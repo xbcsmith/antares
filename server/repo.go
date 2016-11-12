@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"fmt"
@@ -27,7 +27,7 @@ func RepoFindAntarian(id string) lib.Antarian {
 }
 
 func RepoCreateAntarian(s lib.Antarian) lib.Antarian {
-    uuid, err := newUUID()
+    uuid, err := lib.NewUUID()
     if err != nil {
         fmt.Printf("error: %v\n", err)
     }

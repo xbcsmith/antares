@@ -66,10 +66,13 @@ func (a *Antarian) UnmarshalJSON(raw []byte) error {
     return nil
 }
 
-func NewAntarian() *Antarian {
+func NewAntarian() (*Antarian, error) {
     uuid, err := NewUUID()
 	if err != nil {
 		fmt.Printf("error: %v\n", err)
+        return &Antarian{}, err
 	}
-    return &Antarian{Id: uuid}
+    return &Antarian{Id: uuid}, nil
 }
+
+
