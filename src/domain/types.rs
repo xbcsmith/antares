@@ -11,6 +11,9 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+// Re-export GameMode from application layer for convenience
+pub use crate::application::GameMode;
+
 // ===== Type Aliases =====
 
 /// Item identifier
