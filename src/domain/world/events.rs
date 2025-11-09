@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Map event handling system
 //!
 //! This module handles the processing and resolution of map events such as

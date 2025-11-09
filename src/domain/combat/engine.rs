@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Combat engine - turn-based combat logic
 //!
 //! This module implements the core combat system including combat state management,

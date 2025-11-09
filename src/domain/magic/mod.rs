@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Magic system module - Spells, casting, and spell effects
 //!
 //! This module implements the complete magic system including spell definitions,

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Magic system types - Spells, schools, contexts, and targets
 //!
 //! This module defines the core types for the magic system including spell

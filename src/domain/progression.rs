@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Character progression system - Experience, leveling, and stat growth
 //!
 //! This module implements character advancement mechanics including

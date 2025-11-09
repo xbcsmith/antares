@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Item database - Loading and managing item definitions from RON files
 //!
 //! This module provides functionality to load item definitions from RON data files

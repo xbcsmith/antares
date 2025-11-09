@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Spell database - Loading and managing spell definitions from RON files
 //!
 //! This module provides functionality to load spell definitions from RON data files

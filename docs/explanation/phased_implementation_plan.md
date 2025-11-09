@@ -1,7 +1,8 @@
 # Phased Implementation Plan for Antares RPG
 
-**CRITICAL**: This is the master implementation plan. Each phase MUST be completed in order.
-Before starting ANY phase, read this entire document and the relevant sections of `docs/reference/architecture.md`.
+**CRITICAL**: This is the master implementation plan. Each phase MUST be
+completed in order. Before starting ANY phase, read this entire document and the
+relevant sections of `docs/reference/architecture.md`.
 
 ---
 
@@ -29,29 +30,38 @@ Before starting ANY phase, read this entire document and the relevant sections o
 - [ ] Verify Rust toolchain installed: `rustup component add clippy rustfmt`
 - [ ] Understand the game context (turn-based RPG, party vs roster, game modes)
 - [ ] Understand type system (ItemId, SpellId, AttributePair, etc.)
-- [ ] Understand validation workflow (architecture → code → tests → quality gates)
+- [ ] Understand validation workflow (architecture → code → tests → quality
+      gates)
 
 ### Universal Rules for ALL Phases
 
 **These apply to EVERY phase without exception:**
 
-1. **Architecture First**: Read relevant architecture.md sections BEFORE writing code
-2. **Exact Compliance**: Use data structures EXACTLY as defined in architecture.md Section 4
-3. **Type Aliases**: Always use `ItemId`, `SpellId`, `MonsterId`, `MapId`, `CharacterId`, `TownId`, `EventId` (never raw `u32`)
-4. **Constants**: Reference or extract constants (e.g., `Inventory::MAX_ITEMS`, never hardcode `20`)
+1. **Architecture First**: Read relevant architecture.md sections BEFORE writing
+   code
+2. **Exact Compliance**: Use data structures EXACTLY as defined in
+   architecture.md Section 4
+3. **Type Aliases**: Always use `ItemId`, `SpellId`, `MonsterId`, `MapId`,
+   `CharacterId`, `TownId`, `EventId` (never raw `u32`)
+4. **Constants**: Reference or extract constants (e.g., `Inventory::MAX_ITEMS`,
+   never hardcode `20`)
 5. **File Extensions**:
    - `.rs` for Rust source code in `src/`
    - `.ron` for game data files (items, spells, monsters, maps)
    - `.md` for documentation in `docs/`
 6. **Quality Gates** (ALL must pass):
+
    ```bash
    cargo fmt --all
    cargo check --all-targets --all-features
    cargo clippy --all-targets --all-features -- -D warnings
    cargo test --all-features
    ```
-7. **Documentation**: Update `docs/explanation/implementations.md` with summary of changes
-8. **Never Modify**: Core data structures (architecture.md Section 4) without explicit approval
+
+7. **Documentation**: Update `docs/explanation/implementations.md` with summary
+   of changes
+8. **Never Modify**: Core data structures (architecture.md Section 4) without
+   explicit approval
 
 ---
 
@@ -59,7 +69,8 @@ Before starting ANY phase, read this entire document and the relevant sections o
 
 ### Goals
 
-Establish foundational data structures and basic game state management. No UI, no combat logic, just pure data structures and state.
+Establish foundational data structures and basic game state management. No UI,
+no combat logic, just pure data structures and state.
 
 ### Architecture References
 
@@ -68,8 +79,10 @@ Establish foundational data structures and basic game state management. No UI, n
 - Section 3: System Architecture (module structure)
 - Section 4.1: Game State (`GameState`, `GameMode`)
 - Section 4.2: World (`World`, `Map`, `Tile`, `WallType`)
-- Section 4.3: Character (`Character`, `Stats`, `AttributePair`, `Party`, `Roster`, `Race`, `Class`, `Alignment`, `Condition`, `Inventory`, `Equipment`)
-- Section 4.6: Supporting Types (`Position`, `Direction`, `DiceRoll`, `GameTime`)
+- Section 4.3: Character (`Character`, `Stats`, `AttributePair`, `Party`,
+  `Roster`, `Race`, `Class`, `Alignment`, `Condition`, `Inventory`, `Equipment`)
+- Section 4.6: Supporting Types (`Position`, `Direction`, `DiceRoll`,
+  `GameTime`)
 
 ### Task 1.1: Project Setup
 
@@ -78,6 +91,7 @@ Establish foundational data structures and basic game state management. No UI, n
 **Steps**:
 
 1. Verify `Cargo.toml` exists with:
+
    ```toml
    [package]
    name = "antares"
@@ -92,7 +106,8 @@ Establish foundational data structures and basic game state management. No UI, n
    ```
 
 2. Create module structure per architecture.md Section 3.2:
-   ```
+
+   ```text
    src/
    ├── lib.rs
    ├── domain/
@@ -110,12 +125,14 @@ Establish foundational data structures and basic game state management. No UI, n
    ```
 
 3. In `src/lib.rs`:
+
    ```rust
    pub mod domain;
    pub mod application;
    ```
 
 4. Run quality gates:
+
    ```bash
    cargo fmt --all
    cargo check --all-targets --all-features
@@ -132,6 +149,7 @@ Establish foundational data structures and basic game state management. No UI, n
 **Implementation Rules**:
 
 1. Copy type aliases from architecture.md Section 4.6 EXACTLY:
+
    ```rust
    pub type ItemId = u32;
    pub type SpellId = u32;
@@ -142,7 +160,8 @@ Establish foundational data structures and basic game state management. No UI, n
    pub type EventId = u32;
    ```
 
-2. Implement `Position`, `Direction`, `DiceRoll`, `GameTime` EXACTLY as in architecture.md
+2. Implement `Position`, `Direction`, `DiceRoll`, `GameTime` EXACTLY as in
+   architecture.md
 3. Include ALL methods shown in architecture.md:
    - `Direction::turn_left()`, `turn_right()`, `forward()`
    - `DiceRoll::new()`, `roll()`
@@ -153,17 +172,17 @@ Establish foundational data structures and basic game state management. No UI, n
 - Add `///` doc comments to ALL public items
 - Include runnable examples in doc comments
 - Example:
+
   ```rust
   /// Represents a position on the game map
   ///
   /// # Examples
   ///
-  /// ```
   /// use antares::domain::types::Position;
   ///
   /// let pos = Position { x: 10, y: 20 };
   /// assert_eq!(pos.x, 10);
-  /// ```
+  ///
   pub struct Position {
       pub x: i32,
       pub y: i32,
@@ -234,6 +253,7 @@ mod tests {
 **Implementation Rules**:
 
 1. Implement in this order (dependencies matter):
+
    - `AttributePair` and `AttributePair16` with methods
    - `Stats` struct
    - `Resistances` struct
@@ -248,6 +268,7 @@ mod tests {
    - `QuestFlags` struct
 
 2. **CRITICAL**: Use `AttributePair` pattern for ALL modifiable stats:
+
    ```rust
    pub struct AttributePair {
        pub base: u8,
@@ -267,6 +288,7 @@ mod tests {
    ```
 
 3. **CRITICAL**: Extract constants:
+
    ```rust
    impl Inventory {
        pub const MAX_ITEMS: usize = 20;
@@ -282,6 +304,7 @@ mod tests {
    ```
 
 4. **CRITICAL**: Use Condition constants (not magic numbers):
+
    ```rust
    impl Condition {
        pub const FINE: u16 = 0x0000;
@@ -382,17 +405,20 @@ mod tests {
 **Implementation Rules**:
 
 1. Implement in order:
+
    - `WallType` enum
    - `Tile` struct
    - `Map` struct
    - `World` struct
 
 2. Use type aliases:
+
    ```rust
    use crate::domain::types::{MapId, Position, Direction, EventId};
    ```
 
 3. Map structure:
+
    ```rust
    pub struct Map {
        pub id: MapId,
@@ -570,7 +596,8 @@ mod tests {
 **BEFORE claiming Phase 1 is complete, verify ALL:**
 
 - [ ] All modules compile: `cargo check --all-targets --all-features`
-- [ ] Zero clippy warnings: `cargo clippy --all-targets --all-features -- -D warnings`
+- [ ] Zero clippy warnings:
+      `cargo clippy --all-targets --all-features -- -D warnings`
 - [ ] All tests pass: `cargo test --all-features`
 - [ ] Code formatted: `cargo fmt --all`
 - [ ] All data structures match architecture.md Sections 4.1-4.3, 4.6 EXACTLY
@@ -591,27 +618,33 @@ Add to `docs/explanation/implementations.md`:
 **Completed**: [Date]
 
 ### Summary
-Implemented core data structures and game state management per architecture.md Sections 4.1-4.3, 4.6.
+
+Implemented core data structures and game state management per architecture.md
+Sections 4.1-4.3, 4.6.
 
 ### Components Implemented
+
 - Type aliases and supporting types (Position, Direction, DiceRoll, GameTime)
 - Character system (Character, Stats, AttributePair, Party, Roster)
 - World system (World, Map, Tile)
 - Game state management (GameState, GameMode transitions)
 
 ### Architecture Compliance
+
 - All structures match architecture.md field-for-field
 - Type aliases used consistently
 - Constants extracted (Inventory::MAX_ITEMS, Equipment::MAX_EQUIPPED)
 - AttributePair pattern enforced for stat modifications
 
 ### Testing
+
 - Unit tests for all core types
 - State transition tests
 - Boundary tests for inventory and equipment limits
 - Coverage: [X]%
 
 ### Files Created
+
 - `src/domain/types.rs`
 - `src/domain/character.rs`
 - `src/domain/world.rs`
@@ -624,13 +657,15 @@ Implemented core data structures and game state management per architecture.md S
 
 ### Goals
 
-Implement turn-based combat system with monster AI, combat actions, and damage calculation.
+Implement turn-based combat system with monster AI, combat actions, and damage
+calculation.
 
 ### Architecture References
 
 **READ BEFORE IMPLEMENTING:**
 
-- Section 4.4: Combat (`CombatState`, `Combatant`, `Monster`, `Attack`, `Handicap`)
+- Section 4.4: Combat (`CombatState`, `Combatant`, `Monster`, `Attack`,
+  `Handicap`)
 - Section 5.1: Turn-Based Combat System
 - Section 11.1: Combat Positioning System
 
@@ -643,6 +678,7 @@ Implement turn-based combat system with monster AI, combat actions, and damage c
 **Implementation Rules**:
 
 1. Implement in order:
+
    - `Handicap` enum
    - `Combatant` enum
    - `MonsterResistances` struct
@@ -654,11 +690,13 @@ Implement turn-based combat system with monster AI, combat actions, and damage c
    - `CombatState` struct
 
 2. **CRITICAL**: Use type aliases:
+
    ```rust
    use crate::domain::types::{MonsterId, DiceRoll};
    ```
 
 3. Monster structure must match architecture.md:
+
    ```rust
    pub struct Monster {
        pub name: String,
@@ -750,6 +788,7 @@ mod tests {
 **Implementation Rules**:
 
 1. Combat flow must follow architecture.md Section 5.1:
+
    - Initiative determination
    - Turn order calculation
    - Action resolution
@@ -757,6 +796,7 @@ mod tests {
    - Condition effects
 
 2. Key functions:
+
    ```rust
    pub fn start_combat(
        party: &Party,
@@ -878,6 +918,7 @@ Implement map navigation, tile interactions, events, and party movement.
 **Implementation Rules**:
 
 1. Key functions:
+
    ```rust
    pub fn move_party(
        world: &mut World,
@@ -966,6 +1007,7 @@ mod tests {
 **Implementation Rules**:
 
 1. Define event types:
+
    ```rust
    pub enum MapEvent {
        Encounter { monster_group: Vec<MonsterId> },
@@ -978,6 +1020,7 @@ mod tests {
    ```
 
 2. Event triggering:
+
    ```rust
    pub fn trigger_event(
        game_state: &mut GameState,
@@ -1054,7 +1097,8 @@ mod tests {
 
 ### Goals
 
-Implement magic system, character progression, resource management, and conditions.
+Implement magic system, character progression, resource management, and
+conditions.
 
 ### Architecture References
 
@@ -1077,6 +1121,7 @@ Implement magic system, character progression, resource management, and conditio
 **Implementation Rules**:
 
 1. Implement spell structures from architecture.md:
+
    ```rust
    pub struct Spell {
        pub id: SpellId,
@@ -1092,6 +1137,7 @@ Implement magic system, character progression, resource management, and conditio
    ```
 
 2. Spell casting function from architecture.md Section 5.3:
+
    ```rust
    pub fn can_cast_spell(
        character: &Character,
@@ -1106,7 +1152,8 @@ Implement magic system, character progression, resource management, and conditio
    ) -> SpellResult;
    ```
 
-3. **CRITICAL**: Use `calculate_spell_points` EXACTLY as in architecture.md Section 5.3
+3. **CRITICAL**: Use `calculate_spell_points` EXACTLY as in architecture.md
+   Section 5.3
 
 **Testing Requirements**:
 
@@ -1177,13 +1224,15 @@ mod tests {
 
 ### Task 4.2: Character Progression
 
-**Objective**: Implement leveling system per architecture.md Section 5.2 and 12.5.
+**Objective**: Implement leveling system per architecture.md Section 5.2 and
+12.5.
 
 **File**: `src/application/progression.rs`
 
 **Implementation Rules**:
 
 1. Implement experience and leveling:
+
    ```rust
    pub fn award_experience(
        character: &mut Character,
@@ -1200,6 +1249,7 @@ mod tests {
    ```
 
 2. Use `HpGainDie` from architecture.md Section 12.5:
+
    ```rust
    pub fn roll_hp_gain(class: Class) -> u8 {
        let die = match class {
@@ -1255,25 +1305,29 @@ mod tests {
 
 ### Task 4.3: Resource Management
 
-**Objective**: Implement food, light, rest systems per architecture.md Section 12.
+**Objective**: Implement food, light, rest systems per architecture.md
+Section 12.
 
 **File**: `src/application/resources.rs`
 
 **Implementation Rules**:
 
 1. Food consumption (Section 12.2):
+
    ```rust
    pub fn consume_food(party: &mut Party, amount: u32) -> Result<(), ResourceError>;
    pub fn check_starvation(party: &Party) -> bool;
    ```
 
 2. Light system (Section 12.4):
+
    ```rust
    pub fn consume_light(party: &mut Party, tiles_moved: u32);
    pub fn is_dark(map: &Map, position: Position) -> bool;
    ```
 
 3. Rest system (Section 12.3):
+
    ```rust
    pub fn rest_party(party: &mut Party, hours: u8) -> RestResult;
    ```
@@ -1365,7 +1419,8 @@ Create data files for items, spells, monsters, and maps using RON format.
 
 ### Task 5.1: Item Data
 
-**Objective**: Create item data files in RON format per architecture.md Section 7.
+**Objective**: Create item data files in RON format per architecture.md
+Section 7.
 
 **File**: `data/items.ron`
 
@@ -1374,6 +1429,7 @@ Create data files for items, spells, monsters, and maps using RON format.
 1. **CRITICAL**: Use `.ron` extension (NOT `.json` or `.yaml`)
 2. Follow architecture.md Section 7.2 example format EXACTLY
 3. Structure:
+
    ```ron
    [
        Item(
@@ -1434,6 +1490,7 @@ fn test_load_items_from_ron() {
 
 1. Use `.ron` format
 2. Structure per architecture.md Section 5.3:
+
    ```ron
    [
        Spell(
@@ -1473,6 +1530,7 @@ fn test_load_items_from_ron() {
 
 1. Use `.ron` format
 2. Structure per architecture.md Section 4.4:
+
    ```ron
    [
        Monster(
@@ -1519,6 +1577,7 @@ fn test_load_items_from_ron() {
 
 1. Use `.ron` format in `data/maps/` directory
 2. Structure:
+
    ```ron
    Map(
        id: 1,
@@ -1572,6 +1631,7 @@ Integration testing, balance, bug fixes, and final documentation.
 **Implementation Rules**:
 
 1. Test complete scenarios:
+
    ```rust
    #[test]
    fn test_complete_combat_flow() {
@@ -1734,7 +1794,9 @@ Before claiming project is complete:
 
 ## Summary
 
-This plan provides a clear, step-by-step path to implement Antares RPG following the architecture document exactly. Each phase builds on the previous one, with explicit validation requirements and testing expectations.
+This plan provides a clear, step-by-step path to implement Antares RPG following
+the architecture document exactly. Each phase builds on the previous one, with
+explicit validation requirements and testing expectations.
 
 **Success Criteria**:
 
@@ -1753,4 +1815,5 @@ This plan provides a clear, step-by-step path to implement Antares RPG following
 4. Test thoroughly
 5. Document clearly
 
-Follow this plan carefully, and the implementation will align perfectly with the architecture vision.
+Follow this plan carefully, and the implementation will align perfectly with the
+architecture vision.

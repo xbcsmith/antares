@@ -4,16 +4,21 @@
 
 ### 1. Executive Summary
 
-This document outlines the architecture for Antares, a classic turn-based RPG built in Rust, inspired by Might and Magic 1. The game will feature party-based exploration, turn-based combat, character progression, and dungeon crawling in a tile-based world.
+This document outlines the architecture for Antares, a classic turn-based RPG
+built in Rust, inspired by Might and Magic 1. The game will feature party-based
+exploration, turn-based combat, character progression, and dungeon crawling in a
+tile-based world.
 
 ---
 
 ### 2. Core Design Principles
 
-- **Separation of Concerns**: Clear boundaries between game logic, rendering, and I/O
+- **Separation of Concerns**: Clear boundaries between game logic, rendering,
+  and I/O
 - **Data-Driven Design**: Game content defined in external data files
 - **Entity-Component Pattern**: Flexible character and monster representation
-- **Deterministic Gameplay**: Pure functions for game logic, making save/load trivial
+- **Deterministic Gameplay**: Pure functions for game logic, making save/load
+  trivial
 - **Rust Best Practices**: Ownership, borrowing, and type safety for robustness
 
 ---
@@ -22,7 +27,7 @@ This document outlines the architecture for Antares, a classic turn-based RPG bu
 
 #### 3.1 High-Level Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │                    Game Application                     │
 ├─────────────────────────────────────────────────────────┤
@@ -46,7 +51,7 @@ This document outlines the architecture for Antares, a classic turn-based RPG bu
 
 #### 3.2 Module Structure
 
-```
+```text
 src/
 ├── main.rs                 # Entry point, game loop
 ├── lib.rs                  # Library root
@@ -1097,8 +1102,7 @@ _Sorcerer Spells:_
 
 </text>
 
-<old_text line=287>
-**Events:**
+<old_text line=287> **Events:**
 
 - Encounters (monsters)
 - NPCs (quests, dialogue)
@@ -1183,7 +1187,7 @@ _Sorcerer Spells:_
 
 #### 7.1 External Data Files
 
-```
+```text
 data/
 ├── monsters.ron          # Monster definitions
 ├── items.ron            # Item database
@@ -1479,8 +1483,10 @@ data/
 
 ### 9. Testing Strategy
 
-- **Unit Tests**: Combat math, stat calculations, dice rolling, character creation
-- **Integration Tests**: Save/load, map transitions, combat flow, rest/food system
+- **Unit Tests**: Combat math, stat calculations, dice rolling, character
+  creation
+- **Integration Tests**: Save/load, map transitions, combat flow, rest/food
+  system
 - **Playtesting**: Balance, difficulty curve, fun factor, progression curve
 
 ---
@@ -1502,7 +1508,7 @@ data/
 
 Party members are arranged in a 2x3 grid:
 
-```
+```text
 [0] [1]
 [2] [3]
 [4] [5]
@@ -1835,7 +1841,8 @@ pub fn max_spell_level(character_level: u32, class: Class) -> u8 {
 
 **Item Classification:**
 
-MM1 features over 200 unique items ranging from simple non-magical equipment to complex magical artifacts with multiple powers.
+MM1 features over 200 unique items ranging from simple non-magical equipment to
+complex magical artifacts with multiple powers.
 
 **1. Non-Magical Items**
 

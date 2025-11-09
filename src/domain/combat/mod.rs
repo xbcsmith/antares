@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Combat system - turn-based combat mechanics
 //!
 //! This module contains all combat-related data structures and logic including
@@ -12,7 +15,7 @@ pub mod engine;
 pub mod monster;
 pub mod types;
 
-pub use database::{LootTable, MonsterDatabase, MonsterDatabaseError, MonsterDefinition};
+pub use database::{MonsterDatabase, MonsterDatabaseError, MonsterDefinition};
 pub use engine::*;
 pub use monster::*;
 pub use types::*;

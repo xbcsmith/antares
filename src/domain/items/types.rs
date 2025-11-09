@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Item system types - Weapons, armor, and item definitions
 //!
 //! This module defines all item-related data structures as specified in

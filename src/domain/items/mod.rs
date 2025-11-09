@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Item system - Weapons, armor, consumables, and item database
 //!
 //! This module provides the complete item system for the game, including:
