@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Domain layer - Core game logic and data structures
 //!
 //! This module contains all the core game entities and business logic,

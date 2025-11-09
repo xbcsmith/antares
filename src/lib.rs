@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Antares - A classic turn-based RPG inspired by Might and Magic 1
 //!
 //! This library provides the core game engine, including character management,

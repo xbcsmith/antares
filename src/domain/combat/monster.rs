@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Monster definitions and conditions
 //!
 //! This module defines monster data structures, resistances, and condition tracking
@@ -186,6 +189,7 @@ impl Default for MonsterCondition {
 ///     gold_max: 50,
 ///     gems_min: 0,
 ///     gems_max: 2,
+///     items: vec![],
 ///     experience: 100,
 /// };
 /// ```
@@ -199,6 +203,8 @@ pub struct LootTable {
     pub gems_min: u8,
     /// Maximum gems dropped
     pub gems_max: u8,
+    /// Possible item drops (probability, item_id)
+    pub items: Vec<(f32, u8)>,
     /// Experience points awarded
     pub experience: u32,
 }
@@ -211,6 +217,7 @@ impl LootTable {
             gold_max,
             gems_min,
             gems_max,
+            items: Vec::new(),
             experience,
         }
     }
@@ -222,6 +229,7 @@ impl LootTable {
             gold_max: 0,
             gems_min: 0,
             gems_max: 0,
+            items: Vec::new(),
             experience: 0,
         }
     }
