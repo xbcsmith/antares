@@ -372,6 +372,16 @@ impl Condition {
         self.0 >= Self::DEAD
     }
 
+    /// Returns true if the character is unconscious
+    pub fn is_unconscious(&self) -> bool {
+        self.has(Self::UNCONSCIOUS)
+    }
+
+    /// Returns true if the character is silenced
+    pub fn is_silenced(&self) -> bool {
+        self.has(Self::SILENCED)
+    }
+
     /// Clears all conditions (sets to FINE)
     pub fn clear(&mut self) {
         self.0 = Self::FINE;

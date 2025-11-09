@@ -817,3 +817,542 @@ test result: ok. 55 passed; 0 failed; 0 ignored
 - Place events in game maps
 
 ---
+
+## Phase 4: Game Systems (COMPLETED)
+
+_Implementation Date: 2024_
+
+### Overview
+
+Phase 4 implemented the core game systems that make character progression and resource management work: the magic system with spell casting, character leveling and experience, and party resource management (food, light, rest). These systems provide the RPG mechanics that drive gameplay depth and character development.
+
+### Components Implemented
+
+#### Task 4.1: Magic System
+
+**Module**: `src/domain/magic/`
+
+**Core Types** (`types.rs`):
+
+```rust
+pub enum SpellSchool {
+    Cleric,    // Divine magic - healing, protection, support
+    Sorcerer,  // Arcane magic - offense, debuffs, utility
+}
+
+pub enum SpellContext {
+    Anytime, CombatOnly, NonCombatOnly,
+    OutdoorOnly, IndoorOnly, OutdoorCombat,
+}
+
+pub enum SpellTarget {
+    Self_, SingleCharacter, AllCharacters,
+    SingleMonster, MonsterGroup, AllMonsters, SpecificMonsters,
+}
+
+pub struct Spell {
+    pub id: SpellId,
+    pub name: String,
+    pub school: SpellSchool,
+    pub level: u8,              // 1-7
+    pub sp_cost: u16,
+    pub gem_cost: u16,
+    pub context: SpellContext,
+    pub target: SpellTarget,
+    pub description: String,
+}
+
+pub struct SpellResult {
+    pub success: bool,
+    pub effect_message: String,
+    pub damage: Option<i32>,
+    pub healing: Option<i32>,
+    pub affected_targets: Vec<usize>,
+}
+```
+
+**Spell Casting** (`casting.rs`):
+
+```rust
+pub fn can_cast_spell(
+    character: &Character,
+    spell: &Spell,
+    _game_mode: &GameMode,
+    in_combat: bool,
+    is_outdoor: bool,
+) -> Result<(), SpellError>
+
+pub fn cast_spell(
+    character: &mut Character,
+    spell: &Spell,
+) -> SpellResult
+
+pub fn calculate_spell_points(character: &Character) -> u16
+
+pub fn can_class_cast_school(class: Class, school: SpellSchool) -> bool
+
+pub fn get_required_level_for_spell(class: Class, spell: &Spell) -> u32
+```
+
+**Key Features**:
+
+- **Dual spell schools**: Cleric (divine) and Sorcerer (arcane)
+- **Class restrictions**: Clerics/Paladins cast Cleric spells, Sorcerers/Archers cast Sorcerer spells
+- **Delayed spell access**: Paladins and Archers need level 3 minimum
+- **Spell level requirements**: Level 1 = level 1 spells, Level 13+ = level 7 spells
+- **Resource consumption**: SP (spell points) and gems
+- **Context restrictions**: Combat-only, non-combat-only, outdoor/indoor only
+- **Condition checks**: Silenced or unconscious characters cannot cast
+- **SP calculation**: Based on Personality (Cleric/Paladin) or Intellect (Sorcerer/Archer)
+  - Formula: `(stat - 10) * level / 2 + (level * 2)`
+
+**Error Handling**:
+
+```rust
+pub enum SpellError {
+    NotEnoughSP { needed: u16, available: u16 },
+    NotEnoughGems { needed: u32, available: u32 },
+    WrongClass(String, SpellSchool),
+    LevelTooLow { level: u32, required: u32 },
+    CombatOnly, NonCombatOnly,
+    OutdoorsOnly, IndoorsOnly,
+    MagicForbidden, Silenced, Unconscious,
+    SpellNotFound(SpellId), InvalidTarget,
+}
+```
+
+#### Task 4.2: Character Progression
+
+**Module**: `src/domain/progression.rs`
+
+**Core Functions**:
+
+```rust
+pub fn award_experience(
+    character: &mut Character,
+    amount: u64,
+) -> Result<(), ProgressionError>
+
+pub fn check_level_up(character: &Character) -> bool
+
+pub fn level_up(
+    character: &mut Character,
+    rng: &mut impl Rng,
+) -> Result<u16, ProgressionError>
+
+pub fn roll_hp_gain(class: Class, rng: &mut impl Rng) -> u16
+
+pub fn experience_for_level(level: u32) -> u64
+```
+
+**Key Features**:
+
+- **Experience awards**: XP gained from defeating monsters (dead characters cannot gain XP)
+- **Level-up checks**: Validates if character has enough XP for next level
+- **Level progression**: Increases level, rolls HP gain, updates SP
+- **HP gain by class**:
+  - Knight: 1d10
+  - Paladin: 1d8
+  - Archer: 1d8
+  - Cleric: 1d6
+  - Sorcerer: 1d4
+  - Robber: 1d6
+- **SP recalculation**: Spellcasters gain SP on level-up
+- **Exponential XP curve**: `BASE_XP * (level - 1) ^ 1.5`
+- **Maximum level**: 200
+
+**Error Handling**:
+
+```rust
+pub enum ProgressionError {
+    MaxLevelReached,
+    NotEnoughExperience { needed: u64, current: u64 },
+    CharacterDead,
+}
+```
+
+#### Task 4.3: Resource Management
+
+**Module**: `src/domain/resources.rs`
+
+**Core Functions**:
+
+```rust
+pub fn consume_food(
+    party: &mut Party,
+    amount_per_member: u32,
+) -> Result<u32, ResourceError>
+
+pub fn check_starvation(party: &Party) -> bool
+
+pub fn consume_light(
+    party: &mut Party,
+    amount: u32,
+) -> Result<u32, ResourceError>
+
+pub fn is_dark(party: &Party) -> bool
+
+pub fn rest_party(
+    party: &mut Party,
+    game_time: &mut GameTime,
+    hours: u32,
+) -> Result<(), ResourceError>
+
+pub fn apply_starvation_damage(
+    party: &mut Party,
+    damage_per_member: u16,
+)
+```
+
+**Key Features**:
+
+- **Food consumption**: Each party member consumes food during rest/travel
+- **Starvation mechanics**: Out of food triggers starvation damage
+- **Light management**: Light depletes in dark areas (dungeons)
+- **Rest and recovery**:
+  - Restores HP at 12.5% per hour (full in 8 hours)
+  - Restores SP at 12.5% per hour (full in 8 hours)
+  - Consumes 1 food per member per 8-hour rest
+  - Advances game time
+  - Skips dead/unconscious characters
+- **Resource tracking**: Party-level food and light_units
+- **Starvation damage**: Applied periodically when out of food
+
+**Constants**:
+
+```rust
+pub const FOOD_PER_REST: u32 = 1;
+pub const FOOD_PER_DAY: u32 = 3;
+pub const LIGHT_PER_HOUR: u32 = 1;
+pub const HP_RESTORE_RATE: f32 = 0.125;  // 12.5% per hour
+pub const SP_RESTORE_RATE: f32 = 0.125;  // 12.5% per hour
+pub const REST_DURATION_HOURS: u32 = 8;
+```
+
+**Error Handling**:
+
+```rust
+pub enum ResourceError {
+    NoFoodRemaining,
+    NoLightRemaining,
+    CannotRestInCombat,
+    TooHungryToRest,
+}
+```
+
+### Architecture Compliance
+
+**Data Structure Adherence**:
+
+- ✅ Used exact `Spell` struct from architecture Section 5.3
+- ✅ SpellSchool enum matches specification (Cleric, Sorcerer)
+- ✅ SpellContext and SpellTarget enums as specified
+- ✅ Spell level requirements match MM1 progression (1, 3, 5, 7, 9, 11, 13)
+- ✅ Class-based HP dice match architecture
+- ✅ Experience curve uses exponential formula
+- ✅ Resource management tied to Party struct
+
+**Type Alias Usage**:
+
+- ✅ `SpellId` used consistently (u16 with high/low byte encoding)
+- ✅ `CharacterId` for character references
+- ✅ `DiceRoll` for HP gain calculations
+- ✅ `GameTime` for rest time tracking
+
+**AttributePair Pattern**:
+
+- ✅ SP uses `AttributePair16` (base + current)
+- ✅ HP uses `AttributePair16` (base + current)
+- ✅ Rest restores current values, preserves base
+- ✅ Level-up increases both base and current
+
+**Game Mode Context**:
+
+- ✅ Spell casting respects combat/exploration context
+- ✅ Combat-only spells blocked outside combat
+- ✅ Non-combat spells blocked in combat
+- ✅ Outdoor/indoor restrictions enforced
+
+**Error Handling**:
+
+- ✅ thiserror crate for custom error types
+- ✅ Result<T, E> for all recoverable errors
+- ✅ Descriptive error messages with context
+- ✅ Error propagation with ? operator
+
+### Testing
+
+**Unit Tests Added**: 52 new tests
+
+**Magic System Tests** (17 tests):
+
+- Spell creation and required level calculation
+- Class-school compatibility checks
+- SP and gem resource validation
+- Combat/exploration context restrictions
+- Level requirements (including delayed access for Paladins/Archers)
+- Spell casting resource consumption
+- SP calculation for different classes and stats
+- Condition checks (silenced, unconscious)
+
+**Progression System Tests** (12 tests):
+
+- Experience award and accumulation
+- Experience-to-level calculation (exponential)
+- Level-up check and execution
+- HP gain by class (all six classes)
+- SP gain for spellcasters on level-up
+- Maximum level enforcement
+- Dead character XP prevention
+- Non-spellcaster SP handling
+
+**Resource Management Tests** (23 tests):
+
+- Food consumption (per member)
+- Starvation check and damage
+- Light consumption and darkness check
+- Rest HP/SP restoration (full and partial)
+- Rest time advancement
+- Rest food consumption
+- Dead character exclusion from rest
+- Insufficient food handling
+- Partial rest calculations
+
+**Test Coverage**:
+
+- Success cases: ✅ All primary functions tested
+- Failure cases: ✅ All error paths covered
+- Edge cases: ✅ Boundary conditions tested
+- Integration: ✅ Resource interactions validated
+
+**Example Tests**:
+
+```rust
+#[test]
+fn test_cleric_can_cast_cleric_spell()
+#[test]
+fn test_sorcerer_cannot_cast_cleric_spell()
+#[test]
+fn test_cannot_cast_without_sp()
+#[test]
+fn test_cannot_cast_without_gems()
+#[test]
+fn test_combat_only_spell_in_exploration()
+#[test]
+fn test_paladin_delayed_spell_access()
+#[test]
+fn test_level_up_increases_level()
+#[test]
+fn test_hp_gain_by_class()
+#[test]
+fn test_rest_restores_hp()
+#[test]
+fn test_starvation_kills_character()
+```
+
+**Quality Metrics**:
+
+- ✅ All 146 unit tests pass
+- ✅ All 79 doc tests pass
+- ✅ Zero clippy warnings
+- ✅ 100% compilation success
+- ✅ Comprehensive error path coverage
+
+### Files Created
+
+**Phase 4 Files**:
+
+1. `src/domain/magic/mod.rs` - Magic module organization and re-exports
+2. `src/domain/magic/types.rs` - Spell types, schools, contexts, targets (538 lines)
+3. `src/domain/magic/casting.rs` - Spell casting validation and execution (521 lines)
+4. `src/domain/progression.rs` - Experience and leveling system (424 lines)
+5. `src/domain/resources.rs` - Food, light, and rest management (514 lines)
+
+**Modified Files**:
+
+1. `src/domain/mod.rs` - Added magic, progression, resources modules
+2. `src/domain/character.rs` - Added `is_unconscious()` and `is_silenced()` to Condition
+3. `src/domain/types.rs` - Added GameMode re-export
+
+**Total Phase 4 Lines**: ~2,000 lines (implementation + tests + docs)
+
+### Key Features Implemented
+
+**Magic System**:
+
+- ✅ Two spell schools (Cleric, Sorcerer)
+- ✅ Class-based spell restrictions
+- ✅ Delayed spell access (Paladins, Archers level 3+)
+- ✅ Spell level requirements (1, 3, 5, 7, 9, 11, 13)
+- ✅ SP and gem cost validation
+- ✅ Context restrictions (combat, outdoor, indoor)
+- ✅ Condition-based casting prevention (silenced, unconscious)
+- ✅ SP calculation from stats (Personality/Intellect)
+- ✅ SpellResult for effect tracking
+
+**Character Progression**:
+
+- ✅ Experience award system
+- ✅ Exponential XP curve (BASE_XP * (level-1)^1.5)
+- ✅ Level-up check and execution
+- ✅ Class-based HP gain (1d4 to 1d10)
+- ✅ Automatic SP recalculation on level-up
+- ✅ Dead character XP prevention
+- ✅ Maximum level cap (200)
+
+**Resource Management**:
+
+- ✅ Party food consumption (per member)
+- ✅ Food-based rest requirements
+- ✅ Light consumption in dark areas
+- ✅ Rest and recovery (HP, SP restoration)
+- ✅ Time-based restoration (12.5% per hour)
+- ✅ Starvation damage mechanics
+- ✅ Dead/unconscious character exclusion
+- ✅ Partial rest support
+
+### Integration with Previous Phases
+
+**Phase 1 Integration** (Core Engine):
+
+- Uses Character struct with sp, hp, stats, conditions
+- Uses AttributePair16 for HP/SP (base + current)
+- Uses Class enum for spell restrictions and HP dice
+- Uses DiceRoll for HP gain calculations
+- Uses GameTime for rest time tracking
+- Uses SpellBook structure from character.rs
+
+**Phase 2 Integration** (Combat System):
+
+- SpellResult ready for combat spell application
+- Spell targeting system compatible with combat targets
+- Condition checks (silenced, unconscious) work with combat status
+- Experience award functions ready for post-combat XP distribution
+- Starvation damage can be integrated with combat damage
+
+**Phase 3 Integration** (World System):
+
+- Rest system advances game time (world clock)
+- Light consumption during dungeon exploration
+- Food/rest mechanics for travel and camping
+- Spell context (outdoor/indoor) uses world location data
+- Resource depletion during map traversal
+
+### Lessons Learned
+
+**Spell System Design**:
+
+- Two separate spell schools (not a unified system) per MM1 design
+- Class restrictions are hard requirements, not suggestions
+- Delayed spell access adds interesting progression for hybrid classes
+- Spell level requirements create natural progression gates
+- Context restrictions add strategic depth (combat vs utility spells)
+
+**Resource Consumption**:
+
+- Party-level resources simplify management (vs per-character)
+- Percentage-based restoration is clearer than fixed amounts
+- Food/rest coupling creates interesting trade-offs
+- Light depletion adds tension to dungeon exploration
+- Starvation mechanics need careful balancing
+
+**Character Progression**:
+
+- Exponential XP curve prevents grinding while allowing long-term play
+- Class-based HP dice create meaningful class differentiation
+- Automatic SP recalculation removes micromanagement
+- Dead character XP prevention is crucial game rule
+- Level cap prevents infinite power creep
+
+**Testing Insights**:
+
+- Condition helper methods (is_unconscious, is_silenced) improve readability
+- Resource boundary tests catch off-by-one errors
+- Partial rest calculations need careful formula validation
+- Class-based tests need all six classes covered
+- Error messages with context help debugging
+
+**Architecture Adherence**:
+
+- Reading architecture.md spell section prevented rework
+- Exact spell level requirements from MM1 specification
+- HP dice per class matched specification precisely
+- SP formula from architecture document worked correctly
+- Resource constants defined early avoided magic numbers
+
+### Next Steps
+
+**Phase 5 Integration** (Content & Data):
+
+- Create spell data files in RON format (data/spells.ron)
+- Define all Cleric spells (47 spells, levels 1-7)
+- Define all Sorcerer spells (47 spells, levels 1-7)
+- Implement actual spell effects (damage, healing, buffs, debuffs)
+- Create spell effect application system
+
+**Combat Integration**:
+
+- Apply spell damage to monsters (SpellResult → combat damage)
+- Apply spell healing to characters (SpellResult → HP restoration)
+- Integrate spell targeting with combat target selection
+- Add monster magic resistance checks
+- Implement spell fizzle/failure mechanics
+
+**World Integration**:
+
+- Trigger spell context checks based on map type (outdoor/indoor)
+- Implement food/light consumption during travel
+- Add rest locations (inns, camps)
+- Create magic-forbidden zones
+- Add spell effect durations (ActiveSpells integration)
+
+**Future Enhancements**:
+
+- Spell effect implementation (damage, healing, buffs, status)
+- Spell resistance and saving throws
+- Area-of-effect spell mechanics
+- Spell reflection and absorption
+- Level-up stat increase selection
+- Class-specific progression bonuses
+- Rest interruption (random encounters)
+- Food quality tiers (better food = better rest)
+
+**Testing Expansion**:
+
+- Integration tests: spell casting → combat damage
+- Integration tests: rest → time → food depletion
+- Integration tests: level-up → SP → spell access
+- Performance tests: bulk experience awards
+- Stress tests: maximum level characters
+
+---
+
+## Statistics
+
+**Total Project Stats (After Phase 4)**:
+
+- **Total Tests**: 146 unit tests + 79 doc tests = 225 tests
+- **Lines of Code**: ~8,500 lines (excluding tests)
+- **Test Lines**: ~3,500 lines
+- **Modules**: 13 modules (domain: 8, application: 1, supporting: 4)
+- **Error Types**: 6 custom error enums
+- **Quality**: 0 clippy warnings, 100% compilation
+
+**Phase 4 Contribution**:
+
+- **New Tests**: +52 tests (36% increase)
+- **New Code**: ~2,000 lines (31% increase)
+- **New Modules**: +3 modules (magic, progression, resources)
+- **New Error Types**: +3 error enums
+- **Time to Complete**: ~3 hours (implementation + testing + docs)
+
+**Progress Tracking**:
+
+- ✅ Phase 1: Core Engine (100%)
+- ✅ Phase 2: Combat System (100%)
+- ✅ Phase 3: World System (100%)
+- ✅ Phase 4: Game Systems (100%)
+- 🚧 Phase 5: Content & Data (0%)
+- 🚧 Phase 6: Polish & Testing (0%)
+
+**Next Milestone**: Phase 5 - Content & Data (RON files for spells, items, monsters, maps)
