@@ -1,0 +1,525 @@
+// spells.ron - Spell definitions for Antares RPG
+//
+// This file contains all spell definitions in RON (Rusty Object Notation) format.
+// See architecture.md Section 7.2 for format specifications.
+//
+// Spell ID encoding: High byte = school (1=Cleric, 2=Sorcerer), Low byte = spell number
+// Example: 0x0101 = 257 = Cleric L1 #1, 0x0201 = 513 = Sorcerer L1 #1
+
+[
+    // ===== Cleric Spells - Level 1 =====
+
+    (
+        id: 257, // 0x0101
+        name: "Awaken",
+        school: Cleric,
+        level: 1,
+        sp_cost: 5,
+        gem_cost: 0,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Awakens a sleeping character",
+    ),
+
+    (
+        id: 258, // 0x0102
+        name: "Bless",
+        school: Cleric,
+        level: 1,
+        sp_cost: 4,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: AllCharacters,
+        description: "Increases party's attack bonus temporarily",
+    ),
+
+    (
+        id: 259, // 0x0103
+        name: "Blind",
+        school: Cleric,
+        level: 1,
+        sp_cost: 6,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: MonsterGroup,
+        description: "Blinds a group of enemies, reducing accuracy",
+    ),
+
+    (
+        id: 260, // 0x0104
+        name: "First Aid",
+        school: Cleric,
+        level: 1,
+        sp_cost: 2,
+        gem_cost: 0,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Heals 8 hit points",
+    ),
+
+    (
+        id: 261, // 0x0105
+        name: "Light",
+        school: Cleric,
+        level: 1,
+        sp_cost: 3,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Creates light for 100 steps",
+    ),
+
+    (
+        id: 262, // 0x0106
+        name: "Power Cure",
+        school: Cleric,
+        level: 1,
+        sp_cost: 10,
+        gem_cost: 0,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Heals 15 hit points",
+    ),
+
+    (
+        id: 263, // 0x0107
+        name: "Protection from Fear",
+        school: Cleric,
+        level: 1,
+        sp_cost: 5,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: AllCharacters,
+        description: "Protects party from fear effects",
+    ),
+
+    // ===== Cleric Spells - Level 2 =====
+
+    (
+        id: 513, // 0x0201
+        name: "Cure Wounds",
+        school: Cleric,
+        level: 2,
+        sp_cost: 8,
+        gem_cost: 0,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Heals 25 hit points",
+    ),
+
+    (
+        id: 514, // 0x0202
+        name: "Heroism",
+        school: Cleric,
+        level: 2,
+        sp_cost: 12,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: AllCharacters,
+        description: "Greatly increases party morale and combat effectiveness",
+    ),
+
+    (
+        id: 515, // 0x0203
+        name: "Pain",
+        school: Cleric,
+        level: 2,
+        sp_cost: 10,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: MonsterGroup,
+        description: "Inflicts pain on enemies, reducing their effectiveness",
+    ),
+
+    (
+        id: 516, // 0x0204
+        name: "Protection from Cold",
+        school: Cleric,
+        level: 2,
+        sp_cost: 7,
+        gem_cost: 0,
+        context: Anytime,
+        target: AllCharacters,
+        description: "Protects party from cold damage",
+    ),
+
+    (
+        id: 517, // 0x0205
+        name: "Protection from Fire",
+        school: Cleric,
+        level: 2,
+        sp_cost: 7,
+        gem_cost: 0,
+        context: Anytime,
+        target: AllCharacters,
+        description: "Protects party from fire damage",
+    ),
+
+    (
+        id: 518, // 0x0206
+        name: "Protection from Poison",
+        school: Cleric,
+        level: 2,
+        sp_cost: 7,
+        gem_cost: 0,
+        context: Anytime,
+        target: AllCharacters,
+        description: "Protects party from poison effects",
+    ),
+
+    (
+        id: 519, // 0x0207
+        name: "Silence",
+        school: Cleric,
+        level: 2,
+        sp_cost: 8,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: MonsterGroup,
+        description: "Silences enemy spellcasters",
+    ),
+
+    // ===== Cleric Spells - Level 3 =====
+
+    (
+        id: 769, // 0x0301
+        name: "Create Food",
+        school: Cleric,
+        level: 3,
+        sp_cost: 15,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Creates food for the party",
+    ),
+
+    (
+        id: 770, // 0x0302
+        name: "Cure Blindness",
+        school: Cleric,
+        level: 3,
+        sp_cost: 10,
+        gem_cost: 0,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Cures blindness condition",
+    ),
+
+    (
+        id: 771, // 0x0303
+        name: "Cure Paralysis",
+        school: Cleric,
+        level: 3,
+        sp_cost: 12,
+        gem_cost: 0,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Cures paralysis condition",
+    ),
+
+    (
+        id: 772, // 0x0304
+        name: "Lasting Light",
+        school: Cleric,
+        level: 3,
+        sp_cost: 20,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Creates light for 500 steps",
+    ),
+
+    (
+        id: 773, // 0x0305
+        name: "Walk on Water",
+        school: Cleric,
+        level: 3,
+        sp_cost: 25,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: AllCharacters,
+        description: "Allows party to walk on water",
+    ),
+
+    (
+        id: 774, // 0x0306
+        name: "Turn Undead",
+        school: Cleric,
+        level: 3,
+        sp_cost: 15,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: SpecificMonsters,
+        description: "Destroys or causes undead to flee",
+    ),
+
+    (
+        id: 775, // 0x0307
+        name: "Neutralize Poison",
+        school: Cleric,
+        level: 3,
+        sp_cost: 18,
+        gem_cost: 0,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Completely removes poison from character",
+    ),
+
+    // ===== Sorcerer Spells - Level 1 =====
+
+    (
+        id: 1025, // 0x0401 (using different encoding: 4=Sorcerer base)
+        name: "Awaken",
+        school: Sorcerer,
+        level: 1,
+        sp_cost: 5,
+        gem_cost: 0,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Awakens a sleeping character",
+    ),
+
+    (
+        id: 1026, // 0x0402
+        name: "Detect Magic",
+        school: Sorcerer,
+        level: 1,
+        sp_cost: 4,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Detects magical traps and items",
+    ),
+
+    (
+        id: 1027, // 0x0403
+        name: "Energy Blast",
+        school: Sorcerer,
+        level: 1,
+        sp_cost: 6,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: SingleMonster,
+        description: "Deals 2d8 energy damage to one enemy",
+    ),
+
+    (
+        id: 1028, // 0x0404
+        name: "Flame Arrow",
+        school: Sorcerer,
+        level: 1,
+        sp_cost: 8,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: SingleMonster,
+        description: "Deals 3d6 fire damage to one enemy",
+    ),
+
+    (
+        id: 1029, // 0x0405
+        name: "Light",
+        school: Sorcerer,
+        level: 1,
+        sp_cost: 3,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Creates light for 100 steps",
+    ),
+
+    (
+        id: 1030, // 0x0406
+        name: "Location",
+        school: Sorcerer,
+        level: 1,
+        sp_cost: 5,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Reveals current map coordinates",
+    ),
+
+    (
+        id: 1031, // 0x0407
+        name: "Sleep",
+        school: Sorcerer,
+        level: 1,
+        sp_cost: 7,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: MonsterGroup,
+        description: "Puts a group of enemies to sleep",
+    ),
+
+    // ===== Sorcerer Spells - Level 2 =====
+
+    (
+        id: 1281, // 0x0501
+        name: "Electric Arrow",
+        school: Sorcerer,
+        level: 2,
+        sp_cost: 10,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: SingleMonster,
+        description: "Deals 4d6 electricity damage",
+    ),
+
+    (
+        id: 1282, // 0x0502
+        name: "Hypnotize",
+        school: Sorcerer,
+        level: 2,
+        sp_cost: 12,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: MonsterGroup,
+        description: "Hypnotizes enemies, making them fight for you",
+    ),
+
+    (
+        id: 1283, // 0x0503
+        name: "Identify Monster",
+        school: Sorcerer,
+        level: 2,
+        sp_cost: 6,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: SingleMonster,
+        description: "Reveals monster statistics and weaknesses",
+    ),
+
+    (
+        id: 1284, // 0x0504
+        name: "Jump",
+        school: Sorcerer,
+        level: 2,
+        sp_cost: 15,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Teleports party forward 3 spaces",
+    ),
+
+    (
+        id: 1285, // 0x0505
+        name: "Levitate",
+        school: Sorcerer,
+        level: 2,
+        sp_cost: 20,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: AllCharacters,
+        description: "Party can cross pits and chasms",
+    ),
+
+    (
+        id: 1286, // 0x0506
+        name: "Power",
+        school: Sorcerer,
+        level: 2,
+        sp_cost: 10,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: AllCharacters,
+        description: "Increases party's physical attack power",
+    ),
+
+    (
+        id: 1287, // 0x0507
+        name: "Quickness",
+        school: Sorcerer,
+        level: 2,
+        sp_cost: 8,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: AllCharacters,
+        description: "Increases party speed for improved initiative",
+    ),
+
+    // ===== Sorcerer Spells - Level 3 =====
+
+    (
+        id: 1537, // 0x0601
+        name: "Acid Stream",
+        school: Sorcerer,
+        level: 3,
+        sp_cost: 15,
+        gem_cost: 1,
+        context: CombatOnly,
+        target: MonsterGroup,
+        description: "Deals 5d6 acid damage to enemy group",
+    ),
+
+    (
+        id: 1538, // 0x0602
+        name: "Cold Ray",
+        school: Sorcerer,
+        level: 3,
+        sp_cost: 18,
+        gem_cost: 1,
+        context: CombatOnly,
+        target: MonsterGroup,
+        description: "Deals 6d6 cold damage to enemy group",
+    ),
+
+    (
+        id: 1539, // 0x0603
+        name: "Feeble Mind",
+        school: Sorcerer,
+        level: 3,
+        sp_cost: 20,
+        gem_cost: 1,
+        context: CombatOnly,
+        target: SingleMonster,
+        description: "Reduces enemy spellcasting ability",
+    ),
+
+    (
+        id: 1540, // 0x0604
+        name: "Fireball",
+        school: Sorcerer,
+        level: 3,
+        sp_cost: 22,
+        gem_cost: 2,
+        context: CombatOnly,
+        target: AllMonsters,
+        description: "Deals 8d6 fire damage to all enemies",
+    ),
+
+    (
+        id: 1541, // 0x0605
+        name: "Fly",
+        school: Sorcerer,
+        level: 3,
+        sp_cost: 30,
+        gem_cost: 2,
+        context: NonCombatOnly,
+        target: AllCharacters,
+        description: "Party can fly over obstacles",
+    ),
+
+    (
+        id: 1542, // 0x0606
+        name: "Invisibility",
+        school: Sorcerer,
+        level: 3,
+        sp_cost: 25,
+        gem_cost: 1,
+        context: NonCombatOnly,
+        target: AllCharacters,
+        description: "Party becomes invisible, avoiding random encounters",
+    ),
+
+    (
+        id: 1543, // 0x0607
+        name: "Lightning Bolt",
+        school: Sorcerer,
+        level: 3,
+        sp_cost: 20,
+        gem_cost: 1,
+        context: CombatOnly,
+        target: MonsterGroup,
+        description: "Deals 7d6 electricity damage to enemy group",
+    ),
+]

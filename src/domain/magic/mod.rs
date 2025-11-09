@@ -55,6 +55,7 @@
 //! ```
 
 pub mod casting;
+pub mod database;
 pub mod types;
 
 // Re-export commonly used types
@@ -62,4 +63,5 @@ pub use casting::{
     calculate_spell_points, can_cast_spell, can_class_cast_school, cast_spell,
     get_required_level_for_spell,
 };
+pub use database::{SpellDatabase, SpellDatabaseError};
 pub use types::{Spell, SpellContext, SpellError, SpellResult, SpellSchool, SpellTarget};

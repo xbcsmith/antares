@@ -193,7 +193,7 @@ impl Direction {
 /// let result = roll.roll(&mut rng);
 /// assert!(result >= 5 && result <= 15); // Min: 2+3, Max: 12+3
 /// ```
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiceRoll {
     /// Number of dice to roll
     pub count: u8,

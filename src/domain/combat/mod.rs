@@ -7,10 +7,12 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.4 for complete specifications.
 
+pub mod database;
 pub mod engine;
 pub mod monster;
 pub mod types;
 
+pub use database::{LootTable, MonsterDatabase, MonsterDatabaseError, MonsterDefinition};
 pub use engine::*;
 pub use monster::*;
 pub use types::*;
