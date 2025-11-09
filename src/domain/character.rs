@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Character system - Stats, inventory, equipment, and party management
 //!
 //! This module contains all character-related data structures including

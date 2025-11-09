@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! World system - Maps, tiles, and locations
 //!
 //! This module contains all world-related data structures and logic including

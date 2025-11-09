@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 //! Monster database - Loading and managing monster definitions from RON files
 //!
 //! This module provides functionality to load monster definitions from RON data files
@@ -8,9 +11,9 @@
 //! See `docs/reference/architecture.md` Section 7.1-7.2 for data file specifications.
 
 use crate::domain::character::Stats;
-use crate::domain::combat::monster::MonsterResistances;
+use crate::domain::combat::monster::{LootTable, Monster, MonsterResistances};
 use crate::domain::combat::types::Attack;
-use crate::domain::types::{ItemId, MonsterId};
+use crate::domain::types::MonsterId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -36,52 +39,6 @@ pub enum MonsterDatabaseError {
 
 // ===== Loot Table =====
 
-/// Loot table for monsters
-///
-/// # Examples
-///
-/// ```
-/// use antares::domain::combat::database::LootTable;
-///
-/// let goblin_loot = LootTable {
-///     gold_min: 1,
-///     gold_max: 10,
-///     gems_min: 0,
-///     gems_max: 0,
-///     items: vec![],
-///     experience: 10,
-/// };
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LootTable {
-    /// Minimum gold dropped
-    pub gold_min: u32,
-    /// Maximum gold dropped
-    pub gold_max: u32,
-    /// Minimum gems dropped
-    pub gems_min: u32,
-    /// Maximum gems dropped
-    pub gems_max: u32,
-    /// Possible item drops (probability, item_id)
-    pub items: Vec<(f32, ItemId)>,
-    /// Experience points awarded
-    pub experience: u32,
-}
-
-impl LootTable {
-    /// Create a simple loot table with only gold and XP
-    pub fn simple(gold_min: u32, gold_max: u32, experience: u32) -> Self {
-        Self {
-            gold_min,
-            gold_max,
-            gems_min: 0,
-            gems_max: 0,
-            items: Vec::new(),
-            experience,
-        }
-    }
-}
-
 // ===== Monster Definition =====
 
 /// Complete monster definition for data files
@@ -91,8 +48,8 @@ impl LootTable {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::combat::database::{MonsterDefinition, LootTable};
-/// use antares::domain::combat::monster::MonsterResistances;
+/// use antares::domain::combat::database::MonsterDefinition;
+/// use antares::domain::combat::monster::{LootTable, MonsterResistances};
 /// use antares::domain::character::{Stats, AttributePair};
 /// use antares::domain::combat::types::Attack;
 /// use antares::domain::types::DiceRoll;
@@ -121,7 +78,7 @@ impl LootTable {
 ///     can_advance: false,
 ///     is_undead: false,
 ///     magic_resistance: 0,
-///     loot: LootTable::simple(1, 10, 10),
+///     loot: LootTable::new(1, 10, 0, 0, 10),
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,6 +111,62 @@ pub struct MonsterDefinition {
     pub magic_resistance: u8,
     /// Loot table
     pub loot: LootTable,
+}
+
+impl MonsterDefinition {
+    /// Converts this definition into a Monster instance
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::database::MonsterDefinition;
+    /// use antares::domain::combat::monster::{LootTable, MonsterResistances};
+    /// use antares::domain::character::{Stats, AttributePair};
+    /// use antares::domain::combat::types::Attack;
+    ///
+    /// let definition = MonsterDefinition {
+    ///     id: 1,
+    ///     name: "Goblin".to_string(),
+    ///     stats: Stats::new(10, 8, 6, 10, 12, 10, 8),
+    ///     hp: 15,
+    ///     ac: 6,
+    ///     attacks: vec![],
+    ///     flee_threshold: 5,
+    ///     special_attack_threshold: 0,
+    ///     resistances: MonsterResistances::new(),
+    ///     can_regenerate: false,
+    ///     can_advance: true,
+    ///     is_undead: false,
+    ///     magic_resistance: 0,
+    ///     loot: LootTable::new(5, 15, 0, 0, 25),
+    /// };
+    ///
+    /// let monster = definition.to_monster();
+    /// assert_eq!(monster.name, "Goblin");
+    /// assert_eq!(monster.hp.base, 15);
+    /// ```
+    pub fn to_monster(&self) -> Monster {
+        let mut monster = Monster::new(
+            self.id,
+            self.name.clone(),
+            self.stats.clone(),
+            self.hp,
+            self.ac,
+            self.attacks.clone(),
+            self.loot.clone(),
+            self.loot.experience,
+        );
+
+        monster.flee_threshold = self.flee_threshold as u8;
+        monster.special_attack_threshold = self.special_attack_threshold;
+        monster.resistances = self.resistances.clone();
+        monster.can_regenerate = self.can_regenerate;
+        monster.can_advance = self.can_advance;
+        monster.is_undead = self.is_undead;
+        monster.magic_resistance = self.magic_resistance;
+
+        monster
+    }
 }
 
 // ===== Monster Database =====
@@ -285,10 +298,9 @@ impl MonsterDatabase {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::combat::database::{MonsterDatabase, MonsterDefinition, LootTable};
-    /// use antares::domain::combat::monster::MonsterResistances;
+    /// use antares::domain::combat::database::{MonsterDatabase, MonsterDefinition};
+    /// use antares::domain::combat::monster::{LootTable, MonsterResistances};
     /// use antares::domain::character::{Stats, AttributePair};
-    /// use antares::domain::types::DiceRoll;
     ///
     /// let mut db = MonsterDatabase::new();
     /// let goblin = MonsterDefinition {
@@ -313,7 +325,7 @@ impl MonsterDatabase {
     ///     can_advance: false,
     ///     is_undead: false,
     ///     magic_resistance: 0,
-    ///     loot: LootTable::simple(1, 10, 10),
+    ///     loot: LootTable::new(1, 10, 0, 0, 10),
     /// };
     /// db.add_monster(goblin).unwrap();
     ///
@@ -398,7 +410,7 @@ mod tests {
             can_advance: false,
             is_undead: false,
             magic_resistance: 0,
-            loot: LootTable::simple(1, 10, 10),
+            loot: LootTable::new(1, 10, 0, 0, 10),
         }
     }
 
