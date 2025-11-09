@@ -13,6 +13,7 @@
 //! - `items`: Item system (weapons, armor, consumables)
 
 pub mod character;
+pub mod combat;
 pub mod types;
 pub mod world;
 
