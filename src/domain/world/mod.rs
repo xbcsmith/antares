@@ -1,0 +1,22 @@
+//! World system - Maps, tiles, and locations
+//!
+//! This module contains all world-related data structures and logic including
+//! tiles, maps, movement, and event handling.
+//!
+//! # Architecture Reference
+//!
+//! See `docs/reference/architecture.md` Section 4.2 for complete specifications.
+//!
+//! # Module Organization
+//!
+//! - `types`: Core world data structures (Tile, Map, World, etc.)
+//! - `movement`: Party movement and navigation logic
+//! - `events`: Map event handling system
+
+mod events;
+mod movement;
+mod types;
+
+pub use events::{trigger_event, EventError, EventResult};
+pub use movement::{check_tile_blocked, move_party, trigger_tile_event, MovementError};
+pub use types::{Map, MapEvent, Npc, TerrainType, Tile, WallType, World};

@@ -1,7 +1,7 @@
-//! World system - Maps, tiles, and locations
+//! Core world data structures
 //!
-//! This module contains all world-related data structures including
-//! tiles, maps, and the overall world structure.
+//! This module contains the fundamental types for the world system including
+//! tiles, maps, NPCs, and the overall world structure.
 //!
 //! # Architecture Reference
 //!
@@ -129,6 +129,9 @@ impl Tile {
 // ===== Map Event System =====
 
 /// Map event types
+///
+/// Events are triggered when the party moves to specific tiles or interacts
+/// with the environment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MapEvent {
     /// Random monster encounter
@@ -184,6 +187,16 @@ pub struct Npc {
 
 impl Npc {
     /// Creates a new NPC
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::Npc;
+    /// use antares::domain::types::Position;
+    ///
+    /// let npc = Npc::new(1, "Merchant".to_string(), Position::new(5, 5), "Welcome!".to_string());
+    /// assert_eq!(npc.name, "Merchant");
+    /// ```
     pub fn new(id: u16, name: String, position: Position, dialogue: String) -> Self {
         Self {
             id,
@@ -197,6 +210,8 @@ impl Npc {
 // ===== Map =====
 
 /// A map in the game world
+///
+/// Maps are 2D grids of tiles with events and NPCs.
 ///
 /// # Examples
 ///
@@ -312,6 +327,11 @@ impl Map {
         self.events.get(&pos)
     }
 
+    /// Removes and returns an event at the specified position
+    pub fn remove_event(&mut self, pos: Position) -> Option<MapEvent> {
+        self.events.remove(&pos)
+    }
+
     /// Adds an NPC to the map
     pub fn add_npc(&mut self, npc: Npc) {
         self.npcs.push(npc);
@@ -321,6 +341,9 @@ impl Map {
 // ===== World =====
 
 /// The game world containing all maps
+///
+/// The world manages multiple maps, tracks the party's current location,
+/// and handles map transitions.
 ///
 /// # Examples
 ///
@@ -444,6 +467,15 @@ mod tests {
     }
 
     #[test]
+    fn test_tile_blocked_terrain() {
+        let water = Tile::new(TerrainType::Water, WallType::None);
+        assert!(water.is_blocked());
+
+        let mountain = Tile::new(TerrainType::Mountain, WallType::None);
+        assert!(mountain.is_blocked());
+    }
+
+    #[test]
     fn test_map_bounds() {
         let map = Map::new(1, 10, 10);
         assert_eq!(map.width, 10);
@@ -453,6 +485,33 @@ mod tests {
         assert!(map.is_valid_position(Position::new(9, 9)));
         assert!(!map.is_valid_position(Position::new(10, 10)));
         assert!(!map.is_valid_position(Position::new(-1, 0)));
+    }
+
+    #[test]
+    fn test_map_tile_access() {
+        let map = Map::new(1, 10, 10);
+        let tile = map.get_tile(Position::new(5, 5));
+        assert!(tile.is_some());
+        assert_eq!(tile.unwrap().terrain, TerrainType::Ground);
+
+        let out_of_bounds = map.get_tile(Position::new(10, 10));
+        assert!(out_of_bounds.is_none());
+    }
+
+    #[test]
+    fn test_map_events() {
+        let mut map = Map::new(1, 10, 10);
+        let pos = Position::new(5, 5);
+        let event = MapEvent::Sign {
+            text: "Welcome!".to_string(),
+        };
+
+        map.add_event(pos, event);
+        assert!(map.get_event(pos).is_some());
+
+        let removed = map.remove_event(pos);
+        assert!(removed.is_some());
+        assert!(map.get_event(pos).is_none());
     }
 
     #[test]
@@ -489,5 +548,18 @@ mod tests {
 
         world.turn_left();
         assert_eq!(world.party_facing, Direction::North);
+    }
+
+    #[test]
+    fn test_npc_creation() {
+        let npc = Npc::new(
+            1,
+            "Merchant".to_string(),
+            Position::new(10, 10),
+            "Buy something!".to_string(),
+        );
+        assert_eq!(npc.id, 1);
+        assert_eq!(npc.name, "Merchant");
+        assert_eq!(npc.position, Position::new(10, 10));
     }
 }
