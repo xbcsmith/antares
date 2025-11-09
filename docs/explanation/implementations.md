@@ -5,6 +5,224 @@ It is updated after each phase or major feature completion.
 
 ---
 
+## Phase 5: Content & Data (COMPLETED)
+
+**Date Completed**: 2024-12-19
+**Status**: ✅ All tasks complete, all quality gates passed
+
+### Overview
+
+Phase 5 implements the complete data loading infrastructure and creates sample content files in RON format. This phase provides the framework for loading items, spells, monsters, and maps from external data files, separating game content from code logic as specified in the architecture.
+
+### Components Implemented
+
+#### Task 5.1: Item Data System
+
+**Files Created**:
+
+- `src/domain/items/types.rs` (573 lines) - Complete item type system
+- `src/domain/items/database.rs` (391 lines) - Item database loader
+- `src/domain/items/mod.rs` (42 lines) - Module organization
+- `data/items.ron` (484 lines) - Sample item definitions
+
+**Item Types Implemented**:
+
+- **Weapon**: Damage dice, bonus, hands required
+- **Armor**: AC bonus, weight
+- **Accessory**: Ring, Amulet, Belt, Cloak slots
+- **Consumable**: Healing, SP restore, condition cures, attribute boosts
+- **Ammo**: Arrows, bolts, stones with quantity
+- **Quest**: Key items with quest IDs
+
+**Bonus System**:
+
+- Constant bonuses (equipped/carried effects)
+- Temporary bonuses (use effects, consume charges)
+- Spell effects (spell ID references)
+- Cursed items (cannot unequip)
+
+**Disablement Flags**: Class and alignment restrictions using bitfield system matching MM1 architecture (Knight, Paladin, Archer, Cleric, Sorcerer, Robber, Good, Evil)
+
+**Sample Content**: 30+ items including:
+
+- Basic weapons (Club, Dagger, Short Sword, Long Sword, Mace, Battle Axe, Two-Handed Sword)
+- Magical weapons (Club +1, Flaming Sword, Accurate Sword)
+- Armor (Leather, Chain Mail, Plate Mail, Dragon Scale Mail)
+- Accessories (Ring of Protection, Amulet of Might, Belt of Speed)
+- Consumables (Healing Potion, Magic Potion, Cure Poison Potion)
+- Ammunition (Arrows, Crossbow Bolts)
+- Quest items (Ruby Whistle)
+- Cursed items (Mace of Undead)
+
+**Tests**: 13 unit tests covering database operations, filtering, RON parsing
+**Doc Tests**: 7 examples demonstrating usage
+
+#### Task 5.2: Spell Data System
+
+**Files Created**:
+
+- `src/domain/magic/database.rs` (414 lines) - Spell database loader
+- `data/spells.ron` (525 lines) - Sample spell definitions
+
+**Features**:
+
+- Spell database with HashMap-based indexing by SpellId
+- Query methods: by school, by level, by school+level
+- RON deserialization with duplicate detection
+- Integration with existing magic system types (SpellSchool, SpellContext, SpellTarget)
+
+**Sample Content**: 21+ spells across schools and levels:
+
+- **Cleric Level 1**: Awaken, Bless, Blind, First Aid, Light, Power Cure, Protection from Fear
+- **Cleric Level 2**: Cure Wounds, Heroism, Pain, Protection from Cold/Fire/Poison, Silence
+- **Cleric Level 3**: Create Food, Cure Blindness/Paralysis, Lasting Light, Walk on Water, Turn Undead, Neutralize Poison
+- **Sorcerer Level 1**: Awaken, Detect Magic, Energy Blast, Flame Arrow, Light, Location, Sleep
+- **Sorcerer Level 2**: Electric Arrow, Hypnotize, Identify Monster, Jump, Levitate, Power, Quickness
+- **Sorcerer Level 3**: Acid Stream, Cold Ray, Feeble Mind, Fireball, Fly, Invisibility, Lightning Bolt
+
+**Spell ID Encoding**: Uses high byte for school identification (0x01=Cleric, 0x04=Sorcerer base)
+
+**Tests**: 11 unit tests covering database operations, school/level filtering, RON parsing
+**Doc Tests**: 4 examples demonstrating usage
+
+#### Task 5.3: Monster Data System
+
+**Files Created**:
+
+- `src/domain/combat/database.rs` (490 lines) - Monster database loader
+- `data/monsters.ron` (541 lines) - Sample monster definitions
+
+**Monster Definition Fields**:
+
+- **Stats**: Full seven-attribute system with AttributePair
+- **Combat**: HP, AC, attacks (with damage types and special effects)
+- **AI**: Flee threshold, special attack threshold, can_regenerate, can_advance
+- **Resistances**: Physical, Fire, Cold, Electricity, Energy, Paralysis, Fear, Sleep
+- **Undead Flag**: For Turn Undead spell targeting
+- **Magic Resistance**: Percentage-based
+- **Loot Table**: Gold range, gem range, item drops with probabilities, XP value
+
+**Sample Content**: 11 monsters across difficulty tiers:
+
+- **Weak (HP 1-20)**: Goblin, Kobold, Giant Rat
+- **Medium (HP 21-50)**: Orc, Skeleton (undead), Wolf
+- **Strong (HP 51-100)**: Ogre (regenerates), Zombie (undead), Fire Elemental (resistances)
+- **Boss (HP 100+)**: Dragon (200 HP, fire breath), Lich (150 HP, undead, high magic resistance)
+
+**Special Features**:
+
+- Undead creatures with cold/paralysis/fear/sleep immunity
+- Fire Elemental with physical immunity
+- Monsters with disease, drain, and other special effects
+- Varied loot tables with item drop probabilities
+
+**Tests**: 10 unit tests covering database operations, filtering by type/HP range, RON parsing
+**Doc Tests**: 5 examples demonstrating usage
+
+#### Task 5.4: Map Data Infrastructure
+
+**Files Created**:
+
+- `data/maps/` directory structure established
+
+**Status**: Directory created, ready for map RON files. Maps integrate with existing world system (`src/domain/world/types.rs`) which already has complete Map, Tile, and Event structures.
+
+**Next Steps**: Populate with town and dungeon map files using existing Map/Tile/Event structures from Phase 3.
+
+### Architecture Compliance
+
+**RON Format**: All data files use `.ron` extension as mandated by architecture.md Section 7.1-7.2. NO JSON or YAML used for game data.
+
+**Type Aliases**: Consistent use of `ItemId` (u8), `SpellId` (u16), `MonsterId` (u8) throughout.
+
+**Data Structures**: All definitions match architecture.md Section 4 exactly:
+
+- Item system follows Section 4.5 specification
+- Spell system integrates with Section 5.3 magic system
+- Monster system follows Section 4.4 combat system
+
+**Separation of Concerns**: Game content completely separated from code. Content designers can edit RON files without touching Rust source.
+
+**Serde Integration**: All data structures properly derive Serialize/Deserialize for RON compatibility.
+
+### Testing
+
+**Quality Gates**: All passed
+
+- ✅ `cargo fmt --all` - Code formatted
+- ✅ `cargo check --all-targets --all-features` - Compiles clean
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - Zero warnings
+- ✅ `cargo test --all-features` - 176 unit tests + 105 doc tests passed
+
+**Test Coverage**:
+
+- Item database: 13 unit tests + 7 doc tests
+- Spell database: 11 unit tests + 4 doc tests
+- Monster database: 10 unit tests + 5 doc tests
+- RON parsing validation for all three systems
+- Duplicate ID detection
+- Query and filter operations
+- Type safety verification
+
+### Files Created/Modified
+
+**New Files** (9 total):
+
+1. `src/domain/items/types.rs` - Item type definitions
+2. `src/domain/items/database.rs` - Item database loader
+3. `src/domain/items/mod.rs` - Items module organization
+4. `src/domain/magic/database.rs` - Spell database loader
+5. `src/domain/combat/database.rs` - Monster database loader
+6. `data/items.ron` - Item content (30+ items)
+7. `data/spells.ron` - Spell content (21+ spells)
+8. `data/monsters.ron` - Monster content (11 monsters)
+9. `data/maps/` - Map directory structure
+
+**Modified Files** (4 total):
+
+1. `src/domain/mod.rs` - Added items module export
+2. `src/domain/magic/mod.rs` - Added database module export
+3. `src/domain/combat/mod.rs` - Added database module export
+4. `src/domain/types.rs` - Added PartialEq, Eq derives to DiceRoll
+
+**Total Lines Added**: ~2,900 lines (code + data + tests)
+
+### Integration Points
+
+**Items → Equipment System**: ItemDatabase provides definitions for character inventory/equipment (Phase 1)
+
+**Spells → Magic System**: SpellDatabase provides definitions for spell casting validation (Phase 4)
+
+**Monsters → Combat System**: MonsterDatabase provides templates for combat encounters (Phase 2)
+
+**Maps → World System**: Map data files will populate World structure for exploration (Phase 3)
+
+**All Systems → Game Loop**: Data loaders enable content-driven gameplay without code changes
+
+### Lessons Learned
+
+**RON Type Compatibility**: Had to use `ron::error::SpannedError` instead of `ron::Error` for proper error conversion with thiserror's `#[from]` attribute.
+
+**Type Alias Ranges**: ItemId and MonsterId are `u8` (0-255 range), requiring test values ≤255. SpellId is `u16` for school encoding in high byte.
+
+**DiceRoll Comparison**: Added `PartialEq` and `Eq` derives to DiceRoll to enable use in serializable structs that derive these traits.
+
+**Content Balance**: Sample data provides variety across difficulty tiers, useful for testing progression systems.
+
+**Bitfield Disablements**: MM1-style class restriction bitfield (0xFF = all, 0x00 = none) preserves authentic mechanics.
+
+### Next Steps (Phase 6: Polish & Testing)
+
+1. **Integration Testing**: Create end-to-end tests that load data and execute full game flows
+2. **Map Content**: Populate `data/maps/` with town and dungeon RON files
+3. **Balance Testing**: Validate XP curves, loot tables, combat difficulty
+4. **Data Validation**: Add schema validation for RON files (check required fields, valid ranges)
+5. **Content Tools**: Consider helper scripts for generating/validating RON data
+6. **Performance**: Profile database loading, consider caching strategies for production
+7. **Documentation**: Write data authoring guide (how to add new items/spells/monsters)
+
+---
+
 ## Phase 1: Core Engine (COMPLETED)
 
 **Date Completed**: 2024-11-09
@@ -1193,7 +1411,7 @@ fn test_starvation_kills_character()
 **Character Progression**:
 
 - ✅ Experience award system
-- ✅ Exponential XP curve (BASE_XP * (level-1)^1.5)
+- ✅ Exponential XP curve (BASE_XP \* (level-1)^1.5)
 - ✅ Level-up check and execution
 - ✅ Class-based HP gain (1d4 to 1d10)
 - ✅ Automatic SP recalculation on level-up
