@@ -352,7 +352,7 @@ architecture.md.
   design
 - **implementation guide**: `docs/explanation/implementations.md` - what's been
   built
-- **agents guide**: `agents.md` - development rules and patterns
+- **agents guide**: `AGENTS.md` - development rules and patterns
 
 ## feedback
 
