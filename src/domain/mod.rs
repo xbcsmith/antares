@@ -14,6 +14,9 @@
 
 pub mod character;
 pub mod combat;
+pub mod magic;
+pub mod progression;
+pub mod resources;
 pub mod types;
 pub mod world;
 
