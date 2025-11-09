@@ -299,20 +299,20 @@ use std::fs;
 fn test_load_starter_town() {
     let contents = fs::read_to_string("data/maps/starter_town.ron")
         .expect("Failed to read starter_town.ron");
-    
+
     let map: Map = ron::from_str(&contents)
         .expect("Failed to parse starter_town.ron");
-    
+
     // Validate map structure
     assert_eq!(map.id, 1);
     assert_eq!(map.width, 16);
     assert_eq!(map.height, 16);
     assert_eq!(map.tiles.len(), 16); // 16 rows
     assert_eq!(map.tiles[0].len(), 16); // 16 columns
-    
+
     // Validate events
     assert!(map.events.len() > 0, "Map should have events");
-    
+
     // Validate NPCs
     assert_eq!(map.npcs.len(), 1, "Should have merchant NPC");
     assert_eq!(map.npcs[0].id, 1);
@@ -323,10 +323,10 @@ fn test_load_starter_town() {
 fn test_starter_town_has_entrance() {
     let contents = fs::read_to_string("data/maps/starter_town.ron")
         .expect("Failed to read starter_town.ron");
-    
+
     let map: Map = ron::from_str(&contents)
         .expect("Failed to parse starter_town.ron");
-    
+
     // South entrance should be passable
     let entrance_tile = &map.tiles[15][8];
     assert!(!entrance_tile.blocked, "Entrance should not be blocked");
@@ -336,10 +336,10 @@ fn test_starter_town_has_entrance() {
 fn test_starter_town_has_sign() {
     let contents = fs::read_to_string("data/maps/starter_town.ron")
         .expect("Failed to read starter_town.ron");
-    
+
     let map: Map = ron::from_str(&contents)
         .expect("Failed to parse starter_town.ron");
-    
+
     let plaza_pos = Position::new(8, 8);
     assert!(map.events.contains_key(&plaza_pos), "Plaza should have sign event");
 }
@@ -448,7 +448,7 @@ fn test_starter_town_has_sign() {
        position: Position(x: 10, y: 10),
        dialogue: "Greeting message.",
    ),
-   
+
    // In events:
    Position(x: 10, y: 10): NpcDialogue(
        npc_id: 1,
@@ -509,17 +509,17 @@ use std::process;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     if args.len() != 2 {
         eprintln!("Usage: cargo run --example validate_map <path/to/map.ron>");
         process::exit(1);
     }
-    
+
     let path = &args[1];
-    
+
     println!("Validating map: {}", path);
     println!();
-    
+
     // Load file
     let contents = match fs::read_to_string(path) {
         Ok(c) => c,
@@ -528,7 +528,7 @@ fn main() {
             process::exit(1);
         }
     };
-    
+
     // Parse RON
     let map: Map = match ron::from_str(&contents) {
         Ok(m) => m,
@@ -537,17 +537,17 @@ fn main() {
             process::exit(1);
         }
     };
-    
+
     println!("✅ RON syntax valid");
-    
+
     // Validate structure
     let mut errors = Vec::new();
-    
+
     // Check dimensions
     if map.width == 0 || map.height == 0 {
         errors.push("Map dimensions must be > 0".to_string());
     }
-    
+
     // Check tile grid
     if map.tiles.len() != map.height as usize {
         errors.push(format!(
@@ -556,7 +556,7 @@ fn main() {
             map.height
         ));
     }
-    
+
     for (y, row) in map.tiles.iter().enumerate() {
         if row.len() != map.width as usize {
             errors.push(format!(
@@ -567,11 +567,11 @@ fn main() {
             ));
         }
     }
-    
+
     if errors.is_empty() {
         println!("✅ Tile grid dimensions valid");
     }
-    
+
     // Check event positions
     for (pos, _event) in &map.events {
         if pos.x < 0 || pos.x >= map.width as i32 {
@@ -587,11 +587,11 @@ fn main() {
             ));
         }
     }
-    
+
     if errors.is_empty() {
         println!("✅ Event positions valid");
     }
-    
+
     // Check NPC positions
     for npc in &map.npcs {
         if npc.position.x < 0 || npc.position.x >= map.width as i32 {
@@ -607,11 +607,11 @@ fn main() {
             ));
         }
     }
-    
+
     if errors.is_empty() {
         println!("✅ NPC positions valid");
     }
-    
+
     // Report
     println!();
     println!("=== Map Summary ===");
@@ -621,7 +621,7 @@ fn main() {
     println!("Events: {}", map.events.len());
     println!("NPCs: {}", map.npcs.len());
     println!();
-    
+
     if errors.is_empty() {
         println!("✅ All validations passed!");
         process::exit(0);
@@ -749,47 +749,47 @@ impl MapBuilder {
     fn new() -> Self {
         Self { map: None }
     }
-    
+
     fn create_map(&mut self, width: u32, height: u32, id: u16) {
         // Create map with default ground tiles
     }
-    
+
     fn load_map(&mut self, path: &str) -> Result<(), String> {
         // Load from RON file
     }
-    
+
     fn set_tile(&mut self, x: i32, y: i32, terrain: TerrainType, wall: WallType) -> Result<(), String> {
         // Set individual tile
     }
-    
+
     fn fill_tiles(&mut self, terrain: TerrainType, wall: WallType) -> Result<(), String> {
         // Fill all tiles
     }
-    
+
     fn fill_rect(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, terrain: TerrainType, wall: WallType) -> Result<(), String> {
         // Fill rectangular area
     }
-    
+
     fn add_event(&mut self, x: i32, y: i32, event: MapEvent) -> Result<(), String> {
         // Add event at position
     }
-    
+
     fn add_npc(&mut self, id: u16, x: i32, y: i32, name: String, dialogue: String) -> Result<(), String> {
         // Add NPC
     }
-    
+
     fn show_map(&self) {
         // Display ASCII representation
     }
-    
+
     fn show_info(&self) {
         // Show map summary
     }
-    
+
     fn save_map(&self, path: &str) -> Result<(), String> {
         // Save to RON file
     }
-    
+
     fn process_command(&mut self, cmd: &str) -> Result<bool, String> {
         // Parse and execute command
         // Returns Ok(true) to continue, Ok(false) to quit
@@ -798,30 +798,30 @@ impl MapBuilder {
 
 fn main() {
     let mut builder = MapBuilder::new();
-    
+
     println!("=== Antares Map Builder ===");
     println!("Type 'help' for commands");
     println!();
-    
+
     loop {
         print!("> ");
         io::stdout().flush().unwrap();
-        
+
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
-        
+
         let cmd = input.trim();
         if cmd.is_empty() {
             continue;
         }
-        
+
         match builder.process_command(cmd) {
             Ok(true) => continue,
             Ok(false) => break,
             Err(e) => println!("Error: {}", e),
         }
     }
-    
+
     println!("Goodbye!");
 }
 ```
@@ -835,12 +835,12 @@ Show map terrain types:
   ^ = Mountain
   # = Stone
   T = Forest
-  
+
 Show wall types overlaid:
   | = Normal wall
   + = Door
   * = Torch
-  
+
 Example display:
   ^^^^^^^^^^^^^^^^
   ^...........:..^
@@ -1114,26 +1114,26 @@ Add to `tests/map_loading_test.rs`:
 fn test_load_starter_dungeon() {
     let contents = fs::read_to_string("data/maps/starter_dungeon.ron")
         .expect("Failed to read starter_dungeon.ron");
-    
+
     let map: Map = ron::from_str(&contents)
         .expect("Failed to parse starter_dungeon.ron");
-    
+
     assert_eq!(map.id, 2);
     assert_eq!(map.width, 20);
     assert_eq!(map.height, 20);
-    
+
     // Should have encounters
     let encounter_count = map.events.values()
         .filter(|e| matches!(e, MapEvent::Encounter { .. }))
         .count();
     assert!(encounter_count >= 3, "Should have at least 3 encounters");
-    
+
     // Should have treasure
     let treasure_count = map.events.values()
         .filter(|e| matches!(e, MapEvent::Treasure { .. }))
         .count();
     assert!(treasure_count >= 2, "Should have at least 2 treasures");
-    
+
     // Should have traps
     let trap_count = map.events.values()
         .filter(|e| matches!(e, MapEvent::Trap { .. }))
@@ -1218,7 +1218,7 @@ fn test_load_starter_dungeon() {
        destination: Position(x: 8, y: 1),
        map_id: 1,
    ),
-   
+
    // In starter_town.ron, add:
    Position(x: 8, y: 0): Teleport(
        destination: Position(x: 1, y: 15),
@@ -1235,14 +1235,14 @@ Add to `tests/map_loading_test.rs`:
 fn test_load_forest_area() {
     let contents = fs::read_to_string("data/maps/forest_area.ron")
         .expect("Failed to read forest_area.ron");
-    
+
     let map: Map = ron::from_str(&contents)
         .expect("Failed to parse forest_area.ron");
-    
+
     assert_eq!(map.id, 3);
     assert_eq!(map.width, 30);
     assert_eq!(map.height, 30);
-    
+
     // Should have many encounters (outdoor area)
     let encounter_count = map.events.values()
         .filter(|e| matches!(e, MapEvent::Encounter { .. }))
