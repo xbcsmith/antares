@@ -5,6 +5,40 @@ is updated after each phase or major feature completion.
 
 ---
 
+## SDK Implementation Plan (PLANNED)
+
+**Status**: 📋 Planning complete, awaiting Map Content Plan completion
+
+**Plan Document**: `docs/explanation/sdk_implementation_plan.md`
+
+**Overview**: Comprehensive plan to transform Antares from an MM1 clone into a
+general-purpose RPG engine with SDK tooling for campaign creation. Builds upon
+the Map Content Implementation Plan as its cornerstone.
+
+**Key Phases**:
+
+1. **Data-Driven Classes** (5-7 days) - Migrate classes from enum to RON
+2. **Data-Driven Races** (3-4 days) - Migrate races to RON
+3. **SDK Foundation** (4-5 days) - ContentDatabase and validation framework
+4. **Enhanced Map Builder** (2-3 days) - Integrate SDK into existing map tool
+5. **Class/Race Editor** (3-4 days) - Interactive CLI editors
+6. **Campaign Validator** (2-3 days) - Comprehensive validation tool
+7. **Item Editor** (3-4 days) - Interactive item database editor
+8. **Documentation** (4-5 days) - Campaign creation guides and API docs
+9. **Integration & Polish** (3-4 days) - Final QA and user testing
+
+**Prerequisites**:
+
+- ✅ Map Content Implementation Plan Phases 1-3 must complete first
+- Map Builder becomes the flagship SDK tool
+
+**Timeline**: ~10 weeks part-time (after map plan completion)
+
+**Strategic Goal**: Enable modding and custom campaign creation without
+recompilation, positioning Antares as an RPG engine rather than just an MM1 clone.
+
+---
+
 ## Phase 5: Content & Data (COMPLETED)
 
 **Date Completed**: 2024-12-19 **Status**: ✅ All tasks complete, all quality
