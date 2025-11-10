@@ -61,7 +61,7 @@ The map content implementation plan is **well-structured and comprehensive**, pr
 
 **Location**: Phase 1, Task 1.2 (Starter Town Map)
 
-**Problem**: 
+**Problem**:
 The plan suggests manually creating a 16x16 map = 256 tiles in RON format. This is:
 - Extremely tedious and error-prone
 - Inconsistent with having a map builder tool in Phase 2
@@ -120,7 +120,7 @@ In map format documentation, clarify:
 - Monster IDs correspond to the `id` field in monster definitions
 - Example: `[1, 1, 2]` means two Goblins (ID 1) and one Orc (ID 2)
 
-### Treasure Event  
+### Treasure Event
 - `loot: Vec<u8>` - List of Item IDs (from items.ron)
 - Item IDs correspond to the `id` field in item definitions
 - Example: `[1, 2, 3]` means Club (ID 1), Dagger (ID 2), and Leather Armor (ID 3)
@@ -270,7 +270,7 @@ Example 5x5 map:
 
 ## Minor Issues (Nice to Fix)
 
-### Issue 7: RON Serialization Not Verified 
+### Issue 7: RON Serialization Not Verified
 
 **Location**: Throughout plan
 

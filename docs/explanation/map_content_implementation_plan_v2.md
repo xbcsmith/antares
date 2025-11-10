@@ -153,18 +153,18 @@ Complete field-by-field breakdown with examples...
 3. Add **Type Aliases** section explaining MonsterId/ItemId usage:
    ```markdown
    ## Monster and Item IDs
-   
+
    ### Monster IDs (MonsterId = u8)
    Used in Encounter events. See `docs/reference/data_dependencies.md` for complete list.
-   
+
    Common monsters:
    - ID 1: Goblin
    - ID 10: Orc
    - ID 12: Wolf
-   
+
    ### Item IDs (ItemId = u8)
    Used in Treasure events. See `docs/reference/data_dependencies.md` for complete list.
-   
+
    Common items:
    - ID 1: Club
    - ID 20: Leather Armor
@@ -319,17 +319,17 @@ const VALID_ITEM_IDS: &[u8] = &[
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     if args.len() != 2 {
         eprintln!("Usage: cargo run --bin validate_map <path/to/map.ron>");
         process::exit(1);
     }
-    
+
     let path = &args[1];
-    
+
     println!("Validating map: {}", path);
     println!();
-    
+
     // Load file
     let contents = match fs::read_to_string(path) {
         Ok(c) => c,
@@ -338,7 +338,7 @@ fn main() {
             process::exit(1);
         }
     };
-    
+
     // Parse RON
     let map: Map = match ron::from_str(&contents) {
         Ok(m) => m,
@@ -347,17 +347,17 @@ fn main() {
             process::exit(1);
         }
     };
-    
+
     println!("✅ RON syntax valid");
-    
+
     // Validate structure
     let mut errors = Vec::new();
-    
+
     // Check dimensions
     if map.width == 0 || map.height == 0 {
         errors.push("Map dimensions must be > 0".to_string());
     }
-    
+
     // Check tile grid
     if map.tiles.len() != map.height as usize {
         errors.push(format!(
@@ -366,7 +366,7 @@ fn main() {
             map.height
         ));
     }
-    
+
     for (y, row) in map.tiles.iter().enumerate() {
         if row.len() != map.width as usize {
             errors.push(format!(
@@ -377,11 +377,11 @@ fn main() {
             ));
         }
     }
-    
+
     if errors.is_empty() {
         println!("✅ Tile grid dimensions valid");
     }
-    
+
     // Check event positions
     for (pos, event) in &map.events {
         if pos.x < 0 || pos.x >= map.width as i32 {
@@ -396,7 +396,7 @@ fn main() {
                 pos.x, pos.y, map.height
             ));
         }
-        
+
         // Validate Monster IDs
         if let MapEvent::Encounter { monster_group } = event {
             for &id in monster_group {
@@ -408,7 +408,7 @@ fn main() {
                 }
             }
         }
-        
+
         // Validate Item IDs
         if let MapEvent::Treasure { loot } = event {
             for &id in loot {
@@ -421,12 +421,12 @@ fn main() {
             }
         }
     }
-    
+
     if errors.is_empty() {
         println!("✅ Event positions valid");
         println!("✅ Monster/Item IDs valid");
     }
-    
+
     // Check NPC positions
     for npc in &map.npcs {
         if npc.position.x < 0 || npc.position.x >= map.width as i32 {
@@ -442,11 +442,11 @@ fn main() {
             ));
         }
     }
-    
+
     if errors.is_empty() {
         println!("✅ NPC positions valid");
     }
-    
+
     // Report
     println!();
     println!("=== Map Summary ===");
@@ -455,7 +455,7 @@ fn main() {
     println!("Tiles: {}", map.width * map.height);
     println!("Events: {}", map.events.len());
     println!("NPCs: {}", map.npcs.len());
-    
+
     // Count event types
     let mut encounters = 0;
     let mut treasures = 0;
@@ -472,7 +472,7 @@ fn main() {
     println!("  - Treasures: {}", treasures);
     println!("  - Traps: {}", traps);
     println!();
-    
+
     if errors.is_empty() {
         println!("✅ All validations passed!");
         process::exit(0);
@@ -604,7 +604,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
        position: Position(x: 10, y: 10),
        dialogue: "Welcome! I have supplies for sale.",
    ),
-   
+
    // In events:
    Position(x: 10, y: 10): NpcDialogue(
        npc_id: 1,
@@ -753,7 +753,7 @@ impl MapBuilder {
     fn new() -> Self {
         Self { map: None }
     }
-    
+
     fn create_map(&mut self, width: u32, height: u32, id: u16) {
         let mut tiles = Vec::new();
         for _ in 0..height {
@@ -763,7 +763,7 @@ impl MapBuilder {
             }
             tiles.push(row);
         }
-        
+
         self.map = Some(Map {
             id,
             width,
@@ -772,42 +772,42 @@ impl MapBuilder {
             events: HashMap::new(),
             npcs: Vec::new(),
         });
-        
+
         println!("Created {}x{} map with ID {}", width, height, id);
     }
-    
+
     fn load_map(&mut self, path: &str) -> Result<(), String> {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read file: {}", e))?;
-        
+
         let map: Map = ron::from_str(&contents)
             .map_err(|e| format!("Failed to parse RON: {}", e))?;
-        
+
         println!("Loaded map ID {} ({}x{})", map.id, map.width, map.height);
         self.map = Some(map);
         Ok(())
     }
-    
+
     fn set_tile(&mut self, x: i32, y: i32, terrain: TerrainType, wall: WallType) -> Result<(), String> {
         let map = self.map.as_mut().ok_or("No map loaded")?;
-        
+
         if x < 0 || x >= map.width as i32 || y < 0 || y >= map.height as i32 {
             return Err(format!("Position ({}, {}) out of bounds", x, y));
         }
-        
+
         let tile = &mut map.tiles[y as usize][x as usize];
         tile.terrain = terrain;
         tile.wall_type = wall;
         tile.blocked = matches!(terrain, TerrainType::Mountain | TerrainType::Water)
             || matches!(wall, WallType::Normal);
-        
+
         println!("Set tile at ({}, {}) to {:?}/{:?}", x, y, terrain, wall);
         Ok(())
     }
-    
+
     fn fill_tiles(&mut self, terrain: TerrainType, wall: WallType) -> Result<(), String> {
         let map = self.map.as_mut().ok_or("No map loaded")?;
-        
+
         for row in &mut map.tiles {
             for tile in row {
                 tile.terrain = terrain;
@@ -816,39 +816,39 @@ impl MapBuilder {
                     || matches!(wall, WallType::Normal);
             }
         }
-        
+
         println!("Filled all tiles with {:?}/{:?}", terrain, wall);
         Ok(())
     }
-    
+
     fn add_event(&mut self, x: i32, y: i32, event: MapEvent) -> Result<(), String> {
         let map = self.map.as_mut().ok_or("No map loaded")?;
-        
+
         if x < 0 || x >= map.width as i32 || y < 0 || y >= map.height as i32 {
             return Err(format!("Position ({}, {}) out of bounds", x, y));
         }
-        
+
         let pos = Position::new(x, y);
         map.events.insert(pos, event);
-        
+
         println!("Added event at ({}, {})", x, y);
         Ok(())
     }
-    
+
     fn add_npc(&mut self, id: u16, x: i32, y: i32, name: String, dialogue: String) -> Result<(), String> {
         let map = self.map.as_mut().ok_or("No map loaded")?;
-        
+
         if x < 0 || x >= map.width as i32 || y < 0 || y >= map.height as i32 {
             return Err(format!("Position ({}, {}) out of bounds", x, y));
         }
-        
+
         let npc = Npc::new(id, name, Position::new(x, y), dialogue);
         map.npcs.push(npc);
-        
+
         println!("Added NPC at ({}, {})", x, y);
         Ok(())
     }
-    
+
     fn show_map(&self) {
         let map = match &self.map {
             Some(m) => m,
@@ -857,13 +857,13 @@ impl MapBuilder {
                 return;
             }
         };
-        
+
         println!("\n=== Map Display ({}x{}) ===", map.width, map.height);
-        
+
         // Legend
         println!("Legend: . = Ground  : = Grass  ~ = Water  ^ = Mountain");
         println!("        # = Stone   T = Forest | = Wall   + = Door\n");
-        
+
         for row in &map.tiles {
             for tile in row {
                 let ch = match tile.wall_type {
@@ -888,7 +888,7 @@ impl MapBuilder {
         }
         println!();
     }
-    
+
     fn show_info(&self) {
         let map = match &self.map {
             Some(m) => m,
@@ -897,13 +897,13 @@ impl MapBuilder {
                 return;
             }
         };
-        
+
         println!("\n=== Map Info ===");
         println!("ID: {}", map.id);
         println!("Size: {}x{}", map.width, map.height);
         println!("Events: {}", map.events.len());
         println!("NPCs: {}", map.npcs.len());
-        
+
         // Count event types
         let mut encounters = 0;
         let mut treasures = 0;
@@ -921,30 +921,30 @@ impl MapBuilder {
         println!("  - Traps: {}", traps);
         println!();
     }
-    
+
     fn save_map(&self, path: &str) -> Result<(), String> {
         let map = self.map.as_ref().ok_or("No map loaded")?;
-        
+
         let ron_str = ron::ser::to_string_pretty(map, Default::default())
             .map_err(|e| format!("Failed to serialize: {}", e))?;
-        
+
         std::fs::write(path, ron_str)
             .map_err(|e| format!("Failed to write file: {}", e))?;
-        
+
         println!("Saved map to {}", path);
         Ok(())
     }
-    
+
     fn process_command(&mut self, cmd: &str) -> Result<bool, String> {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
-        
+
         if parts.is_empty() {
             return Ok(true);
         }
-        
+
         match parts[0] {
             "quit" | "exit" => Ok(false),
-            
+
             "help" => {
                 println!("\nAvailable commands:");
                 println!("  new <w> <h> <id>       - Create new map");
@@ -960,7 +960,7 @@ impl MapBuilder {
                 println!("  quit                   - Exit\n");
                 Ok(true)
             }
-            
+
             "new" => {
                 if parts.len() < 4 {
                     return Err("Usage: new <width> <height> <id>".to_string());
@@ -974,7 +974,7 @@ impl MapBuilder {
                 self.create_map(width, height, id);
                 Ok(true)
             }
-            
+
             "load" => {
                 if parts.len() < 2 {
                     return Err("Usage: load <path>".to_string());
@@ -982,17 +982,17 @@ impl MapBuilder {
                 self.load_map(parts[1])?;
                 Ok(true)
             }
-            
+
             "show" => {
                 self.show_map();
                 Ok(true)
             }
-            
+
             "info" => {
                 self.show_info();
                 Ok(true)
             }
-            
+
             "save" => {
                 if parts.len() < 2 {
                     return Err("Usage: save <path>".to_string());
@@ -1000,10 +1000,10 @@ impl MapBuilder {
                 self.save_map(parts[1])?;
                 Ok(true)
             }
-            
+
             // TODO: Implement set, fill, event, npc commands
             // (Full implementation would be here)
-            
+
             _ => Err(format!("Unknown command: {}", parts[0])),
         }
     }
@@ -1011,30 +1011,30 @@ impl MapBuilder {
 
 fn main() {
     let mut builder = MapBuilder::new();
-    
+
     println!("=== Antares Map Builder ===");
     println!("Type 'help' for commands");
     println!();
-    
+
     loop {
         print!("> ");
         io::stdout().flush().unwrap();
-        
+
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
-        
+
         let cmd = input.trim();
         if cmd.is_empty() {
             continue;
         }
-        
+
         match builder.process_command(cmd) {
             Ok(true) => continue,
             Ok(false) => break,
             Err(e) => println!("Error: {}", e),
         }
     }
-    
+
     println!("Goodbye!");
 }
 ```
@@ -1274,16 +1274,16 @@ use std::fs;
 fn test_load_starter_town() {
     let contents = fs::read_to_string("data/maps/starter_town.ron")
         .expect("Failed to read starter_town.ron");
-    
+
     let map: Map = ron::from_str(&contents)
         .expect("Failed to parse starter_town.ron");
-    
+
     assert_eq!(map.id, 1);
     assert_eq!(map.width, 16);
     assert_eq!(map.height, 16);
     assert_eq!(map.tiles.len(), 16);
     assert_eq!(map.tiles[0].len(), 16);
-    
+
     assert!(map.events.len() > 0, "Map should have events");
     assert_eq!(map.npcs.len(), 1, "Should have merchant NPC");
     assert_eq!(map.npcs[0].id, 1);
@@ -1322,17 +1322,17 @@ fn test_load_starter_town() {
    Position(x: 10, y: 10): Encounter(
        monster_group: [1, 1], // 2 Goblins (ID 1, not 2!)
    ),
-   
+
    // Kobold ambush
    Position(x: 8, y: 12): Encounter(
        monster_group: [2, 2, 2], // 3 Kobolds (ID 2)
    ),
-   
+
    // Orc guard
    Position(x: 15, y: 5): Encounter(
        monster_group: [10], // 1 Orc (ID 10, NOT 2!)
    ),
-   
+
    // Skeleton warriors
    Position(x: 18, y: 18): Encounter(
        monster_group: [11, 11], // 2 Skeletons (ID 11)
@@ -1345,7 +1345,7 @@ fn test_load_starter_town() {
    Position(x: 18, y: 18): Treasure(
        loot: [3, 21, 50], // Short Sword, Chain Mail, Healing Potion
    ),
-   
+
    // Magic item
    Position(x: 5, y: 15): Treasure(
        loot: [10, 52], // Club +1, Cure Poison Potion
@@ -1358,7 +1358,7 @@ fn test_load_starter_town() {
        damage: 15,
        effect: Some("poison"),
    ),
-   
+
    Position(x: 12, y: 14): Trap(
        damage: 10,
        effect: None,
@@ -1387,14 +1387,14 @@ fn test_load_starter_town() {
 fn test_load_starter_dungeon() {
     let contents = fs::read_to_string("data/maps/starter_dungeon.ron")
         .expect("Failed to read starter_dungeon.ron");
-    
+
     let map: Map = ron::from_str(&contents)
         .expect("Failed to parse starter_dungeon.ron");
-    
+
     assert_eq!(map.id, 2);
     assert_eq!(map.width, 20);
     assert_eq!(map.height, 20);
-    
+
     // Should have encounters
     let encounter_count = map.events.values()
         .filter(|e| matches!(e, antares::domain::world::MapEvent::Encounter { .. }))
@@ -1436,22 +1436,22 @@ fn test_load_starter_dungeon() {
    Position(x: 5, y: 5): Encounter(
        monster_group: [12, 12], // 2 Wolves (ID 12, NOT 3!)
    ),
-   
+
    // Orc hunter
    Position(x: 15, y: 10): Encounter(
        monster_group: [10], // 1 Orc (ID 10, NOT "Bear" which doesn't exist!)
    ),
-   
+
    // Goblin band
    Position(x: 20, y: 20): Encounter(
        monster_group: [1, 1, 1], // 3 Goblins (ID 1)
    ),
-   
+
    // Mixed encounter
    Position(x: 25, y: 15): Encounter(
        monster_group: [12, 10], // Wolf + Orc (IDs 12, 10)
    ),
-   
+
    // Giant Rats
    Position(x: 10, y: 18): Encounter(
        monster_group: [3, 3, 3], // 3 Giant Rats (ID 3 IS Giant Rat, not Wolf)
@@ -1492,14 +1492,14 @@ fn test_load_starter_dungeon() {
 fn test_load_forest_area() {
     let contents = fs::read_to_string("data/maps/forest_area.ron")
         .expect("Failed to read forest_area.ron");
-    
+
     let map: Map = ron::from_str(&contents)
         .expect("Failed to parse forest_area.ron");
-    
+
     assert_eq!(map.id, 3);
     assert_eq!(map.width, 30);
     assert_eq!(map.height, 30);
-    
+
     let encounter_count = map.events.values()
         .filter(|e| matches!(e, antares::domain::world::MapEvent::Encounter { .. }))
         .count();
