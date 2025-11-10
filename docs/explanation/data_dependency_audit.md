@@ -103,7 +103,7 @@ Position(x: 15, y: 10): Encounter(
 ),
 ```
 
-**Issues**: 
+**Issues**:
 - Monster ID 3 is **Giant Rat**, not Wolf!
 - Monster ID 4 **does not exist** (no Bear in database)!
 
@@ -193,7 +193,7 @@ The validation utility (`examples/validate_map.rs` or `src/bin/validate_map.rs`)
 fn validate_monster_ids(map: &Map) -> Vec<String> {
     let valid_ids = [1, 2, 3, 10, 11, 12, 20, 21, 22, 30, 31];
     let mut errors = Vec::new();
-    
+
     for (pos, event) in &map.events {
         if let MapEvent::Encounter { monster_group } = event {
             for &id in monster_group {
@@ -205,7 +205,7 @@ fn validate_monster_ids(map: &Map) -> Vec<String> {
             }
         }
     }
-    
+
     errors
 }
 
@@ -221,7 +221,7 @@ fn validate_item_ids(map: &Map) -> Vec<String> {
         100, 101,                    // Quest/Cursed
     ];
     let mut errors = Vec::new();
-    
+
     for (pos, event) in &map.events {
         if let MapEvent::Treasure { loot } = event {
             for &id in loot {
@@ -233,7 +233,7 @@ fn validate_item_ids(map: &Map) -> Vec<String> {
             }
         }
     }
-    
+
     errors
 }
 ```
