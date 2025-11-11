@@ -11,6 +11,7 @@
 **Version**: 2.0 (Corrected Monster/Item IDs, Revised Phase Ordering)
 
 **Changes from v1**:
+
 - Fixed Monster ID references (ID 2 is Kobold not Orc, ID 3 is Giant Rat not Wolf)
 - Removed reference to non-existent Bear (ID 4)
 - Revised phase ordering: Tools before manual maps
@@ -35,6 +36,7 @@
 ### ✅ Already Implemented (Phase 3)
 
 **World Data Structures** (`src/domain/world/types.rs`):
+
 - `Map` - 2D grid with tiles, events, NPCs
 - `Tile` - terrain, walls, blocking, visited state, event triggers
 - `World` - collection of maps, party position/facing
@@ -44,12 +46,14 @@
 - `WallType` - None, Normal, Door, Torch
 
 **Movement System** (`src/domain/world/movement.rs`):
+
 - Party movement with collision detection
 - Map boundary enforcement
 - Tile visited tracking
 - Integration with Direction type
 
 **Event System** (`src/domain/world/events.rs`):
+
 - Event triggering at positions
 - One-time vs. repeatable events
 - Event result handling for all 6 event types
@@ -61,17 +65,20 @@
 ### ❌ What's Missing
 
 **Map Data Files**:
+
 - No town maps (starter town, merchant areas)
 - No dungeon maps (starter dungeon, caves, castles)
 - No outdoor maps (overworld, forests, mountains)
 - No example/template maps
 
 **Documentation**:
+
 - No RON format guide for map creation
 - No best practices for map design
 - No examples showing event placement
 
 **Tooling**:
+
 - No map builder/editor
 - No map validator
 - No map loader utility for testing
@@ -90,6 +97,7 @@
 ### Architecture References
 
 **READ BEFORE IMPLEMENTING:**
+
 - Section 4.2: World (Map, Tile, MapEvent, Npc)
 - Section 4.6: Type Aliases (MapId, EventId, Position)
 - Section 7.2: Data Files (RON format examples)
@@ -107,11 +115,13 @@
 # Map RON Format Reference
 
 ## Overview
+
 Maps are defined in RON format in `data/maps/` directory.
 
 ## Coordinate System
 
 Maps use a 2D coordinate system:
+
 - Origin (0, 0) is the **top-left** corner
 - X-axis increases to the **right**
 - Y-axis increases **down**
@@ -120,12 +130,14 @@ Maps use a 2D coordinate system:
 
 Example 5x5 map:
 ```
-  0 1 2 3 4
+
+0 1 2 3 4
 0 . . . . .
 1 . . . . .
-2 . . X . .  <- Position(x: 2, y: 2)
+2 . . X . . <- Position(x: 2, y: 2)
 3 . . . . .
 4 . . . . .
+
 ```
 
 ## Type Aliases
@@ -151,27 +163,33 @@ Complete field-by-field breakdown with examples...
 2. Add **Coordinate System** section (see above)
 
 3. Add **Type Aliases** section explaining MonsterId/ItemId usage:
+
    ```markdown
    ## Monster and Item IDs
 
    ### Monster IDs (MonsterId = u8)
+
    Used in Encounter events. See `docs/reference/data_dependencies.md` for complete list.
 
    Common monsters:
+
    - ID 1: Goblin
    - ID 10: Orc
    - ID 12: Wolf
 
    ### Item IDs (ItemId = u8)
+
    Used in Treasure events. See `docs/reference/data_dependencies.md` for complete list.
 
    Common items:
+
    - ID 1: Club
    - ID 20: Leather Armor
    - ID 50: Healing Potion
    ```
 
 4. Document Map structure:
+
    - `id: MapId` - Unique map identifier (u16)
    - `width: u32` - Map width in tiles
    - `height: u32` - Map height in tiles
@@ -180,6 +198,7 @@ Complete field-by-field breakdown with examples...
    - `npcs: Vec<Npc>` - NPCs on this map
 
 5. Document Tile structure with all fields:
+
    - `terrain: TerrainType` - Ground type
    - `wall_type: WallType` - Wall/door/torch
    - `blocked: bool` - Blocks movement
@@ -189,11 +208,13 @@ Complete field-by-field breakdown with examples...
    - `event_trigger: Option<EventId>` - Optional event reference
 
 6. Document all TerrainType variants:
+
    - Ground, Grass, Water, Lava, Swamp, Stone, Dirt, Forest, Mountain
    - Which are blocked by default (Water, Mountain)
    - Visual/gameplay differences
 
 7. Document all WallType variants:
+
    - None, Normal, Door, Torch
    - Which block movement (Normal blocks, Door is passable)
    - Door mechanics, Torch provides light
@@ -201,22 +222,27 @@ Complete field-by-field breakdown with examples...
 8. Document all 6 MapEvent types with **CORRECTED** examples:
 
    **Encounter Event**:
+
    ```ron
    Position(x: 10, y: 10): Encounter(
        monster_group: [1, 1], // 2 Goblins (MonsterId)
    ),
    ```
+
    Note: Refer to `docs/reference/data_dependencies.md` for valid Monster IDs.
 
    **Treasure Event**:
+
    ```ron
    Position(x: 5, y: 5): Treasure(
        loot: [1, 20, 50], // Club, Leather Armor, Healing Potion (ItemId)
    ),
    ```
+
    Note: Refer to `docs/reference/data_dependencies.md` for valid Item IDs.
 
    **Teleport Event**:
+
    ```ron
    Position(x: 15, y: 15): Teleport(
        destination: Position(x: 5, y: 5),
@@ -225,6 +251,7 @@ Complete field-by-field breakdown with examples...
    ```
 
    **Trap Event**:
+
    ```ron
    Position(x: 8, y: 8): Trap(
        damage: 15,
@@ -233,6 +260,7 @@ Complete field-by-field breakdown with examples...
    ```
 
    **Sign Event**:
+
    ```ron
    Position(x: 12, y: 12): Sign(
        text: "Beware! Monsters ahead.",
@@ -240,6 +268,7 @@ Complete field-by-field breakdown with examples...
    ```
 
    **NpcDialogue Event**:
+
    ```ron
    Position(x: 7, y: 7): NpcDialogue(
        npc_id: 1,
@@ -247,6 +276,7 @@ Complete field-by-field breakdown with examples...
    ```
 
 9. Provide common patterns:
+
    - 4-wall room template
    - Corridor template
    - Door placement
@@ -263,6 +293,7 @@ Complete field-by-field breakdown with examples...
     - Item IDs must exist in items.ron
 
 **Validation**:
+
 - [ ] All Map fields documented
 - [ ] All Tile fields documented
 - [ ] Coordinate system clearly explained
@@ -285,6 +316,7 @@ Complete field-by-field breakdown with examples...
 **Note**: Changed from `examples/` to `src/bin/` for consistency.
 
 **Functionality**:
+
 - Load map from RON file
 - Validate structure
 - Check Monster/Item IDs against known data
@@ -487,11 +519,13 @@ fn main() {
 ```
 
 **Usage**:
+
 ```bash
 cargo run --bin validate_map data/maps/starter_town.ron
 ```
 
 **Validation**:
+
 - [ ] Binary compiles
 - [ ] Validates dimension mismatches
 - [ ] Validates out-of-bounds events
@@ -512,6 +546,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
 **Content**: Provide copy-paste templates for:
 
 1. **Empty Map Template**:
+
    ```ron
    Map(
        id: 1,
@@ -526,6 +561,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
    ```
 
 2. **Single Tile Template** (with all fields):
+
    ```ron
    Tile(
        terrain: Ground,
@@ -539,6 +575,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
    ```
 
 3. **Tile Row Template** (20 ground tiles):
+
    ```ron
    [
        Tile(terrain: Ground, wall_type: None, blocked: false, is_special: false, is_dark: false, visited: false, event_trigger: None),
@@ -550,6 +587,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
 4. **Event Templates** (with CORRECTED IDs):
 
    **Starter Encounters**:
+
    ```ron
    Position(x: 5, y: 5): Encounter(
        monster_group: [1, 1], // 2 Goblins
@@ -563,6 +601,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
    ```
 
    **Mid-Level Encounters**:
+
    ```ron
    Position(x: 8, y: 8): Encounter(
        monster_group: [10], // 1 Orc
@@ -576,6 +615,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
    ```
 
    **Starter Treasure**:
+
    ```ron
    Position(x: 5, y: 5): Treasure(
        loot: [1, 2, 20], // Club, Dagger, Leather Armor
@@ -586,6 +626,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
    ```
 
    **Mid-Level Treasure**:
+
    ```ron
    Position(x: 15, y: 15): Treasure(
        loot: [4, 21, 50], // Long Sword, Chain Mail, Healing Potion
@@ -596,6 +637,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
    ```
 
 5. **NPC + Dialogue Template**:
+
    ```ron
    // In npcs array:
    Npc(
@@ -612,6 +654,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
    ```
 
 6. **Sign Template**:
+
    ```ron
    Position(x: 8, y: 8): Sign(
        text: "Welcome to Sorpigal! Beware the dungeons to the east.",
@@ -619,6 +662,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
    ```
 
 7. **Trap Template**:
+
    ```ron
    Position(x: 7, y: 7): Trap(
        damage: 10,
@@ -635,6 +679,7 @@ cargo run --bin validate_map data/maps/starter_town.ron
    ```
 
 **Important Note in Templates**:
+
 ```markdown
 ## Important: Use Map Builder Tool
 
@@ -642,12 +687,14 @@ Creating maps manually by typing out tiles is tedious and error-prone.
 We recommend using the map builder tool (Phase 2) for actual map creation.
 
 These templates are provided for:
+
 - Understanding the RON format
 - Quick reference
 - Small edits to existing maps
 ```
 
 **Validation**:
+
 - [ ] All templates syntactically correct
 - [ ] Templates use CORRECTED Monster/Item IDs
 - [ ] Templates reference data_dependencies.md
@@ -658,6 +705,7 @@ These templates are provided for:
 ### Phase 1 Completion Checklist
 
 **Documentation**:
+
 - [ ] `docs/reference/map_format.md` created and complete
 - [ ] `docs/how_to/map_templates.md` created with templates
 - [ ] Coordinate system documented (0,0 = top-left, i32 type)
@@ -667,6 +715,7 @@ These templates are provided for:
 - [ ] data_dependencies.md cross-referenced
 
 **Validation Tool**:
+
 - [ ] `src/bin/validate_map.rs` created
 - [ ] Tool validates dimensions
 - [ ] Tool validates positions
@@ -676,12 +725,14 @@ These templates are provided for:
 - [ ] SPDX copyright header present
 
 **Quality Gates**:
+
 - [ ] `cargo fmt --all` passes
 - [ ] `cargo check --all-targets --all-features` passes
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings` passes
 - [ ] `cargo build --bin validate_map` succeeds
 
 **Documentation Update**:
+
 - [ ] Updated `docs/explanation/implementations.md` with Phase 1 summary
 
 ---
@@ -698,6 +749,7 @@ These templates are provided for:
 ### Architecture References
 
 **READ BEFORE IMPLEMENTING:**
+
 - Section 4.2: World (Map, Tile, MapEvent, Npc)
 - Section 4.6: Type Aliases (MapId, EventId, Position)
 - `docs/reference/data_dependencies.md` (Monster/Item IDs)
@@ -709,6 +761,7 @@ These templates are provided for:
 **File**: `src/bin/map_builder.rs`
 
 **Functionality**:
+
 - Create new map with dimensions
 - Set individual tiles
 - Fill all tiles
@@ -720,6 +773,7 @@ These templates are provided for:
 - Show map info
 
 **Commands**:
+
 - `new <width> <height> <id>` - Create new map
 - `load <path>` - Load existing map
 - `set <x> <y> <terrain> <wall>` - Set tile
@@ -1042,6 +1096,7 @@ fn main() {
 **Note**: This is an MVP implementation. Full command parsing (set, fill, event, npc) would be implemented in the actual code.
 
 **Validation**:
+
 - [ ] Binary compiles: `cargo build --bin map_builder`
 - [ ] Can create new map
 - [ ] Can load existing map
@@ -1060,6 +1115,7 @@ fn main() {
 **File**: `docs/how_to/using_map_builder.md`
 
 **Content**:
+
 - Installation/running instructions
 - Command reference with examples
 - Workflow guide (create → edit → save)
@@ -1068,37 +1124,44 @@ fn main() {
 - Troubleshooting
 
 **Example Section**:
-```markdown
+
+````markdown
 ## Creating Your First Map
 
 1. Run the map builder:
    ```bash
    cargo run --bin map_builder
    ```
+````
 
 2. Create a new 10x10 map:
+
    ```
    > new 10 10 1
    Created 10x10 map with ID 1
    ```
 
 3. Fill with grass terrain:
+
    ```
    > fill Grass None
    Filled all tiles with Grass/None
    ```
 
 4. View the map:
+
    ```
    > show
    ```
 
 5. Add a sign:
+
    ```
    > event 5 5 Sign "Welcome to the test map!"
    ```
 
 6. Save the map:
+
    ```
    > save data/maps/test_map.ron
    Saved map to data/maps/test_map.ron
@@ -1114,17 +1177,19 @@ fn main() {
 When adding encounters and treasure, use IDs from `docs/reference/data_dependencies.md`.
 
 **Common Monster IDs**:
+
 - 1 = Goblin
 - 10 = Orc
 - 12 = Wolf
 
 **Common Item IDs**:
+
 - 1 = Club
 - 20 = Leather Armor
 - 50 = Healing Potion
-```
 
 **Validation**:
+
 - [ ] File created in docs/how_to/
 - [ ] All commands documented with examples
 - [ ] Workflow guide complete
@@ -1134,6 +1199,7 @@ When adding encounters and treasure, use IDs from `docs/reference/data_dependenc
 ### Phase 2 Completion Checklist
 
 **Map Builder Tool**:
+
 - [ ] `src/bin/map_builder.rs` created (MVP)
 - [ ] Basic commands work (new, load, show, info, save)
 - [ ] ASCII display functional
@@ -1141,6 +1207,7 @@ When adding encounters and treasure, use IDs from `docs/reference/data_dependenc
 - [ ] SPDX copyright header present
 
 **Documentation**:
+
 - [ ] `docs/how_to/using_map_builder.md` created
 - [ ] Commands documented with examples
 - [ ] Workflow guide included
@@ -1148,18 +1215,21 @@ When adding encounters and treasure, use IDs from `docs/reference/data_dependenc
 - [ ] File uses lowercase_with_underscores.md
 
 **Testing**:
+
 - [ ] Tool builds: `cargo build --bin map_builder`
 - [ ] Can create simple map
 - [ ] Generated RON files are valid
 - [ ] Validation tool accepts generated maps
 
 **Quality Gates**:
+
 - [ ] `cargo fmt --all` passes
 - [ ] `cargo check --all-targets --all-features` passes
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings` passes
 - [ ] `cargo build --bin map_builder` succeeds
 
 **Documentation Update**:
+
 - [ ] Updated `docs/explanation/implementations.md` with Phase 2 summary
 
 ---
@@ -1177,6 +1247,7 @@ When adding encounters and treasure, use IDs from `docs/reference/data_dependenc
 ### Architecture References
 
 **READ BEFORE IMPLEMENTING:**
+
 - Section 4.2: World (Map, Tile, MapEvent)
 - Section 5.4: Map and Movement (gameplay context)
 - `docs/reference/data_dependencies.md` (REQUIRED - Monster/Item IDs)
@@ -1188,6 +1259,7 @@ When adding encounters and treasure, use IDs from `docs/reference/data_dependenc
 **File**: `data/maps/starter_town.ron`
 
 **Design Specifications**:
+
 - Size: 16x16 tiles
 - Map ID: 1
 - Layout: Simple town with:
@@ -1201,6 +1273,7 @@ When adding encounters and treasure, use IDs from `docs/reference/data_dependenc
 **Implementation Steps**:
 
 1. Use map builder to create base:
+
    ```bash
    cargo run --bin map_builder
    > new 16 16 1
@@ -1209,12 +1282,14 @@ When adding encounters and treasure, use IDs from `docs/reference/data_dependenc
    ```
 
 2. Edit RON file or use builder to add:
+
    - Border: Mountain terrain (blocked)
    - Buildings: Stone walls with Doors
    - Paths: Dirt terrain
    - Grass: Decorative areas
 
 3. Add Sign event at plaza center (8, 8):
+
    ```ron
    Position(x: 8, y: 8): Sign(
        text: "Welcome to Sorpigal! Visit the merchant for supplies.",
@@ -1222,6 +1297,7 @@ When adding encounters and treasure, use IDs from `docs/reference/data_dependenc
    ```
 
 4. Add NPC merchant at (5, 5):
+
    ```ron
    Npc(
        id: 1,
@@ -1232,6 +1308,7 @@ When adding encounters and treasure, use IDs from `docs/reference/data_dependenc
    ```
 
 5. Add NpcDialogue event:
+
    ```ron
    Position(x: 5, y: 5): NpcDialogue(
        npc_id: 1,
@@ -1239,6 +1316,7 @@ When adding encounters and treasure, use IDs from `docs/reference/data_dependenc
    ```
 
 6. Add starter Treasure at (12, 12):
+
    ```ron
    Position(x: 12, y: 12): Treasure(
        loot: [1, 2, 20], // Club, Dagger, Leather Armor
@@ -1246,6 +1324,7 @@ When adding encounters and treasure, use IDs from `docs/reference/data_dependenc
    ```
 
 7. Add exit teleport to dungeon at (14, 14):
+
    ```ron
    Position(x: 14, y: 14): Teleport(
        destination: Position(x: 1, y: 1),
@@ -1291,6 +1370,7 @@ fn test_load_starter_town() {
 ```
 
 **Validation**:
+
 - [ ] Map file created and parses without errors
 - [ ] Map dimensions correct (16x16)
 - [ ] Sign event present
@@ -1307,6 +1387,7 @@ fn test_load_starter_town() {
 **File**: `data/maps/starter_dungeon.ron`
 
 **Design Specifications**:
+
 - Size: 20x20 tiles
 - Map ID: 2
 - Layout: Small dungeon with 3-4 rooms
@@ -1317,6 +1398,7 @@ fn test_load_starter_town() {
 1. Create base map with builder
 
 2. Add encounters with CORRECTED Monster IDs:
+
    ```ron
    // Goblin patrol
    Position(x: 10, y: 10): Encounter(
@@ -1340,6 +1422,7 @@ fn test_load_starter_town() {
    ```
 
 3. Add treasure with appropriate IDs:
+
    ```ron
    // Better equipment
    Position(x: 18, y: 18): Treasure(
@@ -1353,6 +1436,7 @@ fn test_load_starter_town() {
    ```
 
 4. Add traps:
+
    ```ron
    Position(x: 8, y: 8): Trap(
        damage: 15,
@@ -1366,6 +1450,7 @@ fn test_load_starter_town() {
    ```
 
 5. Add exit teleport back to town:
+
    ```ron
    Position(x: 1, y: 1): Teleport(
        destination: Position(x: 14, y: 14),
@@ -1404,6 +1489,7 @@ fn test_load_starter_dungeon() {
 ```
 
 **Validation**:
+
 - [ ] Map file created and parses without errors
 - [ ] Map dimensions correct (20x20)
 - [ ] Encounters use CORRECT Monster IDs (1, 2, 10, 11)
@@ -1421,6 +1507,7 @@ fn test_load_starter_dungeon() {
 **File**: `data/maps/forest_area.ron`
 
 **Design Specifications**:
+
 - Size: 30x30 tiles (larger outdoor space)
 - Map ID: 3
 - Layout: Forest with clearings
@@ -1431,6 +1518,7 @@ fn test_load_starter_dungeon() {
 1. Create base with varied terrain
 
 2. Add encounters with CORRECTED Monster IDs:
+
    ```ron
    // Wolf pack
    Position(x: 5, y: 5): Encounter(
@@ -1459,6 +1547,7 @@ fn test_load_starter_dungeon() {
    ```
 
 3. Add treasure:
+
    ```ron
    Position(x: 25, y: 25): Treasure(
        loot: [4, 40, 50], // Long Sword, Ring of Protection, Healing Potion
@@ -1466,6 +1555,7 @@ fn test_load_starter_dungeon() {
    ```
 
 4. Add sign:
+
    ```ron
    Position(x: 2, y: 2): Sign(
        text: "Beware! Wild creatures roam these woods.",
@@ -1473,6 +1563,7 @@ fn test_load_starter_dungeon() {
    ```
 
 5. Add teleport to/from town:
+
    ```ron
    Position(x: 1, y: 15): Teleport(
        destination: Position(x: 8, y: 1),
@@ -1508,6 +1599,7 @@ fn test_load_forest_area() {
 ```
 
 **Validation**:
+
 - [ ] Map file created and parses without errors
 - [ ] Map dimensions correct (30x30)
 - [ ] Encounters use CORRECT Monster IDs (1, 3, 10, 12)
@@ -1526,7 +1618,7 @@ fn test_load_forest_area() {
 
 **Content**:
 
-```markdown
+````markdown
 # World Layout
 
 ## Map Connections
@@ -1558,10 +1650,12 @@ fn test_load_forest_area() {
 │ - Traps     │  │ - Sign       │
 └─────────────┘  └──────────────┘
 ```
+````
 
 ## Map Details
 
 ### Map 1: Starter Town
+
 - **Size**: 16x16
 - **Safe**: Yes (no encounters)
 - **Events**: 3 (Sign, NPC, Treasure)
@@ -1570,6 +1664,7 @@ fn test_load_forest_area() {
 - **Recommended Level**: 1
 
 ### Map 2: Starter Dungeon
+
 - **Size**: 20x20
 - **Safe**: No
 - **Encounters**: 4 (Goblins, Kobolds, Orc, Skeletons)
@@ -1579,6 +1674,7 @@ fn test_load_forest_area() {
 - **Recommended Level**: 1-3
 
 ### Map 3: Forest Area
+
 - **Size**: 30x30
 - **Safe**: No
 - **Encounters**: 5+ (Wolves, Orcs, Goblins, Giant Rats)
@@ -1588,21 +1684,23 @@ fn test_load_forest_area() {
 
 ## Event Summary
 
-| Map ID | Name          | Size  | Events | NPCs | Encounters | Treasure | Traps |
-|--------|---------------|-------|--------|------|------------|----------|-------|
-| 1      | Starter Town  | 16x16 | 3      | 1    | 0          | 1        | 0     |
-| 2      | Dungeon       | 20x20 | 7      | 0    | 4          | 2        | 2     |
-| 3      | Forest Area   | 30x30 | 7      | 0    | 5          | 1        | 0     |
+| Map ID | Name         | Size  | Events | NPCs | Encounters | Treasure | Traps |
+| ------ | ------------ | ----- | ------ | ---- | ---------- | -------- | ----- |
+| 1      | Starter Town | 16x16 | 3      | 1    | 0          | 1        | 0     |
+| 2      | Dungeon      | 20x20 | 7      | 0    | 4          | 2        | 2     |
+| 3      | Forest Area  | 30x30 | 7      | 0    | 5          | 1        | 0     |
 
 ## Monster Distribution
 
 ### Weak Monsters (Starter Dungeon)
+
 - Goblin (ID 1): 2 encounters
 - Kobold (ID 2): 1 encounter
 - Orc (ID 10): 1 encounter
 - Skeleton (ID 11): 1 encounter
 
 ### Mid-Level Monsters (Forest)
+
 - Goblin (ID 1): 1 encounter
 - Giant Rat (ID 3): 1 encounter
 - Orc (ID 10): 2 encounters
@@ -1611,18 +1709,22 @@ fn test_load_forest_area() {
 ## Treasure Distribution
 
 ### Starter Town
+
 - Basic equipment: Club, Dagger, Leather Armor
 
 ### Starter Dungeon
+
 - Mid-tier gear: Short Sword, Chain Mail
 - Magic item: Club +1
 - Consumables: Healing Potion, Cure Poison
 
 ### Forest Area
+
 - Better gear: Long Sword
 - Magic accessories: Ring of Protection
 - Consumables: Healing Potion
-```
+
+````
 
 **Validation**:
 - [ ] File created in docs/explanation/
@@ -1679,9 +1781,10 @@ cargo fmt --all
 cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
-```
+````
 
 **Verify Map Files** (Phase 3):
+
 ```bash
 cargo run --bin validate_map data/maps/starter_town.ron
 cargo run --bin validate_map data/maps/starter_dungeon.ron
@@ -1689,6 +1792,7 @@ cargo run --bin validate_map data/maps/forest_area.ron
 ```
 
 **Test Map Loading**:
+
 ```bash
 cargo test map_loading
 ```
@@ -1752,6 +1856,7 @@ This plan provides a complete path from zero map content to a fully functional w
 3. **Phase 3**: Three diverse, playable maps
 
 **Key Improvements in v2**:
+
 - ✅ Corrected Monster IDs (Orc = 10, Wolf = 12, etc.)
 - ✅ Removed non-existent monsters (Bear)
 - ✅ Corrected Item ID usage
