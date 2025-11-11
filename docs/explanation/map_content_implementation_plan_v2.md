@@ -1650,7 +1650,7 @@ fn test_load_forest_area() {
 │ - Traps     │  │ - Sign       │
 └─────────────┘  └──────────────┘
 ```
-````
+
 
 ## Map Details
 
@@ -1863,4 +1863,3 @@ This plan provides a complete path from zero map content to a fully functional w
 - ✅ Revised phase ordering (tools before manual maps)
 - ✅ Standardized on `src/bin/` for tools
 - ✅ Added coordinate system documentation
-- ✅
