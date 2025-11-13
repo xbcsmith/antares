@@ -798,6 +798,69 @@ test result: ok. 8 passed; 0 failed
 **With Game Engine**:
 
 - ✅ Maps ready for runtime loading via `World::add_map()`
+
+### Validation Fix (Post-Implementation)
+
+**Issue Discovered**: The `validate_map.rs` binary from Phase 1 was using a custom `MapData` struct instead of the actual domain types (`antares::domain::world::Map`), causing a format mismatch. The validator could not parse the actual map files that were created using the correct domain types.
+
+**Root Cause**: The validator was implemented with a simplified structure that didn't match the plan's specification (Task 1.2), which explicitly required using `antares::domain::world::{Map, MapEvent}`.
+
+**Resolution**: Rewrote `validate_map.rs` to use the actual domain types as specified in the plan:
+
+```rust
+// Before (WRONG):
+struct MapData {
+    id: u16,
+    name: String,           // Not in domain Map
+    map_type: String,       // Not in domain Map
+    tiles: Vec<Vec<u8>>,   // Domain uses Vec<Vec<Tile>>
+    events: Vec<EventData>, // Domain uses HashMap<Position, MapEvent>
+    // ...
+}
+
+// After (CORRECT):
+use antares::domain::world::{Map, MapEvent};
+use antares::domain::types::Position;
+
+// Uses domain types directly
+fn validate_map_file(file_path: &str) -> Result<Map, Vec<String>> {
+    let map: Map = ron::from_str(&contents)?;
+    // ...
+}
+```
+
+**Changes Made**:
+
+1. Replaced custom `MapData`, `EventData`, `NpcData` structs with domain types
+2. Removed `name`, `map_type`, `outdoor`, `allow_resting`, `danger_level`, `exits` fields (not in domain)
+3. Changed `tiles: Vec<Vec<u8>>` to match domain's `Vec<Vec<Tile>>`
+4. Changed `events: Vec<EventData>` to match domain's `HashMap<Position, MapEvent>`
+5. Updated position validation to use domain's `Position` type (i32 coordinates)
+6. Fixed clippy warnings (`len_zero` → `!is_empty()`)
+
+**Verification**:
+
+```bash
+# All three maps now validate successfully
+cargo run --bin validate_map data/maps/starter_town.ron
+# ✅ VALID - Map Summary: ID: 1, Size: 20x15, Events: 4, NPCs: 4
+
+cargo run --bin validate_map data/maps/starter_dungeon.ron
+# ✅ VALID - Map Summary: ID: 2, Size: 16x16, Events: 9, NPCs: 0
+
+cargo run --bin validate_map data/maps/forest_area.ron
+# ✅ VALID - Map Summary: ID: 3, Size: 20x20, Events: 9, NPCs: 1
+```
+
+**Quality Gates** (Re-verified after fix):
+
+- ✅ `cargo fmt --all` - Passed
+- ✅ `cargo check --all-targets --all-features` - Passed
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - Passed (0 warnings)
+- ✅ `cargo test --all-features` - Passed (105 tests, 8 integration tests)
+
+**Lesson Learned**: Always use actual domain types for validation tools rather than creating parallel structures. This ensures format compatibility and reduces maintenance burden.
+
 - ✅ Events ready for trigger system in `domain::world::events`
 - ✅ NPCs ready for dialogue system
 - ✅ Terrain types support movement rules
