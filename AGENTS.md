@@ -87,6 +87,17 @@ cargo test --all-features
 - **Documentation files**: `docs/**/*.md` - explanations, references, guides
 - **Data files**: Use `.ron` for game data (items, spells, monsters, maps)
 
+#### Copyright and License
+
+Add SPDX FileCopyrightText and License-Identifier as the first lines
+in ALL **Real implementation files**: `src/**/*.rs`
+
+```rust
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+```
+
 #### The Test: "Is this code going to be executed?"
 
 **YES - It's real code:**
