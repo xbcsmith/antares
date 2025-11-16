@@ -151,7 +151,7 @@ Per architecture.md Section 7.1:
 ```text
 ✅ CORRECT:
    docs/explanation/distributed_tracing_architecture.md
-   docs/how_to/setup_monitoring.md
+   docs/how-to/setup_monitoring.md
    docs/reference/api_specification.md
    README.md (ONLY exception)
 
@@ -159,7 +159,7 @@ Per architecture.md Section 7.1:
    docs/explanation/Distributed-Tracing-Architecture.md
    docs/explanation/DistributedTracingArchitecture.md
    docs/explanation/ARCHITECTURE.md
-   docs/how_to/setup-monitoring.md
+   docs/how-to/setup-monitoring.md
    docs/how_to/Setup Monitoring.md
 ```
 
@@ -210,6 +210,7 @@ cargo test --all-features
 **DO NOT:**
 
 - ❌ Create new documentation files without being asked
+- X Create validation reports or summaries without being asked
 - ❌ Skip documentation because "code is self-documenting"
 - ❌ Put documentation in wrong directory or use wrong filename format
 
@@ -687,7 +688,7 @@ If you create data files in wrong format, they WILL be rejected by cargo check.
 
 **Example**: `docs/tutorials/getting_started.md`
 
-### Category 2: How-To Guides (`docs/how_to/`)
+### Category 2: How-To Guides (`docs/how-to/`)
 
 **Purpose**: Task-oriented, problem-solving recipes
 
@@ -697,7 +698,7 @@ If you create data files in wrong format, they WILL be rejected by cargo check.
 - Configuration guides
 - Troubleshooting procedures
 
-**Example**: `docs/how_to/setup_monitoring.md`
+**Example**: `docs/how-to/setup_monitoring.md`
 
 ### Category 3: Explanations (`docs/explanation/`) ← DEFAULT FOR YOUR SUMMARIES
 
@@ -731,7 +732,7 @@ Is it a step-by-step tutorial?
 ├─ YES → docs/tutorials/
 └─ NO
    ├─ Is it solving a specific task?
-   │  ├─ YES → docs/how_to/
+   │  ├─ YES → docs/how-to/
    │  └─ NO
    │     ├─ Is it explaining concepts/architecture?
    │     │  ├─ YES → docs/explanation/  ← MOST COMMON FOR AI AGENTS
@@ -973,13 +974,6 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [ ] Files placed in correct architecture layer (Section 3.2)
 - [ ] Documentation in correct Diataxis category
 
-### Git
-
-- [ ] Branch name follows `pr-<feat>-<issue>` format (lowercase)
-- [ ] Commit message follows conventional commits
-- [ ] Commit message includes JIRA issue in uppercase
-- [ ] Commit message first line ≤72 characters
-- [ ] Commit uses imperative mood ("add" not "added")
 
 ### Architecture
 

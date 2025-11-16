@@ -11,6 +11,7 @@
 //! See `docs/reference/architecture.md` Section 5.2 for complete specifications.
 
 use crate::domain::character::{Character, Class};
+use crate::domain::classes::{ClassDatabase, ClassError};
 use crate::domain::types::DiceRoll;
 use rand::Rng;
 use thiserror::Error;
@@ -28,6 +29,9 @@ pub enum ProgressionError {
 
     #[error("Character is dead and cannot gain experience")]
     CharacterDead,
+
+    #[error("Class error: {0}")]
+    ClassError(#[from] ClassError),
 }
 
 // ===== Experience Constants =====
@@ -242,6 +246,47 @@ pub fn roll_hp_gain(class: Class, rng: &mut impl Rng) -> u16 {
     dice.roll(rng).max(1) as u16
 }
 
+/// Rolls HP gain for a character based on class definition from database
+///
+/// This is the data-driven version that uses external class definitions.
+/// Use this when working with campaign-specific or modded classes.
+///
+/// # Arguments
+///
+/// * `class_id` - The class ID to look up
+/// * `class_db` - Reference to the class database
+/// * `rng` - Random number generator
+///
+/// # Returns
+///
+/// Returns the HP gained (minimum 1), or an error if the class is not found.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::progression::roll_hp_gain_from_db;
+/// use antares::domain::classes::ClassDatabase;
+/// use rand::thread_rng;
+///
+/// let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+/// let mut rng = thread_rng();
+///
+/// let hp = roll_hp_gain_from_db("knight", &db, &mut rng).unwrap();
+/// assert!(hp >= 1 && hp <= 10);
+/// ```
+pub fn roll_hp_gain_from_db(
+    class_id: &str,
+    class_db: &ClassDatabase,
+    rng: &mut impl Rng,
+) -> Result<u16, ProgressionError> {
+    let class_def = class_db
+        .get_class(class_id)
+        .ok_or_else(|| ClassError::ClassNotFound(class_id.to_string()))?;
+
+    let hp = class_def.hp_die.roll(rng).max(1) as u16;
+    Ok(hp)
+}
+
 /// Calculates the experience required for a given level
 ///
 /// Uses an exponential curve: BASE_XP * (level - 1) ^ XP_MULTIPLIER
@@ -425,5 +470,36 @@ mod tests {
         level_up(&mut knight, &mut rng).unwrap();
 
         assert_eq!(knight.sp.base, initial_sp); // Should still be 0
+    }
+
+    #[test]
+    fn test_roll_hp_gain_from_db() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut rng = thread_rng();
+
+        // Test multiple rolls for each class
+        for _ in 0..10 {
+            let knight_hp = roll_hp_gain_from_db("knight", &db, &mut rng).unwrap();
+            assert!((1..=10).contains(&knight_hp), "Knight HP out of range");
+
+            let sorcerer_hp = roll_hp_gain_from_db("sorcerer", &db, &mut rng).unwrap();
+            assert!((1..=4).contains(&sorcerer_hp), "Sorcerer HP out of range");
+
+            let cleric_hp = roll_hp_gain_from_db("cleric", &db, &mut rng).unwrap();
+            assert!((1..=6).contains(&cleric_hp), "Cleric HP out of range");
+        }
+    }
+
+    #[test]
+    fn test_roll_hp_gain_from_db_invalid_class() {
+        let db = ClassDatabase::new();
+        let mut rng = thread_rng();
+
+        let result = roll_hp_gain_from_db("nonexistent", &db, &mut rng);
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(ProgressionError::ClassError(ClassError::ClassNotFound(_)))
+        ));
     }
 }
