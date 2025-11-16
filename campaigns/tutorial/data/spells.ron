@@ -1,0 +1,35 @@
+[
+    (
+        id: 257, // 0x0101 - Cleric L1 #1
+        name: "Heal",
+        school: Cleric,
+        level: 1,
+        sp_cost: 5,
+        gem_cost: 0,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Restores 1d8 hit points to a single target.",
+    ),
+    (
+        id: 513, // 0x0201 - Sorcerer L1 #1
+        name: "Magic Missile",
+        school: Sorcerer,
+        level: 1,
+        sp_cost: 5,
+        gem_cost: 0,
+        context: Combat,
+        target: SingleMonster,
+        description: "Deals 1d6 magical damage to a single enemy.",
+    ),
+    (
+        id: 515, // 0x0203 - Sorcerer L3 #3
+        name: "Fireball",
+        school: Sorcerer,
+        level: 3,
+        sp_cost: 15,
+        gem_cost: 0,
+        context: Combat,
+        target: MonsterGroup,
+        description: "Deals 3d6 fire damage to all enemies.",
+    ),
+]

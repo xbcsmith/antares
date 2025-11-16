@@ -274,25 +274,25 @@ Map(
     name: "Millhaven Town",
     width: 20,
     height: 20,
-    
+
     // Tile data (20x20 grid)
     tiles: [
         // Row 0
         [Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall,
          Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall],
-        
+
         // Row 1
         [Wall, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor,
          Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Wall],
-        
+
         // Rows 2-18: Fill with Floor tiles surrounded by Walls
         // (abbreviated for clarity)
-        
+
         // Row 19
         [Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall,
          Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall],
     ],
-    
+
     // Map events
     events: [
         // A treasure chest
@@ -302,7 +302,7 @@ Map(
                 loot: [1, 2],  // Rusty Sword and Healing Potion
             ),
         ),
-        
+
         // An encounter
         (
             position: Position(x: 10, y: 10),
@@ -311,7 +311,7 @@ Map(
             ),
         ),
     ],
-    
+
     // NPCs
     npcs: [
         Npc(
@@ -321,7 +321,7 @@ Map(
             dialogue_id: 1,
         ),
     ],
-    
+
     // Exits to other maps
     exits: [],
 )
@@ -344,7 +344,7 @@ Edit `data/quests.ron`:
         id: 1,
         name: "The Goblin Menace",
         description: "The Town Elder has asked you to deal with the goblin problem.",
-        
+
         stages: [
             // Stage 1: Accept the quest
             QuestStage(
@@ -359,7 +359,7 @@ Edit `data/quests.ron`:
                 ],
                 require_all_objectives: true,
             ),
-            
+
             // Stage 2: Complete the task
             QuestStage(
                 stage_number: 2,
@@ -373,7 +373,7 @@ Edit `data/quests.ron`:
                 ],
                 require_all_objectives: true,
             ),
-            
+
             // Stage 3: Return for reward
             QuestStage(
                 stage_number: 3,
@@ -388,14 +388,14 @@ Edit `data/quests.ron`:
                 require_all_objectives: true,
             ),
         ],
-        
+
         // Quest rewards
         rewards: [
             Experience(200),
             Gold(100),
             Items([(2, 3)]),  // 3 Healing Potions
         ],
-        
+
         min_level: Some(1),
         max_level: None,
         required_quests: [],
@@ -421,7 +421,7 @@ Edit `data/dialogues.ron`:
         speaker_name: Some("Town Elder"),
         repeatable: true,
         associated_quest: Some(1),
-        
+
         nodes: {
             // Initial greeting
             1: DialogueNode(
@@ -456,7 +456,7 @@ Edit `data/dialogues.ron`:
                 actions: [],
                 is_terminal: false,
             ),
-            
+
             // Quest accepted
             2: DialogueNode(
                 id: 2,
@@ -466,7 +466,7 @@ Edit `data/dialogues.ron`:
                 actions: [],
                 is_terminal: true,
             ),
-            
+
             // More information
             3: DialogueNode(
                 id: 3,
@@ -613,13 +613,13 @@ campaign_validator my_first_campaign
 
 You've created your first Antares campaign! Here's what you learned:
 
-✅ Campaign directory structure  
-✅ Campaign metadata configuration  
-✅ Creating items and monsters  
-✅ Building maps  
-✅ Designing quests  
-✅ Writing dialogues  
-✅ Validation and testing  
+✅ Campaign directory structure
+✅ Campaign metadata configuration
+✅ Creating items and monsters
+✅ Building maps
+✅ Designing quests
+✅ Writing dialogues
+✅ Validation and testing
 ✅ Packaging for distribution
 
 ### Take It Further

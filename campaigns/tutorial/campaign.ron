@@ -1,0 +1,31 @@
+(
+    id: "tutorial_campaign",
+    name: "Tutorial: First Steps",
+    version: "1.0.0",
+    author: "Antares Development Team",
+    description: "A small introductory campaign demonstrating core game mechanics. Perfect for learning how campaigns work.",
+    engine_version: "0.1.0",
+    required_features: [],
+    config: (
+        starting_map: 1,
+        starting_position: (x: 7, y: 7),
+        starting_direction: North,
+        starting_gold: 100,
+        starting_food: 50,
+        difficulty: Normal,
+    ),
+    data: (
+        classes: "data/classes.ron",
+        races: "data/races.ron",
+        items: "data/items.ron",
+        monsters: "data/monsters.ron",
+        spells: "data/spells.ron",
+        maps: "data/maps",
+    ),
+    assets: (
+        tilesets: "assets/tilesets",
+        music: "assets/music",
+        sounds: "assets/sounds",
+        images: "assets/images",
+    ),
+)
