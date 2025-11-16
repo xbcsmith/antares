@@ -1,0 +1,47 @@
+// Example Campaign - A simple starter campaign for Antares
+//
+// This campaign demonstrates the basic structure and serves as a template
+// for creating new campaigns.
+
+Campaign(
+    id: "example",
+    name: "Example Campaign",
+    version: "1.0.0",
+    author: "Antares Team",
+    description: "A simple example campaign demonstrating the campaign structure and basic gameplay.",
+    engine_version: "0.1.0",
+    required_features: [],
+
+    config: CampaignConfig(
+        starting_map: 1,
+        starting_position: Position(x: 10, y: 10),
+        starting_direction: North,
+        starting_gold: 100,
+        starting_food: 50,
+        max_party_size: 6,
+        max_roster_size: 20,
+        difficulty: Normal,
+        permadeath: false,
+        allow_multiclassing: false,
+        starting_level: 1,
+        max_level: 20,
+    ),
+
+    data: CampaignData(
+        items: "data/items.ron",
+        spells: "data/spells.ron",
+        monsters: "data/monsters.ron",
+        classes: "data/classes.ron",
+        races: "data/races.ron",
+        maps: "data/maps",
+        quests: "data/quests.ron",
+        dialogues: "data/dialogues.ron",
+    ),
+
+    assets: CampaignAssets(
+        tilesets: "assets/tilesets",
+        music: "assets/music",
+        sounds: "assets/sounds",
+        images: "assets/images",
+    ),
+)

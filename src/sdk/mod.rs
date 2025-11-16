@@ -42,6 +42,7 @@
 //! # }
 //! ```
 
+pub mod campaign_loader;
 pub mod database;
 pub mod dialogue_editor;
 pub mod map_editor;
@@ -51,6 +52,9 @@ pub mod templates;
 pub mod validation;
 
 // Re-export commonly used types
+pub use campaign_loader::{
+    Campaign, CampaignConfig, CampaignError, CampaignInfo, CampaignLoader, ValidationReport,
+};
 pub use database::{ContentDatabase, ContentStats, DatabaseError};
 pub use dialogue_editor::{
     analyze_dialogue, generate_dialogue_summary, validate_dialogue, DialogueStats,
