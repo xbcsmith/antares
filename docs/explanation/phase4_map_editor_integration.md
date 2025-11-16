@@ -1,7 +1,7 @@
 # Phase 4: Map Editor Integration - Implementation Summary
 
-**Status**: ✅ COMPLETE  
-**Date Completed**: 2025-01-20  
+**Status**: ✅ COMPLETE
+**Date Completed**: 2025-01-20
 **Phase Duration**: Week 9 (as per SDK Implementation Plan)
 
 ---
@@ -191,13 +191,13 @@ use antares::sdk::map_editor::browse_monsters;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = ContentDatabase::load_campaign("campaigns/my_campaign")?;
-    
+
     let monsters = browse_monsters(&db);
     println!("Available monsters:");
     for (id, name) in monsters {
         println!("  [{}] {}", id, name);
     }
-    
+
     Ok(())
 }
 ```
@@ -209,7 +209,7 @@ use antares::sdk::map_editor::suggest_monster_ids;
 
 fn handle_user_input(db: &ContentDatabase, input: &str) {
     let suggestions = suggest_monster_ids(db, input);
-    
+
     if suggestions.is_empty() {
         println!("No monsters matching '{}'", input);
     } else {
@@ -257,7 +257,7 @@ fn add_encounter(db: &ContentDatabase, map: &mut Map, monster_id: MonsterId) {
         eprintln!("Error: Monster ID {} not found in database", monster_id);
         return;
     }
-    
+
     // Add the encounter...
 }
 ```
