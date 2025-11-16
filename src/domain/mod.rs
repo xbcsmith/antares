@@ -16,6 +16,7 @@
 //! - `items`: Item system (weapons, armor, consumables)
 
 pub mod character;
+pub mod classes;
 pub mod combat;
 pub mod items;
 pub mod magic;

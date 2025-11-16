@@ -1,0 +1,24 @@
+[package]
+name = "campaign_builder"
+version = "0.1.0"
+edition = "2021"
+authors = ["Antares Contributors"]
+description = "Campaign Builder - Visual editor for creating Antares campaigns"
+license = "MIT"
+
+[dependencies]
+eframe = { version = "0.29", default-features = false, features = [
+    "glow",              # OpenGL backend (most compatible, works without GPU)
+    "default_fonts",     # Built-in fonts
+] }
+egui = "0.29"
+serde = { version = "1.0", features = ["derive"] }
+ron = "0.8"
+thiserror = "1.0"
+
+# For file dialogs
+rfd = "0.15"
+
+[[bin]]
+name = "campaign-builder"
+path = "src/main.rs"

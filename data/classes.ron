@@ -1,0 +1,94 @@
+// classes.ron - Character class definitions for Antares RPG
+//
+// This file contains all character class definitions in RON (Rusty Object Notation) format.
+// See docs/explanation/sdk_implementation_plan.md Phase 1 for specifications.
+//
+// Class Disablement Bits (for item restrictions):
+//   Bit 0 (0b00000001) - Knight
+//   Bit 1 (0b00000010) - Paladin
+//   Bit 2 (0b00000100) - Archer
+//   Bit 3 (0b00001000) - Cleric
+//   Bit 4 (0b00010000) - Sorcerer
+//   Bit 5 (0b00100000) - Robber
+//
+// HP Dice:
+//   - Knight:   1d10 (highest HP)
+//   - Paladin:  1d8  (high HP, hybrid caster)
+//   - Archer:   1d8  (high HP, ranged specialist)
+//   - Cleric:   1d6  (medium HP, divine caster)
+//   - Sorcerer: 1d4  (lowest HP, arcane caster)
+//   - Robber:   1d6  (medium HP, utility specialist)
+
+[
+    // ===== Knight - Tank/Melee Specialist =====
+    (
+        id: "knight",
+        name: "Knight",
+        hp_die: (count: 1, sides: 10, bonus: 0),
+        spell_school: None,
+        is_pure_caster: false,
+        spell_stat: None,
+        disablement_bit: 0,
+        special_abilities: ["multiple_attacks", "heavy_armor"],
+    ),
+
+    // ===== Paladin - Hybrid Fighter/Cleric =====
+    (
+        id: "paladin",
+        name: "Paladin",
+        hp_die: (count: 1, sides: 8, bonus: 0),
+        spell_school: Some(Cleric),
+        is_pure_caster: false,
+        spell_stat: Some(Personality),
+        disablement_bit: 1,
+        special_abilities: ["turn_undead", "lay_on_hands"],
+    ),
+
+    // ===== Archer - Ranged Specialist =====
+    (
+        id: "archer",
+        name: "Archer",
+        hp_die: (count: 1, sides: 8, bonus: 0),
+        spell_school: None,
+        is_pure_caster: false,
+        spell_stat: None,
+        disablement_bit: 2,
+        special_abilities: ["ranged_bonus", "precision_shot"],
+    ),
+
+    // ===== Cleric - Divine Spellcaster =====
+    (
+        id: "cleric",
+        name: "Cleric",
+        hp_die: (count: 1, sides: 6, bonus: 0),
+        spell_school: Some(Cleric),
+        is_pure_caster: true,
+        spell_stat: Some(Personality),
+        disablement_bit: 3,
+        special_abilities: ["turn_undead", "divine_intervention"],
+    ),
+
+    // ===== Sorcerer - Arcane Spellcaster =====
+    (
+        id: "sorcerer",
+        name: "Sorcerer",
+        hp_die: (count: 1, sides: 4, bonus: 0),
+        spell_school: Some(Sorcerer),
+        is_pure_caster: true,
+        spell_stat: Some(Intellect),
+        disablement_bit: 4,
+        special_abilities: ["arcane_mastery", "spell_penetration"],
+    ),
+
+    // ===== Robber - Utility Specialist =====
+    (
+        id: "robber",
+        name: "Robber",
+        hp_die: (count: 1, sides: 6, bonus: 0),
+        spell_school: None,
+        is_pure_caster: false,
+        spell_stat: None,
+        disablement_bit: 5,
+        special_abilities: ["backstab", "disarm_trap", "pick_lock"],
+    ),
+]
