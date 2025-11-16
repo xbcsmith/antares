@@ -25,6 +25,7 @@
 /// ```
 pub mod application;
 pub mod domain;
+pub mod sdk;
 
 // Re-export commonly used types for convenience
 pub use domain::types::{CharacterId, EventId, ItemId, MapId, MonsterId, SpellId, TownId};

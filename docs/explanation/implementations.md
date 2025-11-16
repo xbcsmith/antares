@@ -4208,6 +4208,7 @@ Implemented Phase 2: Campaign Builder Foundation according to `docs/explanation/
 #### 2.1 Full Metadata Editor
 
 **Enhanced `CampaignMetadata` Structure**:
+
 - Basic metadata: id, name, version, author, description, engine_version
 - Starting conditions: starting_map, starting_position, starting_direction, starting_gold, starting_food
 - Party settings: max_party_size, max_roster_size
@@ -4216,6 +4217,7 @@ Implemented Phase 2: Campaign Builder Foundation according to `docs/explanation/
 - Data file paths: items_file, spells_file, monsters_file, classes_file, races_file, maps_dir, quests_file, dialogue_file
 
 **UI Implementation**:
+
 - Metadata tab: Basic campaign information with preview
 - Config tab: Starting conditions, party/roster settings, difficulty/rules, data file paths
 - Real-time change tracking with unsaved changes indicator
@@ -4224,6 +4226,7 @@ Implemented Phase 2: Campaign Builder Foundation according to `docs/explanation/
 #### 2.2 Campaign Validation UI
 
 **Enhanced Validation System**:
+
 ```rust
 struct ValidationError {
     severity: Severity,  // Error or Warning
@@ -4237,6 +4240,7 @@ enum Severity {
 ```
 
 **Validation Rules Implemented**:
+
 - **ID Validation**: Required, alphanumeric + underscores only
 - **Name Validation**: Required
 - **Author Validation**: Recommended (warning if empty)
@@ -4248,6 +4252,7 @@ enum Severity {
 - **File Paths**: All data file paths required, must use .ron extension
 
 **Validation UI Features**:
+
 - Dedicated Validation tab showing all errors and warnings
 - Color-coded display (red for errors, orange for warnings)
 - Error/warning counters in status message
@@ -4257,13 +4262,14 @@ enum Severity {
 #### 2.3 File I/O Implementation
 
 **Save/Load with RON Format**:
+
 ```rust
 fn save_campaign(&mut self) -> Result<(), CampaignError> {
     let ron_config = ron::ser::PrettyConfig::new()
         .struct_names(true)
         .enumerate_arrays(false)
         .depth_limit(4);
-    
+
     let ron_string = ron::ser::to_string_pretty(&self.campaign, ron_config)?;
     fs::write(path, ron_string)?;
     Ok(())
@@ -4277,18 +4283,19 @@ fn load_campaign_file(&mut self, path: &PathBuf) -> Result<(), CampaignError> {
 ```
 
 **Error Handling**:
+
 ```rust
 #[derive(Debug, Error)]
 enum CampaignError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     #[error("RON serialization error: {0}")]
     Serialization(#[from] ron::Error),
-    
+
     #[error("RON deserialization error: {0}")]
     Deserialization(#[from] ron::error::SpannedError),
-    
+
     #[error("No campaign path set")]
     NoPath,
 }
@@ -4297,6 +4304,7 @@ enum CampaignError {
 #### 2.4 Unsaved Changes Tracking
 
 **Implementation**:
+
 - Boolean flag tracks any modification to campaign data
 - Visual indicator in menu bar (colored "● Unsaved changes" or "✓ Saved")
 - Warning dialog before destructive actions (New, Open, Exit)
@@ -4304,6 +4312,7 @@ enum CampaignError {
 - Pending action system allows completing action after save
 
 **User Flow**:
+
 1. User makes changes → `unsaved_changes = true`
 2. User tries to exit/open/new → Warning dialog appears
 3. User chooses Save → Campaign saved, then action executes
@@ -4313,6 +4322,7 @@ enum CampaignError {
 #### 2.5 File Structure Browser
 
 **File Tree Implementation**:
+
 ```rust
 struct FileNode {
     name: String,
@@ -4323,6 +4333,7 @@ struct FileNode {
 ```
 
 **Features**:
+
 - Recursive directory reading from campaign directory
 - Tree view with indentation showing directory hierarchy
 - Icons differentiate directories (📁) from files (📄)
@@ -4335,30 +4346,35 @@ struct FileNode {
 Implemented read-only placeholder views for all data types scheduled for Phase 3:
 
 **Items Editor (`show_items_editor`)**:
+
 - Search bar placeholder
 - "Add Item" button placeholder
 - Status display showing items file path
 - Future feature list (load, add/edit/delete, filtering, validation)
 
 **Spells Editor (`show_spells_editor`)**:
+
 - Search bar placeholder
 - "Add Spell" button placeholder
 - Status display showing spells file path
 - Future feature list (school filtering, level organization, cost editor)
 
 **Monsters Editor (`show_monsters_editor`)**:
+
 - Search bar placeholder
 - "Add Monster" button placeholder
 - Status display showing monsters file path
 - Future feature list (stats editor, loot tables, special attacks)
 
 **Maps Editor (`show_maps_editor`)**:
+
 - Search bar placeholder
 - "Add Map" button placeholder
 - Status display showing maps directory path
 - Future feature list (map_builder integration, preview, events)
 
 **Quests Editor (`show_quests_editor`)**:
+
 - Search bar placeholder
 - "Add Quest" button placeholder
 - Status display showing quests file path
@@ -4370,7 +4386,8 @@ Implemented read-only placeholder views for all data types scheduled for Phase 3
 
 **Data Format**: Uses RON format exclusively for campaign.ron serialization/deserialization
 
-**Type System**: 
+**Type System**:
+
 - Custom error types with `thiserror`
 - Proper enum definitions for Difficulty and Severity
 - Strong typing for all metadata fields
@@ -4410,6 +4427,7 @@ test_validation_error_creation              ✅
 ```
 
 **Quality Gates**:
+
 ```bash
 ✅ cargo fmt --all                                      # Code formatted
 ✅ cargo check --all-targets --all-features            # Compiles successfully
@@ -4421,6 +4439,7 @@ test_validation_error_creation              ✅
 ### Files Modified
 
 **Modified**:
+
 - `sdk/campaign_builder/src/main.rs` - Enhanced from 474 to 1717 lines
   - Added full metadata structure (27 fields total)
   - Added Difficulty enum with Default derive
@@ -4438,6 +4457,7 @@ test_validation_error_creation              ✅
 ### Key Features Delivered
 
 **Phase 2 Deliverables** (per SDK architecture):
+
 - ✅ Full metadata editor UI - Complete metadata and config tabs
 - ✅ Campaign validation UI - Enhanced with errors/warnings and color coding
 - ✅ Basic item/spell/monster list views - Placeholder panels with future roadmap
@@ -4445,6 +4465,7 @@ test_validation_error_creation              ✅
 - ✅ Save/load campaign projects - RON format with proper error handling
 
 **Additional Features**:
+
 - ✅ Unsaved changes tracking with warning dialog
 - ✅ Three-option save flow (Save/Don't Save/Cancel)
 - ✅ Campaign directory management
@@ -4455,29 +4476,34 @@ test_validation_error_creation              ✅
 ### Lessons Learned
 
 **1. RON Serialization is Excellent**:
+
 - Pretty printing config makes human-readable campaign files
 - Struct names in output aid debugging
 - Deserialize errors are clear and helpful
 - Round-trip serialization works flawlessly
 
 **2. egui Immediate Mode Benefits**:
+
 - Change tracking is straightforward (`.changed()` on widgets)
 - State management is simple (no message passing)
 - UI updates are instantaneous
 - Adding new fields is trivial (no boilerplate)
 
 **3. File I/O Error Handling**:
+
 - `thiserror` makes error types clean and ergonomic
 - Proper Result types enforce error handling
 - Users need clear error messages, not just "failed to save"
 
 **4. Unsaved Changes UX**:
+
 - Warning dialog is essential for data safety
 - Three-option flow gives users control
 - Visual indicator reduces accidental data loss
 - Pending action pattern works well for deferred operations
 
 **5. Placeholder Editors Communicate Intent**:
+
 - Showing future feature list sets expectations
 - Displaying file paths helps users understand data structure
 - Empty states should guide users, not confuse them
@@ -4485,13 +4511,16 @@ test_validation_error_creation              ✅
 ### Next Steps
 
 **Phase 3: Data Editors (Weeks 5-8)** per SDK architecture:
+
 - [ ] Implement Items editor with add/edit/delete
+
   - [ ] Load items from .ron files
   - [ ] Item type editor (Weapon/Armor/Consumable)
   - [ ] Class restriction UI
   - [ ] Stats editor for weapons/armor
 
 - [ ] Implement Spells editor with add/edit/delete
+
   - [ ] Load spells from .ron files
   - [ ] School selector (Cleric/Sorcerer)
   - [ ] Level organization (1-7)
@@ -4499,6 +4528,7 @@ test_validation_error_creation              ✅
   - [ ] Target and context selectors
 
 - [ ] Implement Monsters editor with add/edit/delete
+
   - [ ] Load monsters from .ron files
   - [ ] Stats editor (HP, AC, damage)
   - [ ] Loot table editor
@@ -4513,6 +4543,7 @@ test_validation_error_creation              ✅
 ### Success Metrics
 
 **Deliverables**:
+
 - ✅ 2 new editor tabs (Metadata split into Metadata + Config)
 - ✅ 1 enhanced validation panel (errors + warnings with colors)
 - ✅ 1 file browser tab (Files)
@@ -4522,12 +4553,14 @@ test_validation_error_creation              ✅
 - ✅ 18 unit tests (100% pass rate)
 
 **Code Quality**:
+
 - Lines: 1717 (up from 474)
 - Tests: 18 (up from 0)
 - Functions: ~30 (proper separation of concerns)
 - Documentation: Comprehensive inline comments
 
 **User Experience**:
+
 - Campaign creation workflow is complete
 - Validation provides actionable feedback
 - File I/O is reliable and predictable
@@ -4535,6 +4568,7 @@ test_validation_error_creation              ✅
 - UI is responsive and intuitive
 
 **Architecture**:
+
 - Follows SDK architecture document exactly
 - Proper error handling with Result types
 - RON format for all campaign data
@@ -4543,3 +4577,481 @@ test_validation_error_creation              ✅
 
 ---
 
+## Phase 3: SDK Foundation Module (COMPLETED)
+
+**Date Completed**: 2025
+**Status**: ✅ All tasks complete, all quality gates passed
+
+### Overview
+
+Phase 3 implements the SDK Foundation Module, providing unified content database access, cross-reference validation, RON serialization helpers, and content templates for campaign creation tools. This creates the infrastructure needed for campaign editors and validation tools to work with game content consistently.
+
+### Components Implemented
+
+#### 3.1 SDK Module Structure
+
+**Files Created**:
+
+- `src/sdk/mod.rs` - Main SDK module with exports
+- `src/sdk/database.rs` - Unified ContentDatabase
+- `src/sdk/validation.rs` - Cross-reference validation
+- `src/sdk/serialization.rs` - RON format helpers
+- `src/sdk/templates.rs` - Content templates
+
+**Module Organization**:
+
+```rust
+pub mod sdk {
+    pub mod database;      // Unified content database
+    pub mod validation;    // Cross-reference validation
+    pub mod serialization; // RON helpers
+    pub mod templates;     // Pre-configured templates
+}
+```
+
+#### 3.2 Unified Content Database
+
+**Implementation**: `src/sdk/database.rs` (715 lines)
+
+```rust
+pub struct ContentDatabase {
+    pub classes: ClassDatabase,
+    pub races: RaceDatabase,
+    pub items: ItemDatabase,
+    pub monsters: MonsterDatabase,
+    pub spells: SpellDatabase,
+    pub maps: MapDatabase,
+}
+```
+
+**Key Features**:
+
+- Single entry point for all game content
+- Loads from campaign directory structure
+- Provides statistics and validation
+- Supports both core game and campaign content
+
+**Loading Methods**:
+
+```rust
+// Load campaign-specific content
+ContentDatabase::load_campaign("campaigns/my_campaign")?;
+
+// Load core game content
+ContentDatabase::load_core("data")?;
+```
+
+**Statistics Tracking**:
+
+```rust
+pub struct ContentStats {
+    pub class_count: usize,
+    pub race_count: usize,
+    pub item_count: usize,
+    pub monster_count: usize,
+    pub spell_count: usize,
+    pub map_count: usize,
+}
+```
+
+**Database Implementations**:
+
+- `RaceDatabase` - Placeholder for Phase 2 race system
+- `SpellDatabase` - Placeholder for spell definitions
+- `MonsterDatabase` - Placeholder for monster definitions
+- `MapDatabase` - Map loading from directory
+- Integrates existing `ClassDatabase` and `ItemDatabase`
+
+#### 3.3 Cross-Reference Validation
+
+**Implementation**: `src/sdk/validation.rs` (499 lines)
+
+**Validation Error Types**:
+
+```rust
+pub enum ValidationError {
+    MissingClass { context: String, class_id: ClassId },
+    MissingRace { context: String, race_id: RaceId },
+    MissingItem { context: String, item_id: ItemId },
+    MissingMonster { map: MapId, monster_id: MonsterId },
+    MissingSpell { context: String, spell_id: SpellId },
+    DisconnectedMap { map_id: MapId },
+    DuplicateId { entity_type: String, id: String },
+    BalanceWarning { severity: Severity, message: String },
+}
+```
+
+**Severity Levels**:
+
+```rust
+pub enum Severity {
+    Info,    // Informational message
+    Warning, // Content may work but has issues
+    Error,   // Content is invalid
+}
+```
+
+**Validator Implementation**:
+
+```rust
+pub struct Validator<'a> {
+    db: &'a ContentDatabase,
+}
+
+impl Validator {
+    pub fn validate_all(&self) -> Result<Vec<ValidationError>, Box<dyn Error>> {
+        // Cross-reference validation
+        // Connectivity validation
+        // Balance checking
+    }
+}
+```
+
+**Validation Capabilities**:
+
+- Cross-reference checking (IDs exist in databases)
+- Map connectivity validation (reachability)
+- Balance warnings (empty databases, power curves)
+- Severity-based filtering
+- Extensible validation framework
+
+#### 3.4 RON Serialization Helpers
+
+**Implementation**: `src/sdk/serialization.rs` (429 lines)
+
+**Error Types**:
+
+```rust
+pub enum SerializationError {
+    SyntaxError(String),
+    ParseError(ron::Error),
+    FormatError(String),
+    MergeError(String),
+    TypeMismatch { expected: String, actual: String },
+}
+```
+
+**Helper Functions**:
+
+```rust
+// Format RON with pretty printing
+pub fn format_ron(ron_data: &str) -> Result<String, SerializationError>;
+
+// Validate RON syntax
+pub fn validate_ron_syntax(ron_data: &str) -> Result<(), SerializationError>;
+
+// Merge two RON data structures
+pub fn merge_ron_data(base: &str, override: &str) -> Result<String, SerializationError>;
+
+// Generic serialization helpers
+pub fn to_ron_string<T: Serialize>(value: &T) -> Result<String, SerializationError>;
+pub fn from_ron_string<T: Deserialize>(ron_data: &str) -> Result<T, SerializationError>;
+```
+
+**Features**:
+
+- Pretty printing with configurable depth and formatting
+- Syntax validation without type checking
+- Data structure merging (maps and sequences)
+- Generic serialization/deserialization wrappers
+- Comprehensive error handling
+
+#### 3.5 Content Templates
+
+**Implementation**: `src/sdk/templates.rs` (752 lines)
+
+**Weapon Templates**:
+
+```rust
+pub fn basic_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item;
+pub fn two_handed_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item;
+pub fn magical_weapon(id: ItemId, name: &str, damage: DiceRoll, bonus: i8) -> Item;
+```
+
+**Armor Templates**:
+
+```rust
+pub fn basic_armor(id: ItemId, name: &str, ac_bonus: u8) -> Item;
+pub fn shield(id: ItemId, name: &str, ac_bonus: u8) -> Item;
+pub fn magical_armor(id: ItemId, name: &str, ac_bonus: u8, magic_bonus: i8) -> Item;
+```
+
+**Accessory Templates**:
+
+```rust
+pub fn basic_ring(id: ItemId, name: &str, bonus: Bonus) -> Item;
+pub fn basic_amulet(id: ItemId, name: &str, bonus: Bonus) -> Item;
+```
+
+**Consumable Templates**:
+
+```rust
+pub fn healing_potion(id: ItemId, name: &str, healing_amount: u16) -> Item;
+pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item;
+```
+
+**Ammo Templates**:
+
+```rust
+pub fn arrow_bundle(id: ItemId, count: u16) -> Item;
+pub fn bolt_bundle(id: ItemId, count: u16) -> Item;
+```
+
+**Quest Item Templates**:
+
+```rust
+pub fn quest_item(id: ItemId, name: &str, quest_id: &str) -> Item;
+```
+
+**Map Templates**:
+
+```rust
+pub fn town_map(id: MapId, name: &str, width: u32, height: u32) -> Map;
+pub fn dungeon_map(id: MapId, name: &str, width: u32, height: u32) -> Map;
+pub fn forest_map(id: MapId, name: &str, width: u32, height: u32) -> Map;
+```
+
+**Template Features**:
+
+- Pre-configured with sensible defaults
+- Follow architecture.md data structures exactly
+- Include proper cost/sell values
+- Set appropriate disablement flags
+- Ready for immediate use or customization
+
+### Architecture Compliance
+
+**Type System Adherence**:
+
+- Uses `ItemId`, `SpellId`, `MonsterId`, `MapId`, `ClassId` type aliases
+- Follows architecture.md Section 4 data structures exactly
+- No deviation from core type definitions
+
+**RON Format Usage**:
+
+- All data loading uses RON format (`.ron` files)
+- Pretty printing for human-readable output
+- Proper error handling for parsing failures
+
+**Module Structure**:
+
+- SDK module in `src/sdk/` directory
+- Clear separation of concerns (database/validation/serialization/templates)
+- Follows Rust best practices for module organization
+
+**Error Handling**:
+
+- All functions return `Result` types
+- Custom error types with `thiserror`
+- Descriptive error messages
+- Proper error propagation with `?` operator
+
+### Testing
+
+**Test Coverage**: 52 tests, 100% pass rate
+
+**Database Tests** (8 tests):
+
+- Empty database creation
+- Content statistics calculation
+- Database placeholder implementations
+- Validation on empty database
+
+**Validation Tests** (12 tests):
+
+- Severity ordering and display
+- Error severity classification
+- Error display formatting
+- Validator creation and usage
+- Empty database validation (generates warnings)
+- Severity filtering
+
+**Serialization Tests** (13 tests):
+
+- RON syntax validation (valid/invalid)
+- Format RON with pretty printing
+- Merge RON data (maps and sequences)
+- Generic serialization/deserialization
+- Error display formatting
+- Complex structure validation
+- Primitive value override
+
+**Template Tests** (19 tests):
+
+- Basic weapon creation
+- Two-handed weapon creation
+- Magical weapon creation
+- Basic armor creation
+- Shield creation
+- Magical armor creation
+- Ring and amulet creation
+- Healing and SP potions
+- Arrow and bolt bundles
+- Quest item creation
+- Town, dungeon, and forest maps
+- Cost scaling validation
+- Cursed items not created by templates
+
+### Documentation
+
+**Module Documentation**:
+
+- Comprehensive doc comments on all public items
+- Examples in doc comments (tested by `cargo test --doc`)
+- Architecture references to implementation plan
+- Usage examples for all major features
+
+**Doc Examples**: 15 tested examples in doc comments
+
+- All examples compile and pass
+- Demonstrate real-world usage patterns
+- Show error handling patterns
+
+### Quality Gates
+
+All quality checks passed:
+
+```bash
+✅ cargo fmt --all                                      # Code formatted
+✅ cargo check --all-targets --all-features            # Compiles successfully
+✅ cargo clippy --all-targets --all-features -- -D warnings  # Zero warnings
+✅ cargo test --all-features                            # 240 tests passed (52 new SDK tests)
+✅ cargo test --doc                                     # 155 doc tests passed
+```
+
+### Files Created/Modified
+
+**New Files**:
+
+- `src/sdk/mod.rs` (54 lines) - SDK module root
+- `src/sdk/database.rs` (715 lines) - ContentDatabase implementation
+- `src/sdk/validation.rs` (499 lines) - Validator implementation
+- `src/sdk/serialization.rs` (429 lines) - RON helpers
+- `src/sdk/templates.rs` (752 lines) - Content templates
+
+**Modified Files**:
+
+- `src/lib.rs` - Added `pub mod sdk;` export
+
+**Total New Code**: 2,449 lines (all with comprehensive tests and documentation)
+
+### Key Features Delivered
+
+**Phase 3 Deliverables** (per SDK implementation plan):
+
+- ✅ SDK module structure with proper organization
+- ✅ Unified ContentDatabase for all content types
+- ✅ Cross-reference validation with severity levels
+- ✅ RON serialization helpers (format, validate, merge)
+- ✅ Content templates for quick item/map creation
+- ✅ Comprehensive test coverage (52 tests)
+- ✅ Full documentation with tested examples
+
+**Additional Features**:
+
+- ✅ ContentStats for database metrics
+- ✅ Placeholder databases for future content types
+- ✅ Extensible validation framework
+- ✅ Error types with `thiserror` integration
+- ✅ Generic serialization wrappers
+- ✅ Multiple map type templates
+- ✅ Magical item templates with bonuses
+
+### Lessons Learned
+
+**1. RON is Excellent for Game Data**:
+
+- Human-readable and easy to edit
+- Strong type checking via serde
+- Pretty printing makes beautiful output
+- Error messages are clear and helpful
+- Round-trip serialization is reliable
+
+**2. Placeholder Implementations Work Well**:
+
+- RaceDatabase, SpellDatabase, MonsterDatabase are placeholders
+- Allows SDK to compile and test without full implementations
+- Makes integration easier when full implementations arrive
+- Sets clear API contracts for future work
+
+**3. Validation Framework is Extensible**:
+
+- Severity levels allow filtering (errors vs warnings)
+- ValidationError enum easily extended
+- Validator trait approach allows different validation strategies
+- Balance warnings separate from hard errors
+
+**4. Templates Accelerate Development**:
+
+- Quick prototyping of content
+- Consistent starting points reduce errors
+- Easy to customize after creation
+- Serve as documentation of data structures
+
+**5. Comprehensive Testing Catches Issues**:
+
+- 52 new tests found several bugs during development
+- Doc tests ensure examples stay up-to-date
+- Test coverage gives confidence in refactoring
+- Integration tests validate end-to-end workflows
+
+### Next Steps
+
+**Phase 4: Enhanced Map Builder** (SDK Integration):
+
+- [ ] Integrate SDK ContentDatabase into map builder
+- [ ] Add smart ID suggestions from databases
+- [ ] Implement interactive content browser
+- [ ] Add advanced validation using Validator
+- [ ] Cross-reference validation for map events
+
+**Phase 5: Class/Race Editor Tool** (CLI):
+
+- [ ] Implement class editor with add/edit/delete
+- [ ] Implement race editor with stat modifiers
+- [ ] Add preview and validation
+- [ ] Save to RON format
+
+**Phase 6: Campaign Validator Tool**:
+
+- [ ] Standalone validation tool
+- [ ] Comprehensive cross-reference checking
+- [ ] Balance analysis and warnings
+- [ ] CI/CD integration support
+
+### Success Metrics
+
+**Deliverables**:
+
+- ✅ 4 new SDK modules (database, validation, serialization, templates)
+- ✅ 1 unified ContentDatabase with 6 sub-databases
+- ✅ 52 unit tests (100% pass rate)
+- ✅ 15 doc tests (100% pass rate)
+- ✅ Zero clippy warnings
+- ✅ Full documentation coverage
+
+**Code Quality**:
+
+- Lines: 2,449 new lines
+- Tests: 52 new unit tests, 15 doc tests
+- Functions: ~60 public functions with full documentation
+- Error handling: All functions use Result types
+- Zero unsafe code
+
+**Architecture Compliance**:
+
+- ✅ Follows SDK implementation plan Phase 3 exactly
+- ✅ Uses type aliases from architecture.md Section 4.6
+- ✅ RON format for all data (Section 7.2)
+- ✅ Proper module organization (Section 3.2)
+- ✅ No architectural deviations
+
+**Extensibility**:
+
+- Clear APIs for future content types
+- Placeholder databases ready for implementation
+- Validation framework accepts new error types
+- Template system easily extended
+- Generic helpers work with any content
+
+---

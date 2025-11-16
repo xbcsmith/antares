@@ -120,11 +120,11 @@ LIBGL_ALWAYS_SOFTWARE=1 cargo run --bin campaign-builder
 
 ## What This Prototype Demonstrates
 
-✅ **Framework Validation** - egui works perfectly for Antares SDK  
-✅ **No GPU Required** - Runs with software rendering  
-✅ **Pure Rust** - Integrates seamlessly with Antares  
-✅ **Key UI Patterns** - Menus, tabs, forms, validation, file dialogs  
-✅ **Ready for Full SDK** - Foundation proven and tested  
+✅ **Framework Validation** - egui works perfectly for Antares SDK
+✅ **No GPU Required** - Runs with software rendering
+✅ **Pure Rust** - Integrates seamlessly with Antares
+✅ **Key UI Patterns** - Menus, tabs, forms, validation, file dialogs
+✅ **Ready for Full SDK** - Foundation proven and tested
 
 ## Next Steps
 
