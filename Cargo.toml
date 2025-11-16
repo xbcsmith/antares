@@ -21,9 +21,25 @@ thiserror = "1.0"
 rand = "0.8"
 rustyline = "17.0.2"
 clap = { version = "4.5", features = ["derive"] }
+flate2 = "1.0"
+tar = "0.4"
+sha2 = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
 
 [[bin]]
 name = "campaign_validator"
 path = "src/bin/campaign_validator.rs"
+
+[[bin]]
+name = "class_editor"
+path = "src/bin/class_editor.rs"
+
+[[bin]]
+name = "race_editor"
+path = "src/bin/race_editor.rs"
+
+[[bin]]
+name = "item_editor"
+path = "src/bin/item_editor.rs"
 
 [dev-dependencies]

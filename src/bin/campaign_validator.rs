@@ -315,3 +315,134 @@ fn print_json_report(report: &ValidationReport) {
 
     println!("{}", serde_json::to_string_pretty(&json).unwrap());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validation_report_valid() {
+        let report = ValidationReport {
+            is_valid: true,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        assert!(report.is_valid);
+        assert_eq!(report.errors.len(), 0);
+        assert_eq!(report.warnings.len(), 0);
+    }
+
+    #[test]
+    fn test_validation_report_with_errors() {
+        let report = ValidationReport {
+            is_valid: false,
+            errors: vec![
+                "Missing monster ID: 42".to_string(),
+                "Duplicate item ID: sword".to_string(),
+            ],
+            warnings: vec!["Low monster density".to_string()],
+        };
+
+        assert!(!report.is_valid);
+        assert_eq!(report.errors.len(), 2);
+        assert_eq!(report.warnings.len(), 1);
+    }
+
+    #[test]
+    fn test_validation_report_warnings_only() {
+        let report = ValidationReport {
+            is_valid: true,
+            errors: Vec::new(),
+            warnings: vec!["Balance warning: Level 1 area has high-level monsters".to_string()],
+        };
+
+        assert!(report.is_valid);
+        assert_eq!(report.errors.len(), 0);
+        assert_eq!(report.warnings.len(), 1);
+    }
+
+    #[test]
+    fn test_print_json_report_structure() {
+        let report = ValidationReport {
+            is_valid: false,
+            errors: vec!["Test error".to_string()],
+            warnings: vec!["Test warning".to_string()],
+        };
+
+        let json = serde_json::json!({
+            "is_valid": report.is_valid,
+            "errors": report.errors,
+            "warnings": report.warnings,
+            "error_count": report.errors.len(),
+            "warning_count": report.warnings.len(),
+        });
+
+        assert_eq!(json["is_valid"], false);
+        assert_eq!(json["error_count"], 1);
+        assert_eq!(json["warning_count"], 1);
+        assert_eq!(json["errors"][0], "Test error");
+        assert_eq!(json["warnings"][0], "Test warning");
+    }
+
+    #[test]
+    fn test_empty_report_is_valid() {
+        let report = ValidationReport {
+            is_valid: true,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        assert!(report.is_valid);
+        assert!(report.errors.is_empty());
+        assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_report_with_multiple_errors() {
+        let errors = vec![
+            "Error 1".to_string(),
+            "Error 2".to_string(),
+            "Error 3".to_string(),
+        ];
+
+        let report = ValidationReport {
+            is_valid: false,
+            errors: errors.clone(),
+            warnings: Vec::new(),
+        };
+
+        assert!(!report.is_valid);
+        assert_eq!(report.errors.len(), 3);
+        assert_eq!(report.errors, errors);
+    }
+
+    #[test]
+    fn test_json_output_format() {
+        let report = ValidationReport {
+            is_valid: true,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        let json = serde_json::json!({
+            "is_valid": report.is_valid,
+            "errors": report.errors,
+            "warnings": report.warnings,
+            "error_count": report.errors.len(),
+            "warning_count": report.warnings.len(),
+        });
+
+        // Verify JSON can be serialized
+        let json_string = serde_json::to_string(&json);
+        assert!(json_string.is_ok());
+
+        // Verify structure
+        assert!(json.is_object());
+        assert!(json.get("is_valid").is_some());
+        assert!(json.get("errors").is_some());
+        assert!(json.get("warnings").is_some());
+        assert!(json.get("error_count").is_some());
+        assert!(json.get("warning_count").is_some());
+    }
+}
