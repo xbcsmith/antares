@@ -43,6 +43,7 @@
 //! ```
 
 pub mod campaign_loader;
+pub mod campaign_packager;
 pub mod database;
 pub mod dialogue_editor;
 pub mod map_editor;
@@ -55,6 +56,7 @@ pub mod validation;
 pub use campaign_loader::{
     Campaign, CampaignConfig, CampaignError, CampaignInfo, CampaignLoader, ValidationReport,
 };
+pub use campaign_packager::{CampaignPackager, PackageError, PackageManifest};
 pub use database::{ContentDatabase, ContentStats, DatabaseError};
 pub use dialogue_editor::{
     analyze_dialogue, generate_dialogue_summary, validate_dialogue, DialogueStats,
