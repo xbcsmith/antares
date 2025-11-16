@@ -25,6 +25,7 @@ flate2 = "1.0"
 tar = "0.4"
 sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
 
 [[bin]]
 name = "campaign_validator"
@@ -43,3 +44,4 @@ name = "item_editor"
 path = "src/bin/item_editor.rs"
 
 [dev-dependencies]
+tempfile = "3.8"

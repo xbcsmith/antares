@@ -1,7 +1,7 @@
 # Creating Your First Campaign
 
-**Difficulty**: Beginner  
-**Time**: 30-45 minutes  
+**Difficulty**: Beginner
+**Time**: 30-45 minutes
 **Prerequisites**: Antares SDK installed
 
 This tutorial walks you through creating a complete playable campaign from scratch.

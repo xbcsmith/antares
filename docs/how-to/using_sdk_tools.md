@@ -1,6 +1,6 @@
 # Using SDK Tools
 
-**Target Audience**: Campaign creators, content designers  
+**Target Audience**: Campaign creators, content designers
 **Difficulty**: Beginner to Intermediate
 
 This guide covers all the command-line tools in the Antares SDK for creating and managing campaign content.
@@ -110,7 +110,7 @@ Commands:
   [s]ave   - Save and exit
   [q]uit   - Quit without saving
 
-> 
+>
 ```
 
 ### Adding a Class
@@ -212,7 +212,7 @@ Commands:
   [s]ave   - Save and exit
   [q]uit   - Quit without saving
 
-> 
+>
 ```
 
 ### Adding a Race
@@ -309,7 +309,7 @@ Commands:
   [s]ave   - Save and exit
   [q]uit   - Quit without saving
 
-> 
+>
 ```
 
 ### Adding an Item
@@ -701,7 +701,7 @@ Use the validator to identify the exact location.
 
 **Problem**: "DuplicateId" error after adding content
 
-**Solution**: 
+**Solution**:
 1. Check for ID conflicts in the file
 2. Use unique IDs for each entity
 3. Use consistent ID numbering scheme (e.g., items 1-100, armor 101-200)
@@ -800,5 +800,5 @@ cp data/items.ron data/items_template.ron
 
 ---
 
-**Last Updated**: 2024  
+**Last Updated**: 2024
 **SDK Version**: 0.1.0

@@ -1,6 +1,6 @@
 # Antares SDK API Reference
 
-**Version**: 0.1.0  
+**Version**: 0.1.0
 **Target Audience**: Campaign creators, modders, tool developers
 
 This document provides a complete technical reference for the Antares SDK modules, types, and functions.
@@ -94,7 +94,7 @@ Loads all content from a campaign directory structure:
 - `path/data/spells.ron`
 - `path/data/maps/*.ron`
 
-**Returns**: `Ok(ContentDatabase)` if all files load successfully.  
+**Returns**: `Ok(ContentDatabase)` if all files load successfully.
 **Errors**: `DatabaseError` if files are missing, invalid, or have parse errors.
 
 ```rust
@@ -409,7 +409,7 @@ campaigns/my_campaign/
 └── README.md (optional)
 ```
 
-**Returns**: `Ok(Campaign)` with all content loaded.  
+**Returns**: `Ok(Campaign)` with all content loaded.
 **Errors**: `CampaignError` with details of missing/invalid files.
 
 ```rust
@@ -475,7 +475,7 @@ pub fn new() -> Self
 Creates a new campaign packager.
 
 ```rust
-pub fn package(&self, campaign_path: &str, output_path: &str) 
+pub fn package(&self, campaign_path: &str, output_path: &str)
     -> Result<PackageManifest, PackageError>
 ```
 Packages a campaign into a distributable archive.
@@ -493,7 +493,7 @@ Packages a campaign into a distributable archive.
 4. Generates checksums
 
 ```rust
-pub fn unpack(&self, package_path: &str, destination: &str) 
+pub fn unpack(&self, package_path: &str, destination: &str)
     -> Result<(), PackageError>
 ```
 Unpacks a campaign package.
@@ -609,7 +609,7 @@ Checks if a map ID exists.
 #### Functions
 
 ```rust
-pub fn validate_quest(quest: &Quest, db: &ContentDatabase) 
+pub fn validate_quest(quest: &Quest, db: &ContentDatabase)
     -> Result<(), Vec<QuestValidationError>>
 ```
 Validates a quest definition.
@@ -638,7 +638,7 @@ Generates a human-readable quest summary.
 #### Functions
 
 ```rust
-pub fn validate_dialogue(dialogue: &Dialogue, db: &ContentDatabase) 
+pub fn validate_dialogue(dialogue: &Dialogue, db: &ContentDatabase)
     -> Result<(), Vec<DialogueValidationError>>
 ```
 Validates a dialogue tree.
@@ -748,11 +748,11 @@ fn validate_campaign(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Load campaign
     let loader = CampaignLoader::new();
     let campaign = loader.load(path)?;
-    
+
     // Validate
     let validator = Validator::new(&campaign.content);
     let errors = validator.validate_all()?;
-    
+
     // Report results
     if errors.is_empty() {
         println!("✓ Campaign is valid!");
@@ -762,7 +762,7 @@ fn validate_campaign(path: &str) -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("  - {}", error);
         }
     }
-    
+
     Ok(())
 }
 ```
@@ -778,15 +778,15 @@ fn create_starter_gear() -> Result<(), Box<dyn std::error::Error>> {
         basic_weapon("Rusty Dagger", (1, 4)),
         basic_armor("Leather Armor", 2),
     ];
-    
+
     // Customize
     items[0].value = 5;
     items[1].value = 15;
-    
+
     // Save to RON
     let ron = format_ron(&items)?;
     std::fs::write("data/starter_items.ron", ron)?;
-    
+
     Ok(())
 }
 ```
@@ -798,17 +798,17 @@ use antares::sdk::CampaignPackager;
 
 fn package_campaign(campaign_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let packager = CampaignPackager::new();
-    
+
     // Package campaign
     let manifest = packager.package(
         campaign_path,
         "releases/my_campaign_v1.0.tar.gz"
     )?;
-    
+
     println!("Packaged: {}", manifest.campaign_info.name);
     println!("Version: {}", manifest.campaign_info.version);
     println!("Files: {}", manifest.files.len());
-    
+
     Ok(())
 }
 ```
@@ -820,16 +820,16 @@ use antares::sdk::{ContentDatabase, map_editor};
 
 fn suggest_items_for_loot(query: &str) -> Result<(), Box<dyn std::error::Error>> {
     let db = ContentDatabase::load_core()?;
-    
+
     // Get suggestions
     let suggestions = map_editor::suggest_item_ids(&db, query);
-    
+
     // Display to user
     println!("Items matching '{}':", query);
     for (id, name) in suggestions {
         println!("  [{}] {}", id, name);
     }
-    
+
     Ok(())
 }
 ```
@@ -843,19 +843,19 @@ fn check_missing_items(campaign_path: &str) -> Result<(), Box<dyn std::error::Er
     let db = ContentDatabase::load_campaign(campaign_path)?;
     let validator = Validator::new(&db);
     let errors = validator.validate_all()?;
-    
+
     // Filter for missing item errors
     let missing_items: Vec<_> = errors.iter()
         .filter(|e| matches!(e, ValidationError::MissingItem { .. }))
         .collect();
-    
+
     if !missing_items.is_empty() {
         eprintln!("Missing items referenced:");
         for error in missing_items {
             eprintln!("  {}", error);
         }
     }
-    
+
     Ok(())
 }
 ```
@@ -934,5 +934,5 @@ let item = db.items.get(&item_id).unwrap(); // May panic
 
 ---
 
-**Last Updated**: 2024  
+**Last Updated**: 2024
 **SDK Version**: 0.1.0
