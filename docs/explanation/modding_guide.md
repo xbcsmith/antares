@@ -1,6 +1,6 @@
 # Antares Modding Guide
 
-**Target Audience**: Campaign creators, modders, content designers  
+**Target Audience**: Campaign creators, modders, content designers
 **Difficulty**: Intermediate to Advanced
 
 This guide explains the concepts, patterns, and best practices for creating content for Antares RPG.
@@ -199,7 +199,7 @@ Design items in tiers that match player progression:
         value: 5,
         // ...
     ),
-    
+
     // Tier 2: Early game (levels 4-6)
     10: (
         id: 10,
@@ -208,7 +208,7 @@ Design items in tiers that match player progression:
         value: 50,
         // ...
     ),
-    
+
     // Tier 3: Mid game (levels 7-10)
     20: (
         id: 20,
@@ -291,7 +291,7 @@ Balance consumable items with appropriate costs:
         value: 10,
         // ...
     ),
-    
+
     // Expensive, strong healing
     401: (
         name: "Greater Healing Potion",
@@ -299,7 +299,7 @@ Balance consumable items with appropriate costs:
         value: 100,
         // ...
     ),
-    
+
     // Multi-use items
     402: (
         name: "Healing Salve",
@@ -323,7 +323,7 @@ events: [
             (monster_id: 1, count: 2),  // 2 weak monsters
         ]),
     ),
-    
+
     // Medium encounter (mid-dungeon)
     (
         position: (10, 8),
@@ -332,7 +332,7 @@ events: [
             (monster_id: 2, count: 1),  // Mixed difficulty
         ]),
     ),
-    
+
     // Boss encounter (end)
     (
         position: (15, 15),
@@ -366,7 +366,7 @@ events: [
             (item_id: 999, quantity: 1),  // "Blood-Stained Map" (quest item)
         ]),
     ),
-    
+
     // Trap warning from environment
     (
         position: (8, 5),
@@ -391,10 +391,10 @@ Items with conditional or temporary bonuses:
 bonuses: [
     // Permanent bonus
     (attribute: Might, value: Constant(3)),
-    
+
     // Temporary bonus (duration in turns)
     (attribute: Speed, value: Temporary(5, 10)),  // +5 Speed for 10 turns
-    
+
     // Conditional bonus (implementation-specific)
     (attribute: AttackBonus, value: Constant(2)),  // vs specific enemy type
 ]

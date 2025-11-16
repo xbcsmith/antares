@@ -1,8 +1,8 @@
 # Tutorial Campaign: First Steps
 
-**Version**: 1.0.0  
-**Author**: Antares Development Team  
-**Difficulty**: Beginner  
+**Version**: 1.0.0
+**Author**: Antares Development Team
+**Difficulty**: Beginner
 **Estimated Playtime**: 15-30 minutes
 
 ---
