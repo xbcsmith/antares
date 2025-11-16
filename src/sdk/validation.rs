@@ -365,6 +365,173 @@ impl<'a> Validator<'a> {
 
         errors
     }
+
+    /// Validates a single map for errors and warnings
+    ///
+    /// Performs comprehensive validation on a map including:
+    /// - Event cross-references (monster IDs, item IDs, map IDs)
+    /// - NPC validation
+    /// - Map connectivity (teleport destinations)
+    /// - Balance checks (monster encounters, treasure)
+    ///
+    /// # Arguments
+    ///
+    /// * `map` - The map to validate
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Vec<ValidationError>)` with all validation issues found.
+    /// An empty vector means the map is valid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::database::ContentDatabase;
+    /// use antares::sdk::validation::Validator;
+    /// use antares::domain::world::Map;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let db = ContentDatabase::new();
+    /// let validator = Validator::new(&db);
+    /// let map = Map::new(0, 10, 10);
+    ///
+    /// let errors = validator.validate_map(&map)?;
+    /// println!("Map has {} validation issues", errors.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn validate_map(
+        &self,
+        map: &crate::domain::world::Map,
+    ) -> Result<Vec<ValidationError>, Box<dyn std::error::Error>> {
+        let mut errors = Vec::new();
+
+        // Validate map events
+        for (pos, event) in &map.events {
+            match event {
+                crate::domain::world::MapEvent::Encounter { monster_group } => {
+                    // Validate monster IDs
+                    for &monster_id in monster_group {
+                        if !self.db.monsters.has_monster(&(monster_id as MonsterId)) {
+                            errors.push(ValidationError::MissingMonster {
+                                map: map.id,
+                                monster_id: monster_id as MonsterId,
+                            });
+                        }
+                    }
+                }
+                crate::domain::world::MapEvent::Treasure { loot } => {
+                    // Validate item IDs
+                    for &item_id in loot {
+                        if !self.db.items.has_item(&(item_id as ItemId)) {
+                            errors.push(ValidationError::MissingItem {
+                                context: format!(
+                                    "Map {} treasure at ({}, {})",
+                                    map.id, pos.x, pos.y
+                                ),
+                                item_id: item_id as ItemId,
+                            });
+                        }
+                    }
+                }
+                crate::domain::world::MapEvent::Teleport {
+                    map_id,
+                    destination,
+                } => {
+                    // Validate destination map exists
+                    if !self.db.maps.has_map(map_id) {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Error,
+                            message: format!(
+                                "Map {} has teleport to non-existent map {} at ({}, {})",
+                                map.id, map_id, pos.x, pos.y
+                            ),
+                        });
+                    }
+
+                    // Check if destination is valid (we can't fully validate without loading the target map)
+                    let _ = destination; // Used in error message if needed
+                }
+                crate::domain::world::MapEvent::Trap { damage, .. } => {
+                    // Balance check for trap damage
+                    if *damage > 100 {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Warning,
+                            message: format!(
+                                "Map {} has high-damage trap ({} damage) at ({}, {})",
+                                map.id, damage, pos.x, pos.y
+                            ),
+                        });
+                    }
+                }
+                crate::domain::world::MapEvent::Sign { .. } => {
+                    // Signs are always valid
+                }
+                crate::domain::world::MapEvent::NpcDialogue { npc_id } => {
+                    // Validate NPC exists on this map
+                    if !map.npcs.iter().any(|npc| npc.id == *npc_id) {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Error,
+                            message: format!(
+                                "Map {} has NPC dialogue event for non-existent NPC {} at ({}, {})",
+                                map.id, npc_id, pos.x, pos.y
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Validate NPCs
+        for npc in &map.npcs {
+            // Check if NPC position is valid
+            if !map.is_valid_position(npc.position) {
+                errors.push(ValidationError::BalanceWarning {
+                    severity: Severity::Error,
+                    message: format!(
+                        "Map {} has NPC '{}' (ID {}) at invalid position ({}, {})",
+                        map.id, npc.name, npc.id, npc.position.x, npc.position.y
+                    ),
+                });
+            }
+        }
+
+        // Check for duplicate NPC IDs
+        let mut seen_npc_ids = std::collections::HashSet::new();
+        for npc in &map.npcs {
+            if !seen_npc_ids.insert(npc.id) {
+                errors.push(ValidationError::DuplicateId {
+                    entity_type: "NPC".to_string(),
+                    id: npc.id.to_string(),
+                });
+            }
+        }
+
+        // Balance checks
+        if map.events.len() > 1000 {
+            errors.push(ValidationError::BalanceWarning {
+                severity: Severity::Warning,
+                message: format!(
+                    "Map {} has {} events, which may cause performance issues",
+                    map.id,
+                    map.events.len()
+                ),
+            });
+        }
+
+        if map.npcs.len() > 100 {
+            errors.push(ValidationError::BalanceWarning {
+                severity: Severity::Warning,
+                message: format!(
+                    "Map {} has {} NPCs, which may cause performance issues",
+                    map.id,
+                    map.npcs.len()
+                ),
+            });
+        }
+
+        Ok(errors)
+    }
 }
 
 #[cfg(test)]

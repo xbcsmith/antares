@@ -173,6 +173,11 @@ impl SpellDatabase {
     pub fn count(&self) -> usize {
         self.spells.len()
     }
+
+    /// Checks if a spell exists in the database
+    pub fn has_spell(&self, id: &SpellId) -> bool {
+        self.spells.contains_key(id)
+    }
 }
 
 // ===== Monster System (Placeholder) =====
@@ -220,6 +225,11 @@ impl MonsterDatabase {
     pub fn count(&self) -> usize {
         self.monsters.len()
     }
+
+    /// Checks if a monster exists in the database
+    pub fn has_monster(&self, id: &MonsterId) -> bool {
+        self.monsters.contains_key(id)
+    }
 }
 
 // ===== Map Database =====
@@ -257,6 +267,11 @@ impl MapDatabase {
     /// Returns the number of maps
     pub fn count(&self) -> usize {
         self.maps.len()
+    }
+
+    /// Checks if a map exists in the database
+    pub fn has_map(&self, id: &MapId) -> bool {
+        self.maps.contains_key(id)
     }
 }
 

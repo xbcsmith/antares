@@ -253,6 +253,41 @@ impl ItemDatabase {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
+
+    /// Check if an item exists in the database
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::{ItemDatabase, Item, ItemType, WeaponData, Disablement};
+    /// use antares::domain::types::DiceRoll;
+    ///
+    /// let mut db = ItemDatabase::new();
+    /// let club = Item {
+    ///     id: 1,
+    ///     name: "Club".to_string(),
+    ///     item_type: ItemType::Weapon(WeaponData {
+    ///         damage: DiceRoll::new(1, 3, 0),
+    ///         bonus: 0,
+    ///         hands_required: 1,
+    ///     }),
+    ///     base_cost: 1,
+    ///     sell_cost: 0,
+    ///     disablements: Disablement::ALL,
+    ///     constant_bonus: None,
+    ///     temporary_bonus: None,
+    ///     spell_effect: None,
+    ///     max_charges: 0,
+    ///     is_cursed: false,
+    /// };
+    /// db.add_item(club).unwrap();
+    ///
+    /// assert!(db.has_item(&1));
+    /// assert!(!db.has_item(&99));
+    /// ```
+    pub fn has_item(&self, id: &ItemId) -> bool {
+        self.items.contains_key(id)
+    }
 }
 
 impl Default for ItemDatabase {
