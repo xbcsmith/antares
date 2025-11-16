@@ -1382,7 +1382,7 @@ fn main() -> Result<(), eframe::Error> {
 
 ---
 
-**Document Status**: Draft for Review  
-**Last Updated**: 2025-01-XX  
-**Author**: AI Development Agent  
+**Document Status**: Draft for Review
+**Last Updated**: 2025-01-XX
+**Author**: AI Development Agent
 **Approved By**: TBD
