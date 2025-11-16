@@ -43,17 +43,26 @@
 //! ```
 
 pub mod database;
+pub mod dialogue_editor;
 pub mod map_editor;
+pub mod quest_editor;
 pub mod serialization;
 pub mod templates;
 pub mod validation;
 
 // Re-export commonly used types
 pub use database::{ContentDatabase, ContentStats, DatabaseError};
+pub use dialogue_editor::{
+    analyze_dialogue, generate_dialogue_summary, validate_dialogue, DialogueStats,
+    DialogueValidationError,
+};
 pub use map_editor::{
     browse_items, browse_maps, browse_monsters, browse_spells, is_valid_item_id, is_valid_map_id,
     is_valid_monster_id, is_valid_spell_id, suggest_item_ids, suggest_map_ids, suggest_monster_ids,
     suggest_spell_ids, validate_map,
+};
+pub use quest_editor::{
+    generate_quest_summary, get_quest_dependencies, validate_quest, QuestValidationError,
 };
 pub use serialization::{format_ron, merge_ron_data, validate_ron_syntax, SerializationError};
 pub use templates::{basic_armor, basic_weapon, dungeon_map, town_map};

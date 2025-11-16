@@ -60,16 +60,16 @@ for (id, width, height) in maps {
 fn show_available_monsters(db: &ContentDatabase) {
     println!("╔═══ Available Monsters ═══╗");
     let monsters = browse_monsters(db);
-    
+
     if monsters.is_empty() {
         println!("No monsters found in database");
         return;
     }
-    
+
     for (id, name) in monsters.iter().take(20) {
         println!("  [{}] {}", id, name);
     }
-    
+
     if monsters.len() > 20 {
         println!("  ... and {} more", monsters.len() - 20);
     }
@@ -105,13 +105,13 @@ let map_ids = suggest_map_ids(&db, "dungeon");
 ```rust
 fn handle_monster_input(db: &ContentDatabase, user_input: &str) {
     let suggestions = suggest_monster_ids(db, user_input);
-    
+
     if suggestions.is_empty() {
         println!("💡 No monsters found matching '{}'", user_input);
         println!("Type 'browse monsters' to see all available monsters");
         return;
     }
-    
+
     println!("💡 Suggestions for '{}':", user_input);
     for (id, name) in suggestions {
         println!("  [{}] {}", id, name);
@@ -128,9 +128,9 @@ fn parse_encounter_command(db: &ContentDatabase, args: &[&str]) {
         println!("Usage: add encounter <monster_name_or_id>");
         return;
     }
-    
+
     let input = args[1];
-    
+
     // Try to parse as ID first
     if let Ok(monster_id) = input.parse::<u32>() {
         if is_valid_monster_id(db, monster_id) {
@@ -139,10 +139,10 @@ fn parse_encounter_command(db: &ContentDatabase, args: &[&str]) {
             return;
         }
     }
-    
+
     // Otherwise, suggest matches
     let suggestions = suggest_monster_ids(db, input);
-    
+
     if suggestions.len() == 1 {
         let (id, name) = &suggestions[0];
         println!("Adding encounter with {} [{}]", name, id);
@@ -169,23 +169,23 @@ use antares::sdk::validation::Severity;
 
 fn validate_and_report(db: &ContentDatabase, map: &Map) -> Result<bool, Box<dyn std::error::Error>> {
     let errors = validate_map(db, map)?;
-    
+
     if errors.is_empty() {
         println!("✅ Map {} is valid!", map.id);
         return Ok(true);
     }
-    
+
     // Count by severity
     let error_count = errors.iter().filter(|e| e.severity() == Severity::Error).count();
     let warning_count = errors.iter().filter(|e| e.severity() == Severity::Warning).count();
     let info_count = errors.iter().filter(|e| e.severity() == Severity::Info).count();
-    
+
     println!("\n╔═══ Validation Results ═══╗");
     println!("Errors:   {}", error_count);
     println!("Warnings: {}", warning_count);
     println!("Info:     {}", info_count);
     println!();
-    
+
     // Display all issues
     for error in &errors {
         let icon = match error.severity() {
@@ -195,7 +195,7 @@ fn validate_and_report(db: &ContentDatabase, map: &Map) -> Result<bool, Box<dyn 
         };
         println!("{} {}", icon, error);
     }
-    
+
     Ok(error_count == 0)
 }
 ```
@@ -211,15 +211,15 @@ fn add_encounter_safe(db: &ContentDatabase, map: &mut Map, monster_id: u32, x: i
         eprintln!("   Use 'browse monsters' or 'suggest monster <name>' to find valid IDs");
         return;
     }
-    
+
     // Add the encounter
     use antares::domain::world::MapEvent;
     use antares::domain::types::Position;
-    
+
     let event = MapEvent::Encounter {
         monster_group: vec![monster_id as u8],
     };
-    
+
     map.add_event(Position::new(x, y), event);
     println!("✅ Added encounter at ({}, {})", x, y);
 }
@@ -233,7 +233,7 @@ fn on_map_modified(db: &ContentDatabase, map: &Map) {
     match validate_map(db, map) {
         Ok(errors) => {
             let error_count = errors.iter().filter(|e| e.severity() == Severity::Error).count();
-            
+
             if error_count > 0 {
                 println!("⚠️  Map has {} validation errors", error_count);
                 // Show first error as hint
@@ -260,7 +260,7 @@ fn on_map_modified(db: &ContentDatabase, map: &Map) {
 ```rust
 fn process_command(db: &ContentDatabase, map: &mut Map, command: &str) {
     let parts: Vec<&str> = command.split_whitespace().collect();
-    
+
     match parts[0] {
         "browse" => {
             if parts.len() < 2 {
@@ -288,7 +288,7 @@ fn process_command(db: &ContentDatabase, map: &mut Map, command: &str) {
             }
             let category = parts[1];
             let partial = parts[2];
-            
+
             match category {
                 "monster" => {
                     for (id, name) in suggest_monster_ids(db, partial) {
@@ -323,7 +323,7 @@ struct AutocompleteWidget {
 impl AutocompleteWidget {
     fn on_text_changed(&mut self, new_text: &str, category: &str) {
         self.input_text = new_text.to_string();
-        
+
         // Update suggestions based on category
         self.suggestions = match category {
             "monster" => suggest_monster_ids(&self.db, new_text),
@@ -332,11 +332,11 @@ impl AutocompleteWidget {
             _ => Vec::new(),
         };
     }
-    
+
     fn render(&self) {
         // Render input box
         println!("Input: {}", self.input_text);
-        
+
         // Render suggestions dropdown
         if !self.suggestions.is_empty() {
             println!("Suggestions:");
@@ -354,9 +354,9 @@ impl AutocompleteWidget {
 fn save_map_with_validation(db: &ContentDatabase, map: &Map, path: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Validate before saving
     let errors = validate_map(db, map)?;
-    
+
     let has_errors = errors.iter().any(|e| e.severity() == Severity::Error);
-    
+
     if has_errors {
         println!("❌ Cannot save map with validation errors:");
         for error in errors.iter().filter(|e| e.severity() == Severity::Error) {
@@ -364,7 +364,7 @@ fn save_map_with_validation(db: &ContentDatabase, map: &Map, path: &str) -> Resu
         }
         return Err("Validation failed".into());
     }
-    
+
     // Show warnings but allow save
     let warnings: Vec<_> = errors.iter().filter(|e| e.severity() == Severity::Warning).collect();
     if !warnings.is_empty() {
@@ -373,11 +373,11 @@ fn save_map_with_validation(db: &ContentDatabase, map: &Map, path: &str) -> Resu
             println!("   {}", warning);
         }
     }
-    
+
     // Serialize and save
     let ron_string = ron::ser::to_string_pretty(map, ron::ser::PrettyConfig::default())?;
     std::fs::write(path, ron_string)?;
-    
+
     println!("✅ Saved map to {}", path);
     Ok(())
 }

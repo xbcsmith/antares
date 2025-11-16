@@ -31,7 +31,9 @@
 //! ```
 
 use crate::domain::classes::ClassDatabase;
+use crate::domain::dialogue::{DialogueId, DialogueTree};
 use crate::domain::items::ItemDatabase;
+use crate::domain::quest::{Quest, QuestId};
 use crate::domain::types::{MapId, MonsterId, SpellId};
 use crate::domain::world::Map;
 use serde::{Deserialize, Serialize};
@@ -58,6 +60,12 @@ pub enum DatabaseError {
 
     #[error("Failed to load spells: {0}")]
     SpellLoadError(String),
+
+    #[error("Failed to load quests: {0}")]
+    QuestLoadError(String),
+
+    #[error("Failed to load dialogues: {0}")]
+    DialogueLoadError(String),
 
     #[error("Failed to load map {map_id}: {error}")]
     MapLoadError { map_id: MapId, error: String },
@@ -275,6 +283,102 @@ impl MapDatabase {
     }
 }
 
+// ===== Quest Database =====
+
+/// Quest database for loading and managing quests
+#[derive(Debug, Clone, Default)]
+pub struct QuestDatabase {
+    quests: HashMap<QuestId, Quest>,
+}
+
+impl QuestDatabase {
+    /// Creates an empty quest database
+    pub fn new() -> Self {
+        Self {
+            quests: HashMap::new(),
+        }
+    }
+
+    /// Loads quests from a RON file
+    pub fn load_from_file<P: AsRef<Path>>(_path: P) -> Result<Self, DatabaseError> {
+        // Placeholder implementation - will load quests from RON file
+        Ok(Self::new())
+    }
+
+    /// Gets a quest by ID
+    pub fn get_quest(&self, id: QuestId) -> Option<&Quest> {
+        self.quests.get(&id)
+    }
+
+    /// Returns all quest IDs
+    pub fn all_quests(&self) -> Vec<QuestId> {
+        self.quests.keys().copied().collect()
+    }
+
+    /// Returns the number of quests
+    pub fn count(&self) -> usize {
+        self.quests.len()
+    }
+
+    /// Checks if a quest exists in the database
+    pub fn has_quest(&self, id: &QuestId) -> bool {
+        self.quests.contains_key(id)
+    }
+
+    /// Adds a quest to the database
+    pub fn add_quest(&mut self, quest: Quest) {
+        self.quests.insert(quest.id, quest);
+    }
+}
+
+// ===== Dialogue Database =====
+
+/// Dialogue database for loading and managing dialogue trees
+#[derive(Debug, Clone, Default)]
+pub struct DialogueDatabase {
+    dialogues: HashMap<DialogueId, DialogueTree>,
+}
+
+impl DialogueDatabase {
+    /// Creates an empty dialogue database
+    pub fn new() -> Self {
+        Self {
+            dialogues: HashMap::new(),
+        }
+    }
+
+    /// Loads dialogues from a RON file
+    pub fn load_from_file<P: AsRef<Path>>(_path: P) -> Result<Self, DatabaseError> {
+        // Placeholder implementation - will load dialogues from RON file
+        Ok(Self::new())
+    }
+
+    /// Gets a dialogue by ID
+    pub fn get_dialogue(&self, id: DialogueId) -> Option<&DialogueTree> {
+        self.dialogues.get(&id)
+    }
+
+    /// Returns all dialogue IDs
+    pub fn all_dialogues(&self) -> Vec<DialogueId> {
+        self.dialogues.keys().copied().collect()
+    }
+
+    /// Returns the number of dialogues
+    pub fn count(&self) -> usize {
+        self.dialogues.len()
+    }
+
+    /// Checks if a dialogue exists in the database
+    pub fn has_dialogue(&self, id: &DialogueId) -> bool {
+        self.dialogues.contains_key(id)
+    }
+
+    /// Adds a dialogue to the database
+    pub fn add_dialogue(&mut self, dialogue: DialogueTree) {
+        self.dialogues.insert(dialogue.id, dialogue);
+    }
+}
+
 // ===== Content Database =====
 
 /// Unified content database containing all game content
@@ -324,6 +428,12 @@ pub struct ContentDatabase {
 
     /// Map definitions database
     pub maps: MapDatabase,
+
+    /// Quest definitions database
+    pub quests: QuestDatabase,
+
+    /// Dialogue definitions database
+    pub dialogues: DialogueDatabase,
 }
 
 impl ContentDatabase {
@@ -345,6 +455,8 @@ impl ContentDatabase {
             monsters: MonsterDatabase::new(),
             spells: SpellDatabase::new(),
             maps: MapDatabase::new(),
+            quests: QuestDatabase::new(),
+            dialogues: DialogueDatabase::new(),
         }
     }
 
@@ -359,6 +471,8 @@ impl ContentDatabase {
     /// │   ├── items.ron
     /// │   ├── monsters.ron
     /// │   ├── spells.ron
+    /// │   ├── quests.ron
+    /// │   ├── dialogues.ron
     /// │   └── maps/
     /// │       ├── map001.ron
     /// │       └── map002.ron
@@ -443,6 +557,20 @@ impl ContentDatabase {
             MapDatabase::new()
         };
 
+        // Load quests
+        let quests = if data_dir.join("quests.ron").exists() {
+            QuestDatabase::load_from_file(data_dir.join("quests.ron"))?
+        } else {
+            QuestDatabase::new()
+        };
+
+        // Load dialogues
+        let dialogues = if data_dir.join("dialogues.ron").exists() {
+            DialogueDatabase::load_from_file(data_dir.join("dialogues.ron"))?
+        } else {
+            DialogueDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -450,6 +578,8 @@ impl ContentDatabase {
             monsters,
             spells,
             maps,
+            quests,
+            dialogues,
         })
     }
 
@@ -519,6 +649,20 @@ impl ContentDatabase {
             MapDatabase::new()
         };
 
+        // Load quests
+        let quests = if data_path.join("quests.ron").exists() {
+            QuestDatabase::load_from_file(data_path.join("quests.ron"))?
+        } else {
+            QuestDatabase::new()
+        };
+
+        // Load dialogues
+        let dialogues = if data_path.join("dialogues.ron").exists() {
+            DialogueDatabase::load_from_file(data_path.join("dialogues.ron"))?
+        } else {
+            DialogueDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -526,6 +670,8 @@ impl ContentDatabase {
             monsters,
             spells,
             maps,
+            quests,
+            dialogues,
         })
     }
 
@@ -578,6 +724,8 @@ impl ContentDatabase {
             monster_count: self.monsters.count(),
             spell_count: self.spells.count(),
             map_count: self.maps.count(),
+            quest_count: self.quests.count(),
+            dialogue_count: self.dialogues.count(),
         }
     }
 }
@@ -623,6 +771,12 @@ pub struct ContentStats {
 
     /// Number of map definitions
     pub map_count: usize,
+
+    /// Number of quest definitions
+    pub quest_count: usize,
+
+    /// Number of dialogue definitions
+    pub dialogue_count: usize,
 }
 
 impl ContentStats {
@@ -640,9 +794,11 @@ impl ContentStats {
     ///     monster_count: 50,
     ///     spell_count: 40,
     ///     map_count: 10,
+    ///     quest_count: 20,
+    ///     dialogue_count: 15,
     /// };
     ///
-    /// assert_eq!(stats.total(), 211);
+    /// assert_eq!(stats.total(), 246);
     /// ```
     pub fn total(&self) -> usize {
         self.class_count
@@ -651,6 +807,8 @@ impl ContentStats {
             + self.monster_count
             + self.spell_count
             + self.map_count
+            + self.quest_count
+            + self.dialogue_count
     }
 }
 
@@ -681,9 +839,11 @@ mod tests {
             monster_count: 50,
             spell_count: 40,
             map_count: 10,
+            quest_count: 20,
+            dialogue_count: 15,
         };
 
-        assert_eq!(stats.total(), 211);
+        assert_eq!(stats.total(), 246);
     }
 
     #[test]

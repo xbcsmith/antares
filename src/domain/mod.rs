@@ -18,13 +18,17 @@
 pub mod character;
 pub mod classes;
 pub mod combat;
+pub mod dialogue;
 pub mod items;
 pub mod magic;
 pub mod progression;
+pub mod quest;
 pub mod resources;
 pub mod types;
 pub mod world;
 
 // Re-export commonly used types from submodules
+pub use dialogue::{DialogueId, NodeId};
+pub use quest::QuestId;
 pub use types::{CharacterId, EventId, ItemId, MapId, MonsterId, SpellId, TownId};
 pub use types::{DiceRoll, Direction, GameTime, Position};
