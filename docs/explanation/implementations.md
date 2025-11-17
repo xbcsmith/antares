@@ -5,6 +5,194 @@ is updated after each phase or major feature completion.
 
 ---
 
+## Phase 11: Campaign Builder GUI - Map Editor Integration (COMPLETED)
+
+**Date Completed**: 2025-01-26
+**Status**: ✅ Visual map editor integrated into Campaign Builder
+
+### Overview
+
+Phase 11 integrates a comprehensive visual map editor into the Campaign Builder GUI. This eliminates the need for external tools and provides a seamless workflow for creating and editing game maps directly within the campaign authoring environment.
+
+### Components Implemented
+
+#### 11.1: Map Editor Component Architecture
+
+**File Created**: `sdk/campaign_builder/src/map_editor.rs` (1476 lines)
+
+Embeddable egui-based map editor with clean separation of concerns:
+
+**Key Structures**:
+
+- `MapEditorState` - Pure state management (no UI dependencies)
+- `MapEditorWidget` - egui rendering component
+- `MapGridWidget` - Visual tile grid display
+- `UndoStack` - Undo/redo action history
+- `EventEditorState` - Event placement and editing
+- `NpcEditorState` - NPC placement and dialogue
+
+**Features**:
+
+- Visual tile editing with color-coded terrain types
+- Interactive tool palette (select, paint, events, NPCs, erase)
+- Full undo/redo support for all operations
+- Real-time validation feedback
+- RON serialization for map persistence
+
+#### 11.2: Map List View Integration
+
+**File Modified**: `sdk/campaign_builder/src/main.rs`
+
+Integrated map management into Campaign Builder:
+
+**Key Changes**:
+
+- Added `maps: Vec<Map>` to campaign state
+- Added `maps_editor_mode: EditorMode` for mode switching
+- Added `map_editor_state: Option<MapEditorState>` for active editing
+- Implemented `load_maps()` - loads all `.ron` files from `maps/` directory
+- Implemented `save_map()` - saves individual maps as `map_{id}.ron`
+- Replaced placeholder `show_maps_editor()` with full implementation
+
+**Features**:
+
+- Map list view with search/filter
+- Mini preview for each map (shows tiles, events, NPCs)
+- Create new map button (auto-increments ID)
+- Edit/delete buttons per map
+- Seamless transition between list and editor views
+
+#### 11.3: Map Preview Panel
+
+Visual preview rendering in list view:
+
+**Features**:
+
+- Small thumbnail (8x8 pixels per tile)
+- Color-coded display (blocked tiles, events, NPCs)
+- Scales to fit preview area (max 240x160)
+- Updates when map is selected
+
+#### 11.4: Event Editor Improvements
+
+Comprehensive event placement and editing:
+
+**Supported Event Types**:
+
+1. **Encounter** - Monster group IDs (comma-separated)
+2. **Treasure** - Item IDs for loot
+3. **Teleport** - Destination map ID and position
+4. **Trap** - Damage amount and status effect
+5. **Sign** - Text message displayed to player
+6. **NPC Dialogue** - Triggers dialogue by NPC ID
+
+**Visual Features**:
+
+- Events highlighted in red on map grid
+- Event type palette with icons
+- Property editor panel for selected event
+- Validation prevents events on blocked tiles
+
+#### 11.5: Additional Features
+
+**Tool Palette**:
+
+- 🔍 Select - Inspect tiles and entities
+- 🎨 Paint Terrain - 9 terrain types (ground, grass, water, stone, forest, etc.)
+- 🧱 Paint Wall - 4 wall types (none, normal, door, torch)
+- ⚡ Place Event - 6 event types
+- 👤 Place NPC - Character placement with dialogue
+- 🪣 Fill Region - Bucket fill tool
+- 🧹 Erase - Reset tiles to default
+
+**Undo/Redo System**:
+
+- Complete action history for tile changes, events, NPCs
+- Undo button (↩) and Redo button (↪)
+- Actions store enough data to reverse or replay operations
+
+**Inspector Panel**:
+
+- Shows selected tile details (terrain, wall, blocked status)
+- Displays event details at selected position
+- Shows NPC information
+- Map statistics (event count, NPC count)
+- Validation error display
+
+### Testing
+
+**Unit Tests**: 18 tests in `map_editor.rs`
+
+- State management (creation, tile changes, undo/redo)
+- Paint operations (terrain, walls, fill region)
+- Event/NPC management (add, remove)
+- Validation (blocked tile checks)
+- Serialization (save to RON)
+
+**Integration Tests**:
+
+- Map lifecycle (create → edit → save → load)
+- Data persistence (events, NPCs preserved across save/load)
+- Multiple maps in single campaign
+
+**Quality Gates**:
+
+```bash
+✅ cargo fmt --all
+✅ cargo check --all-targets --all-features
+✅ cargo clippy --all-targets --all-features -- -D warnings
+✅ cargo test --all-features (212 tests passed)
+```
+
+### User Workflow
+
+**Creating a New Map**:
+
+1. Click "New Map" in list view
+2. Empty 20x20 map created with auto-incremented ID
+3. Select terrain/wall tools from palette
+4. Paint tiles on grid
+5. Add events and NPCs
+6. Save map (creates `map_{id}.ron`)
+
+**Editing Existing Maps**:
+
+1. Select map from list
+2. Click "Edit" button
+3. Make changes using tools
+4. Use undo/redo as needed
+5. Save changes
+6. Return to list view
+
+### Architecture Compliance
+
+✅ **Uses existing domain types**: `Map`, `Tile`, `TerrainType`, `WallType`, `MapEvent`, `Npc`, `Position`
+✅ **No core struct modifications**: Extended metadata stored separately in `MapMetadata`
+✅ **RON format**: Maps saved as `.ron` files per project standards
+✅ **Type aliases**: Uses `MapId` (not raw `u32`)
+✅ **Module placement**: GUI tool in `sdk/campaign_builder/`, not in core domain
+
+### Files Modified/Created
+
+**New Files**:
+
+- `sdk/campaign_builder/src/map_editor.rs` (1476 lines)
+- `docs/explanation/phase11_map_editor_integration_implementation.md`
+
+**Modified Files**:
+
+- `sdk/campaign_builder/src/main.rs` (added map editor module, state, methods)
+
+### Future Enhancements
+
+- Quest integration (link events to quest objectives)
+- Enhanced previews (isometric, first-person simulation)
+- Templates (pre-made rooms, dungeon patterns)
+- Advanced tools (pathfinding visualization, encounter balance)
+- Multi-layer maps (underground levels, second floors)
+
+---
+
 ## Phase 14: Game Engine Campaign Integration (COMPLETED)
 
 **Date Completed**: 2025
