@@ -25,15 +25,15 @@ use antares::sdk::cache::{ContentCache, CacheConfig};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Load shared configuration
     let config = ToolConfig::load_or_default()?;
-    
+
     // 2. Create error formatter using config settings
     let formatter = ErrorFormatter::new(config.display.color);
-    
+
     // 3. Create cache for performance
     let mut cache = ContentCache::new(CacheConfig::default());
-    
+
     // 4. Use in your tool...
-    
+
     Ok(())
 }
 ```
@@ -57,7 +57,7 @@ use clap::Parser;
 #[derive(Parser)]
 struct Args {
     // Your existing args...
-    
+
     /// Override config file path
     #[arg(long)]
     config: Option<PathBuf>,
@@ -65,18 +65,18 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    
+
     // Load configuration
     let config = if let Some(config_path) = args.config {
         ToolConfig::load_from_file(&config_path)?
     } else {
         ToolConfig::load_or_default()?
     };
-    
+
     // Use configuration
     let verbose = config.display.verbose;
     let data_dir = config.get_data_dir();
-    
+
     Ok(())
 }
 ```
@@ -229,7 +229,7 @@ match validate_campaign(path) {
                 line_number: None,
                 available_ids: vec![],
             };
-            
+
             let formatted = formatter.format_validation_error(&error, Some(&context));
             eprintln!("{}", formatted);
         }
@@ -270,7 +270,7 @@ let validation_errors = validator.validate_all()?;
 if !validation_errors.is_empty() {
     let report = formatter.format_error_report(&validation_errors);
     eprintln!("{}", report);
-    
+
     std::process::exit(1);
 }
 ```
@@ -366,7 +366,7 @@ if config.display.verbose {
     println!("Cache statistics:");
     println!("  Entries: {}", stats.memory_entries);
     println!("  Total accesses: {}", stats.total_accesses);
-    
+
     // Calculate hit rate if you track total requests
     let total_requests = /* your tracking */;
     println!("  Hit rate: {:.1}%", stats.hit_rate(total_requests) * 100.0);
@@ -435,7 +435,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Load configuration
     let mut config = ToolConfig::load_or_default()?;
-    
+
     // Apply command-line overrides
     if args.verbose {
         config.display.verbose = true;
@@ -457,7 +457,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if config.display.verbose {
                 println!("Using cached validation results");
             }
-            
+
             if cached_errors.is_empty() {
                 println!("✓ Campaign is valid (cached)");
                 return Ok(());
@@ -482,7 +482,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if config.display.verbose {
         let stats = db.stats();
-        println!("  Loaded {} classes, {} items, {} maps", 
+        println!("  Loaded {} classes, {} items, {} maps",
                  stats.class_count, stats.item_count, stats.map_count);
     }
 
@@ -493,18 +493,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 6. Format and display errors
     if validation_errors.is_empty() {
         progress.success("Validation complete - no errors!");
-        
+
         // Cache the result
         val_cache.put(campaign_key, Vec::new());
-        
+
         // Update recent files
         config.add_recent_file(args.campaign.clone());
         config.save()?;
-        
+
         Ok(())
     } else {
         progress.error(&format!("Found {} errors", validation_errors.len()));
-        
+
         // Filter by severity if not in strict mode
         let errors_to_show = if config.validation.strict_mode {
             validation_errors
@@ -521,7 +521,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 line_number: None,
                 available_ids: vec![],  // Could be populated from db
             };
-            
+
             let formatted = formatter.format_validation_error(error, Some(&context));
             eprintln!("{}", formatted);
         }
@@ -666,17 +666,17 @@ where
 {
     // Try cache first
     // (Note: Current ContentCache API is limited; this shows the pattern)
-    
+
     if config.display.verbose {
         println!("Loading {}...", path.display());
     }
-    
+
     let data = loader(path)?;
-    
+
     if config.display.verbose {
         println!("Loaded successfully");
     }
-    
+
     Ok(data)
 }
 ```

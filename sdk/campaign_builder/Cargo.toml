@@ -7,6 +7,7 @@ description = "Campaign Builder - Visual editor for creating Antares campaigns"
 license = "MIT"
 
 [dependencies]
+antares = { path = "../.." }
 eframe = { version = "0.29", default-features = false, features = [
     "glow",              # OpenGL backend (most compatible, works without GPU)
     "default_fonts",     # Built-in fonts

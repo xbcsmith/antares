@@ -1,7 +1,7 @@
 # Antares SDK Phase 9: Integration and Polish - Release Notes
 
-**Version:** Phase 9 Complete  
-**Release Date:** 2025  
+**Version:** Phase 9 Complete
+**Release Date:** 2025
 **Status:** Production Ready
 
 ---
@@ -509,8 +509,8 @@ Phase 9 delivers on the promise of a professional, integrated SDK for Antares ca
 
 ---
 
-**Version:** Phase 9 Complete  
-**Status:** Production Ready  
+**Version:** Phase 9 Complete
+**Status:** Production Ready
 **Date:** 2025
 
 Happy campaign creating with the Antares SDK!
