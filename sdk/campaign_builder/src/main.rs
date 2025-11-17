@@ -11,6 +11,8 @@
 //! - Placeholder list views for Items, Spells, Monsters, Maps, Quests
 //! - Unsaved changes tracking and warnings
 
+mod map_editor;
+
 use antares::domain::character::Stats;
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterResistances};
@@ -18,7 +20,9 @@ use antares::domain::combat::types::{Attack, AttackType};
 use antares::domain::items::types::{Disablement, Item, ItemType, WeaponData};
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
 use antares::domain::types::DiceRoll;
+use antares::domain::world::Map;
 use eframe::egui;
+use map_editor::{MapEditorState, MapEditorWidget};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -249,6 +253,13 @@ struct CampaignBuilderApp {
     monsters_selected: Option<usize>,
     monsters_editor_mode: EditorMode,
     monsters_edit_buffer: MonsterDefinition,
+
+    // Map editor state
+    maps: Vec<Map>,
+    maps_search: String,
+    maps_selected: Option<usize>,
+    maps_editor_mode: EditorMode,
+    map_editor_state: Option<MapEditorState>,
 }
 
 #[derive(Debug, Clone)]
@@ -300,6 +311,13 @@ impl Default for CampaignBuilderApp {
             monsters_selected: None,
             monsters_editor_mode: EditorMode::List,
             monsters_edit_buffer: Self::default_monster(),
+
+            // Map editor state
+            maps: Vec::new(),
+            maps_search: String::new(),
+            maps_selected: None,
+            maps_editor_mode: EditorMode::List,
+            map_editor_state: None,
         }
     }
 }
@@ -497,6 +515,86 @@ impl CampaignBuilderApp {
 
             fs::write(&monsters_path, contents)
                 .map_err(|e| format!("Failed to write monsters file: {}", e))?;
+
+            self.unsaved_changes = true;
+            Ok(())
+        } else {
+            Err("No campaign directory set".to_string())
+        }
+    }
+
+    /// Load maps from the maps directory
+    fn load_maps(&mut self) {
+        self.maps.clear();
+
+        if let Some(ref dir) = self.campaign_dir {
+            let maps_dir = dir.join(&self.campaign.maps_dir);
+
+            if maps_dir.exists() && maps_dir.is_dir() {
+                match fs::read_dir(&maps_dir) {
+                    Ok(entries) => {
+                        let mut loaded_count = 0;
+                        for entry in entries.filter_map(|e| e.ok()) {
+                            let path = entry.path();
+                            if path.extension().and_then(|s| s.to_str()) == Some("ron") {
+                                match fs::read_to_string(&path) {
+                                    Ok(contents) => match ron::from_str::<Map>(&contents) {
+                                        Ok(map) => {
+                                            self.maps.push(map);
+                                            loaded_count += 1;
+                                        }
+                                        Err(e) => {
+                                            self.status_message = format!(
+                                                "Failed to parse map {:?}: {}",
+                                                path.file_name().unwrap_or_default(),
+                                                e
+                                            );
+                                        }
+                                    },
+                                    Err(e) => {
+                                        self.status_message = format!(
+                                            "Failed to read map {:?}: {}",
+                                            path.file_name().unwrap_or_default(),
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        if loaded_count > 0 {
+                            self.status_message = format!("Loaded {} maps", loaded_count);
+                        }
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to read maps directory: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Save a map to RON file
+    fn save_map(&mut self, map: &Map) -> Result<(), String> {
+        if let Some(ref dir) = self.campaign_dir {
+            let maps_dir = dir.join(&self.campaign.maps_dir);
+
+            // Create maps directory if it doesn't exist
+            fs::create_dir_all(&maps_dir)
+                .map_err(|e| format!("Failed to create maps directory: {}", e))?;
+
+            let map_filename = format!("map_{}.ron", map.id);
+            let map_path = maps_dir.join(map_filename);
+
+            let ron_config = ron::ser::PrettyConfig::new()
+                .struct_names(false)
+                .enumerate_arrays(false);
+
+            let contents = ron::ser::to_string_pretty(map, ron_config)
+                .map_err(|e| format!("Failed to serialize map: {}", e))?;
+
+            fs::write(&map_path, contents)
+                .map_err(|e| format!("Failed to write map file: {}", e))?;
 
             self.unsaved_changes = true;
             Ok(())
@@ -741,6 +839,7 @@ impl CampaignBuilderApp {
                     self.load_items();
                     self.load_spells();
                     self.load_monsters();
+                    self.load_maps();
 
                     self.unsaved_changes = false;
                     self.status_message = format!("Opened campaign from: {}", path.display());
@@ -2148,8 +2247,16 @@ impl CampaignBuilderApp {
         });
     }
 
-    /// Show maps editor (placeholder with list view)
-    fn show_maps_editor(&self, ui: &mut egui::Ui) {
+    /// Show maps editor with integrated map editor
+    fn show_maps_editor(&mut self, ui: &mut egui::Ui) {
+        match self.maps_editor_mode {
+            EditorMode::List => self.show_maps_list(ui),
+            EditorMode::Add | EditorMode::Edit => self.show_map_editor_panel(ui),
+        }
+    }
+
+    /// Show maps list view
+    fn show_maps_list(&mut self, ui: &mut egui::Ui) {
         ui.heading("🗺️ Maps Editor");
         ui.add_space(5.0);
         ui.label("Manage world maps and dungeons");
@@ -2157,30 +2264,257 @@ impl CampaignBuilderApp {
 
         ui.horizontal(|ui| {
             ui.label("🔍 Search:");
-            ui.text_edit_singleline(&mut String::new());
+            ui.text_edit_singleline(&mut self.maps_search);
             ui.separator();
-            if ui.button("➕ Add Map").clicked() {
-                // Will be implemented in Phase 4
+
+            if ui.button("➕ New Map").clicked() {
+                // Create a new empty map
+                let new_id = self.maps.iter().map(|m| m.id).max().unwrap_or(0) + 1;
+                let new_map = Map::new(new_id, 20, 20);
+                self.maps.push(new_map.clone());
+                self.maps_selected = Some(self.maps.len() - 1);
+                self.map_editor_state = Some(MapEditorState::new(new_map));
+                self.maps_editor_mode = EditorMode::Add;
+            }
+
+            if ui.button("🔄 Reload").clicked() {
+                self.load_maps();
             }
         });
 
         ui.separator();
 
+        // Map list with previews
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.group(|ui| {
-                ui.label("📋 Map List (Placeholder)");
-                ui.separator();
-                ui.label("No maps loaded. Maps will be loaded from:");
-                ui.monospace(&self.campaign.maps_dir);
-                ui.add_space(10.0);
-                ui.label("Phase 4 will integrate:");
-                ui.label("  • Launch map_builder tool");
-                ui.label("  • Load existing maps");
-                ui.label("  • Map preview");
-                ui.label("  • Event editor integration");
-                ui.label("  • Interconnection management");
-            });
+            if self.maps.is_empty() {
+                ui.group(|ui| {
+                    ui.label("No maps found");
+                    ui.label("Create a new map or load maps from:");
+                    ui.monospace(&self.campaign.maps_dir);
+                });
+            } else {
+                let mut to_delete = None;
+                let mut to_edit = None;
+
+                for (idx, map) in self.maps.iter().enumerate() {
+                    let filter_match = self.maps_search.is_empty()
+                        || map.id.to_string().contains(&self.maps_search);
+
+                    if !filter_match {
+                        continue;
+                    }
+
+                    let is_selected = self.maps_selected == Some(idx);
+
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.set_min_width(ui.available_width());
+
+                            ui.vertical(|ui| {
+                                ui.strong(format!("Map ID: {}", map.id));
+                                ui.label(format!("Size: {}x{}", map.width, map.height));
+                                ui.label(format!("Events: {}", map.events.len()));
+                                ui.label(format!("NPCs: {}", map.npcs.len()));
+                            });
+
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.button("🗑").on_hover_text("Delete map").clicked() {
+                                        to_delete = Some(idx);
+                                    }
+
+                                    if ui.button("✏️").on_hover_text("Edit map").clicked() {
+                                        to_edit = Some(idx);
+                                    }
+                                },
+                            );
+                        });
+
+                        // Show mini preview
+                        if is_selected {
+                            ui.separator();
+                            ui.label("Preview:");
+                            self.show_map_preview(ui, map);
+                        }
+                    });
+
+                    ui.add_space(5.0);
+                }
+
+                // Handle actions after iteration
+                if let Some(idx) = to_delete {
+                    self.maps.remove(idx);
+                    if self.maps_selected == Some(idx) {
+                        self.maps_selected = None;
+                    }
+                }
+
+                if let Some(idx) = to_edit {
+                    if let Some(map) = self.maps.get(idx) {
+                        self.maps_selected = Some(idx);
+                        self.map_editor_state = Some(MapEditorState::new(map.clone()));
+                        self.maps_editor_mode = EditorMode::Edit;
+                    }
+                }
+            }
         });
+    }
+
+    /// Show map editor panel
+    fn show_map_editor_panel(&mut self, ui: &mut egui::Ui) {
+        let mut back_clicked = false;
+        let mut save_clicked = false;
+
+        if let Some(ref mut editor_state) = self.map_editor_state {
+            ui.horizontal(|ui| {
+                if ui.button("← Back to List").clicked() {
+                    back_clicked = true;
+                }
+
+                ui.separator();
+
+                if ui
+                    .button("💾 Save")
+                    .on_hover_text("Save map to file")
+                    .clicked()
+                {
+                    save_clicked = true;
+                }
+            });
+
+            ui.separator();
+
+            // Show the map editor widget
+            let mut widget = MapEditorWidget::new(editor_state);
+            widget.show(ui);
+        } else {
+            ui.label("No map editor state available");
+            if ui.button("Back").clicked() {
+                self.maps_editor_mode = EditorMode::List;
+            }
+            return;
+        }
+
+        // Handle actions after borrowing editor_state
+        if back_clicked {
+            // Extract data we need before any mutable borrows
+            let (map_to_save, has_changes, selected_idx) =
+                if let Some(ref editor_state) = self.map_editor_state {
+                    (
+                        Some(editor_state.map.clone()),
+                        editor_state.has_changes,
+                        self.maps_selected,
+                    )
+                } else {
+                    (None, false, None)
+                };
+
+            if has_changes {
+                if let Some(map) = map_to_save {
+                    // Save map before going back
+                    if let Err(e) = self.save_map(&map) {
+                        self.status_message = format!("Failed to save map: {}", e);
+                    } else {
+                        // Update the map in the list
+                        if let Some(idx) = selected_idx {
+                            if idx < self.maps.len() {
+                                self.maps[idx] = map;
+                            }
+                        }
+                        self.status_message = "Map saved".to_string();
+                    }
+                }
+            }
+
+            self.maps_editor_mode = EditorMode::List;
+            self.map_editor_state = None;
+        }
+
+        if save_clicked {
+            // Extract data we need before any mutable borrows
+            let (map_to_save, selected_idx) = if let Some(ref editor_state) = self.map_editor_state
+            {
+                (Some(editor_state.map.clone()), self.maps_selected)
+            } else {
+                (None, None)
+            };
+
+            if let Some(map) = map_to_save {
+                match self.save_map(&map) {
+                    Ok(_) => {
+                        // Update the map in the list
+                        if let Some(idx) = selected_idx {
+                            if idx < self.maps.len() {
+                                self.maps[idx] = map;
+                            }
+                        }
+
+                        // Now we can safely borrow mutably to update the state
+                        if let Some(ref mut editor_state) = self.map_editor_state {
+                            editor_state.has_changes = false;
+                        }
+
+                        self.status_message = "Map saved successfully".to_string();
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to save map: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Show a small preview of a map
+    fn show_map_preview(&self, ui: &mut egui::Ui, map: &Map) {
+        let tile_size = 8.0;
+        let preview_width = (map.width.min(30) as f32 * tile_size).min(240.0);
+        let preview_height = (map.height.min(20) as f32 * tile_size).min(160.0);
+
+        let (response, painter) = ui.allocate_painter(
+            egui::Vec2::new(preview_width, preview_height),
+            egui::Sense::hover(),
+        );
+
+        let rect = response.rect;
+
+        let scale_x = preview_width / (map.width as f32 * tile_size);
+        let scale_y = preview_height / (map.height as f32 * tile_size);
+        let scale = scale_x.min(scale_y);
+
+        let actual_tile_size = tile_size * scale;
+
+        // Draw a simplified view of the map
+        for y in 0..map.height.min(20) {
+            for x in 0..map.width.min(30) {
+                let pos = antares::domain::types::Position::new(x as i32, y as i32);
+                if let Some(tile) = map.get_tile(pos) {
+                    let has_event = map.events.contains_key(&pos);
+                    let has_npc = map.npcs.iter().any(|npc| npc.position == pos);
+
+                    let color = if has_event {
+                        egui::Color32::RED
+                    } else if has_npc {
+                        egui::Color32::YELLOW
+                    } else if tile.blocked {
+                        egui::Color32::DARK_GRAY
+                    } else {
+                        egui::Color32::LIGHT_GRAY
+                    };
+
+                    let tile_rect = egui::Rect::from_min_size(
+                        rect.min
+                            + egui::Vec2::new(
+                                x as f32 * actual_tile_size,
+                                y as f32 * actual_tile_size,
+                            ),
+                        egui::Vec2::new(actual_tile_size, actual_tile_size),
+                    );
+
+                    painter.rect_filled(tile_rect, 0.0, color);
+                }
+            }
+        }
     }
 
     /// Show quests editor (placeholder with list view)
