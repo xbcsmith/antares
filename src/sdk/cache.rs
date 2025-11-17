@@ -233,7 +233,7 @@ impl ContentCache {
             .map_err(|e| CacheError::HashError(e.to_string()))?;
 
         // Simple hash based on size and modified time
-        let hash = (metadata.len() as u64).wrapping_mul(31).wrapping_add(
+        let hash = metadata.len().wrapping_mul(31).wrapping_add(
             modified
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map_err(|e| CacheError::HashError(e.to_string()))?
@@ -365,7 +365,10 @@ mod tests {
     fn test_cache_entry_expiration() {
         let entry = CacheEntry::new("data".to_string(), 12345);
         assert!(!entry.is_expired(Duration::from_secs(3600)));
-        assert!(entry.is_expired(Duration::from_nanos(1)));
+
+        // Sleep to ensure time has passed
+        std::thread::sleep(Duration::from_millis(10));
+        assert!(entry.is_expired(Duration::from_millis(1)));
     }
 
     #[test]

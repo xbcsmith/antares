@@ -22,32 +22,79 @@ This plan outlines the development of the Antares SDK - a comprehensive toolset 
 
 ### Existing Infrastructure
 
-**✅ Already Data-Driven:**
+**✅ SDK Backend Complete (Phases 0-3, 8-9):**
 
+- `src/sdk/campaign_loader.rs` - Campaign loading system with metadata and validation
+- `src/sdk/campaign_packager.rs` - Campaign packaging and distribution
+- `src/sdk/database.rs` - Unified content database (items, spells, monsters, classes, races, quests, dialogue)
+- `src/sdk/validation.rs` - Cross-reference validation and balance checking
+- `src/sdk/serialization.rs` - RON format helpers
+- `src/sdk/templates.rs` - Content templates for quick creation
+- `src/sdk/quest_editor.rs` - Quest validation and analysis helpers
+- `src/sdk/dialogue_editor.rs` - Dialogue tree validation helpers
+- `src/sdk/map_editor.rs` - Map validation and content browsing
+- `src/sdk/error_formatter.rs` - Enhanced error messages with suggestions
+- `src/sdk/cache.rs` - Performance optimization caching
+- `src/sdk/tool_config.rs` - Shared configuration for SDK tools
 - `data/items.ron` - Item database with `ItemDatabase` loader
 - `data/monsters.ron` - Monster definitions (planned)
 - `data/spells.ron` - Spell definitions (planned)
 - `data/maps/*.ron` - Map system (in progress via Map Content Plan)
 
-**❌ Code-Driven (Needs Migration):**
+**✅ Domain Layer Complete:**
 
-- Character classes - hardcoded `enum Class` in `src/domain/character.rs`
-- Character races - hardcoded `enum Race` in `src/domain/character.rs`
-- Class-specific game logic - HP dice, spell access, item restrictions
+- `src/domain/quest.rs` - Complete quest system with stages, objectives, conditions, rewards
+- `src/domain/dialogue.rs` - Complete dialogue system with trees, nodes, choices, conditions
+- `src/domain/classes.rs` - Data-driven class system
+- `src/domain/character.rs` - Character system with quest flags
+- `src/domain/items/` - Item system with types and effects
+- `src/domain/combat/` - Combat mechanics
+- `src/domain/magic/` - Spell system
+- `src/domain/world/` - World and map structures
+
+**✅ Campaign Builder GUI - Phase 2 Complete:**
+
+- `sdk/campaign_builder/` - egui-based GUI application
+  - ✅ Phase 0: Framework validation (egui confirmed, works without GPU)
+  - ✅ Phase 1: Core campaign system backend
+  - ✅ Phase 2: Foundation UI (metadata editor, validation, file I/O, unsaved changes tracking)
+  - ❌ Phase 3: Data Editors (Items, Spells, Monsters) - **PLACEHOLDER ONLY**
+  - ❌ Phase 4: Map Editor Integration - **NOT STARTED**
+  - ❌ Phase 5: Quest & Dialogue Tools - **NOT STARTED**
+  - ❌ Phase 6: Testing & Distribution - **NOT STARTED**
+
+**✅ Documentation Complete (Phase 8):**
+
+- `docs/reference/sdk_api.md` - Complete SDK API reference
+- `docs/tutorials/creating_campaigns.md` - Campaign creation guide
+- `docs/how-to/using_sdk_tools.md` - Tool usage guides
+- `campaigns/tutorial/` - Complete example campaign
+- `docs/explanation/modding_guide.md` - Comprehensive modding guide
+
+**❌ Critical Gaps Remaining:**
+
+- **Campaign Builder GUI Phase 3**: Data editors are placeholders (no CRUD for items/spells/monsters)
+- **Campaign Builder GUI Phase 4**: Map editor not integrated into GUI
+- **Campaign Builder GUI Phase 5**: Quest designer and dialogue tree editor missing
+- **Campaign Builder GUI Phase 6**: Campaign packager, test play, asset manager not integrated
+- **Game Engine Integration**: `GameState` lacks campaign support, game can't load/play campaigns
+- **CLI Tools Status**: Class/Race/Item editors from phases 5-7 unclear if implemented
 
 **🔧 Existing Patterns to Leverage:**
 
 - `ItemDatabase` - proven pattern for loading/querying RON data
 - RON serialization infrastructure - serde + ron crate already integrated
 - Type aliases - `ItemId`, `SpellId`, `MonsterId` provide abstraction layer
+- SDK helper modules - `quest_editor`, `dialogue_editor`, `map_editor` provide backend functionality
+- egui immediate mode patterns - proven in Phase 2 Campaign Builder foundation
 
 ### Identified Issues
 
-1. **Tight Coupling**: Class enum embedded in multiple systems (progression, magic, items)
-2. **Hardcoded Logic**: HP gain dice, spell school access uses pattern matching
-3. **Bitflag Restrictions**: `Disablement` system uses fixed class bits
-4. **No Validation**: Tools lack cross-reference validation (e.g., map references non-existent monster)
-5. **No SDK API**: Engine internals not exposed for tool development
+1. **GUI Incomplete**: Campaign Builder has placeholders for data editors (Phase 3), map integration (Phase 4), quest/dialogue tools (Phase 5)
+2. **Game Can't Load Campaigns**: No campaign integration in `GameState` or main game CLI
+3. **Disconnected Tools**: Map Builder exists as CLI but not integrated into Campaign Builder GUI
+4. **Missing Distribution**: Campaign packager exists but not integrated into GUI workflow
+5. **Two Planning Documents**: `sdk_implementation_plan.md` (CLI-focused, phases 0-9) vs `sdk_and_campaign_architecture.md` (GUI-focused, phases 0-6) are misaligned
 
 ## Implementation Phases
 
@@ -1499,19 +1546,869 @@ impl ItemEditor {
 | Documentation lags implementation | Write docs as you build, not after              |
 | Tools hard to use                 | Early user testing, iterate on UX               |
 
+---
+
+### Phase 10: Campaign Builder GUI - Data Editors (Phase 3)
+
+**Goal:** Implement full CRUD editors for Items, Spells, and Monsters in Campaign Builder GUI
+
+**Duration:** 2-3 weeks
+
+**Status:** 🔲 NOT STARTED (Current: Placeholder views only)
+
+**Dependencies:** Phase 2 Campaign Builder foundation, SDK backend (database, validation)
+
+#### 10.1 Items Editor Implementation
+
+**File:** `sdk/campaign_builder/src/main.rs` - Replace `show_items_editor` placeholder
+
+**Features to Implement:**
+
+- **List View**: Display all items from `campaign.items_file` with search/filter
+- **Add Item Form**: Select item type (Weapon, Armor, Consumable, Quest), fill stats, set disablement flags
+- **Edit Item Form**: Modify existing item in-place with validation
+- **Delete Item**: Remove with confirmation dialog
+- **Preview Panel**: Show item stats, restrictions, description as formatted display
+- **Search/Filter**: By name, type, level requirement, class restrictions
+- **Validation**: Real-time check against `ContentDatabase` rules
+- **Integration**: Use `src/sdk/database.rs` `ItemDatabase` for loading/saving
+
+**UI Layout:**
+
+- Left: Searchable list with add/delete buttons
+- Right: Edit form or preview panel
+- Bottom: Validation errors/warnings display
+- Auto-save integration with unsaved changes tracking
+
+#### 10.2 Spells Editor Implementation
+
+**File:** `sdk/campaign_builder/src/main.rs` - Replace `show_spells_editor` placeholder
+
+**Features to Implement:**
+
+- **List View**: All spells grouped by school (Cleric/Sorcerer) and level
+- **Add Spell Form**: School, level, name, SP cost, target type, effect configuration
+- **Edit Spell Form**: Modify spell parameters with validation
+- **Delete Spell**: Remove with confirmation
+- **Preview Panel**: Show spell effect description, targeting, requirements
+- **Filter**: By school, level range, effect type
+- **Validation**: Check SP cost formulas, level progression balance
+- **Integration**: Use `src/sdk/database.rs` `SpellDatabase`
+
+#### 10.3 Monsters Editor Implementation
+
+**File:** `sdk/campaign_builder/src/main.rs` - Replace `show_monsters_editor` placeholder
+
+**Features to Implement:**
+
+- **List View**: All monsters with basic stats (HP, AC, level)
+- **Add Monster Form**: Stats editor, loot table builder, special abilities checkboxes
+- **Edit Monster Form**: Full monster configuration
+- **Delete Monster**: Remove with dependency check (used in maps?)
+- **Preview Panel**: Combat simulator preview showing expected damage/XP
+- **Loot Table Editor**: Add items with drop rates
+- **Special Abilities**: Regeneration, advancement, special attacks
+- **Validation**: Balance checking against party power level
+- **Integration**: Use `src/sdk/database.rs` `MonsterDatabase`
+
+#### 10.4 Shared Data Editor Components
+
+**Reusable UI Components:**
+
+- Search bar with instant filtering
+- Sortable data tables (by name, level, type)
+- Form validation with inline error messages
+- Confirmation dialogs for destructive actions
+- Undo/redo system (basic - track last action)
+- Import/export buttons (RON file operations)
+
+#### 10.5 Integration with Validation System
+
+**Connect to SDK Backend:**
+
+- Use `src/sdk/validation.rs` `Validator` for cross-reference checks
+- Display validation results in dedicated panel
+- Mark items/spells/monsters with errors in list view
+- Provide "Fix" button that opens relevant editor
+
+#### 10.6 Testing Requirements
+
+**Unit Tests:**
+
+- [ ] Item CRUD operations (add, edit, delete)
+- [ ] Spell CRUD operations with level restrictions
+- [ ] Monster CRUD operations with loot tables
+- [ ] Search and filter functionality
+- [ ] Validation integration
+- [ ] RON serialization round-trip
+
+**Manual Testing:**
+
+- [ ] Create 10+ items of each type
+- [ ] Create spell progression for both schools (levels 1-7)
+- [ ] Create monster set for dungeon (easy to hard)
+- [ ] Test search with partial names
+- [ ] Verify validation catches invalid references
+- [ ] Test unsaved changes warning on tab switch
+
+#### 10.7 Deliverables
+
+- [ ] Full Items editor replacing placeholder in `show_items_editor`
+- [ ] Full Spells editor replacing placeholder in `show_spells_editor`
+- [ ] Full Monsters editor replacing placeholder in `show_monsters_editor`
+- [ ] Shared UI component library for data editors
+- [ ] Integration with `ContentDatabase` and `Validator`
+- [ ] Updated `sdk/campaign_builder/README.md` documenting editors
+- [ ] Tests achieving >80% coverage for editor logic
+- [ ] `docs/explanation/implementations.md` updated with Phase 10 summary
+
+#### 10.8 Success Criteria
+
+- ✅ User can create/edit/delete items without touching RON files
+- ✅ User can create/edit/delete spells with automatic validation
+- ✅ User can create/edit/delete monsters with loot tables
+- ✅ Search and filter work instantly on large datasets (100+ items)
+- ✅ Validation errors shown in real-time with actionable messages
+- ✅ All quality gates pass (fmt, clippy, tests)
+- ✅ No crashes or data loss during editor operations
+
+---
+
+### Phase 11: Campaign Builder GUI - Map Editor Integration (Phase 4)
+
+**Goal:** Integrate map editing into Campaign Builder GUI
+
+**Duration:** 2 weeks
+
+**Status:** 🔲 NOT STARTED
+
+**Dependencies:** Phase 10 (data editors), existing CLI map_builder tool
+
+**Decision:** Rewrite CLI map_builder as egui component within Campaign Builder (per user decision)
+
+#### 11.1 Map Editor Component Architecture
+
+**New File:** `sdk/campaign_builder/src/map_editor_component.rs`
+
+**Component Structure:**
+
+- Reusable egui widget for map editing
+- Grid-based tile placement UI
+- Event editor integrated into map view
+- Uses `src/sdk/map_editor.rs` helpers for validation
+- Saves to `campaign.maps_dir` in RON format
+
+**Features to Port from CLI Map Builder:**
+
+- Grid rendering with zoom controls
+- Tile palette selection
+- Event placement and configuration
+- Map properties editor (size, name, terrain type)
+- Connection point editor (north/south/east/west exits)
+- Validation with content database (check monster IDs, item IDs)
+
+#### 11.2 Map List View Integration
+
+**File:** `sdk/campaign_builder/src/main.rs` - Replace `show_maps_editor` placeholder
+
+**Features:**
+
+- **List View**: All maps in `campaign.maps_dir` with thumbnail previews
+- **Add Map**: Launch map editor component with new map
+- **Edit Map**: Open existing map in editor component
+- **Delete Map**: Remove with connectivity check
+- **Map Properties**: Quick edit for name, size, starting position
+- **Interconnection Manager**: Visual graph showing map connections
+- **Validation**: Check all maps for disconnected areas
+
+#### 11.3 Map Preview Panel
+
+**Visual Display:**
+
+- ASCII/tile representation of map
+- Highlighted events and connections
+- Minimap overview for large maps
+- Click to edit in full editor
+
+#### 11.4 Event Editor Improvements
+
+**Enhanced Event Configuration:**
+
+- Dropdown for event types using validated lists
+- Item ID selector with search from Items editor
+- Monster ID selector from Monsters editor
+- NPC dialogue selector from Dialogue editor
+- Quest integration (trigger quest stages)
+
+#### 11.5 Testing Requirements
+
+**Unit Tests:**
+
+- [ ] Map creation and saving
+- [ ] Tile placement and modification
+- [ ] Event configuration
+- [ ] Map interconnection validation
+- [ ] RON serialization for maps
+
+**Manual Testing:**
+
+- [ ] Create interconnected town and dungeon maps
+- [ ] Place events with item/monster references
+- [ ] Verify validation catches invalid references
+- [ ] Test zoom and pan controls
+- [ ] Ensure large maps (100x100) perform well
+
+#### 11.6 Deliverables
+
+- [ ] Map editor component (`map_editor_component.rs`)
+- [ ] Map list view replacing placeholder
+- [ ] Event editor with content database integration
+- [ ] Map interconnection visualizer
+- [ ] Updated documentation
+- [ ] Tests for map editing functionality
+
+#### 11.7 Success Criteria
+
+- ✅ User can create maps entirely in GUI
+- ✅ Map editor replicates CLI map_builder functionality
+- ✅ Events validate against items/monsters/quests
+- ✅ Map connections visualized and validated
+- ✅ No need to use CLI tools for map creation
+
+---
+
+### Phase 12: Campaign Builder GUI - Quest & Dialogue Tools (Phase 5)
+
+**Goal:** Implement visual quest designer and dialogue tree editor
+
+**Duration:** 2-3 weeks
+
+**Status:** 🔲 NOT STARTED
+
+**Dependencies:** Phase 10 (data editors), Phase 11 (map integration)
+
+**Decision:** List-based editors for Phase 12, node-graph visualization deferred to Phase 15 (per user decision)
+
+#### 12.1 Quest Designer Implementation
+
+**File:** `sdk/campaign_builder/src/main.rs` - Replace `show_quests_editor` placeholder
+
+**Features:**
+
+- **Quest List View**: All quests with status (active/completed/blocked)
+- **Add Quest Form**: Name, description, quest giver
+- **Stage Editor**: Add/edit/delete quest stages in order
+- **Objective Builder**: Per-stage objectives with types (kill, collect, visit)
+- **Prerequisite Chain**: Select prerequisite quests from list
+- **Reward Configuration**: Gold, XP, items, unlocked dialogue
+- **Validation**: Use `src/sdk/quest_editor.rs` helpers
+- **Preview**: Text description of quest flow
+
+**Quest Stage Types:**
+
+- Kill monsters (select from monster database)
+- Collect items (select from item database)
+- Visit location (select map + coordinates)
+- Talk to NPC (select dialogue tree)
+- Custom flag (manual flag ID)
+
+#### 12.2 Dialogue Tree Editor Implementation
+
+**File:** `sdk/campaign_builder/src/main.rs` - Add dialogue tree editor tab
+
+**Features:**
+
+- **Tree List View**: All dialogue trees with root node info
+- **Node List**: Show all nodes in selected tree (list-based, not graph)
+- **Add Node Form**: Speaker, text, conditions
+- **Choice Editor**: Add player responses with target nodes
+- **Condition Builder**: Check quest flags, inventory, stats
+- **Action Configuration**: Set quest flags, give items, trigger events
+- **Navigation**: Click target node to jump to it in list
+- **Validation**: Use `src/sdk/dialogue_editor.rs` helpers
+- **Preview**: Text walkthrough of dialogue flow
+
+**Condition Types:**
+
+- Quest completed/active
+- Item in inventory
+- Stat check (charisma, reputation)
+- Flag set
+- Gold amount
+
+**Action Types:**
+
+- Start/complete quest
+- Give/take item
+- Give/take gold
+- Set flag
+- Trigger combat
+
+#### 12.3 Quest-Dialogue Integration
+
+**Cross-Editor Features:**
+
+- Quest editor can select dialogue tree for quest giver
+- Dialogue editor can start/complete quests in actions
+- Validation checks quest IDs in dialogue actions
+- Validation checks dialogue IDs in quest configurations
+
+#### 12.4 Testing Requirements
+
+**Unit Tests:**
+
+- [ ] Quest CRUD operations
+- [ ] Quest stage ordering
+- [ ] Prerequisite chain validation
+- [ ] Dialogue tree CRUD operations
+- [ ] Dialogue choice navigation
+- [ ] Condition and action configuration
+- [ ] Cross-reference validation (quests in dialogue, dialogue in quests)
+
+**Manual Testing:**
+
+- [ ] Create multi-stage quest with branching objectives
+- [ ] Create dialogue tree with conditions and branching
+- [ ] Link quest to dialogue tree (NPC quest giver)
+- [ ] Test prerequisite chains (quest A requires quest B)
+- [ ] Verify validation catches orphaned nodes
+- [ ] Test condition evaluation preview
+
+#### 12.5 Deliverables
+
+- [ ] Quest designer replacing placeholder
+- [ ] Dialogue tree editor (new tab)
+- [ ] Quest-dialogue integration
+- [ ] Validation integration
+- [ ] Updated documentation
+- [ ] Tests for quest and dialogue editing
+
+#### 12.6 Success Criteria
+
+- ✅ User can create complex multi-stage quests
+- ✅ User can create branching dialogue trees
+- ✅ Quest-dialogue integration works seamlessly
+- ✅ Validation catches broken references
+- ✅ List-based editors are usable for moderate complexity (10-20 nodes)
+
+**Note:** Node-graph visualization for dialogue trees planned for Phase 15 (Polish & Advanced Features)
+
+---
+
+### Phase 13: Campaign Builder GUI - Distribution Tools (Phase 6)
+
+**Goal:** Integrate campaign packaging, testing, and asset management
+
+**Duration:** 1-2 weeks
+
+**Status:** 🔲 NOT STARTED
+
+**Dependencies:** Phases 10-12 (all editors complete)
+
+#### 13.1 Campaign Packager Integration
+
+**File:** `sdk/campaign_builder/src/main.rs` - Add export functionality
+
+**Features:**
+
+- **Export Wizard**: Multi-step process for campaign packaging
+- **Validation Check**: Run full campaign validation before export
+- **File Selection**: Choose which assets to include (data, maps, README)
+- **Compression**: Use `src/sdk/campaign_packager.rs` for .zip creation
+- **Metadata Generation**: Auto-generate campaign.ron from editor state
+- **Version Bump**: Helper to increment version (1.0.0 → 1.0.1)
+- **Distribution**: Save .zip to user-selected location
+
+**Export Checklist:**
+
+- All required files present (campaign.ron, data files)
+- Validation passes with zero errors
+- README.md exists and complete
+- Assets included if present
+- Version follows semantic versioning
+
+#### 13.2 Test Play Integration
+
+**Features:**
+
+- **Launch Game Button**: Start Antares with current campaign
+- **CLI Integration**: Execute `antares --campaign <id>` as subprocess
+- **Output Capture**: Show game stdout/stderr in Campaign Builder log panel
+- **Quick Test**: Save campaign, launch game, return to editor
+- **Debug Mode**: Launch game with extra logging for testing
+
+**Prerequisites:**
+
+- Game engine must support `--campaign` flag (see Phase 14)
+- Campaign must be saved before test play
+- Validation should pass (or show warning)
+
+#### 13.3 Asset Manager
+
+**File:** `sdk/campaign_builder/src/main.rs` - Add Assets tab
+
+**Features:**
+
+- **Asset Browser**: Show all files in campaign directory tree
+- **Upload Assets**: Drag-and-drop or file picker for images, music, sounds
+- **Organize**: Move files into data/, assets/, docs/ subdirectories
+- **Preview**: Display text files, show image thumbnails (if possible)
+- **Remove**: Delete unused assets with confirmation
+- **Validation**: Check referenced assets exist (map tilesets, dialogue portraits)
+
+**Asset Types:**
+
+- Tilesets (for maps)
+- Music (for maps/events)
+- Sound effects (for combat/events)
+- Portraits (for NPCs/dialogue)
+- Documentation (README, guides)
+
+#### 13.4 Campaign Installation System
+
+**Features:**
+
+- **Import Campaign**: Load .zip exported from another Campaign Builder
+- **Extract**: Unpack to campaigns directory
+- **Validation**: Check imported campaign for errors
+- **Conflict Resolution**: Handle campaigns with duplicate IDs
+
+#### 13.5 Testing Requirements
+
+**Unit Tests:**
+
+- [ ] Campaign packaging (create .zip)
+- [ ] File inclusion/exclusion logic
+- [ ] Version validation and incrementing
+- [ ] Asset upload and organization
+- [ ] Campaign import and extraction
+
+**Manual Testing:**
+
+- [ ] Export campaign as .zip
+- [ ] Import campaign .zip on different machine
+- [ ] Test play launches game successfully
+- [ ] Asset browser shows all files
+- [ ] Version bumping works correctly
+
+#### 13.6 Deliverables
+
+- [ ] Export wizard integrated into File menu
+- [ ] Test Play button in Tools menu
+- [ ] Asset Manager tab
+- [ ] Campaign import functionality
+- [ ] Updated documentation
+- [ ] Tests for packaging and distribution
+
+#### 13.7 Success Criteria
+
+- ✅ User can export campaign as distributable .zip
+- ✅ Test play launches game with current campaign
+- ✅ Asset manager handles images, music, sounds
+- ✅ Imported campaigns work correctly
+- ✅ Export includes all necessary files
+
+---
+
+### Phase 14: Game Engine Campaign Integration (CRITICAL)
+
+**Goal:** Enable Antares game engine to load and play custom campaigns
+
+**Duration:** 1-2 weeks
+
+**Status:** 🔲 NOT STARTED (Game currently cannot load campaigns)
+
+**Dependencies:** SDK backend complete (Phase 3), Campaign Builder Phase 2
+
+**Rationale:** This phase is CRITICAL because without it, campaigns created in Campaign Builder cannot be played. Currently, the game has no campaign loading system.
+
+#### 14.1 GameState Campaign Integration
+
+**File:** `src/application/mod.rs` - Modify `GameState` struct
+
+**Changes Needed:**
+
+- Add `campaign: Option<Campaign>` field to `GameState`
+- Modify `GameState::new()` to accept optional campaign parameter
+- Update `GameState::new_game()` to use campaign config (starting gold, food, map, position)
+- Ensure `World` uses campaign's map directory
+- Ensure item/spell/monster databases load from campaign data paths
+
+**Example Integration:**
+
+```rust
+pub struct GameState {
+    pub campaign: Option<Campaign>,  // NEW: Campaign context
+    pub world: World,
+    pub roster: Roster,
+    pub party: Party,
+    // ... existing fields
+}
+
+impl GameState {
+    pub fn new_game(campaign: Option<Campaign>) -> Result<Self, GameError> {
+        let config = campaign.as_ref().map(|c| &c.config).unwrap_or_default();
+
+        // Use campaign starting conditions
+        let starting_map = config.starting_map;
+        let starting_gold = config.starting_gold;
+        let starting_food = config.starting_food;
+
+        // ... initialize with campaign data
+    }
+}
+```
+
+#### 14.2 Main Game CLI Campaign Support
+
+**File:** Create or modify main game binary (e.g., `src/bin/antares.rs`)
+
+**CLI Interface:**
+
+```bash
+# Launch with specific campaign
+antares --campaign my_campaign
+
+# List available campaigns
+antares --list-campaigns
+
+# Validate campaign before playing
+antares --validate-campaign my_campaign
+
+# Continue last saved game (preserves campaign)
+antares --continue
+
+# Load specific save file
+antares --load savegame.ron
+```
+
+**Implementation:**
+
+- Add CLI argument parser (clap crate)
+- Use `src/sdk/campaign_loader.rs` `CampaignLoader` to load campaign
+- Pass `Campaign` to `GameState::new_game()`
+- Handle errors gracefully (campaign not found, invalid campaign)
+
+#### 14.3 Save Game Campaign Reference
+
+**File:** Modify save game format (wherever save/load is implemented)
+
+**Changes:**
+
+- Add `campaign_reference: Option<CampaignReference>` to save game structure
+- `CampaignReference` stores campaign ID, version, name
+- On load, verify campaign is still available
+- On load, verify campaign version matches (or is compatible)
+- Warn user if campaign is missing/changed
+
+**Save Game Structure:**
+
+```rust
+pub struct SaveGame {
+    pub version: String,
+    pub timestamp: SystemTime,
+    pub campaign_reference: Option<CampaignReference>,  // NEW
+    pub game_state: GameState,
+}
+
+pub struct CampaignReference {
+    pub id: String,
+    pub version: String,
+    pub name: String,
+}
+```
+
+#### 14.4 Campaign Data Loading
+
+**Integration Points:**
+
+- `ItemDatabase::load()` should use campaign's items file path
+- `SpellDatabase::load()` should use campaign's spells file path
+- `MonsterDatabase::load()` should use campaign's monsters file path
+- `ClassDatabase::load()` should use campaign's classes file path
+- `RaceDatabase::load()` should use campaign's races file path
+- Map loading should use campaign's maps directory
+
+**Fallback Behavior:**
+
+- If no campaign specified, use default core content
+- Core content remains at `data/items.ron`, `data/spells.ron`, etc.
+- Campaigns override core content or extend it (configurable)
+
+#### 14.5 Error Handling
+
+**User-Friendly Messages:**
+
+- Campaign not found: List available campaigns
+- Campaign validation errors: Show specific issues
+- Save game campaign mismatch: Offer to continue anyway or abort
+- Missing campaign data files: Show which files are missing
+
+#### 14.6 Testing Requirements
+
+**Unit Tests:**
+
+- [ ] `GameState` creation with campaign
+- [ ] Campaign data loading (items, spells, monsters)
+- [ ] Save game with campaign reference
+- [ ] Load game with campaign reference
+- [ ] Campaign version mismatch handling
+
+**Integration Tests:**
+
+- [ ] Launch game with `--campaign tutorial`
+- [ ] Verify tutorial campaign data loaded
+- [ ] Save game, verify campaign reference stored
+- [ ] Load game, verify campaign restored
+- [ ] Test with missing campaign (error handling)
+
+**Manual Testing:**
+
+- [ ] Create campaign in Campaign Builder
+- [ ] Launch game with `--campaign` flag
+- [ ] Verify campaign config applied (starting gold, food, map)
+- [ ] Save game during play
+- [ ] Load saved game
+- [ ] Verify campaign still active after load
+
+#### 14.7 Deliverables
+
+- [ ] `GameState` with campaign support
+- [ ] Main game CLI with campaign flags
+- [ ] Save game format with campaign reference
+- [ ] Campaign data loading integration
+- [ ] Error handling and user messages
+- [ ] Updated `docs/explanation/implementations.md`
+- [ ] Tests for campaign loading and gameplay
+
+#### 14.8 Success Criteria
+
+- ✅ Game launches with `--campaign <id>` flag
+- ✅ Campaign config applied (starting conditions)
+- ✅ Campaign data loaded (items, spells, monsters, maps)
+- ✅ Save games preserve campaign reference
+- ✅ Loaded games restore campaign correctly
+- ✅ Error messages guide user when campaign missing/invalid
+- ✅ Core game still works without campaign (backward compatible)
+
+**CRITICAL:** Without Phase 14, the SDK is non-functional - campaigns can be created but not played!
+
+---
+
+### Phase 15: Polish & Advanced Features (Phase 7)
+
+**Goal:** User experience improvements and advanced features
+
+**Duration:** 2-3 weeks
+
+**Status:** 🔲 NOT STARTED
+
+**Dependencies:** Phases 10-14 complete (all core functionality working)
+
+#### 15.1 Undo/Redo System
+
+**Scope:**
+
+- Campaign metadata changes
+- Data editor operations (add/edit/delete items, spells, monsters)
+- Map editor tile placement
+- Quest and dialogue modifications
+
+**Implementation:**
+
+- Command pattern for all reversible operations
+- Undo/redo stack (max 50 actions)
+- Keyboard shortcuts (Ctrl+Z, Ctrl+Y)
+- Visual indication of undo availability
+
+#### 15.2 Template System
+
+**Features:**
+
+- Pre-built item templates (common weapon/armor sets)
+- Monster templates (classic RPG creatures with stats)
+- Map templates (town, dungeon, wilderness layouts)
+- Quest templates (fetch, kill, escort structures)
+- Dialogue templates (merchant, quest giver, guard)
+
+**Integration:**
+
+- "New from Template" buttons in all editors
+- Customizable templates (user can save their own)
+- Template browser with preview
+
+#### 15.3 Node-Graph Dialogue Visualizer
+
+**Features:**
+
+- Visual node graph for dialogue trees (nodes and edges)
+- Drag-and-drop node positioning
+- Zoom and pan controls
+- Click node to edit in list editor
+- Auto-layout algorithm for complex trees
+- Export as image for documentation
+
+**Library:** Consider `egui_graphs` or custom implementation
+
+#### 15.4 Advanced Validation Features
+
+**Enhancements:**
+
+- Balance analyzer (party power vs monster difficulty)
+- Loot economy checker (gold/item distribution)
+- Quest dependency graph visualization
+- Unreachable content detector (items never placed, quests never started)
+- Difficulty curve analyzer (progression pacing)
+
+#### 15.5 Collaborative Features
+
+**Future-Focused:**
+
+- Export campaign as git-friendly format (separate files per entity)
+- Import/merge changes from other contributors
+- Diff visualization for campaign changes
+- Comment system for content review
+
+#### 15.6 Accessibility Improvements
+
+**Features:**
+
+- Keyboard navigation for all editors
+- Screen reader support (ARIA labels)
+- High contrast theme option
+- Font size adjustment
+- Tooltips for all icons and buttons
+
+#### 15.7 Performance Optimizations
+
+**Targets:**
+
+- Large campaigns (1000+ items, 100+ maps)
+- Lazy loading for content lists
+- Virtual scrolling for large lists
+- Background validation (don't block UI)
+- Incremental saving (only changed files)
+
+#### 15.8 Testing Requirements
+
+**Manual Testing:**
+
+- [ ] Undo/redo in all editors
+- [ ] Template system usability
+- [ ] Node-graph dialogue visualization
+- [ ] Balance analyzer accuracy
+- [ ] Keyboard-only navigation
+- [ ] Large campaign performance
+
+#### 15.9 Deliverables
+
+- [ ] Undo/redo system
+- [ ] Template library
+- [ ] Node-graph dialogue visualizer
+- [ ] Advanced validation tools
+- [ ] Accessibility features
+- [ ] Performance optimizations
+- [ ] Updated documentation
+
+#### 15.10 Success Criteria
+
+- ✅ Undo/redo works reliably in all editors
+- ✅ Templates speed up content creation significantly
+- ✅ Node-graph visualizer handles complex dialogue trees (50+ nodes)
+- ✅ Large campaigns (1000+ items) load in <2 seconds
+- ✅ Campaign Builder usable with keyboard only
+- ✅ Balance analyzer provides actionable feedback
+
+---
+
 ## Post-SDK Future Work
 
-**After SDK completion, consider:**
+**After Phase 15 completion, consider:**
 
-- GUI tools (Tauri or egui-based editors)
-- Scripting language for custom events (Lua/Rhai)
-- Online mod repository and browser
-- Visual map editor (grid-based UI)
-- Advanced balance analyzer tools
-- Automated content generators
+- Scripting language for custom events (Lua/Rhai integration)
+- Online mod repository and browser (campaign sharing platform)
+- Multiplayer campaign support (co-op gameplay)
+- Advanced balance analyzer with AI suggestions
+- Automated content generators (procedural dungeons, quests)
+- Mobile companion app (character sheets, inventory management)
+- Community features (ratings, comments, featured campaigns)
+
+---
+
+## Revised Timeline Summary
+
+### Completed Phases (Weeks 1-16)
+
+- ✅ **Phase 0**: Map Content Plan (Weeks 1-3)
+- ✅ **Phase 0.5**: UI Framework Validation (Week 4)
+- ✅ **Phase 1-2**: Data-Driven Class/Race System (Weeks 5-6) - _Status unclear_
+- ✅ **Phase 3**: SDK Foundation Module (Week 7)
+- ✅ **Phase 8**: Documentation and Examples (Weeks 8-9)
+- ✅ **Phase 9**: Integration and Polish (CLI tools) (Week 10)
+- ✅ **Campaign Builder Phase 0-2**: Foundation UI (Weeks 11-14)
+
+### Remaining Phases (Estimated)
+
+- 🔲 **Phase 10** (CB Phase 3): Data Editors - Items, Spells, Monsters (Weeks 17-19)
+- 🔲 **Phase 11** (CB Phase 4): Map Editor Integration (Weeks 20-21)
+- 🔲 **Phase 12** (CB Phase 5): Quest & Dialogue Tools (Weeks 22-24)
+- 🔲 **Phase 13** (CB Phase 6): Distribution Tools (Weeks 25-26)
+- 🔲 **Phase 14**: Game Engine Campaign Integration (Weeks 27-28) - **CRITICAL**
+- 🔲 **Phase 15** (CB Phase 7): Polish & Advanced Features (Weeks 29-31)
+
+**Total Estimated Time:** 31 weeks (~8 months)
+**Time Completed:** 16 weeks (~4 months)
+**Time Remaining:** 15 weeks (~4 months)
+
+**Critical Path:**
+
+1. Phase 10 (Data Editors) - Foundation for content creation
+2. Phase 14 (Game Integration) - Makes campaigns playable
+3. Phase 12 (Quest/Dialogue) - Completes content creation loop
+4. Phase 13 (Distribution) - Enables sharing
+5. Phase 11 (Map Integration) - Can work in parallel with Phase 12
+6. Phase 15 (Polish) - Enhances UX but not blocking
+
+---
+
+## Alignment Notes
+
+This updated plan reconciles two documents:
+
+- **`sdk_implementation_plan.md`** (this file) - Originally CLI-focused with phases 0-9
+- **`sdk_and_campaign_architecture.md`** - GUI-focused Campaign Builder with phases 0-6
+
+**Key Changes:**
+
+- Added Phases 10-15 to cover Campaign Builder GUI (previously missing)
+- Added Phase 14 for Game Engine Integration (CRITICAL gap)
+- Clarified Phase 9 as CLI tools infrastructure (complete)
+- Confirmed egui framework decision (Phase 0.5)
+- Documented Campaign Builder Phase 2 completion status
+- Identified placeholder status of data editors (Phase 10 needed)
+
+**Two-Track Development:**
+
+1. **CLI Tools Track** (Phases 1-9): Backend SDK, CLI editors, documentation - Mostly complete
+2. **GUI Tools Track** (Phases 10-15): Campaign Builder with visual editors - Partially complete
+
+**Current Status:** CLI backend is solid, GUI frontend needs Phases 10-15 for full modding SDK vision.
+
+---
 
 ## Conclusion
 
-This SDK plan transforms Antares from an MM1 clone into a general-purpose RPG engine. The Map Content Implementation Plan serves as the cornerstone, with SDK features building on top of proven patterns. By maintaining backward compatibility and following the existing architecture, this plan minimizes refactoring while maximizing extensibility.
+This SDK plan transforms Antares from an MM1 clone into a general-purpose RPG engine with a complete modding SDK. The Map Content Implementation Plan served as the cornerstone, with SDK features building on top of proven patterns.
 
-**Key Takeaway:** Execute Map Content Plan first, then add SDK incrementally. This validates the architecture with real content before investing in tooling.
+**Current State:** Backend SDK infrastructure complete, Campaign Builder has foundation UI, but data editors are placeholders and game cannot load campaigns yet.
+
+**Next Steps:**
+
+1. **Phase 10**: Implement data editors (items, spells, monsters) in Campaign Builder GUI
+2. **Phase 14**: Integrate campaign loading into game engine (CRITICAL - enables gameplay)
+3. **Phase 12**: Add quest and dialogue tools to Campaign Builder
+4. **Phase 11**: Integrate map editor into Campaign Builder GUI
+5. **Phase 13**: Add distribution and testing tools
+6. **Phase 15**: Polish and advanced features (undo/redo, templates, node-graph visualizer)
+
+**Key Takeaway:** SDK backend is complete and solid. Focus now shifts to completing Campaign Builder GUI (Phases 10-13, 15) and integrating campaigns into game engine (Phase 14) to achieve the full modding SDK vision documented in `sdk_and_campaign_architecture.md`.

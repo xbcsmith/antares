@@ -119,9 +119,10 @@ impl Default for MonsterResistances {
 /// let condition = MonsterCondition::Normal;
 /// assert!(matches!(condition, MonsterCondition::Normal));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum MonsterCondition {
     /// Monster is operating normally
+    #[default]
     Normal,
     /// Monster is paralyzed and cannot act
     Paralyzed,
@@ -164,12 +165,6 @@ impl MonsterCondition {
     /// Returns true if the monster is dead
     pub fn is_dead(&self) -> bool {
         matches!(self, MonsterCondition::Dead)
-    }
-}
-
-impl Default for MonsterCondition {
-    fn default() -> Self {
-        Self::Normal
     }
 }
 

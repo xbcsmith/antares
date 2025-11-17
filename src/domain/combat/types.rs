@@ -152,20 +152,15 @@ pub enum SpecialEffect {
 /// let handicap = Handicap::PartyAdvantage;
 /// assert!(matches!(handicap, Handicap::PartyAdvantage));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Handicap {
     /// Party has advantage (party acts first)
     PartyAdvantage,
     /// Monsters have advantage (monsters act first)
     MonsterAdvantage,
     /// No advantage (normal initiative order)
+    #[default]
     Even,
-}
-
-impl Default for Handicap {
-    fn default() -> Self {
-        Self::Even
-    }
 }
 
 // ===== CombatStatus =====
@@ -180,9 +175,10 @@ impl Default for Handicap {
 /// let status = CombatStatus::InProgress;
 /// assert!(matches!(status, CombatStatus::InProgress));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CombatStatus {
     /// Combat is ongoing
+    #[default]
     InProgress,
     /// Party won the combat
     Victory,
@@ -192,12 +188,6 @@ pub enum CombatStatus {
     Fled,
     /// Combat ended in surrender
     Surrendered,
-}
-
-impl Default for CombatStatus {
-    fn default() -> Self {
-        Self::InProgress
-    }
 }
 
 // ===== CombatantId =====
