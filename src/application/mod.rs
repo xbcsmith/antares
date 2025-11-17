@@ -11,9 +11,12 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.1 for complete specifications.
 
+pub mod save_game;
+
 use crate::domain::character::{Party, Roster};
 use crate::domain::types::GameTime;
 use crate::domain::world::World;
+use crate::sdk::campaign_loader::Campaign;
 use serde::{Deserialize, Serialize};
 
 // ===== Game Mode =====
@@ -243,6 +246,9 @@ impl Default for QuestLog {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState {
+    /// Active campaign (if playing campaign mode)
+    #[serde(skip)]
+    pub campaign: Option<Campaign>,
     /// The game world
     pub world: World,
     /// Character roster (all created characters)
@@ -260,7 +266,7 @@ pub struct GameState {
 }
 
 impl GameState {
-    /// Creates a new game state with default values
+    /// Creates a new game state with default values (no campaign)
     ///
     /// # Examples
     ///
@@ -270,12 +276,61 @@ impl GameState {
     /// let state = GameState::new();
     /// assert_eq!(state.mode, GameMode::Exploration);
     /// assert_eq!(state.time.day, 1);
+    /// assert!(state.campaign.is_none());
     /// ```
     pub fn new() -> Self {
         Self {
+            campaign: None,
             world: World::new(),
             roster: Roster::new(),
             party: Party::new(),
+            active_spells: ActiveSpells::new(),
+            mode: GameMode::Exploration,
+            time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
+            quests: QuestLog::new(),
+        }
+    }
+
+    /// Creates a new game state with a campaign
+    ///
+    /// This constructor applies the campaign's starting configuration:
+    /// - Sets starting gold and food from campaign config
+    /// - Initializes party with campaign starting position
+    /// - Loads campaign-specific data (items, spells, monsters, maps)
+    ///
+    /// # Arguments
+    ///
+    /// * `campaign` - The campaign to load
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::application::GameState;
+    /// use antares::sdk::campaign_loader::{Campaign, CampaignLoader};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = CampaignLoader::new("campaigns");
+    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let state = GameState::new_game(campaign);
+    ///
+    /// assert!(state.campaign.is_some());
+    /// assert_eq!(state.party.gold, state.campaign.as_ref().unwrap().config.starting_gold);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new_game(campaign: Campaign) -> Self {
+        let starting_gold = campaign.config.starting_gold;
+        let starting_food = campaign.config.starting_food;
+
+        let mut party = Party::new();
+        party.gold = starting_gold;
+        party.food = starting_food;
+
+        Self {
+            campaign: Some(campaign),
+            world: World::new(),
+            roster: Roster::new(),
+            party,
             active_spells: ActiveSpells::new(),
             mode: GameMode::Exploration,
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM

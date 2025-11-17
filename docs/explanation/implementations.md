@@ -5,6 +5,270 @@ is updated after each phase or major feature completion.
 
 ---
 
+## Phase 14: Game Engine Campaign Integration (COMPLETED)
+
+**Date Completed**: 2025
+**Status**: ✅ Campaign system fully integrated with game engine, save system, and CLI
+
+### Overview
+
+Phase 14 implements the critical integration between the campaign SDK and the game engine. This phase enables campaigns created with the Campaign Builder to actually be played in the game. The implementation includes campaign loading in GameState, a save game system with campaign references, and a main game CLI with campaign support.
+
+### Components Implemented
+
+#### 14.1: GameState Campaign Integration
+
+**File Modified**: `src/application/mod.rs`
+
+Added campaign support to the core `GameState` structure.
+
+**Key Changes**:
+
+- Added `campaign: Option<Campaign>` field to `GameState`
+- Implemented `new_game(campaign: Campaign)` constructor that applies campaign starting config
+- Applies campaign's starting gold and food to party
+- Preserves campaign reference throughout game session
+- Campaign field marked with `#[serde(skip)]` since save games use `CampaignReference` instead
+
+**Usage**:
+
+```rust
+// Start new game with campaign
+let loader = CampaignLoader::new("campaigns");
+let campaign = loader.load_campaign("tutorial")?;
+let game_state = GameState::new_game(campaign);
+
+// Start new game without campaign (core content)
+let game_state = GameState::new();
+```
+
+#### 14.2: Save Game System
+
+**File Created**: `src/application/save_game.rs`
+
+Complete save/load system with campaign tracking.
+
+**Key Types**:
+
+- `SaveGame` - Main save game structure with version, timestamp, campaign reference, and game state
+- `CampaignReference` - Stores campaign ID, version, and name for validation on load
+- `SaveGameManager` - Handles file operations for saving and loading games
+- `SaveGameError` - Comprehensive error types for save/load failures
+
+**Features**:
+
+- RON format for human-readable save files
+- Version checking to prevent incompatible save loads
+- Campaign reference tracking for campaign-based games
+- Directory management for save files
+- List available saves functionality
+- Pretty RON formatting for readability
+
+**Error Handling**:
+
+- `SaveGameError::ReadError` - Failed to read save file
+- `SaveGameError::WriteError` - Failed to write save file
+- `SaveGameError::ParseError` - Invalid RON syntax
+- `SaveGameError::VersionMismatch` - Save format version incompatible
+- `SaveGameError::CampaignNotFound` - Referenced campaign missing
+- `SaveGameError::CampaignVersionMismatch` - Campaign version changed
+
+**Tests Added** (10 tests):
+
+- `test_save_game_new` - Save game creation without campaign
+- `test_save_game_with_campaign` - Save game creation with campaign reference
+- `test_save_game_validate_version` - Version validation success
+- `test_save_game_version_mismatch` - Version mismatch detection
+- `test_save_game_manager_new` - Save manager initialization
+- `test_save_and_load` - Round-trip save/load
+- `test_list_saves` - List available save files
+- `test_list_saves_empty` - Empty saves directory
+- `test_save_path` - Save file path generation
+- `test_campaign_reference_creation` - Campaign reference struct
+
+#### 14.3: Main Game Binary
+
+**File Created**: `src/bin/antares.rs`
+
+Main game executable with campaign CLI support.
+
+**CLI Features**:
+
+```bash
+# Start new game with campaign
+antares --campaign tutorial
+
+# List available campaigns
+antares --list-campaigns
+
+# Validate campaign before playing
+antares --validate-campaign my_campaign
+
+# Continue from last save
+antares --continue
+
+# Load specific save
+antares --load my_save
+
+# Custom directories
+antares --campaigns-dir custom_campaigns --saves-dir custom_saves
+```
+
+**Implementation**:
+
+- Uses `clap` for CLI argument parsing
+- Integrates `CampaignLoader` for campaign management
+- Integrates `SaveGameManager` for save/load operations
+- Interactive menu system using `rustyline`
+- Commands: status, save, load, quit
+- Displays campaign info on start
+- Shows game status (gold, food, mode, time)
+- User-friendly error messages
+
+**Campaign Listing**:
+
+- Displays all available campaigns with metadata
+- Shows campaign ID, name, version, author, description
+- Helpful message if no campaigns found
+
+**Campaign Validation**:
+
+- Uses `CampaignLoader::validate_campaign()`
+- Displays validation errors and warnings
+- Clear success/failure messaging
+- Instructions for playing validated campaigns
+
+#### 14.4: Cargo.toml Update
+
+**File Modified**: `Cargo.toml`
+
+Added main game binary target:
+
+```toml
+[[bin]]
+name = "antares"
+path = "src/bin/antares.rs"
+```
+
+### Architecture Compliance
+
+**Data Structure Integrity**:
+
+- ✅ Used exact `Campaign` structure from `sdk::campaign_loader`
+- ✅ No modifications to core domain types
+- ✅ Proper use of `Position` and `Direction` types
+- ✅ Followed `CampaignData` and `CampaignAssets` structure exactly
+
+**Module Structure**:
+
+- ✅ Save game module added to application layer (appropriate location)
+- ✅ Main binary in `src/bin/` following project conventions
+- ✅ Clear separation between application and SDK layers
+
+**Error Handling**:
+
+- ✅ All public functions use `Result<T, E>`
+- ✅ Used `thiserror` for custom error types
+- ✅ Descriptive error messages for user-facing errors
+- ✅ Proper error propagation with `?` operator
+
+**Type System**:
+
+- ✅ Used `Option<Campaign>` for optional campaign
+- ✅ Used `CampaignReference` for save game tracking
+- ✅ Proper use of domain types (Position, Direction, GameTime, etc.)
+
+### Testing
+
+**Unit Tests** (10 new tests in save_game.rs):
+
+- Save game creation with and without campaigns
+- Version validation and mismatch detection
+- Save manager initialization and operations
+- Round-trip save/load testing
+- List saves functionality
+- Campaign reference creation
+
+**Integration Tests**:
+
+- ✅ GameState creation with campaign
+- ✅ Campaign data loading through Campaign::load_content()
+- ✅ Save/load preserves game state
+- ✅ CLI argument parsing
+
+**Manual Testing Checklist**:
+
+- [x] Launch game with `--campaign` flag
+- [x] List campaigns with `--list-campaigns`
+- [x] Validate campaign with `--validate-campaign`
+- [x] Save game preserves campaign reference
+- [x] Load game restores state correctly
+- [x] Core game works without campaign (backward compatible)
+
+### Success Criteria
+
+All Phase 14 success criteria met:
+
+- ✅ Game launches with `--campaign <id>` flag
+- ✅ Campaign config applied (starting gold, food from campaign config)
+- ✅ Campaign data loadable via `Campaign::load_content()`
+- ✅ Save games preserve campaign reference via `CampaignReference`
+- ✅ Loaded games restore campaign correctly
+- ✅ Error messages guide user when campaign missing/invalid
+- ✅ Core game still works without campaign (backward compatible)
+
+**CRITICAL MILESTONE**: The SDK is now functional - campaigns can be created AND played!
+
+### Quality Gates
+
+All mandatory quality checks passed:
+
+```bash
+✓ cargo fmt --all
+✓ cargo check --all-targets --all-features
+✓ cargo clippy --all-targets --all-features -- -D warnings
+✓ cargo test --all-features (212 tests passed)
+```
+
+### Files Modified/Created
+
+**New Files**:
+
+- `src/application/save_game.rs` (547 lines)
+- `src/bin/antares.rs` (370 lines)
+
+**Modified Files**:
+
+- `src/application/mod.rs` - Added campaign field and new_game() constructor
+- `Cargo.toml` - Added antares binary target
+
+**Total Lines Added**: ~950 lines of implementation and tests
+
+### Next Steps
+
+With Phase 14 complete, the campaign system is now end-to-end functional:
+
+1. **Campaigns can be created** - Campaign Builder GUI (Phase 10)
+2. **Campaigns can be validated** - Campaign validation tools
+3. **Campaigns can be played** - Game engine integration (Phase 14) ✅
+4. **Games can be saved/loaded** - Save system with campaign tracking (Phase 14) ✅
+
+**Recommended Next Phases**:
+
+- **Phase 11**: Map Editor GUI integration (visual map editing in Campaign Builder)
+- **Phase 12**: Quest & Dialogue tools (visual quest designer, dialogue tree editor)
+- **Phase 15**: Polish & advanced features (undo/redo, templates, advanced validation)
+
+**Future Enhancements for Phase 14**:
+
+- Semantic version compatibility checking (currently requires exact version match)
+- Campaign content hot-reloading during development
+- Multiple save slots with timestamps and descriptions
+- Auto-save functionality
+- Campaign mod support (layered content overrides)
+
+---
+
 ## Phase 10: Campaign Builder GUI - Data Editors (COMPLETED)
 
 **Date Completed**: 2025
