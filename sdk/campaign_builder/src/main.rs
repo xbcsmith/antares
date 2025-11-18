@@ -11,18 +11,24 @@
 //! - Placeholder list views for Items, Spells, Monsters, Maps, Quests
 //! - Unsaved changes tracking and warnings
 
+mod dialogue_editor;
 mod map_editor;
+mod quest_editor;
 
 use antares::domain::character::Stats;
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterResistances};
 use antares::domain::combat::types::{Attack, AttackType};
+use antares::domain::dialogue::DialogueTree;
 use antares::domain::items::types::{Disablement, Item, ItemType, WeaponData};
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+use antares::domain::quest::Quest;
 use antares::domain::types::DiceRoll;
 use antares::domain::world::Map;
+use dialogue_editor::DialogueEditorState;
 use eframe::egui;
 use map_editor::{MapEditorState, MapEditorWidget};
+use quest_editor::QuestEditorState;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -146,16 +152,15 @@ impl Default for CampaignMetadata {
 }
 
 /// Active tab in the UI
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EditorTab {
     Metadata,
-    Config,
     Items,
     Spells,
     Monsters,
     Maps,
     Quests,
-    Files,
+    Dialogues,
     Validation,
 }
 
@@ -260,6 +265,14 @@ struct CampaignBuilderApp {
     maps_selected: Option<usize>,
     maps_editor_mode: EditorMode,
     map_editor_state: Option<MapEditorState>,
+
+    // Quest editor state
+    quests: Vec<Quest>,
+    quest_editor_state: QuestEditorState,
+
+    // Dialogue editor state
+    dialogues: Vec<DialogueTree>,
+    dialogue_editor_state: DialogueEditorState,
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +331,14 @@ impl Default for CampaignBuilderApp {
             maps_selected: None,
             maps_editor_mode: EditorMode::List,
             map_editor_state: None,
+
+            // Quest editor state
+            quests: Vec::new(),
+            quest_editor_state: QuestEditorState::new(),
+
+            // Dialogue editor state
+            dialogues: Vec::new(),
+            dialogue_editor_state: DialogueEditorState::new(),
         }
     }
 }
