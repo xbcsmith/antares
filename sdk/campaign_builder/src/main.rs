@@ -35,7 +35,7 @@ use antares::domain::character::Stats;
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterResistances};
 use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
-use antares::domain::dialogue::DialogueTree;
+use antares::domain::dialogue::{DialogueTree, NodeId};
 use antares::domain::items::types::{
     AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorData, AttributeType, Bonus,
     BonusAttribute, ConsumableData, ConsumableEffect, Disablement, Item, ItemType, QuestData,
@@ -363,8 +363,13 @@ struct CampaignBuilderApp {
     quests_show_import_dialog: bool,
 
     // Dialogue editor state</parameter>
+    // Dialogue editor state
     dialogues: Vec<DialogueTree>,
     dialogue_editor_state: DialogueEditorState,
+    dialogues_search_filter: String,
+    dialogues_show_preview: bool,
+    dialogues_import_buffer: String,
+    dialogues_show_import_dialog: bool,
 
     // Phase 13: Distribution tools state
     export_wizard: Option<packager::ExportWizard>,
@@ -468,6 +473,10 @@ impl Default for CampaignBuilderApp {
 
             dialogues: Vec::new(),
             dialogue_editor_state: DialogueEditorState::default(),
+            dialogues_search_filter: String::new(),
+            dialogues_show_preview: false,
+            dialogues_import_buffer: String::new(),
+            dialogues_show_import_dialog: false,
 
             // Phase 13: Distribution tools
             export_wizard: None,
@@ -4946,7 +4955,7 @@ impl CampaignBuilderApp {
                 ui.heading("Quest Stages");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("➕ Add Stage").clicked() {
-                        self.quest_editor_state.add_stage();
+                        let _ = self.quest_editor_state.add_stage();
                         self.unsaved_changes = true;
                     }
                 });
@@ -5254,33 +5263,476 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load dialogues from file
+    fn load_dialogues_from_file(&mut self, path: &std::path::Path) -> Result<(), CampaignError> {
+        let contents = std::fs::read_to_string(path)?;
+        let dialogues: Vec<DialogueTree> = ron::from_str(&contents)?;
+        self.dialogues = dialogues;
+        Ok(())
+    }
+
     /// Show dialogues editor
     fn show_dialogues_editor(&mut self, ui: &mut egui::Ui) {
         ui.heading("💬 Dialogues Editor");
         ui.add_space(5.0);
-        ui.label("Manage NPC dialogues and conversation trees");
+
+        // Toolbar
+        ui.horizontal(|ui| {
+            if ui.button("➕ New Dialogue").clicked() {
+                self.dialogue_editor_state.start_new_dialogue();
+            }
+
+            if ui.button("💾 Save to Campaign").clicked() {
+                // Sync dialogue_editor_state.dialogues to self.dialogues
+                self.dialogues = self.dialogue_editor_state.dialogues.clone();
+                self.status_message = "Dialogues saved to campaign".to_string();
+            }
+
+            if ui.button("📂 Load from File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("RON", &["ron"])
+                    .pick_file()
+                {
+                    match self.load_dialogues_from_file(&path) {
+                        Ok(()) => {
+                            self.dialogue_editor_state
+                                .load_dialogues(self.dialogues.clone());
+                            self.status_message =
+                                format!("Loaded {} dialogues", self.dialogues.len());
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to load dialogues: {:?}", e);
+                        }
+                    }
+                }
+            }
+
+            if ui.button("📤 Import RON").clicked() {
+                self.dialogues_show_import_dialog = true;
+                self.dialogues_import_buffer.clear();
+            }
+
+            if ui.button("📋 Export to Clipboard").clicked() {
+                match ron::ser::to_string_pretty(&self.dialogues, Default::default()) {
+                    Ok(ron_str) => {
+                        ui.output_mut(|o| o.copied_text = ron_str.clone());
+                        self.status_message = "Dialogues exported to clipboard".to_string();
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Export failed: {:?}", e);
+                    }
+                }
+            }
+
+            ui.checkbox(&mut self.dialogues_show_preview, "Show Preview");
+        });
+
         ui.separator();
 
-        ui.label("Dialogue editor integration in progress");
+        // Import dialog (handled outside main UI to avoid borrow conflicts)
+        let mut import_complete = false;
+        let mut import_result: Option<Result<DialogueTree, String>> = None;
+        let mut cancel_import = false;
+
+        if self.dialogues_show_import_dialog {
+            let mut show_dialog = self.dialogues_show_import_dialog;
+            egui::Window::new("Import Dialogue RON")
+                .open(&mut show_dialog)
+                .show(ui.ctx(), |ui| {
+                    ui.label("Paste RON dialogue data:");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.dialogues_import_buffer)
+                            .desired_width(500.0)
+                            .desired_rows(15),
+                    );
+
+                    ui.horizontal(|ui| {
+                        if ui.button("Import").clicked() {
+                            match ron::from_str::<DialogueTree>(&self.dialogues_import_buffer) {
+                                Ok(dialogue) => {
+                                    import_result = Some(Ok(dialogue));
+                                    import_complete = true;
+                                }
+                                Err(e) => {
+                                    import_result = Some(Err(format!("{:?}", e)));
+                                    import_complete = true;
+                                }
+                            }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            cancel_import = true;
+                        }
+                    });
+                });
+            self.dialogues_show_import_dialog = show_dialog;
+        }
+
+        // Process import result outside window closure
+        if cancel_import {
+            self.dialogues_show_import_dialog = false;
+        }
+        if import_complete {
+            if let Some(result) = import_result {
+                match result {
+                    Ok(mut dialogue) => {
+                        let new_id = self.next_available_dialogue_id();
+                        dialogue.id = new_id;
+                        self.dialogues.push(dialogue);
+                        self.dialogue_editor_state
+                            .load_dialogues(self.dialogues.clone());
+                        self.status_message = format!("Imported dialogue {}", new_id);
+                        self.dialogues_show_import_dialog = false;
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Import failed: {}", e);
+                    }
+                }
+            }
+        }
+
+        ui.horizontal(|ui| {
+            ui.label("Search:");
+            ui.text_edit_singleline(&mut self.dialogue_editor_state.search_filter);
+        });
+
         ui.separator();
 
-        // Display dialogue count
-        ui.label(format!("Dialogues loaded: {}", self.dialogues.len()));
+        // Main content area
+        match self.dialogue_editor_state.mode {
+            dialogue_editor::DialogueEditorMode::List => {
+                self.show_dialogue_list(ui);
+            }
+            dialogue_editor::DialogueEditorMode::Creating
+            | dialogue_editor::DialogueEditorMode::Editing => {
+                self.show_dialogue_form(ui);
+            }
+        }
+    }
 
-        // TODO: Integrate DialogueEditorWidget when UI components are ready
-        // For now, show basic list
+    /// Show dialogue list view
+    fn show_dialogue_list(&mut self, ui: &mut egui::Ui) {
+        ui.label(format!(
+            "Total Dialogues: {}",
+            self.dialogue_editor_state.dialogues.len()
+        ));
+
+        // Collect actions to avoid borrow conflicts
+        let mut delete_idx: Option<usize> = None;
+        let mut edit_idx: Option<usize> = None;
+        let mut duplicate_idx: Option<usize> = None;
+
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for (idx, dialogue) in self.dialogues.iter().enumerate() {
+            let filtered = self.dialogue_editor_state.filtered_dialogues();
+
+            for (idx, dialogue) in filtered {
                 ui.group(|ui| {
-                    ui.label(format!(
-                        "Dialogue {}: {} ({} nodes)",
-                        idx,
-                        dialogue.id,
-                        dialogue.nodes.len()
-                    ));
+                    ui.horizontal(|ui| {
+                        ui.label(format!("ID: {}", dialogue.id));
+                        ui.separator();
+                        ui.strong(&dialogue.name);
+                        if let Some(speaker) = &dialogue.speaker_name {
+                            ui.label(format!("(Speaker: {})", speaker));
+                        }
+                        ui.label(format!("({} nodes)", dialogue.nodes.len()));
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("🗑 Delete").clicked() {
+                                delete_idx = Some(idx);
+                            }
+                            if ui.button("✏ Edit").clicked() {
+                                edit_idx = Some(idx);
+                            }
+                            if ui.button("📋 Duplicate").clicked() {
+                                duplicate_idx = Some(idx);
+                            }
+                        });
+                    });
+
+                    // Preview details
+                    if self.dialogues_show_preview {
+                        ui.separator();
+                        ui.label(format!("Root Node: {}", dialogue.root_node));
+                        ui.label(format!("Repeatable: {}", dialogue.repeatable));
+                        if let Some(quest_id) = dialogue.associated_quest {
+                            ui.label(format!("Associated Quest: {}", quest_id));
+                        }
+                    }
                 });
             }
         });
+
+        // Process actions after scroll area
+        if let Some(idx) = delete_idx {
+            self.dialogue_editor_state.delete_dialogue(idx);
+            self.dialogues = self.dialogue_editor_state.dialogues.clone();
+        }
+        if let Some(idx) = edit_idx {
+            self.dialogue_editor_state.start_edit_dialogue(idx);
+        }
+        if let Some(idx) = duplicate_idx {
+            if let Some(dialogue) = self.dialogue_editor_state.dialogues.get(idx) {
+                let mut new_dialogue = dialogue.clone();
+                new_dialogue.id = self.next_available_dialogue_id();
+                new_dialogue.name = format!("{} (Copy)", new_dialogue.name);
+                self.dialogue_editor_state.dialogues.push(new_dialogue);
+                self.dialogues = self.dialogue_editor_state.dialogues.clone();
+            }
+        }
+    }
+
+    /// Show dialogue form editor
+    fn show_dialogue_form(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            if ui.button("⬅ Back to List").clicked() {
+                self.dialogue_editor_state.cancel_edit();
+            }
+
+            if ui.button("💾 Save Dialogue").clicked() {
+                match self.dialogue_editor_state.save_dialogue() {
+                    Ok(()) => {
+                        self.dialogues = self.dialogue_editor_state.dialogues.clone();
+                        self.status_message = "Dialogue saved".to_string();
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Save failed: {}", e);
+                    }
+                }
+            }
+        });
+
+        ui.separator();
+
+        // Dialogue form
+        egui::Grid::new("dialogue_form_grid")
+            .num_columns(2)
+            .spacing([10.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("Dialogue ID:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.dialogue_editor_state.dialogue_buffer.id)
+                        .desired_width(200.0),
+                );
+                ui.end_row();
+
+                ui.label("Name:");
+                ui.add(
+                    egui::TextEdit::singleline(
+                        &mut self.dialogue_editor_state.dialogue_buffer.name,
+                    )
+                    .desired_width(300.0),
+                );
+                ui.end_row();
+
+                ui.label("Speaker Name:");
+                ui.add(
+                    egui::TextEdit::singleline(
+                        &mut self.dialogue_editor_state.dialogue_buffer.speaker_name,
+                    )
+                    .desired_width(200.0),
+                );
+                ui.end_row();
+
+                ui.label("Repeatable:");
+                ui.checkbox(
+                    &mut self.dialogue_editor_state.dialogue_buffer.repeatable,
+                    "",
+                );
+                ui.end_row();
+
+                ui.label("Associated Quest ID:");
+                ui.add(
+                    egui::TextEdit::singleline(
+                        &mut self.dialogue_editor_state.dialogue_buffer.associated_quest,
+                    )
+                    .desired_width(150.0),
+                );
+                ui.end_row();
+            });
+
+        ui.separator();
+
+        // Node tree editor
+        if let Some(dialogue_idx) = self.dialogue_editor_state.selected_dialogue {
+            if dialogue_idx < self.dialogue_editor_state.dialogues.len() {
+                ui.heading("Dialogue Nodes");
+                self.show_dialogue_nodes_editor(ui, dialogue_idx);
+            }
+        } else {
+            ui.label("Save dialogue to add nodes");
+        }
+    }
+
+    /// Show dialogue node tree editor
+    fn show_dialogue_nodes_editor(&mut self, ui: &mut egui::Ui, dialogue_idx: usize) {
+        // Add node form
+        let mut add_node_clicked = false;
+        ui.horizontal(|ui| {
+            ui.label("Add New Node:");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.dialogue_editor_state.node_buffer.id)
+                    .hint_text("Node ID")
+                    .desired_width(80.0),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.dialogue_editor_state.node_buffer.text)
+                    .hint_text("Node text")
+                    .desired_width(250.0),
+            );
+            ui.checkbox(
+                &mut self.dialogue_editor_state.node_buffer.is_terminal,
+                "Terminal",
+            );
+
+            if ui.button("➕ Add Node").clicked() {
+                add_node_clicked = true;
+            }
+        });
+
+        if add_node_clicked {
+            match self.dialogue_editor_state.add_node() {
+                Ok(()) => {
+                    self.status_message = "Node added".to_string();
+                }
+                Err(e) => {
+                    self.status_message = format!("Failed to add node: {}", e);
+                }
+            }
+        }
+
+        ui.separator();
+
+        // Clone dialogue data to avoid borrow conflicts
+        let dialogue = self.dialogue_editor_state.dialogues[dialogue_idx].clone();
+        let mut select_node: Option<NodeId> = None;
+
+        // Display nodes
+        egui::ScrollArea::vertical()
+            .max_height(400.0)
+            .show(ui, |ui| {
+                for (node_id, node) in &dialogue.nodes {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.strong(format!("Node {}", node_id));
+                            if *node_id == dialogue.root_node {
+                                ui.label("(ROOT)");
+                            }
+                            if node.is_terminal {
+                                ui.label("(TERMINAL)");
+                            }
+                        });
+
+                        ui.label(&node.text);
+
+                        if let Some(speaker) = &node.speaker_override {
+                            ui.label(format!("Speaker: {}", speaker));
+                        }
+
+                        // Show choices
+                        if !node.choices.is_empty() {
+                            ui.separator();
+                            ui.label("Choices:");
+                            for (choice_idx, choice) in node.choices.iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("  {}. {}", choice_idx + 1, choice.text));
+                                    if let Some(target) = choice.target_node {
+                                        ui.label(format!("→ Node {}", target));
+                                    }
+                                    if choice.ends_dialogue {
+                                        ui.label("(Ends)");
+                                    }
+                                });
+                            }
+                        }
+
+                        // Show conditions
+                        if !node.conditions.is_empty() {
+                            ui.separator();
+                            ui.label(format!("Conditions: {}", node.conditions.len()));
+                        }
+
+                        // Show actions
+                        if !node.actions.is_empty() {
+                            ui.separator();
+                            ui.label(format!("Actions: {}", node.actions.len()));
+                        }
+
+                        // Add choice to this node
+                        if ui.button("➕ Add Choice").clicked() {
+                            select_node = Some(*node_id);
+                        }
+                    });
+                }
+            });
+
+        // Process node selection outside scroll area
+        if let Some(node_id) = select_node {
+            self.dialogue_editor_state.selected_node = Some(node_id);
+        }
+
+        // Choice editor panel
+        let mut add_choice_clicked = false;
+        let mut cancel_choice_clicked = false;
+
+        if let Some(selected_node_id) = self.dialogue_editor_state.selected_node {
+            ui.separator();
+            ui.heading(format!("Add Choice to Node {}", selected_node_id));
+
+            ui.horizontal(|ui| {
+                ui.label("Choice Text:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.dialogue_editor_state.choice_buffer.text)
+                        .desired_width(250.0),
+                );
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Target Node ID:");
+                ui.add(
+                    egui::TextEdit::singleline(
+                        &mut self.dialogue_editor_state.choice_buffer.target_node,
+                    )
+                    .desired_width(80.0),
+                );
+                ui.checkbox(
+                    &mut self.dialogue_editor_state.choice_buffer.ends_dialogue,
+                    "Ends Dialogue",
+                );
+            });
+
+            ui.horizontal(|ui| {
+                if ui.button("✓ Add Choice").clicked() {
+                    add_choice_clicked = true;
+                }
+                if ui.button("✗ Cancel").clicked() {
+                    cancel_choice_clicked = true;
+                }
+            });
+        }
+
+        // Process choice actions outside choice panel
+        if add_choice_clicked {
+            match self.dialogue_editor_state.add_choice() {
+                Ok(()) => {
+                    self.status_message = "Choice added".to_string();
+                }
+                Err(e) => {
+                    self.status_message = format!("Failed to add choice: {}", e);
+                }
+            }
+        }
+        if cancel_choice_clicked {
+            self.dialogue_editor_state.selected_node = None;
+        }
+    }
+
+    /// Generate next available dialogue ID
+    fn next_available_dialogue_id(&self) -> u16 {
+        self.dialogues
+            .iter()
+            .map(|d| d.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
     }
 
     /// Save dialogues to file
@@ -7306,5 +7758,399 @@ mod tests {
             app.quest_editor_state.mode,
             quest_editor::QuestEditorMode::List
         );
+    }
+
+    // ============================================================
+    // Phase 4B: Dialogue Editor Integration Tests
+    // ============================================================
+
+    #[test]
+    fn test_dialogue_editor_state_initialization() {
+        let app = CampaignBuilderApp::default();
+
+        assert!(app.dialogues.is_empty());
+        assert!(app.dialogue_editor_state.dialogues.is_empty());
+        assert_eq!(
+            app.dialogue_editor_state.mode,
+            dialogue_editor::DialogueEditorMode::List
+        );
+        assert!(app.dialogues_search_filter.is_empty());
+        assert!(!app.dialogues_show_preview);
+        assert!(app.dialogues_import_buffer.is_empty());
+        assert!(!app.dialogues_show_import_dialog);
+    }
+
+    #[test]
+    fn test_dialogue_list_operations() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Add dialogues
+        let dialogue1 = DialogueTree::new(1, "Merchant Greeting", 1);
+        let dialogue2 = DialogueTree::new(2, "Guard Warning", 1);
+
+        app.dialogues.push(dialogue1);
+        app.dialogues.push(dialogue2);
+        app.dialogue_editor_state
+            .load_dialogues(app.dialogues.clone());
+
+        assert_eq!(app.dialogue_editor_state.dialogues.len(), 2);
+        assert_eq!(
+            app.dialogue_editor_state.dialogues[0].name,
+            "Merchant Greeting"
+        );
+        assert_eq!(app.dialogue_editor_state.dialogues[1].name, "Guard Warning");
+    }
+
+    #[test]
+    fn test_dialogue_search_filter() {
+        let mut app = CampaignBuilderApp::default();
+
+        let dialogue1 = DialogueTree::new(1, "Merchant Greeting", 1);
+        let dialogue2 = DialogueTree::new(2, "Guard Warning", 1);
+
+        app.dialogues.push(dialogue1);
+        app.dialogues.push(dialogue2);
+        app.dialogue_editor_state
+            .load_dialogues(app.dialogues.clone());
+
+        // No filter - all dialogues
+        let filtered = app.dialogue_editor_state.filtered_dialogues();
+        assert_eq!(filtered.len(), 2);
+
+        // Filter by name
+        app.dialogue_editor_state.search_filter = "merchant".to_string();
+        let filtered = app.dialogue_editor_state.filtered_dialogues();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].1.name, "Merchant Greeting");
+
+        // Filter by ID
+        app.dialogue_editor_state.search_filter = "2".to_string();
+        let filtered = app.dialogue_editor_state.filtered_dialogues();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].1.id, 2);
+    }
+
+    #[test]
+    fn test_dialogue_start_new() {
+        let mut app = CampaignBuilderApp::default();
+
+        app.dialogue_editor_state.start_new_dialogue();
+
+        assert_eq!(
+            app.dialogue_editor_state.mode,
+            dialogue_editor::DialogueEditorMode::Creating
+        );
+        assert!(app.dialogue_editor_state.dialogue_buffer.id.is_empty());
+        assert!(app.dialogue_editor_state.dialogue_buffer.name.is_empty());
+        assert!(app.dialogue_editor_state.validation_errors.is_empty());
+    }
+
+    #[test]
+    fn test_dialogue_edit_existing() {
+        let mut app = CampaignBuilderApp::default();
+
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        dialogue.speaker_name = Some("Merchant".to_string());
+        dialogue.repeatable = true;
+
+        app.dialogues.push(dialogue);
+        app.dialogue_editor_state
+            .load_dialogues(app.dialogues.clone());
+
+        app.dialogue_editor_state.start_edit_dialogue(0);
+
+        assert_eq!(
+            app.dialogue_editor_state.mode,
+            dialogue_editor::DialogueEditorMode::Editing
+        );
+        assert_eq!(app.dialogue_editor_state.dialogue_buffer.id, "1");
+        assert_eq!(
+            app.dialogue_editor_state.dialogue_buffer.name,
+            "Test Dialogue"
+        );
+        assert_eq!(
+            app.dialogue_editor_state.dialogue_buffer.speaker_name,
+            "Merchant"
+        );
+        assert!(app.dialogue_editor_state.dialogue_buffer.repeatable);
+    }
+
+    #[test]
+    fn test_dialogue_save_new() {
+        let mut app = CampaignBuilderApp::default();
+
+        app.dialogue_editor_state.start_new_dialogue();
+        app.dialogue_editor_state.dialogue_buffer.id = "10".to_string();
+        app.dialogue_editor_state.dialogue_buffer.name = "New Dialogue".to_string();
+        app.dialogue_editor_state.dialogue_buffer.speaker_name = "NPC".to_string();
+
+        let result = app.dialogue_editor_state.save_dialogue();
+
+        assert!(result.is_ok());
+        assert_eq!(app.dialogue_editor_state.dialogues.len(), 1);
+        assert_eq!(app.dialogue_editor_state.dialogues[0].id, 10);
+        assert_eq!(app.dialogue_editor_state.dialogues[0].name, "New Dialogue");
+        assert_eq!(
+            app.dialogue_editor_state.dialogues[0].speaker_name,
+            Some("NPC".to_string())
+        );
+        assert_eq!(
+            app.dialogue_editor_state.mode,
+            dialogue_editor::DialogueEditorMode::List
+        );
+    }
+
+    #[test]
+    fn test_dialogue_delete() {
+        let mut app = CampaignBuilderApp::default();
+
+        let dialogue1 = DialogueTree::new(1, "Dialogue 1", 1);
+        let dialogue2 = DialogueTree::new(2, "Dialogue 2", 1);
+
+        app.dialogues.push(dialogue1);
+        app.dialogues.push(dialogue2);
+        app.dialogue_editor_state
+            .load_dialogues(app.dialogues.clone());
+
+        assert_eq!(app.dialogue_editor_state.dialogues.len(), 2);
+
+        app.dialogue_editor_state.delete_dialogue(0);
+
+        assert_eq!(app.dialogue_editor_state.dialogues.len(), 1);
+        assert_eq!(app.dialogue_editor_state.dialogues[0].id, 2);
+    }
+
+    #[test]
+    fn test_dialogue_cancel_edit() {
+        let mut app = CampaignBuilderApp::default();
+
+        app.dialogue_editor_state.start_new_dialogue();
+        app.dialogue_editor_state.dialogue_buffer.name = "Test".to_string();
+
+        app.dialogue_editor_state.cancel_edit();
+
+        assert_eq!(
+            app.dialogue_editor_state.mode,
+            dialogue_editor::DialogueEditorMode::List
+        );
+        assert!(app.dialogue_editor_state.dialogue_buffer.name.is_empty());
+        assert!(app.dialogue_editor_state.selected_dialogue.is_none());
+    }
+
+    #[test]
+    fn test_dialogue_add_node() {
+        let mut app = CampaignBuilderApp::default();
+
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        let root_node = antares::domain::dialogue::DialogueNode::new(1, "Root node text");
+        dialogue.add_node(root_node);
+
+        app.dialogues.push(dialogue);
+        app.dialogue_editor_state
+            .load_dialogues(app.dialogues.clone());
+        app.dialogue_editor_state.start_edit_dialogue(0);
+
+        // Add new node
+        app.dialogue_editor_state.node_buffer.id = "2".to_string();
+        app.dialogue_editor_state.node_buffer.text = "New node text".to_string();
+        app.dialogue_editor_state.node_buffer.is_terminal = true;
+
+        let result = app.dialogue_editor_state.add_node();
+
+        assert!(result.is_ok());
+        assert_eq!(app.dialogue_editor_state.dialogues[0].nodes.len(), 2);
+        assert!(app.dialogue_editor_state.dialogues[0]
+            .nodes
+            .contains_key(&2));
+    }
+
+    #[test]
+    fn test_dialogue_add_choice() {
+        let mut app = CampaignBuilderApp::default();
+
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        let root_node = antares::domain::dialogue::DialogueNode::new(1, "Root");
+        let target_node = antares::domain::dialogue::DialogueNode::new(2, "Target");
+        dialogue.add_node(root_node);
+        dialogue.add_node(target_node);
+
+        app.dialogues.push(dialogue);
+        app.dialogue_editor_state
+            .load_dialogues(app.dialogues.clone());
+        app.dialogue_editor_state.start_edit_dialogue(0);
+
+        // Select node 1 to add choice to
+        app.dialogue_editor_state.selected_node = Some(1);
+        app.dialogue_editor_state.choice_buffer.text = "Go to node 2".to_string();
+        app.dialogue_editor_state.choice_buffer.target_node = "2".to_string();
+
+        let result = app.dialogue_editor_state.add_choice();
+
+        assert!(result.is_ok());
+        let node = app.dialogue_editor_state.dialogues[0]
+            .nodes
+            .get(&1)
+            .unwrap();
+        assert_eq!(node.choices.len(), 1);
+        assert_eq!(node.choices[0].text, "Go to node 2");
+    }
+
+    #[test]
+    fn test_dialogue_next_available_id() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Empty list - should return 1
+        assert_eq!(app.next_available_dialogue_id(), 1);
+
+        // With dialogues - should return max + 1
+        app.dialogues.push(DialogueTree::new(1, "D1", 1));
+        app.dialogues.push(DialogueTree::new(5, "D2", 1));
+        app.dialogues.push(DialogueTree::new(3, "D3", 1));
+
+        assert_eq!(app.next_available_dialogue_id(), 6);
+    }
+
+    #[test]
+    fn test_dialogue_import_export_roundtrip() {
+        let mut app = CampaignBuilderApp::default();
+
+        let mut dialogue = DialogueTree::new(42, "Test Export", 1);
+        dialogue.speaker_name = Some("Merchant".to_string());
+        dialogue.repeatable = false;
+
+        let root_node = antares::domain::dialogue::DialogueNode::new(1, "Hello!");
+        dialogue.add_node(root_node);
+
+        app.dialogues.push(dialogue);
+
+        // Export to RON
+        let ron_str = ron::ser::to_string_pretty(&app.dialogues, Default::default()).unwrap();
+
+        // Import back
+        let imported: Vec<DialogueTree> = ron::from_str(&ron_str).unwrap();
+
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].id, 42);
+        assert_eq!(imported[0].name, "Test Export");
+        assert_eq!(imported[0].speaker_name, Some("Merchant".to_string()));
+        assert!(!imported[0].repeatable);
+        assert_eq!(imported[0].nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_dialogue_editor_mode_transitions() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Start in list mode
+        assert_eq!(
+            app.dialogue_editor_state.mode,
+            dialogue_editor::DialogueEditorMode::List
+        );
+
+        // Transition to creating
+        app.dialogue_editor_state.start_new_dialogue();
+        assert_eq!(
+            app.dialogue_editor_state.mode,
+            dialogue_editor::DialogueEditorMode::Creating
+        );
+
+        // Cancel back to list
+        app.dialogue_editor_state.cancel_edit();
+        assert_eq!(
+            app.dialogue_editor_state.mode,
+            dialogue_editor::DialogueEditorMode::List
+        );
+    }
+
+    #[test]
+    fn test_dialogue_node_terminal_flag() {
+        let mut app = CampaignBuilderApp::default();
+
+        let mut dialogue = DialogueTree::new(1, "Test", 1);
+        let mut node = antares::domain::dialogue::DialogueNode::new(1, "Terminal node");
+        node.is_terminal = true;
+        dialogue.add_node(node);
+
+        app.dialogues.push(dialogue);
+        app.dialogue_editor_state
+            .load_dialogues(app.dialogues.clone());
+
+        let node = app.dialogue_editor_state.dialogues[0]
+            .nodes
+            .get(&1)
+            .unwrap();
+        assert!(node.is_terminal);
+    }
+
+    #[test]
+    fn test_dialogue_speaker_override() {
+        let mut app = CampaignBuilderApp::default();
+
+        let mut dialogue = DialogueTree::new(1, "Test", 1);
+        dialogue.speaker_name = Some("Default Speaker".to_string());
+
+        let mut node = antares::domain::dialogue::DialogueNode::new(1, "Override test");
+        node.speaker_override = Some("Special Speaker".to_string());
+        dialogue.add_node(node);
+
+        app.dialogues.push(dialogue);
+        app.dialogue_editor_state
+            .load_dialogues(app.dialogues.clone());
+
+        let node = app.dialogue_editor_state.dialogues[0]
+            .nodes
+            .get(&1)
+            .unwrap();
+        assert_eq!(node.speaker_override, Some("Special Speaker".to_string()));
+    }
+
+    #[test]
+    fn test_dialogue_associated_quest() {
+        let mut app = CampaignBuilderApp::default();
+
+        app.dialogue_editor_state.start_new_dialogue();
+        app.dialogue_editor_state.dialogue_buffer.id = "10".to_string();
+        app.dialogue_editor_state.dialogue_buffer.name = "Quest Dialogue".to_string();
+        app.dialogue_editor_state.dialogue_buffer.associated_quest = "5".to_string();
+
+        let result = app.dialogue_editor_state.save_dialogue();
+
+        assert!(result.is_ok());
+        assert_eq!(
+            app.dialogue_editor_state.dialogues[0].associated_quest,
+            Some(5)
+        );
+    }
+
+    #[test]
+    fn test_dialogue_repeatable_flag() {
+        let mut dialogue1 = DialogueTree::new(1, "One-time", 1);
+        dialogue1.repeatable = false;
+
+        let mut dialogue2 = DialogueTree::new(2, "Repeatable", 1);
+        dialogue2.repeatable = true;
+
+        assert!(!dialogue1.repeatable);
+        assert!(dialogue2.repeatable);
+    }
+
+    #[test]
+    fn test_dialogue_import_buffer() {
+        let app = CampaignBuilderApp::default();
+        assert!(app.dialogues_import_buffer.is_empty());
+        assert!(!app.dialogues_show_import_dialog);
+    }
+
+    #[test]
+    fn test_dialogue_validation_errors_cleared() {
+        let mut app = CampaignBuilderApp::default();
+
+        app.dialogue_editor_state
+            .validation_errors
+            .push("Test error".to_string());
+        assert!(!app.dialogue_editor_state.validation_errors.is_empty());
+
+        app.dialogue_editor_state.start_new_dialogue();
+        assert!(app.dialogue_editor_state.validation_errors.is_empty());
     }
 }
