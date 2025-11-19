@@ -357,8 +357,12 @@ struct CampaignBuilderApp {
     // Quest editor state
     quests: Vec<Quest>,
     quest_editor_state: QuestEditorState,
+    quests_search_filter: String,
+    quests_show_preview: bool,
+    quests_import_buffer: String,
+    quests_show_import_dialog: bool,
 
-    // Dialogue editor state
+    // Dialogue editor state</parameter>
     dialogues: Vec<DialogueTree>,
     dialogue_editor_state: DialogueEditorState,
 
@@ -457,6 +461,10 @@ impl Default for CampaignBuilderApp {
 
             quests: Vec::new(),
             quest_editor_state: QuestEditorState::default(),
+            quests_search_filter: String::new(),
+            quests_show_preview: true,
+            quests_import_buffer: String::new(),
+            quests_show_import_dialog: false,
 
             dialogues: Vec::new(),
             dialogue_editor_state: DialogueEditorState::default(),
@@ -4577,39 +4585,559 @@ impl CampaignBuilderApp {
         }
     }
 
-    /// Show quests editor (placeholder with list view)
-    fn show_quests_editor(&self, ui: &mut egui::Ui) {
+    /// Show quests editor (Phase 4A: Full Quest Editor Integration)
+    fn show_quests_editor(&mut self, ui: &mut egui::Ui) {
         ui.heading("📜 Quests Editor");
         ui.add_space(5.0);
-        ui.label("Manage quest chains and objectives");
+
+        // Sync quests between app and editor state
+        self.quest_editor_state.quests = self.quests.clone();
+
+        // Toolbar
+        ui.horizontal(|ui| {
+            if ui.button("➕ New Quest").clicked() {
+                self.quest_editor_state.start_new_quest();
+                self.unsaved_changes = true;
+            }
+
+            ui.separator();
+
+            if ui.button("💾 Save Quests").clicked() {
+                if let Err(e) = self.save_quests() {
+                    eprintln!("Failed to save quests: {}", e);
+                }
+            }
+
+            if ui.button("📂 Load Quests").clicked() {
+                if let Err(e) = self.load_quests() {
+                    eprintln!("Failed to load quests: {}", e);
+                }
+            }
+
+            ui.separator();
+
+            if ui.button("📥 Import Quest").clicked() {
+                self.quests_show_import_dialog = true;
+            }
+
+            if let Some(selected_idx) = self.quest_editor_state.selected_quest {
+                if selected_idx < self.quest_editor_state.quests.len() {
+                    if ui.button("📤 Export Quest").clicked() {
+                        let quest = &self.quest_editor_state.quests[selected_idx];
+                        match ron::ser::to_string_pretty(quest, Default::default()) {
+                            Ok(ron_string) => {
+                                self.quests_import_buffer = ron_string;
+                                ui.output_mut(|o| {
+                                    o.copied_text = self.quests_import_buffer.clone();
+                                });
+                            }
+                            Err(e) => eprintln!("Failed to export quest: {}", e),
+                        }
+                    }
+                }
+            }
+
+            ui.separator();
+
+            ui.checkbox(&mut self.quests_show_preview, "Show Preview");
+        });
+
         ui.separator();
 
+        // Search filter
         ui.horizontal(|ui| {
             ui.label("🔍 Search:");
-            ui.text_edit_singleline(&mut String::new());
-            ui.separator();
-            if ui.button("➕ Add Quest").clicked() {
-                // Will be implemented in Phase 5
+            ui.text_edit_singleline(&mut self.quest_editor_state.search_filter);
+        });
+
+        ui.separator();
+
+        // Main content - split view or form editor
+        match self.quest_editor_state.mode {
+            quest_editor::QuestEditorMode::List => {
+                // Split view: list on left, preview on right
+                egui::SidePanel::left("quest_list_panel")
+                    .resizable(true)
+                    .default_width(300.0)
+                    .show_inside(ui, |ui| {
+                        self.show_quest_list(ui);
+                    });
+
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    if self.quests_show_preview {
+                        self.show_quest_preview(ui);
+                    } else {
+                        ui.centered_and_justified(|ui| {
+                            ui.label("Select a quest to view details or create a new quest");
+                        });
+                    }
+                });
             }
+            quest_editor::QuestEditorMode::Creating | quest_editor::QuestEditorMode::Editing => {
+                // Full-screen quest form editor
+                self.show_quest_form(ui);
+            }
+        }
+
+        // Import dialog
+        if self.quests_show_import_dialog {
+            egui::Window::new("Import Quest from RON")
+                .collapsible(false)
+                .resizable(true)
+                .default_size([600.0, 400.0])
+                .show(ui.ctx(), |ui| {
+                    ui.label("Paste RON-formatted quest data:");
+                    ui.add_space(5.0);
+
+                    egui::ScrollArea::vertical()
+                        .max_height(250.0)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.quests_import_buffer)
+                                    .desired_width(f32::INFINITY)
+                                    .font(egui::TextStyle::Monospace),
+                            );
+                        });
+
+                    ui.add_space(10.0);
+
+                    ui.horizontal(|ui| {
+                        if ui.button("✅ Import").clicked() {
+                            match ron::from_str::<Quest>(&self.quests_import_buffer) {
+                                Ok(mut quest) => {
+                                    // Assign new ID to avoid conflicts
+                                    quest.id = self.next_available_quest_id();
+                                    self.quests.push(quest);
+                                    self.unsaved_changes = true;
+                                    self.quests_import_buffer.clear();
+                                    self.quests_show_import_dialog = false;
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to parse quest RON: {}", e);
+                                }
+                            }
+                        }
+
+                        if ui.button("❌ Cancel").clicked() {
+                            self.quests_show_import_dialog = false;
+                            self.quests_import_buffer.clear();
+                        }
+                    });
+                });
+        }
+
+        // Sync back any changes
+        self.quests = self.quest_editor_state.quests.clone();
+    }
+
+    /// Show quest list view
+    fn show_quest_list(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Quest List");
+        ui.separator();
+
+        // Sync quests to editor state for filtering
+        self.quest_editor_state.quests = self.quests.clone();
+        let filtered_quests_cloned: Vec<(usize, Quest)> = self
+            .quest_editor_state
+            .filtered_quests()
+            .into_iter()
+            .map(|(idx, q)| (idx, q.clone()))
+            .collect();
+
+        ui.label(format!("Total: {} quest(s)", filtered_quests_cloned.len()));
+        ui.separator();
+
+        // Pre-calculate next ID to avoid borrowing self in closure
+        let next_id = self.next_available_quest_id();
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for (idx, quest) in filtered_quests_cloned.iter().enumerate() {
+                let is_selected = self.quest_editor_state.selected_quest == Some(idx);
+
+                let response = ui.selectable_label(
+                    is_selected,
+                    format!(
+                        "{} - {} {}",
+                        quest.1.id,
+                        quest.1.name,
+                        if quest.1.is_main_quest { "⭐" } else { "" }
+                    ),
+                );
+
+                if response.clicked() {
+                    self.quest_editor_state.selected_quest = Some(idx);
+                }
+
+                if response.double_clicked() {
+                    self.quest_editor_state.start_edit_quest(idx);
+                }
+
+                // Context menu
+                response.context_menu(|ui| {
+                    if ui.button("✏️ Edit").clicked() {
+                        self.quest_editor_state.start_edit_quest(idx);
+                        ui.close_menu();
+                    }
+
+                    if ui.button("🗑️ Delete").clicked() {
+                        self.quest_editor_state.delete_quest(idx);
+                        self.quests = self.quest_editor_state.quests.clone();
+                        self.unsaved_changes = true;
+                        ui.close_menu();
+                    }
+
+                    if ui.button("📋 Duplicate").clicked() {
+                        if idx < self.quests.len() {
+                            let mut new_quest = self.quests[idx].clone();
+                            new_quest.id = next_id;
+                            new_quest.name = format!("{} (Copy)", new_quest.name);
+                            self.quests.push(new_quest);
+                            self.unsaved_changes = true;
+                        }
+                        ui.close_menu();
+                    }
+                });
+            }
+
+            if filtered_quests_cloned.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(20.0);
+                    ui.label("No quests found");
+                    ui.label("Click 'New Quest' to create one");
+                });
+            }
+        });
+    }
+
+    /// Show quest form editor
+    fn show_quest_form(&mut self, ui: &mut egui::Ui) {
+        let is_creating = matches!(
+            self.quest_editor_state.mode,
+            quest_editor::QuestEditorMode::Creating
+        );
+
+        ui.heading(if is_creating {
+            "Create New Quest"
+        } else {
+            "Edit Quest"
         });
 
         ui.separator();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.group(|ui| {
-                ui.label("📋 Quest List (Placeholder)");
+                ui.label("Basic Information");
                 ui.separator();
-                ui.label("No quests loaded. Quests will be loaded from:");
-                ui.monospace(&self.campaign.quests_file);
-                ui.add_space(10.0);
-                ui.label("Phase 5 will add:");
-                ui.label("  • Quest designer UI");
-                ui.label("  • Objective chains");
-                ui.label("  • Reward configuration");
-                ui.label("  • Prerequisite system");
-                ui.label("  • Quest state tracking");
+
+                ui.horizontal(|ui| {
+                    ui.label("ID:");
+                    ui.text_edit_singleline(&mut self.quest_editor_state.quest_buffer.id);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Name:");
+                    ui.text_edit_singleline(&mut self.quest_editor_state.quest_buffer.name);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Description:");
+                });
+                ui.add(
+                    egui::TextEdit::multiline(
+                        &mut self.quest_editor_state.quest_buffer.description,
+                    )
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY),
+                );
+
+                ui.horizontal(|ui| {
+                    ui.checkbox(
+                        &mut self.quest_editor_state.quest_buffer.repeatable,
+                        "Repeatable",
+                    );
+                    ui.checkbox(
+                        &mut self.quest_editor_state.quest_buffer.is_main_quest,
+                        "Main Quest",
+                    );
+                });
+            });
+
+            ui.add_space(10.0);
+
+            ui.group(|ui| {
+                ui.label("Level Requirements");
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    ui.label("Min Level:");
+                    ui.text_edit_singleline(&mut self.quest_editor_state.quest_buffer.min_level);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Max Level:");
+                    ui.text_edit_singleline(&mut self.quest_editor_state.quest_buffer.max_level);
+                });
+            });
+
+            ui.add_space(10.0);
+
+            ui.group(|ui| {
+                ui.label("Quest Giver");
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    ui.label("NPC ID:");
+                    ui.text_edit_singleline(
+                        &mut self.quest_editor_state.quest_buffer.quest_giver_npc,
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Map ID:");
+                    ui.text_edit_singleline(
+                        &mut self.quest_editor_state.quest_buffer.quest_giver_map,
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Position X:");
+                    ui.text_edit_singleline(
+                        &mut self.quest_editor_state.quest_buffer.quest_giver_x,
+                    );
+                    ui.label("Y:");
+                    ui.text_edit_singleline(
+                        &mut self.quest_editor_state.quest_buffer.quest_giver_y,
+                    );
+                });
+            });
+
+            ui.add_space(10.0);
+
+            // Stages editor
+            self.show_quest_stages_editor(ui);
+
+            ui.add_space(10.0);
+
+            // Validation display
+            self.show_quest_validation(ui);
+
+            ui.add_space(10.0);
+
+            // Action buttons
+            ui.horizontal(|ui| {
+                if ui.button("✅ Save Quest").clicked() {
+                    if self.quest_editor_state.save_quest().is_ok() {
+                        self.quests = self.quest_editor_state.quests.clone();
+                        self.unsaved_changes = true;
+                    }
+                }
+
+                if ui.button("❌ Cancel").clicked() {
+                    self.quest_editor_state.cancel_edit();
+                }
             });
         });
+    }
+
+    /// Show quest stages editor
+    fn show_quest_stages_editor(&mut self, ui: &mut egui::Ui) {
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.heading("Quest Stages");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("➕ Add Stage").clicked() {
+                        self.quest_editor_state.add_stage();
+                        self.unsaved_changes = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            if let Some(selected_idx) = self.quest_editor_state.selected_quest {
+                if selected_idx < self.quests.len() {
+                    let quest = &self.quests[selected_idx];
+                    for stage in &quest.stages {
+                        ui.collapsing(
+                            format!("Stage {}: {}", stage.stage_number, stage.name),
+                            |ui| {
+                                ui.label(&stage.description);
+                                ui.separator();
+                                ui.label(format!("Objectives ({})", stage.objectives.len()));
+                                for objective in &stage.objectives {
+                                    ui.label(format!("  • {}", objective.description()));
+                                }
+                            },
+                        );
+                    }
+
+                    if quest.stages.is_empty() {
+                        ui.label("No stages defined yet");
+                    }
+                } else {
+                    ui.label("No quest selected");
+                }
+            } else {
+                ui.label("No quest selected");
+            }
+        });
+    }
+
+    /// Show quest validation display
+    fn show_quest_validation(&mut self, ui: &mut egui::Ui) {
+        self.quest_editor_state.validate_current_quest();
+        let errors = &self.quest_editor_state.validation_errors;
+
+        if !errors.is_empty() {
+            ui.group(|ui| {
+                ui.label("⚠️ Validation Errors:");
+                ui.separator();
+
+                for error in errors {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(255, 100, 100),
+                        format!("• {}", error),
+                    );
+                }
+            });
+        } else if self.quest_editor_state.selected_quest.is_some() {
+            ui.group(|ui| {
+                ui.colored_label(egui::Color32::from_rgb(100, 255, 100), "✅ Quest is valid");
+            });
+        }
+    }
+
+    /// Show quest preview panel
+    fn show_quest_preview(&self, ui: &mut egui::Ui) {
+        if let Some(selected_idx) = self.quest_editor_state.selected_quest {
+            if selected_idx < self.quests.len() {
+                let quest = &self.quests[selected_idx];
+
+                ui.heading(&quest.name);
+                ui.separator();
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.group(|ui| {
+                        ui.label("Description:");
+                        ui.label(&quest.description);
+                    });
+
+                    ui.add_space(5.0);
+
+                    ui.group(|ui| {
+                        ui.label("Quest Info:");
+                        ui.separator();
+                        ui.label(format!("ID: {}", quest.id));
+                        ui.label(format!(
+                            "Type: {}",
+                            if quest.is_main_quest {
+                                "Main Quest ⭐"
+                            } else {
+                                "Side Quest"
+                            }
+                        ));
+                        ui.label(format!("Repeatable: {}", quest.repeatable));
+
+                        if let Some(min) = quest.min_level {
+                            ui.label(format!("Min Level: {}", min));
+                        }
+                        if let Some(max) = quest.max_level {
+                            ui.label(format!("Max Level: {}", max));
+                        }
+                    });
+
+                    ui.add_space(5.0);
+
+                    ui.group(|ui| {
+                        ui.label(format!("Stages ({}):", quest.stages.len()));
+                        ui.separator();
+                        for stage in &quest.stages {
+                            ui.collapsing(
+                                format!("Stage {}: {}", stage.stage_number, stage.name),
+                                |ui| {
+                                    ui.label(&stage.description);
+                                    ui.separator();
+                                    ui.label(format!("Objectives ({})", stage.objectives.len()));
+                                    for objective in &stage.objectives {
+                                        ui.label(format!("  • {}", objective.description()));
+                                    }
+                                },
+                            );
+                        }
+                    });
+
+                    ui.add_space(5.0);
+
+                    ui.group(|ui| {
+                        ui.label(format!("Rewards ({}):", quest.rewards.len()));
+                        ui.separator();
+                        for reward in &quest.rewards {
+                            match reward {
+                                antares::domain::quest::QuestReward::Experience(xp) => {
+                                    ui.label(format!("  • {} XP", xp))
+                                }
+                                antares::domain::quest::QuestReward::Gold(gold) => {
+                                    ui.label(format!("  • {} Gold", gold))
+                                }
+                                antares::domain::quest::QuestReward::Items(items) => {
+                                    for (item_id, qty) in items {
+                                        ui.label(format!("  • {} x Item {}", qty, item_id));
+                                    }
+                                    ui.label("")
+                                }
+                                antares::domain::quest::QuestReward::UnlockQuest(quest_id) => {
+                                    ui.label(format!("  • Unlock Quest {}", quest_id))
+                                }
+                                antares::domain::quest::QuestReward::SetFlag {
+                                    flag_name,
+                                    value,
+                                } => ui.label(format!("  • Set Flag '{}' = {}", flag_name, value)),
+                                antares::domain::quest::QuestReward::Reputation {
+                                    faction,
+                                    change,
+                                } => ui.label(format!("  • {} Reputation: {:+}", faction, change)),
+                            };
+                        }
+                    });
+                });
+            } else {
+                ui.centered_and_justified(|ui| {
+                    ui.label("Quest not found");
+                });
+            }
+        } else {
+            ui.centered_and_justified(|ui| {
+                ui.label("No quest selected");
+            });
+        }
+    }
+
+    /// Load quests from file
+    fn load_quests(&mut self) -> Result<(), CampaignError> {
+        if let Some(dir) = &self.campaign_dir {
+            let quests_path = dir.join(&self.campaign.quests_file);
+            if quests_path.exists() {
+                let contents = fs::read_to_string(&quests_path)?;
+                self.quests = ron::from_str(&contents)?;
+                self.quest_editor_state.load_quests(self.quests.clone());
+            }
+        }
+        Ok(())
+    }
+
+    /// Save quests to file
+    fn save_quests(&self) -> Result<(), CampaignError> {
+        if let Some(dir) = &self.campaign_dir {
+            let quests_path = dir.join(&self.campaign.quests_file);
+            let contents = ron::ser::to_string_pretty(&self.quests, Default::default())?;
+            fs::write(&quests_path, contents)?;
+        }
+        Ok(())
+    }
+
+    /// Get next available quest ID
+    fn next_available_quest_id(&self) -> QuestId {
+        self.quests.iter().map(|q| q.id).max().unwrap_or(0) + 1
     }
 
     /// Show file browser
@@ -6557,5 +7085,226 @@ mod tests {
             );
             assert_eq!(spell.target, target);
         }
+    }
+
+    // ============================================================
+    // Phase 4A: Quest Editor Integration Tests
+    // ============================================================
+
+    #[test]
+    fn test_quest_editor_state_initialization() {
+        let app = CampaignBuilderApp::default();
+        assert_eq!(app.quests.len(), 0);
+        assert_eq!(app.quest_editor_state.selected_quest, None);
+        assert_eq!(
+            app.quest_editor_state.mode,
+            quest_editor::QuestEditorMode::List
+        );
+        assert!(app.quests_show_preview);
+        assert!(app.quest_editor_state.search_filter.is_empty());
+    }
+
+    #[test]
+    fn test_quest_list_operations() {
+        let mut app = CampaignBuilderApp::default();
+
+        let quest1 = Quest::new(1, "Quest 1", "First quest");
+        let quest2 = Quest::new(2, "Quest 2", "Second quest");
+        app.quests.push(quest1);
+        app.quests.push(quest2);
+
+        assert_eq!(app.quests.len(), 2);
+        assert_eq!(app.quests[0].name, "Quest 1");
+        assert_eq!(app.quests[1].name, "Quest 2");
+    }
+
+    #[test]
+    fn test_quest_search_filter() {
+        let mut app = CampaignBuilderApp::default();
+
+        let quest1 = Quest::new(1, "Dragon Slayer", "Kill the dragon");
+        let quest2 = Quest::new(2, "Fetch Water", "Get water from the well");
+        let quest3 = Quest::new(3, "Dragon Rider", "Tame a dragon");
+
+        app.quests.push(quest1);
+        app.quests.push(quest2);
+        app.quests.push(quest3);
+        app.quest_editor_state.quests = app.quests.clone();
+
+        // Filter by "dragon"
+        app.quest_editor_state.search_filter = "dragon".to_string();
+        let filtered = app.quest_editor_state.filtered_quests();
+
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().any(|(_, q)| q.id == 1));
+        assert!(filtered.iter().any(|(_, q)| q.id == 3));
+    }
+
+    #[test]
+    fn test_next_available_quest_id() {
+        let mut app = CampaignBuilderApp::default();
+
+        assert_eq!(app.next_available_quest_id(), 1);
+
+        app.quests.push(Quest::new(5, "Quest 5", "Description"));
+        assert_eq!(app.next_available_quest_id(), 6);
+
+        app.quests.push(Quest::new(10, "Quest 10", "Description"));
+        assert_eq!(app.next_available_quest_id(), 11);
+    }
+
+    #[test]
+    fn test_quest_with_stages() {
+        let mut quest = Quest::new(1, "Multi-Stage Quest", "A quest with multiple stages");
+        let stage1 = antares::domain::quest::QuestStage::new(1, "Stage 1");
+        let stage2 = antares::domain::quest::QuestStage::new(2, "Stage 2");
+
+        quest.add_stage(stage1);
+        quest.add_stage(stage2);
+
+        assert_eq!(quest.stages.len(), 2);
+        assert_eq!(quest.stages[0].stage_number, 1);
+        assert_eq!(quest.stages[1].stage_number, 2);
+    }
+
+    #[test]
+    fn test_quest_with_rewards() {
+        use antares::domain::quest::QuestReward;
+
+        let mut quest = Quest::new(1, "Rewarding Quest", "A quest with rewards");
+        quest.add_reward(QuestReward::Experience(1000));
+        quest.add_reward(QuestReward::Gold(500));
+
+        assert_eq!(quest.rewards.len(), 2);
+        assert!(matches!(quest.rewards[0], QuestReward::Experience(1000)));
+        assert!(matches!(quest.rewards[1], QuestReward::Gold(500)));
+    }
+
+    #[test]
+    fn test_quest_level_requirements() {
+        let mut quest = Quest::new(1, "Level Quest", "Quest with level requirements");
+        quest.min_level = Some(5);
+        quest.max_level = Some(15);
+
+        assert_eq!(quest.min_level, Some(5));
+        assert_eq!(quest.max_level, Some(15));
+        assert!(quest.is_available_for_level(10));
+        assert!(!quest.is_available_for_level(3));
+        assert!(!quest.is_available_for_level(20));
+    }
+
+    #[test]
+    fn test_quest_import_export_roundtrip() {
+        use antares::domain::quest::QuestReward;
+
+        let original = Quest::new(42, "Export Quest", "Quest for export testing");
+        let mut quest = original.clone();
+        quest.min_level = Some(10);
+        quest.repeatable = true;
+        quest.is_main_quest = true;
+        quest.add_reward(QuestReward::Experience(2000));
+        quest.add_reward(QuestReward::Gold(1000));
+
+        // Export to RON
+        let exported = ron::ser::to_string_pretty(&quest, Default::default());
+        assert!(exported.is_ok());
+
+        let ron_string = exported.unwrap();
+        assert!(ron_string.contains("Export Quest"));
+        assert!(ron_string.contains("repeatable: true"));
+
+        // Import from RON
+        let imported: Result<Quest, _> = ron::from_str(&ron_string);
+        assert!(imported.is_ok());
+
+        let quest_imported = imported.unwrap();
+        assert_eq!(quest_imported.id, quest.id);
+        assert_eq!(quest_imported.name, quest.name);
+        assert_eq!(quest_imported.repeatable, quest.repeatable);
+        assert_eq!(quest_imported.is_main_quest, quest.is_main_quest);
+        assert_eq!(quest_imported.min_level, quest.min_level);
+        assert_eq!(quest_imported.rewards.len(), 2);
+    }
+
+    #[test]
+    fn test_quest_preview_toggle() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Default is true
+        assert!(app.quests_show_preview);
+
+        app.quests_show_preview = false;
+        assert!(!app.quests_show_preview);
+
+        app.quests_show_preview = true;
+        assert!(app.quests_show_preview);
+    }
+
+    #[test]
+    fn test_quest_with_giver_location() {
+        let mut quest = Quest::new(1, "NPC Quest", "Quest from an NPC");
+        quest.quest_giver_npc = Some(100);
+        quest.quest_giver_map = Some(5);
+        quest.quest_giver_position = Some(antares::domain::types::Position::new(10, 20));
+
+        assert_eq!(quest.quest_giver_npc, Some(100));
+        assert_eq!(quest.quest_giver_map, Some(5));
+        assert!(quest.quest_giver_position.is_some());
+    }
+
+    #[test]
+    fn test_quest_repeatable_flag() {
+        let mut quest1 = Quest::new(1, "One-Time Quest", "Can only do once");
+        quest1.repeatable = false;
+
+        let mut quest2 = Quest::new(2, "Daily Quest", "Can repeat daily");
+        quest2.repeatable = true;
+
+        assert!(!quest1.repeatable);
+        assert!(quest2.repeatable);
+    }
+
+    #[test]
+    fn test_quest_main_quest_flag() {
+        let mut quest1 = Quest::new(1, "Main Story", "Part of main storyline");
+        quest1.is_main_quest = true;
+
+        let mut quest2 = Quest::new(2, "Side Story", "Optional side quest");
+        quest2.is_main_quest = false;
+
+        assert!(quest1.is_main_quest);
+        assert!(!quest2.is_main_quest);
+    }
+
+    #[test]
+    fn test_quest_import_buffer() {
+        let app = CampaignBuilderApp::default();
+        assert!(app.quests_import_buffer.is_empty());
+        assert!(!app.quests_show_import_dialog);
+    }
+
+    #[test]
+    fn test_quest_editor_mode_transitions() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Start in list mode
+        assert_eq!(
+            app.quest_editor_state.mode,
+            quest_editor::QuestEditorMode::List
+        );
+
+        // Transition to creating
+        app.quest_editor_state.start_new_quest();
+        assert_eq!(
+            app.quest_editor_state.mode,
+            quest_editor::QuestEditorMode::Creating
+        );
+
+        // Cancel back to list
+        app.quest_editor_state.cancel_edit();
+        assert_eq!(
+            app.quest_editor_state.mode,
+            quest_editor::QuestEditorMode::List
+        );
     }
 }
