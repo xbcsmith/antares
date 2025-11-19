@@ -11,9 +11,12 @@
 //! - Placeholder list views for Items, Spells, Monsters, Maps, Quests
 //! - Unsaved changes tracking and warnings
 
+mod asset_manager;
 mod dialogue_editor;
 mod map_editor;
+mod packager;
 mod quest_editor;
+mod test_play;
 
 use antares::domain::character::Stats;
 use antares::domain::combat::database::MonsterDefinition;
@@ -161,6 +164,7 @@ enum EditorTab {
     Maps,
     Quests,
     Dialogues,
+    Assets,
     Validation,
 }
 
@@ -175,15 +179,15 @@ enum EditorMode {
 impl EditorTab {
     fn name(&self) -> &str {
         match self {
-            EditorTab::Metadata => "📋 Metadata",
-            EditorTab::Config => "⚙️ Config",
-            EditorTab::Items => "⚔️ Items",
-            EditorTab::Spells => "✨ Spells",
-            EditorTab::Monsters => "👹 Monsters",
-            EditorTab::Maps => "🗺️ Maps",
-            EditorTab::Quests => "📜 Quests",
-            EditorTab::Files => "📁 Files",
-            EditorTab::Validation => "✅ Validation",
+            EditorTab::Metadata => "Metadata",
+            EditorTab::Items => "Items",
+            EditorTab::Spells => "Spells",
+            EditorTab::Monsters => "Monsters",
+            EditorTab::Maps => "Maps",
+            EditorTab::Quests => "Quests",
+            EditorTab::Dialogues => "Dialogues",
+            EditorTab::Assets => "Assets",
+            EditorTab::Validation => "Validation",
         }
     }
 }
@@ -273,6 +277,15 @@ struct CampaignBuilderApp {
     // Dialogue editor state
     dialogues: Vec<DialogueTree>,
     dialogue_editor_state: DialogueEditorState,
+
+    // Phase 13: Distribution tools state
+    export_wizard: Option<packager::ExportWizard>,
+    test_play_session: Option<test_play::TestPlaySession>,
+    test_play_config: test_play::TestPlayConfig,
+    asset_manager: Option<asset_manager::AssetManager>,
+    show_export_dialog: bool,
+    show_test_play_panel: bool,
+    show_asset_manager: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -306,7 +319,6 @@ impl Default for CampaignBuilderApp {
             pending_action: None,
             file_tree: Vec::new(),
 
-            // Data editor state
             items: Vec::new(),
             items_search: String::new(),
             items_selected: None,
@@ -325,20 +337,26 @@ impl Default for CampaignBuilderApp {
             monsters_editor_mode: EditorMode::List,
             monsters_edit_buffer: Self::default_monster(),
 
-            // Map editor state
             maps: Vec::new(),
             maps_search: String::new(),
             maps_selected: None,
             maps_editor_mode: EditorMode::List,
             map_editor_state: None,
 
-            // Quest editor state
             quests: Vec::new(),
-            quest_editor_state: QuestEditorState::new(),
+            quest_editor_state: QuestEditorState::default(),
 
-            // Dialogue editor state
             dialogues: Vec::new(),
-            dialogue_editor_state: DialogueEditorState::new(),
+            dialogue_editor_state: DialogueEditorState::default(),
+
+            // Phase 13: Distribution tools
+            export_wizard: None,
+            test_play_session: None,
+            test_play_config: test_play::TestPlayConfig::default(),
+            asset_manager: None,
+            show_export_dialog: false,
+            show_test_play_panel: false,
+            show_asset_manager: false,
         }
     }
 }
@@ -1044,13 +1062,13 @@ impl eframe::App for CampaignBuilderApp {
 
                 let tabs = [
                     EditorTab::Metadata,
-                    EditorTab::Config,
                     EditorTab::Items,
                     EditorTab::Spells,
                     EditorTab::Monsters,
                     EditorTab::Maps,
                     EditorTab::Quests,
-                    EditorTab::Files,
+                    EditorTab::Dialogues,
+                    EditorTab::Assets,
                     EditorTab::Validation,
                 ];
 
@@ -1082,13 +1100,13 @@ impl eframe::App for CampaignBuilderApp {
         // Central panel with editor content
         egui::CentralPanel::default().show(ctx, |ui| match self.active_tab {
             EditorTab::Metadata => self.show_metadata_editor(ui),
-            EditorTab::Config => self.show_config_editor(ui),
             EditorTab::Items => self.show_items_editor(ui),
             EditorTab::Spells => self.show_spells_editor(ui),
             EditorTab::Monsters => self.show_monsters_editor(ui),
             EditorTab::Maps => self.show_maps_editor(ui),
             EditorTab::Quests => self.show_quests_editor(ui),
-            EditorTab::Files => self.show_file_browser(ui),
+            EditorTab::Dialogues => self.show_dialogues_editor(ui),
+            EditorTab::Assets => self.show_assets_editor(ui),
             EditorTab::Validation => self.show_validation_panel(ui),
         });
 
@@ -2686,6 +2704,136 @@ impl CampaignBuilderApp {
             ui.label("💡 Tip: Fix errors in the Metadata and Config tabs");
         }
     }
+
+    /// Show dialogues editor
+    fn show_dialogues_editor(&mut self, ui: &mut egui::Ui) {
+        ui.heading("💬 Dialogues Editor");
+        ui.add_space(5.0);
+        ui.label("Manage NPC dialogues and conversation trees");
+        ui.separator();
+
+        ui.label("Dialogue editor integration in progress");
+        ui.separator();
+
+        // Display dialogue count
+        ui.label(format!("Dialogues loaded: {}", self.dialogues.len()));
+
+        // TODO: Integrate DialogueEditorWidget when UI components are ready
+        // For now, show basic list
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for (idx, dialogue) in self.dialogues.iter().enumerate() {
+                ui.group(|ui| {
+                    ui.label(format!(
+                        "Dialogue {}: {} ({} nodes)",
+                        idx,
+                        dialogue.tree_id,
+                        dialogue.nodes.len()
+                    ));
+                });
+            }
+        });
+    }
+
+    /// Save dialogues to file
+    fn save_dialogues_to_file(&self, path: &std::path::Path) -> Result<(), CampaignError> {
+        let ron = ron::ser::to_string_pretty(&self.dialogues, Default::default())
+            .map_err(|e| CampaignError::Serialization(format!("{}", e)))?;
+        std::fs::write(path, ron).map_err(CampaignError::Io)?;
+        Ok(())
+    }
+
+    /// Show assets editor
+    fn show_assets_editor(&mut self, ui: &mut egui::Ui) {
+        ui.heading("📦 Asset Manager");
+        ui.add_space(5.0);
+        ui.label("Manage campaign assets (images, sounds, music, tilesets)");
+        ui.separator();
+
+        // Initialize asset manager if needed
+        if self.asset_manager.is_none() {
+            if let Some(ref campaign_dir) = self.campaign_dir {
+                let mut manager = asset_manager::AssetManager::new(campaign_dir.clone());
+                if let Err(e) = manager.scan_directory() {
+                    self.status_message = format!("Failed to scan assets: {}", e);
+                } else {
+                    self.asset_manager = Some(manager);
+                }
+            }
+        }
+
+        if let Some(ref mut manager) = self.asset_manager {
+            // Asset statistics
+            ui.horizontal(|ui| {
+                ui.label(format!("Total Assets: {}", manager.asset_count()));
+                ui.separator();
+                ui.label(format!("Total Size: {}", manager.total_size_string()));
+                ui.separator();
+                if ui.button("🔄 Refresh").clicked() {
+                    if let Err(e) = manager.scan_directory() {
+                        self.status_message = format!("Failed to refresh assets: {}", e);
+                    } else {
+                        self.status_message = "Assets refreshed".to_string();
+                    }
+                }
+            });
+
+            ui.separator();
+
+            // Asset type filters
+            ui.horizontal(|ui| {
+                ui.label("Filter by type:");
+                for asset_type in asset_manager::AssetType::all() {
+                    let count = manager.asset_count_by_type(asset_type);
+                    if ui
+                        .button(format!("{} ({})", asset_type.display_name(), count))
+                        .clicked()
+                    {
+                        // Filter would be implemented here
+                    }
+                }
+            });
+
+            ui.separator();
+
+            // Asset list
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for (path, asset) in manager.assets() {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("📄 {}", path.display()));
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(asset.size_string());
+                                    ui.label(asset.asset_type.display_name());
+                                    if !asset.is_referenced {
+                                        ui.colored_label(egui::Color32::YELLOW, "⚠ Unused");
+                                    }
+                                },
+                            );
+                        });
+                    });
+                }
+            });
+
+            ui.separator();
+
+            // Unreferenced assets warning
+            let unreferenced = manager.unreferenced_assets();
+            if !unreferenced.is_empty() {
+                ui.colored_label(
+                    egui::Color32::YELLOW,
+                    format!("⚠ {} unreferenced assets found", unreferenced.len()),
+                );
+            }
+        } else {
+            ui.vertical_centered(|ui| {
+                ui.add_space(50.0);
+                ui.label("No campaign directory loaded");
+                ui.label("Open or create a campaign to manage assets");
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2939,15 +3087,15 @@ mod tests {
 
     #[test]
     fn test_editor_tab_names() {
-        assert_eq!(EditorTab::Metadata.name(), "📋 Metadata");
-        assert_eq!(EditorTab::Config.name(), "⚙️ Config");
-        assert_eq!(EditorTab::Items.name(), "⚔️ Items");
-        assert_eq!(EditorTab::Spells.name(), "✨ Spells");
-        assert_eq!(EditorTab::Monsters.name(), "👹 Monsters");
-        assert_eq!(EditorTab::Maps.name(), "🗺️ Maps");
-        assert_eq!(EditorTab::Quests.name(), "📜 Quests");
-        assert_eq!(EditorTab::Files.name(), "📁 Files");
-        assert_eq!(EditorTab::Validation.name(), "✅ Validation");
+        assert_eq!(EditorTab::Metadata.name(), "Metadata");
+        assert_eq!(EditorTab::Items.name(), "Items");
+        assert_eq!(EditorTab::Spells.name(), "Spells");
+        assert_eq!(EditorTab::Monsters.name(), "Monsters");
+        assert_eq!(EditorTab::Maps.name(), "Maps");
+        assert_eq!(EditorTab::Quests.name(), "Quests");
+        assert_eq!(EditorTab::Dialogues.name(), "Dialogues");
+        assert_eq!(EditorTab::Assets.name(), "Assets");
+        assert_eq!(EditorTab::Validation.name(), "Validation");
     }
 
     #[test]
