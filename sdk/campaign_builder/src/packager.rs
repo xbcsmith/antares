@@ -220,7 +220,7 @@ impl CampaignBuilderApp {
                 PackageError::IoError(io_err) => CampaignError::Io(io_err),
                 PackageError::CampaignNotFound(path) => CampaignError::Io(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    format!("Campaign not found: {}", path.display()),
+                    format!("Campaign not found: {}", path),
                 )),
                 PackageError::ArchiveError(msg) => CampaignError::Io(std::io::Error::new(
                     std::io::ErrorKind::Other,
@@ -263,7 +263,7 @@ impl CampaignBuilderApp {
                 PackageError::IoError(io_err) => CampaignError::Io(io_err),
                 PackageError::PackageNotFound(path) => CampaignError::Io(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    format!("Package not found: {}", path.display()),
+                    format!("Package not found: {}", path),
                 )),
                 PackageError::ArchiveError(msg) => CampaignError::Io(std::io::Error::new(
                     std::io::ErrorKind::Other,
