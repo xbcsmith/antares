@@ -1,0 +1,84 @@
+(
+    id: 1,
+    name: "Training Grounds",
+    width: 15,
+    height: 15,
+    environment: Outdoor,
+    tiles: [
+        // Row 0
+        Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor,
+        // Row 1
+        Floor, Floor, Floor, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Floor, Floor, Floor, Floor,
+        // Row 2
+        Floor, Floor, Floor, Wall, Floor, Floor, Floor, Floor, Floor, Floor, Wall, Floor, Floor, Floor, Floor,
+        // Row 3
+        Floor, Floor, Floor, Wall, Floor, Floor, Floor, Floor, Floor, Floor, Wall, Floor, Floor, Floor, Floor,
+        // Row 4
+        Floor, Floor, Floor, Wall, Floor, Floor, Floor, Floor, Floor, Floor, Wall, Floor, Floor, Floor, Floor,
+        // Row 5
+        Floor, Floor, Floor, Wall, Floor, Floor, Floor, Floor, Floor, Floor, Door, Floor, Floor, Floor, Floor,
+        // Row 6
+        Floor, Floor, Floor, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Wall, Floor, Floor, Floor, Floor,
+        // Row 7
+        Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor,
+        // Row 8
+        Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor,
+        // Row 9
+        Forest, Forest, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Forest, Forest, Forest,
+        // Row 10
+        Forest, Forest, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Forest, Forest, Forest,
+        // Row 11
+        Forest, Forest, Forest, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Forest, Forest, Forest, Forest,
+        // Row 12
+        Forest, Forest, Forest, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Floor, Forest, Forest, Forest, Forest,
+        // Row 13
+        Forest, Forest, Forest, Forest, Floor, Floor, Floor, Floor, Floor, Floor, Forest, Forest, Forest, Forest, Forest,
+        // Row 14
+        Forest, Forest, Forest, Forest, Forest, Floor, Floor, Floor, Floor, Forest, Forest, Forest, Forest, Forest, Forest,
+    ],
+    events: [
+        (
+            position: (7, 3),
+            event_type: Text("Welcome to the Training Grounds! This tutorial will teach you the basics of Antares RPG."),
+        ),
+        (
+            position: (5, 3),
+            event_type: Treasure([
+                (item_id: 1, quantity: 1),
+                (item_id: 4, quantity: 2),
+            ]),
+        ),
+        (
+            position: (7, 8),
+            event_type: Combat([
+                (monster_id: 1, count: 2),
+            ]),
+        ),
+        (
+            position: (10, 10),
+            event_type: Combat([
+                (monster_id: 2, count: 1),
+            ]),
+        ),
+        (
+            position: (7, 13),
+            event_type: Combat([
+                (monster_id: 3, count: 1),
+            ]),
+        ),
+        (
+            position: (7, 14),
+            event_type: Text("Congratulations! You have completed the tutorial. You are now ready for adventure!"),
+        ),
+    ],
+    npcs: [
+        (
+            id: 1,
+            name: "Training Master",
+            position: (7, 2),
+            dialogue_id: None,
+        ),
+    ],
+    exits: [],
+    starting_position: (7, 7),
+)

@@ -222,14 +222,10 @@ impl CampaignBuilderApp {
                     std::io::ErrorKind::NotFound,
                     format!("Campaign not found: {}", path),
                 )),
-                PackageError::ArchiveError(msg) => CampaignError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Archive error: {}", msg),
-                )),
-                _ => CampaignError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Package error",
-                )),
+                PackageError::ArchiveError(msg) => {
+                    CampaignError::Io(std::io::Error::other(format!("Archive error: {}", msg)))
+                }
+                _ => CampaignError::Io(std::io::Error::other("Package error")),
             })?;
 
         self.status_message = format!("Campaign exported to {:?}", output_path);
@@ -265,14 +261,10 @@ impl CampaignBuilderApp {
                     std::io::ErrorKind::NotFound,
                     format!("Package not found: {}", path),
                 )),
-                PackageError::ArchiveError(msg) => CampaignError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Archive error: {}", msg),
-                )),
-                _ => CampaignError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Import error",
-                )),
+                PackageError::ArchiveError(msg) => {
+                    CampaignError::Io(std::io::Error::other(format!("Archive error: {}", msg)))
+                }
+                _ => CampaignError::Io(std::io::Error::other("Import error")),
             })?;
 
         self.status_message = format!(
