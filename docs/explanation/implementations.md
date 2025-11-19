@@ -5,6 +5,219 @@ is updated after each phase or major feature completion.
 
 ---
 
+## Phase 13: Campaign Builder GUI - Distribution Tools (COMPLETED)
+
+**Date Completed**: 2025-01-24
+**Status**: ✅ Campaign packaging, test play, and asset management implemented
+
+### Overview
+
+Phase 13 implements distribution tools for the Antares Campaign Builder, enabling creators to package campaigns for distribution, test them with the game engine, and manage campaign assets. This phase provides the foundation for campaign sharing and quality assurance workflows.
+
+### Components Implemented
+
+#### 13.1: Campaign Packager Integration
+
+**File Created**: `sdk/campaign_builder/src/packager.rs` (530 lines, 18 tests)
+
+Export wizard and version management for campaign packaging:
+
+**Key Structures**:
+
+- `ExportWizard` - Multi-step export process state machine
+- `ExportWizardStep` - Enum for wizard steps (Validation, FileSelection, Metadata, Settings, Exporting, Complete)
+- `VersionIncrement` - Enum for semantic version increments (Major, Minor, Patch)
+
+**Key Functions**:
+
+- `parse_version()` - Parses semantic version strings into components
+- `increment_version()` - Increments version by major/minor/patch
+- `CampaignBuilderApp::export_campaign()` - Exports campaign as .zip archive
+- `CampaignBuilderApp::import_campaign()` - Imports campaign from .zip package
+- `CampaignBuilderApp::can_export_campaign()` - Validates export readiness
+- `CampaignBuilderApp::get_package_files()` - Lists files to include in package
+
+**Features**:
+
+- Export wizard state management with step validation
+- Semantic versioning utilities (parse, increment)
+- Integration with SDK's `CampaignPackager` for ZIP creation
+- Automatic file selection (data, maps, README)
+- Configurable compression level (0-9)
+- Error handling for export/import failures
+
+#### 13.2: Test Play Integration
+
+**File Created**: `sdk/campaign_builder/src/test_play.rs` (402 lines, 14 tests)
+
+Game process management for testing campaigns:
+
+**Key Structures**:
+
+- `TestPlaySession` - Manages game process lifecycle
+- `TestPlayConfig` - Configuration for test play (executable path, debug mode, auto-save, validation)
+
+**Key Methods**:
+
+- `TestPlaySession::launch()` - Spawns game process with campaign ID
+- `TestPlaySession::is_running()` - Checks if game is still running
+- `TestPlaySession::terminate()` - Stops game process
+- `TestPlaySession::output_log()` - Retrieves stdout log
+- `TestPlaySession::error_log()` - Retrieves stderr log
+- `TestPlaySession::elapsed()` - Gets session duration
+- `CampaignBuilderApp::launch_test_play()` - Launches game with campaign
+- `CampaignBuilderApp::can_launch_test_play()` - Checks if game executable exists
+
+**Features**:
+
+- Process spawning with `--campaign <id>` flag
+- Debug mode support (`--debug` flag)
+- Output/error log capture
+- Auto-save before launch
+- Validation check before launch
+- Automatic process cleanup on drop
+- Session duration tracking
+
+#### 13.3: Asset Manager
+
+**File Created**: `sdk/campaign_builder/src/asset_manager.rs` (625 lines, 21 tests)
+
+Campaign asset tracking and organization:
+
+**Key Structures**:
+
+- `AssetType` - Enum for asset classification (Tileset, Portrait, Music, Sound, Documentation, Data, Other)
+- `Asset` - Asset file metadata (path, type, size, modified time, reference status)
+- `AssetManager` - Asset collection manager
+
+**Key Methods**:
+
+- `AssetType::from_path()` - Detects asset type from file extension and path
+- `AssetManager::scan_directory()` - Recursively scans campaign directory
+- `AssetManager::add_asset()` - Copies file into campaign directory
+- `AssetManager::remove_asset()` - Deletes asset file
+- `AssetManager::move_asset()` - Moves asset to different subdirectory
+- `AssetManager::assets_by_type()` - Filters assets by type
+- `AssetManager::unreferenced_assets()` - Finds unused assets
+- `AssetManager::mark_referenced()` - Marks asset as used/unused
+- `Asset::size_string()` - Human-readable size formatting (B, KB, MB, GB)
+
+**Features**:
+
+- Automatic asset type detection from extensions
+- Directory-based type hints (tilesets/, portraits/, sounds/)
+- Recursive directory scanning
+- File metadata extraction (size, modified time)
+- Reference tracking for unused asset detection
+- Total size tracking with human-readable formatting
+- Asset filtering and querying by type
+- Suggested directory structure per asset type
+
+#### 13.4: Campaign Installation System
+
+**Integration**: Uses `antares::sdk::campaign_packager::CampaignPackager`
+
+**Features**:
+
+- Import .zip packages with `import_campaign()`
+- Extract to specified directory
+- Validation during import
+- Conflict detection (file system level)
+- Error handling for corrupted archives
+
+#### 13.5: Main Application Integration
+
+**File Modified**: `sdk/campaign_builder/src/main.rs`
+
+**New State Fields**:
+
+- `export_wizard: Option<ExportWizard>` - Export wizard state
+- `test_play_session: Option<TestPlaySession>` - Active test play session
+- `test_play_config: TestPlayConfig` - Test play configuration
+- `asset_manager: Option<AssetManager>` - Asset manager instance
+- `show_export_dialog: bool` - Export dialog visibility flag
+- `show_test_play_panel: bool` - Test play panel visibility flag
+- `show_asset_manager: bool` - Asset manager visibility flag
+
+**New Tab**: `EditorTab::Assets`
+
+**New Methods**:
+
+- `show_assets_editor()` - Renders asset manager UI
+- `show_dialogues_editor()` - Renders dialogue editor UI (Phase 12 integration)
+- `save_dialogues_to_file()` - Saves dialogues to RON file
+
+**UI Features**:
+
+- Asset statistics display (count, total size)
+- Asset type filters
+- Asset list with path, type, size, reference status
+- Unreferenced assets warning
+- Refresh button to rescan directory
+
+### Testing
+
+**Total New Tests**: 53 tests (all passing)
+
+- Packager module: 18 tests
+- Test play module: 14 tests
+- Asset manager module: 21 tests
+
+**Test Coverage**:
+
+- Export wizard state machine and validation
+- Version parsing and incrementing (valid/invalid inputs)
+- Test play session lifecycle
+- Asset type detection from paths
+- Asset size formatting (B, KB, MB, GB)
+- Asset reference tracking
+- Asset filtering and querying
+- Edge cases and boundary conditions
+
+### Quality Gates
+
+All quality checks passed:
+
+```bash
+✅ cargo fmt --all
+✅ cargo check --all-targets --all-features
+✅ cargo clippy --all-targets --all-features -- -D warnings
+✅ cargo test --all-features (212 passed)
+```
+
+### Documentation
+
+**Files Created**:
+
+- `docs/explanation/phase13_distribution_tools_implementation.md` - Technical implementation details
+- `docs/how-to/package_and_test_campaigns.md` - User guide for packaging and testing
+
+### Architecture Compliance
+
+- ✅ No modifications to core domain types
+- ✅ Proper separation of concerns (packager, test play, assets)
+- ✅ Type safety with enums and strong typing
+- ✅ Error handling with `Result<T, E>`
+- ✅ RON format for campaign data
+- ✅ Module organization follows project structure
+- ✅ Comprehensive test coverage (>80%)
+- ✅ Documentation follows Diataxis framework
+
+### Known Limitations
+
+- Export wizard UI not implemented (state exists, UI deferred to Phase 15)
+- Test play log viewer not implemented (logs captured but not displayed)
+- Asset upload UI not implemented (file picker integration deferred)
+- No real-time log monitoring during test play
+- No dependency resolution for campaign imports
+
+### Next Steps
+
+- Phase 14: Game Engine Campaign Integration
+- Phase 15: Polish and advanced features (export wizard UI, log viewer, asset preview)
+
+---
+
 ## Phase 11: Campaign Builder GUI - Map Editor Integration (COMPLETED)
 
 **Date Completed**: 2025-01-26
