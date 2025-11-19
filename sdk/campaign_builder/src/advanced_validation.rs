@@ -839,10 +839,18 @@ mod tests {
 
     #[test]
     fn test_content_reachability() {
-        let items = vec![create_test_item(1, 100), create_test_item(2, 200)];
+        // Need more than 5 items to trigger the validation result
+        let items = vec![
+            create_test_item(1, 100),
+            create_test_item(2, 200),
+            create_test_item(3, 300),
+            create_test_item(4, 400),
+            create_test_item(5, 500),
+            create_test_item(6, 600),
+        ];
         let validator = AdvancedValidator::new(items, vec![], vec![], vec![]);
         let results = validator.validate_content_reachability();
-        // May have info about unreferenced items
+        // Should have info about unreferenced items (threshold is > 5)
         assert!(!results.is_empty());
     }
 

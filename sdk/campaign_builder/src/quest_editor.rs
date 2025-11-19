@@ -714,9 +714,9 @@ mod tests {
     #[test]
     fn test_delete_quest() {
         let mut editor = QuestEditorState::new();
+        editor.start_new_quest();
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Test Quest".to_string();
-        editor.start_new_quest();
         editor.save_quest().unwrap();
 
         assert_eq!(editor.quests.len(), 1);
@@ -727,14 +727,14 @@ mod tests {
     #[test]
     fn test_filtered_quests() {
         let mut editor = QuestEditorState::new();
+        editor.start_new_quest();
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Dragon Slayer".to_string();
-        editor.start_new_quest();
         editor.save_quest().unwrap();
 
+        editor.start_new_quest();
         editor.quest_buffer.id = "2".to_string();
         editor.quest_buffer.name = "Treasure Hunt".to_string();
-        editor.start_new_quest();
         editor.save_quest().unwrap();
 
         editor.search_filter = "dragon".to_string();
@@ -746,9 +746,9 @@ mod tests {
     #[test]
     fn test_add_stage() {
         let mut editor = QuestEditorState::new();
+        editor.start_new_quest();
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Test Quest".to_string();
-        editor.start_new_quest();
         editor.save_quest().unwrap();
 
         editor.selected_quest = Some(0);
@@ -762,9 +762,9 @@ mod tests {
     #[test]
     fn test_validation_empty_quest() {
         let mut editor = QuestEditorState::new();
+        editor.start_new_quest();
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Test".to_string();
-        editor.start_new_quest();
         editor.save_quest().unwrap();
 
         editor.selected_quest = Some(0);

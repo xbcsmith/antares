@@ -771,9 +771,9 @@ mod tests {
     #[test]
     fn test_delete_dialogue() {
         let mut editor = DialogueEditorState::new();
+        editor.start_new_dialogue();
         editor.dialogue_buffer.id = "1".to_string();
         editor.dialogue_buffer.name = "Test Dialogue".to_string();
-        editor.start_new_dialogue();
         editor.save_dialogue().unwrap();
 
         assert_eq!(editor.dialogues.len(), 1);
@@ -784,14 +784,14 @@ mod tests {
     #[test]
     fn test_filtered_dialogues() {
         let mut editor = DialogueEditorState::new();
+        editor.start_new_dialogue();
         editor.dialogue_buffer.id = "1".to_string();
         editor.dialogue_buffer.name = "Merchant Greeting".to_string();
-        editor.start_new_dialogue();
         editor.save_dialogue().unwrap();
 
+        editor.start_new_dialogue();
         editor.dialogue_buffer.id = "2".to_string();
         editor.dialogue_buffer.name = "Guard Warning".to_string();
-        editor.start_new_dialogue();
         editor.save_dialogue().unwrap();
 
         editor.search_filter = "merchant".to_string();
@@ -837,9 +837,9 @@ mod tests {
     #[test]
     fn test_validation_empty_dialogue() {
         let mut editor = DialogueEditorState::new();
+        editor.start_new_dialogue();
         editor.dialogue_buffer.id = "1".to_string();
         editor.dialogue_buffer.name = "Test".to_string();
-        editor.start_new_dialogue();
         editor.save_dialogue().unwrap();
 
         editor.selected_dialogue = Some(0);
@@ -864,10 +864,10 @@ mod tests {
     #[test]
     fn test_dialogue_preview() {
         let mut editor = DialogueEditorState::new();
+        editor.start_new_dialogue();
         editor.dialogue_buffer.id = "1".to_string();
         editor.dialogue_buffer.name = "Test Dialogue".to_string();
         editor.dialogue_buffer.speaker_name = "NPC".to_string();
-        editor.start_new_dialogue();
         editor.save_dialogue().unwrap();
 
         let preview = editor.get_dialogue_preview(0);
