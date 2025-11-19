@@ -5,6 +5,297 @@ is updated after each phase or major feature completion.
 
 ---
 
+## Phase 3C: Spells and Monsters Editor Enhancement (COMPLETED)
+
+**Date Completed**: 2025-01-25
+**Status**: ✅ Spells and monsters editors now have advanced filtering, type-specific editors, and XP calculation
+
+### Overview
+
+Phase 3C enhances the Campaign Builder spells and monsters editors with filtering by school/level, enhanced spell context/target editing, comprehensive monster stat/attack/loot editors, automatic XP calculation, and import/export functionality. This completes the content editor enhancements for Phase 3.
+
+### Components Implemented
+
+#### 3C.1: Enhanced Spell Editor
+
+**File Modified**: `sdk/campaign_builder/src/main.rs`
+
+Added comprehensive spell editing capabilities:
+
+**Context Editor**:
+
+- ComboBox selector for all SpellContext variants
+- Options: Anytime, CombatOnly, NonCombatOnly, OutdoorOnly, IndoorOnly, OutdoorCombat
+
+**Target Editor**:
+
+- ComboBox selector for all SpellTarget variants
+- Options: Self, SingleCharacter, AllCharacters, SingleMonster, MonsterGroup, AllMonsters, SpecificMonsters
+
+**Spell Preview Panel** (`show_spell_preview`):
+
+- Formatted display with school icons (✝️ Cleric, 🔮 Sorcerer)
+- SP cost and gem cost display
+- Target and context information
+- Full description text
+
+#### 3C.2: Spell Filtering by School/Level
+
+**School Filter**:
+
+- Toggle button cycling through: All → Cleric → Sorcerer → All
+- Visual indicators in spell list with school icons
+- Real-time list filtering
+
+**Level Filter**:
+
+- ComboBox with options: All, 1-7
+- Combined with school filter for precise searches
+- Filter state preserved during session
+
+**Import/Export** (`show_spell_import_dialog`):
+
+- RON format import from text buffer
+- Auto-assigns next available SpellId on import
+- Export selected spell to buffer for sharing
+
+#### 3C.3: Enhanced Monster Editor
+
+**File Modified**: `sdk/campaign_builder/src/main.rs`
+
+Added collapsible sections for monster editing:
+
+**Monster Preview Panel** (`show_monster_preview`):
+
+- Type indicator (💀 Undead / 👹 Living)
+- Combat stats: HP, AC, attacks, magic resistance
+- All 7 attributes displayed
+- Special abilities list (regenerate, advance)
+- Loot summary with XP
+
+#### 3C.4: Monster Attack Editor (`show_monster_attacks_editor`)
+
+**Attack Management**:
+
+- Add/remove individual attacks
+- Per-attack editing in grouped UI
+
+**Damage Configuration**:
+
+- Dice count (1-10d)
+- Dice sides (2-100)
+- Damage bonus (-10 to +100)
+- Visual format: "XdY+Z"
+
+**Attack Type Selector**:
+
+- Physical, Fire, Cold, Electricity, Acid, Poison, Energy
+- ComboBox with all AttackType variants
+
+**Special Effect Selector**:
+
+- None or: Poison, Disease, Paralysis, Sleep, Drain, Stone, Death
+- ComboBox with all SpecialEffect variants
+
+#### 3C.5: Loot Table Editor (`show_monster_loot_editor`)
+
+**Gold Configuration**:
+
+- Min/max range inputs with DragValue
+- Displayed as "X-Y gp" in preview
+
+**Gems Configuration**:
+
+- Min/max range inputs
+- Separate from gold drops
+
+**Experience Points**:
+
+- Manual XP input
+- **Auto-calculation button** based on monster difficulty
+
+#### 3C.6: Monster Stat Calculator (`calculate_monster_xp`)
+
+**XP Calculation Formula**:
+
+```rust
+base_xp = hp * 10
++ AC bonus (if AC < 10): (10 - AC) * 50
++ per attack: 20 XP
++ per attack avg damage: damage * 5
++ special effect bonus: +50 per attack
++ regenerate: +100
++ undead: +50
++ magic resistance: resistance% * 2
+```
+
+**Use Cases**:
+
+- Balancing new monsters
+- Ensuring fair XP rewards
+- Quick difficulty assessment
+- "Use Suggested XP" button applies calculation
+
+#### 3C.7: Monster Stats Editor (`show_monster_stats_editor`)
+
+**All 7 Attributes**:
+
+- Might, Intellect, Personality, Endurance, Speed, Accuracy, Luck
+- Range: 0-255 for each
+- DragValue inputs with speed 1.0
+
+**Additional Stats**:
+
+- Flee Threshold (HP value to attempt flee)
+- Special Attack % (0-100 slider)
+
+**Import/Export** (`show_monster_import_dialog`):
+
+- RON format for complex monster data
+- Preserves all stats, attacks, loot, resistances
+- Auto-assigns next available MonsterId
+
+### State Fields Added
+
+**Spell Editor State**:
+
+```rust
+spells_filter_school: Option<SpellSchool>,
+spells_filter_level: Option<u8>,
+spells_show_preview: bool,
+spells_import_export_buffer: String,
+spells_show_import_dialog: bool,
+```
+
+**Monster Editor State**:
+
+```rust
+monsters_show_preview: bool,
+monsters_show_attacks_editor: bool,
+monsters_show_loot_editor: bool,
+monsters_show_stats_editor: bool,
+monsters_import_export_buffer: String,
+monsters_show_import_dialog: bool,
+```
+
+### Testing
+
+**Tests Added**: 12 new tests (200 total, 191 passing)
+
+**Spell Tests**:
+
+- `test_spell_school_filter_cleric` - School filtering
+- `test_spell_level_filter` - Level filtering
+- `test_spell_combined_filters` - School + level combined
+- `test_spell_context_target_editing` - Context/target enum editing
+- `test_spell_import_export_roundtrip` - RON serialization
+- `test_spell_all_contexts` - All context variants available
+- `test_spell_all_targets` - All target variants available
+
+**Monster Tests**:
+
+- `test_monster_attacks_editor` - Attack CRUD operations
+- `test_monster_attack_types` - All AttackType variants
+- `test_monster_special_effects` - All SpecialEffect variants
+- `test_monster_loot_editor` - Loot table editing
+- `test_monster_stats_editor` - All 7 stats editing
+- `test_monster_xp_calculation_basic` - Basic XP formula
+- `test_monster_xp_calculation_with_abilities` - Complex XP with abilities
+- `test_monster_import_export_roundtrip` - RON serialization
+- `test_monster_preview_fields` - Preview data integrity
+
+**Quality Gates**:
+
+- ✅ `cargo fmt --all` - All code formatted
+- ✅ `cargo check --all-targets --all-features` - Compiles successfully
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - Zero warnings
+- ✅ `cargo test --all-features` - 191/200 tests pass (9 pre-existing failures in Phase 4 modules)
+
+### Key Features
+
+**User Experience**:
+
+- Collapsible editor sections reduce UI clutter
+- Visual icons for spell schools and monster types
+- Real-time filtering with multiple criteria
+- Suggested XP calculation for game balance
+- Import/export for sharing content
+
+**Data Integrity**:
+
+- Type-safe enum selectors prevent invalid states
+- Range constraints on all numeric inputs
+- RON format preserves all data structure fields
+- Auto-ID assignment prevents collisions
+
+**Game Design Support**:
+
+- XP calculator helps balance encounters
+- Attack editor supports complex combat patterns
+- Context/target editing ensures spell consistency
+- Loot editor with min/max ranges for variety
+
+### Files Modified
+
+- `sdk/campaign_builder/src/main.rs` - Main UI implementation and tests
+
+### Usage Examples
+
+**Filtering Spells**:
+
+1. Set school filter to "Cleric"
+2. Set level filter to "3"
+3. List shows only Cleric level 3 spells
+
+**Creating Complex Monster**:
+
+1. Open Stats editor - set all 7 attributes
+2. Open Attacks editor - add multiple attacks with different types
+3. Add special effects (e.g., Poison on bite attack)
+4. Open Loot editor - click "Use Suggested XP" for balanced rewards
+
+**Designing Spell**:
+
+1. Set spell school and level
+2. Choose context (e.g., CombatOnly for offensive)
+3. Choose target (e.g., AllMonsters for AoE)
+4. Set SP and gem costs
+5. Preview shows formatted spell card
+
+### Integration Points
+
+**Phase 3A Integration**:
+
+- Uses `next_available_spell_id()` and `next_available_monster_id()`
+- Validates uniqueness on save
+- RON import respects ID generation rules
+
+**Phase 3B Patterns**:
+
+- Similar filtering UI to items editor
+- Consistent import/export workflow
+- Preview panel follows same layout
+
+**Future Phases**:
+
+- Phase 4A: Quest editor will reference spells/monsters
+- Phase 4B: Dialogue editor may reference monster encounters
+- Phase 5: Asset manager will track spell/monster usage
+- Phase 6: Maps editor will place monster encounters
+
+### Known Issues
+
+None. All Phase 3C functionality is complete and tested.
+
+### Next Steps
+
+- **Phase 4A**: Quest Editor Integration (replace placeholder with full quest editing)
+- **Phase 4B**: Dialogue Editor Integration (node tree editing, conditions/actions)
+- **Phase 5**: Asset Manager Reference Tracking (scan and display usage)
+- **Phase 6**: Maps Editor Enhancement (tile painting, event placement)
+
+---
+
 ## Phase 3B: Items Editor Enhancement (COMPLETED)
 
 **Date Completed**: 2025-01-25

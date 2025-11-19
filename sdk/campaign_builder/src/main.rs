@@ -34,7 +34,7 @@ mod undo_redo;
 use antares::domain::character::Stats;
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterResistances};
-use antares::domain::combat::types::{Attack, AttackType};
+use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
 use antares::domain::dialogue::DialogueTree;
 use antares::domain::items::types::{
     AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorData, AttributeType, Bonus,
@@ -327,12 +327,25 @@ struct CampaignBuilderApp {
     spells_selected: Option<usize>,
     spells_editor_mode: EditorMode,
     spells_edit_buffer: Spell,
+    // Phase 3C: Spell filtering
+    spells_filter_school: Option<SpellSchool>,
+    spells_filter_level: Option<u8>,
+    spells_show_preview: bool,
+    spells_import_export_buffer: String,
+    spells_show_import_dialog: bool,
 
     monsters: Vec<MonsterDefinition>,
     monsters_search: String,
     monsters_selected: Option<usize>,
     monsters_editor_mode: EditorMode,
     monsters_edit_buffer: MonsterDefinition,
+    // Phase 3C: Monster editing enhancements
+    monsters_show_preview: bool,
+    monsters_show_attacks_editor: bool,
+    monsters_show_loot_editor: bool,
+    monsters_show_stats_editor: bool,
+    monsters_import_export_buffer: String,
+    monsters_show_import_dialog: bool,
 
     // Map editor state
     maps: Vec<Map>,
@@ -418,12 +431,23 @@ impl Default for CampaignBuilderApp {
             spells_selected: None,
             spells_editor_mode: EditorMode::List,
             spells_edit_buffer: Self::default_spell(),
+            spells_filter_school: None,
+            spells_filter_level: None,
+            spells_show_preview: true,
+            spells_import_export_buffer: String::new(),
+            spells_show_import_dialog: false,
 
             monsters: Vec::new(),
             monsters_search: String::new(),
             monsters_selected: None,
             monsters_editor_mode: EditorMode::List,
             monsters_edit_buffer: Self::default_monster(),
+            monsters_show_preview: true,
+            monsters_show_attacks_editor: false,
+            monsters_show_loot_editor: false,
+            monsters_show_stats_editor: false,
+            monsters_import_export_buffer: String::new(),
+            monsters_show_import_dialog: false,
 
             maps: Vec::new(),
             maps_search: String::new(),
@@ -3084,6 +3108,55 @@ impl CampaignBuilderApp {
             }
             ui.separator();
 
+            // Phase 3C: School filter
+            ui.label("School:");
+            if ui
+                .button(match self.spells_filter_school {
+                    None => "All",
+                    Some(SpellSchool::Cleric) => "Cleric",
+                    Some(SpellSchool::Sorcerer) => "Sorcerer",
+                })
+                .clicked()
+            {
+                self.spells_filter_school = match self.spells_filter_school {
+                    None => Some(SpellSchool::Cleric),
+                    Some(SpellSchool::Cleric) => Some(SpellSchool::Sorcerer),
+                    Some(SpellSchool::Sorcerer) => None,
+                };
+                self.spells_selected = None;
+            }
+
+            // Phase 3C: Level filter
+            ui.label("Level:");
+            egui::ComboBox::from_id_salt("spell_level_filter")
+                .selected_text(match self.spells_filter_level {
+                    None => "All".to_string(),
+                    Some(lvl) => format!("{}", lvl),
+                })
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.spells_filter_level.is_none(), "All")
+                        .clicked()
+                    {
+                        self.spells_filter_level = None;
+                        self.spells_selected = None;
+                    }
+                    for level in 1..=7 {
+                        if ui
+                            .selectable_label(
+                                self.spells_filter_level == Some(level),
+                                format!("{}", level),
+                            )
+                            .clicked()
+                        {
+                            self.spells_filter_level = Some(level);
+                            self.spells_selected = None;
+                        }
+                    }
+                });
+
+            ui.separator();
+
             if ui.button("➕ Add Spell").clicked() {
                 self.spells_editor_mode = EditorMode::Add;
                 self.spells_edit_buffer = Self::default_spell();
@@ -3094,11 +3167,22 @@ impl CampaignBuilderApp {
                 self.load_spells();
             }
 
+            if ui.button("📥 Import").clicked() {
+                self.spells_show_import_dialog = true;
+            }
+
             ui.separator();
             ui.label(format!("Total: {}", self.spells.len()));
+
+            ui.checkbox(&mut self.spells_show_preview, "Preview");
         });
 
         ui.separator();
+
+        // Phase 3C: Import dialog
+        if self.spells_show_import_dialog {
+            self.show_spell_import_dialog(ui);
+        }
 
         match self.spells_editor_mode {
             EditorMode::List => self.show_spells_list(ui),
@@ -3115,7 +3199,23 @@ impl CampaignBuilderApp {
             .iter()
             .enumerate()
             .filter(|(_, spell)| {
-                search_lower.is_empty() || spell.name.to_lowercase().contains(&search_lower)
+                // Text search
+                if !search_lower.is_empty() && !spell.name.to_lowercase().contains(&search_lower) {
+                    return false;
+                }
+                // Phase 3C: School filter
+                if let Some(school) = self.spells_filter_school {
+                    if spell.school != school {
+                        return false;
+                    }
+                }
+                // Phase 3C: Level filter
+                if let Some(level) = self.spells_filter_level {
+                    if spell.level != level {
+                        return false;
+                    }
+                }
+                true
             })
             .map(|(idx, spell)| {
                 let school_icon = match spell.school {
@@ -3175,24 +3275,32 @@ impl CampaignBuilderApp {
                             if ui.button("📋 Duplicate").clicked() {
                                 action = Some((idx, "duplicate"));
                             }
+                            if ui.button("📤 Export").clicked() {
+                                action = Some((idx, "export"));
+                            }
                         });
 
                         ui.separator();
 
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            ui.group(|ui| {
-                                ui.label(format!("ID: {}", spell.id));
-                                ui.label(format!("School: {:?}", spell.school));
-                                ui.label(format!("Level: {}", spell.level));
-                                ui.label(format!("SP Cost: {}", spell.sp_cost));
-                                ui.label(format!("Gem Cost: {}", spell.gem_cost));
-                                ui.label(format!("Context: {:?}", spell.context));
-                                ui.label(format!("Target: {:?}", spell.target));
-                                ui.separator();
-                                ui.label("Description:");
-                                ui.label(&spell.description);
+                        // Phase 3C: Spell preview
+                        if self.spells_show_preview {
+                            self.show_spell_preview(ui, &spell);
+                        } else {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                ui.group(|ui| {
+                                    ui.label(format!("ID: {}", spell.id));
+                                    ui.label(format!("School: {:?}", spell.school));
+                                    ui.label(format!("Level: {}", spell.level));
+                                    ui.label(format!("SP Cost: {}", spell.sp_cost));
+                                    ui.label(format!("Gem Cost: {}", spell.gem_cost));
+                                    ui.label(format!("Context: {:?}", spell.context));
+                                    ui.label(format!("Target: {:?}", spell.target));
+                                    ui.separator();
+                                    ui.label("Description:");
+                                    ui.label(&spell.description);
+                                });
                             });
-                        });
+                        }
                     }
                 } else {
                     ui.vertical_centered(|ui| {
@@ -3224,6 +3332,12 @@ impl CampaignBuilderApp {
                     new_spell.name = format!("{} (Copy)", new_spell.name);
                     self.spells.push(new_spell);
                     let _ = self.save_spells();
+                }
+                "export" => {
+                    if let Ok(ron) = ron::to_string(&self.spells[idx]) {
+                        self.spells_import_export_buffer = ron;
+                        self.status_message = "Spell exported to buffer".to_string();
+                    }
                 }
                 _ => {}
             }
@@ -3283,6 +3397,89 @@ impl CampaignBuilderApp {
                 ui.add(egui::DragValue::new(&mut self.spells_edit_buffer.gem_cost).speed(1.0));
             });
 
+            // Phase 3C: Context editor
+            ui.horizontal(|ui| {
+                ui.label("Context:");
+                egui::ComboBox::from_id_salt("spell_context")
+                    .selected_text(format!("{:?}", self.spells_edit_buffer.context))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.context,
+                            SpellContext::Anytime,
+                            "Anytime",
+                        );
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.context,
+                            SpellContext::CombatOnly,
+                            "CombatOnly",
+                        );
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.context,
+                            SpellContext::NonCombatOnly,
+                            "NonCombatOnly",
+                        );
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.context,
+                            SpellContext::OutdoorOnly,
+                            "OutdoorOnly",
+                        );
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.context,
+                            SpellContext::IndoorOnly,
+                            "IndoorOnly",
+                        );
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.context,
+                            SpellContext::OutdoorCombat,
+                            "OutdoorCombat",
+                        );
+                    });
+            });
+
+            // Phase 3C: Target editor
+            ui.horizontal(|ui| {
+                ui.label("Target:");
+                egui::ComboBox::from_id_salt("spell_target")
+                    .selected_text(format!("{:?}", self.spells_edit_buffer.target))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.target,
+                            SpellTarget::Self_,
+                            "Self",
+                        );
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.target,
+                            SpellTarget::SingleCharacter,
+                            "SingleCharacter",
+                        );
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.target,
+                            SpellTarget::AllCharacters,
+                            "AllCharacters",
+                        );
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.target,
+                            SpellTarget::SingleMonster,
+                            "SingleMonster",
+                        );
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.target,
+                            SpellTarget::MonsterGroup,
+                            "MonsterGroup",
+                        );
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.target,
+                            SpellTarget::AllMonsters,
+                            "AllMonsters",
+                        );
+                        ui.selectable_value(
+                            &mut self.spells_edit_buffer.target,
+                            SpellTarget::SpecificMonsters,
+                            "SpecificMonsters",
+                        );
+                    });
+            });
+
             ui.horizontal(|ui| {
                 ui.label("Description:");
             });
@@ -3334,11 +3531,22 @@ impl CampaignBuilderApp {
                 self.load_monsters();
             }
 
+            if ui.button("📥 Import").clicked() {
+                self.monsters_show_import_dialog = true;
+            }
+
             ui.separator();
             ui.label(format!("Total: {}", self.monsters.len()));
+
+            ui.checkbox(&mut self.monsters_show_preview, "Preview");
         });
 
         ui.separator();
+
+        // Phase 3C: Import dialog
+        if self.monsters_show_import_dialog {
+            self.show_monster_import_dialog(ui);
+        }
 
         match self.monsters_editor_mode {
             EditorMode::List => self.show_monsters_list(ui),
@@ -3412,36 +3620,47 @@ impl CampaignBuilderApp {
                             if ui.button("📋 Duplicate").clicked() {
                                 action = Some((idx, "duplicate"));
                             }
+                            if ui.button("📤 Export").clicked() {
+                                action = Some((idx, "export"));
+                            }
                         });
 
                         ui.separator();
 
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            ui.group(|ui| {
-                                ui.label(format!("ID: {}", monster.id));
-                                ui.label(format!("HP: {}", monster.hp));
-                                ui.label(format!("AC: {}", monster.ac));
-                                ui.label(format!("Attacks: {}", monster.attacks.len()));
-                                ui.label(format!("Undead: {}", monster.is_undead));
-                                ui.label(format!("Can Regenerate: {}", monster.can_regenerate));
-                                ui.label(format!("Can Advance: {}", monster.can_advance));
-                                ui.label(format!(
-                                    "Magic Resistance: {}%",
-                                    monster.magic_resistance
-                                ));
-                                ui.separator();
-                                ui.label("Loot:");
-                                ui.label(format!(
-                                    "  Gold: {}-{} gp",
-                                    monster.loot.gold_min, monster.loot.gold_max
-                                ));
-                                ui.label(format!(
-                                    "  Gems: {}-{}",
-                                    monster.loot.gems_min, monster.loot.gems_max
-                                ));
-                                ui.label(format!("  Experience: {} XP", monster.loot.experience));
+                        // Phase 3C: Monster preview
+                        if self.monsters_show_preview {
+                            self.show_monster_preview(ui, &monster);
+                        } else {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                ui.group(|ui| {
+                                    ui.label(format!("ID: {}", monster.id));
+                                    ui.label(format!("HP: {}", monster.hp));
+                                    ui.label(format!("AC: {}", monster.ac));
+                                    ui.label(format!("Attacks: {}", monster.attacks.len()));
+                                    ui.label(format!("Undead: {}", monster.is_undead));
+                                    ui.label(format!("Can Regenerate: {}", monster.can_regenerate));
+                                    ui.label(format!("Can Advance: {}", monster.can_advance));
+                                    ui.label(format!(
+                                        "Magic Resistance: {}%",
+                                        monster.magic_resistance
+                                    ));
+                                    ui.separator();
+                                    ui.label("Loot:");
+                                    ui.label(format!(
+                                        "  Gold: {}-{} gp",
+                                        monster.loot.gold_min, monster.loot.gold_max
+                                    ));
+                                    ui.label(format!(
+                                        "  Gems: {}-{}",
+                                        monster.loot.gems_min, monster.loot.gems_max
+                                    ));
+                                    ui.label(format!(
+                                        "  Experience: {} XP",
+                                        monster.loot.experience
+                                    ));
+                                });
                             });
-                        });
+                        }
                     }
                 } else {
                     ui.vertical_centered(|ui| {
@@ -3473,6 +3692,12 @@ impl CampaignBuilderApp {
                     new_monster.name = format!("{} (Copy)", new_monster.name);
                     self.monsters.push(new_monster);
                     let _ = self.save_monsters();
+                }
+                "export" => {
+                    if let Ok(ron) = ron::to_string(&self.monsters[idx]) {
+                        self.monsters_import_export_buffer = ron;
+                        self.status_message = "Monster exported to buffer".to_string();
+                    }
                 }
                 _ => {}
             }
@@ -3514,10 +3739,6 @@ impl CampaignBuilderApp {
             });
 
             ui.checkbox(&mut self.monsters_edit_buffer.is_undead, "Undead");
-            ui.checkbox(
-                &mut self.monsters_edit_buffer.can_regenerate,
-                "Can Regenerate",
-            );
             ui.checkbox(&mut self.monsters_edit_buffer.can_advance, "Can Advance");
 
             ui.horizontal(|ui| {
@@ -3528,37 +3749,62 @@ impl CampaignBuilderApp {
                 ));
             });
 
+            // Phase 3C: Stats editor toggle
             ui.separator();
-            ui.label("Loot Table:");
+            if ui
+                .button(if self.monsters_show_stats_editor {
+                    "▼ Stats"
+                } else {
+                    "▶ Stats"
+                })
+                .clicked()
+            {
+                self.monsters_show_stats_editor = !self.monsters_show_stats_editor;
+            }
 
-            ui.horizontal(|ui| {
-                ui.label("Gold Min:");
-                ui.add(
-                    egui::DragValue::new(&mut self.monsters_edit_buffer.loot.gold_min).speed(1.0),
-                );
-                ui.label("Max:");
-                ui.add(
-                    egui::DragValue::new(&mut self.monsters_edit_buffer.loot.gold_max).speed(1.0),
-                );
-            });
+            if self.monsters_show_stats_editor {
+                ui.group(|ui| {
+                    self.show_monster_stats_editor(ui);
+                });
+            }
 
-            ui.horizontal(|ui| {
-                ui.label("Gems Min:");
-                ui.add(
-                    egui::DragValue::new(&mut self.monsters_edit_buffer.loot.gems_min).speed(1.0),
-                );
-                ui.label("Max:");
-                ui.add(
-                    egui::DragValue::new(&mut self.monsters_edit_buffer.loot.gems_max).speed(1.0),
-                );
-            });
+            // Phase 3C: Attacks editor toggle
+            ui.separator();
+            if ui
+                .button(if self.monsters_show_attacks_editor {
+                    "▼ Attacks"
+                } else {
+                    "▶ Attacks"
+                })
+                .clicked()
+            {
+                self.monsters_show_attacks_editor = !self.monsters_show_attacks_editor;
+            }
 
-            ui.horizontal(|ui| {
-                ui.label("Experience:");
-                ui.add(
-                    egui::DragValue::new(&mut self.monsters_edit_buffer.loot.experience).speed(1.0),
-                );
-            });
+            if self.monsters_show_attacks_editor {
+                ui.group(|ui| {
+                    self.show_monster_attacks_editor(ui);
+                });
+            }
+
+            // Phase 3C: Loot editor toggle
+            ui.separator();
+            if ui
+                .button(if self.monsters_show_loot_editor {
+                    "▼ Loot Table"
+                } else {
+                    "▶ Loot Table"
+                })
+                .clicked()
+            {
+                self.monsters_show_loot_editor = !self.monsters_show_loot_editor;
+            }
+
+            if self.monsters_show_loot_editor {
+                ui.group(|ui| {
+                    self.show_monster_loot_editor(ui);
+                });
+            }
 
             ui.separator();
 
@@ -3581,6 +3827,484 @@ impl CampaignBuilderApp {
                 }
             });
         });
+    }
+
+    /// Phase 3C: Show spell preview panel with formatted information
+    fn show_spell_preview(&self, ui: &mut egui::Ui, spell: &Spell) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.group(|ui| {
+                ui.heading(&spell.name);
+                ui.separator();
+
+                ui.label(format!("🆔 ID: {}", spell.id));
+
+                let school_icon = match spell.school {
+                    SpellSchool::Cleric => "✝️",
+                    SpellSchool::Sorcerer => "🔮",
+                };
+                ui.label(format!("{} School: {:?}", school_icon, spell.school));
+                ui.label(format!("📊 Level: {}", spell.level));
+
+                ui.separator();
+
+                ui.label(format!("💎 SP Cost: {}", spell.sp_cost));
+                if spell.gem_cost > 0 {
+                    ui.label(format!("💎 Gem Cost: {}", spell.gem_cost));
+                }
+
+                ui.separator();
+
+                ui.label(format!("🎯 Target: {:?}", spell.target));
+                ui.label(format!("📍 Context: {:?}", spell.context));
+
+                ui.separator();
+
+                ui.label("📝 Description:");
+                ui.label(&spell.description);
+            });
+        });
+    }
+
+    /// Phase 3C: Show spell import dialog
+    fn show_spell_import_dialog(&mut self, ui: &mut egui::Ui) {
+        egui::Window::new("Import Spell")
+            .default_width(600.0)
+            .show(ui.ctx(), |ui| {
+                ui.label("Paste RON spell data:");
+                ui.text_edit_multiline(&mut self.spells_import_export_buffer);
+
+                ui.horizontal(|ui| {
+                    if ui.button("Import").clicked() {
+                        match ron::from_str::<Spell>(&self.spells_import_export_buffer) {
+                            Ok(mut spell) => {
+                                spell.id = self.next_available_spell_id();
+                                self.spells.push(spell);
+                                let _ = self.save_spells();
+                                self.spells_import_export_buffer.clear();
+                                self.spells_show_import_dialog = false;
+                                self.status_message = "Spell imported successfully".to_string();
+                            }
+                            Err(e) => {
+                                self.status_message = format!("Import failed: {}", e);
+                            }
+                        }
+                    }
+
+                    if ui.button("Cancel").clicked() {
+                        self.spells_show_import_dialog = false;
+                    }
+                });
+            });
+    }
+
+    /// Phase 3C: Show monster preview panel with formatted information
+    fn show_monster_preview(&self, ui: &mut egui::Ui, monster: &MonsterDefinition) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.group(|ui| {
+                ui.heading(&monster.name);
+                ui.separator();
+
+                ui.label(format!("🆔 ID: {}", monster.id));
+
+                let type_icon = if monster.is_undead { "💀" } else { "👹" };
+                ui.label(format!(
+                    "{} Type: {}",
+                    type_icon,
+                    if monster.is_undead {
+                        "Undead"
+                    } else {
+                        "Living"
+                    }
+                ));
+
+                ui.separator();
+
+                ui.label("⚔️ Combat Stats:");
+                ui.label(format!("  ❤️ HP: {}", monster.hp));
+                ui.label(format!("  🛡️ AC: {}", monster.ac));
+                ui.label(format!("  ⚡ Attacks: {}", monster.attacks.len()));
+
+                if monster.magic_resistance > 0 {
+                    ui.label(format!(
+                        "  🔮 Magic Resistance: {}%",
+                        monster.magic_resistance
+                    ));
+                }
+
+                ui.separator();
+
+                ui.label("🎲 Attributes:");
+                ui.label(format!("  Might: {}", monster.stats.might.base));
+                ui.label(format!("  Intellect: {}", monster.stats.intellect.base));
+                ui.label(format!("  Personality: {}", monster.stats.personality.base));
+                ui.label(format!("  Endurance: {}", monster.stats.endurance.base));
+                ui.label(format!("  Speed: {}", monster.stats.speed.base));
+                ui.label(format!("  Accuracy: {}", monster.stats.accuracy.base));
+                ui.label(format!("  Luck: {}", monster.stats.luck.base));
+
+                ui.separator();
+
+                ui.label("⚙️ Special Abilities:");
+                if monster.can_regenerate {
+                    ui.label("  ♻️ Can Regenerate");
+                }
+                if monster.can_advance {
+                    ui.label("  🏃 Can Advance");
+                }
+
+                ui.separator();
+
+                ui.label("💰 Loot:");
+                if monster.loot.gold_max > 0 {
+                    ui.label(format!(
+                        "  Gold: {}-{} gp",
+                        monster.loot.gold_min, monster.loot.gold_max
+                    ));
+                }
+                if monster.loot.gems_max > 0 {
+                    ui.label(format!(
+                        "  Gems: {}-{}",
+                        monster.loot.gems_min, monster.loot.gems_max
+                    ));
+                }
+                ui.label(format!("  Experience: {} XP", monster.loot.experience));
+            });
+        });
+    }
+
+    /// Phase 3C: Show monster import dialog
+    fn show_monster_import_dialog(&mut self, ui: &mut egui::Ui) {
+        egui::Window::new("Import Monster")
+            .default_width(600.0)
+            .show(ui.ctx(), |ui| {
+                ui.label("Paste RON monster data:");
+                ui.text_edit_multiline(&mut self.monsters_import_export_buffer);
+
+                ui.horizontal(|ui| {
+                    if ui.button("Import").clicked() {
+                        match ron::from_str::<MonsterDefinition>(
+                            &self.monsters_import_export_buffer,
+                        ) {
+                            Ok(mut monster) => {
+                                monster.id = self.next_available_monster_id();
+                                self.monsters.push(monster);
+                                let _ = self.save_monsters();
+                                self.monsters_import_export_buffer.clear();
+                                self.monsters_show_import_dialog = false;
+                                self.status_message = "Monster imported successfully".to_string();
+                            }
+                            Err(e) => {
+                                self.status_message = format!("Import failed: {}", e);
+                            }
+                        }
+                    }
+
+                    if ui.button("Cancel").clicked() {
+                        self.monsters_show_import_dialog = false;
+                    }
+                });
+            });
+    }
+
+    /// Phase 3C: Show monster stats editor
+    fn show_monster_stats_editor(&mut self, ui: &mut egui::Ui) {
+        ui.label("Attributes:");
+
+        ui.horizontal(|ui| {
+            ui.label("Might:");
+            ui.add(
+                egui::DragValue::new(&mut self.monsters_edit_buffer.stats.might.base)
+                    .speed(1.0)
+                    .range(0..=255),
+            );
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Intellect:");
+            ui.add(
+                egui::DragValue::new(&mut self.monsters_edit_buffer.stats.intellect.base)
+                    .speed(1.0)
+                    .range(0..=255),
+            );
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Personality:");
+            ui.add(
+                egui::DragValue::new(&mut self.monsters_edit_buffer.stats.personality.base)
+                    .speed(1.0)
+                    .range(0..=255),
+            );
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Endurance:");
+            ui.add(
+                egui::DragValue::new(&mut self.monsters_edit_buffer.stats.endurance.base)
+                    .speed(1.0)
+                    .range(0..=255),
+            );
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Speed:");
+            ui.add(
+                egui::DragValue::new(&mut self.monsters_edit_buffer.stats.speed.base)
+                    .speed(1.0)
+                    .range(0..=255),
+            );
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Accuracy:");
+            ui.add(
+                egui::DragValue::new(&mut self.monsters_edit_buffer.stats.accuracy.base)
+                    .speed(1.0)
+                    .range(0..=255),
+            );
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Luck:");
+            ui.add(
+                egui::DragValue::new(&mut self.monsters_edit_buffer.stats.luck.base)
+                    .speed(1.0)
+                    .range(0..=255),
+            );
+        });
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Flee Threshold:");
+            ui.add(egui::DragValue::new(&mut self.monsters_edit_buffer.flee_threshold).speed(1.0));
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Special Attack %:");
+            ui.add(egui::Slider::new(
+                &mut self.monsters_edit_buffer.special_attack_threshold,
+                0..=100,
+            ));
+        });
+    }
+
+    /// Phase 3C: Show monster attacks editor
+    fn show_monster_attacks_editor(&mut self, ui: &mut egui::Ui) {
+        ui.label(format!(
+            "Attacks ({})",
+            self.monsters_edit_buffer.attacks.len()
+        ));
+
+        if ui.button("➕ Add Attack").clicked() {
+            self.monsters_edit_buffer.attacks.push(Attack {
+                damage: DiceRoll::new(1, 6, 0),
+                attack_type: AttackType::Physical,
+                special_effect: None,
+            });
+        }
+
+        ui.separator();
+
+        let mut to_remove: Option<usize> = None;
+
+        for (idx, attack) in self.monsters_edit_buffer.attacks.iter_mut().enumerate() {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(format!("Attack {}", idx + 1));
+                    if ui.button("🗑️").clicked() {
+                        to_remove = Some(idx);
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Damage:");
+                    ui.add(
+                        egui::DragValue::new(&mut attack.damage.count)
+                            .speed(1.0)
+                            .range(1..=10)
+                            .prefix("d"),
+                    );
+                    ui.label("d");
+                    ui.add(
+                        egui::DragValue::new(&mut attack.damage.sides)
+                            .speed(1.0)
+                            .range(2..=100),
+                    );
+                    ui.label("+");
+                    ui.add(
+                        egui::DragValue::new(&mut attack.damage.bonus)
+                            .speed(1.0)
+                            .range(-10..=100),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Type:");
+                    egui::ComboBox::from_id_salt(format!("attack_type_{}", idx))
+                        .selected_text(format!("{:?}", attack.attack_type))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut attack.attack_type,
+                                AttackType::Physical,
+                                "Physical",
+                            );
+                            ui.selectable_value(&mut attack.attack_type, AttackType::Fire, "Fire");
+                            ui.selectable_value(&mut attack.attack_type, AttackType::Cold, "Cold");
+                            ui.selectable_value(
+                                &mut attack.attack_type,
+                                AttackType::Electricity,
+                                "Electricity",
+                            );
+                            ui.selectable_value(&mut attack.attack_type, AttackType::Acid, "Acid");
+                            ui.selectable_value(
+                                &mut attack.attack_type,
+                                AttackType::Poison,
+                                "Poison",
+                            );
+                            ui.selectable_value(
+                                &mut attack.attack_type,
+                                AttackType::Energy,
+                                "Energy",
+                            );
+                        });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Special Effect:");
+                    egui::ComboBox::from_id_salt(format!("special_effect_{}", idx))
+                        .selected_text(match attack.special_effect {
+                            None => "None",
+                            Some(SpecialEffect::Poison) => "Poison",
+                            Some(SpecialEffect::Disease) => "Disease",
+                            Some(SpecialEffect::Paralysis) => "Paralysis",
+                            Some(SpecialEffect::Sleep) => "Sleep",
+                            Some(SpecialEffect::Drain) => "Drain",
+                            Some(SpecialEffect::Stone) => "Stone",
+                            Some(SpecialEffect::Death) => "Death",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut attack.special_effect, None, "None");
+                            ui.selectable_value(
+                                &mut attack.special_effect,
+                                Some(SpecialEffect::Poison),
+                                "Poison",
+                            );
+                            ui.selectable_value(
+                                &mut attack.special_effect,
+                                Some(SpecialEffect::Disease),
+                                "Disease",
+                            );
+                            ui.selectable_value(
+                                &mut attack.special_effect,
+                                Some(SpecialEffect::Paralysis),
+                                "Paralysis",
+                            );
+                            ui.selectable_value(
+                                &mut attack.special_effect,
+                                Some(SpecialEffect::Sleep),
+                                "Sleep",
+                            );
+                            ui.selectable_value(
+                                &mut attack.special_effect,
+                                Some(SpecialEffect::Drain),
+                                "Drain",
+                            );
+                            ui.selectable_value(
+                                &mut attack.special_effect,
+                                Some(SpecialEffect::Stone),
+                                "Stone",
+                            );
+                            ui.selectable_value(
+                                &mut attack.special_effect,
+                                Some(SpecialEffect::Death),
+                                "Death",
+                            );
+                        });
+                });
+            });
+        }
+
+        if let Some(idx) = to_remove {
+            self.monsters_edit_buffer.attacks.remove(idx);
+        }
+    }
+
+    /// Phase 3C: Show monster loot editor
+    fn show_monster_loot_editor(&mut self, ui: &mut egui::Ui) {
+        ui.label("Loot Table:");
+
+        ui.horizontal(|ui| {
+            ui.label("Gold Min:");
+            ui.add(egui::DragValue::new(&mut self.monsters_edit_buffer.loot.gold_min).speed(1.0));
+            ui.label("Max:");
+            ui.add(egui::DragValue::new(&mut self.monsters_edit_buffer.loot.gold_max).speed(1.0));
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Gems Min:");
+            ui.add(egui::DragValue::new(&mut self.monsters_edit_buffer.loot.gems_min).speed(1.0));
+            ui.label("Max:");
+            ui.add(egui::DragValue::new(&mut self.monsters_edit_buffer.loot.gems_max).speed(1.0));
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Experience:");
+            ui.add(
+                egui::DragValue::new(&mut self.monsters_edit_buffer.loot.experience).speed(10.0),
+            );
+        });
+
+        ui.separator();
+
+        // Phase 3C: Calculate recommended XP based on monster stats
+        let calculated_xp = self.calculate_monster_xp(&self.monsters_edit_buffer);
+        ui.label(format!(
+            "💡 Suggested XP: {} (based on stats)",
+            calculated_xp
+        ));
+
+        if ui.button("Use Suggested XP").clicked() {
+            self.monsters_edit_buffer.loot.experience = calculated_xp;
+        }
+    }
+
+    /// Phase 3C: Calculate recommended XP for a monster based on stats
+    fn calculate_monster_xp(&self, monster: &MonsterDefinition) -> u32 {
+        let mut xp = monster.hp as u32 * 10;
+
+        // Factor in AC (higher AC = harder to hit)
+        if monster.ac < 10 {
+            xp += (10 - monster.ac as u32) * 50;
+        }
+
+        // Factor in number of attacks
+        xp += monster.attacks.len() as u32 * 20;
+
+        // Factor in attack damage
+        for attack in &monster.attacks {
+            let avg_damage = (attack.damage.count as f32 * (attack.damage.sides as f32 / 2.0))
+                + attack.damage.bonus as f32;
+            xp += (avg_damage * 5.0) as u32;
+
+            // Bonus for special effects
+            if attack.special_effect.is_some() {
+                xp += 50;
+            }
+        }
+
+        // Factor in special abilities
+        if monster.can_regenerate {
+            xp += 100;
+        }
+        if monster.is_undead {
+            xp += 50;
+        }
+        if monster.magic_resistance > 0 {
+            xp += monster.magic_resistance as u32 * 2;
+        }
+
+        xp
     }
 
     /// Show maps editor with integrated map editor
@@ -5248,5 +5972,590 @@ mod tests {
         assert!(item.constant_bonus.is_some());
         assert!(item.spell_effect.is_some());
         assert_eq!(item.max_charges, 20);
+    }
+
+    // ===== Phase 3C Tests: Spell Editor Enhancements =====
+
+    #[test]
+    fn test_spell_school_filter_cleric() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Add test spells
+        app.spells.push(Spell::new(
+            1,
+            "Heal",
+            SpellSchool::Cleric,
+            1,
+            3,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Heals wounds",
+        ));
+        app.spells.push(Spell::new(
+            2,
+            "Fireball",
+            SpellSchool::Sorcerer,
+            3,
+            5,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::MonsterGroup,
+            "Fire damage",
+        ));
+        app.spells.push(Spell::new(
+            3,
+            "Bless",
+            SpellSchool::Cleric,
+            2,
+            2,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::AllCharacters,
+            "Party buff",
+        ));
+
+        // Apply Cleric filter
+        app.spells_filter_school = Some(SpellSchool::Cleric);
+
+        let filtered: Vec<_> = app
+            .spells
+            .iter()
+            .filter(|s| app.spells_filter_school.map_or(true, |f| s.school == f))
+            .collect();
+
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|s| s.school == SpellSchool::Cleric));
+    }
+
+    #[test]
+    fn test_spell_level_filter() {
+        let mut app = CampaignBuilderApp::default();
+
+        app.spells.push(Spell::new(
+            1,
+            "Heal",
+            SpellSchool::Cleric,
+            1,
+            3,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Level 1",
+        ));
+        app.spells.push(Spell::new(
+            2,
+            "Fireball",
+            SpellSchool::Sorcerer,
+            3,
+            5,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::MonsterGroup,
+            "Level 3",
+        ));
+        app.spells.push(Spell::new(
+            3,
+            "Lightning",
+            SpellSchool::Sorcerer,
+            3,
+            6,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::SingleMonster,
+            "Level 3",
+        ));
+
+        // Filter level 3 spells
+        app.spells_filter_level = Some(3);
+
+        let filtered: Vec<_> = app
+            .spells
+            .iter()
+            .filter(|s| app.spells_filter_level.map_or(true, |f| s.level == f))
+            .collect();
+
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|s| s.level == 3));
+    }
+
+    #[test]
+    fn test_spell_combined_filters() {
+        let mut app = CampaignBuilderApp::default();
+
+        app.spells.push(Spell::new(
+            1,
+            "Heal",
+            SpellSchool::Cleric,
+            1,
+            3,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Cleric L1",
+        ));
+        app.spells.push(Spell::new(
+            2,
+            "Cure Disease",
+            SpellSchool::Cleric,
+            3,
+            5,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Cleric L3",
+        ));
+        app.spells.push(Spell::new(
+            3,
+            "Fireball",
+            SpellSchool::Sorcerer,
+            3,
+            5,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::MonsterGroup,
+            "Sorcerer L3",
+        ));
+
+        // Filter: Cleric + Level 3
+        app.spells_filter_school = Some(SpellSchool::Cleric);
+        app.spells_filter_level = Some(3);
+
+        let filtered: Vec<_> = app
+            .spells
+            .iter()
+            .filter(|s| {
+                app.spells_filter_school.map_or(true, |f| s.school == f)
+                    && app.spells_filter_level.map_or(true, |f| s.level == f)
+            })
+            .collect();
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "Cure Disease");
+        assert_eq!(filtered[0].school, SpellSchool::Cleric);
+        assert_eq!(filtered[0].level, 3);
+    }
+
+    #[test]
+    fn test_spell_context_target_editing() {
+        let mut app = CampaignBuilderApp::default();
+        app.spells_edit_buffer = Spell::new(
+            1,
+            "Test",
+            SpellSchool::Cleric,
+            1,
+            1,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::Self_,
+            "Test",
+        );
+
+        // Change context
+        app.spells_edit_buffer.context = SpellContext::CombatOnly;
+        assert_eq!(app.spells_edit_buffer.context, SpellContext::CombatOnly);
+
+        // Change target
+        app.spells_edit_buffer.target = SpellTarget::AllCharacters;
+        assert_eq!(app.spells_edit_buffer.target, SpellTarget::AllCharacters);
+    }
+
+    #[test]
+    fn test_spell_import_export_roundtrip() {
+        let original = Spell::new(
+            42,
+            "Test Spell",
+            SpellSchool::Sorcerer,
+            5,
+            10,
+            2,
+            SpellContext::CombatOnly,
+            SpellTarget::AllMonsters,
+            "Test description",
+        );
+
+        // Export to RON
+        let ron_data = ron::to_string(&original).unwrap();
+
+        // Import from RON
+        let imported: Spell = ron::from_str(&ron_data).unwrap();
+
+        assert_eq!(imported.id, original.id);
+        assert_eq!(imported.name, original.name);
+        assert_eq!(imported.school, original.school);
+        assert_eq!(imported.level, original.level);
+        assert_eq!(imported.sp_cost, original.sp_cost);
+        assert_eq!(imported.gem_cost, original.gem_cost);
+        assert_eq!(imported.context, original.context);
+        assert_eq!(imported.target, original.target);
+    }
+
+    // ===== Phase 3C Tests: Monster Editor Enhancements =====
+
+    #[test]
+    fn test_monster_attacks_editor() {
+        let mut app = CampaignBuilderApp::default();
+        app.monsters_edit_buffer = CampaignBuilderApp::default_monster();
+
+        // Initial attacks
+        assert_eq!(app.monsters_edit_buffer.attacks.len(), 1);
+
+        // Add attack
+        app.monsters_edit_buffer.attacks.push(Attack {
+            damage: DiceRoll::new(2, 8, 3),
+            attack_type: AttackType::Fire,
+            special_effect: Some(SpecialEffect::Poison),
+        });
+
+        assert_eq!(app.monsters_edit_buffer.attacks.len(), 2);
+        assert_eq!(app.monsters_edit_buffer.attacks[1].damage.count, 2);
+        assert_eq!(app.monsters_edit_buffer.attacks[1].damage.sides, 8);
+        assert_eq!(app.monsters_edit_buffer.attacks[1].damage.bonus, 3);
+        assert_eq!(
+            app.monsters_edit_buffer.attacks[1].attack_type,
+            AttackType::Fire
+        );
+        assert_eq!(
+            app.monsters_edit_buffer.attacks[1].special_effect,
+            Some(SpecialEffect::Poison)
+        );
+    }
+
+    #[test]
+    fn test_monster_attack_types() {
+        let mut attack = Attack {
+            damage: DiceRoll::new(1, 6, 0),
+            attack_type: AttackType::Physical,
+            special_effect: None,
+        };
+
+        // Test all attack types
+        attack.attack_type = AttackType::Fire;
+        assert_eq!(attack.attack_type, AttackType::Fire);
+
+        attack.attack_type = AttackType::Cold;
+        assert_eq!(attack.attack_type, AttackType::Cold);
+
+        attack.attack_type = AttackType::Electricity;
+        assert_eq!(attack.attack_type, AttackType::Electricity);
+
+        attack.attack_type = AttackType::Acid;
+        assert_eq!(attack.attack_type, AttackType::Acid);
+
+        attack.attack_type = AttackType::Poison;
+        assert_eq!(attack.attack_type, AttackType::Poison);
+
+        attack.attack_type = AttackType::Energy;
+        assert_eq!(attack.attack_type, AttackType::Energy);
+    }
+
+    #[test]
+    fn test_monster_special_effects() {
+        let mut attack = Attack {
+            damage: DiceRoll::new(1, 6, 0),
+            attack_type: AttackType::Physical,
+            special_effect: None,
+        };
+
+        // Test all special effects
+        let effects = vec![
+            SpecialEffect::Poison,
+            SpecialEffect::Disease,
+            SpecialEffect::Paralysis,
+            SpecialEffect::Sleep,
+            SpecialEffect::Drain,
+            SpecialEffect::Stone,
+            SpecialEffect::Death,
+        ];
+
+        for effect in effects {
+            attack.special_effect = Some(effect);
+            assert_eq!(attack.special_effect, Some(effect));
+        }
+
+        attack.special_effect = None;
+        assert!(attack.special_effect.is_none());
+    }
+
+    #[test]
+    fn test_monster_loot_editor() {
+        let mut app = CampaignBuilderApp::default();
+        app.monsters_edit_buffer = CampaignBuilderApp::default_monster();
+
+        // Modify loot table
+        app.monsters_edit_buffer.loot.gold_min = 10;
+        app.monsters_edit_buffer.loot.gold_max = 50;
+        app.monsters_edit_buffer.loot.gems_min = 0;
+        app.monsters_edit_buffer.loot.gems_max = 2;
+        app.monsters_edit_buffer.loot.experience = 150;
+
+        assert_eq!(app.monsters_edit_buffer.loot.gold_min, 10);
+        assert_eq!(app.monsters_edit_buffer.loot.gold_max, 50);
+        assert_eq!(app.monsters_edit_buffer.loot.gems_min, 0);
+        assert_eq!(app.monsters_edit_buffer.loot.gems_max, 2);
+        assert_eq!(app.monsters_edit_buffer.loot.experience, 150);
+    }
+
+    #[test]
+    fn test_monster_stats_editor() {
+        let mut app = CampaignBuilderApp::default();
+        app.monsters_edit_buffer = CampaignBuilderApp::default_monster();
+
+        // Modify all stats
+        app.monsters_edit_buffer.stats.might.base = 20;
+        app.monsters_edit_buffer.stats.intellect.base = 5;
+        app.monsters_edit_buffer.stats.personality.base = 8;
+        app.monsters_edit_buffer.stats.endurance.base = 18;
+        app.monsters_edit_buffer.stats.speed.base = 12;
+        app.monsters_edit_buffer.stats.accuracy.base = 15;
+        app.monsters_edit_buffer.stats.luck.base = 6;
+
+        assert_eq!(app.monsters_edit_buffer.stats.might.base, 20);
+        assert_eq!(app.monsters_edit_buffer.stats.intellect.base, 5);
+        assert_eq!(app.monsters_edit_buffer.stats.personality.base, 8);
+        assert_eq!(app.monsters_edit_buffer.stats.endurance.base, 18);
+        assert_eq!(app.monsters_edit_buffer.stats.speed.base, 12);
+        assert_eq!(app.monsters_edit_buffer.stats.accuracy.base, 15);
+        assert_eq!(app.monsters_edit_buffer.stats.luck.base, 6);
+    }
+
+    #[test]
+    fn test_monster_xp_calculation_basic() {
+        let app = CampaignBuilderApp::default();
+        let monster = MonsterDefinition {
+            id: 1,
+            name: "Test Monster".to_string(),
+            stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
+            hp: 20,
+            ac: 10,
+            attacks: vec![Attack {
+                damage: DiceRoll::new(1, 6, 0),
+                attack_type: AttackType::Physical,
+                special_effect: None,
+            }],
+            flee_threshold: 0,
+            special_attack_threshold: 0,
+            resistances: MonsterResistances::new(),
+            can_regenerate: false,
+            can_advance: true,
+            is_undead: false,
+            magic_resistance: 0,
+            loot: LootTable {
+                gold_min: 0,
+                gold_max: 0,
+                gems_min: 0,
+                gems_max: 0,
+                items: Vec::new(),
+                experience: 0,
+            },
+        };
+
+        let xp = app.calculate_monster_xp(&monster);
+
+        // Base: 20 HP * 10 = 200
+        // + 1 attack * 20 = 20
+        // + avg damage (1d6 = 3.5) * 5 = ~17
+        // Total should be ~237
+        assert!(xp >= 200);
+        assert!(xp < 300);
+    }
+
+    #[test]
+    fn test_monster_xp_calculation_with_abilities() {
+        let app = CampaignBuilderApp::default();
+        let monster = MonsterDefinition {
+            id: 1,
+            name: "Powerful Monster".to_string(),
+            stats: Stats::new(20, 10, 10, 20, 15, 15, 10),
+            hp: 50,
+            ac: 5,
+            attacks: vec![
+                Attack {
+                    damage: DiceRoll::new(2, 8, 5),
+                    attack_type: AttackType::Fire,
+                    special_effect: Some(SpecialEffect::Poison),
+                },
+                Attack {
+                    damage: DiceRoll::new(1, 10, 3),
+                    attack_type: AttackType::Physical,
+                    special_effect: None,
+                },
+            ],
+            flee_threshold: 10,
+            special_attack_threshold: 25,
+            resistances: MonsterResistances::new(),
+            can_regenerate: true,
+            can_advance: true,
+            is_undead: true,
+            magic_resistance: 50,
+            loot: LootTable {
+                gold_min: 50,
+                gold_max: 200,
+                gems_min: 1,
+                gems_max: 5,
+                items: Vec::new(),
+                experience: 0,
+            },
+        };
+
+        let xp = app.calculate_monster_xp(&monster);
+
+        // Should have significant XP due to:
+        // - High HP (50 * 10 = 500)
+        // - Low AC bonus ((10 - 5) * 50 = 250)
+        // - 2 attacks (2 * 20 = 40)
+        // - High damage
+        // - Special effect (+50)
+        // - Regenerate (+100)
+        // - Undead (+50)
+        // - Magic resistance (50 * 2 = 100)
+        assert!(xp >= 1000);
+    }
+
+    #[test]
+    fn test_monster_import_export_roundtrip() {
+        let original = MonsterDefinition {
+            id: 42,
+            name: "Test Monster".to_string(),
+            stats: Stats::new(15, 12, 10, 14, 13, 11, 8),
+            hp: 30,
+            ac: 8,
+            attacks: vec![Attack {
+                damage: DiceRoll::new(2, 6, 2),
+                attack_type: AttackType::Fire,
+                special_effect: Some(SpecialEffect::Paralysis),
+            }],
+            flee_threshold: 5,
+            special_attack_threshold: 20,
+            resistances: MonsterResistances::new(),
+            can_regenerate: true,
+            can_advance: false,
+            is_undead: true,
+            magic_resistance: 25,
+            loot: LootTable {
+                gold_min: 10,
+                gold_max: 50,
+                gems_min: 0,
+                gems_max: 2,
+                items: Vec::new(),
+                experience: 200,
+            },
+        };
+
+        // Export to RON
+        let ron_data = ron::to_string(&original).unwrap();
+
+        // Import from RON
+        let imported: MonsterDefinition = ron::from_str(&ron_data).unwrap();
+
+        assert_eq!(imported.id, original.id);
+        assert_eq!(imported.name, original.name);
+        assert_eq!(imported.hp, original.hp);
+        assert_eq!(imported.ac, original.ac);
+        assert_eq!(imported.attacks.len(), original.attacks.len());
+        assert_eq!(imported.can_regenerate, original.can_regenerate);
+        assert_eq!(imported.can_advance, original.can_advance);
+        assert_eq!(imported.is_undead, original.is_undead);
+        assert_eq!(imported.magic_resistance, original.magic_resistance);
+        assert_eq!(imported.loot.experience, original.loot.experience);
+    }
+
+    #[test]
+    fn test_monster_preview_fields() {
+        let app = CampaignBuilderApp::default();
+        let monster = MonsterDefinition {
+            id: 1,
+            name: "Goblin".to_string(),
+            stats: Stats::new(12, 8, 6, 10, 14, 10, 5),
+            hp: 15,
+            ac: 12,
+            attacks: vec![Attack {
+                damage: DiceRoll::new(1, 4, 1),
+                attack_type: AttackType::Physical,
+                special_effect: None,
+            }],
+            flee_threshold: 5,
+            special_attack_threshold: 0,
+            resistances: MonsterResistances::new(),
+            can_regenerate: false,
+            can_advance: true,
+            is_undead: false,
+            magic_resistance: 0,
+            loot: LootTable {
+                gold_min: 1,
+                gold_max: 10,
+                gems_min: 0,
+                gems_max: 0,
+                items: Vec::new(),
+                experience: 25,
+            },
+        };
+
+        // Verify all preview fields exist
+        assert_eq!(monster.name, "Goblin");
+        assert_eq!(monster.hp, 15);
+        assert_eq!(monster.ac, 12);
+        assert_eq!(monster.attacks.len(), 1);
+        assert!(!monster.is_undead);
+        assert!(!monster.can_regenerate);
+        assert!(monster.can_advance);
+        assert_eq!(monster.loot.experience, 25);
+    }
+
+    #[test]
+    fn test_spell_all_contexts() {
+        // Test all spell contexts are available
+        let contexts = vec![
+            SpellContext::Anytime,
+            SpellContext::CombatOnly,
+            SpellContext::NonCombatOnly,
+            SpellContext::OutdoorOnly,
+            SpellContext::IndoorOnly,
+            SpellContext::OutdoorCombat,
+        ];
+
+        for context in contexts {
+            let spell = Spell::new(
+                1,
+                "Test",
+                SpellSchool::Cleric,
+                1,
+                1,
+                0,
+                context,
+                SpellTarget::Self_,
+                "Test",
+            );
+            assert_eq!(spell.context, context);
+        }
+    }
+
+    #[test]
+    fn test_spell_all_targets() {
+        // Test all spell targets are available
+        let targets = vec![
+            SpellTarget::Self_,
+            SpellTarget::SingleCharacter,
+            SpellTarget::AllCharacters,
+            SpellTarget::SingleMonster,
+            SpellTarget::MonsterGroup,
+            SpellTarget::AllMonsters,
+            SpellTarget::SpecificMonsters,
+        ];
+
+        for target in targets {
+            let spell = Spell::new(
+                1,
+                "Test",
+                SpellSchool::Cleric,
+                1,
+                1,
+                0,
+                SpellContext::Anytime,
+                target,
+                "Test",
+            );
+            assert_eq!(spell.target, target);
+        }
     }
 }
