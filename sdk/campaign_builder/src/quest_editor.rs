@@ -15,10 +15,9 @@
 //! - Prerequisite chain management
 //! - Quest validation and preview
 
-use antares::domain::quest::{Quest, QuestId, QuestObjective, QuestReward, QuestStage};
+use antares::domain::quest::{Quest, QuestId, QuestObjective, QuestStage};
 use antares::domain::types::{ItemId, MapId, MonsterId, Position};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Editor state for quest designer
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,7 +309,10 @@ impl QuestEditorState {
                 max_level: quest.max_level.map_or(String::new(), |l| l.to_string()),
                 repeatable: quest.repeatable,
                 is_main_quest: quest.is_main_quest,
-                quest_giver_npc: quest.quest_giver_npc.clone().unwrap_or_default(),
+                quest_giver_npc: quest
+                    .quest_giver_npc
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
                 quest_giver_map: quest
                     .quest_giver_map
                     .map_or(String::new(), |m| m.to_string()),
@@ -374,7 +376,7 @@ impl QuestEditorState {
                 .quest_giver_y
                 .parse::<u32>()
                 .map_err(|_| "Invalid quest giver Y coordinate".to_string())?;
-            Some(Position::new(x, y))
+            Some(Position::new(x as i32, y as i32))
         } else {
             None
         };
@@ -394,7 +396,7 @@ impl QuestEditorState {
         quest.quest_giver_npc = if self.quest_buffer.quest_giver_npc.is_empty() {
             None
         } else {
-            Some(self.quest_buffer.quest_giver_npc.clone())
+            self.quest_buffer.quest_giver_npc.parse::<u16>().ok()
         };
         quest.quest_giver_map = if self.quest_buffer.quest_giver_map.is_empty() {
             None
@@ -479,7 +481,7 @@ impl QuestEditorState {
                         .map_err(|_| "Invalid quantity".to_string())?;
                     QuestObjective::KillMonsters {
                         monster_id,
-                        quantity,
+                        quantity: quantity as u16,
                     }
                 }
                 ObjectiveType::CollectItems => {
@@ -493,7 +495,10 @@ impl QuestEditorState {
                         .quantity
                         .parse::<u32>()
                         .map_err(|_| "Invalid quantity".to_string())?;
-                    QuestObjective::CollectItems { item_id, quantity }
+                    QuestObjective::CollectItems {
+                        item_id,
+                        quantity: quantity as u16,
+                    }
                 }
                 ObjectiveType::ReachLocation => {
                     let map_id = self
@@ -518,8 +523,8 @@ impl QuestEditorState {
                         .map_err(|_| "Invalid radius".to_string())?;
                     QuestObjective::ReachLocation {
                         map_id,
-                        position: Position::new(x, y),
-                        radius,
+                        position: Position::new(x as i32, y as i32),
+                        radius: radius as u8,
                     }
                 }
                 ObjectiveType::TalkToNpc => {
@@ -529,7 +534,7 @@ impl QuestEditorState {
                         .parse::<MapId>()
                         .map_err(|_| "Invalid map ID".to_string())?;
                     QuestObjective::TalkToNpc {
-                        npc_id: self.objective_buffer.npc_id.clone(),
+                        npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
                         map_id,
                     }
                 }
@@ -546,8 +551,8 @@ impl QuestEditorState {
                         .map_err(|_| "Invalid quantity".to_string())?;
                     QuestObjective::DeliverItem {
                         item_id,
-                        npc_id: self.objective_buffer.npc_id.clone(),
-                        quantity,
+                        npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
+                        quantity: quantity as u16,
                     }
                 }
                 ObjectiveType::EscortNpc => {
@@ -567,9 +572,9 @@ impl QuestEditorState {
                         .parse::<u32>()
                         .map_err(|_| "Invalid Y coordinate".to_string())?;
                     QuestObjective::EscortNpc {
-                        npc_id: self.objective_buffer.npc_id.clone(),
+                        npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
                         map_id,
-                        position: Position::new(x, y),
+                        position: Position::new(x as i32, y as i32),
                     }
                 }
                 ObjectiveType::CustomFlag => QuestObjective::CustomFlag {
@@ -647,7 +652,27 @@ impl QuestEditorState {
         if !quest.rewards.is_empty() {
             preview.push_str("\nRewards:\n");
             for reward in &quest.rewards {
-                preview.push_str(&format!("  - {}\n", reward.description()));
+                let desc = match reward {
+                    antares::domain::quest::QuestReward::Experience(xp) => format!("{} XP", xp),
+                    antares::domain::quest::QuestReward::Gold(gold) => format!("{} Gold", gold),
+                    antares::domain::quest::QuestReward::Items(items) => {
+                        let item_strs: Vec<String> = items
+                            .iter()
+                            .map(|(id, qty)| format!("{}x Item #{}", qty, id))
+                            .collect();
+                        item_strs.join(", ")
+                    }
+                    antares::domain::quest::QuestReward::UnlockQuest(qid) => {
+                        format!("Unlock Quest {}", qid)
+                    }
+                    antares::domain::quest::QuestReward::SetFlag { flag_name, value } => {
+                        format!("Set flag '{}' to {}", flag_name, value)
+                    }
+                    antares::domain::quest::QuestReward::Reputation { faction, change } => {
+                        format!("Reputation with {}: {:+}", faction, change)
+                    }
+                };
+                preview.push_str(&format!("  - {}\n", desc));
             }
         }
 

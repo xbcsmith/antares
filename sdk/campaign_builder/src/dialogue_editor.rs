@@ -469,7 +469,7 @@ impl DialogueEditorState {
                     .parse::<NodeId>()
                     .map_err(|_| "Invalid target node ID".to_string())?;
 
-                let mut choice = DialogueChoice::new(&self.choice_buffer.text, target_node);
+                let mut choice = DialogueChoice::new(&self.choice_buffer.text, Some(target_node));
                 choice.ends_dialogue = self.choice_buffer.ends_dialogue;
 
                 // Verify target node exists
@@ -542,7 +542,7 @@ impl DialogueEditorState {
                 let quantity = self
                     .condition_buffer
                     .item_quantity
-                    .parse::<u32>()
+                    .parse::<u16>()
                     .map_err(|_| "Invalid quantity".to_string())?;
                 DialogueCondition::HasItem { item_id, quantity }
             }
@@ -571,7 +571,7 @@ impl DialogueEditorState {
                 threshold: self
                     .condition_buffer
                     .reputation_threshold
-                    .parse::<i32>()
+                    .parse::<i16>()
                     .map_err(|_| "Invalid reputation threshold".to_string())?,
             },
         })
@@ -611,7 +611,7 @@ impl DialogueEditorState {
                     .parse::<ItemId>()
                     .map_err(|_| "Invalid item ID".to_string())?;
                 DialogueAction::GiveItems {
-                    items: vec![item_id],
+                    items: vec![(item_id, 1)],
                 }
             }
             ActionType::TakeItems => {
@@ -621,7 +621,7 @@ impl DialogueEditorState {
                     .parse::<ItemId>()
                     .map_err(|_| "Invalid item ID".to_string())?;
                 DialogueAction::TakeItems {
-                    items: vec![item_id],
+                    items: vec![(item_id, 1)],
                 }
             }
             ActionType::GiveGold => {
@@ -649,7 +649,7 @@ impl DialogueEditorState {
                 change: self
                     .action_buffer
                     .reputation_change
-                    .parse::<i32>()
+                    .parse::<i16>()
                     .map_err(|_| "Invalid reputation change".to_string())?,
             },
             ActionType::TriggerEvent => DialogueAction::TriggerEvent {
@@ -692,11 +692,13 @@ impl DialogueEditorState {
                 // Validate all choice targets exist
                 for node in dialogue.nodes.values() {
                     for choice in &node.choices {
-                        if dialogue.get_node(choice.target_node).is_none() {
-                            self.validation_errors.push(format!(
-                                "Choice in node {} targets non-existent node {}",
-                                node.id, choice.target_node
-                            ));
+                        if let Some(target) = choice.target_node {
+                            if dialogue.get_node(target).is_none() {
+                                self.validation_errors.push(format!(
+                                    "Choice in node {} targets non-existent node {}",
+                                    node.id, target
+                                ));
+                            }
                         }
                     }
                 }

@@ -11,12 +11,25 @@
 //! - Placeholder list views for Items, Spells, Monsters, Maps, Quests
 //! - Unsaved changes tracking and warnings
 
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::single_char_add_str)]
+#![allow(clippy::derivable_impls)]
+#![allow(clippy::for_kv_map)]
+#![allow(clippy::vec_init_then_push)]
+#![allow(clippy::useless_conversion)]
+
+mod advanced_validation;
 mod asset_manager;
 mod dialogue_editor;
 mod map_editor;
 mod packager;
 mod quest_editor;
+mod templates;
 mod test_play;
+mod undo_redo;
 
 use antares::domain::character::Stats;
 use antares::domain::combat::database::MonsterDefinition;
@@ -286,6 +299,16 @@ struct CampaignBuilderApp {
     show_export_dialog: bool,
     show_test_play_panel: bool,
     show_asset_manager: bool,
+
+    // Phase 15: Polish & advanced features state
+    undo_redo_manager: undo_redo::UndoRedoManager,
+    template_manager: templates::TemplateManager,
+    show_template_browser: bool,
+    template_category: templates::TemplateCategory,
+    advanced_validator: Option<advanced_validation::AdvancedValidator>,
+    show_validation_report: bool,
+    validation_report: String,
+    show_balance_stats: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -357,6 +380,16 @@ impl Default for CampaignBuilderApp {
             show_export_dialog: false,
             show_test_play_panel: false,
             show_asset_manager: false,
+
+            // Phase 15: Polish & advanced features
+            undo_redo_manager: undo_redo::UndoRedoManager::new(),
+            template_manager: templates::TemplateManager::new(),
+            show_template_browser: false,
+            template_category: templates::TemplateCategory::Item,
+            advanced_validator: None,
+            show_validation_report: false,
+            validation_report: String::new(),
+            show_balance_stats: false,
         }
     }
 }
@@ -968,6 +1001,246 @@ impl CampaignBuilderApp {
             std::process::exit(0);
         }
     }
+
+    /// Sync state from undo/redo manager back to app state
+    fn sync_state_from_undo_redo(&mut self) {
+        let state = self.undo_redo_manager.state();
+        self.items = state.items.clone();
+        self.spells = state.spells.clone();
+        self.monsters = state.monsters.clone();
+        self.maps = state.maps.clone();
+        self.quests = state.quests.clone();
+        self.dialogues = state.dialogues.clone();
+    }
+
+    /// Sync state to undo/redo manager (before executing commands)
+    fn sync_state_to_undo_redo(&mut self) {
+        let state = self.undo_redo_manager.state_mut();
+        state.items = self.items.clone();
+        state.spells = self.spells.clone();
+        state.monsters = self.monsters.clone();
+        state.maps = self.maps.clone();
+        state.quests = self.quests.clone();
+        state.dialogues = self.dialogues.clone();
+    }
+
+    /// Run advanced validation and generate report
+    fn run_advanced_validation(&mut self) {
+        let validator = advanced_validation::AdvancedValidator::new(
+            self.items.clone(),
+            self.monsters.clone(),
+            self.quests.clone(),
+            self.maps.clone(),
+        );
+        self.validation_report = validator.generate_report();
+        self.advanced_validator = Some(validator);
+    }
+
+    /// Show template browser dialog
+    fn show_template_browser_dialog(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_template_browser;
+        egui::Window::new("📋 Template Browser")
+            .open(&mut open)
+            .resizable(true)
+            .default_size([600.0, 400.0])
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Category:");
+                    for category in templates::TemplateCategory::all() {
+                        if ui
+                            .selectable_label(self.template_category == *category, category.name())
+                            .clicked()
+                        {
+                            self.template_category = *category;
+                        }
+                    }
+                });
+
+                ui.separator();
+
+                egui::ScrollArea::vertical().show(ui, |ui| match self.template_category {
+                    templates::TemplateCategory::Item => {
+                        for template in self.template_manager.item_templates() {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.heading(&template.name);
+                                    if ui.button("Use Template").clicked() {
+                                        if let Some(item) = self
+                                            .template_manager
+                                            .create_item(&template.id, self.items.len() as u32 + 1)
+                                        {
+                                            self.items_edit_buffer = item;
+                                            self.items_editor_mode = EditorMode::Add;
+                                            self.active_tab = EditorTab::Items;
+                                            self.status_message =
+                                                format!("Template '{}' loaded", template.name);
+                                        }
+                                    }
+                                });
+                                ui.label(&template.description);
+                                ui.label(format!("Tags: {}", template.tags.join(", ")));
+                            });
+                            ui.add_space(5.0);
+                        }
+                    }
+                    templates::TemplateCategory::Monster => {
+                        for template in self.template_manager.monster_templates() {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.heading(&template.name);
+                                    if ui.button("Use Template").clicked() {
+                                        if let Some(monster) = self.template_manager.create_monster(
+                                            &template.id,
+                                            self.monsters.len() as u32 + 1,
+                                        ) {
+                                            self.monsters_edit_buffer = monster;
+                                            self.monsters_editor_mode = EditorMode::Add;
+                                            self.active_tab = EditorTab::Monsters;
+                                            self.status_message =
+                                                format!("Template '{}' loaded", template.name);
+                                        }
+                                    }
+                                });
+                                ui.label(&template.description);
+                                ui.label(format!("Tags: {}", template.tags.join(", ")));
+                            });
+                            ui.add_space(5.0);
+                        }
+                    }
+                    templates::TemplateCategory::Quest => {
+                        for template in self.template_manager.quest_templates() {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.heading(&template.name);
+                                    if ui.button("Use Template").clicked() {
+                                        if let Some(quest) = self.template_manager.create_quest(
+                                            &template.id,
+                                            self.quests.len() as u32 + 1,
+                                        ) {
+                                            self.quests.push(quest);
+                                            self.active_tab = EditorTab::Quests;
+                                            self.unsaved_changes = true;
+                                            self.status_message =
+                                                format!("Template '{}' added", template.name);
+                                        }
+                                    }
+                                });
+                                ui.label(&template.description);
+                                ui.label(format!("Tags: {}", template.tags.join(", ")));
+                            });
+                            ui.add_space(5.0);
+                        }
+                    }
+                    templates::TemplateCategory::Dialogue => {
+                        for template in self.template_manager.dialogue_templates() {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.heading(&template.name);
+                                    if ui.button("Use Template").clicked() {
+                                        if let Some(dialogue) =
+                                            self.template_manager.create_dialogue(
+                                                &template.id,
+                                                self.dialogues.len() as u32 + 1,
+                                            )
+                                        {
+                                            self.dialogues.push(dialogue);
+                                            self.active_tab = EditorTab::Dialogues;
+                                            self.unsaved_changes = true;
+                                            self.status_message =
+                                                format!("Template '{}' added", template.name);
+                                        }
+                                    }
+                                });
+                                ui.label(&template.description);
+                                ui.label(format!("Tags: {}", template.tags.join(", ")));
+                            });
+                            ui.add_space(5.0);
+                        }
+                    }
+                    templates::TemplateCategory::Map => {
+                        ui.label("Map templates coming soon...");
+                    }
+                });
+            });
+        self.show_template_browser = open;
+    }
+
+    /// Show validation report dialog
+    fn show_validation_report_dialog(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_validation_report;
+        egui::Window::new("📊 Advanced Validation Report")
+            .open(&mut open)
+            .resizable(true)
+            .default_size([700.0, 500.0])
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.monospace(&self.validation_report);
+                });
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Close").clicked() {
+                        self.show_validation_report = false;
+                    }
+                    if ui.button("Run Again").clicked() {
+                        self.run_advanced_validation();
+                    }
+                });
+            });
+        self.show_validation_report = open;
+    }
+
+    /// Show balance statistics dialog
+    fn show_balance_stats_dialog(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_balance_stats;
+        egui::Window::new("⚖️ Balance Statistics")
+            .open(&mut open)
+            .resizable(true)
+            .default_size([500.0, 400.0])
+            .show(ctx, |ui| {
+                let validator = advanced_validation::AdvancedValidator::new(
+                    self.items.clone(),
+                    self.monsters.clone(),
+                    self.quests.clone(),
+                    self.maps.clone(),
+                );
+                let stats = validator.calculate_balance_stats();
+
+                ui.heading("Content Overview");
+                ui.label(format!("Total Items: {}", self.items.len()));
+                ui.label(format!("Total Monsters: {}", self.monsters.len()));
+                ui.label(format!("Total Quests: {}", self.quests.len()));
+                ui.label(format!("Total Maps: {}", self.maps.len()));
+
+                ui.add_space(10.0);
+                ui.heading("Monster Statistics");
+                ui.label(format!("Average Level: {:.1}", stats.average_monster_level));
+                ui.label(format!("Average HP: {:.1}", stats.average_monster_hp));
+                ui.label(format!("Average XP: {:.0}", stats.average_monster_exp));
+
+                ui.add_space(10.0);
+                ui.heading("Economy");
+                ui.label(format!(
+                    "Total Gold Available: {}",
+                    stats.total_gold_available
+                ));
+                ui.label(format!("Total Items: {}", stats.total_items_available));
+
+                ui.add_space(10.0);
+                ui.heading("Level Distribution");
+                let mut levels: Vec<_> = stats.monster_level_distribution.iter().collect();
+                levels.sort_by_key(|(level, _)| *level);
+                for (level, count) in levels {
+                    ui.label(format!("Level {}: {} monsters", level, count));
+                }
+
+                ui.separator();
+                if ui.button("Close").clicked() {
+                    self.show_balance_stats = false;
+                }
+            });
+        self.show_balance_stats = open;
+    }
 }
 
 impl eframe::App for CampaignBuilderApp {
@@ -1005,12 +1278,61 @@ impl eframe::App for CampaignBuilderApp {
                     }
                 });
 
+                ui.menu_button("Edit", |ui| {
+                    let can_undo = self.undo_redo_manager.can_undo();
+                    let can_redo = self.undo_redo_manager.can_redo();
+
+                    if ui
+                        .add_enabled(can_undo, egui::Button::new("⎌ Undo"))
+                        .clicked()
+                    {
+                        match self.undo_redo_manager.undo() {
+                            Ok(desc) => {
+                                self.sync_state_from_undo_redo();
+                                self.status_message = format!("Undid: {}", desc);
+                                self.unsaved_changes = true;
+                            }
+                            Err(e) => self.status_message = e,
+                        }
+                        ui.close_menu();
+                    }
+                    if ui
+                        .add_enabled(can_redo, egui::Button::new("↷ Redo"))
+                        .clicked()
+                    {
+                        match self.undo_redo_manager.redo() {
+                            Ok(desc) => {
+                                self.sync_state_from_undo_redo();
+                                self.status_message = format!("Redid: {}", desc);
+                                self.unsaved_changes = true;
+                            }
+                            Err(e) => self.status_message = e,
+                        }
+                        ui.close_menu();
+                    }
+                });
+
                 ui.menu_button("Tools", |ui| {
+                    if ui.button("📋 Template Browser...").clicked() {
+                        self.show_template_browser = true;
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button("✅ Validate Campaign").clicked() {
                         self.validate_campaign();
                         self.active_tab = EditorTab::Validation;
                         ui.close_menu();
                     }
+                    if ui.button("📊 Advanced Validation Report...").clicked() {
+                        self.run_advanced_validation();
+                        self.show_validation_report = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("⚖️ Balance Statistics...").clicked() {
+                        self.show_balance_stats = true;
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button("🔄 Refresh File Tree").clicked() {
                         if let Some(dir) = self.campaign_dir.clone() {
                             self.update_file_tree(&dir);
@@ -1045,12 +1367,58 @@ impl eframe::App for CampaignBuilderApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.unsaved_changes {
                         ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "● Unsaved changes");
-                    } else {
-                        ui.colored_label(egui::Color32::from_rgb(0, 200, 0), "✓ Saved");
+                    }
+
+                    // Show undo/redo status
+                    if self.undo_redo_manager.can_undo() {
+                        ui.label(format!("↺ {}", self.undo_redo_manager.undo_count()));
                     }
                 });
             });
         });
+
+        // Handle keyboard shortcuts
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
+            if ctx.input(|i| i.modifiers.shift) {
+                // Ctrl+Shift+Z = Redo
+                if self.undo_redo_manager.can_redo() {
+                    match self.undo_redo_manager.redo() {
+                        Ok(desc) => {
+                            self.sync_state_from_undo_redo();
+                            self.status_message = format!("Redid: {}", desc);
+                            self.unsaved_changes = true;
+                        }
+                        Err(e) => self.status_message = e,
+                    }
+                }
+            } else {
+                // Ctrl+Z = Undo
+                if self.undo_redo_manager.can_undo() {
+                    match self.undo_redo_manager.undo() {
+                        Ok(desc) => {
+                            self.sync_state_from_undo_redo();
+                            self.status_message = format!("Undid: {}", desc);
+                            self.unsaved_changes = true;
+                        }
+                        Err(e) => self.status_message = e,
+                    }
+                }
+            }
+        }
+
+        // Ctrl+Y = Redo (alternative)
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Y)) {
+            if self.undo_redo_manager.can_redo() {
+                match self.undo_redo_manager.redo() {
+                    Ok(desc) => {
+                        self.sync_state_from_undo_redo();
+                        self.status_message = format!("Redid: {}", desc);
+                        self.unsaved_changes = true;
+                    }
+                    Err(e) => self.status_message = e,
+                }
+            }
+        }
 
         // Left sidebar with tabs
         egui::SidePanel::left("tab_panel")
@@ -1188,6 +1556,21 @@ impl eframe::App for CampaignBuilderApp {
                         }
                     });
                 });
+        }
+
+        // Phase 15: Template browser dialog
+        if self.show_template_browser {
+            self.show_template_browser_dialog(ctx);
+        }
+
+        // Phase 15: Validation report dialog
+        if self.show_validation_report {
+            self.show_validation_report_dialog(ctx);
+        }
+
+        // Phase 15: Balance statistics dialog
+        if self.show_balance_stats {
+            self.show_balance_stats_dialog(ctx);
         }
     }
 }
@@ -2726,7 +3109,7 @@ impl CampaignBuilderApp {
                     ui.label(format!(
                         "Dialogue {}: {} ({} nodes)",
                         idx,
-                        dialogue.tree_id,
+                        dialogue.id,
                         dialogue.nodes.len()
                     ));
                 });
@@ -2737,7 +3120,7 @@ impl CampaignBuilderApp {
     /// Save dialogues to file
     fn save_dialogues_to_file(&self, path: &std::path::Path) -> Result<(), CampaignError> {
         let ron = ron::ser::to_string_pretty(&self.dialogues, Default::default())
-            .map_err(|e| CampaignError::Serialization(format!("{}", e)))?;
+            .map_err(CampaignError::Serialization)?;
         std::fs::write(path, ron).map_err(CampaignError::Io)?;
         Ok(())
     }
