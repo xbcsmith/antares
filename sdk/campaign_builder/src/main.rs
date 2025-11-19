@@ -38,8 +38,8 @@ use antares::domain::combat::types::{Attack, AttackType};
 use antares::domain::dialogue::DialogueTree;
 use antares::domain::items::types::{Disablement, Item, ItemType, WeaponData};
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
-use antares::domain::quest::Quest;
-use antares::domain::types::DiceRoll;
+use antares::domain::quest::{Quest, QuestId};
+use antares::domain::types::{DiceRoll, ItemId, MapId, MonsterId, SpellId};
 use antares::domain::world::Map;
 use dialogue_editor::DialogueEditorState;
 use eframe::egui;
@@ -462,6 +462,126 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Validate item IDs for uniqueness
+    ///
+    /// Returns validation errors for any duplicate IDs found.
+    fn validate_item_ids(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for item in &self.items {
+            if !seen_ids.insert(item.id) {
+                errors.push(ValidationError {
+                    severity: Severity::Error,
+                    message: format!("Duplicate item ID: {}", item.id),
+                });
+            }
+        }
+        errors
+    }
+
+    /// Validate spell IDs for uniqueness
+    ///
+    /// Returns validation errors for any duplicate IDs found.
+    fn validate_spell_ids(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for spell in &self.spells {
+            if !seen_ids.insert(spell.id) {
+                errors.push(ValidationError {
+                    severity: Severity::Error,
+                    message: format!("Duplicate spell ID: {}", spell.id),
+                });
+            }
+        }
+        errors
+    }
+
+    /// Validate monster IDs for uniqueness
+    ///
+    /// Returns validation errors for any duplicate IDs found.
+    fn validate_monster_ids(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for monster in &self.monsters {
+            if !seen_ids.insert(monster.id) {
+                errors.push(ValidationError {
+                    severity: Severity::Error,
+                    message: format!("Duplicate monster ID: {}", monster.id),
+                });
+            }
+        }
+        errors
+    }
+
+    /// Validate map IDs for uniqueness
+    ///
+    /// Returns validation errors for any duplicate IDs found.
+    fn validate_map_ids(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for map in &self.maps {
+            if !seen_ids.insert(map.id) {
+                errors.push(ValidationError {
+                    severity: Severity::Error,
+                    message: format!("Duplicate map ID: {}", map.id),
+                });
+            }
+        }
+        errors
+    }
+
+    /// Get next available item ID
+    ///
+    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
+    fn next_available_item_id(&self) -> ItemId {
+        self.items
+            .iter()
+            .map(|i| i.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+    }
+
+    /// Get next available spell ID
+    ///
+    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
+    fn next_available_spell_id(&self) -> SpellId {
+        self.spells
+            .iter()
+            .map(|s| s.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+    }
+
+    /// Get next available monster ID
+    ///
+    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
+    fn next_available_monster_id(&self) -> MonsterId {
+        self.monsters
+            .iter()
+            .map(|m| m.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+    }
+
+    /// Get next available map ID
+    ///
+    /// Returns the next unique ID by finding the maximum existing ID and adding 1.
+    fn next_available_map_id(&self) -> MapId {
+        self.maps
+            .iter()
+            .map(|m| m.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+    }
+
     /// Load items from RON file
     fn load_items(&mut self) {
         if let Some(ref dir) = self.campaign_dir {
@@ -471,7 +591,19 @@ impl CampaignBuilderApp {
                     Ok(contents) => match ron::from_str::<Vec<Item>>(&contents) {
                         Ok(items) => {
                             self.items = items;
-                            self.status_message = format!("Loaded {} items", self.items.len());
+
+                            // Validate IDs after loading
+                            let id_errors = self.validate_item_ids();
+                            if !id_errors.is_empty() {
+                                self.validation_errors.extend(id_errors.clone());
+                                self.status_message = format!(
+                                    "⚠️ Loaded {} items with {} ID conflicts",
+                                    self.items.len(),
+                                    id_errors.len()
+                                );
+                            } else {
+                                self.status_message = format!("Loaded {} items", self.items.len());
+                            }
                         }
                         Err(e) => {
                             self.status_message = format!("Failed to parse items: {}", e);
@@ -515,7 +647,20 @@ impl CampaignBuilderApp {
                     Ok(contents) => match ron::from_str::<Vec<Spell>>(&contents) {
                         Ok(spells) => {
                             self.spells = spells;
-                            self.status_message = format!("Loaded {} spells", self.spells.len());
+
+                            // Validate IDs after loading
+                            let id_errors = self.validate_spell_ids();
+                            if !id_errors.is_empty() {
+                                self.validation_errors.extend(id_errors.clone());
+                                self.status_message = format!(
+                                    "⚠️ Loaded {} spells with {} ID conflicts",
+                                    self.spells.len(),
+                                    id_errors.len()
+                                );
+                            } else {
+                                self.status_message =
+                                    format!("Loaded {} spells", self.spells.len());
+                            }
                         }
                         Err(e) => {
                             self.status_message = format!("Failed to parse spells: {}", e);
@@ -559,8 +704,20 @@ impl CampaignBuilderApp {
                     Ok(contents) => match ron::from_str::<Vec<MonsterDefinition>>(&contents) {
                         Ok(monsters) => {
                             self.monsters = monsters;
-                            self.status_message =
-                                format!("Loaded {} monsters", self.monsters.len());
+
+                            // Validate IDs after loading
+                            let id_errors = self.validate_monster_ids();
+                            if !id_errors.is_empty() {
+                                self.validation_errors.extend(id_errors.clone());
+                                self.status_message = format!(
+                                    "⚠️ Loaded {} monsters with {} ID conflicts",
+                                    self.monsters.len(),
+                                    id_errors.len()
+                                );
+                            } else {
+                                self.status_message =
+                                    format!("Loaded {} monsters", self.monsters.len());
+                            }
                         }
                         Err(e) => {
                             self.status_message = format!("Failed to parse monsters: {}", e);
@@ -678,6 +835,12 @@ impl CampaignBuilderApp {
     /// Validate the campaign metadata
     fn validate_campaign(&mut self) {
         self.validation_errors.clear();
+
+        // Validate data IDs for uniqueness
+        self.validation_errors.extend(self.validate_item_ids());
+        self.validation_errors.extend(self.validate_spell_ids());
+        self.validation_errors.extend(self.validate_monster_ids());
+        self.validation_errors.extend(self.validate_map_ids());
 
         // Required fields
         if self.campaign.id.is_empty() {
@@ -1956,7 +2119,7 @@ impl CampaignBuilderApp {
             if ui.button("➕ Add Item").clicked() {
                 self.items_editor_mode = EditorMode::Add;
                 self.items_edit_buffer = Self::default_item();
-                self.items_edit_buffer.id = self.items.iter().map(|i| i.id).max().unwrap_or(0) + 1;
+                self.items_edit_buffer.id = self.next_available_item_id();
             }
 
             if ui.button("🔄 Reload").clicked() {
@@ -2080,7 +2243,7 @@ impl CampaignBuilderApp {
                 }
                 "duplicate" => {
                     let mut new_item = self.items[idx].clone();
-                    new_item.id = self.items.iter().map(|i| i.id).max().unwrap_or(0) + 1;
+                    new_item.id = self.next_available_item_id();
                     new_item.name = format!("{} (Copy)", new_item.name);
                     self.items.push(new_item);
                     let _ = self.save_items();
@@ -2171,8 +2334,7 @@ impl CampaignBuilderApp {
             if ui.button("➕ Add Spell").clicked() {
                 self.spells_editor_mode = EditorMode::Add;
                 self.spells_edit_buffer = Self::default_spell();
-                self.spells_edit_buffer.id =
-                    self.spells.iter().map(|s| s.id).max().unwrap_or(0) + 1;
+                self.spells_edit_buffer.id = self.next_available_spell_id();
             }
 
             if ui.button("🔄 Reload").clicked() {
@@ -2305,7 +2467,7 @@ impl CampaignBuilderApp {
                 }
                 "duplicate" => {
                     let mut new_spell = self.spells[idx].clone();
-                    new_spell.id = self.spells.iter().map(|s| s.id).max().unwrap_or(0) + 1;
+                    new_spell.id = self.next_available_spell_id();
                     new_spell.name = format!("{} (Copy)", new_spell.name);
                     self.spells.push(new_spell);
                     let _ = self.save_spells();
@@ -2412,8 +2574,7 @@ impl CampaignBuilderApp {
             if ui.button("➕ Add Monster").clicked() {
                 self.monsters_editor_mode = EditorMode::Add;
                 self.monsters_edit_buffer = Self::default_monster();
-                self.monsters_edit_buffer.id =
-                    self.monsters.iter().map(|m| m.id).max().unwrap_or(0) + 1;
+                self.monsters_edit_buffer.id = self.next_available_monster_id();
             }
 
             if ui.button("🔄 Reload").clicked() {
@@ -2555,7 +2716,7 @@ impl CampaignBuilderApp {
                 }
                 "duplicate" => {
                     let mut new_monster = self.monsters[idx].clone();
-                    new_monster.id = self.monsters.iter().map(|m| m.id).max().unwrap_or(0) + 1;
+                    new_monster.id = self.next_available_monster_id();
                     new_monster.name = format!("{} (Copy)", new_monster.name);
                     self.monsters.push(new_monster);
                     let _ = self.save_monsters();
@@ -2691,7 +2852,7 @@ impl CampaignBuilderApp {
 
             if ui.button("➕ New Map").clicked() {
                 // Create a new empty map
-                let new_id = self.maps.iter().map(|m| m.id).max().unwrap_or(0) + 1;
+                let new_id = self.next_available_map_id();
                 let new_map = Map::new(new_id, 20, 20);
                 self.maps.push(new_map.clone());
                 self.maps_selected = Some(self.maps.len() - 1);
@@ -3697,5 +3858,242 @@ mod tests {
     fn test_magic_resistance_range() {
         let monster = CampaignBuilderApp::default_monster();
         assert!(monster.magic_resistance <= 100);
+    }
+
+    // ===== Phase 3A: ID Validation and Generation Tests =====
+
+    #[test]
+    fn test_item_id_uniqueness_validation() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Add items with duplicate IDs
+        let mut item1 = CampaignBuilderApp::default_item();
+        item1.id = 1;
+        item1.name = "Item 1".to_string();
+        app.items.push(item1);
+
+        let mut item2 = CampaignBuilderApp::default_item();
+        item2.id = 1; // Duplicate ID
+        item2.name = "Item 2".to_string();
+        app.items.push(item2);
+
+        let mut item3 = CampaignBuilderApp::default_item();
+        item3.id = 2;
+        item3.name = "Item 3".to_string();
+        app.items.push(item3);
+
+        // Validate
+        let errors = app.validate_item_ids();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].message.contains("Duplicate item ID: 1"));
+    }
+
+    #[test]
+    fn test_spell_id_uniqueness_validation() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Add spells with duplicate IDs
+        let mut spell1 = CampaignBuilderApp::default_spell();
+        spell1.id = 100;
+        spell1.name = "Spell 1".to_string();
+        app.spells.push(spell1);
+
+        let mut spell2 = CampaignBuilderApp::default_spell();
+        spell2.id = 100; // Duplicate ID
+        spell2.name = "Spell 2".to_string();
+        app.spells.push(spell2);
+
+        // Validate
+        let errors = app.validate_spell_ids();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].message.contains("Duplicate spell ID: 100"));
+    }
+
+    #[test]
+    fn test_monster_id_uniqueness_validation() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Add monsters with duplicate IDs
+        let mut monster1 = CampaignBuilderApp::default_monster();
+        monster1.id = 5;
+        monster1.name = "Monster 1".to_string();
+        app.monsters.push(monster1);
+
+        let mut monster2 = CampaignBuilderApp::default_monster();
+        monster2.id = 5; // Duplicate ID
+        monster2.name = "Monster 2".to_string();
+        app.monsters.push(monster2);
+
+        // Validate
+        let errors = app.validate_monster_ids();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].message.contains("Duplicate monster ID: 5"));
+    }
+
+    #[test]
+    fn test_map_id_uniqueness_validation() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Add maps with duplicate IDs
+        let map1 = Map::new(10, 20, 20);
+        app.maps.push(map1);
+
+        let map2 = Map::new(10, 30, 30); // Duplicate ID
+        app.maps.push(map2);
+
+        // Validate
+        let errors = app.validate_map_ids();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].message.contains("Duplicate map ID: 10"));
+    }
+
+    #[test]
+    fn test_next_available_item_id_empty() {
+        let app = CampaignBuilderApp::default();
+        assert_eq!(app.next_available_item_id(), 1);
+    }
+
+    #[test]
+    fn test_next_available_item_id_with_items() {
+        let mut app = CampaignBuilderApp::default();
+
+        let mut item1 = CampaignBuilderApp::default_item();
+        item1.id = 1;
+        app.items.push(item1);
+
+        let mut item2 = CampaignBuilderApp::default_item();
+        item2.id = 5;
+        app.items.push(item2);
+
+        let mut item3 = CampaignBuilderApp::default_item();
+        item3.id = 3;
+        app.items.push(item3);
+
+        // Should return max + 1 = 6
+        assert_eq!(app.next_available_item_id(), 6);
+    }
+
+    #[test]
+    fn test_next_available_spell_id() {
+        let mut app = CampaignBuilderApp::default();
+
+        let mut spell1 = CampaignBuilderApp::default_spell();
+        spell1.id = 100;
+        app.spells.push(spell1);
+
+        let mut spell2 = CampaignBuilderApp::default_spell();
+        spell2.id = 150;
+        app.spells.push(spell2);
+
+        assert_eq!(app.next_available_spell_id(), 151);
+    }
+
+    #[test]
+    fn test_next_available_monster_id() {
+        let mut app = CampaignBuilderApp::default();
+
+        let mut monster1 = CampaignBuilderApp::default_monster();
+        monster1.id = 10;
+        app.monsters.push(monster1);
+
+        assert_eq!(app.next_available_monster_id(), 11);
+    }
+
+    #[test]
+    fn test_next_available_map_id() {
+        let mut app = CampaignBuilderApp::default();
+
+        let map1 = Map::new(5, 20, 20);
+        app.maps.push(map1);
+
+        let map2 = Map::new(8, 30, 30);
+        app.maps.push(map2);
+
+        assert_eq!(app.next_available_map_id(), 9);
+    }
+
+    #[test]
+    fn test_id_generation_with_gaps() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Add items with IDs: 1, 2, 5 (gap at 3, 4)
+        let mut item1 = CampaignBuilderApp::default_item();
+        item1.id = 1;
+        app.items.push(item1);
+
+        let mut item2 = CampaignBuilderApp::default_item();
+        item2.id = 2;
+        app.items.push(item2);
+
+        let mut item3 = CampaignBuilderApp::default_item();
+        item3.id = 5;
+        app.items.push(item3);
+
+        // Should return 6 (max + 1), not fill gap
+        assert_eq!(app.next_available_item_id(), 6);
+    }
+
+    #[test]
+    fn test_validate_campaign_includes_id_checks() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test_campaign".to_string();
+        app.campaign.name = "Test Campaign".to_string();
+        app.campaign.version = "1.0.0".to_string();
+        app.campaign.engine_version = "0.1.0".to_string();
+        app.campaign.starting_map = "start".to_string();
+
+        // Add duplicate item IDs
+        let mut item1 = CampaignBuilderApp::default_item();
+        item1.id = 1;
+        app.items.push(item1);
+
+        let mut item2 = CampaignBuilderApp::default_item();
+        item2.id = 1; // Duplicate
+        app.items.push(item2);
+
+        // Run validation
+        app.validate_campaign();
+
+        // Should have error for duplicate item ID
+        let has_duplicate_error = app
+            .validation_errors
+            .iter()
+            .any(|e| e.message.contains("Duplicate item ID"));
+        assert!(has_duplicate_error);
+    }
+
+    #[test]
+    fn test_no_duplicate_ids_validation_passes() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Add items with unique IDs
+        let mut item1 = CampaignBuilderApp::default_item();
+        item1.id = 1;
+        app.items.push(item1);
+
+        let mut item2 = CampaignBuilderApp::default_item();
+        item2.id = 2;
+        app.items.push(item2);
+
+        // Validate
+        let errors = app.validate_item_ids();
+        assert_eq!(errors.len(), 0);
+    }
+
+    #[test]
+    fn test_saturating_add_prevents_overflow() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Add item with max ID for ItemId (u8)
+        let mut item = CampaignBuilderApp::default_item();
+        item.id = 255; // u8::MAX
+        app.items.push(item);
+
+        // Should saturate at 255, not overflow
+        assert_eq!(app.next_available_item_id(), 255);
     }
 }

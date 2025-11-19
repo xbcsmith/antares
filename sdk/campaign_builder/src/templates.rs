@@ -849,7 +849,7 @@ mod tests {
         assert!(dialogue.is_some());
         let dialogue = dialogue.unwrap();
         assert_eq!(dialogue.id, 1);
-        assert_eq!(dialogue.title, "Merchant Dialogue");
+        assert_eq!(dialogue.name, "Merchant Dialogue");
     }
 
     #[test]
@@ -867,7 +867,7 @@ mod tests {
         let initial_count = manager.item_templates().len();
 
         let custom_item = Item {
-            id: 999,
+            id: 99,
             name: "Custom Sword".to_string(),
             item_type: ItemType::Weapon(WeaponData {
                 damage: DiceRoll::new(2, 8, 2),

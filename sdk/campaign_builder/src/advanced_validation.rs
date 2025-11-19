@@ -707,30 +707,34 @@ impl AdvancedValidator {
 mod tests {
     use super::*;
     use antares::domain::character::{AttributePair, Stats};
-    use antares::domain::combat::types::Attack;
+    use antares::domain::combat::monster::{LootTable, MonsterResistances};
+    use antares::domain::combat::types::{Attack, AttackType};
     use antares::domain::items::types::{Disablement, ItemType, WeaponData};
     use antares::domain::types::DiceRoll;
 
     fn create_test_item(id: u32, value: u32) -> Item {
         Item {
-            id,
+            id: id as u8,
             name: format!("Item {}", id),
             item_type: ItemType::Weapon(WeaponData {
                 damage: DiceRoll::new(1, 6, 0),
                 bonus: 0,
                 hands_required: 1,
             }),
-            description: "Test item".to_string(),
-            value,
-            weight: 5,
-            disablement: Disablement::default(),
-            curse_level: 0,
+            base_cost: value,
+            sell_cost: value / 2,
+            disablements: Disablement(255),
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
         }
     }
 
     fn create_test_monster(id: u32, ac: u8, hp: u16) -> MonsterDefinition {
         MonsterDefinition {
-            id,
+            id: id as u8,
             name: format!("Monster {}", id),
             stats: Stats {
                 might: AttributePair::new(10),
@@ -743,7 +747,11 @@ mod tests {
             },
             hp,
             ac,
-            attacks: vec![Attack::physical(DiceRoll::new(1, 6, 0))],
+            attacks: vec![Attack {
+                damage: DiceRoll::new(1, 6, 0),
+                attack_type: AttackType::Physical,
+                special_effect: None,
+            }],
             flee_threshold: 3,
             special_attack_threshold: 20,
             resistances: MonsterResistances::new(),
@@ -751,7 +759,14 @@ mod tests {
             can_advance: false,
             is_undead: false,
             magic_resistance: 0,
-            loot: LootTable::new(10, 50, 0, 0, 10),
+            loot: LootTable {
+                gold_min: 10,
+                gold_max: 50,
+                gems_min: 0,
+                gems_max: 0,
+                items: Vec::new(),
+                experience: 10,
+            },
         }
     }
 
