@@ -5,6 +5,249 @@ is updated after each phase or major feature completion.
 
 ---
 
+## Phase 3B: Items Editor Enhancement (COMPLETED)
+
+**Date Completed**: 2025-01-25
+**Status**: ✅ Items editor now has type-specific editors, filters, and import/export
+
+### Overview
+
+Phase 3B enhances the Campaign Builder items editor with specialized UI components for each item type, comprehensive filtering, disablement (class restriction) editing, enhanced preview panel, and import/export functionality. This builds on Phase 3A's type system fixes and ID management.
+
+### Components Implemented
+
+#### 3B.1: ItemType-Specific Editors
+
+**File Modified**: `sdk/campaign_builder/src/main.rs`
+
+Added specialized editor UIs for each ItemType variant:
+
+**Weapon Editor**:
+
+- Damage dice editor (count, sides, bonus) with drag values
+- To-hit/damage bonus slider (-10 to +10)
+- Hands required selector (1 or 2)
+
+**Armor Editor**:
+
+- AC bonus slider (0 to 20)
+- Weight input (0 to 255 lbs)
+
+**Accessory Editor**:
+
+- Slot selector (Ring, Amulet, Belt, Cloak)
+
+**Consumable Editor**:
+
+- Effect type selector (Heal HP, Restore SP, Cure Condition, Boost Attribute)
+- Effect value editors with appropriate ranges
+- Attribute selector for boost effects
+- Combat usability checkbox
+
+**Ammo Editor**:
+
+- Ammo type selector (Arrow, Bolt, Stone)
+- Quantity input (1 to 1000)
+
+**Quest Editor**:
+
+- Quest ID text input
+- Key item checkbox (cannot drop/sell)
+
+#### 3B.2: Disablement Editor
+
+**Function**: `show_disablement_editor()`
+
+Provides checkbox UI for editing class and alignment restrictions:
+
+**Class Restrictions**:
+
+- Individual checkboxes for: Knight, Paladin, Archer, Cleric, Sorcerer, Robber
+- Bitfield manipulation to set/clear flags
+- "All Classes" button to enable all
+- "None" button to disable all
+
+**Alignment Restrictions**:
+
+- "Good Only" checkbox (sets GOOD flag, clears EVIL)
+- "Evil Only" checkbox (sets EVIL flag, clears GOOD)
+- Mutual exclusivity enforced
+
+**Display Function**: `show_disablement_display()`
+
+- Shows which classes can use item (✓/✗)
+- Shows alignment requirements (☀️/🌙/⚖️)
+
+#### 3B.3: Item Preview Panel
+
+**Function**: `show_item_preview()`
+
+Enhanced preview panel with formatted display:
+
+**Basic Info Section**:
+
+- ID, base cost, sell cost
+- Status flags (✨ Magical, 💀 Cursed, 📜 Quest Item)
+
+**Type-Specific Display**:
+
+- Weapon: Damage, bonus, hands required
+- Armor: AC bonus, weight
+- Accessory: Slot type
+- Consumable: Effect type, combat usability
+- Ammo: Type, quantity
+- Quest: Quest ID, key item status
+
+**Class Restrictions Section**:
+
+- Visual display of allowed classes
+- Alignment requirements
+
+**Magical Effects Section** (if applicable):
+
+- Constant bonuses
+- Temporary bonuses
+- Spell effects
+- Max charges
+
+#### 3B.4: Item Search Filters
+
+**Enum Added**: `ItemTypeFilter` with variants for each item type
+
+**Filter UI Components**:
+
+- Type filter dropdown (Weapon, Armor, Accessory, Consumable, Ammo, Quest)
+- "✨ Magical" toggle button
+- "💀 Cursed" toggle button
+- "📜 Quest" toggle button
+- "Clear Filters" button
+
+**Filter Logic**:
+
+- Text search combined with all active filters
+- Filters applied to item list in `show_items_list()`
+- Visual indicators (✨💀📜) in item list
+- All filters are optional and can be combined
+
+**State Fields Added**:
+
+- `items_filter_type: Option<ItemTypeFilter>`
+- `items_filter_magical: Option<bool>`
+- `items_filter_cursed: Option<bool>`
+- `items_filter_quest: Option<bool>`
+
+#### 3B.5: Item Import/Export
+
+**Function**: `show_item_import_dialog()`
+
+Dialog window for RON-based import/export:
+
+**Export Functionality**:
+
+- "📤 Export" button on selected item
+- Generates RON string with PrettyConfig
+- Opens dialog with pre-filled RON data
+- "Copy to Clipboard" button
+
+**Import Functionality**:
+
+- "📥 Import" button in toolbar
+- Text area for pasting RON data
+- Validates RON syntax
+- Auto-assigns next available ID
+- Adds imported item to collection
+
+**State Fields**:
+
+- `items_import_export_buffer: String` - RON text buffer
+- `items_show_import_dialog: bool` - Dialog visibility
+
+### Testing
+
+Added 12 new test cases covering Phase 3B functionality:
+
+**Filter Tests** (5 tests):
+
+- `test_item_type_filter_weapon` - Type filter matches weapons
+- `test_item_type_filter_all_types` - All type filters work correctly
+- `test_items_filter_magical` - Magical filter matches items with charges/bonuses
+- `test_items_filter_cursed` - Cursed filter matches cursed items
+- `test_items_filter_quest` - Quest filter matches quest items
+
+**Disablement Tests** (3 tests):
+
+- `test_disablement_flags` - Bitfield operations work correctly
+- `test_disablement_editor_all_classes` - All classes flag enables all
+- `test_disablement_editor_specific_classes` - Specific class restrictions work
+
+**Import/Export Tests** (1 test):
+
+- `test_item_import_export_roundtrip` - RON serialization preserves all data
+
+**Type-Specific Editor Tests** (2 tests):
+
+- `test_item_type_specific_editors` - Each type creates correct structure
+- `test_combined_filters` - Multiple filters work together
+
+**Preview Tests** (1 test):
+
+- `test_item_preview_displays_all_info` - Preview shows all item properties
+
+### Quality Gates
+
+All quality checks passed:
+
+- ✅ `cargo fmt --all` - Code formatted
+- ✅ `cargo check --all-targets --all-features` - Compiles without errors
+- ✅ `cargo clippy -- -D warnings` - Zero clippy warnings
+- ✅ `cargo test --package campaign_builder` - 175 tests pass (12 new Phase 3B tests, 9 pre-existing failures in other modules)
+
+### Architecture Compliance
+
+Phase 3B adheres to architecture specifications:
+
+- Uses `ItemId` type alias (not raw `u8`)
+- Uses `ItemType` enum with correct variant data structures
+- Uses `Disablement` bitfield pattern from architecture
+- RON format for import/export (not JSON/YAML)
+- Proper separation between UI and domain logic
+
+### Type System Usage
+
+Correctly imports and uses all domain types:
+
+- `ItemType` and variants (Weapon, Armor, Accessory, Consumable, Ammo, Quest)
+- Type-specific data structs (WeaponData, ArmorData, etc.)
+- `Disablement` with bitfield constants (KNIGHT, PALADIN, etc.)
+- `Bonus`, `BonusAttribute` for magical effects
+- `ConsumableEffect`, `AttributeType` for consumables
+- `AccessorySlot`, `AmmoType` enums
+
+### User Experience Improvements
+
+Phase 3B significantly improves the items editor UX:
+
+- **Type-specific editing**: Appropriate controls for each item type
+- **Visual filtering**: Quick access to item subsets with visual indicators
+- **Class restrictions**: Intuitive checkbox interface for disablements
+- **Rich preview**: See all item properties at a glance
+- **Import/Export**: Share items between campaigns or with other designers
+
+### Files Modified
+
+- `sdk/campaign_builder/src/main.rs` - Enhanced items editor with all Phase 3B features
+
+### Next Steps
+
+Proceed to Phase 3C: Spells and Monsters Editor Enhancement
+
+- Enhanced spell editor with school/level filtering
+- Monster editor with attack and loot table editing
+- Monster stat calculator
+- Template-based monster creation
+
+---
+
 ## Phase 14: Game Engine Campaign Integration (COMPLETED)
 
 **Date Completed**: 2025-01-24
