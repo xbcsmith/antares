@@ -36,7 +36,11 @@ use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterResistances};
 use antares::domain::combat::types::{Attack, AttackType};
 use antares::domain::dialogue::DialogueTree;
-use antares::domain::items::types::{Disablement, Item, ItemType, WeaponData};
+use antares::domain::items::types::{
+    AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorData, AttributeType, Bonus,
+    BonusAttribute, ConsumableData, ConsumableEffect, Disablement, Item, ItemType, QuestData,
+    WeaponData,
+};
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
 use antares::domain::quest::{Quest, QuestId};
 use antares::domain::types::{DiceRoll, ItemId, MapId, MonsterId, SpellId};
@@ -227,6 +231,52 @@ impl Severity {
     }
 }
 
+/// Item type filter for search
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ItemTypeFilter {
+    Weapon,
+    Armor,
+    Accessory,
+    Consumable,
+    Ammo,
+    Quest,
+}
+
+impl ItemTypeFilter {
+    fn matches(&self, item: &Item) -> bool {
+        match self {
+            ItemTypeFilter::Weapon => item.is_weapon(),
+            ItemTypeFilter::Armor => item.is_armor(),
+            ItemTypeFilter::Accessory => item.is_accessory(),
+            ItemTypeFilter::Consumable => item.is_consumable(),
+            ItemTypeFilter::Ammo => item.is_ammo(),
+            ItemTypeFilter::Quest => item.is_quest_item(),
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            ItemTypeFilter::Weapon => "Weapon",
+            ItemTypeFilter::Armor => "Armor",
+            ItemTypeFilter::Accessory => "Accessory",
+            ItemTypeFilter::Consumable => "Consumable",
+            ItemTypeFilter::Ammo => "Ammo",
+            ItemTypeFilter::Quest => "Quest",
+        }
+    }
+
+    fn all() -> [ItemTypeFilter; 6] {
+        [
+            ItemTypeFilter::Weapon,
+            ItemTypeFilter::Armor,
+            ItemTypeFilter::Accessory,
+            ItemTypeFilter::Consumable,
+            ItemTypeFilter::Ammo,
+            ItemTypeFilter::Quest,
+        ]
+    }
+}
+
 /// File I/O errors
 #[derive(Debug, Error)]
 enum CampaignError {
@@ -263,6 +313,14 @@ struct CampaignBuilderApp {
     items_selected: Option<usize>,
     items_editor_mode: EditorMode,
     items_edit_buffer: Item,
+    // Phase 3B: Items editor enhancements
+    items_filter_type: Option<ItemTypeFilter>,
+    items_filter_magical: Option<bool>,
+    items_filter_cursed: Option<bool>,
+    items_filter_quest: Option<bool>,
+    items_show_preview: bool,
+    items_import_export_buffer: String,
+    items_show_import_dialog: bool,
 
     spells: Vec<Spell>,
     spells_search: String,
@@ -347,6 +405,13 @@ impl Default for CampaignBuilderApp {
             items_selected: None,
             items_editor_mode: EditorMode::List,
             items_edit_buffer: Self::default_item(),
+            items_filter_type: None,
+            items_filter_magical: None,
+            items_filter_cursed: None,
+            items_filter_quest: None,
+            items_show_preview: true,
+            items_import_export_buffer: String::new(),
+            items_show_import_dialog: false,
 
             spells: Vec::new(),
             spells_search: String::new(),
@@ -2126,8 +2191,87 @@ impl CampaignBuilderApp {
                 self.load_items();
             }
 
+            if ui.button("📥 Import").clicked() {
+                self.items_show_import_dialog = true;
+                self.items_import_export_buffer.clear();
+            }
+
             ui.separator();
             ui.label(format!("Total: {}", self.items.len()));
+        });
+
+        // Phase 3B: Filter toolbar
+        ui.horizontal(|ui| {
+            ui.label("Filters:");
+
+            egui::ComboBox::from_id_salt("item_type_filter")
+                .selected_text(
+                    self.items_filter_type
+                        .map(|f| f.as_str().to_string())
+                        .unwrap_or_else(|| "All Types".to_string()),
+                )
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.items_filter_type.is_none(), "All Types")
+                        .clicked()
+                    {
+                        self.items_filter_type = None;
+                    }
+                    for filter in ItemTypeFilter::all() {
+                        if ui
+                            .selectable_value(
+                                &mut self.items_filter_type,
+                                Some(filter),
+                                filter.as_str(),
+                            )
+                            .clicked()
+                        {}
+                    }
+                });
+
+            ui.separator();
+
+            if ui
+                .selectable_label(self.items_filter_magical == Some(true), "✨ Magical")
+                .clicked()
+            {
+                self.items_filter_magical = if self.items_filter_magical == Some(true) {
+                    None
+                } else {
+                    Some(true)
+                };
+            }
+
+            if ui
+                .selectable_label(self.items_filter_cursed == Some(true), "💀 Cursed")
+                .clicked()
+            {
+                self.items_filter_cursed = if self.items_filter_cursed == Some(true) {
+                    None
+                } else {
+                    Some(true)
+                };
+            }
+
+            if ui
+                .selectable_label(self.items_filter_quest == Some(true), "📜 Quest")
+                .clicked()
+            {
+                self.items_filter_quest = if self.items_filter_quest == Some(true) {
+                    None
+                } else {
+                    Some(true)
+                };
+            }
+
+            ui.separator();
+
+            if ui.button("🔄 Clear Filters").clicked() {
+                self.items_filter_type = None;
+                self.items_filter_magical = None;
+                self.items_filter_cursed = None;
+                self.items_filter_quest = None;
+            }
         });
 
         ui.separator();
@@ -2135,6 +2279,11 @@ impl CampaignBuilderApp {
         match self.items_editor_mode {
             EditorMode::List => self.show_items_list(ui),
             EditorMode::Add | EditorMode::Edit => self.show_items_form(ui),
+        }
+
+        // Phase 3B: Import dialog
+        if self.items_show_import_dialog {
+            self.show_item_import_dialog(ui.ctx());
         }
     }
 
@@ -2147,9 +2296,49 @@ impl CampaignBuilderApp {
             .iter()
             .enumerate()
             .filter(|(_, item)| {
-                search_lower.is_empty() || item.name.to_lowercase().contains(&search_lower)
+                // Text search
+                if !search_lower.is_empty() && !item.name.to_lowercase().contains(&search_lower) {
+                    return false;
+                }
+                // Type filter
+                if let Some(type_filter) = self.items_filter_type {
+                    if !type_filter.matches(item) {
+                        return false;
+                    }
+                }
+                // Magical filter
+                if let Some(magical) = self.items_filter_magical {
+                    if item.is_magical() != magical {
+                        return false;
+                    }
+                }
+                // Cursed filter
+                if let Some(cursed) = self.items_filter_cursed {
+                    if item.is_cursed != cursed {
+                        return false;
+                    }
+                }
+                // Quest filter
+                if let Some(quest) = self.items_filter_quest {
+                    if item.is_quest_item() != quest {
+                        return false;
+                    }
+                }
+                true
             })
-            .map(|(idx, item)| (idx, format!("{}: {}", item.id, item.name)))
+            .map(|(idx, item)| {
+                let mut label = format!("{}: {}", item.id, item.name);
+                if item.is_magical() {
+                    label.push_str(" ✨");
+                }
+                if item.is_cursed {
+                    label.push_str(" 💀");
+                }
+                if item.is_quest_item() {
+                    label.push_str(" 📜");
+                }
+                (idx, label)
+            })
             .collect();
 
         let selected = self.items_selected;
@@ -2198,24 +2387,15 @@ impl CampaignBuilderApp {
                             if ui.button("📋 Duplicate").clicked() {
                                 action = Some((idx, "duplicate"));
                             }
+                            if ui.button("📤 Export").clicked() {
+                                action = Some((idx, "export"));
+                            }
                         });
 
                         ui.separator();
 
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            ui.group(|ui| {
-                                ui.label(format!("ID: {}", item.id));
-                                ui.label(format!("Type: {:?}", item.item_type));
-                                ui.label(format!("Base Cost: {} gold", item.base_cost));
-                                ui.label(format!("Sell Cost: {} gold", item.sell_cost));
-                                ui.label(format!("Cursed: {}", item.is_cursed));
-                                ui.label(format!("Magical: {}", item.is_magical()));
-
-                                if item.max_charges > 0 {
-                                    ui.label(format!("Charges: {}", item.max_charges));
-                                }
-                            });
-                        });
+                        // Phase 3B: Enhanced preview panel
+                        self.show_item_preview(ui, &item);
                     }
                 } else {
                     ui.vertical_centered(|ui| {
@@ -2248,9 +2428,215 @@ impl CampaignBuilderApp {
                     self.items.push(new_item);
                     let _ = self.save_items();
                 }
+                "export" => {
+                    // Export item to RON
+                    if let Ok(ron_str) = ron::ser::to_string_pretty(
+                        &self.items[idx],
+                        ron::ser::PrettyConfig::default(),
+                    ) {
+                        self.items_import_export_buffer = ron_str;
+                        self.items_show_import_dialog = true;
+                        self.status_message = "Item exported to clipboard dialog".to_string();
+                    } else {
+                        self.status_message = "Failed to export item".to_string();
+                    }
+                }
                 _ => {}
             }
         }
+    }
+
+    /// Phase 3B: Show enhanced item preview panel
+    ///
+    /// Displays formatted item information with type-specific stats,
+    /// class restrictions, bonuses, and effects.
+    fn show_item_preview(&self, ui: &mut egui::Ui, item: &Item) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.group(|ui| {
+                ui.heading("Basic Info");
+                ui.label(format!("ID: {}", item.id));
+                ui.label(format!("Base Cost: {} gold", item.base_cost));
+                ui.label(format!("Sell Cost: {} gold", item.sell_cost));
+
+                let mut flags = Vec::new();
+                if item.is_magical() {
+                    flags.push("✨ Magical");
+                }
+                if item.is_cursed {
+                    flags.push("💀 Cursed");
+                }
+                if item.is_quest_item() {
+                    flags.push("📜 Quest Item");
+                }
+                if !flags.is_empty() {
+                    ui.label(flags.join(" "));
+                }
+            });
+
+            ui.add_space(5.0);
+
+            // Type-specific display
+            ui.group(|ui| {
+                ui.heading("Item Type");
+                match &item.item_type {
+                    ItemType::Weapon(data) => {
+                        ui.label("⚔️ Weapon");
+                        ui.label(format!("  Damage: {:?}", data.damage));
+                        ui.label(format!("  Bonus: {}", data.bonus));
+                        ui.label(format!("  Hands: {}", data.hands_required));
+                    }
+                    ItemType::Armor(data) => {
+                        ui.label("🛡️ Armor");
+                        ui.label(format!("  AC Bonus: +{}", data.ac_bonus));
+                        ui.label(format!("  Weight: {} lbs", data.weight));
+                    }
+                    ItemType::Accessory(data) => {
+                        ui.label("💍 Accessory");
+                        ui.label(format!("  Slot: {:?}", data.slot));
+                    }
+                    ItemType::Consumable(data) => {
+                        ui.label("🧪 Consumable");
+                        ui.label(format!("  Effect: {:?}", data.effect));
+                        ui.label(format!("  Combat Use: {}", data.is_combat_usable));
+                    }
+                    ItemType::Ammo(data) => {
+                        ui.label("🏹 Ammunition");
+                        ui.label(format!("  Type: {:?}", data.ammo_type));
+                        ui.label(format!("  Quantity: {}", data.quantity));
+                    }
+                    ItemType::Quest(data) => {
+                        ui.label("📜 Quest Item");
+                        ui.label(format!("  Quest: {}", data.quest_id));
+                        ui.label(format!("  Key Item: {}", data.is_key_item));
+                    }
+                }
+            });
+
+            ui.add_space(5.0);
+
+            // Disablements (class restrictions)
+            ui.group(|ui| {
+                ui.heading("Class Restrictions");
+                self.show_disablement_display(ui, item.disablements);
+            });
+
+            // Bonuses and effects
+            if item.constant_bonus.is_some()
+                || item.temporary_bonus.is_some()
+                || item.spell_effect.is_some()
+            {
+                ui.add_space(5.0);
+                ui.group(|ui| {
+                    ui.heading("Magical Effects");
+
+                    if let Some(bonus) = item.constant_bonus {
+                        ui.label(format!("Constant: {:?} {:+}", bonus.attribute, bonus.value));
+                    }
+
+                    if let Some(bonus) = item.temporary_bonus {
+                        ui.label(format!(
+                            "Temporary: {:?} {:+}",
+                            bonus.attribute, bonus.value
+                        ));
+                    }
+
+                    if let Some(spell_id) = item.spell_effect {
+                        ui.label(format!("Spell Effect: ID {}", spell_id));
+                    }
+
+                    if item.max_charges > 0 {
+                        ui.label(format!("Max Charges: {}", item.max_charges));
+                    }
+                });
+            }
+        });
+    }
+
+    /// Phase 3B: Display disablement flags (class restrictions)
+    ///
+    /// Shows which classes and alignments can use the item.
+    fn show_disablement_display(&self, ui: &mut egui::Ui, disablement: Disablement) {
+        ui.horizontal_wrapped(|ui| {
+            let classes = [
+                (Disablement::KNIGHT, "Knight"),
+                (Disablement::PALADIN, "Paladin"),
+                (Disablement::ARCHER, "Archer"),
+                (Disablement::CLERIC, "Cleric"),
+                (Disablement::SORCERER, "Sorcerer"),
+                (Disablement::ROBBER, "Robber"),
+            ];
+
+            for (flag, name) in &classes {
+                let can_use = disablement.can_use_class(*flag);
+                if can_use {
+                    ui.label(format!("✓ {}", name));
+                } else {
+                    ui.label(format!("✗ {}", name));
+                }
+            }
+        });
+
+        ui.horizontal(|ui| {
+            if disablement.good_only() {
+                ui.label("☀️ Good Only");
+            }
+            if disablement.evil_only() {
+                ui.label("🌙 Evil Only");
+            }
+            if !disablement.good_only() && !disablement.evil_only() {
+                ui.label("⚖️ Any Alignment");
+            }
+        });
+    }
+
+    /// Phase 3B: Import/export dialog
+    fn show_item_import_dialog(&mut self, ctx: &egui::Context) {
+        let mut open = self.items_show_import_dialog;
+
+        egui::Window::new("Import/Export Item")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(500.0)
+            .show(ctx, |ui| {
+                ui.heading("Item RON Data");
+                ui.separator();
+
+                ui.label("Paste RON data to import, or copy exported data:");
+                let text_edit = egui::TextEdit::multiline(&mut self.items_import_export_buffer)
+                    .desired_rows(15)
+                    .code_editor();
+                ui.add(text_edit);
+
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("📥 Import").clicked() {
+                        match ron::from_str::<Item>(&self.items_import_export_buffer) {
+                            Ok(mut item) => {
+                                item.id = self.next_available_item_id();
+                                self.items.push(item);
+                                let _ = self.save_items();
+                                self.status_message = "Item imported successfully".to_string();
+                                self.items_show_import_dialog = false;
+                            }
+                            Err(e) => {
+                                self.status_message = format!("Import failed: {}", e);
+                            }
+                        }
+                    }
+
+                    if ui.button("📋 Copy to Clipboard").clicked() {
+                        ui.output_mut(|o| o.copied_text = self.items_import_export_buffer.clone());
+                        self.status_message = "Copied to clipboard".to_string();
+                    }
+
+                    if ui.button("❌ Close").clicked() {
+                        self.items_show_import_dialog = false;
+                    }
+                });
+            });
+
+        self.items_show_import_dialog = open;
     }
 
     /// Show items edit/add form
@@ -2260,40 +2646,125 @@ impl CampaignBuilderApp {
         ui.separator();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("ID:");
-                ui.add_enabled(
-                    false,
-                    egui::TextEdit::singleline(&mut self.items_edit_buffer.id.to_string()),
-                );
+            ui.group(|ui| {
+                ui.heading("Basic Properties");
+
+                ui.horizontal(|ui| {
+                    ui.label("ID:");
+                    ui.add_enabled(
+                        false,
+                        egui::TextEdit::singleline(&mut self.items_edit_buffer.id.to_string()),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Name:");
+                    ui.text_edit_singleline(&mut self.items_edit_buffer.name);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Base Cost:");
+                    ui.add(egui::DragValue::new(&mut self.items_edit_buffer.base_cost).speed(1.0));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Sell Cost:");
+                    ui.add(egui::DragValue::new(&mut self.items_edit_buffer.sell_cost).speed(1.0));
+                });
+
+                ui.checkbox(&mut self.items_edit_buffer.is_cursed, "Cursed");
+
+                ui.horizontal(|ui| {
+                    ui.label("Max Charges:");
+                    ui.add(
+                        egui::DragValue::new(&mut self.items_edit_buffer.max_charges).speed(1.0),
+                    );
+                });
             });
 
-            ui.horizontal(|ui| {
-                ui.label("Name:");
-                ui.text_edit_singleline(&mut self.items_edit_buffer.name);
+            ui.add_space(10.0);
+
+            // Phase 3B: Item type selector and type-specific editor
+            ui.group(|ui| {
+                ui.heading("Item Type");
+
+                ui.horizontal(|ui| {
+                    if ui
+                        .selectable_label(self.items_edit_buffer.is_weapon(), "⚔️ Weapon")
+                        .clicked()
+                    {
+                        self.items_edit_buffer.item_type = ItemType::Weapon(WeaponData {
+                            damage: DiceRoll::new(1, 6, 0),
+                            bonus: 0,
+                            hands_required: 1,
+                        });
+                    }
+                    if ui
+                        .selectable_label(self.items_edit_buffer.is_armor(), "🛡️ Armor")
+                        .clicked()
+                    {
+                        self.items_edit_buffer.item_type =
+                            ItemType::Armor(antares::domain::items::types::ArmorData {
+                                ac_bonus: 0,
+                                weight: 0,
+                            });
+                    }
+                    if ui
+                        .selectable_label(self.items_edit_buffer.is_accessory(), "💍 Accessory")
+                        .clicked()
+                    {
+                        self.items_edit_buffer.item_type =
+                            ItemType::Accessory(antares::domain::items::types::AccessoryData {
+                                slot: antares::domain::items::types::AccessorySlot::Ring,
+                            });
+                    }
+                    if ui
+                        .selectable_label(self.items_edit_buffer.is_consumable(), "🧪 Consumable")
+                        .clicked()
+                    {
+                        self.items_edit_buffer.item_type =
+                            ItemType::Consumable(antares::domain::items::types::ConsumableData {
+                                effect: antares::domain::items::types::ConsumableEffect::HealHp(10),
+                                is_combat_usable: true,
+                            });
+                    }
+                    if ui
+                        .selectable_label(self.items_edit_buffer.is_ammo(), "🏹 Ammo")
+                        .clicked()
+                    {
+                        self.items_edit_buffer.item_type =
+                            ItemType::Ammo(antares::domain::items::types::AmmoData {
+                                ammo_type: antares::domain::items::types::AmmoType::Arrow,
+                                quantity: 20,
+                            });
+                    }
+                    if ui
+                        .selectable_label(self.items_edit_buffer.is_quest_item(), "📜 Quest")
+                        .clicked()
+                    {
+                        self.items_edit_buffer.item_type =
+                            ItemType::Quest(antares::domain::items::types::QuestData {
+                                quest_id: String::new(),
+                                is_key_item: false,
+                            });
+                    }
+                });
+
+                ui.separator();
+
+                // Phase 3B: Type-specific editors
+                self.show_item_type_editor(ui);
             });
 
-            ui.horizontal(|ui| {
-                ui.label("Base Cost:");
-                ui.add(egui::DragValue::new(&mut self.items_edit_buffer.base_cost).speed(1.0));
+            ui.add_space(10.0);
+
+            // Phase 3B: Disablement editor
+            ui.group(|ui| {
+                ui.heading("Class Restrictions");
+                self.show_disablement_editor(ui);
             });
 
-            ui.horizontal(|ui| {
-                ui.label("Sell Cost:");
-                ui.add(egui::DragValue::new(&mut self.items_edit_buffer.sell_cost).speed(1.0));
-            });
-
-            ui.checkbox(&mut self.items_edit_buffer.is_cursed, "Cursed");
-
-            ui.horizontal(|ui| {
-                ui.label("Max Charges:");
-                ui.add(egui::DragValue::new(&mut self.items_edit_buffer.max_charges).speed(1.0));
-            });
-
-            ui.separator();
-
-            // Type-specific editors would go here
-            ui.label(format!("Type: {:?}", self.items_edit_buffer.item_type));
+            ui.add_space(10.0);
 
             ui.separator();
 
@@ -2315,6 +2786,288 @@ impl CampaignBuilderApp {
                     self.items_editor_mode = EditorMode::List;
                 }
             });
+        });
+    }
+
+    /// Phase 3B: Type-specific item editor
+    ///
+    /// Displays appropriate editor fields based on the current item type.
+    fn show_item_type_editor(&mut self, ui: &mut egui::Ui) {
+        match &mut self.items_edit_buffer.item_type {
+            ItemType::Weapon(data) => {
+                ui.label("⚔️ Weapon Properties");
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    ui.label("Damage Dice:");
+                    ui.add(
+                        egui::DragValue::new(&mut data.damage.count)
+                            .range(1..=10)
+                            .prefix("Count: "),
+                    );
+                    ui.label("d");
+                    ui.add(
+                        egui::DragValue::new(&mut data.damage.sides)
+                            .range(1..=100)
+                            .prefix("Sides: "),
+                    );
+                    ui.label("+");
+                    ui.add(
+                        egui::DragValue::new(&mut data.damage.bonus)
+                            .range(-100..=100)
+                            .prefix("Bonus: "),
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("To-Hit/Damage Bonus:");
+                    ui.add(egui::DragValue::new(&mut data.bonus).range(-10..=10));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Hands Required:");
+                    ui.add(egui::DragValue::new(&mut data.hands_required).range(1..=2));
+                });
+            }
+            ItemType::Armor(data) => {
+                ui.label("🛡️ Armor Properties");
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    ui.label("AC Bonus:");
+                    ui.add(egui::DragValue::new(&mut data.ac_bonus).range(0..=20));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Weight (lbs):");
+                    ui.add(egui::DragValue::new(&mut data.weight).range(0..=255));
+                });
+            }
+            ItemType::Accessory(data) => {
+                ui.label("💍 Accessory Properties");
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    ui.label("Equipment Slot:");
+                    egui::ComboBox::from_id_salt("accessory_slot")
+                        .selected_text(format!("{:?}", data.slot))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut data.slot, AccessorySlot::Ring, "Ring");
+                            ui.selectable_value(&mut data.slot, AccessorySlot::Amulet, "Amulet");
+                            ui.selectable_value(&mut data.slot, AccessorySlot::Belt, "Belt");
+                            ui.selectable_value(&mut data.slot, AccessorySlot::Cloak, "Cloak");
+                        });
+                });
+            }
+            ItemType::Consumable(data) => {
+                ui.label("🧪 Consumable Properties");
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    ui.label("Effect Type:");
+
+                    let effect_str = match &data.effect {
+                        ConsumableEffect::HealHp(_) => "Heal HP",
+                        ConsumableEffect::RestoreSp(_) => "Restore SP",
+                        ConsumableEffect::CureCondition(_) => "Cure Condition",
+                        ConsumableEffect::BoostAttribute(_, _) => "Boost Attribute",
+                    };
+
+                    egui::ComboBox::from_id_salt("consumable_effect")
+                        .selected_text(effect_str)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(
+                                    matches!(data.effect, ConsumableEffect::HealHp(_)),
+                                    "Heal HP",
+                                )
+                                .clicked()
+                            {
+                                data.effect = ConsumableEffect::HealHp(10);
+                            }
+                            if ui
+                                .selectable_label(
+                                    matches!(data.effect, ConsumableEffect::RestoreSp(_)),
+                                    "Restore SP",
+                                )
+                                .clicked()
+                            {
+                                data.effect = ConsumableEffect::RestoreSp(10);
+                            }
+                            if ui
+                                .selectable_label(
+                                    matches!(data.effect, ConsumableEffect::CureCondition(_)),
+                                    "Cure Condition",
+                                )
+                                .clicked()
+                            {
+                                data.effect = ConsumableEffect::CureCondition(0);
+                            }
+                            if ui
+                                .selectable_label(
+                                    matches!(data.effect, ConsumableEffect::BoostAttribute(_, _)),
+                                    "Boost Attribute",
+                                )
+                                .clicked()
+                            {
+                                data.effect =
+                                    ConsumableEffect::BoostAttribute(AttributeType::Might, 1);
+                            }
+                        });
+                });
+
+                // Edit effect value
+                match &mut data.effect {
+                    ConsumableEffect::HealHp(amount) | ConsumableEffect::RestoreSp(amount) => {
+                        ui.horizontal(|ui| {
+                            ui.label("Amount:");
+                            ui.add(egui::DragValue::new(amount).range(1..=1000));
+                        });
+                    }
+                    ConsumableEffect::CureCondition(flags) => {
+                        ui.horizontal(|ui| {
+                            ui.label("Condition Flags:");
+                            ui.add(egui::DragValue::new(flags).range(0..=255));
+                        });
+                    }
+                    ConsumableEffect::BoostAttribute(attr_type, value) => {
+                        ui.horizontal(|ui| {
+                            ui.label("Attribute:");
+                            egui::ComboBox::from_id_salt("boost_attribute")
+                                .selected_text(format!("{:?}", attr_type))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(attr_type, AttributeType::Might, "Might");
+                                    ui.selectable_value(
+                                        attr_type,
+                                        AttributeType::Intellect,
+                                        "Intellect",
+                                    );
+                                    ui.selectable_value(
+                                        attr_type,
+                                        AttributeType::Personality,
+                                        "Personality",
+                                    );
+                                    ui.selectable_value(
+                                        attr_type,
+                                        AttributeType::Endurance,
+                                        "Endurance",
+                                    );
+                                    ui.selectable_value(attr_type, AttributeType::Speed, "Speed");
+                                    ui.selectable_value(
+                                        attr_type,
+                                        AttributeType::Accuracy,
+                                        "Accuracy",
+                                    );
+                                    ui.selectable_value(attr_type, AttributeType::Luck, "Luck");
+                                });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Boost Amount:");
+                            ui.add(egui::DragValue::new(value).range(-10..=10));
+                        });
+                    }
+                }
+
+                ui.checkbox(&mut data.is_combat_usable, "Usable in Combat");
+            }
+            ItemType::Ammo(data) => {
+                ui.label("🏹 Ammunition Properties");
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    ui.label("Ammo Type:");
+                    egui::ComboBox::from_id_salt("ammo_type")
+                        .selected_text(format!("{:?}", data.ammo_type))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut data.ammo_type, AmmoType::Arrow, "Arrow");
+                            ui.selectable_value(&mut data.ammo_type, AmmoType::Bolt, "Bolt");
+                            ui.selectable_value(&mut data.ammo_type, AmmoType::Stone, "Stone");
+                        });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Quantity:");
+                    ui.add(egui::DragValue::new(&mut data.quantity).range(1..=1000));
+                });
+            }
+            ItemType::Quest(data) => {
+                ui.label("📜 Quest Item Properties");
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    ui.label("Quest ID:");
+                    ui.text_edit_singleline(&mut data.quest_id);
+                });
+
+                ui.checkbox(&mut data.is_key_item, "Key Item (Cannot drop/sell)");
+            }
+        }
+    }
+
+    /// Phase 3B: Disablement editor
+    ///
+    /// Provides checkboxes for editing class and alignment restrictions.
+    fn show_disablement_editor(&mut self, ui: &mut egui::Ui) {
+        let mut flags = self.items_edit_buffer.disablements.0;
+
+        ui.label("Usable by:");
+        ui.horizontal_wrapped(|ui| {
+            let classes = [
+                (Disablement::KNIGHT, "Knight"),
+                (Disablement::PALADIN, "Paladin"),
+                (Disablement::ARCHER, "Archer"),
+                (Disablement::CLERIC, "Cleric"),
+                (Disablement::SORCERER, "Sorcerer"),
+                (Disablement::ROBBER, "Robber"),
+            ];
+
+            for (flag, name) in &classes {
+                let mut enabled = (flags & flag) != 0;
+                if ui.checkbox(&mut enabled, *name).changed() {
+                    if enabled {
+                        flags |= flag;
+                    } else {
+                        flags &= !flag;
+                    }
+                }
+            }
+        });
+
+        ui.separator();
+        ui.label("Alignment:");
+        ui.horizontal(|ui| {
+            let mut good = (flags & Disablement::GOOD) != 0;
+            let mut evil = (flags & Disablement::EVIL) != 0;
+
+            if ui.checkbox(&mut good, "☀️ Good Only").changed() {
+                if good {
+                    flags |= Disablement::GOOD;
+                    flags &= !Disablement::EVIL; // Can't be both
+                } else {
+                    flags &= !Disablement::GOOD;
+                }
+            }
+
+            if ui.checkbox(&mut evil, "🌙 Evil Only").changed() {
+                if evil {
+                    flags |= Disablement::EVIL;
+                    flags &= !Disablement::GOOD; // Can't be both
+                } else {
+                    flags &= !Disablement::EVIL;
+                }
+            }
+        });
+
+        self.items_edit_buffer.disablements.0 = flags;
+
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.button("✓ All Classes").clicked() {
+                self.items_edit_buffer.disablements.0 = 0b0011_1111; // All classes, no alignment restriction
+            }
+            if ui.button("✗ None").clicked() {
+                self.items_edit_buffer.disablements.0 = 0;
+            }
         });
     }
 
@@ -4095,5 +4848,405 @@ mod tests {
 
         // Should saturate at 255, not overflow
         assert_eq!(app.next_available_item_id(), 255);
+    }
+
+    // ===== Phase 3B: Items Editor Enhancement Tests =====
+
+    #[test]
+    fn test_item_type_filter_weapon() {
+        let app = CampaignBuilderApp::default();
+
+        let mut weapon = CampaignBuilderApp::default_item();
+        weapon.item_type = ItemType::Weapon(WeaponData {
+            damage: DiceRoll::new(1, 8, 0),
+            bonus: 1,
+            hands_required: 1,
+        });
+
+        let filter = ItemTypeFilter::Weapon;
+        assert!(filter.matches(&weapon));
+
+        // Should not match other types
+        let mut armor = CampaignBuilderApp::default_item();
+        armor.item_type = ItemType::Armor(antares::domain::items::types::ArmorData {
+            ac_bonus: 5,
+            weight: 20,
+        });
+        assert!(!filter.matches(&armor));
+    }
+
+    #[test]
+    fn test_item_type_filter_all_types() {
+        use antares::domain::items::types::*;
+
+        let weapon_item = Item {
+            id: 1,
+            name: "Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            disablements: Disablement::ALL,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+        };
+
+        let armor_item = Item {
+            id: 2,
+            name: "Chainmail".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 5,
+                weight: 30,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            disablements: Disablement::ALL,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+        };
+
+        assert!(ItemTypeFilter::Weapon.matches(&weapon_item));
+        assert!(!ItemTypeFilter::Weapon.matches(&armor_item));
+        assert!(ItemTypeFilter::Armor.matches(&armor_item));
+        assert!(!ItemTypeFilter::Armor.matches(&weapon_item));
+    }
+
+    #[test]
+    fn test_items_filter_magical() {
+        let mut app = CampaignBuilderApp::default();
+        app.items_filter_magical = Some(true);
+
+        let mut magical_item = CampaignBuilderApp::default_item();
+        magical_item.id = 1;
+        magical_item.name = "Magic Sword".to_string();
+        magical_item.max_charges = 10;
+        app.items.push(magical_item.clone());
+
+        let mut mundane_item = CampaignBuilderApp::default_item();
+        mundane_item.id = 2;
+        mundane_item.name = "Normal Sword".to_string();
+        mundane_item.max_charges = 0;
+        app.items.push(mundane_item);
+
+        // Magical filter should only match magical items
+        assert!(magical_item.is_magical());
+    }
+
+    #[test]
+    fn test_items_filter_cursed() {
+        let mut cursed_item = CampaignBuilderApp::default_item();
+        cursed_item.is_cursed = true;
+
+        let normal_item = CampaignBuilderApp::default_item();
+
+        assert!(cursed_item.is_cursed);
+        assert!(!normal_item.is_cursed);
+    }
+
+    #[test]
+    fn test_items_filter_quest() {
+        use antares::domain::items::types::QuestData;
+
+        let mut quest_item = CampaignBuilderApp::default_item();
+        quest_item.item_type = ItemType::Quest(QuestData {
+            quest_id: "main_quest".to_string(),
+            is_key_item: true,
+        });
+
+        let normal_item = CampaignBuilderApp::default_item();
+
+        assert!(quest_item.is_quest_item());
+        assert!(!normal_item.is_quest_item());
+    }
+
+    #[test]
+    fn test_disablement_flags() {
+        let mut item = CampaignBuilderApp::default_item();
+
+        // Test all classes enabled
+        item.disablements = Disablement(0xFF);
+        assert!(item.disablements.can_use_class(Disablement::KNIGHT));
+        assert!(item.disablements.can_use_class(Disablement::SORCERER));
+
+        // Test specific class restriction
+        item.disablements = Disablement(Disablement::KNIGHT | Disablement::PALADIN);
+        assert!(item.disablements.can_use_class(Disablement::KNIGHT));
+        assert!(item.disablements.can_use_class(Disablement::PALADIN));
+        assert!(!item.disablements.can_use_class(Disablement::SORCERER));
+
+        // Test alignment flags
+        item.disablements = Disablement(Disablement::KNIGHT | Disablement::GOOD);
+        assert!(item.disablements.good_only());
+        assert!(!item.disablements.evil_only());
+    }
+
+    #[test]
+    fn test_item_import_export_roundtrip() {
+        use antares::domain::items::types::*;
+
+        let original_item = Item {
+            id: 42,
+            name: "Test Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(2, 6, 1),
+                bonus: 2,
+                hands_required: 1,
+            }),
+            base_cost: 100,
+            sell_cost: 50,
+            disablements: Disablement(0xFF),
+            constant_bonus: Some(Bonus {
+                attribute: BonusAttribute::Might,
+                value: 3,
+            }),
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+        };
+
+        // Export to RON
+        let ron_string =
+            ron::ser::to_string_pretty(&original_item, ron::ser::PrettyConfig::default())
+                .expect("Failed to serialize item");
+
+        // Import from RON
+        let imported_item: Item = ron::from_str(&ron_string).expect("Failed to deserialize item");
+
+        // Verify roundtrip
+        assert_eq!(original_item.id, imported_item.id);
+        assert_eq!(original_item.name, imported_item.name);
+        assert_eq!(original_item.base_cost, imported_item.base_cost);
+        assert_eq!(original_item.is_cursed, imported_item.is_cursed);
+
+        // Verify weapon data
+        if let (ItemType::Weapon(orig_data), ItemType::Weapon(import_data)) =
+            (&original_item.item_type, &imported_item.item_type)
+        {
+            assert_eq!(orig_data.damage, import_data.damage);
+            assert_eq!(orig_data.bonus, import_data.bonus);
+            assert_eq!(orig_data.hands_required, import_data.hands_required);
+        } else {
+            panic!("Item type mismatch after roundtrip");
+        }
+    }
+
+    #[test]
+    fn test_item_type_specific_editors() {
+        use antares::domain::items::types::*;
+
+        // Test weapon type
+        let weapon = Item {
+            id: 1,
+            name: "Longsword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+            }),
+            base_cost: 15,
+            sell_cost: 7,
+            disablements: Disablement::ALL,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+        };
+        assert!(weapon.is_weapon());
+
+        // Test armor type
+        let armor = Item {
+            id: 2,
+            name: "Plate Mail".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 8,
+                weight: 50,
+            }),
+            base_cost: 100,
+            sell_cost: 50,
+            disablements: Disablement::ALL,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+        };
+        assert!(armor.is_armor());
+
+        // Test consumable type
+        let potion = Item {
+            id: 3,
+            name: "Healing Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(20),
+                is_combat_usable: true,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            disablements: Disablement::ALL,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+        };
+        assert!(potion.is_consumable());
+    }
+
+    #[test]
+    fn test_combined_filters() {
+        use antares::domain::items::types::*;
+
+        let mut app = CampaignBuilderApp::default();
+
+        // Add various items
+        let magical_weapon = Item {
+            id: 1,
+            name: "Magic Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 1,
+                hands_required: 1,
+            }),
+            base_cost: 100,
+            sell_cost: 50,
+            disablements: Disablement::ALL,
+            constant_bonus: Some(Bonus {
+                attribute: BonusAttribute::Might,
+                value: 2,
+            }),
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 5,
+            is_cursed: false,
+        };
+
+        let cursed_armor = Item {
+            id: 2,
+            name: "Cursed Mail".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 5,
+                weight: 30,
+            }),
+            base_cost: 50,
+            sell_cost: 0,
+            disablements: Disablement::ALL,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: true,
+        };
+
+        app.items.push(magical_weapon.clone());
+        app.items.push(cursed_armor.clone());
+
+        // Test magical + weapon filters
+        assert!(magical_weapon.is_magical());
+        assert!(magical_weapon.is_weapon());
+        assert!(!cursed_armor.is_magical());
+        assert!(cursed_armor.is_cursed);
+    }
+
+    #[test]
+    fn test_disablement_editor_all_classes() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Set all classes enabled
+        app.items_edit_buffer.disablements = Disablement(0b0011_1111);
+
+        assert!(app
+            .items_edit_buffer
+            .disablements
+            .can_use_class(Disablement::KNIGHT));
+        assert!(app
+            .items_edit_buffer
+            .disablements
+            .can_use_class(Disablement::PALADIN));
+        assert!(app
+            .items_edit_buffer
+            .disablements
+            .can_use_class(Disablement::ARCHER));
+        assert!(app
+            .items_edit_buffer
+            .disablements
+            .can_use_class(Disablement::CLERIC));
+        assert!(app
+            .items_edit_buffer
+            .disablements
+            .can_use_class(Disablement::SORCERER));
+        assert!(app
+            .items_edit_buffer
+            .disablements
+            .can_use_class(Disablement::ROBBER));
+    }
+
+    #[test]
+    fn test_disablement_editor_specific_classes() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Only knight and paladin
+        app.items_edit_buffer.disablements =
+            Disablement(Disablement::KNIGHT | Disablement::PALADIN);
+
+        assert!(app
+            .items_edit_buffer
+            .disablements
+            .can_use_class(Disablement::KNIGHT));
+        assert!(app
+            .items_edit_buffer
+            .disablements
+            .can_use_class(Disablement::PALADIN));
+        assert!(!app
+            .items_edit_buffer
+            .disablements
+            .can_use_class(Disablement::SORCERER));
+    }
+
+    #[test]
+    fn test_item_preview_displays_all_info() {
+        use antares::domain::items::types::*;
+
+        let item = Item {
+            id: 10,
+            name: "Flaming Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 2),
+                bonus: 3,
+                hands_required: 1,
+            }),
+            base_cost: 500,
+            sell_cost: 250,
+            disablements: Disablement(
+                Disablement::KNIGHT | Disablement::PALADIN | Disablement::GOOD,
+            ),
+            constant_bonus: Some(Bonus {
+                attribute: BonusAttribute::Might,
+                value: 2,
+            }),
+            temporary_bonus: None,
+            spell_effect: Some(10),
+            max_charges: 20,
+            is_cursed: false,
+        };
+
+        // Verify item has all expected properties
+        assert_eq!(item.id, 10);
+        assert!(item.is_weapon());
+        assert!(item.is_magical());
+        assert!(!item.is_cursed);
+        assert!(item.constant_bonus.is_some());
+        assert!(item.spell_effect.is_some());
+        assert_eq!(item.max_charges, 20);
     }
 }
