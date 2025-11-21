@@ -307,7 +307,228 @@ impl DialogueEditorState {
         Self::default()
     }
 
-    /// Load dialogue trees from data
+    /// Edit an existing node
+    pub fn edit_node(&mut self, dialogue_idx: usize, node_id: NodeId) -> Result<(), String> {
+        if dialogue_idx >= self.dialogues.len() {
+            return Err("Invalid dialogue index".to_string());
+        }
+
+        let dialogue = &self.dialogues[dialogue_idx];
+        if let Some(node) = dialogue.nodes.get(&node_id) {
+            self.node_buffer = NodeEditBuffer {
+                id: node_id.to_string(),
+                text: node.text.clone(),
+                speaker_override: node.speaker_override.clone().unwrap_or_default(),
+                is_terminal: node.is_terminal,
+            };
+            self.selected_node = Some(node_id);
+            Ok(())
+        } else {
+            Err("Node not found".to_string())
+        }
+    }
+
+    /// Save edited node
+    pub fn save_node(&mut self, dialogue_idx: usize, node_id: NodeId) -> Result<(), String> {
+        if dialogue_idx >= self.dialogues.len() {
+            return Err("Invalid dialogue index".to_string());
+        }
+
+        let node_id_parsed = self
+            .node_buffer
+            .id
+            .parse::<NodeId>()
+            .map_err(|_| "Invalid node ID".to_string())?;
+
+        let dialogue = &mut self.dialogues[dialogue_idx];
+        if let Some(node) = dialogue.nodes.get_mut(&node_id) {
+            node.text = self.node_buffer.text.clone();
+            node.speaker_override = if self.node_buffer.speaker_override.is_empty() {
+                None
+            } else {
+                Some(self.node_buffer.speaker_override.clone())
+            };
+            node.is_terminal = self.node_buffer.is_terminal;
+
+            self.has_unsaved_changes = true;
+            self.selected_node = None;
+            Ok(())
+        } else {
+            Err("Node not found".to_string())
+        }
+    }
+
+    /// Delete a node from dialogue
+    pub fn delete_node(&mut self, dialogue_idx: usize, node_id: NodeId) -> Result<(), String> {
+        if dialogue_idx >= self.dialogues.len() {
+            return Err("Invalid dialogue index".to_string());
+        }
+
+        let dialogue = &mut self.dialogues[dialogue_idx];
+
+        // Don't allow deleting root node
+        if node_id == dialogue.root_node {
+            return Err("Cannot delete root node".to_string());
+        }
+
+        dialogue.nodes.remove(&node_id);
+        self.has_unsaved_changes = true;
+
+        if self.selected_node == Some(node_id) {
+            self.selected_node = None;
+        }
+
+        Ok(())
+    }
+
+    /// Edit an existing choice
+    pub fn edit_choice(
+        &mut self,
+        dialogue_idx: usize,
+        node_id: NodeId,
+        choice_idx: usize,
+    ) -> Result<(), String> {
+        if dialogue_idx >= self.dialogues.len() {
+            return Err("Invalid dialogue index".to_string());
+        }
+
+        let dialogue = &self.dialogues[dialogue_idx];
+        if let Some(node) = dialogue.nodes.get(&node_id) {
+            if choice_idx >= node.choices.len() {
+                return Err("Invalid choice index".to_string());
+            }
+
+            let choice = &node.choices[choice_idx];
+            self.choice_buffer = ChoiceEditBuffer {
+                text: choice.text.clone(),
+                target_node: choice
+                    .target_node
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
+                ends_dialogue: choice.ends_dialogue,
+            };
+            self.selected_choice = Some(choice_idx);
+            Ok(())
+        } else {
+            Err("Node not found".to_string())
+        }
+    }
+
+    /// Save edited choice
+    pub fn save_choice(
+        &mut self,
+        dialogue_idx: usize,
+        node_id: NodeId,
+        choice_idx: usize,
+    ) -> Result<(), String> {
+        if dialogue_idx >= self.dialogues.len() {
+            return Err("Invalid dialogue index".to_string());
+        }
+
+        let dialogue = &mut self.dialogues[dialogue_idx];
+        if let Some(node) = dialogue.nodes.get_mut(&node_id) {
+            if choice_idx >= node.choices.len() {
+                return Err("Invalid choice index".to_string());
+            }
+
+            let target_node = if self.choice_buffer.target_node.is_empty() {
+                None
+            } else {
+                Some(
+                    self.choice_buffer
+                        .target_node
+                        .parse::<NodeId>()
+                        .map_err(|_| "Invalid target node ID".to_string())?,
+                )
+            };
+
+            let choice = &mut node.choices[choice_idx];
+            choice.text = self.choice_buffer.text.clone();
+            choice.target_node = target_node;
+            choice.ends_dialogue = self.choice_buffer.ends_dialogue;
+
+            self.has_unsaved_changes = true;
+            self.selected_choice = None;
+            Ok(())
+        } else {
+            Err("Node not found".to_string())
+        }
+    }
+
+    /// Delete a choice from a node
+    pub fn delete_choice(
+        &mut self,
+        dialogue_idx: usize,
+        node_id: NodeId,
+        choice_idx: usize,
+    ) -> Result<(), String> {
+        if dialogue_idx >= self.dialogues.len() {
+            return Err("Invalid dialogue index".to_string());
+        }
+
+        let dialogue = &mut self.dialogues[dialogue_idx];
+        if let Some(node) = dialogue.nodes.get_mut(&node_id) {
+            if choice_idx >= node.choices.len() {
+                return Err("Invalid choice index".to_string());
+            }
+
+            node.choices.remove(choice_idx);
+            self.has_unsaved_changes = true;
+
+            if self.selected_choice == Some(choice_idx) {
+                self.selected_choice = None;
+            }
+
+            Ok(())
+        } else {
+            Err("Node not found".to_string())
+        }
+    }
+
+    /// Find unreachable nodes in all dialogues
+    pub fn find_unreachable_nodes(&self) -> Vec<(DialogueId, Vec<NodeId>)> {
+        let mut unreachable = Vec::new();
+
+        for dialogue in &self.dialogues {
+            let mut reachable = std::collections::HashSet::new();
+            let mut to_visit = vec![dialogue.root_node];
+
+            // BFS to find all reachable nodes
+            while let Some(node_id) = to_visit.pop() {
+                if reachable.contains(&node_id) {
+                    continue;
+                }
+                reachable.insert(node_id);
+
+                if let Some(node) = dialogue.nodes.get(&node_id) {
+                    for choice in &node.choices {
+                        if let Some(target) = choice.target_node {
+                            if !reachable.contains(&target) {
+                                to_visit.push(target);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Find nodes that exist but are not reachable
+            let mut unreachable_nodes: Vec<NodeId> = dialogue
+                .nodes
+                .keys()
+                .filter(|id| !reachable.contains(id))
+                .copied()
+                .collect();
+
+            if !unreachable_nodes.is_empty() {
+                unreachable_nodes.sort();
+                unreachable.push((dialogue.id, unreachable_nodes));
+            }
+        }
+
+        unreachable
+    }
+
+    /// Load dialogues from data
     pub fn load_dialogues(&mut self, dialogues: Vec<DialogueTree>) {
         self.dialogues = dialogues;
         self.has_unsaved_changes = false;
@@ -873,5 +1094,149 @@ mod tests {
         let preview = editor.get_dialogue_preview(0);
         assert!(preview.contains("Test Dialogue"));
         assert!(preview.contains("NPC"));
+    }
+
+    #[test]
+    fn test_edit_node() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        let mut node = DialogueNode::new(1, "Hello, traveler!");
+        node.is_terminal = false;
+        dialogue.add_node(node);
+        editor.dialogues.push(dialogue);
+
+        // Edit the node
+        assert!(editor.edit_node(0, 1).is_ok());
+        assert_eq!(editor.node_buffer.id, "1");
+        assert_eq!(editor.node_buffer.text, "Hello, traveler!");
+        assert_eq!(editor.selected_node, Some(1));
+    }
+
+    #[test]
+    fn test_delete_node() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        dialogue.add_node(DialogueNode::new(1, "Root node"));
+        dialogue.add_node(DialogueNode::new(2, "Another node"));
+        editor.dialogues.push(dialogue);
+
+        assert_eq!(editor.dialogues[0].nodes.len(), 2);
+
+        // Cannot delete root node
+        assert!(editor.delete_node(0, 1).is_err());
+
+        // Can delete non-root node
+        assert!(editor.delete_node(0, 2).is_ok());
+        assert_eq!(editor.dialogues[0].nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_edit_choice() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        let mut node = DialogueNode::new(1, "Hello!");
+        node.add_choice(DialogueChoice::new("Goodbye", Some(2)));
+        dialogue.add_node(node);
+        editor.dialogues.push(dialogue);
+
+        // Edit the choice
+        assert!(editor.edit_choice(0, 1, 0).is_ok());
+        assert_eq!(editor.choice_buffer.text, "Goodbye");
+        assert_eq!(editor.choice_buffer.target_node, "2");
+        assert_eq!(editor.selected_choice, Some(0));
+    }
+
+    #[test]
+    fn test_delete_choice() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        let mut node = DialogueNode::new(1, "Hello!");
+        node.add_choice(DialogueChoice::new("Option 1", Some(2)));
+        node.add_choice(DialogueChoice::new("Option 2", Some(3)));
+        dialogue.add_node(node);
+        editor.dialogues.push(dialogue);
+
+        assert_eq!(editor.dialogues[0].nodes.get(&1).unwrap().choices.len(), 2);
+
+        // Delete first choice
+        assert!(editor.delete_choice(0, 1, 0).is_ok());
+        assert_eq!(editor.dialogues[0].nodes.get(&1).unwrap().choices.len(), 1);
+        assert_eq!(
+            editor.dialogues[0].nodes.get(&1).unwrap().choices[0].text,
+            "Option 2"
+        );
+    }
+
+    #[test]
+    fn test_find_unreachable_nodes() {
+        let mut editor = DialogueEditorState::new();
+
+        // Create dialogue with reachable nodes
+        let mut dialogue1 = DialogueTree::new(1, "Reachable Dialogue", 1);
+        let mut node1 = DialogueNode::new(1, "Root");
+        node1.add_choice(DialogueChoice::new("Go to 2", Some(2)));
+        dialogue1.add_node(node1);
+        dialogue1.add_node(DialogueNode::new(2, "Node 2"));
+        editor.dialogues.push(dialogue1);
+
+        // Create dialogue with unreachable node
+        let mut dialogue2 = DialogueTree::new(2, "Unreachable Dialogue", 1);
+        dialogue2.add_node(DialogueNode::new(1, "Root"));
+        dialogue2.add_node(DialogueNode::new(2, "Unreachable node"));
+        dialogue2.add_node(DialogueNode::new(3, "Another unreachable"));
+        editor.dialogues.push(dialogue2);
+
+        let unreachable = editor.find_unreachable_nodes();
+        assert_eq!(unreachable.len(), 1);
+        assert_eq!(unreachable[0].0, 2);
+        assert_eq!(unreachable[0].1.len(), 2);
+        assert!(unreachable[0].1.contains(&2));
+        assert!(unreachable[0].1.contains(&3));
+    }
+
+    #[test]
+    fn test_save_edited_node() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        dialogue.add_node(DialogueNode::new(1, "Original text"));
+        editor.dialogues.push(dialogue);
+
+        // Edit and save the node
+        editor.edit_node(0, 1).unwrap();
+        editor.node_buffer.text = "Modified text".to_string();
+        editor.node_buffer.speaker_override = "NewSpeaker".to_string();
+        editor.node_buffer.is_terminal = true;
+
+        assert!(editor.save_node(0, 1).is_ok());
+
+        // Verify changes
+        let node = editor.dialogues[0].nodes.get(&1).unwrap();
+        assert_eq!(node.text, "Modified text");
+        assert_eq!(node.speaker_override, Some("NewSpeaker".to_string()));
+        assert!(node.is_terminal);
+    }
+
+    #[test]
+    fn test_save_edited_choice() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        let mut node = DialogueNode::new(1, "Hello!");
+        node.add_choice(DialogueChoice::new("Original", Some(2)));
+        dialogue.add_node(node);
+        editor.dialogues.push(dialogue);
+
+        // Edit and save the choice
+        editor.edit_choice(0, 1, 0).unwrap();
+        editor.choice_buffer.text = "Modified choice".to_string();
+        editor.choice_buffer.target_node = "5".to_string();
+        editor.choice_buffer.ends_dialogue = true;
+
+        assert!(editor.save_choice(0, 1, 0).is_ok());
+
+        // Verify changes
+        let choice = &editor.dialogues[0].nodes.get(&1).unwrap().choices[0];
+        assert_eq!(choice.text, "Modified choice");
+        assert_eq!(choice.target_node, Some(5));
+        assert!(choice.ends_dialogue);
     }
 }
