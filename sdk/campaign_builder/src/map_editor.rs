@@ -1725,7 +1725,7 @@ mod tests {
 
     #[test]
     fn test_map_preview_with_terrain_types() {
-        let mut map = Map::new(1, 10, 10);
+        let map = Map::new(1, 10, 10);
         let mut state = MapEditorState::new(map.clone());
 
         // Paint different terrain types

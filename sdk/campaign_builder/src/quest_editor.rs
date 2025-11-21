@@ -263,6 +263,357 @@ impl QuestEditorState {
         Self::default()
     }
 
+    /// Edit an existing stage
+    pub fn edit_stage(&mut self, quest_idx: usize, stage_idx: usize) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
+            return Err("Invalid quest index".to_string());
+        }
+
+        let quest = &self.quests[quest_idx];
+        if stage_idx >= quest.stages.len() {
+            return Err("Invalid stage index".to_string());
+        }
+
+        let stage = &quest.stages[stage_idx];
+        self.stage_buffer = StageEditBuffer {
+            number: stage.stage_number.to_string(),
+            name: stage.name.clone(),
+            description: stage.description.clone(),
+            require_all: stage.require_all_objectives,
+        };
+
+        self.selected_stage = Some(stage_idx);
+        Ok(())
+    }
+
+    /// Save edited stage
+    pub fn save_stage(&mut self, quest_idx: usize, stage_idx: usize) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
+            return Err("Invalid quest index".to_string());
+        }
+
+        if stage_idx >= self.quests[quest_idx].stages.len() {
+            return Err("Invalid stage index".to_string());
+        }
+
+        let stage_num = self
+            .stage_buffer
+            .number
+            .parse::<u8>()
+            .map_err(|_| "Invalid stage number".to_string())?;
+
+        let stage = &mut self.quests[quest_idx].stages[stage_idx];
+        stage.stage_number = stage_num;
+        stage.name = self.stage_buffer.name.clone();
+        stage.description = self.stage_buffer.description.clone();
+        stage.require_all_objectives = self.stage_buffer.require_all;
+
+        self.has_unsaved_changes = true;
+        self.selected_stage = None;
+        Ok(())
+    }
+
+    /// Delete a stage from quest
+    pub fn delete_stage(&mut self, quest_idx: usize, stage_idx: usize) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
+            return Err("Invalid quest index".to_string());
+        }
+
+        if stage_idx >= self.quests[quest_idx].stages.len() {
+            return Err("Invalid stage index".to_string());
+        }
+
+        self.quests[quest_idx].stages.remove(stage_idx);
+        self.has_unsaved_changes = true;
+
+        if self.selected_stage == Some(stage_idx) {
+            self.selected_stage = None;
+        }
+
+        Ok(())
+    }
+
+    /// Edit an existing objective
+    pub fn edit_objective(
+        &mut self,
+        quest_idx: usize,
+        stage_idx: usize,
+        objective_idx: usize,
+    ) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
+            return Err("Invalid quest index".to_string());
+        }
+
+        let quest = &self.quests[quest_idx];
+        if stage_idx >= quest.stages.len() {
+            return Err("Invalid stage index".to_string());
+        }
+
+        let stage = &quest.stages[stage_idx];
+        if objective_idx >= stage.objectives.len() {
+            return Err("Invalid objective index".to_string());
+        }
+
+        let objective = &stage.objectives[objective_idx];
+        self.objective_buffer = match objective {
+            QuestObjective::KillMonsters {
+                monster_id,
+                quantity,
+            } => ObjectiveEditBuffer {
+                objective_type: ObjectiveType::KillMonsters,
+                monster_id: monster_id.to_string(),
+                quantity: quantity.to_string(),
+                ..Default::default()
+            },
+            QuestObjective::CollectItems { item_id, quantity } => ObjectiveEditBuffer {
+                objective_type: ObjectiveType::CollectItems,
+                item_id: item_id.to_string(),
+                quantity: quantity.to_string(),
+                ..Default::default()
+            },
+            QuestObjective::ReachLocation {
+                map_id,
+                position,
+                radius,
+            } => ObjectiveEditBuffer {
+                objective_type: ObjectiveType::ReachLocation,
+                map_id: map_id.to_string(),
+                location_x: position.x.to_string(),
+                location_y: position.y.to_string(),
+                location_radius: radius.to_string(),
+                ..Default::default()
+            },
+            QuestObjective::TalkToNpc { npc_id, map_id } => ObjectiveEditBuffer {
+                objective_type: ObjectiveType::TalkToNpc,
+                npc_id: npc_id.to_string(),
+                map_id: map_id.to_string(),
+                ..Default::default()
+            },
+            QuestObjective::DeliverItem {
+                item_id,
+                npc_id,
+                quantity,
+            } => ObjectiveEditBuffer {
+                objective_type: ObjectiveType::DeliverItem,
+                item_id: item_id.to_string(),
+                npc_id: npc_id.to_string(),
+                quantity: quantity.to_string(),
+                ..Default::default()
+            },
+            QuestObjective::EscortNpc {
+                npc_id,
+                map_id,
+                position,
+            } => ObjectiveEditBuffer {
+                objective_type: ObjectiveType::EscortNpc,
+                npc_id: npc_id.to_string(),
+                map_id: map_id.to_string(),
+                location_x: position.x.to_string(),
+                location_y: position.y.to_string(),
+                ..Default::default()
+            },
+            QuestObjective::CustomFlag {
+                flag_name,
+                required_value,
+            } => ObjectiveEditBuffer {
+                objective_type: ObjectiveType::CustomFlag,
+                flag_name: flag_name.clone(),
+                flag_value: *required_value,
+                ..Default::default()
+            },
+        };
+
+        self.selected_objective = Some(objective_idx);
+        Ok(())
+    }
+
+    /// Save edited objective
+    pub fn save_objective(
+        &mut self,
+        quest_idx: usize,
+        stage_idx: usize,
+        objective_idx: usize,
+    ) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
+            return Err("Invalid quest index".to_string());
+        }
+
+        if stage_idx >= self.quests[quest_idx].stages.len() {
+            return Err("Invalid stage index".to_string());
+        }
+
+        if objective_idx >= self.quests[quest_idx].stages[stage_idx].objectives.len() {
+            return Err("Invalid objective index".to_string());
+        }
+
+        let objective = match self.objective_buffer.objective_type {
+            ObjectiveType::KillMonsters => {
+                let monster_id = self
+                    .objective_buffer
+                    .monster_id
+                    .parse::<MonsterId>()
+                    .map_err(|_| "Invalid monster ID".to_string())?;
+                let quantity = self
+                    .objective_buffer
+                    .quantity
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid quantity".to_string())?;
+                QuestObjective::KillMonsters {
+                    monster_id,
+                    quantity: quantity as u16,
+                }
+            }
+            ObjectiveType::CollectItems => {
+                let item_id = self
+                    .objective_buffer
+                    .item_id
+                    .parse::<ItemId>()
+                    .map_err(|_| "Invalid item ID".to_string())?;
+                let quantity = self
+                    .objective_buffer
+                    .quantity
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid quantity".to_string())?;
+                QuestObjective::CollectItems {
+                    item_id,
+                    quantity: quantity as u16,
+                }
+            }
+            ObjectiveType::ReachLocation => {
+                let map_id = self
+                    .objective_buffer
+                    .map_id
+                    .parse::<MapId>()
+                    .map_err(|_| "Invalid map ID".to_string())?;
+                let x = self
+                    .objective_buffer
+                    .location_x
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid X coordinate".to_string())?;
+                let y = self
+                    .objective_buffer
+                    .location_y
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid Y coordinate".to_string())?;
+                let radius = self
+                    .objective_buffer
+                    .location_radius
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid radius".to_string())?;
+                QuestObjective::ReachLocation {
+                    map_id,
+                    position: Position::new(x as i32, y as i32),
+                    radius: radius as u8,
+                }
+            }
+            ObjectiveType::TalkToNpc => {
+                let map_id = self
+                    .objective_buffer
+                    .map_id
+                    .parse::<MapId>()
+                    .map_err(|_| "Invalid map ID".to_string())?;
+                QuestObjective::TalkToNpc {
+                    npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
+                    map_id,
+                }
+            }
+            ObjectiveType::DeliverItem => {
+                let item_id = self
+                    .objective_buffer
+                    .item_id
+                    .parse::<ItemId>()
+                    .map_err(|_| "Invalid item ID".to_string())?;
+                let quantity = self
+                    .objective_buffer
+                    .quantity
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid quantity".to_string())?;
+                QuestObjective::DeliverItem {
+                    item_id,
+                    npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
+                    quantity: quantity as u16,
+                }
+            }
+            ObjectiveType::EscortNpc => {
+                let map_id = self
+                    .objective_buffer
+                    .map_id
+                    .parse::<MapId>()
+                    .map_err(|_| "Invalid map ID".to_string())?;
+                let x = self
+                    .objective_buffer
+                    .location_x
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid X coordinate".to_string())?;
+                let y = self
+                    .objective_buffer
+                    .location_y
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid Y coordinate".to_string())?;
+                QuestObjective::EscortNpc {
+                    npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
+                    map_id,
+                    position: Position::new(x as i32, y as i32),
+                }
+            }
+            ObjectiveType::CustomFlag => QuestObjective::CustomFlag {
+                flag_name: self.objective_buffer.flag_name.clone(),
+                required_value: self.objective_buffer.flag_value,
+            },
+        };
+
+        self.quests[quest_idx].stages[stage_idx].objectives[objective_idx] = objective;
+        self.has_unsaved_changes = true;
+        self.selected_objective = None;
+        Ok(())
+    }
+
+    /// Delete an objective from a stage
+    pub fn delete_objective(
+        &mut self,
+        quest_idx: usize,
+        stage_idx: usize,
+        objective_idx: usize,
+    ) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
+            return Err("Invalid quest index".to_string());
+        }
+
+        if stage_idx >= self.quests[quest_idx].stages.len() {
+            return Err("Invalid stage index".to_string());
+        }
+
+        if objective_idx >= self.quests[quest_idx].stages[stage_idx].objectives.len() {
+            return Err("Invalid objective index".to_string());
+        }
+
+        self.quests[quest_idx].stages[stage_idx]
+            .objectives
+            .remove(objective_idx);
+        self.has_unsaved_changes = true;
+
+        if self.selected_objective == Some(objective_idx) {
+            self.selected_objective = None;
+        }
+
+        Ok(())
+    }
+
+    /// Find orphaned objectives (stages with no objectives)
+    pub fn find_orphaned_objectives(&self) -> Vec<(QuestId, u8)> {
+        let mut orphaned = Vec::new();
+
+        for quest in &self.quests {
+            for stage in &quest.stages {
+                if stage.objectives.is_empty() {
+                    orphaned.push((quest.id, stage.stage_number));
+                }
+            }
+        }
+
+        orphaned
+    }
+
     /// Load quests from data
     pub fn load_quests(&mut self, quests: Vec<Quest>) {
         self.quests = quests;
@@ -683,6 +1034,7 @@ impl QuestEditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antares::domain::types::Position;
 
     #[test]
     fn test_quest_editor_state_creation() {
@@ -774,7 +1126,7 @@ mod tests {
 
     #[test]
     fn test_quest_buffer_levels() {
-        let mut buffer = QuestEditBuffer {
+        let buffer = QuestEditBuffer {
             min_level: "5".to_string(),
             max_level: "15".to_string(),
             ..Default::default()
@@ -796,5 +1148,142 @@ mod tests {
         assert_eq!(RewardType::Experience.as_str(), "Experience");
         assert_eq!(RewardType::Gold.as_str(), "Gold");
         assert_eq!(RewardType::Items.as_str(), "Items");
+    }
+
+    #[test]
+    fn test_edit_stage() {
+        let mut state = QuestEditorState::new();
+        let mut quest = Quest::new(1, "Test Quest", "Test description");
+        let mut stage = QuestStage::new(1, "Stage 1");
+        stage.description = "Test stage description".to_string();
+        quest.add_stage(stage);
+        state.quests.push(quest);
+
+        // Edit the stage
+        assert!(state.edit_stage(0, 0).is_ok());
+        assert_eq!(state.stage_buffer.number, "1");
+        assert_eq!(state.stage_buffer.name, "Stage 1");
+        assert_eq!(state.stage_buffer.description, "Test stage description");
+        assert_eq!(state.selected_stage, Some(0));
+    }
+
+    #[test]
+    fn test_delete_stage() {
+        let mut state = QuestEditorState::new();
+        let mut quest = Quest::new(1, "Test Quest", "Test description");
+        quest.add_stage(QuestStage::new(1, "Stage 1"));
+        quest.add_stage(QuestStage::new(2, "Stage 2"));
+        state.quests.push(quest);
+
+        assert_eq!(state.quests[0].stages.len(), 2);
+
+        // Delete first stage
+        assert!(state.delete_stage(0, 0).is_ok());
+        assert_eq!(state.quests[0].stages.len(), 1);
+        assert_eq!(state.quests[0].stages[0].stage_number, 2);
+    }
+
+    #[test]
+    fn test_edit_objective() {
+        use antares::domain::quest::QuestObjective;
+
+        let mut state = QuestEditorState::new();
+        let mut quest = Quest::new(1, "Test Quest", "Test description");
+        let mut stage = QuestStage::new(1, "Stage 1");
+        stage.add_objective(QuestObjective::KillMonsters {
+            monster_id: 5,
+            quantity: 10,
+        });
+        quest.add_stage(stage);
+        state.quests.push(quest);
+
+        // Edit the objective
+        assert!(state.edit_objective(0, 0, 0).is_ok());
+        assert_eq!(state.objective_buffer.monster_id, "5");
+        assert_eq!(state.objective_buffer.quantity, "10");
+        assert_eq!(state.selected_objective, Some(0));
+    }
+
+    #[test]
+    fn test_delete_objective() {
+        use antares::domain::quest::QuestObjective;
+
+        let mut state = QuestEditorState::new();
+        let mut quest = Quest::new(1, "Test Quest", "Test description");
+        let mut stage = QuestStage::new(1, "Stage 1");
+        stage.add_objective(QuestObjective::KillMonsters {
+            monster_id: 5,
+            quantity: 10,
+        });
+        stage.add_objective(QuestObjective::CollectItems {
+            item_id: 3,
+            quantity: 5,
+        });
+        quest.add_stage(stage);
+        state.quests.push(quest);
+
+        assert_eq!(state.quests[0].stages[0].objectives.len(), 2);
+
+        // Delete first objective
+        assert!(state.delete_objective(0, 0, 0).is_ok());
+        assert_eq!(state.quests[0].stages[0].objectives.len(), 1);
+    }
+
+    #[test]
+    fn test_find_orphaned_objectives() {
+        let mut state = QuestEditorState::new();
+
+        // Quest with valid stages
+        let mut quest1 = Quest::new(1, "Quest 1", "Test");
+        let mut stage1 = QuestStage::new(1, "Stage 1");
+        stage1.add_objective(QuestObjective::KillMonsters {
+            monster_id: 1,
+            quantity: 5,
+        });
+        quest1.add_stage(stage1);
+        state.quests.push(quest1);
+
+        // Quest with orphaned stage
+        let mut quest2 = Quest::new(2, "Quest 2", "Test");
+        quest2.add_stage(QuestStage::new(1, "Empty Stage"));
+        state.quests.push(quest2);
+
+        let orphaned = state.find_orphaned_objectives();
+        assert_eq!(orphaned.len(), 1);
+        assert_eq!(orphaned[0], (2, 1));
+    }
+
+    #[test]
+    fn test_save_edited_objective() {
+        use antares::domain::quest::QuestObjective;
+
+        let mut state = QuestEditorState::new();
+        let mut quest = Quest::new(1, "Test Quest", "Test description");
+        let mut stage = QuestStage::new(1, "Stage 1");
+        stage.add_objective(QuestObjective::KillMonsters {
+            monster_id: 5,
+            quantity: 10,
+        });
+        quest.add_stage(stage);
+        state.quests.push(quest);
+
+        // Edit and save the objective
+        state.edit_objective(0, 0, 0).unwrap();
+        state.objective_buffer.monster_id = "8".to_string();
+        state.objective_buffer.quantity = "15".to_string();
+
+        assert!(state.save_objective(0, 0, 0).is_ok());
+
+        // Verify changes
+        match &state.quests[0].stages[0].objectives[0] {
+            QuestObjective::KillMonsters {
+                monster_id,
+                quantity,
+            } => {
+                assert_eq!(*monster_id, 8);
+                assert_eq!(*quantity, 15);
+            }
+            _ => panic!("Expected KillMonsters objective"),
+        }
     }
 }
