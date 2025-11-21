@@ -1405,9 +1405,11 @@ mod tests {
 
     #[test]
     fn test_event_editor_state_to_encounter() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Encounter;
-        editor.encounter_monsters = "1, 2, 3".to_string();
+        let mut editor = EventEditorState {
+            event_type: EventType::Encounter,
+            encounter_monsters: "1, 2, 3".to_string(),
+            ..Default::default()
+        };
 
         let event = editor.to_map_event().unwrap();
         match event {
@@ -1420,9 +1422,11 @@ mod tests {
 
     #[test]
     fn test_event_editor_state_to_sign() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Sign;
-        editor.sign_text = "Hello World".to_string();
+        let mut editor = EventEditorState {
+            event_type: EventType::Sign,
+            sign_text: "Hello World".to_string(),
+            ..Default::default()
+        };
 
         let event = editor.to_map_event().unwrap();
         match event {
@@ -1435,12 +1439,13 @@ mod tests {
 
     #[test]
     fn test_npc_editor_state_to_npc() {
-        let mut editor = NpcEditorState::default();
-        editor.npc_id = "42".to_string();
-        editor.name = "Guard".to_string();
-        editor.position_x = "10".to_string();
-        editor.position_y = "15".to_string();
-        editor.dialogue = "Halt!".to_string();
+        let mut editor = NpcEditorState {
+            npc_id: "42".to_string(),
+            name: "Guard".to_string(),
+            position_x: "10".to_string(),
+            position_y: "15".to_string(),
+            dialogue: "Halt!".to_string(),
+        };
 
         let npc = editor.to_npc().unwrap();
         assert_eq!(npc.id, 42);

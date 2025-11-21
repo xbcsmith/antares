@@ -5763,18 +5763,25 @@ impl CampaignBuilderApp {
         }
 
         if let Some(ref mut manager) = self.asset_manager {
-            // Asset statistics
+            // Toolbar with actions
             ui.horizontal(|ui| {
                 ui.label(format!("Total Assets: {}", manager.asset_count()));
                 ui.separator();
                 ui.label(format!("Total Size: {}", manager.total_size_string()));
                 ui.separator();
+
                 if ui.button("🔄 Refresh").clicked() {
                     if let Err(e) = manager.scan_directory() {
                         self.status_message = format!("Failed to refresh assets: {}", e);
                     } else {
                         self.status_message = "Assets refreshed".to_string();
                     }
+                }
+
+                if ui.button("🔍 Scan References").clicked() {
+                    // Scan references across all campaign data
+                    manager.scan_references(&self.items, &self.quests, &self.dialogues);
+                    self.status_message = "Asset references scanned".to_string();
                 }
             });
 
@@ -5796,37 +5803,81 @@ impl CampaignBuilderApp {
 
             ui.separator();
 
-            // Asset list
+            // Unreferenced assets warning and cleanup
+            let unreferenced_count = manager.unreferenced_assets().len();
+            let cleanup_candidates_count = manager.get_cleanup_candidates().len();
+
+            if unreferenced_count > 0 {
+                ui.horizontal(|ui| {
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        format!("⚠ {} unreferenced assets found", unreferenced_count),
+                    );
+
+                    if cleanup_candidates_count > 0 {
+                        if ui
+                            .button(format!(
+                                "🧹 Cleanup {} Unused Assets",
+                                cleanup_candidates_count
+                            ))
+                            .clicked()
+                        {
+                            // Show confirmation or perform cleanup
+                            match manager.cleanup_unused(true) {
+                                Ok(would_delete) => {
+                                    self.status_message = format!(
+                                        "Would delete {} assets (dry run)",
+                                        would_delete.len()
+                                    );
+                                }
+                                Err(e) => {
+                                    self.status_message = format!("Cleanup error: {}", e);
+                                }
+                            }
+                        }
+                    }
+                });
+                ui.separator();
+            }
+
+            // Asset list with usage context
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for (path, asset) in manager.assets() {
                     ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("📄 {}", path.display()));
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(asset.size_string());
-                                    ui.label(asset.asset_type.display_name());
-                                    if !asset.is_referenced {
-                                        ui.colored_label(egui::Color32::YELLOW, "⚠ Unused");
+                        ui.vertical(|ui| {
+                            // Asset header
+                            ui.horizontal(|ui| {
+                                ui.label(format!("📄 {}", path.display()));
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(asset.size_string());
+                                        ui.label(asset.asset_type.display_name());
+                                        if !asset.is_referenced {
+                                            ui.colored_label(egui::Color32::YELLOW, "⚠ Unused");
+                                        } else {
+                                            ui.colored_label(egui::Color32::GREEN, "✓ In Use");
+                                        }
+                                    },
+                                );
+                            });
+
+                            // Show references if any
+                            if !asset.references.is_empty() {
+                                ui.indent("asset_refs", |ui| {
+                                    ui.label(format!(
+                                        "Referenced by {} item(s):",
+                                        asset.references.len()
+                                    ));
+                                    for reference in &asset.references {
+                                        ui.label(format!("  • {}", reference.display_string()));
                                     }
-                                },
-                            );
+                                });
+                            }
                         });
                     });
                 }
             });
-
-            ui.separator();
-
-            // Unreferenced assets warning
-            let unreferenced = manager.unreferenced_assets();
-            if !unreferenced.is_empty() {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    format!("⚠ {} unreferenced assets found", unreferenced.len()),
-                );
-            }
         } else {
             ui.vertical_centered(|ui| {
                 ui.add_space(50.0);
