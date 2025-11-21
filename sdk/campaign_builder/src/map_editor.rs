@@ -180,16 +180,25 @@ pub struct MapMetadata {
     pub is_outdoor: bool,
     /// Connected map IDs and transition positions
     pub connections: Vec<MapConnection>,
+    /// Light level (0-100, where 0 is pitch black)
+    pub light_level: u8,
+    /// Music track identifier
+    pub music_track: String,
+    /// Random encounter rate (0-100)
+    pub encounter_rate: u8,
 }
 
 impl Default for MapMetadata {
     fn default() -> Self {
         Self {
-            name: String::new(),
+            name: "New Map".to_string(),
             description: String::new(),
             difficulty: 1,
             is_outdoor: false,
             connections: Vec::new(),
+            light_level: 100,
+            music_track: String::new(),
+            encounter_rate: 10,
         }
     }
 }
@@ -234,9 +243,11 @@ pub struct MapEditorState {
     /// NPC markers visibility
     pub show_npcs: bool,
     /// Event editor state
-    pub event_editor: EventEditorState,
+    pub event_editor: Option<EventEditorState>,
     /// NPC editor state
-    pub npc_editor: NpcEditorState,
+    pub npc_editor: Option<NpcEditorState>,
+    /// Show metadata editor panel
+    pub show_metadata_editor: bool,
 }
 
 impl MapEditorState {
@@ -259,8 +270,9 @@ impl MapEditorState {
             show_grid: true,
             show_events: true,
             show_npcs: true,
-            event_editor: EventEditorState::default(),
-            npc_editor: NpcEditorState::default(),
+            event_editor: None,
+            npc_editor: None,
+            show_metadata_editor: false,
         }
     }
 
@@ -500,6 +512,37 @@ impl MapEditorState {
     /// Can redo?
     pub fn can_redo(&self) -> bool {
         self.undo_stack.can_redo()
+    }
+
+    /// Add an event at the specified position
+    ///
+    /// # Arguments
+    ///
+    /// * `x` - X coordinate on the map
+    /// * `y` - Y coordinate on the map
+    /// * `event` - The map event to add
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Map, MapEvent};
+    /// use campaign_builder::map_editor::MapEditorState;
+    ///
+    /// let mut state = MapEditorState::new(Map::new(1, 10, 10));
+    /// // Add event implementation
+    /// ```
+    pub fn add_event_at_position(&mut self, x: u32, y: u32, event: MapEvent) {
+        let pos = Position {
+            x: x as i32,
+            y: y as i32,
+        };
+        self.add_event(pos, event);
+    }
+
+    /// Show event editor UI (for integration with egui)
+    pub fn show_event_editor_ui(&mut self) -> bool {
+        // Returns true if event editor should be shown
+        self.event_editor.is_some()
     }
 }
 
@@ -826,11 +869,26 @@ impl<'a> Widget for MapGridWidget<'a> {
                             self.state.erase_tile(pos);
                         }
                         EditorTool::PlaceEvent => {
-                            self.state.event_editor.position = pos;
+                            if self.state.event_editor.is_none() {
+                                self.state.event_editor = Some(EventEditorState {
+                                    position: pos,
+                                    ..Default::default()
+                                });
+                            } else if let Some(ref mut editor) = self.state.event_editor {
+                                editor.position = pos;
+                            }
                         }
                         EditorTool::PlaceNpc => {
-                            self.state.npc_editor.position_x = pos.x.to_string();
-                            self.state.npc_editor.position_y = pos.y.to_string();
+                            if self.state.npc_editor.is_none() {
+                                self.state.npc_editor = Some(NpcEditorState {
+                                    position_x: pos.x.to_string(),
+                                    position_y: pos.y.to_string(),
+                                    ..Default::default()
+                                });
+                            } else if let Some(ref mut editor) = self.state.npc_editor {
+                                editor.position_x = pos.x.to_string();
+                                editor.position_y = pos.y.to_string();
+                            }
                         }
                         EditorTool::Fill => {
                             // Fill tool requires two clicks (start and end)
@@ -1052,6 +1110,32 @@ impl<'a> MapEditorWidget<'a> {
             ui.heading("Inspector");
             ui.separator();
 
+            // Map metadata button
+            if ui.button("🗺️ Edit Map Metadata").clicked() {
+                self.state.show_metadata_editor = !self.state.show_metadata_editor;
+            }
+
+            if self.state.show_metadata_editor {
+                ui.separator();
+                self.show_metadata_editor_panel(ui);
+                ui.separator();
+            }
+
+            // Map info display
+            ui.group(|ui| {
+                ui.label(format!("Map ID: {}", self.state.map.id));
+                ui.label(format!(
+                    "Size: {}×{}",
+                    self.state.map.width, self.state.map.height
+                ));
+                ui.label(format!("Name: {}", self.state.metadata.name));
+                if !self.state.metadata.description.is_empty() {
+                    ui.label(format!("Description: {}", self.state.metadata.description));
+                }
+            });
+
+            ui.separator();
+
             // Selected tile info
             if let Some(pos) = self.state.selected_position {
                 ui.group(|ui| {
@@ -1147,100 +1231,212 @@ impl<'a> MapEditorWidget<'a> {
     }
 
     fn show_event_editor(&mut self, ui: &mut Ui) {
-        egui::ComboBox::from_label("Event Type")
-            .selected_text(self.state.event_editor.event_type.name())
-            .show_ui(ui, |ui| {
-                for event_type in EventType::all() {
-                    if ui
-                        .selectable_label(
-                            self.state.event_editor.event_type == *event_type,
-                            format!("{} {}", event_type.icon(), event_type.name()),
-                        )
-                        .clicked()
-                    {
-                        self.state.event_editor.event_type = *event_type;
+        if let Some(ref mut event_editor) = self.state.event_editor {
+            egui::ComboBox::from_label("Event Type")
+                .selected_text(event_editor.event_type.name())
+                .show_ui(ui, |ui| {
+                    for event_type in EventType::all() {
+                        if ui
+                            .selectable_label(
+                                event_editor.event_type == *event_type,
+                                format!("{} {}", event_type.icon(), event_type.name()),
+                            )
+                            .clicked()
+                        {
+                            event_editor.event_type = *event_type;
+                        }
                     }
+                });
+
+            ui.separator();
+
+            match event_editor.event_type {
+                EventType::Encounter => {
+                    ui.label("Monster IDs (comma-separated):");
+                    ui.text_edit_singleline(&mut event_editor.encounter_monsters);
                 }
-            });
-
-        ui.separator();
-
-        match self.state.event_editor.event_type {
-            EventType::Encounter => {
-                ui.label("Monster IDs (comma-separated):");
-                ui.text_edit_singleline(&mut self.state.event_editor.encounter_monsters);
-            }
-            EventType::Treasure => {
-                ui.label("Item IDs (comma-separated):");
-                ui.text_edit_singleline(&mut self.state.event_editor.treasure_items);
-            }
-            EventType::Teleport => {
-                ui.label("Destination X:");
-                ui.text_edit_singleline(&mut self.state.event_editor.teleport_x);
-                ui.label("Destination Y:");
-                ui.text_edit_singleline(&mut self.state.event_editor.teleport_y);
-                ui.label("Target Map ID:");
-                ui.text_edit_singleline(&mut self.state.event_editor.teleport_map_id);
-            }
-            EventType::Trap => {
-                ui.label("Damage:");
-                ui.text_edit_singleline(&mut self.state.event_editor.trap_damage);
-                ui.label("Effect (optional):");
-                ui.text_edit_singleline(&mut self.state.event_editor.trap_effect);
-            }
-            EventType::Sign => {
-                ui.label("Sign Text:");
-                ui.text_edit_multiline(&mut self.state.event_editor.sign_text);
-            }
-            EventType::NpcDialogue => {
-                ui.label("NPC ID:");
-                ui.text_edit_singleline(&mut self.state.event_editor.npc_id);
-            }
-        }
-
-        ui.separator();
-
-        if ui.button("➕ Add Event").clicked() {
-            match self.state.event_editor.to_map_event() {
-                Ok(event) => {
-                    let pos = self.state.event_editor.position;
-                    self.state.add_event(pos, event);
+                EventType::Treasure => {
+                    ui.label("Item IDs (comma-separated):");
+                    ui.text_edit_singleline(&mut event_editor.treasure_items);
                 }
-                Err(err) => {
-                    // Show error (in real implementation, use proper error handling)
-                    println!("Error creating event: {}", err);
+                EventType::Teleport => {
+                    ui.label("Destination X:");
+                    ui.text_edit_singleline(&mut event_editor.teleport_x);
+                    ui.label("Destination Y:");
+                    ui.text_edit_singleline(&mut event_editor.teleport_y);
+                    ui.label("Target Map ID:");
+                    ui.text_edit_singleline(&mut event_editor.teleport_map_id);
+                }
+                EventType::Trap => {
+                    ui.label("Damage:");
+                    ui.text_edit_singleline(&mut event_editor.trap_damage);
+                    ui.label("Effect (optional):");
+                    ui.text_edit_singleline(&mut event_editor.trap_effect);
+                }
+                EventType::Sign => {
+                    ui.label("Sign Text:");
+                    ui.text_edit_multiline(&mut event_editor.sign_text);
+                }
+                EventType::NpcDialogue => {
+                    ui.label("NPC ID:");
+                    ui.text_edit_singleline(&mut event_editor.npc_id);
+                }
+            }
+
+            ui.separator();
+
+            if ui.button("➕ Add Event").clicked() {
+                match event_editor.to_map_event() {
+                    Ok(event) => {
+                        let pos = event_editor.position;
+                        self.state.add_event(pos, event);
+                        self.state.event_editor = None;
+                    }
+                    Err(err) => {
+                        // Show error (in real implementation, use proper error handling)
+                        println!("Error creating event: {}", err);
+                    }
                 }
             }
         }
     }
 
+    fn show_metadata_editor_panel(&mut self, ui: &mut Ui) {
+        ui.group(|ui| {
+            ui.heading("Map Metadata");
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("Name:");
+                if ui
+                    .text_edit_singleline(&mut self.state.metadata.name)
+                    .changed()
+                {
+                    self.state.has_changes = true;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Description:");
+            });
+            if ui
+                .text_edit_multiline(&mut self.state.metadata.description)
+                .changed()
+            {
+                self.state.has_changes = true;
+            }
+
+            ui.horizontal(|ui| {
+                ui.label("Difficulty:");
+                if ui
+                    .add(egui::Slider::new(
+                        &mut self.state.metadata.difficulty,
+                        1..=10,
+                    ))
+                    .changed()
+                {
+                    self.state.has_changes = true;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Light Level:");
+                if ui
+                    .add(egui::Slider::new(
+                        &mut self.state.metadata.light_level,
+                        0..=100,
+                    ))
+                    .changed()
+                {
+                    self.state.has_changes = true;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Encounter Rate:");
+                if ui
+                    .add(egui::Slider::new(
+                        &mut self.state.metadata.encounter_rate,
+                        0..=100,
+                    ))
+                    .changed()
+                {
+                    self.state.has_changes = true;
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Music Track:");
+                if ui
+                    .text_edit_singleline(&mut self.state.metadata.music_track)
+                    .changed()
+                {
+                    self.state.has_changes = true;
+                }
+            });
+
+            if ui
+                .checkbox(&mut self.state.metadata.is_outdoor, "Outdoor Map")
+                .changed()
+            {
+                self.state.has_changes = true;
+            }
+
+            ui.separator();
+
+            if ui.button("Close").clicked() {
+                self.state.show_metadata_editor = false;
+            }
+        });
+    }
+
     fn show_npc_editor(&mut self, ui: &mut Ui) {
-        ui.label("NPC ID:");
-        ui.text_edit_singleline(&mut self.state.npc_editor.npc_id);
+        let mut should_add = false;
+        let mut npc_result = None;
+        let mut should_clear = false;
 
-        ui.label("Name:");
-        ui.text_edit_singleline(&mut self.state.npc_editor.name);
+        if let Some(ref mut npc_editor) = self.state.npc_editor {
+            ui.label("NPC ID:");
+            ui.text_edit_singleline(&mut npc_editor.npc_id);
 
-        ui.label("Position X:");
-        ui.text_edit_singleline(&mut self.state.npc_editor.position_x);
+            ui.label("Name:");
+            ui.text_edit_singleline(&mut npc_editor.name);
 
-        ui.label("Position Y:");
-        ui.text_edit_singleline(&mut self.state.npc_editor.position_y);
+            ui.label("Position X:");
+            ui.text_edit_singleline(&mut npc_editor.position_x);
 
-        ui.label("Dialogue:");
-        ui.text_edit_multiline(&mut self.state.npc_editor.dialogue);
+            ui.label("Position Y:");
+            ui.text_edit_singleline(&mut npc_editor.position_y);
 
-        ui.separator();
+            ui.label("Dialogue:");
+            ui.text_edit_multiline(&mut npc_editor.dialogue);
 
-        if ui.button("➕ Add NPC").clicked() {
-            match self.state.npc_editor.to_npc() {
-                Ok(npc) => {
-                    self.state.add_npc(npc);
-                    self.state.npc_editor.clear();
+            ui.separator();
+
+            if ui.button("➕ Add NPC").clicked() {
+                match npc_editor.to_npc() {
+                    Ok(npc) => {
+                        npc_result = Some(npc);
+                        should_add = true;
+                        should_clear = true;
+                    }
+                    Err(err) => {
+                        println!("Error creating NPC: {}", err);
+                    }
                 }
-                Err(err) => {
-                    println!("Error creating NPC: {}", err);
-                }
+            }
+        }
+
+        // Handle add after we've released the borrow
+        if should_add {
+            if let Some(npc) = npc_result {
+                self.state.add_npc(npc);
+            }
+        }
+
+        if should_clear {
+            if let Some(ref mut npc_editor) = self.state.npc_editor {
+                npc_editor.clear();
             }
         }
     }
@@ -1260,6 +1456,8 @@ mod tests {
         assert_eq!(state.map.height, 10);
         assert!(!state.has_changes);
         assert_eq!(state.current_tool, EditorTool::Select);
+        assert!(!state.show_metadata_editor);
+        assert_eq!(state.metadata.name, "Map 1");
     }
 
     #[test]
@@ -1405,7 +1603,7 @@ mod tests {
 
     #[test]
     fn test_event_editor_state_to_encounter() {
-        let mut editor = EventEditorState {
+        let editor = EventEditorState {
             event_type: EventType::Encounter,
             encounter_monsters: "1, 2, 3".to_string(),
             ..Default::default()
@@ -1422,7 +1620,7 @@ mod tests {
 
     #[test]
     fn test_event_editor_state_to_sign() {
-        let mut editor = EventEditorState {
+        let editor = EventEditorState {
             event_type: EventType::Sign,
             sign_text: "Hello World".to_string(),
             ..Default::default()
@@ -1439,7 +1637,7 @@ mod tests {
 
     #[test]
     fn test_npc_editor_state_to_npc() {
-        let mut editor = NpcEditorState {
+        let editor = NpcEditorState {
             npc_id: "42".to_string(),
             name: "Guard".to_string(),
             position_x: "10".to_string(),
@@ -1475,12 +1673,154 @@ mod tests {
 
     #[test]
     fn test_save_to_ron() {
-        let map = Map::new(1, 5, 5);
-        let state = MapEditorState::new(map);
+        let mut state = MapEditorState::new(Map::new(1, 5, 5));
+        state.paint_terrain(Position { x: 0, y: 0 }, TerrainType::Grass);
 
-        let ron_string = state.save_to_ron().unwrap();
-        assert!(ron_string.contains("id:"));
-        assert!(ron_string.contains("width:"));
-        assert!(ron_string.contains("height:"));
+        let ron = state.save_to_ron().unwrap();
+        assert!(ron.contains("id:"));
+        assert!(ron.contains("width:"));
+        assert!(ron.contains("height:"));
+    }
+
+    #[test]
+    fn test_metadata_editor() {
+        let mut state = MapEditorState::new(Map::new(1, 10, 10));
+
+        state.metadata.name = "Test Map".to_string();
+        state.metadata.description = "A test map".to_string();
+        state.metadata.difficulty = 5;
+        state.metadata.light_level = 80;
+        state.metadata.encounter_rate = 25;
+        state.metadata.music_track = "dungeon.ogg".to_string();
+        state.metadata.is_outdoor = true;
+
+        assert_eq!(state.metadata.name, "Test Map");
+        assert_eq!(state.metadata.difficulty, 5);
+        assert_eq!(state.metadata.light_level, 80);
+        assert_eq!(state.metadata.encounter_rate, 25);
+        assert!(state.metadata.is_outdoor);
+    }
+
+    #[test]
+    fn test_add_event_at_position() {
+        let mut state = MapEditorState::new(Map::new(1, 10, 10));
+        let event = MapEvent::Sign {
+            text: "Test sign".to_string(),
+        };
+
+        state.add_event_at_position(5, 5, event);
+
+        let pos = Position { x: 5, y: 5 };
+        assert!(state.map.events.contains_key(&pos));
+    }
+
+    #[test]
+    fn test_show_event_editor_ui() {
+        let mut state = MapEditorState::new(Map::new(1, 10, 10));
+        assert!(!state.show_event_editor_ui());
+
+        state.event_editor = Some(EventEditorState::default());
+        assert!(state.show_event_editor_ui());
+    }
+
+    #[test]
+    fn test_map_preview_with_terrain_types() {
+        let mut map = Map::new(1, 10, 10);
+        let mut state = MapEditorState::new(map.clone());
+
+        // Paint different terrain types
+        state.paint_terrain(Position { x: 0, y: 0 }, TerrainType::Grass);
+        state.paint_terrain(Position { x: 1, y: 0 }, TerrainType::Water);
+        state.paint_terrain(Position { x: 2, y: 0 }, TerrainType::Stone);
+
+        // Verify terrain was set
+        assert_eq!(
+            state.map.get_tile(Position { x: 0, y: 0 }).unwrap().terrain,
+            TerrainType::Grass
+        );
+        assert_eq!(
+            state.map.get_tile(Position { x: 1, y: 0 }).unwrap().terrain,
+            TerrainType::Water
+        );
+        assert_eq!(
+            state.map.get_tile(Position { x: 2, y: 0 }).unwrap().terrain,
+            TerrainType::Stone
+        );
+    }
+
+    #[test]
+    fn test_map_preview_with_events() {
+        let mut state = MapEditorState::new(Map::new(1, 10, 10));
+
+        // Add events at different positions
+        let event1 = MapEvent::Sign {
+            text: "Welcome".to_string(),
+        };
+        let event2 = MapEvent::Treasure {
+            loot: vec![1, 2, 3],
+        };
+
+        state.add_event_at_position(5, 5, event1);
+        state.add_event_at_position(7, 7, event2);
+
+        // Verify events are in the map
+        assert!(state.map.events.contains_key(&Position { x: 5, y: 5 }));
+        assert!(state.map.events.contains_key(&Position { x: 7, y: 7 }));
+        assert_eq!(state.map.events.len(), 2);
+    }
+
+    #[test]
+    fn test_tile_painting_with_undo() {
+        let mut state = MapEditorState::new(Map::new(1, 5, 5));
+
+        // Paint a tile
+        state.paint_terrain(Position { x: 2, y: 2 }, TerrainType::Lava);
+        assert_eq!(
+            state.map.get_tile(Position { x: 2, y: 2 }).unwrap().terrain,
+            TerrainType::Lava
+        );
+
+        // Undo
+        state.undo();
+        assert_eq!(
+            state.map.get_tile(Position { x: 2, y: 2 }).unwrap().terrain,
+            TerrainType::Ground
+        );
+
+        // Redo
+        state.redo();
+        assert_eq!(
+            state.map.get_tile(Position { x: 2, y: 2 }).unwrap().terrain,
+            TerrainType::Lava
+        );
+    }
+
+    #[test]
+    fn test_event_placement_tool() {
+        let mut state = MapEditorState::new(Map::new(1, 10, 10));
+
+        // Initially no event editor
+        assert!(state.event_editor.is_none());
+
+        // Select place event tool
+        state.current_tool = EditorTool::PlaceEvent;
+
+        // Simulate placing event at position (manually initialize editor)
+        state.event_editor = Some(EventEditorState {
+            position: Position { x: 3, y: 3 },
+            event_type: EventType::Sign,
+            sign_text: "Test".to_string(),
+            ..Default::default()
+        });
+
+        // Create and add the event
+        if let Some(ref editor) = state.event_editor {
+            if let Ok(event) = editor.to_map_event() {
+                state.add_event(editor.position, event);
+            }
+        }
+
+        // Verify event was added
+        assert!(state.map.events.contains_key(&Position { x: 3, y: 3 }));
     }
 }

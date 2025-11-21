@@ -17,6 +17,7 @@ The implementation will proceed in focused phases to systematically complete eac
 ### Existing Infrastructure
 
 **Working Components:**
+
 - ✅ Campaign metadata editor (fully functional)
 - ✅ Validation system with error/warning severity
 - ✅ File I/O with RON serialization
@@ -25,12 +26,14 @@ The implementation will proceed in focused phases to systematically complete eac
 - ✅ Tab navigation system
 
 **Partially Working:**
+
 - ⚠️ Items editor - CRUD operations work but ID generation has type issues
 - ⚠️ Spells editor - Basic functionality but missing advanced features
 - ⚠️ Monsters editor - Similar to spells, needs enhancement
 - ⚠️ Maps editor - Placeholder with basic list view
 
 **Not Working:**
+
 - ❌ Quests editor - Placeholder UI only, backend exists but not connected
 - ❌ Dialogues editor - Backend implemented but UI shows basic list, no tree view
 - ❌ Assets manager - Scans files but reference tracking non-functional
@@ -42,6 +45,7 @@ The implementation will proceed in focused phases to systematically complete eac
 **Location:** `sdk/campaign_builder/src/main.rs` throughout Items/Spells/Monsters editors
 
 **Problem:** Using raw `u32` for IDs instead of type aliases defined in architecture:
+
 ```rust
 // WRONG (current code):
 pub id: u32
@@ -53,6 +57,7 @@ pub id: MonsterId
 ```
 
 **Impact:**
+
 - Violates Golden Rule 3 (Type System Adherence)
 - Breaks semantic type safety
 - Makes cross-references harder to validate
@@ -63,11 +68,13 @@ pub id: MonsterId
 **Location:** ID generation in all editors (lines 1960, 2087, 2175, 2312, 2416, 2562)
 
 **Problem:** ID generation uses `max().unwrap_or(0) + 1` pattern without checking for:
+
 - Existing IDs when loading from file
 - ID collisions during duplicate operations
 - ID gaps after deletions
 
 **Impact:**
+
 - "ID clash" errors reported by user
 - Data corruption risk when items with same ID exist
 - Unpredictable behavior in game engine
@@ -77,12 +84,14 @@ pub id: MonsterId
 **Location:** `sdk/campaign_builder/src/main.rs` line 2943-2975
 
 **Problem:** Quest editor shows placeholder UI but `QuestEditorState` is fully implemented in `quest_editor.rs`:
+
 - 681 lines of working backend code
 - Quest CRUD operations ready
 - Stage/objective management complete
 - Validation logic present
 
 **Impact:**
+
 - Users cannot create or edit quests
 - Quest system appears non-functional
 - Phase 5 work is partially complete but invisible
@@ -92,12 +101,14 @@ pub id: MonsterId
 **Location:** `sdk/campaign_builder/src/main.rs` line 3092-3126
 
 **Problem:** `DialogueEditorState` is implemented (738 lines) but UI only shows:
+
 ```rust
 ui.label("Dialogue editor integration in progress");
 // TODO: Integrate DialogueEditorWidget when UI components are ready
 ```
 
 **Impact:**
+
 - Cannot create NPC conversations
 - Dialogue trees cannot be edited
 - Major feature gap for campaign creators
@@ -107,6 +118,7 @@ ui.label("Dialogue editor integration in progress");
 **Location:** `sdk/campaign_builder/src/asset_manager.rs` line 390-392
 
 **Problem:** `AssetManager::unreferenced_assets()` returns all assets because `mark_referenced()` is never called:
+
 ```rust
 pub fn unreferenced_assets(&self) -> Vec<&PathBuf> {
     self.assets.values()
@@ -117,6 +129,7 @@ pub fn unreferenced_assets(&self) -> Vec<&PathBuf> {
 ```
 
 **Impact:**
+
 - False warnings that all assets are unused
 - Cannot identify truly orphaned files
 - Misleading data for campaign cleanup
@@ -126,12 +139,14 @@ pub fn unreferenced_assets(&self) -> Vec<&PathBuf> {
 **Location:** `sdk/campaign_builder/src/main.rs` line 2673-2888
 
 **Problem:** Map editor has list view but `MapEditorState` in `map_editor.rs` is not fully utilized:
+
 - Map preview exists but basic
 - No tile editing UI
 - No event placement
 - No exit/entrance connections
 
 **Impact:**
+
 - Cannot create maps in GUI
 - Must use separate `map_builder` CLI tool
 - Workflow fragmentation
@@ -147,6 +162,7 @@ pub fn unreferenced_assets(&self) -> Vec<&PathBuf> {
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Add type alias imports:
+
 ```rust
 use antares::domain::items::ItemId;
 use antares::domain::magic::SpellId;
@@ -160,6 +176,7 @@ use antares::domain::quest::QuestId;
 **Files:** `sdk/campaign_builder/src/main.rs` CampaignBuilderApp
 
 Change all Item-related fields:
+
 - `items: Vec<Item>` - Already correct, Item uses ItemId internally
 - `items_edit_buffer: Item` - Already correct
 - Update ID generation to use type-safe patterns
@@ -169,6 +186,7 @@ Change all Item-related fields:
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Create new validation function:
+
 ```rust
 impl CampaignBuilderApp {
     /// Check for duplicate IDs across items
@@ -198,6 +216,7 @@ impl CampaignBuilderApp {
 **Files:** `sdk/campaign_builder/src/main.rs` multiple locations
 
 Replace all ID generation with safe pattern:
+
 ```rust
 // BEFORE:
 self.items_edit_buffer.id = self.items.iter().map(|i| i.id).max().unwrap_or(0) + 1;
@@ -219,6 +238,7 @@ Apply similar pattern for spells, monsters, maps.
 **Files:** `sdk/campaign_builder/src/main.rs` load functions
 
 Update `load_items()`, `load_spells()`, `load_monsters()`:
+
 ```rust
 fn load_items(&mut self) {
     // ... existing load code ...
@@ -239,6 +259,7 @@ fn load_items(&mut self) {
 #### 3A.6 Testing Requirements
 
 Create tests in `main.rs` test module:
+
 - `test_item_id_uniqueness_validation` - Detect duplicate IDs
 - `test_next_available_id_generation` - ID generation with gaps
 - `test_load_items_with_duplicate_ids` - Error handling on load
@@ -272,18 +293,21 @@ Create tests in `main.rs` test module:
 **Files:** `sdk/campaign_builder/src/main.rs` `show_items_form()`
 
 Expand form to handle all ItemType variants:
+
 - Weapon editor: damage dice, attack bonus, weapon class
 - Armor editor: AC bonus, armor class
 - Consumable editor: effect, charges, consumption behavior
 - Accessory editor: stat modifiers, special effects
 
 Current code has placeholder:
+
 ```rust
 // Type-specific editors would go here
 ui.label(format!("Type: {:?}", self.items_edit_buffer.item_type));
 ```
 
 Replace with:
+
 ```rust
 ui.collapsing("Item Type Details", |ui| {
     match &mut self.items_edit_buffer.item_type {
@@ -301,6 +325,7 @@ ui.collapsing("Item Type Details", |ui| {
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Add UI for class/alignment restrictions:
+
 ```rust
 fn show_disablement_editor(&mut self, ui: &mut egui::Ui, disablement: &mut Disablement) {
     ui.label("Class Restrictions:");
@@ -319,6 +344,7 @@ fn show_disablement_editor(&mut self, ui: &mut egui::Ui, disablement: &mut Disab
 **Files:** `sdk/campaign_builder/src/main.rs` `show_items_list()`
 
 Enhance right panel details to show:
+
 - All item properties formatted
 - Calculated values (effective damage, total AC bonus)
 - Visual indicators for special properties (cursed, magical)
@@ -329,6 +355,7 @@ Enhance right panel details to show:
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Add filter dropdowns above search:
+
 ```rust
 ui.horizontal(|ui| {
     ui.label("Filter by type:");
@@ -347,6 +374,7 @@ ui.horizontal(|ui| {
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Add buttons to toolbar:
+
 - Import from another campaign's items.ron
 - Export selected items to file
 - Bulk operations (delete, modify stats)
@@ -386,6 +414,7 @@ Add buttons to toolbar:
 **Files:** `sdk/campaign_builder/src/main.rs` `show_spells_form()`
 
 Add missing fields:
+
 - `context: SpellContext` (Exploration, Combat, Both)
 - `target: SpellTarget` (Self, Single, Group, All)
 - Effect description (multiline text)
@@ -398,6 +427,7 @@ Current form only has: name, school, level, costs, description.
 **Files:** `sdk/campaign_builder/src/main.rs` `show_spells_list()`
 
 Add filter controls:
+
 ```rust
 ui.horizontal(|ui| {
     ui.label("School:");
@@ -424,6 +454,7 @@ ui.horizontal(|ui| {
 **Files:** `sdk/campaign_builder/src/main.rs` `show_monsters_form()`
 
 Add missing sections:
+
 - Attack editor (multiple attacks, attack types, damage dice)
 - Resistances editor (magic, physical, elemental)
 - Special abilities (regeneration rate, advance distance)
@@ -436,6 +467,7 @@ Current form has basic stats but attacks are hardcoded in `default_monster()`.
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Create attack management UI:
+
 ```rust
 fn show_monster_attacks_editor(&mut self, ui: &mut egui::Ui, monster: &mut MonsterDefinition) {
     ui.collapsing("Attacks", |ui| {
@@ -475,6 +507,7 @@ fn show_monster_attacks_editor(&mut self, ui: &mut egui::Ui, monster: &mut Monst
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Enhance loot editing beyond current min/max:
+
 - Item drop chances (specific items)
 - Equipment drop percentages
 - Treasure tier selection
@@ -485,6 +518,7 @@ Enhance loot editing beyond current min/max:
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Helper tool that suggests stats based on:
+
 - Challenge rating
 - Party level
 - Encounter type (boss, minion, standard)
@@ -524,6 +558,7 @@ Helper tool that suggests stats based on:
 **Files:** `sdk/campaign_builder/src/main.rs` `show_quests_editor()`
 
 Remove placeholder and integrate `QuestEditorState`:
+
 ```rust
 fn show_quests_editor(&mut self, ui: &mut egui::Ui) {
     ui.heading("📜 Quests Editor");
@@ -561,6 +596,7 @@ fn show_quests_editor(&mut self, ui: &mut egui::Ui) {
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Create list/detail split view:
+
 ```rust
 fn show_quest_list(&mut self, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
@@ -608,6 +644,7 @@ fn show_quest_list(&mut self, ui: &mut egui::Ui) {
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Create quest editing form:
+
 ```rust
 fn show_quest_form(&mut self, ui: &mut egui::Ui) {
     let buffer = &mut self.quest_editor_state.quest_buffer;
@@ -694,6 +731,7 @@ fn show_quest_form(&mut self, ui: &mut egui::Ui) {
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Create collapsible stages UI:
+
 ```rust
 fn show_quest_stages_editor(&mut self, ui: &mut egui::Ui) {
     ui.collapsing("Quest Stages", |ui| {
@@ -734,6 +772,7 @@ fn show_quest_objectives_editor(&mut self, ui: &mut egui::Ui, stage_idx: usize) 
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Show validation errors in quest form:
+
 ```rust
 // After quest form, before save button
 if !self.quest_editor_state.validation_errors.is_empty() {
@@ -750,6 +789,7 @@ if !self.quest_editor_state.validation_errors.is_empty() {
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Wire up quest persistence:
+
 ```rust
 impl CampaignBuilderApp {
     fn load_quests(&mut self) {
@@ -811,6 +851,7 @@ Call `load_quests()` in `do_open_campaign()` and quest reload button.
 **Files:** `sdk/campaign_builder/src/main.rs` `show_dialogues_editor()`
 
 Similar pattern to quests - replace basic list with full editor:
+
 ```rust
 fn show_dialogues_editor(&mut self, ui: &mut egui::Ui) {
     ui.heading("💬 Dialogues Editor");
@@ -949,6 +990,7 @@ fn show_dialogue_form(&mut self, ui: &mut egui::Ui) {
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Create hierarchical node editor:
+
 ```rust
 fn show_dialogue_nodes_editor(&mut self, ui: &mut egui::Ui) {
     ui.collapsing("Dialogue Nodes", |ui| {
@@ -995,6 +1037,7 @@ fn show_dialogue_node_recursive(&mut self, ui: &mut egui::Ui, node_idx: usize, d
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Integrate condition and action buffer editors:
+
 ```rust
 fn show_node_conditions_editor(&mut self, ui: &mut egui::Ui) {
     ui.collapsing("Conditions", |ui| {
@@ -1045,6 +1088,7 @@ fn show_node_actions_editor(&mut self, ui: &mut egui::Ui) {
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Create visual tree preview:
+
 ```rust
 fn show_dialogue_tree_preview(&self, ui: &mut egui::Ui, dialogue_idx: usize) {
     ui.heading("Dialogue Tree");
@@ -1107,6 +1151,7 @@ fn show_dialogue_tree_preview(&self, ui: &mut egui::Ui, dialogue_idx: usize) {
 **Files:** `sdk/campaign_builder/src/asset_manager.rs`
 
 Add method to scan data files for asset references:
+
 ```rust
 impl AssetManager {
     /// Scan campaign data files and mark referenced assets
@@ -1168,6 +1213,7 @@ impl AssetManager {
 **Files:** `sdk/campaign_builder/src/main.rs` `show_assets_editor()`
 
 Add button to trigger scan:
+
 ```rust
 ui.horizontal(|ui| {
     ui.label(format!("Total Assets: {}", manager.asset_count()));
@@ -1194,6 +1240,7 @@ ui.horizontal(|ui| {
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 When showing asset details, show where it's referenced:
+
 ```rust
 for (path, asset) in manager.assets() {
     ui.group(|ui| {
@@ -1283,6 +1330,7 @@ Add cleanup button to UI with confirmation dialog.
 **Files:** `sdk/campaign_builder/src/main.rs` `show_map_preview()`
 
 Enhance existing preview to show:
+
 - Tile grid with colors for tile types
 - Event markers
 - Entry/exit points
@@ -1295,6 +1343,7 @@ Current preview (line 2891-2940) is basic. Enhance with proper rendering.
 **Files:** `sdk/campaign_builder/src/map_editor.rs`
 
 Extend `MapEditorState` with:
+
 - Tile palette selection
 - Click-to-paint tile changes
 - Brush size selector
@@ -1321,6 +1370,7 @@ impl MapEditorState {
 **Files:** `sdk/campaign_builder/src/main.rs`
 
 Add form for map properties:
+
 - Map ID, name, description
 - Outdoor vs indoor flag
 - Light level
@@ -1352,11 +1402,362 @@ Add form for map properties:
 
 ---
 
+### Phase 7: Quest and Dialogue Editor Refinements (Week 9)
+
+**Priority:** MEDIUM - Enhance existing editors with missing CRUD operations
+
+**Rationale:** Phases 4A and 4B implemented creation and viewing, but lack full editing and deletion capabilities for nested structures (quest objectives, dialogue nodes/choices).
+
+#### 7.1 Add Quest Objective Editing
+
+**Files:** `sdk/campaign_builder/src/quest_editor.rs`, `sdk/campaign_builder/src/main.rs`
+
+**Current State:** Quest objectives can only be added, not edited or deleted.
+
+**Implementation:**
+
+Add to `QuestEditorState`:
+
+- `selected_objective_index: Option<usize>` - Track which objective is selected
+- `edit_objective(&mut self, stage_index, obj_index, objective)` - Update existing objective
+- `delete_objective(&mut self, stage_index, obj_index)` - Remove objective
+- `move_objective(&mut self, stage_index, from, to)` - Reorder objectives
+
+UI enhancements in `show_quest_objectives_editor`:
+
+- Edit button per objective opens edit form
+- Delete button with confirmation prompt
+- Up/Down buttons for reordering
+- Inline editing mode vs popup dialog
+
+#### 7.2 Add Quest Stage Editing
+
+**Files:** `sdk/campaign_builder/src/quest_editor.rs`
+
+**Enhancement:**
+
+- Edit stage name and description
+- Delete stage (with cascade warning if objectives exist)
+- Reorder stages (affects stage numbers)
+- Duplicate stage functionality
+
+#### 7.3 Add Dialogue Node Editing
+
+**Files:** `sdk/campaign_builder/src/dialogue_editor.rs`, `sdk/campaign_builder/src/main.rs`
+
+**Current State:** Dialogue nodes can be added but not edited or deleted.
+
+**Implementation:**
+
+Add to `DialogueEditorState`:
+
+- `edit_node(&mut self, node_id, updated_node)` - Update node text/speaker/conditions
+- `delete_node(&mut self, node_id)` - Remove node (check for orphaned references)
+- `find_node_references(&self, node_id) -> Vec<NodeId>` - Find which nodes reference this one
+
+UI enhancements in `show_dialogue_nodes_editor`:
+
+- Right-click context menu: Edit / Delete / Set as Root
+- Edit mode shows form for modifying node properties
+- Delete shows warning if node is referenced by choices
+- Visual indicator for root node
+
+#### 7.4 Add Dialogue Choice Editing
+
+**Files:** `sdk/campaign_builder/src/dialogue_editor.rs`
+
+**Enhancement:**
+
+- Edit choice text and target node
+- Delete choice from node
+- Reorder choices within a node
+- Add conditions to existing choices
+- Add actions to existing choices
+
+UI pattern:
+
+- Choice list with Edit/Delete icons
+- Drag-and-drop for reordering
+- Inline text editing on double-click
+
+#### 7.5 Add Orphaned Content Detection
+
+**Files:** `sdk/campaign_builder/src/quest_editor.rs`, `sdk/campaign_builder/src/dialogue_editor.rs`
+
+**Quest Editor:**
+
+```rust
+impl QuestEditorState {
+    pub fn find_orphaned_objectives(&self) -> Vec<(QuestId, usize, usize)> {
+        // Returns (quest_id, stage_index, objective_index) for unreachable objectives
+    }
+}
+```
+
+**Dialogue Editor:**
+
+```rust
+impl DialogueEditorState {
+    pub fn find_unreachable_nodes(&self, dialogue_id: DialogueId) -> Vec<NodeId> {
+        // Returns node IDs not reachable from root node
+    }
+}
+```
+
+UI display:
+
+- Warning badge showing count of orphaned items
+- Button to view list of orphaned content
+- Option to auto-clean or navigate to orphans
+
+#### 7.6 Testing Requirements
+
+- `test_edit_quest_objective` - Verify objective editing updates correctly
+- `test_delete_quest_objective` - Verify objective deletion
+- `test_reorder_quest_stages` - Verify stage reordering updates numbers
+- `test_edit_dialogue_node` - Verify node editing
+- `test_delete_dialogue_node_with_references` - Verify cascade handling
+- `test_delete_dialogue_choice` - Verify choice deletion
+- `test_find_unreachable_dialogue_nodes` - Verify orphan detection
+- `test_reorder_dialogue_choices` - Verify choice reordering
+
+#### 7.7 Deliverables
+
+- [ ] Quest objective editing and deletion
+- [ ] Quest stage editing and reordering
+- [ ] Dialogue node editing and deletion
+- [ ] Dialogue choice editing and reordering
+- [ ] Orphaned content detection for both editors
+- [ ] 8+ new tests covering CRUD operations
+
+#### 7.8 Success Criteria
+
+- Can edit existing quest objectives and stages
+- Can delete quest content with appropriate warnings
+- Can edit existing dialogue nodes and choices
+- Can delete dialogue content with cascade detection
+- Orphaned content is detected and reported
+- All CRUD operations properly validated
+- No data loss on edit/delete operations
+
+---
+
+### Phase 8: Asset System Enhancements (Week 10)
+
+**Priority:** LOW - Quality of life improvements to asset management
+
+**Rationale:** Phase 5 implemented reference tracking using name-based heuristics. This phase adds explicit asset path fields to domain types for accurate tracking and extends asset management features.
+
+#### 8.1 Add Asset Path Fields to Domain Types
+
+**Files:** `antares/src/domain/items/types.rs`, `antares/src/domain/quest.rs`, `antares/src/domain/dialogue.rs`
+
+**CRITICAL:** This modifies core data structures - requires architecture approval.
+
+**Item struct enhancement:**
+
+```rust
+pub struct Item {
+    // ... existing fields ...
+
+    /// Optional icon/sprite asset path (relative to campaign assets directory)
+    pub icon_path: Option<String>,
+}
+```
+
+**Quest struct enhancement:**
+
+```rust
+pub struct Quest {
+    // ... existing fields ...
+
+    /// Optional quest icon asset path
+    pub icon_path: Option<String>,
+}
+```
+
+**DialogueTree struct enhancement:**
+
+```rust
+pub struct DialogueTree {
+    // ... existing fields ...
+
+    /// Optional portrait image for primary speaker
+    pub speaker_portrait: Option<String>,
+}
+```
+
+**Monster struct enhancement:**
+
+```rust
+pub struct Monster {
+    // ... existing fields ...
+
+    /// Optional sprite/portrait asset path
+    pub sprite_path: Option<String>,
+}
+```
+
+#### 8.2 Update Asset Scanner to Use Explicit Paths
+
+**Files:** `sdk/campaign_builder/src/asset_manager.rs`
+
+**Replace heuristic scanning with direct field checks:**
+
+```rust
+fn scan_items_references(&mut self, items: &[Item]) {
+    for item in items {
+        if let Some(ref icon_path) = item.icon_path {
+            let path = PathBuf::from(icon_path);
+            if let Some(asset) = self.assets.get_mut(&path) {
+                asset.is_referenced = true;
+                asset.references.push(AssetReference::Item {
+                    id: item.id,
+                    name: item.name.clone(),
+                });
+            }
+        }
+    }
+}
+```
+
+Similar updates for quests, dialogues, and monsters.
+
+#### 8.3 Add Asset Picker Widget
+
+**Files:** `sdk/campaign_builder/src/asset_manager.rs`, `sdk/campaign_builder/src/main.rs`
+
+**New widget for selecting assets in editors:**
+
+```rust
+impl AssetManager {
+    pub fn show_asset_picker(
+        &self,
+        ui: &mut egui::Ui,
+        selected_path: &mut Option<String>,
+        filter_type: Option<AssetType>,
+    ) -> bool {
+        // Returns true if selection changed
+        // Shows filterable list of assets with thumbnails (if image)
+        // Double-click or Select button confirms choice
+    }
+}
+```
+
+**Integration points:**
+
+- Item editor: Pick icon when creating/editing items
+- Quest editor: Pick quest icon
+- Dialogue editor: Pick speaker portrait
+- Monster editor: Pick sprite
+
+#### 8.4 Add Asset Preview Panel
+
+**Files:** `sdk/campaign_builder/src/main.rs` (show_assets_editor)
+
+**Enhancement to asset list:**
+
+- Image assets show thumbnail preview (64x64 or 128x128)
+- Audio assets show duration and format info
+- Click asset to show full-size preview in side panel
+- Preview panel shows:
+  - Full image (if image asset)
+  - Metadata (size, modified date, dimensions)
+  - Reference list (already implemented)
+  - Actions: Open in External Editor, Replace File, Delete
+
+#### 8.5 Add Asset Import with Auto-Categorization
+
+**Files:** `sdk/campaign_builder/src/main.rs` (show_assets_editor)
+
+**Import wizard:**
+
+- "Import Assets" button opens file dialog
+- Multi-select support for batch import
+- Auto-detects asset type from extension
+- Suggests target directory based on type
+- Option to override suggested directory
+- Progress bar for batch imports
+- Summary report: X files imported, Y skipped (duplicates)
+
+#### 8.6 Add Asset Replacement
+
+**Files:** `sdk/campaign_builder/src/asset_manager.rs`
+
+**Method:**
+
+```rust
+impl AssetManager {
+    pub fn replace_asset(
+        &mut self,
+        old_path: &Path,
+        new_source_path: &Path,
+    ) -> Result<(), std::io::Error> {
+        // Replace file on disk
+        // Update metadata
+        // Preserve references
+    }
+}
+```
+
+**Use case:** Update an icon without changing references in items/quests.
+
+#### 8.7 Testing Requirements
+
+- `test_item_with_icon_path` - Verify Item serialization with icon_path field
+- `test_quest_with_icon_path` - Verify Quest serialization with icon_path
+- `test_dialogue_with_portrait` - Verify DialogueTree with speaker_portrait
+- `test_scan_references_uses_explicit_paths` - Verify scanner uses fields not heuristics
+- `test_asset_picker_filters_by_type` - Verify asset picker filtering
+- `test_asset_replacement_preserves_references` - Verify replace doesn't break references
+- `test_batch_asset_import` - Verify multi-file import
+
+#### 8.8 Deliverables
+
+- [ ] Asset path fields added to Item, Quest, DialogueTree, Monster structs
+- [ ] Asset scanner updated to use explicit paths
+- [ ] Asset picker widget implemented
+- [ ] Asset preview panel with thumbnails
+- [ ] Asset import wizard with batch support
+- [ ] Asset replacement functionality
+- [ ] Migration guide for existing campaigns (optional icon_path = None)
+- [ ] 7+ new tests covering asset enhancements
+
+#### 8.9 Success Criteria
+
+- Domain types have optional asset path fields
+- Asset scanning uses explicit paths (100% accurate)
+- Can pick assets from UI when editing items/quests/dialogues
+- Can preview image assets with thumbnails
+- Can import multiple assets in one operation
+- Can replace assets without breaking references
+- Backward compatible with existing campaigns (None values)
+- All quality gates pass (fmt, check, clippy, test)
+
+#### 8.10 Migration Considerations
+
+**Backward Compatibility:**
+
+- All new asset path fields are `Option<String>` (None = no asset)
+- Existing campaigns load without errors (fields default to None)
+- Phase 5's heuristic scanning still works as fallback for None values
+
+**Migration Path:**
+
+1. Load existing campaign
+2. Run Phase 5 heuristic scanner to populate references
+3. Use "Asset Suggestions" tool to auto-populate icon_path fields based on references
+4. Designer reviews and confirms suggestions
+5. Save campaign with explicit paths
+
+---
+
 ## Testing Strategy
 
 ### Unit Tests
 
 Each phase must add:
+
 - **Minimum 4 tests per phase**
 - Cover success cases, failure cases, edge cases
 - Use descriptive names: `test_{feature}_{condition}_{expected}`
@@ -1364,6 +1765,7 @@ Each phase must add:
 ### Integration Tests
 
 Add to `sdk/campaign_builder/tests/`:
+
 - `integration_test_campaign_workflow.rs` - Full create/edit/save cycle
 - `integration_test_data_persistence.rs` - Save/load data integrity
 - `integration_test_validation.rs` - End-to-end validation
@@ -1371,6 +1773,7 @@ Add to `sdk/campaign_builder/tests/`:
 ### Manual Testing Checklist
 
 After each phase, verify:
+
 - [ ] All cargo quality gates pass (fmt, check, clippy, test)
 - [ ] No new warnings introduced
 - [ ] UI remains responsive (<100ms per frame)
@@ -1392,11 +1795,13 @@ After each phase, verify:
 After each phase, update:
 
 1. **`sdk/campaign_builder/README.md`**
+
    - Move completed features from "Coming in Phase X" to "Implemented"
    - Update feature list with new capabilities
    - Add screenshots if GUI changed significantly
 
 2. **`docs/explanation/implementations.md`**
+
    - Add summary of phase completion
    - Note any deviations from plan
    - Document design decisions
@@ -1460,6 +1865,7 @@ After each phase, update:
 ### Risk 1: Type System Refactoring Breaks Existing Code
 
 **Mitigation:**
+
 - Make changes incrementally (one editor at a time)
 - Run tests after each change
 - Keep backup of working state
@@ -1468,6 +1874,7 @@ After each phase, update:
 ### Risk 2: UI Becomes Sluggish with Large Data Sets
 
 **Mitigation:**
+
 - Implement pagination for lists (show 50 items at a time)
 - Add virtual scrolling for large lists
 - Profile with campaigns containing 500+ items/monsters
@@ -1476,6 +1883,7 @@ After each phase, update:
 ### Risk 3: Backend/UI Integration Complexity
 
 **Mitigation:**
+
 - Follow existing patterns (items/spells editors as templates)
 - Quest and Dialogue backends already have clean APIs
 - Test each integration point individually
@@ -1484,6 +1892,7 @@ After each phase, update:
 ### Risk 4: Asset Reference Scanning False Negatives
 
 **Mitigation:**
+
 - Start with conservative scanning (mark as used if in doubt)
 - Add manual "Mark as Used" button
 - Don't auto-delete, only suggest cleanup
@@ -1509,6 +1918,7 @@ After each phase, update:
 ### Blockers
 
 None identified. All required backend code exists:
+
 - `quest_editor.rs` - 681 lines, ready
 - `dialogue_editor.rs` - 738 lines, ready
 - `asset_manager.rs` - 413 lines, mostly ready
@@ -1539,14 +1949,69 @@ None identified. All required backend code exists:
 3. **Week 3**: Phase 3C (Spells/Monsters Enhancement) - HIGH
 4. **Week 4**: Phase 4A (Quest Editor Integration) - HIGH
 5. **Week 5**: Phase 4B (Dialogue Editor Integration) - HIGH
-6. **Week 6**: Phase 5 (Asset Manager Fixes) - MEDIUM
+6. **Week 6**: Phase 5 (Asset Manager Reference Tracking) - MEDIUM
 7. **Weeks 7-8**: Phase 6 (Maps Editor Enhancement) - MEDIUM
+8. **Week 9**: Phase 7 (Quest/Dialogue Editor Refinements) - MEDIUM
+9. **Week 10**: Phase 8 (Asset System Enhancements) - LOW
 
 **Critical Path:**
 Phase 3A must complete before any other work (fixes foundation)
 → Phases 3B/3C can run in parallel
 → Phases 4A/4B can run in parallel after Phase 3
-→ Phases 5-6 are independent enhancements
+→ Phase 5 builds on Phase 4 (needs quest/dialogue data)
+→ Phase 6 is independent (maps)
+→ Phase 7 refines Phase 4 editors (requires 4A/4B complete)
+→ Phase 8 enhances Phase 5 (optional, requires architecture approval for domain changes)
+
+**Parallel Work Opportunities:**
+
+- Phases 3B and 3C (both editor enhancements)
+- Phases 4A and 4B (both editor integrations)
+- Phase 6 can be done anytime after Phase 3A (independent)
+
+---
+
+## Future Work: Game Engine Enhancements
+
+**Note**: This plan focuses exclusively on Campaign Builder GUI completion. Game engine enhancements (such as 3D tile-based rendering) are **out of scope** for this document.
+
+**Recommended Timing for Game Engine Work:**
+
+After completing **Phases 6-7** (Weeks 7-9), the campaign builder will be functionally complete with:
+
+✅ All content authoring tools operational (items, spells, monsters, quests, dialogues)
+✅ Map editor with basic tile painting and event placement
+✅ Asset management system
+✅ Full CRUD operations for all campaign data
+
+**Why wait until after Phase 6-7?**
+
+1. **Complete data structures**: Map editor completion reveals all data requirements for engine
+2. **Asset pipeline clarity**: Understanding asset management informs 3D asset pipeline design
+3. **Event system ready**: Quest/dialogue systems define event triggers engine must support
+4. **Parallel work possible**: Campaign builder functional, allowing content creation during engine development
+5. **Clear requirements**: All editor features expose what engine must render/execute
+
+**Suggested Next Steps (Week 9-10+):**
+
+- **Option A (Sequential)**: Complete Phases 7-8, then begin game engine planning
+- **Option B (Parallel)**: After Phase 6, start engine planning/prototyping in parallel with Phases 7-8
+- **Option C (Defer)**: Complete all campaign builder work (Phases 3-8), then focus entirely on engine
+
+**Engine Planning Document:**
+
+Create a separate implementation plan: `docs/explanation/game_engine_3d_enhancement_plan.md`
+
+This should address:
+
+- Rendering stack selection (Bevy, wgpu, rend3, custom)
+- 3D tile representation approach (voxel, isometric 3D, true 3D tiles)
+- Camera and movement systems (first-person, third-person, isometric)
+- Asset pipeline (2D to 3D transition strategy)
+- Performance targets and optimization strategy
+- Backward compatibility with existing 2D map data
+
+**Campaign Builder remains the priority** until Phases 6-7 are complete. Engine enhancements should not block content authoring tool development.
 
 ---
 
@@ -1623,18 +2088,23 @@ if !self.validation_errors.is_empty() {
 This plan provides a systematic approach to completing the Campaign Builder GUI. By following the phased implementation, starting with critical type system fixes and progressing through each editor, the Campaign Builder will become a fully functional tool for creating Antares campaigns.
 
 The plan adheres to:
+
 - ✅ AGENTS.md Golden Rules (especially Type System Adherence)
 - ✅ Architecture.md data structure definitions
 - ✅ Existing code patterns in campaign_builder
 - ✅ Quality gate requirements
 - ✅ Test coverage standards
 
-**Estimated completion: 8 weeks (one developer, full-time)**
+**Estimated completion: 10 weeks (one developer, full-time)**
 
-**Risk level: LOW** - All backend code exists, only UI integration required.
+**Risk levels:**
+
+- **Phases 3-6: LOW** - All backend code exists, only UI integration required
+- **Phase 7: MEDIUM** - Requires careful handling of cascading deletes and reference integrity
+- **Phase 8: HIGH** - Modifies core domain types, requires architecture approval and migration strategy
 
 ---
 
-*Document version: 1.0*
-*Created: 2024*
-*Status: Ready for implementation*
+_Document version: 1.0_
+_Created: 2024_
+_Status: Ready for implementation_
