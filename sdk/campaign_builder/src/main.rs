@@ -5014,22 +5014,71 @@ impl CampaignBuilderApp {
 
             if let Some(selected_idx) = self.quest_editor_state.selected_quest {
                 if selected_idx < self.quests.len() {
-                    let quest = &self.quests[selected_idx];
-                    for stage in &quest.stages {
-                        ui.collapsing(
-                            format!("Stage {}: {}", stage.stage_number, stage.name),
-                            |ui| {
-                                ui.label(&stage.description);
-                                ui.separator();
-                                ui.label(format!("Objectives ({})", stage.objectives.len()));
-                                for objective in &stage.objectives {
-                                    ui.label(format!("  • {}", objective.description()));
-                                }
-                            },
-                        );
+                    // Clone stages to avoid borrowing issues
+                    let stages = self.quests[selected_idx].stages.clone();
+                    let mut stage_to_delete: Option<usize> = None;
+                    let mut stage_to_edit: Option<usize> = None;
+
+                    for (stage_idx, stage) in stages.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            let header = ui.collapsing(
+                                format!("Stage {}: {}", stage.stage_number, stage.name),
+                                |ui| {
+                                    ui.label(&stage.description);
+                                    ui.label(format!(
+                                        "Require all objectives: {}",
+                                        stage.require_all_objectives
+                                    ));
+                                    ui.separator();
+
+                                    // Show objectives with edit/delete controls
+                                    self.show_quest_objectives_editor(
+                                        ui,
+                                        selected_idx,
+                                        stage_idx,
+                                        &stage.objectives,
+                                    );
+                                },
+                            );
+
+                            // Stage action buttons
+                            if ui.small_button("✏️").on_hover_text("Edit Stage").clicked() {
+                                stage_to_edit = Some(stage_idx);
+                            }
+                            if ui
+                                .small_button("🗑️")
+                                .on_hover_text("Delete Stage")
+                                .clicked()
+                            {
+                                stage_to_delete = Some(stage_idx);
+                            }
+                        });
                     }
 
-                    if quest.stages.is_empty() {
+                    // Handle stage deletion
+                    if let Some(stage_idx) = stage_to_delete {
+                        if self
+                            .quest_editor_state
+                            .delete_stage(selected_idx, stage_idx)
+                            .is_ok()
+                        {
+                            self.quests = self.quest_editor_state.quests.clone();
+                            self.unsaved_changes = true;
+                        }
+                    }
+
+                    // Handle stage editing
+                    if let Some(stage_idx) = stage_to_edit {
+                        if self
+                            .quest_editor_state
+                            .edit_stage(selected_idx, stage_idx)
+                            .is_ok()
+                        {
+                            self.quest_editor_state.mode = quest_editor::QuestEditorMode::Editing;
+                        }
+                    }
+
+                    if stages.is_empty() {
                         ui.label("No stages defined yet");
                     }
                 } else {
@@ -5039,6 +5088,344 @@ impl CampaignBuilderApp {
                 ui.label("No quest selected");
             }
         });
+
+        // Stage editor modal
+        if let Some(stage_idx) = self.quest_editor_state.selected_stage {
+            egui::Window::new("Edit Stage")
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Stage Number:");
+                        ui.text_edit_singleline(&mut self.quest_editor_state.stage_buffer.number);
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.text_edit_singleline(&mut self.quest_editor_state.stage_buffer.name);
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Description:");
+                    });
+                    ui.add(
+                        egui::TextEdit::multiline(
+                            &mut self.quest_editor_state.stage_buffer.description,
+                        )
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY),
+                    );
+
+                    ui.checkbox(
+                        &mut self.quest_editor_state.stage_buffer.require_all,
+                        "Require all objectives to complete",
+                    );
+
+                    ui.add_space(10.0);
+
+                    ui.horizontal(|ui| {
+                        if ui.button("✅ Save").clicked() {
+                            if let Some(selected_idx) = self.quest_editor_state.selected_quest {
+                                if self
+                                    .quest_editor_state
+                                    .save_stage(selected_idx, stage_idx)
+                                    .is_ok()
+                                {
+                                    self.quests = self.quest_editor_state.quests.clone();
+                                    self.unsaved_changes = true;
+                                }
+                            }
+                        }
+
+                        if ui.button("❌ Cancel").clicked() {
+                            self.quest_editor_state.selected_stage = None;
+                        }
+                    });
+                });
+        }
+    }
+
+    /// Show quest objectives editor
+    fn show_quest_objectives_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        quest_idx: usize,
+        stage_idx: usize,
+        objectives: &[antares::domain::quest::QuestObjective],
+    ) {
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(format!("Objectives ({})", objectives.len()));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .small_button("➕")
+                        .on_hover_text("Add Objective")
+                        .clicked()
+                    {
+                        let _ = self.quest_editor_state.add_objective();
+                        self.unsaved_changes = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            let mut objective_to_delete: Option<usize> = None;
+            let mut objective_to_edit: Option<usize> = None;
+
+            for (obj_idx, objective) in objectives.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{}.", obj_idx + 1));
+                    ui.label(objective.description());
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .small_button("🗑️")
+                            .on_hover_text("Delete Objective")
+                            .clicked()
+                        {
+                            objective_to_delete = Some(obj_idx);
+                        }
+                        if ui
+                            .small_button("✏️")
+                            .on_hover_text("Edit Objective")
+                            .clicked()
+                        {
+                            objective_to_edit = Some(obj_idx);
+                        }
+                    });
+                });
+            }
+
+            // Handle objective deletion
+            if let Some(obj_idx) = objective_to_delete {
+                if self
+                    .quest_editor_state
+                    .delete_objective(quest_idx, stage_idx, obj_idx)
+                    .is_ok()
+                {
+                    self.quests = self.quest_editor_state.quests.clone();
+                    self.unsaved_changes = true;
+                }
+            }
+
+            // Handle objective editing
+            if let Some(obj_idx) = objective_to_edit {
+                if self
+                    .quest_editor_state
+                    .edit_objective(quest_idx, stage_idx, obj_idx)
+                    .is_ok()
+                {
+                    // Objective editing modal will be shown below
+                }
+            }
+
+            if objectives.is_empty() {
+                ui.label("No objectives defined");
+            }
+        });
+
+        // Objective editor modal
+        if let Some(obj_idx) = self.quest_editor_state.selected_objective {
+            egui::Window::new("Edit Objective")
+                .collapsible(false)
+                .resizable(true)
+                .default_size([500.0, 400.0])
+                .show(ui.ctx(), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Objective Type:");
+                        egui::ComboBox::new("objective_type_selector", "")
+                            .selected_text(format!(
+                                "{:?}",
+                                self.quest_editor_state.objective_buffer.objective_type
+                            ))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.objective_buffer.objective_type,
+                                    quest_editor::ObjectiveType::KillMonsters,
+                                    "Kill Monsters",
+                                );
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.objective_buffer.objective_type,
+                                    quest_editor::ObjectiveType::CollectItems,
+                                    "Collect Items",
+                                );
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.objective_buffer.objective_type,
+                                    quest_editor::ObjectiveType::ReachLocation,
+                                    "Reach Location",
+                                );
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.objective_buffer.objective_type,
+                                    quest_editor::ObjectiveType::TalkToNpc,
+                                    "Talk To NPC",
+                                );
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.objective_buffer.objective_type,
+                                    quest_editor::ObjectiveType::DeliverItem,
+                                    "Deliver Item",
+                                );
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.objective_buffer.objective_type,
+                                    quest_editor::ObjectiveType::EscortNpc,
+                                    "Escort NPC",
+                                );
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.objective_buffer.objective_type,
+                                    quest_editor::ObjectiveType::CustomFlag,
+                                    "Custom Flag",
+                                );
+                            });
+                    });
+
+                    ui.separator();
+
+                    // Type-specific fields
+                    match self.quest_editor_state.objective_buffer.objective_type {
+                        quest_editor::ObjectiveType::KillMonsters => {
+                            ui.horizontal(|ui| {
+                                ui.label("Monster ID:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.monster_id,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Quantity:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.quantity,
+                                );
+                            });
+                        }
+                        quest_editor::ObjectiveType::CollectItems => {
+                            ui.horizontal(|ui| {
+                                ui.label("Item ID:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.item_id,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Quantity:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.quantity,
+                                );
+                            });
+                        }
+                        quest_editor::ObjectiveType::ReachLocation => {
+                            ui.horizontal(|ui| {
+                                ui.label("Map ID:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.map_id,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("X:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.location_x,
+                                );
+                                ui.label("Y:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.location_y,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Radius:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.location_radius,
+                                );
+                            });
+                        }
+                        quest_editor::ObjectiveType::TalkToNpc => {
+                            ui.horizontal(|ui| {
+                                ui.label("NPC ID:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.npc_id,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Map ID:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.map_id,
+                                );
+                            });
+                        }
+                        quest_editor::ObjectiveType::DeliverItem => {
+                            ui.horizontal(|ui| {
+                                ui.label("Item ID:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.item_id,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("NPC ID:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.npc_id,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Quantity:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.quantity,
+                                );
+                            });
+                        }
+                        quest_editor::ObjectiveType::EscortNpc => {
+                            ui.horizontal(|ui| {
+                                ui.label("NPC ID:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.npc_id,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Map ID:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.map_id,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Destination X:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.location_x,
+                                );
+                                ui.label("Y:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.location_y,
+                                );
+                            });
+                        }
+                        quest_editor::ObjectiveType::CustomFlag => {
+                            ui.horizontal(|ui| {
+                                ui.label("Flag Name:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.objective_buffer.flag_name,
+                                );
+                            });
+                            ui.checkbox(
+                                &mut self.quest_editor_state.objective_buffer.flag_value,
+                                "Required Value",
+                            );
+                        }
+                    }
+
+                    ui.add_space(10.0);
+
+                    ui.horizontal(|ui| {
+                        if ui.button("✅ Save").clicked() {
+                            if self
+                                .quest_editor_state
+                                .save_objective(quest_idx, stage_idx, obj_idx)
+                                .is_ok()
+                            {
+                                self.quests = self.quest_editor_state.quests.clone();
+                                self.unsaved_changes = true;
+                            }
+                        }
+
+                        if ui.button("❌ Cancel").clicked() {
+                            self.quest_editor_state.selected_objective = None;
+                        }
+                    });
+                });
+        }
     }
 
     /// Show quest validation display
@@ -5940,6 +6327,7 @@ impl CampaignBuilderApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antares::domain::quest::QuestStage;
 
     #[test]
     fn test_campaign_metadata_default() {
@@ -6303,6 +6691,329 @@ mod tests {
         assert!(!item.is_accessory());
         assert!(!item.is_consumable());
         assert!(!item.is_ammo());
+    }
+
+    #[test]
+    fn test_quest_objective_editor_initialization() {
+        let app = CampaignBuilderApp::default();
+        assert_eq!(app.quests.len(), 0);
+        assert_eq!(app.quest_editor_state.selected_quest, None);
+        assert_eq!(app.quest_editor_state.selected_stage, None);
+        assert_eq!(app.quest_editor_state.selected_objective, None);
+        assert_eq!(
+            app.quest_editor_state.mode,
+            quest_editor::QuestEditorMode::List
+        );
+    }
+
+    #[test]
+    fn test_quest_stage_editing_flow() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Create a quest with a stage
+        let quest = Quest {
+            id: 1,
+            name: "Test Quest".to_string(),
+            description: "Test Description".to_string(),
+            is_main_quest: false,
+            repeatable: false,
+            min_level: None,
+            max_level: None,
+            required_quests: Vec::new(),
+            stages: vec![QuestStage {
+                stage_number: 1,
+                name: "Stage 1".to_string(),
+                description: "Stage 1 description".to_string(),
+                require_all_objectives: true,
+                objectives: Vec::new(),
+            }],
+            rewards: Vec::new(),
+            quest_giver_npc: None,
+            quest_giver_map: None,
+            quest_giver_position: None,
+        };
+
+        app.quests.push(quest.clone());
+        app.quest_editor_state.quests.push(quest);
+        app.quest_editor_state.selected_quest = Some(0);
+
+        // Test edit stage
+        let result = app.quest_editor_state.edit_stage(0, 0);
+        assert!(result.is_ok());
+        assert_eq!(app.quest_editor_state.selected_stage, Some(0));
+        assert_eq!(app.quest_editor_state.stage_buffer.name, "Stage 1");
+        assert_eq!(
+            app.quest_editor_state.stage_buffer.description,
+            "Stage 1 description"
+        );
+
+        // Test save stage
+        app.quest_editor_state.stage_buffer.name = "Updated Stage".to_string();
+        let result = app.quest_editor_state.save_stage(0, 0);
+        assert!(result.is_ok());
+        assert_eq!(
+            app.quest_editor_state.quests[0].stages[0].name,
+            "Updated Stage"
+        );
+        assert_eq!(app.quest_editor_state.selected_stage, None);
+        assert!(app.quest_editor_state.has_unsaved_changes);
+    }
+
+    #[test]
+    fn test_quest_objective_editing_flow() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Create a quest with a stage and objective
+        let quest = Quest {
+            id: 1,
+            name: "Test Quest".to_string(),
+            description: "Test Description".to_string(),
+            is_main_quest: false,
+            repeatable: false,
+            min_level: None,
+            max_level: None,
+            required_quests: Vec::new(),
+            stages: vec![QuestStage {
+                stage_number: 1,
+                name: "Stage 1".to_string(),
+                description: "Stage 1 description".to_string(),
+                require_all_objectives: true,
+                objectives: vec![antares::domain::quest::QuestObjective::KillMonsters {
+                    monster_id: 100,
+                    quantity: 5,
+                }],
+            }],
+            rewards: Vec::new(),
+            quest_giver_npc: None,
+            quest_giver_map: None,
+            quest_giver_position: None,
+        };
+
+        app.quests.push(quest.clone());
+        app.quest_editor_state.quests.push(quest);
+        app.quest_editor_state.selected_quest = Some(0);
+
+        // Test edit objective
+        let result = app.quest_editor_state.edit_objective(0, 0, 0);
+        assert!(result.is_ok());
+        assert_eq!(app.quest_editor_state.selected_objective, Some(0));
+        assert_eq!(
+            app.quest_editor_state.objective_buffer.objective_type,
+            quest_editor::ObjectiveType::KillMonsters
+        );
+        assert_eq!(app.quest_editor_state.objective_buffer.monster_id, "100");
+        assert_eq!(app.quest_editor_state.objective_buffer.quantity, "5");
+
+        // Test save objective
+        app.quest_editor_state.objective_buffer.quantity = "10".to_string();
+        let result = app.quest_editor_state.save_objective(0, 0, 0);
+        assert!(result.is_ok());
+
+        if let antares::domain::quest::QuestObjective::KillMonsters {
+            monster_id,
+            quantity,
+        } = &app.quest_editor_state.quests[0].stages[0].objectives[0]
+        {
+            assert_eq!(*quantity, 10);
+        } else {
+            panic!("Expected KillMonsters objective");
+        }
+
+        assert_eq!(app.quest_editor_state.selected_objective, None);
+        assert!(app.quest_editor_state.has_unsaved_changes);
+    }
+
+    #[test]
+    fn test_quest_stage_deletion() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Create a quest with two stages
+        let quest = Quest {
+            id: 1,
+            name: "Test Quest".to_string(),
+            description: "Test Description".to_string(),
+            is_main_quest: false,
+            repeatable: false,
+            min_level: None,
+            max_level: None,
+            required_quests: Vec::new(),
+            stages: vec![
+                QuestStage {
+                    stage_number: 1,
+                    name: "Stage 1".to_string(),
+                    description: "Stage 1 description".to_string(),
+                    require_all_objectives: true,
+                    objectives: Vec::new(),
+                },
+                QuestStage {
+                    stage_number: 2,
+                    name: "Stage 2".to_string(),
+                    description: "Stage 2 description".to_string(),
+                    require_all_objectives: true,
+                    objectives: Vec::new(),
+                },
+            ],
+            rewards: Vec::new(),
+            quest_giver_npc: None,
+            quest_giver_map: None,
+            quest_giver_position: None,
+        };
+
+        app.quests.push(quest.clone());
+        app.quest_editor_state.quests.push(quest);
+        app.quest_editor_state.selected_quest = Some(0);
+
+        // Delete first stage
+        assert_eq!(app.quest_editor_state.quests[0].stages.len(), 2);
+        let result = app.quest_editor_state.delete_stage(0, 0);
+        assert!(result.is_ok());
+        assert_eq!(app.quest_editor_state.quests[0].stages.len(), 1);
+        assert_eq!(app.quest_editor_state.quests[0].stages[0].name, "Stage 2");
+        assert!(app.quest_editor_state.has_unsaved_changes);
+    }
+
+    #[test]
+    fn test_quest_objective_deletion() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Create a quest with a stage and multiple objectives
+        let quest = Quest {
+            id: 1,
+            name: "Test Quest".to_string(),
+            description: "Test Description".to_string(),
+            is_main_quest: false,
+            repeatable: false,
+            min_level: None,
+            max_level: None,
+            required_quests: Vec::new(),
+            stages: vec![QuestStage {
+                stage_number: 1,
+                name: "Stage 1".to_string(),
+                description: "Stage 1 description".to_string(),
+                require_all_objectives: true,
+                objectives: vec![
+                    antares::domain::quest::QuestObjective::KillMonsters {
+                        monster_id: 100,
+                        quantity: 5,
+                    },
+                    antares::domain::quest::QuestObjective::CollectItems {
+                        item_id: 200,
+                        quantity: 3,
+                    },
+                ],
+            }],
+            rewards: Vec::new(),
+            quest_giver_npc: None,
+            quest_giver_map: None,
+            quest_giver_position: None,
+        };
+
+        app.quests.push(quest.clone());
+        app.quest_editor_state.quests.push(quest);
+        app.quest_editor_state.selected_quest = Some(0);
+
+        // Delete first objective
+        assert_eq!(
+            app.quest_editor_state.quests[0].stages[0].objectives.len(),
+            2
+        );
+        let result = app.quest_editor_state.delete_objective(0, 0, 0);
+        assert!(result.is_ok());
+        assert_eq!(
+            app.quest_editor_state.quests[0].stages[0].objectives.len(),
+            1
+        );
+
+        // Verify remaining objective is CollectItems
+        if let antares::domain::quest::QuestObjective::CollectItems { item_id, quantity } =
+            &app.quest_editor_state.quests[0].stages[0].objectives[0]
+        {
+            assert_eq!(*item_id, 200);
+            assert_eq!(*quantity, 3);
+        } else {
+            panic!("Expected CollectItems objective");
+        }
+
+        assert!(app.quest_editor_state.has_unsaved_changes);
+    }
+
+    #[test]
+    fn test_quest_objective_type_conversion() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Create a quest with a KillMonsters objective
+        let quest = Quest {
+            id: 1,
+            name: "Test Quest".to_string(),
+            description: "Test Description".to_string(),
+            is_main_quest: false,
+            repeatable: false,
+            min_level: None,
+            max_level: None,
+            required_quests: Vec::new(),
+            stages: vec![QuestStage {
+                stage_number: 1,
+                name: "Stage 1".to_string(),
+                description: "Stage 1 description".to_string(),
+                require_all_objectives: true,
+                objectives: vec![antares::domain::quest::QuestObjective::KillMonsters {
+                    monster_id: 100,
+                    quantity: 5,
+                }],
+            }],
+            rewards: Vec::new(),
+            quest_giver_npc: None,
+            quest_giver_map: None,
+            quest_giver_position: None,
+        };
+
+        app.quests.push(quest.clone());
+        app.quest_editor_state.quests.push(quest);
+
+        // Edit objective and change type to CollectItems
+        let result = app.quest_editor_state.edit_objective(0, 0, 0);
+        assert!(result.is_ok());
+
+        app.quest_editor_state.objective_buffer.objective_type =
+            quest_editor::ObjectiveType::CollectItems;
+        app.quest_editor_state.objective_buffer.item_id = "250".to_string();
+        app.quest_editor_state.objective_buffer.quantity = "7".to_string();
+
+        let result = app.quest_editor_state.save_objective(0, 0, 0);
+        assert!(result.is_ok());
+
+        // Verify objective type changed
+        if let antares::domain::quest::QuestObjective::CollectItems { item_id, quantity } =
+            &app.quest_editor_state.quests[0].stages[0].objectives[0]
+        {
+            assert_eq!(*item_id, 250);
+            assert_eq!(*quantity, 7);
+        } else {
+            panic!("Expected CollectItems objective");
+        }
+    }
+
+    #[test]
+    fn test_quest_editor_invalid_indices() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Test with no quests
+        let result = app.quest_editor_state.edit_stage(0, 0);
+        assert!(result.is_err());
+
+        let result = app.quest_editor_state.edit_objective(0, 0, 0);
+        assert!(result.is_err());
+
+        let result = app.quest_editor_state.delete_stage(0, 0);
+        assert!(result.is_err());
+
+        let result = app.quest_editor_state.delete_objective(0, 0, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_item_type_is_quest_item() {
+        let item = CampaignBuilderApp::default_item();
         assert!(!item.is_quest_item());
     }
 

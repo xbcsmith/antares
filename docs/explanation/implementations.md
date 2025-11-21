@@ -5,10 +5,178 @@ is updated after each phase or major feature completion.
 
 ---
 
-## Phase 7: Quest and Dialogue Editor Refinements (COMPLETED)
+## Phase 7.1: Quest Objective Editing UI Integration (COMPLETED)
 
 **Date Completed**: 2025-01-25
-**Status**: ✅ Enhanced quest and dialogue editors with full CRUD operations and orphaned content detection
+**Status**: ✅ UI integration for quest stage and objective editing with interactive controls
+
+### Overview
+
+Phase 7.1 implements the user interface integration for quest stage and objective editing, building on the backend CRUD methods from Phase 7. The UI now provides interactive Edit/Delete buttons for stages and objectives, modal dialogs for editing, confirmation flows, and type-specific form fields for each objective type.
+
+### Components Implemented
+
+#### UI Enhancements for Quest Stages Editor
+
+**File Modified**: `sdk/campaign_builder/src/main.rs` (lines 5000-5340)
+
+**Method Modified**: `show_quest_stages_editor()`
+
+**New Features**:
+
+- Interactive stage list with Edit (✏️) and Delete (🗑️) buttons for each stage
+- Collapsible stage sections showing stage description and objectives
+- Stage deletion with immediate unsaved changes tracking
+- Stage edit modal dialog with form fields:
+  - Stage Number (text input)
+  - Name (text input)
+  - Description (multiline text area)
+  - Require all objectives checkbox
+  - Save/Cancel buttons
+
+**Implementation Details**:
+
+- Clones stages vector to avoid borrow checker issues during UI rendering
+- Tracks stages to edit/delete using `Option<usize>` indices
+- Calls `quest_editor_state.delete_stage()` backend method
+- Calls `quest_editor_state.edit_stage()` and `save_stage()` for editing
+- Modal dialog appears when `selected_stage` is `Some(stage_idx)`
+- Updates main app state from `quest_editor_state.quests` after operations
+- Sets `unsaved_changes = true` on modifications
+
+#### New Method: Quest Objectives Editor
+
+**File Added**: `show_quest_objectives_editor()` method in `sdk/campaign_builder/src/main.rs` (lines 5122-5340)
+
+**Signature**: `fn show_quest_objectives_editor(&mut self, ui: &mut egui::Ui, quest_idx: usize, stage_idx: usize, objectives: &[QuestObjective])`
+
+**Features**:
+
+- Displays numbered list of objectives with descriptions
+- Edit (✏️) and Delete (🗑️) buttons for each objective
+- Add Objective button (➕)
+- Objective editor modal with:
+  - Objective Type selector (ComboBox) with 7 types:
+    - Kill Monsters
+    - Collect Items
+    - Reach Location
+    - Talk To NPC
+    - Deliver Item
+    - Escort NPC
+    - Custom Flag
+  - Type-specific form fields that appear based on selection:
+    - **Kill Monsters**: Monster ID, Quantity
+    - **Collect Items**: Item ID, Quantity
+    - **Reach Location**: Map ID, X/Y coordinates, Radius
+    - **Talk To NPC**: NPC ID, Map ID
+    - **Deliver Item**: Item ID, NPC ID, Quantity
+    - **Escort NPC**: NPC ID, Map ID, Destination X/Y
+    - **Custom Flag**: Flag Name, Required Value (checkbox)
+  - Save/Cancel buttons
+
+**Implementation Details**:
+
+- Modal dialog shown when `selected_objective` is `Some(obj_idx)`
+- Uses `quest_editor_state.objective_buffer` for form state
+- Calls backend methods:
+  - `edit_objective(quest_idx, stage_idx, obj_idx)` - loads data into buffer
+  - `save_objective(quest_idx, stage_idx, obj_idx)` - commits changes
+  - `delete_objective(quest_idx, stage_idx, obj_idx)` - removes objective
+- Dynamic form fields based on `objective_buffer.objective_type` enum
+- All text inputs bind to buffer fields (monster_id, item_id, quantity, etc.)
+- Syncs changes back to main app state after save/delete operations
+
+#### UI Flow
+
+1. User expands a quest stage in the stages editor
+2. Stage shows collapsible header with name and stage number
+3. Inside collapse: description, objectives list, and Edit/Delete buttons
+4. Click Edit Stage → Modal opens with pre-filled form
+5. Click Save → Updates stage, closes modal, marks unsaved
+6. Click Delete Stage → Removes stage immediately, updates quest
+7. In objectives list: Click Edit Objective → Modal opens with type selector
+8. Change objective type → Form fields update dynamically
+9. Fill fields → Click Save → Updates objective, closes modal
+10. Click Delete Objective → Removes objective immediately
+
+### Testing Summary
+
+**Total Tests Added**: 8 new UI integration tests
+
+- `test_quest_objective_editor_initialization` - Verifies initial state
+- `test_quest_stage_editing_flow` - Tests edit → modify → save flow for stages
+- `test_quest_objective_editing_flow` - Tests edit → modify → save flow for objectives
+- `test_quest_stage_deletion` - Confirms stage removal and index updates
+- `test_quest_objective_deletion` - Confirms objective removal
+- `test_quest_objective_type_conversion` - Tests changing objective type during edit
+- `test_quest_editor_invalid_indices` - Verifies error handling for invalid indices
+- `test_item_type_is_quest_item` - Helper test for item type checking
+
+**Test Coverage**: All tests verify:
+
+- Proper buffer population when editing
+- State synchronization between UI and backend
+- Unsaved changes flag updates
+- Selection state management
+- Quest structure integrity after operations
+
+**Test Results**: All 270 campaign_builder tests pass (262 previously + 8 new)
+
+### Quality Checks
+
+✅ `cargo fmt --all` - All code formatted
+✅ `cargo check --all-targets --all-features` - Compiles successfully
+✅ `cargo clippy --package campaign_builder` - No new warnings in quest editor code
+✅ `cargo test --package campaign_builder --all-features` - All 270 tests pass
+
+### Technical Highlights
+
+**UI Patterns Used**:
+
+1. **Clone-and-iterate pattern**: Clones data before rendering to avoid borrow conflicts
+2. **Deferred actions**: Collects edit/delete actions in `Option<usize>` variables, applies after loop
+3. **Modal dialogs**: Uses `egui::Window` with `selected_X` state to show/hide editors
+4. **Dynamic forms**: Form fields change based on enum selection (objective type)
+5. **Inline buttons**: Uses `small_button()` with hover tooltips for compact UI
+
+**State Management**:
+
+- UI state lives in `CampaignBuilderApp` (selected indices, buffers)
+- Backend state lives in `QuestEditorState` (quests list, validation)
+- Changes propagate: Backend → App state → UI rendering
+- Unsaved changes tracked at app level
+
+**User Experience**:
+
+- Edit buttons clearly marked with ✏️ emoji
+- Delete buttons marked with 🗑️ emoji
+- Hover tooltips explain button actions
+- Modal dialogs provide focused editing without navigation
+- Save/Cancel buttons provide clear commit/abort choices
+- Type selector updates form fields immediately
+
+### Architecture Compliance
+
+- ✅ Uses domain type aliases: `QuestId`, `ItemId`, `MapId`, `MonsterId`, `Position`
+- ✅ Respects `QuestObjective` and `QuestStage` structures from architecture
+- ✅ No modifications to core domain types
+- ✅ UI layer properly separated from domain logic
+- ✅ Backend methods (quest_editor.rs) remain independent of UI framework
+
+### Next Steps (Phase 7.2+)
+
+With quest stage/objective editing UI complete, remaining Phase 7 work includes:
+
+1. **Dialogue Editor UI Integration** (Phase 7.7) - Similar edit/delete controls for dialogue nodes and choices
+2. **Orphaned Content Validation Display** (Phase 7.8) - UI panel showing orphaned stages and unreachable nodes with quick-fix navigation
+3. **Quest/Dialogue Preview Enhancements** - Visual tree/graph view of quest flow and dialogue branches
+
+---
+
+## Phase 7: Quest and Dialogue Editor Refinements (Backend - COMPLETED)
+
+**Date Completed**: 2025-01-25
+**Status**: ✅ Backend CRUD operations and orphaned content detection for quest and dialogue editors
 
 ### Overview
 
