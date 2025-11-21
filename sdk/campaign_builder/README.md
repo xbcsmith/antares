@@ -2,15 +2,19 @@
 
 A functional campaign editor for creating Antares RPG campaigns. Phase 2 delivers full metadata editing, real file I/O, validation UI, and data editor placeholders.
 
-## Status: Phase 2 Complete ✅
+## Status: Phase 7.1 Complete ✅
 
 - ✅ **Phase 0**: Framework validation (egui confirmed)
 - ✅ **Phase 1**: Core campaign system (backend)
-- ✅ **Phase 2**: Campaign Builder Foundation (this release)
-- 🔲 **Phase 3**: Data Editors (Items, Spells, Monsters)
-- 🔲 **Phase 4**: Map Editor Integration
-- 🔲 **Phase 5**: Quest & Dialogue Tools
-- 🔲 **Phase 6**: Testing & Distribution
+- ✅ **Phase 2**: Campaign Builder Foundation
+- ✅ **Phase 3**: Data Editors (Items, Spells, Monsters)
+- ✅ **Phase 4A**: Quest Editor Integration (backend)
+- ✅ **Phase 6**: Map Editor Enhancement
+- ✅ **Phase 7**: Quest & Dialogue Backend CRUD Operations
+- ✅ **Phase 7.1**: Quest Stage & Objective Editing UI ⭐ **NEW!**
+- 🔲 **Phase 7.7**: Dialogue Editor UI Integration
+- 🔲 **Phase 8**: Asset System Enhancements
+- 🔲 **Phase 9**: Testing & Distribution
 
 ## Features
 
@@ -53,13 +57,39 @@ A functional campaign editor for creating Antares RPG campaigns. Phase 2 deliver
 - **Visual Icons**: Directories (📁) and files (📄) clearly marked
 - **Manual Refresh**: Tools menu option to rescan files
 
+#### ✅ Phase 7.1: Interactive Quest Stage & Objective Editing (NEW!)
+
+**Quest Stages Editor**:
+
+- **Edit Stages**: Click ✏️ button to open modal dialog with stage form
+- **Delete Stages**: Click 🗑️ button for immediate removal
+- **Stage Fields**: Edit stage number, name, description, and "require all objectives" flag
+- **Collapsible View**: Expand/collapse stages to see objectives
+
+**Quest Objectives Editor**:
+
+- **Edit Objectives**: Click ✏️ button to open dynamic objective editor modal
+- **Delete Objectives**: Click 🗑️ button for immediate removal
+- **Type Selector**: Dropdown with 7 objective types (Kill Monsters, Collect Items, Reach Location, Talk To NPC, Deliver Item, Escort NPC, Custom Flag)
+- **Dynamic Forms**: Form fields change automatically based on selected objective type
+- **Add Objectives**: Click ➕ button in objectives section
+- **Type Conversion**: Change objective type during editing - form updates instantly
+
+**UI Features**:
+
+- Modal dialogs for focused editing without navigation
+- Save/Cancel buttons for explicit commit/discard
+- Hover tooltips on all action buttons
+- Immediate unsaved changes tracking
+- Clean inline controls that don't clutter the list view
+
 #### Data Editor Placeholders
 
 - **Items Editor** - Ready for Phase 3 implementation
 - **Spells Editor** - Ready for Phase 3 implementation
 - **Monsters Editor** - Ready for Phase 3 implementation
 - **Maps Editor** - Ready for Phase 4 integration
-- **Quests Editor** - Ready for Phase 5 implementation
+- **Dialogues Editor** - Ready for Phase 7.7 UI integration
 
 ### 📋 Coming in Phase 3
 
@@ -100,10 +130,10 @@ cargo build --release
 
 ```bash
 # From antares/ root
-cargo run --release --bin campaign-builder
+cargo run --release --package campaign_builder --bin campaign-builder
 
 # Or from sdk/campaign_builder/
-cargo run --release
+cargo run --release --package campaign_builder
 
 # Binary location after build:
 # target/release/campaign-builder

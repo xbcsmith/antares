@@ -33,7 +33,7 @@ sudo pacman -S libxcb libxkbcommon
 cd antares/
 
 # Run the prototype (will build automatically)
-cargo run --bin campaign-builder
+cargo run --package campaign_builder --bin campaign-builder
 ```
 
 That's it! The Campaign Builder UI should launch.
@@ -60,25 +60,51 @@ That's it! The Campaign Builder UI should launch.
 - Notice the status bar at the bottom
 - Make changes and see "● Unsaved changes" indicator
 
+### Test Quest Editing (NEW in Phase 7.1!)
+
+1. Navigate to the **Quests** tab
+2. Click **➕ New Quest** to create a test quest:
+   - ID: `1`
+   - Name: `Test Quest`
+   - Description: `Testing the new editing features`
+3. Click **➕ Add Stage** to add a quest stage
+4. **Expand the stage** by clicking its collapsible header
+5. Try the new editing features:
+   - Click **✏️** next to the stage name → Modal opens with stage form
+   - Modify the stage name → Click **✅ Save**
+   - Click **➕** in the objectives section → Add an objective
+   - Select "Kill Monsters" type → Fill in Monster ID: `100`, Quantity: `5`
+   - Click **✅ Save** → Objective appears in list
+   - Click **✏️** next to the objective → Modal reopens
+   - Change type to "Collect Items" → Form fields update!
+   - Fill in Item ID: `42`, Quantity: `3` → Click **✅ Save**
+   - Click **🗑️** next to the objective → Deleted immediately
+6. Notice the "● Unsaved changes" indicator appears after edits
+7. Click **File → Save** to persist your changes
+8. Close and reopen Campaign Builder
+9. Load the campaign and verify changes persisted
+
+**Expected**: All edit/delete operations work smoothly with modal dialogs and immediate feedback.
+
 ## 4. Testing Without GPU
 
 ### Linux - Software Rendering
 
 ```bash
 # Force CPU-only rendering
-LIBGL_ALWAYS_SOFTWARE=1 cargo run --bin campaign-builder
+LIBGL_ALWAYS_SOFTWARE=1 cargo run --package campaign_builder --bin campaign-builder
 
 # Run in virtual framebuffer (headless)
-xvfb-run cargo run --bin campaign-builder
+xvfb-run cargo run --package campaign_builder --bin campaign-builder
 
 # Check which backend is being used
-RUST_LOG=eframe=debug cargo run --bin campaign-builder 2>&1 | grep backend
+RUST_LOG=eframe=debug cargo run --package campaign_builder --bin campaign-builder 2>&1 | grep backend
 ```
 
 ## 5. Expected Performance
 
-| Your Hardware        | Expected FPS | Experience |
-|---------------------|--------------|------------|
+| Your Hardware       | Expected FPS | Experience |
+| ------------------- | ------------ | ---------- |
 | Desktop with GPU    | 60           | Smooth ✨  |
 | Laptop (integrated) | 60           | Smooth ✨  |
 | VM without GPU      | 30-60        | Usable ✓   |
@@ -112,10 +138,10 @@ glxinfo | grep "OpenGL version"
 
 ```bash
 # Try with logging
-RUST_LOG=info cargo run --bin campaign-builder
+RUST_LOG=info cargo run --package campaign_builder --bin campaign-builder
 
 # Force software rendering
-LIBGL_ALWAYS_SOFTWARE=1 cargo run --bin campaign-builder
+LIBGL_ALWAYS_SOFTWARE=1 cargo run --package campaign_builder --bin campaign-builder
 ```
 
 ## What This Prototype Demonstrates

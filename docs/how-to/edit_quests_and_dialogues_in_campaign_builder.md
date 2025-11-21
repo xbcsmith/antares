@@ -2,6 +2,8 @@
 
 This guide walks you through creating and managing quests and dialogue trees in the Antares Campaign Builder.
 
+**Updated for Phase 7.1**: This guide now reflects the interactive quest stage and objective editing features with modal dialogs and inline edit/delete controls.
+
 ## Quest Editor
 
 ### Creating a New Quest
@@ -30,54 +32,107 @@ Stages organize quest objectives in sequence. Players complete them in order.
    - **Require All Objectives**: Check if ALL objectives must be completed, uncheck if ANY objective completes the stage
 4. Click **✅ Create**
 
+### Editing Quest Stages (Phase 7.1 Feature)
+
+Quest stages can now be edited directly with modal dialogs:
+
+1. **Expand the Quest** - Click on the quest in the list to show its stages
+2. **Expand a Stage** - Click the collapsible header to reveal stage details and objectives
+3. **Edit Stage** - Click the **✏️** button next to the stage name
+   - A modal dialog appears with the stage editing form
+   - Fields available:
+     - **Stage Number**: The numerical order of this stage
+     - **Name**: Stage title
+     - **Description**: Multiline text describing what happens in this stage
+     - **Require all objectives**: Checkbox - if checked, ALL objectives must be completed; if unchecked, completing ANY objective completes the stage
+   - Make your changes
+   - Click **✅ Save** to commit changes
+   - Click **❌ Cancel** to discard changes
+4. **Delete Stage** - Click the **🗑️** button next to the stage name
+   - Stage is removed immediately
+   - No confirmation dialog (changes can be reverted by not saving the campaign)
+
 ### Adding Objectives to a Stage
 
 Each stage needs one or more objectives that guide players toward completion.
 
-1. **Select the stage** you want to add an objective to
-2. Click **➕ Add Objective**
-3. Choose objective type from dropdown:
+1. **Expand the stage** you want to add an objective to
+2. In the objectives section, click the small **➕** button
+3. Choose objective type from dropdown and fill in fields (see "Objective Type Reference" below)
+4. Click **✅ Save**
 
-   **Kill Monsters**
-   - Select monster ID from database
-   - Set quantity (how many to kill)
-   - Example: Kill 5 Goblins
+### Editing Quest Objectives (Phase 7.1 Feature)
 
-   **Collect Items**
-   - Select item ID from database
-   - Set quantity (how many to collect)
-   - Example: Collect 3 Ancient Coins
+Objectives can now be edited with a dynamic modal form:
 
-   **Reach Location**
-   - Enter map ID where location is
-   - Set X and Y coordinates
-   - Set search radius (how close player needs to be)
-   - Example: Go to (25, 30) on Map 5
+1. **Expand a Stage** - Click the collapsible stage header
+2. **View Objectives** - See the numbered list of objectives
+3. **Edit Objective** - Click the **✏️** button next to any objective
+   - Modal dialog opens with **Objective Type** dropdown at the top
+   - Current type is pre-selected
+   - Form fields below show data for the current type
+   - **Change Type** - Select a different objective type from the dropdown
+     - Form fields update dynamically to match the new type
+     - Previous data is cleared when type changes
+   - Fill in type-specific fields (see reference below)
+   - Click **✅ Save** to commit changes
+   - Click **❌ Cancel** to discard changes
+4. **Delete Objective** - Click the **🗑️** button next to the objective
+   - Objective removed immediately
+   - Remaining objectives maintain their order
 
-   **Talk to NPC**
-   - Enter NPC ID or name
-   - Select map where NPC is located
-   - Example: Talk to "Innkeeper" on Map 2
+### Objective Type Reference
 
-   **Deliver Item**
-   - Select item ID to deliver
-   - Enter NPC ID who receives it
-   - Set quantity
-   - Example: Deliver 1 Ancient Scroll to "Sage"
+When editing an objective, the form shows different fields based on the selected type:
 
-   **Escort NPC**
-   - Enter NPC ID to escort
-   - Select destination map
-   - Set destination X, Y coordinates
-   - Example: Escort "Princess" to (50, 40) on Map 8
+#### Kill Monsters
 
-   **Custom Flag**
-   - Enter flag name (e.g., "dragon_defeated")
-   - Set required value (true/false)
-   - Example: Custom flag "forge_repaired" must be true
+- **Monster ID**: Numeric ID of the monster type (text input)
+- **Quantity**: How many to kill (text input)
+- Example: Monster ID `100`, Quantity `5` = "Kill 5 of Monster 100"
 
-4. Fill in objective-specific fields
-5. Click **✅ Create**
+#### Collect Items
+
+- **Item ID**: Numeric ID of the item (text input)
+- **Quantity**: How many to collect (text input)
+- Example: Item ID `42`, Quantity `3` = "Collect 3 of Item 42"
+
+#### Reach Location
+
+- **Map ID**: Numeric ID of the map (text input)
+- **X**: X coordinate on the map (text input)
+- **Y**: Y coordinate on the map (text input)
+- **Radius**: Search radius in tiles (text input)
+- Example: Map `10`, X `25`, Y `30`, Radius `2` = "Reach location (25, 30) on Map 10 within 2 tiles"
+
+#### Talk To NPC
+
+- **NPC ID**: Numeric ID or string identifier for the NPC (text input)
+- **Map ID**: Which map the NPC is on (text input)
+- Example: NPC `innkeeper`, Map `5` = "Talk to NPC innkeeper on Map 5"
+
+#### Deliver Item
+
+- **Item ID**: ID of item to deliver (text input)
+- **NPC ID**: Who receives the item (text input)
+- **Quantity**: How many to deliver (text input)
+- Example: Item `100`, NPC `sage`, Quantity `1` = "Deliver 1 of Item 100 to NPC sage"
+
+#### Escort NPC
+
+- **NPC ID**: Who to escort (text input)
+- **Map ID**: Destination map (text input)
+- **Destination X**: Target X coordinate (text input)
+- **Destination Y**: Target Y coordinate (text input)
+- Example: NPC `princess`, Map `8`, X `50`, Y `40` = "Escort NPC princess to (50, 40) on Map 8"
+
+#### Custom Flag
+
+- **Flag Name**: Name of the custom game flag (text input)
+- **Required Value**: True or false (checkbox)
+- Example: Flag `dragon_defeated`, Value `true` = "Custom flag dragon_defeated must be true"
+
+**Note**: All fields are text inputs (strings). The quest system will parse them when loading quests. Enter numeric values as text (e.g., "42" not 42).
 
 ### Setting Quest Giver
 
@@ -90,24 +145,17 @@ Every quest should have someone to give it out:
    - **Position X, Y**: Where on that map to find them
 3. Save the quest
 
-### Editing a Quest
-
-1. **Select the quest** from the list
-2. Click **✏️ Edit** button
-3. Modify any fields
-4. Click **✅ Save**
-
-To edit stages and objectives, use the **✏️** button next to each item in the list.
-
 ### Deleting a Quest
 
 1. **Select the quest** from the list
-2. Click **🗑️** button next to the quest name
-3. Quest is removed immediately
+2. Right-click and select **Delete** from context menu, or
+3. Click **🗑️** button next to the quest name
+4. Quest is removed immediately
 
 ### Searching Quests
 
 Use the search box at the top of the quest list to filter by:
+
 - Quest name (case-insensitive)
 - Quest ID
 - Any part of the name
@@ -117,12 +165,30 @@ Example: Type "dragon" to find all dragon-related quests
 ### Quest Validation
 
 The quest editor automatically checks:
+
 - ✅ Quest has a name
 - ✅ Quest has at least one stage
 - ✅ Each stage has at least one objective
 - ✅ All prerequisite quests exist (if specified)
 
 Fix any errors shown in the validation panel before saving.
+
+### Phase 7.1 UI Workflow Summary
+
+Here's the typical editing workflow with the new interactive controls:
+
+1. **Navigate to Quests tab** → See list of all quests
+2. **Select a quest** → Quest details appear
+3. **Expand quest stages** → Click collapsible headers
+4. **Edit a stage**:
+   - Click **✏️** → Modal opens
+   - Modify fields → Click **✅ Save**
+5. **Edit an objective**:
+   - Click **✏️** on objective → Modal opens
+   - Change type if needed → Form updates
+   - Fill fields → Click **✅ Save**
+6. **Delete items** → Click **🗑️** (immediate)
+7. **Save campaign** → File → Save (or Ctrl+S)
 
 ## Dialogue Editor
 
@@ -185,33 +251,39 @@ Node 3: "This is our fair town..."
 └─ Choice A: "Go back" → Node 1
 ```
 
-### Editing Dialogue
+### Editing Dialogue (Phase 7.7 Coming Soon)
+
+**Note**: Dialogue node and choice editing with modal dialogs is planned for Phase 7.7. The backend methods exist; UI integration is in progress.
+
+Current workflow:
 
 1. **Select the dialogue** from the list
 2. Click **✏️ Edit** to modify tree metadata
-3. To edit nodes, select the node and click **✏️**
-4. To edit choices, select the node and click **✏️** on the choice
-5. Click **✅ Save**
+3. To edit nodes, select the node and use the form editor
+4. Click **✅ Save**
 
 ### Deleting Dialogue Elements
 
 1. **Select the dialogue** to delete the entire tree
 2. Click **🗑️** button
-3. To delete nodes: Select node and click **🗑️**
+3. To delete nodes: Select node and click **🗑️** (root node protected)
 4. To delete choices: Select node, then click **🗑️** on the choice
 
 ### Dialogue Validation
 
 The editor checks:
+
 - ✅ Dialogue has a name
 - ✅ Dialogue has at least one node
 - ✅ Root node (Node 1) exists
 - ✅ All choices point to valid nodes
 - ✅ Associated quest exists (if specified)
+- ✅ No unreachable nodes (orphaned content detection)
 
 ### Searching Dialogues
 
 Use the search box to filter by:
+
 - Dialogue name (case-insensitive)
 - Dialogue ID
 - Speaker name
@@ -225,10 +297,12 @@ Example: Type "merchant" to find all merchant dialogues
 To have an NPC give out a quest through dialogue:
 
 1. **Create a quest** with the NPC as quest giver
+
    - Set Quest Giver NPC name
    - Set Quest Giver Map and Position
 
 2. **Create a dialogue** for that NPC
+
    - Set Speaker Name to match NPC name
    - Optionally set Associated Quest
 
@@ -239,12 +313,14 @@ To have an NPC give out a quest through dialogue:
 ### Common Patterns
 
 **Simple Quest Giver Dialogue:**
+
 ```
 Node 1: "I need your help!"
 └─ Choice: "I'll do it" → Node 2 (dialogue ends, quest starts)
 ```
 
 **Merchant with Multiple Options:**
+
 ```
 Node 1: "Welcome! What can I do for you?"
 ├─ Choice A: "Buy" → Node 2 (shop menu)
@@ -253,6 +329,7 @@ Node 1: "Welcome! What can I do for you?"
 ```
 
 **Conditional Dialogue (Phase 13):**
+
 ```
 Node 1: "Have you defeated the dragon?"
 ├─ If quest completed: "Well done!" → Node 2
@@ -268,10 +345,10 @@ my_campaign/
 ├── campaign.ron           # Campaign metadata
 ├── quests.ron             # All quests
 ├── dialogues.ron          # All dialogue trees
-├── items.ron              # Items (from Phase 10)
+├── items.ron              # Items
 ├── spells.ron             # Spells
 ├── monsters.ron           # Monsters
-└── maps/                   # Map files (from Phase 11)
+└── maps/                   # Map files
 ```
 
 ## Tips & Best Practices
@@ -284,6 +361,7 @@ my_campaign/
 4. **NPCs**: Always assign a quest giver location
 5. **Chains**: Use prerequisite quests to create quest chains
 6. **Variety**: Mix objective types (not all "kill X")
+7. **Test Early**: Use the edit features to quickly iterate on objectives
 
 ### Dialogue Design
 
@@ -294,49 +372,107 @@ my_campaign/
 5. **Clarity**: Make target of each choice obvious
 6. **Personality**: Give each NPC distinct speech patterns
 
+### Using Phase 7.1 Features Effectively
+
+1. **Iterate Quickly**: Use the edit modal to rapidly test different objective types
+2. **Convert Types**: Don't delete and recreate - just edit and change the type
+3. **Descriptive Names**: Stage names show in collapsed view, make them clear
+4. **Save Often**: Changes persist only when you save the campaign file
+5. **Check Validation**: Expand the validation panel to catch issues early
+
 ### Validation
 
 1. **Test Chains**: Verify quest prerequisites exist
 2. **Check Targets**: Ensure dialogue choices lead to valid nodes
 3. **Verify NPCs**: Confirm quest givers are on correct maps
 4. **Consistency**: Use matching speaker names throughout
+5. **Empty Stages**: Use orphaned content detection to find stages with no objectives
 
 ## Common Issues & Solutions
 
-### "Invalid Quest ID" Error
+### Phase 7.1 Specific Issues
+
+**Modal Dialog Won't Close**
+
+- **Cause**: Clicked outside the modal or UI glitch
+- **Fix**: Click **❌ Cancel** button explicitly to dismiss
+
+**Changes Not Showing in List**
+
+- **Cause**: UI hasn't refreshed after save
+- **Fix**: Click away and back to the quest to refresh
+
+**Objective Form Fields Not Updating**
+
+- **Cause**: Type selector may need re-selection
+- **Fix**: Select a different type, then select back to desired type
+
+**Lost Changes After Cancel**
+
+- **Cause**: Clicked Cancel instead of Save
+- **Fix**: This is expected behavior - re-edit the item
+
+### General Issues
+
+**"Invalid Quest ID" Error**
+
 - **Cause**: Prerequisite quest doesn't exist
 - **Fix**: Create the prerequisite quest first, then reference it
 
-### "Target Node Does Not Exist" Error
+**"Target Node Does Not Exist" Error**
+
 - **Cause**: Choice points to non-existent node
 - **Fix**: Check node ID spelling, or create the target node
 
-### Orphaned Nodes
-- **Cause**: Nodes with no incoming choices
-- **Fix**: Add a choice from another node that targets it
+**Orphaned Objectives**
 
-### Dialogue Won't Start
-- **Cause**: Root node (Node 1) is missing
-- **Fix**: Add a new node with ID 1, or set it as root
+- **Cause**: Stages with no objectives (empty)
+- **Fix**: Use the orphaned content detection feature (Phase 7.5) to find them, then add objectives or delete the stage
 
-### Quest Not Progressing
+**Quest Not Progressing**
+
 - **Cause**: Objective parameters don't match game data
 - **Fix**: Verify monster/item/map IDs exist in respective databases
+
+## Testing Your Quests
+
+### Manual Testing Workflow
+
+1. **Create Quest** → Add stages → Add objectives
+2. **Edit Multiple Times** → Test the edit/save cycle works
+3. **Save Campaign** → File → Save
+4. **Reload Campaign** → File → Open → Select same campaign.ron
+5. **Verify Persistence** → Check all edits persisted correctly
+
+### What to Test (Phase 7.1)
+
+- [ ] Edit a stage → changes persist
+- [ ] Delete a stage → removed correctly
+- [ ] Edit an objective → changes persist
+- [ ] Change objective type → form updates and saves
+- [ ] Delete an objective → removed correctly
+- [ ] Add objective → appears in list
+- [ ] Modal Cancel → discards changes
+- [ ] Save campaign → changes written to disk
+- [ ] Reload campaign → changes still there
 
 ## Advanced Features (Phase 13+)
 
 ### Quest Actions
+
 - Start quests from dialogue
 - Complete quest stages
 - Give quest rewards
 
 ### Dialogue Conditions
+
 - Check if player has quest
 - Check player inventory
 - Check player level
 - Check custom flags
 
 ### Dialogue Actions
+
 - Give/take items
 - Give/take gold
 - Set story flags
@@ -347,11 +483,32 @@ my_campaign/
 1. **Save Campaign**: All changes saved to `quests.ron` and `dialogues.ron`
 2. **Test in Game**: (Phase 14) Load campaign in game and test quest flow
 3. **Validate**: Campaign Builder validates references before saving
+4. **Test Play**: (Coming soon) Test quests directly from Campaign Builder
 
 ## Next Steps
 
 1. Create quest chains by linking prerequisites
 2. Design branching dialogues with multiple endings
 3. Set up quest-dialogue integration for dynamic storytelling
-4. (Phase 13) Test quests in-game with test-play feature
-5. (Phase 15) Use node-graph visualization for complex dialogues
+4. Use Phase 7.1 editing features to rapidly iterate on quest designs
+5. (Phase 7.7) Use dialogue node editing with similar modal workflow
+6. (Phase 13) Test quests in-game with test-play feature
+7. (Phase 15) Use node-graph visualization for complex dialogues
+
+## Changelog
+
+### Phase 7.1 (2025-01-25)
+
+- ✅ Added interactive stage editing with modal dialogs
+- ✅ Added interactive objective editing with dynamic forms
+- ✅ Added inline edit (✏️) and delete (🗑️) buttons
+- ✅ Objective type selector with form field adaptation
+- ✅ Immediate delete operations for stages and objectives
+
+### Phase 7 Backend (2025-01-25)
+
+- ✅ Quest stage CRUD operations (edit, save, delete)
+- ✅ Quest objective CRUD operations (edit, save, delete)
+- ✅ Orphaned content detection (stages with no objectives)
+
+For more details, see `docs/explanation/implementations.md` Phase 7 and 7.1 sections.
