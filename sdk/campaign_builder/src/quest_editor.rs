@@ -774,9 +774,11 @@ mod tests {
 
     #[test]
     fn test_quest_buffer_levels() {
-        let mut buffer = QuestEditBuffer::default();
-        buffer.min_level = "5".to_string();
-        buffer.max_level = "15".to_string();
+        let mut buffer = QuestEditBuffer {
+            min_level: "5".to_string(),
+            max_level: "15".to_string(),
+            ..Default::default()
+        };
 
         assert_eq!(buffer.min_level.parse::<u8>().unwrap(), 5);
         assert_eq!(buffer.max_level.parse::<u8>().unwrap(), 15);
