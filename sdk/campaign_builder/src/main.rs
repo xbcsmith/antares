@@ -4561,22 +4561,35 @@ impl CampaignBuilderApp {
 
         let actual_tile_size = tile_size * scale;
 
-        // Draw a simplified view of the map
+        // Draw a detailed view of the map with terrain colors
         for y in 0..map.height.min(20) {
             for x in 0..map.width.min(30) {
                 let pos = antares::domain::types::Position::new(x as i32, y as i32);
                 if let Some(tile) = map.get_tile(pos) {
-                    let has_event = map.events.contains_key(&pos);
-                    let has_npc = map.npcs.iter().any(|npc| npc.position == pos);
+                    use antares::domain::world::TerrainType;
 
-                    let color = if has_event {
-                        egui::Color32::RED
-                    } else if has_npc {
-                        egui::Color32::YELLOW
-                    } else if tile.blocked {
-                        egui::Color32::DARK_GRAY
+                    // Base color from terrain type
+                    let base_color = match tile.terrain {
+                        TerrainType::Ground => egui::Color32::from_rgb(160, 140, 120),
+                        TerrainType::Grass => egui::Color32::from_rgb(100, 180, 100),
+                        TerrainType::Water => egui::Color32::from_rgb(80, 120, 200),
+                        TerrainType::Lava => egui::Color32::from_rgb(220, 60, 30),
+                        TerrainType::Swamp => egui::Color32::from_rgb(90, 100, 70),
+                        TerrainType::Stone => egui::Color32::from_rgb(120, 120, 130),
+                        TerrainType::Dirt => egui::Color32::from_rgb(140, 110, 80),
+                        TerrainType::Forest => egui::Color32::from_rgb(60, 120, 60),
+                        TerrainType::Mountain => egui::Color32::from_rgb(100, 100, 110),
+                    };
+
+                    // Darken if blocked by wall
+                    let color = if tile.blocked {
+                        egui::Color32::from_rgb(
+                            base_color.r() / 2,
+                            base_color.g() / 2,
+                            base_color.b() / 2,
+                        )
                     } else {
-                        egui::Color32::LIGHT_GRAY
+                        base_color
                     };
 
                     let tile_rect = egui::Rect::from_min_size(
@@ -4589,9 +4602,45 @@ impl CampaignBuilderApp {
                     );
 
                     painter.rect_filled(tile_rect, 0.0, color);
+
+                    // Draw event marker
+                    if map.events.contains_key(&pos) {
+                        let center = tile_rect.center();
+                        painter.circle_filled(
+                            center,
+                            actual_tile_size * 0.3,
+                            egui::Color32::from_rgb(255, 200, 0),
+                        );
+                    }
+
+                    // Draw NPC marker
+                    if map.npcs.iter().any(|npc| npc.position == pos) {
+                        let center = tile_rect.center();
+                        painter.circle_filled(
+                            center,
+                            actual_tile_size * 0.25,
+                            egui::Color32::from_rgb(255, 100, 255),
+                        );
+                    }
+
+                    // Draw grid lines
+                    painter.rect_stroke(
+                        tile_rect,
+                        0.0,
+                        egui::Stroke::new(0.5, egui::Color32::from_gray(100)),
+                    );
                 }
             }
         }
+
+        // Draw legend
+        ui.add_space(5.0);
+        ui.horizontal(|ui| {
+            ui.label("Legend:");
+            ui.colored_label(egui::Color32::from_rgb(255, 200, 0), "● Event");
+            ui.colored_label(egui::Color32::from_rgb(255, 100, 255), "● NPC");
+            ui.colored_label(egui::Color32::from_rgb(100, 100, 110), "■ Blocked");
+        });
     }
 
     /// Show quests editor (Phase 4A: Full Quest Editor Integration)
