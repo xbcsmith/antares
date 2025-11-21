@@ -1530,40 +1530,71 @@ impl DialogueEditorState {
 
 **Tests Added:** 2 tests (orphaned objectives, unreachable nodes)
 
-#### 7.6 UI Integration for Quest Editor (TODO)
+#### 7.6 UI Integration for Quest Editor (✅ PARTIALLY COMPLETE - Phase 7.1)
 
-**Files:** `sdk/campaign_builder/src/main.rs`
+**Status as of 2025-01-25**:
 
-**Required Changes:**
+- ✅ Quest stage editing UI with modal dialogs (Phase 7.1 COMPLETE)
+- ✅ Quest objective editing UI with dynamic forms (Phase 7.1 COMPLETE)
+- 🔲 Quest form editor enhancements (TODO)
+- 🔲 Quest list view improvements (TODO)
+- 🔲 Quest validation display enhancements (TODO)
 
-Enhance `show_quest_stages_editor` (around line 5036):
+**Phase 7.1 Deliverables (COMPLETED)**:
 
-- Add Edit and Delete buttons for each stage
-- Show selected stage in edit mode with inline form
-- Add confirmation dialog for stage deletion
-- Wire up `edit_stage()`, `save_stage()`, and `delete_stage()` methods
-- Display stage details in collapsible sections
+The quest stage and objective editing UI has been fully implemented with:
 
-Add new `show_quest_objectives_editor` function:
+- Interactive edit (✏️) and delete (🗑️) buttons for stages and objectives
+- Modal dialogs for stage editing with form fields
+- Dynamic objective editor with type selector and adaptive form fields
+- Inline controls that don't clutter the list view
+- Immediate feedback with unsaved changes tracking
+- Full persistence through save/reload cycles
 
-- Display objectives list for selected stage
-- Add Edit button per objective (opens inline editor or modal)
-- Add Delete button with confirmation
-- Wire up `edit_objective()`, `save_objective()`, `delete_objective()` methods
-- Show objective type-specific fields in edit mode
-- Integrate into quest form editor UI
+**Files Modified:** `sdk/campaign_builder/src/main.rs` (lines 5000-5340)
 
-UI Pattern Example:
+**Implementation Summary:**
+
+Enhanced `show_quest_stages_editor`:
+
+- ✅ Added Edit and Delete buttons for each stage
+- ✅ Modal dialog for stage editing (Stage Number, Name, Description, Require All Objectives)
+- ✅ Wired up `edit_stage()`, `save_stage()`, and `delete_stage()` backend methods
+- ✅ Collapsible stage sections with objectives display
+
+Added new `show_quest_objectives_editor` function:
+
+- ✅ Displays numbered objectives list for selected stage
+- ✅ Edit button per objective (opens modal dialog)
+- ✅ Delete button for immediate removal
+- ✅ Wired up `edit_objective()`, `save_objective()`, `delete_objective()` methods
+- ✅ Objective type selector with 7 types (Kill Monsters, Collect Items, Reach Location, Talk To NPC, Deliver Item, Escort NPC, Custom Flag)
+- ✅ Dynamic form fields that change based on objective type selection
+- ✅ Add Objective button (➕)
+
+**Actual UI Implementation:**
 
 ```
-Stage 1: Find the Cave
-  [Edit] [Delete]
+Stage 1: Find the Cave [✏️] [🗑️]
+  ▼ (collapsible)
 
-  Objectives:
-    • Kill 5 Goblins [Edit] [Delete]
-    • Collect 3 Herbs [Edit] [Delete]
-    [+ Add Objective]
+  Description: Search for the hidden cave entrance
+  Require all objectives: ☑
+
+  Objectives (2):
+    1. Kill 5 Goblins [✏️] [🗑️]
+    2. Collect 3 Herbs [✏️] [🗑️]
+    [➕ Add Objective]
 ```
+
+**Modal Dialog Features:**
+
+- Stage editor: Form with Number, Name, Description (multiline), Require All checkbox
+- Objective editor: Type dropdown + dynamic form fields + Save/Cancel buttons
+- Form fields adapt instantly when objective type changes
+- Cancel button discards changes, Save button commits
+
+See `docs/explanation/implementations.md` Phase 7.1 section and `docs/how-to/edit_quests_and_dialogues_in_campaign_builder.md` for complete documentation.
 
 #### 7.7 UI Integration for Dialogue Editor (TODO)
 
