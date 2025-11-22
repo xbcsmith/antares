@@ -13,8 +13,8 @@ including manual test cases, automated test setup, and validation procedures.
 
 ### Bug 1: Items and Monsters Not Saved to Campaign
 
-**Root Cause**: Save operations call individual `save_items()` and `save_monsters()` 
-functions, but these are NOT automatically called when the campaign is saved via 
+**Root Cause**: Save operations call individual `save_items()` and `save_monsters()`
+functions, but these are NOT automatically called when the campaign is saved via
 `do_save_campaign()`. The campaign metadata is saved, but the actual data files are not.
 
 **Location**: `sdk/campaign_builder/src/main.rs:1105-1128`
@@ -76,15 +76,15 @@ fn do_save_campaign(&mut self) -> Result<(), CampaignError> {
 
 ### Bug 2: ID Clashes in Items and Monsters Tabs UI
 
-**Root Cause**: egui requires unique IDs for interactive widgets. When using 
-`ComboBox::from_label()` with the same label text in multiple places, egui 
+**Root Cause**: egui requires unique IDs for interactive widgets. When using
+`ComboBox::from_label()` with the same label text in multiple places, egui
 generates ID collisions.
 
-**Location**: 
+**Location**:
 - `sdk/campaign_builder/src/main.rs:2245-2288` (Items editor)
 - Similar pattern in Monsters editor at lines 3529-3572
 
-**Fix Required**: Use `ComboBox::from_id_salt()` with unique salt strings instead 
+**Fix Required**: Use `ComboBox::from_id_salt()` with unique salt strings instead
 of `from_label()`.
 
 ```rust
@@ -123,15 +123,15 @@ egui::ComboBox::from_id_salt("items_type_filter_combo")
 
 ### Bug 3: Map Tools Selector - Terrain and Wall Reset Each Other
 
-**Root Cause**: The `current_tool` field in `MapEditorState` uses an enum that can 
-only hold one tool at a time. When selecting a terrain from the Terrain combo box, 
-it sets `current_tool = EditorTool::PaintTerrain(terrain)`. When selecting a wall 
+**Root Cause**: The `current_tool` field in `MapEditorState` uses an enum that can
+only hold one tool at a time. When selecting a terrain from the Terrain combo box,
+it sets `current_tool = EditorTool::PaintTerrain(terrain)`. When selecting a wall
 type, it sets `current_tool = EditorTool::PaintWall(wall)`, overwriting the terrain.
 
 **Location**: `sdk/campaign_builder/src/map_editor.rs:978-1106`
 
-**Design Issue**: The current design treats "Paint Terrain" and "Paint Wall" as 
-mutually exclusive tools, but users expect to select BOTH a terrain type AND a 
+**Design Issue**: The current design treats "Paint Terrain" and "Paint Wall" as
+mutually exclusive tools, but users expect to select BOTH a terrain type AND a
 wall type, then paint tiles with that combination.
 
 **Fix Options**:
@@ -176,11 +176,11 @@ Keep current design but make it clear that Terrain and Wall are separate tools:
 // In show_tool_palette:
 ui.horizontal(|ui| {
     ui.label("Paint Mode:");
-    
+
     if ui.radio_value(&mut paint_mode, PaintMode::Terrain, "🎨 Terrain").clicked() {
         // Show terrain selector below
     }
-    
+
     if ui.radio_value(&mut paint_mode, PaintMode::Wall, "🧱 Wall").clicked() {
         // Show wall selector below
     }
@@ -193,7 +193,7 @@ match paint_mode {
 }
 ```
 
-**Recommended**: Use Option A, as it matches user expectations (select both terrain 
+**Recommended**: Use Option A, as it matches user expectations (select both terrain
 and wall, then paint).
 
 **Test Case After Fix**:
@@ -641,29 +641,29 @@ use std::path::PathBuf;
 fn test_campaign_save_load_roundtrip() {
     let temp_dir = tempfile::tempdir().unwrap();
     let campaign_path = temp_dir.path().join("test_campaign.ron");
-    
+
     // Create campaign
     let mut app = CampaignBuilderApp::default();
     app.campaign.name = "Test Campaign".to_string();
     app.campaign_path = Some(campaign_path.clone());
     app.campaign_dir = Some(temp_dir.path().to_path_buf());
-    
+
     // Add test data
     app.items.push(/* test item */);
     app.monsters.push(/* test monster */);
-    
+
     // Save campaign
     app.do_save_campaign().expect("Save should succeed");
-    
+
     // Verify files exist
     assert!(campaign_path.exists());
     assert!(temp_dir.path().join("items.ron").exists());
     assert!(temp_dir.path().join("monsters.ron").exists());
-    
+
     // Load campaign
     let mut app2 = CampaignBuilderApp::default();
     app2.do_open_campaign(&campaign_path).expect("Load should succeed");
-    
+
     // Verify data matches
     assert_eq!(app2.campaign.name, "Test Campaign");
     assert_eq!(app2.items.len(), 1);
@@ -799,19 +799,19 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Run unit tests
         run: cd sdk/campaign_builder && cargo test --lib
-      
+
       - name: Run integration tests
         run: cd sdk/campaign_builder && cargo test --test '*'
-      
+
       - name: Check formatting
         run: cd sdk/campaign_builder && cargo fmt --all -- --check
-      
+
       - name: Run clippy
         run: cd sdk/campaign_builder && cargo clippy --all-targets -- -D warnings
-      
+
       - name: Build release
         run: cd sdk/campaign_builder && cargo build --release
 ```
@@ -870,7 +870,7 @@ fn generate_test_campaign(
             // ... rest of fields
         })
         .collect();
-    
+
     // Generate monsters
     let monsters: Vec<Monster> = (0..num_monsters)
         .map(|i| Monster {
@@ -879,10 +879,10 @@ fn generate_test_campaign(
             // ... rest of fields
         })
         .collect();
-    
+
     // Write to RON files
     // ...
-    
+
     Ok(())
 }
 ```
@@ -951,8 +951,8 @@ fn generate_test_campaign(
 This testing guide provides comprehensive coverage for Campaign Builder UI validation.
 The three critical bugs MUST be fixed before proceeding with Phase 3B implementation.
 
-After fixes are verified, follow the campaign_builder_completion_plan.md for 
+After fixes are verified, follow the campaign_builder_completion_plan.md for
 continued development phases.
 
-**Key Takeaway**: Test early, test often. Manual testing catches UI issues that 
+**Key Takeaway**: Test early, test often. Manual testing catches UI issues that
 unit tests miss. Integration tests catch persistence bugs.

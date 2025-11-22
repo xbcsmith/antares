@@ -1,7 +1,7 @@
 # Systematic Bug Fixing Plan - Test-Driven Approach
 
-**Date**: 2025-01-25  
-**Status**: IN PROGRESS  
+**Date**: 2025-01-25
+**Status**: IN PROGRESS
 **Strategy**: Test First, Fix Second, Verify Third
 
 ---
@@ -143,7 +143,7 @@ grep -rn "item_type_filter" sdk/campaign_builder/src/
 # - String literals in tests (OK)
 ```
 
-**Hypothesis**: 
+**Hypothesis**:
 - Either multiple widgets use same ID (BUG)
 - Or test is counting false positives (TEST BUG)
 
@@ -266,13 +266,13 @@ fn test_asset_manager_scans_directories() {
 #[test]
 fn test_unique_ids_in_items_editor_source_only() {
     let src = fs::read_to_string("src/main.rs").unwrap();
-    
+
     // Only search in items editor function
     let items_fn = extract_function(&src, "show_items_editor");
-    
+
     // Count actual from_id_salt calls
     let ids = extract_widget_ids(&items_fn);
-    
+
     // Verify no duplicates
     assert_no_duplicates(&ids);
 }
@@ -281,25 +281,25 @@ fn test_unique_ids_in_items_editor_source_only() {
 fn test_save_load_roundtrip_preserves_items() {
     // Create temp campaign
     let temp_dir = tempfile::tempdir().unwrap();
-    
+
     // Create app instance
     let mut app = CampaignBuilderApp::default();
     app.campaign_dir = Some(temp_dir.path().to_path_buf());
-    
+
     // Add test item
     let test_item = create_test_item();
     app.items.push(test_item.clone());
-    
+
     // Save campaign
     app.do_save_campaign().unwrap();
-    
+
     // Create NEW app instance (simulates reopen)
     let mut app2 = CampaignBuilderApp::default();
     app2.campaign_dir = Some(temp_dir.path().to_path_buf());
-    
+
     // Load campaign
     app2.load_items();
-    
+
     // Verify item persists
     assert_eq!(app2.items.len(), 1);
     assert_eq!(app2.items[0].name, test_item.name);
@@ -450,6 +450,6 @@ fn test_save_load_roundtrip_preserves_items() {
 
 ---
 
-**Author**: AI Agent  
-**Date**: 2025-01-25  
+**Author**: AI Agent
+**Date**: 2025-01-25
 **Status**: PLAN - Ready for Execution

@@ -43,10 +43,10 @@ This guide explains what can be automated in Campaign Builder testing and what r
 fn test_campaign_lifecycle_save() {
     // Create campaign data
     let campaign_ron = "...";
-    
+
     // Write files (simulates save operation)
     fs::write("campaign.ron", campaign_ron);
-    
+
     // Verify files exist
     assert!(Path::new("campaign.ron").exists());
 }
@@ -402,9 +402,9 @@ When you can convert a manual test to automated:
 fn test_add_item_updates_state() {
     let mut app = CampaignBuilderApp::default();
     let initial_count = app.items.len();
-    
+
     app.add_new_item("Test Item");
-    
+
     assert_eq!(app.items.len(), initial_count + 1);
     assert_eq!(app.items.last().unwrap().name, "Test Item");
 }

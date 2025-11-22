@@ -45,11 +45,22 @@ use antares::domain::types::{MapId, Position};
 use antares::domain::world::{Map, MapEvent, Npc, TerrainType, Tile, WallType};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
+use std::fs;
+use std::io;
 
 /// Map builder context
 struct MapBuilder {
     map: Option<Map>,
     auto_show: bool,
+}
+
+impl MapBuilder {
+    /// Creates a new map builder
+    fn new() -> Self {
+        Self {
+            map: None,
+            auto_show: true,
+        }
     }
 
     /// Creates a new map with the specified dimensions
@@ -69,6 +80,25 @@ struct MapBuilder {
         if self.auto_show {
             self.show_map();
         }
+    }
+
+    /// Loads a map from a RON file
+    fn load_map(&mut self, path: &str) -> io::Result<()> {
+        let contents = fs::read_to_string(path)?;
+        let map: Map = ron::from_str(&contents).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("RON parse error: {}", e),
+            )
+        })?;
+
+        self.map = Some(map);
+        println!("✅ Loaded map from {}", path);
+
+        if self.auto_show {
+            self.show_map();
+        }
+
         Ok(())
     }
 
@@ -92,6 +122,47 @@ struct MapBuilder {
             if self.auto_show {
                 self.show_map();
             }
+        }
+    }
+
+    /// Fills a rectangular region with the specified terrain and wall
+    fn fill_tiles(
+        &mut self,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        terrain: TerrainType,
+        wall: WallType,
+    ) {
+        let Some(ref mut map) = self.map else {
+            println!("❌ Error: No map loaded. Use 'new' or 'load' first.");
+            return;
+        };
+
+        let min_x = x1.min(x2);
+        let max_x = x1.max(x2);
+        let min_y = y1.min(y2);
+        let max_y = y1.max(y2);
+
+        let mut count = 0;
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                let pos = Position::new(x, y);
+                if map.is_valid_position(pos) {
+                    if let Some(tile) = map.get_tile_mut(pos) {
+                        *tile = Tile::new(terrain, wall);
+                        count += 1;
+                    }
+                }
+            }
+        }
+
+        println!("✅ Filled {} tiles with {:?}/{:?}", count, terrain, wall);
+
+        if self.auto_show {
+            self.show_map();
+        }
     }
 
     /// Adds an event at the specified position
@@ -109,6 +180,34 @@ struct MapBuilder {
 
         map.add_event(pos, event);
         println!("✅ Added event at ({}, {})", x, y);
+
+        if self.auto_show {
+            self.show_map();
+        }
+    }
+
+    /// Adds an NPC at the specified position
+    fn add_npc(&mut self, id: u16, x: i32, y: i32, name: String, dialogue: String) {
+        let Some(ref mut map) = self.map else {
+            println!("❌ Error: No map loaded. Use 'new' or 'load' first.");
+            return;
+        };
+
+        let pos = Position::new(x, y);
+        if !map.is_valid_position(pos) {
+            println!("❌ Error: Position ({}, {}) is out of bounds", x, y);
+            return;
+        }
+
+        let npc = Npc {
+            id,
+            name: name.clone(),
+            position: pos,
+            dialogue,
+        };
+
+        map.npcs.push(npc);
+        println!("✅ Added NPC '{}' at ({}, {})", name, x, y);
 
         if self.auto_show {
             self.show_map();
@@ -176,7 +275,269 @@ struct MapBuilder {
         println!("X");
         println!("I");
         println!("S");
+        println!();
+    }
 
+    /// Shows map information
+    fn show_info(&self) {
+        let Some(ref map) = self.map else {
+            println!("❌ Error: No map loaded. Use 'new' or 'load' first.");
+            return;
+        };
+
+        println!("\n╔═══ Map Information ═══╗");
+        println!("ID: {}", map.id);
+        println!("Dimensions: {}x{}", map.width, map.height);
+        println!("Total tiles: {}", map.width * map.height);
+        println!("Events: {}", map.events.len());
+        println!("NPCs: {}", map.npcs.len());
+        println!();
+    }
+
+    /// Saves the map to a RON file
+    fn save_map(&self, path: &str) -> io::Result<()> {
+        let Some(ref map) = self.map else {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "No map loaded"));
+        };
+
+        let ron_string = ron::ser::to_string_pretty(map, ron::ser::PrettyConfig::default())
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("RON error: {}", e)))?;
+
+        fs::write(path, ron_string)?;
+        println!("✅ Saved map to {}", path);
+
+        Ok(())
+    }
+
+    /// Processes a command and returns true if the program should continue
+    fn process_command(&mut self, line: &str) -> bool {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.is_empty() {
+            return true;
+        }
+
+        match parts[0] {
+            "new" => {
+                if parts.len() != 4 {
+                    println!("Usage: new <id> <width> <height>");
+                    return true;
+                }
+
+                let id: MapId = match parts[1].parse() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        println!("❌ Error: Invalid map ID (must be a number)");
+                        return true;
+                    }
+                };
+
+                let width: u32 = match parts[2].parse() {
+                    Ok(w) => w,
+                    Err(_) => {
+                        println!("❌ Error: Invalid width (must be a number)");
+                        return true;
+                    }
+                };
+
+                let height: u32 = match parts[3].parse() {
+                    Ok(h) => h,
+                    Err(_) => {
+                        println!("❌ Error: Invalid height (must be a number)");
+                        return true;
+                    }
+                };
+
+                self.create_map(id, width, height);
+            }
+            "load" => {
+                if parts.len() != 2 {
+                    println!("Usage: load <path>");
+                    return true;
+                }
+                if let Err(e) = self.load_map(parts[1]) {
+                    println!("❌ Error: {}", e);
+                }
+            }
+            "set" => {
+                if parts.len() < 4 || parts.len() > 5 {
+                    println!("Usage: set <x> <y> <terrain> [wall]");
+                    return true;
+                }
+
+                let x: i32 = match parts[1].parse() {
+                    Ok(x) => x,
+                    Err(_) => {
+                        println!("❌ Error: Invalid X coordinate");
+                        return true;
+                    }
+                };
+
+                let y: i32 = match parts[2].parse() {
+                    Ok(y) => y,
+                    Err(_) => {
+                        println!("❌ Error: Invalid Y coordinate");
+                        return true;
+                    }
+                };
+
+                let terrain = parse_terrain(parts[3]);
+                let wall = if parts.len() == 5 {
+                    parse_wall(parts[4])
+                } else {
+                    WallType::None
+                };
+
+                self.set_tile(x, y, terrain, wall);
+            }
+            "fill" => {
+                if parts.len() < 6 || parts.len() > 7 {
+                    println!("Usage: fill <x1> <y1> <x2> <y2> <terrain> [wall]");
+                    return true;
+                }
+
+                let x1: i32 = match parts[1].parse() {
+                    Ok(x) => x,
+                    Err(_) => {
+                        println!("❌ Error: Invalid X1 coordinate");
+                        return true;
+                    }
+                };
+
+                let y1: i32 = match parts[2].parse() {
+                    Ok(y) => y,
+                    Err(_) => {
+                        println!("❌ Error: Invalid Y1 coordinate");
+                        return true;
+                    }
+                };
+
+                let x2: i32 = match parts[3].parse() {
+                    Ok(x) => x,
+                    Err(_) => {
+                        println!("❌ Error: Invalid X2 coordinate");
+                        return true;
+                    }
+                };
+
+                let y2: i32 = match parts[4].parse() {
+                    Ok(y) => y,
+                    Err(_) => {
+                        println!("❌ Error: Invalid Y2 coordinate");
+                        return true;
+                    }
+                };
+
+                let terrain = parse_terrain(parts[5]);
+                let wall = if parts.len() == 7 {
+                    parse_wall(parts[6])
+                } else {
+                    WallType::None
+                };
+
+                self.fill_tiles(x1, y1, x2, y2, terrain, wall);
+            }
+            "event" => {
+                if parts.len() < 4 {
+                    println!("Usage: event <x> <y> <type> <data>");
+                    return true;
+                }
+
+                let x: i32 = match parts[1].parse() {
+                    Ok(x) => x,
+                    Err(_) => {
+                        println!("❌ Error: Invalid X coordinate");
+                        return true;
+                    }
+                };
+
+                let y: i32 = match parts[2].parse() {
+                    Ok(y) => y,
+                    Err(_) => {
+                        println!("❌ Error: Invalid Y coordinate");
+                        return true;
+                    }
+                };
+
+                let event_type = parts[3];
+                let data = parts[4..].join(" ");
+
+                let event = match event_type {
+                    "sign" => MapEvent::Sign { text: data },
+                    "treasure" => MapEvent::Treasure { loot: vec![] },
+                    "encounter" => MapEvent::Encounter {
+                        monster_group: vec![],
+                    },
+                    "trap" => MapEvent::Trap {
+                        damage: 10,
+                        effect: None,
+                    },
+                    _ => {
+                        println!("⚠️  Unknown event type '{}', using sign", event_type);
+                        MapEvent::Sign { text: data }
+                    }
+                };
+
+                self.add_event(x, y, event);
+            }
+            "npc" => {
+                if parts.len() < 6 {
+                    println!("Usage: npc <id> <x> <y> <name> <dialogue>");
+                    return true;
+                }
+
+                let id: u16 = match parts[1].parse() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        println!("❌ Error: Invalid NPC ID (must be a number)");
+                        return true;
+                    }
+                };
+
+                let x: i32 = match parts[2].parse() {
+                    Ok(x) => x,
+                    Err(_) => {
+                        println!("❌ Error: Invalid X coordinate");
+                        return true;
+                    }
+                };
+
+                let y: i32 = match parts[3].parse() {
+                    Ok(y) => y,
+                    Err(_) => {
+                        println!("❌ Error: Invalid Y coordinate");
+                        return true;
+                    }
+                };
+
+                let name = parts[4].to_string();
+                let dialogue = parts[5..].join(" ");
+
+                self.add_npc(id, x, y, name, dialogue);
+            }
+            "show" => {
+                self.show_map();
+            }
+            "auto" => {
+                if parts.len() != 2 {
+                    println!("Usage: auto [on|off]");
+                    println!("Current: {}", if self.auto_show { "ON" } else { "OFF" });
+                    return true;
+                }
+
+                match parts[1] {
+                    "on" => {
+                        self.auto_show = true;
+                        println!("✅ Auto-show enabled");
+                    }
+                    "off" => {
+                        self.auto_show = false;
+                        println!("✅ Auto-show disabled");
+                    }
+                    _ => {
+                        println!("Usage: auto [on|off]");
+                    }
+                }
+            }
             "info" => {
                 self.show_info();
             }
