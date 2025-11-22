@@ -1103,9 +1103,48 @@ impl CampaignBuilderApp {
     }
 
     fn do_save_campaign(&mut self) -> Result<(), CampaignError> {
-        let path = self.campaign_path.as_ref().ok_or(CampaignError::NoPath)?;
+        // Clone path early to avoid borrow checker issues with mutable save methods
+        let path = self.campaign_path.clone().ok_or(CampaignError::NoPath)?;
 
-        // Serialize to RON format with pretty printing
+        // CRITICAL FIX: Save all data files BEFORE saving campaign metadata
+        // This ensures all content is persisted when user clicks "Save Campaign"
+
+        // Track any save failures but continue (partial save is better than no save)
+        let mut save_warnings = Vec::new();
+
+        if let Err(e) = self.save_items() {
+            save_warnings.push(format!("Items: {}", e));
+        }
+
+        if let Err(e) = self.save_spells() {
+            save_warnings.push(format!("Spells: {}", e));
+        }
+
+        if let Err(e) = self.save_monsters() {
+            save_warnings.push(format!("Monsters: {}", e));
+        }
+
+        // Save maps individually (they're saved per-map, not as a collection)
+        // Clone maps to avoid borrow checker issues
+        let maps_to_save = self.maps.clone();
+        for (idx, map) in maps_to_save.iter().enumerate() {
+            if let Err(e) = self.save_map(map) {
+                save_warnings.push(format!("Map {}: {}", idx, e));
+            }
+        }
+
+        if let Err(e) = self.save_quests() {
+            save_warnings.push(format!("Quests: {}", e));
+        }
+
+        if let Some(dir) = &self.campaign_dir {
+            let dialogues_path = dir.join(&self.campaign.dialogue_file);
+            if let Err(e) = self.save_dialogues_to_file(&dialogues_path) {
+                save_warnings.push(format!("Dialogues: {}", e));
+            }
+        }
+
+        // Now save campaign metadata to RON format
         let ron_config = ron::ser::PrettyConfig::new()
             .struct_names(true)
             .enumerate_arrays(false)
@@ -1113,11 +1152,20 @@ impl CampaignBuilderApp {
 
         let ron_string = ron::ser::to_string_pretty(&self.campaign, ron_config)?;
 
-        // Write to file
-        fs::write(path, ron_string)?;
+        // Write campaign metadata file
+        fs::write(&path, ron_string)?;
 
         self.unsaved_changes = false;
-        self.status_message = format!("Campaign saved to: {}", path.display());
+
+        // Update status message based on results
+        if save_warnings.is_empty() {
+            self.status_message = format!("✅ Campaign and all data saved to: {}", path.display());
+        } else {
+            self.status_message = format!(
+                "⚠️ Campaign saved with warnings:\n{}",
+                save_warnings.join("\n")
+            );
+        }
 
         // Update file tree if we have a campaign directory
         if let Some(dir) = self.campaign_dir.clone() {
@@ -1181,6 +1229,20 @@ impl CampaignBuilderApp {
                     self.load_spells();
                     self.load_monsters();
                     self.load_maps();
+
+                    // Load quests and dialogues
+                    if let Err(e) = self.load_quests() {
+                        eprintln!("Warning: Failed to load quests: {}", e);
+                    }
+
+                    if let Some(dir) = &self.campaign_dir {
+                        let dialogue_path = dir.join(&self.campaign.dialogue_file);
+                        if dialogue_path.exists() {
+                            if let Err(e) = self.load_dialogues_from_file(&dialogue_path) {
+                                eprintln!("Warning: Failed to load dialogues: {}", e);
+                            }
+                        }
+                    }
 
                     self.unsaved_changes = false;
                     self.status_message = format!("Opened campaign from: {}", path.display());

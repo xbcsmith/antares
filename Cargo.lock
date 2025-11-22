@@ -512,6 +512,7 @@ dependencies = [
  "rfd",
  "ron",
  "serde",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 

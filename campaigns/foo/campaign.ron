@@ -1,8 +1,8 @@
 CampaignMetadata(
-    id: "101",
+    id: "100",
     name: "Foo",
     version: "1.0.0",
-    author: "Smitty",
+    author: "Brett Smith",
     description: "Foo Campaign",
     engine_version: "0.1.0",
     starting_map: "starter_town",
