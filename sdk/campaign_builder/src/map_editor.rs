@@ -47,10 +47,8 @@ use std::path::PathBuf;
 pub enum EditorTool {
     /// Select and inspect tiles
     Select,
-    /// Paint terrain tiles
-    PaintTerrain(TerrainType),
-    /// Paint walls
-    PaintWall(WallType),
+    /// Paint tiles with selected terrain and wall
+    PaintTile,
     /// Place events
     PlaceEvent,
     /// Place NPCs
@@ -66,11 +64,10 @@ impl EditorTool {
     pub fn name(&self) -> &str {
         match self {
             EditorTool::Select => "Select",
-            EditorTool::PaintTerrain(_) => "Paint Terrain",
-            EditorTool::PaintWall(_) => "Paint Wall",
+            EditorTool::PaintTile => "Paint Tile",
             EditorTool::PlaceEvent => "Place Event",
             EditorTool::PlaceNpc => "Place NPC",
-            EditorTool::Fill => "Fill Region",
+            EditorTool::Fill => "Fill",
             EditorTool::Erase => "Erase",
         }
     }
@@ -78,11 +75,10 @@ impl EditorTool {
     /// Returns the tool icon
     pub fn icon(&self) -> &str {
         match self {
-            EditorTool::Select => "🔍",
-            EditorTool::PaintTerrain(_) => "🎨",
-            EditorTool::PaintWall(_) => "🧱",
-            EditorTool::PlaceEvent => "⚡",
-            EditorTool::PlaceNpc => "👤",
+            EditorTool::Select => "👆",
+            EditorTool::PaintTile => "🖌️",
+            EditorTool::PlaceEvent => "🎯",
+            EditorTool::PlaceNpc => "🧙",
             EditorTool::Fill => "🪣",
             EditorTool::Erase => "🧹",
         }
@@ -228,6 +224,10 @@ pub struct MapEditorState {
     pub current_tool: EditorTool,
     /// Selected position (for inspector)
     pub selected_position: Option<Position>,
+    /// Currently selected terrain type for painting
+    pub selected_terrain: TerrainType,
+    /// Currently selected wall type for painting
+    pub selected_wall: WallType,
     /// Undo/redo stack
     undo_stack: UndoStack,
     /// Has unsaved changes
@@ -263,6 +263,8 @@ impl MapEditorState {
             metadata,
             current_tool: EditorTool::Select,
             selected_position: None,
+            selected_terrain: TerrainType::Ground,
+            selected_wall: WallType::None,
             undo_stack: UndoStack::new(),
             has_changes: false,
             file_path: None,
@@ -298,8 +300,22 @@ impl MapEditorState {
         }
     }
 
-    /// Paints terrain at position
-    pub fn paint_terrain(&mut self, pos: Position, terrain: TerrainType) {
+    /// Paints a tile with the currently selected terrain and wall
+    pub fn paint_tile(&mut self, pos: Position) {
+        if let Some(tile) = self.map.get_tile(pos).cloned() {
+            let mut new_tile = tile;
+            new_tile.terrain = self.selected_terrain;
+            new_tile.wall_type = self.selected_wall;
+            new_tile.blocked = matches!(
+                self.selected_terrain,
+                TerrainType::Mountain | TerrainType::Water
+            ) || matches!(self.selected_wall, WallType::Normal);
+            self.set_tile(pos, new_tile);
+        }
+    }
+
+    /// Paints terrain at position (kept for undo compatibility)
+    fn paint_terrain(&mut self, pos: Position, terrain: TerrainType) {
         if let Some(tile) = self.map.get_tile(pos).cloned() {
             let mut new_tile = tile;
             new_tile.terrain = terrain;
@@ -309,8 +325,8 @@ impl MapEditorState {
         }
     }
 
-    /// Paints wall at position
-    pub fn paint_wall(&mut self, pos: Position, wall: WallType) {
+    /// Paints wall at position (kept for undo compatibility)
+    fn paint_wall(&mut self, pos: Position, wall: WallType) {
         if let Some(tile) = self.map.get_tile(pos).cloned() {
             let mut new_tile = tile;
             new_tile.wall_type = wall;
@@ -859,11 +875,8 @@ impl<'a> Widget for MapGridWidget<'a> {
                     // Apply current tool
                     match self.state.current_tool {
                         EditorTool::Select => {}
-                        EditorTool::PaintTerrain(terrain) => {
-                            self.state.paint_terrain(pos, terrain);
-                        }
-                        EditorTool::PaintWall(wall) => {
-                            self.state.paint_wall(pos, wall);
+                        EditorTool::PaintTile => {
+                            self.state.paint_tile(pos);
                         }
                         EditorTool::Erase => {
                             self.state.erase_tile(pos);
@@ -893,11 +906,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                         EditorTool::Fill => {
                             // Fill tool requires two clicks (start and end)
                             // For simplicity, we'll just paint single tiles for now
-                            if let EditorTool::PaintTerrain(terrain) =
-                                EditorTool::PaintTerrain(TerrainType::Ground)
-                            {
-                                self.state.paint_terrain(pos, terrain);
-                            }
+                            self.state.paint_tile(pos);
                         }
                     }
                 }
@@ -989,59 +998,15 @@ impl<'a> MapEditorWidget<'a> {
                 self.state.current_tool = EditorTool::Select;
             }
 
-            ui.separator();
-
-            // Terrain palette
-            egui::ComboBox::from_label("🎨 Terrain")
-                .selected_text(
-                    if let EditorTool::PaintTerrain(terrain) = self.state.current_tool {
-                        format!("{:?}", terrain)
-                    } else {
-                        "Select".to_string()
-                    },
+            if ui
+                .selectable_label(
+                    matches!(self.state.current_tool, EditorTool::PaintTile),
+                    format!("{} Paint", EditorTool::PaintTile.icon()),
                 )
-                .show_ui(ui, |ui| {
-                    for terrain in &[
-                        TerrainType::Ground,
-                        TerrainType::Grass,
-                        TerrainType::Water,
-                        TerrainType::Stone,
-                        TerrainType::Dirt,
-                        TerrainType::Forest,
-                        TerrainType::Mountain,
-                        TerrainType::Swamp,
-                        TerrainType::Lava,
-                    ] {
-                        if ui
-                            .selectable_label(false, format!("{:?}", terrain))
-                            .clicked()
-                        {
-                            self.state.current_tool = EditorTool::PaintTerrain(*terrain);
-                        }
-                    }
-                });
-
-            // Wall palette
-            egui::ComboBox::from_label("🧱 Wall")
-                .selected_text(
-                    if let EditorTool::PaintWall(wall) = self.state.current_tool {
-                        format!("{:?}", wall)
-                    } else {
-                        "Select".to_string()
-                    },
-                )
-                .show_ui(ui, |ui| {
-                    for wall in &[
-                        WallType::None,
-                        WallType::Normal,
-                        WallType::Door,
-                        WallType::Torch,
-                    ] {
-                        if ui.selectable_label(false, format!("{:?}", wall)).clicked() {
-                            self.state.current_tool = EditorTool::PaintWall(*wall);
-                        }
-                    }
-                });
+                .clicked()
+            {
+                self.state.current_tool = EditorTool::PaintTile;
+            }
 
             ui.separator();
 
@@ -1094,6 +1059,53 @@ impl<'a> MapEditorWidget<'a> {
                     self.state.undo();
                 }
             });
+        });
+
+        // Terrain and wall selection (separate row)
+        ui.horizontal(|ui| {
+            ui.label("Terrain:");
+
+            egui::ComboBox::from_id_salt("map_terrain_palette_combo")
+                .selected_text(format!("{:?}", self.state.selected_terrain))
+                .show_ui(ui, |ui| {
+                    for terrain in &[
+                        TerrainType::Ground,
+                        TerrainType::Grass,
+                        TerrainType::Water,
+                        TerrainType::Stone,
+                        TerrainType::Dirt,
+                        TerrainType::Forest,
+                        TerrainType::Mountain,
+                        TerrainType::Swamp,
+                        TerrainType::Lava,
+                    ] {
+                        ui.selectable_value(
+                            &mut self.state.selected_terrain,
+                            *terrain,
+                            format!("{:?}", terrain),
+                        );
+                    }
+                });
+
+            ui.separator();
+            ui.label("Wall:");
+
+            egui::ComboBox::from_id_salt("map_wall_palette_combo")
+                .selected_text(format!("{:?}", self.state.selected_wall))
+                .show_ui(ui, |ui| {
+                    for wall in &[
+                        WallType::None,
+                        WallType::Normal,
+                        WallType::Door,
+                        WallType::Torch,
+                    ] {
+                        ui.selectable_value(
+                            &mut self.state.selected_wall,
+                            *wall,
+                            format!("{:?}", wall),
+                        );
+                    }
+                });
         });
 
         // View options
@@ -1232,7 +1244,7 @@ impl<'a> MapEditorWidget<'a> {
 
     fn show_event_editor(&mut self, ui: &mut Ui) {
         if let Some(ref mut event_editor) = self.state.event_editor {
-            egui::ComboBox::from_label("Event Type")
+            egui::ComboBox::from_id_salt("map_event_type_combo")
                 .selected_text(event_editor.event_type.name())
                 .show_ui(ui, |ui| {
                     for event_type in EventType::all() {
@@ -1655,10 +1667,7 @@ mod tests {
     #[test]
     fn test_editor_tool_names() {
         assert_eq!(EditorTool::Select.name(), "Select");
-        assert_eq!(
-            EditorTool::PaintTerrain(TerrainType::Ground).name(),
-            "Paint Terrain"
-        );
+        assert_eq!(EditorTool::PaintTile.name(), "Paint Tile");
         assert_eq!(EditorTool::PlaceEvent.name(), "Place Event");
     }
 
@@ -1674,7 +1683,8 @@ mod tests {
     #[test]
     fn test_save_to_ron() {
         let mut state = MapEditorState::new(Map::new(1, 5, 5));
-        state.paint_terrain(Position { x: 0, y: 0 }, TerrainType::Grass);
+        state.selected_terrain = TerrainType::Grass;
+        state.paint_tile(Position { x: 0, y: 0 });
 
         let ron = state.save_to_ron().unwrap();
         assert!(ron.contains("id:"));
@@ -1729,9 +1739,12 @@ mod tests {
         let mut state = MapEditorState::new(map.clone());
 
         // Paint different terrain types
-        state.paint_terrain(Position { x: 0, y: 0 }, TerrainType::Grass);
-        state.paint_terrain(Position { x: 1, y: 0 }, TerrainType::Water);
-        state.paint_terrain(Position { x: 2, y: 0 }, TerrainType::Stone);
+        state.selected_terrain = TerrainType::Grass;
+        state.paint_tile(Position { x: 0, y: 0 });
+        state.selected_terrain = TerrainType::Water;
+        state.paint_tile(Position { x: 1, y: 0 });
+        state.selected_terrain = TerrainType::Stone;
+        state.paint_tile(Position { x: 2, y: 0 });
 
         // Verify terrain was set
         assert_eq!(
@@ -1774,7 +1787,8 @@ mod tests {
         let mut state = MapEditorState::new(Map::new(1, 5, 5));
 
         // Paint a tile
-        state.paint_terrain(Position { x: 2, y: 2 }, TerrainType::Lava);
+        state.selected_terrain = TerrainType::Lava;
+        state.paint_tile(Position { x: 2, y: 2 });
         assert_eq!(
             state.map.get_tile(Position { x: 2, y: 2 }).unwrap().terrain,
             TerrainType::Lava

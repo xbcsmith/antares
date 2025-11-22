@@ -20,6 +20,9 @@ thiserror = "1.0"
 # For file dialogs
 rfd = "0.15"
 
+[dev-dependencies]
+tempfile = "3.8"
+
 [[bin]]
 name = "campaign-builder"
 path = "src/main.rs"
