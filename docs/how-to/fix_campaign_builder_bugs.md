@@ -41,33 +41,33 @@ fn do_save_campaign(&mut self) -> Result<(), CampaignError> {
 
     // CRITICAL FIX: Save all data files BEFORE saving campaign metadata
     // This ensures all content is persisted when user clicks "Save Campaign"
-    
+
     // Track any save failures but continue (partial save is better than no save)
     let mut save_warnings = Vec::new();
-    
+
     if let Err(e) = self.save_items() {
         save_warnings.push(format!("Items: {}", e));
     }
-    
+
     if let Err(e) = self.save_spells() {
         save_warnings.push(format!("Spells: {}", e));
     }
-    
+
     if let Err(e) = self.save_monsters() {
         save_warnings.push(format!("Monsters: {}", e));
     }
-    
+
     // Save maps individually (they're saved per-map, not as a collection)
     for (idx, map) in self.maps.iter().enumerate() {
         if let Err(e) = self.save_map(map) {
             save_warnings.push(format!("Map {}: {}", idx, e));
         }
     }
-    
+
     if let Err(e) = self.save_quests() {
         save_warnings.push(format!("Quests: {}", e));
     }
-    
+
     if let Err(e) = self.save_dialogues_to_file() {
         save_warnings.push(format!("Dialogues: {}", e));
     }
@@ -84,7 +84,7 @@ fn do_save_campaign(&mut self) -> Result<(), CampaignError> {
     fs::write(path, ron_string)?;
 
     self.unsaved_changes = false;
-    
+
     // Update status message based on results
     if save_warnings.is_empty() {
         self.status_message = format!("✅ Campaign and all data saved to: {}", path.display());
@@ -373,11 +373,11 @@ pub struct MapEditorState {
     pub metadata: MapMetadata,
     pub current_tool: EditorTool,
     pub selected_position: Option<(u32, u32)>,
-    
+
     // NEW: Separate terrain and wall selections
     pub selected_terrain: TerrainType,
     pub selected_wall: WallType,
-    
+
     undo_stack: UndoStack,
     // ... rest
 }
@@ -394,11 +394,11 @@ pub fn new(map: Map, file_path: Option<PathBuf>) -> Self {
         metadata: MapMetadata::default(),
         current_tool: EditorTool::Select,
         selected_position: None,
-        
+
         // NEW: Initialize with sensible defaults
         selected_terrain: TerrainType::Ground,
         selected_wall: WallType::None,
-        
+
         undo_stack: UndoStack::new(),
         has_changes: false,
         file_path,
@@ -476,13 +476,13 @@ Replace `paint_terrain()` and `paint_wall()` with unified method:
 /// Paints a tile with the currently selected terrain and wall
 pub fn paint_tile(&mut self, position: (u32, u32)) {
     let old_tile = self.map.get_tile(position);
-    
+
     let new_tile = Tile {
         terrain: self.selected_terrain,
         wall: self.selected_wall,
         ..old_tile.unwrap_or_default()
     };
-    
+
     self.set_tile(position, new_tile);
 }
 
@@ -591,7 +591,7 @@ fn show_tool_palette(&mut self, ui: &mut Ui) {
     // NEW: Separate row for terrain and wall selection (always visible)
     ui.horizontal(|ui| {
         ui.label("Terrain:");
-        
+
         egui::ComboBox::from_id_salt("map_terrain_palette_combo")
             .selected_text(format!("{:?}", self.state.selected_terrain))
             .show_ui(ui, |ui| {
@@ -616,7 +616,7 @@ fn show_tool_palette(&mut self, ui: &mut Ui) {
 
         ui.separator();
         ui.label("Wall:");
-        
+
         egui::ComboBox::from_id_salt("map_wall_palette_combo")
             .selected_text(format!("{:?}", self.state.selected_wall))
             .show_ui(ui, |ui| {
