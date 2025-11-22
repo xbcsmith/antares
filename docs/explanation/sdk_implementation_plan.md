@@ -6,17 +6,6 @@ This plan outlines the development of the Antares SDK - a comprehensive toolset 
 
 **Key Principles:**
 
-- Map Content Plan (Phases 1-3) executes first, unchanged
-- SDK adds capability without refactoring existing code
-- Data-driven design enables modding without recompilation
-- All content uses RON format per architecture.md Section 7
-- **UI framework: egui** - validated through prototype testing, no GPU required
-
-**Framework Decision:**
-
-- ✅ egui selected and validated (see `sdk/campaign_builder/FRAMEWORK_DECISION.md`)
-- ✅ iced prototype tested and rejected (GPU dependency failure)
-- ✅ Working egui prototype demonstrates all key UI patterns
 
 ## Current State Analysis
 
@@ -211,61 +200,6 @@ Could not bind the given EGLImage to a CoglTexture2D
 
 **Changes:**
 
-```rust
-// NEW: Data structure for class definitions
-pub struct ClassDefinition {
-    pub id: String,                          // "knight", "sorcerer"
-    pub name: String,                        // "Knight", "Sorcerer"
-    pub hp_die: DiceRoll,                   // Hit dice (1d10, 1d4, etc.)
-    pub spell_school: Option<SpellSchool>,  // Cleric, Sorcerer, or None
-    pub is_pure_caster: bool,               // Full vs hybrid caster
-    pub spell_stat: Option<SpellStat>,      // INT or PER for spell points
-    pub disablement_bit: u8,                // Bitflag for item restrictions
-    pub special_abilities: Vec<String>,     // "multiple_attacks", etc.
-}
-
-pub enum SpellStat {
-    Intellect,
-    Personality,
-}
-
-// CHANGE: Replace enum with ID-based reference
-pub type ClassId = String;
-
-// MODIFY: Character struct
-pub struct Character {
-    pub name: String,
-    pub race: Race,
-    pub class_id: ClassId,  // Changed from: pub class: Class,
-    // ... rest unchanged
-}
-```
-
-**Rationale:** Maintains existing `Character` struct layout, minimizes refactoring
-
-#### 1.2 Class Database Implementation
-
-**File:** `src/domain/character/class_database.rs` (create new)
-
-**Pattern:** Mirror existing `ItemDatabase` implementation
-
-```rust
-pub struct ClassDatabase {
-    classes: HashMap<ClassId, ClassDefinition>,
-}
-
-impl ClassDatabase {
-    pub fn new() -> Self;
-    pub fn load_from_file(path: &Path) -> Result<Self, ClassDatabaseError>;
-    pub fn load_from_string(ron_data: &str) -> Result<Self, ClassDatabaseError>;
-    pub fn get_class(&self, id: &ClassId) -> Option<&ClassDefinition>;
-    pub fn all_classes(&self) -> Vec<&ClassDefinition>;
-    pub fn validate(&self) -> Vec<ValidationError>;
-}
-```
-
-**Dependencies:**
-
 - Reuse error patterns from `items/database.rs`
 - Use existing `thiserror` for error types
 
@@ -305,12 +239,6 @@ impl ClassDatabase {
 
 **Files to Modify:**
 
-- `src/domain/progression.rs` - HP gain function
-- `src/domain/magic/casting.rs` - Spell access checks
-- `src/domain/items/types.rs` - Disablement validation
-
-**Pattern for Refactoring:**
-
 ```rust
 // OLD: Direct enum matching
 pub fn roll_hp_gain(class: Class, rng: &mut impl Rng) -> u16 {
@@ -340,12 +268,6 @@ pub fn roll_hp_gain(
 #### 1.5 Testing Requirements
 
 **Test Files:**
-
-- `src/domain/character/class_database.rs` - Unit tests for database
-- `src/domain/progression.rs` - Update existing tests to use ClassDatabase
-- `src/domain/magic/casting.rs` - Update spell access tests
-
-**Test Coverage:**
 
 - Load classes from RON string
 - Validate all 6 MM1 classes parse correctly
@@ -468,14 +390,6 @@ impl RaceDatabase {
 
 **Changes:**
 
-- Update `Character::new()` to accept `RaceId`
-- Apply stat modifiers from `RaceDefinition` during creation
-- Update tests to use race IDs instead of enum
-
-#### 2.5 Testing Requirements
-
-**Coverage:**
-
 - Load races from RON
 - Stat modifiers apply correctly
 - All MM1 races parse successfully
@@ -510,26 +424,6 @@ impl RaceDatabase {
 
 **Structure:**
 
-```rust
-//! Antares SDK - Content creation and validation tools
-//!
-//! This module provides programmatic access to game systems for
-//! content creation tools and campaign validation.
-
-pub mod database;      // Unified content database
-pub mod validation;    // Cross-reference validation
-pub mod serialization; // RON helpers
-pub mod templates;     // Common content patterns
-
-pub use database::ContentDatabase;
-pub use validation::{ValidationError, Validator};
-```
-
-#### 3.2 Unified Content Database
-
-**File:** `src/sdk/database.rs` (create new)
-
-````rust
 /// Central database for all game content
 ///
 /// Aggregates all content databases for unified access and validation.
@@ -625,72 +519,6 @@ impl Validator {
 
 **Validation Rules:**
 
-- Every `ItemId` in maps exists in `items.ron`
-- Every `MonsterId` in maps exists in `monsters.ron`
-- Every `ClassId` referenced exists in `classes.ron`
-- All map transitions point to existing maps
-- No duplicate IDs within a content type
-
-#### 3.4 RON Serialization Helpers
-
-**File:** `src/sdk/serialization.rs` (create new)
-
-```rust
-/// Pretty-print RON with consistent formatting
-pub fn format_ron<T: Serialize>(data: &T) -> Result<String, SerializationError>;
-
-/// Validate RON syntax without full deserialization
-pub fn validate_ron_syntax(ron_str: &str) -> Result<(), SerializationError>;
-
-/// Load and merge multiple RON files (for mod composition)
-pub fn merge_ron_data<T>(files: &[PathBuf]) -> Result<Vec<T>, SerializationError>
-where
-    T: DeserializeOwned;
-```
-
-#### 3.5 Content Templates
-
-**File:** `src/sdk/templates.rs` (create new)
-
-```rust
-/// Common patterns for content creation tools
-pub mod templates {
-    /// Create a basic melee weapon
-    pub fn basic_weapon(
-        id: ItemId,
-        name: &str,
-        damage_dice: DiceRoll,
-    ) -> Item;
-
-    /// Create a simple armor piece
-    pub fn basic_armor(
-        id: ItemId,
-        name: &str,
-        ac_bonus: u8,
-    ) -> Item;
-
-    /// Create a town map template
-    pub fn town_map(
-        id: MapId,
-        name: &str,
-        width: u32,
-        height: u32,
-    ) -> Map;
-
-    /// Create a dungeon map template
-    pub fn dungeon_map(
-        id: MapId,
-        name: &str,
-        width: u32,
-        height: u32,
-    ) -> Map;
-}
-```
-
-#### 3.6 Testing Requirements
-
-**Tests:**
-
 - Load campaign from directory structure
 - Validation catches missing item references
 - Validation catches duplicate IDs
@@ -729,108 +557,6 @@ pub mod templates {
 **File:** `tools/map-builder/main.rs` (modify existing)
 
 **Changes:**
-
-```rust
-// Add to MapBuilder struct
-struct MapBuilder {
-    map: Map,
-    content_db: Option<ContentDatabase>,  // NEW: Optional SDK integration
-}
-
-impl MapBuilder {
-    fn new() -> Self {
-        // Try to load content database for validation
-        let content_db = ContentDatabase::load_core().ok();
-        Self { map: Map::default(), content_db }
-    }
-
-    // NEW: Enhanced validation command
-    fn validate_advanced(&self) {
-        if let Some(db) = &self.content_db {
-            let errors = db.validate();
-            if errors.is_empty() {
-                println!("✅ Map validated successfully");
-            } else {
-                println!("❌ Validation errors:");
-                for error in errors {
-                    println!("  - {}", error);
-                }
-            }
-        } else {
-            println!("⚠️  SDK not available, using basic validation");
-            self.validate_basic();
-        }
-    }
-
-    // Existing basic validation still works
-    fn validate_basic(&self) {
-        // Original VALID_MONSTER_IDS check
-    }
-}
-```
-
-#### 4.2 Add Smart ID Suggestions
-
-**Enhancement:** When user enters invalid ID, suggest valid alternatives
-
-```rust
-fn add_event(&mut self, x: u32, y: u32, event_type: &str) {
-    // ... existing code ...
-
-    // NEW: Suggest valid IDs if SDK available
-    if let Some(db) = &self.content_db {
-        if event_type == "monster" {
-            if db.monsters.get_monster(monster_id).is_none() {
-                println!("❌ Monster ID {} not found", monster_id);
-                println!("💡 Available monsters:");
-                for monster in db.monsters.all_monsters().iter().take(10) {
-                    println!("   {} - {}", monster.id, monster.name);
-                }
-            }
-        }
-    }
-}
-```
-
-#### 4.3 Add Interactive Content Browser
-
-**New Command:** `list <content_type>`
-
-```rust
-fn process_command(&mut self, line: &str) {
-    match parts[0] {
-        // ... existing commands ...
-
-        "list" => {
-            if let Some(db) = &self.content_db {
-                match parts.get(1) {
-                    Some(&"monsters") => {
-                        println!("Available Monsters:");
-                        for m in db.monsters.all_monsters() {
-                            println!("  {} - {} (HP: {})", m.id, m.name, m.hp);
-                        }
-                    }
-                    Some(&"items") => {
-                        println!("Available Items:");
-                        for i in db.items.all_items() {
-                            println!("  {} - {} ({}g)", i.id, i.name, i.base_cost);
-                        }
-                    }
-                    _ => println!("Usage: list <monsters|items|classes|races>"),
-                }
-            } else {
-                println!("SDK not loaded");
-            }
-        }
-
-        _ => println!("Unknown command"),
-    }
-}
-```
-
-#### 4.4 Testing Requirements
-
-**Tests:**
 
 - Map Builder works without SDK (graceful degradation)
 - Map Builder with SDK provides enhanced validation
@@ -969,15 +695,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 **File:** `tools/race-editor/main.rs` (create new)
 
 **Similar structure to Class Editor, adapted for races:**
-
-- Set stat modifiers (+/- to attributes)
-- Set resistance modifiers
-- Configure special abilities
-- Preview stat distribution at character creation
-
-#### 5.3 Testing Requirements
-
-**Manual Testing Checklist:**
 
 - [ ] Create new class and save to RON
 - [ ] Load existing classes and edit
@@ -1124,13 +841,6 @@ fn format_error(error: &ValidationError) -> String {
 
 1. **Reference Integrity:**
 
-   - All `ItemId` references exist in `items.ron`
-   - All `MonsterId` references exist in `monsters.ron`
-   - All `SpellId` references exist in `spells.ron`
-   - All class restrictions reference valid classes
-
-2. **Structural Validation:**
-
    - No duplicate IDs within content type
    - All maps are reachable (connected graph)
    - No circular dependencies
@@ -1146,106 +856,11 @@ fn format_error(error: &ValidationError) -> String {
 
 **Test Campaigns:**
 
-- Valid campaign (should pass)
-- Campaign with missing monster ID (should fail)
-- Campaign with disconnected map (should warn)
-- Campaign with balance issues (should warn)
-
-#### 6.4 Deliverables
-
-- [ ] `tools/campaign-validator/` CLI tool
-- [ ] Validates all reference integrity
-- [ ] Checks structural issues
-- [ ] Optional balance warnings
-- [ ] Clear, actionable error messages
-- [ ] Exit codes for CI/CD integration
-- [ ] Documentation in `docs/how_to/validating_campaigns.md`
-
-#### 6.5 Success Criteria
-
-- ✅ Catches all reference errors in test campaigns
-- ✅ Provides helpful suggestions for fixes
-- ✅ Can be used in automated workflows
-- ✅ Performance acceptable for large campaigns (100+ maps)
-- ✅ Documentation includes examples of common errors
-
----
-
-### Phase 7: Item Editor Tool (CLI)
-
-**Goal:** Create comprehensive CLI item editor with class restriction support
-
-**Duration:** 3-4 days
-
-**Note:** This provides CLI tooling. The egui-based Campaign Builder UI will provide a visual item editor with tree view, form inputs, and real-time validation.
-
 #### 7.1 Item Editor Implementation
 
 **File:** `tools/item-editor/main.rs` (create new)
 
 **Features:**
-
-- Browse existing items by category
-- Create new items with guided prompts
-- Edit item properties
-- Set class/race restrictions via checkboxes
-- Preview item stats and effects
-- Validate item definitions
-
-```rust
-struct ItemEditor {
-    items: ItemDatabase,
-    classes: ClassDatabase,  // For validation
-    current_item: Option<ItemId>,
-}
-
-impl ItemEditor {
-    fn create_weapon(&mut self) {
-        println!("\n=== Weapon Creator ===");
-
-        let id = self.get_next_id();
-        let name = self.get_input("Name: ");
-
-        println!("Damage (examples: 1d6, 2d4, 1d8+2): ");
-        let damage = self.parse_dice();
-
-        println!("To-Hit/Damage Bonus (0 for none): ");
-        let bonus = self.get_i8();
-
-        println!("Hands Required (1 or 2): ");
-        let hands = self.get_u8();
-
-        println!("Base Cost (gold): ");
-        let cost = self.get_u32();
-
-        println!("\nClass Restrictions:");
-        let disablement = self.select_classes();
-
-        // ... create Item struct ...
-
-        self.items.add_item(item)?;
-        println!("✅ Weapon created: {}", name);
-    }
-
-    fn select_classes(&self) -> Disablement {
-        println!("Select classes that CAN use this item:");
-        let mut bits = 0u8;
-
-        for class in self.classes.all_classes() {
-            let answer = self.get_input(&format!("  {} [y/N]: ", class.name));
-            if answer.to_lowercase() == "y" {
-                bits |= class.disablement_bit;
-            }
-        }
-
-        Disablement(bits)
-    }
-}
-```
-
-#### 7.2 Testing Requirements
-
-**Manual Testing:**
 
 - Create each item type (weapon, armor, consumable, etc.)
 - Edit existing items
@@ -1283,19 +898,6 @@ impl ItemEditor {
 
 **Content:**
 
-- Overview of SDK architecture
-- `ContentDatabase` API reference
-- `Validator` API reference
-- Serialization helpers
-- Template functions
-- Code examples for each module
-
-#### 8.2 Campaign Creation Guide
-
-**File:** `docs/tutorials/campaign_creation_guide.md` (create new)
-
-**Content:**
-
 - Quick start: Your first campaign
 - Directory structure requirements
 - Step-by-step workflow:
@@ -1312,20 +914,6 @@ impl ItemEditor {
 
 **Files to Create:**
 
-- `docs/how_to/using_map_builder.md` (update existing)
-- `docs/how_to/using_class_editor.md`
-- `docs/how_to/using_race_editor.md`
-- `docs/how_to/using_item_editor.md`
-- `docs/how_to/validating_campaigns.md`
-
-**Format:** Follow Diataxis framework (task-oriented guides)
-
-#### 8.4 Example Campaign
-
-**Directory:** `campaigns/example_tutorial/` (create new)
-
-**Content:** Minimal but complete campaign demonstrating all features
-
 - 2-3 custom classes
 - 2 custom races
 - 10-15 custom items
@@ -1341,44 +929,6 @@ impl ItemEditor {
 
 **Content:**
 
-- Introduction to Antares modding
-- SDK overview
-- Campaign structure
-- Creating custom content
-- Testing your mod
-- Sharing with community
-- Best practices
-
-#### 8.6 Deliverables
-
-- [ ] `docs/reference/sdk_api.md` - Complete API docs
-- [ ] `docs/tutorials/campaign_creation_guide.md` - Step-by-step guide
-- [ ] `docs/tutorials/modding_guide.md` - Modder introduction
-- [ ] Individual tool guides in `docs/how_to/`
-- [ ] `campaigns/example_tutorial/` - Working example
-- [ ] README.md updated with SDK information
-- [ ] Architecture.md updated with SDK additions
-
-#### 8.7 Success Criteria
-
-- ✅ External user can create campaign following documentation
-- ✅ All SDK functions documented with examples
-- ✅ Example campaign loads and plays correctly
-- ✅ Documentation passes markdownlint
-- ✅ No broken links in documentation
-
----
-
-### Phase 9: Integration and Polish
-
-**Goal:** Final integration, bug fixes, and user experience improvements
-
-**Duration:** 3-4 days
-
-#### 9.1 Cross-Tool Integration
-
-**Enhancements:**
-
 - Map Builder suggests items from Item Editor database
 - Class Editor validates against Race Editor data
 - All tools use consistent UI/UX patterns
@@ -1387,15 +937,6 @@ impl ItemEditor {
 #### 9.2 Error Message Improvements
 
 **Review and enhance:**
-
-- All error messages provide actionable guidance
-- Validation errors suggest fixes
-- Tool help text is clear and complete
-- Examples included in error messages where helpful
-
-#### 9.3 Performance Optimization
-
-**Profile and optimize:**
 
 - Campaign loading times
 - Validation performance on large campaigns
@@ -1406,37 +947,6 @@ impl ItemEditor {
 
 **Final checks:**
 
-- All cargo commands pass (test, clippy, fmt)
-- Documentation complete and accurate
-- Example campaign fully functional
-- Tools work on all supported platforms
-- No breaking changes to core engine
-
-#### 9.5 Deliverables
-
-- [ ] All tools integrated and cross-functional
-- [ ] Error messages reviewed and improved
-- [ ] Performance acceptable for large campaigns
-- [ ] All quality checks pass
-- [ ] Release notes prepared
-- [ ] Migration guide from pre-SDK version
-
-#### 9.6 Success Criteria
-
-- ✅ Complete campaign creation workflow functional
-- ✅ External tester can create campaign using only docs
-- ✅ All tools pass quality gates
-- ✅ Performance metrics acceptable
-- ✅ No known critical bugs
-
----
-
-## Architecture Compliance
-
-### Data Structure Integrity
-
-**Preserved from architecture.md:**
-
 - Type aliases: `ClassId`, `RaceId`, `ItemId`, etc.
 - RON format for all data files (Section 7.1-7.2)
 - Module structure respects domain/application layers
@@ -1444,42 +954,16 @@ impl ItemEditor {
 
 **New Additions (Compatible):**
 
-- `src/sdk/` module for tool support (application layer)
-- `data/classes.ron` and `data/races.ron` (data layer)
-- `tools/` directory for SDK binaries (external to engine)
-
-### Backward Compatibility
-
-**Breaking Changes:**
-
 - Character struct uses `ClassId` instead of `Class` enum
 - Function signatures add `&ClassDatabase` parameters
 
 **Migration Strategy:**
-
-- Provide conversion functions: `Class::from_str()` → `ClassId`
-- Document migration in `docs/explanation/sdk_migration.md`
-- Support both old and new APIs for 1-2 versions (if needed)
-
-## Testing Strategy
-
-### Unit Tests
-
-**Coverage Requirements:**
 
 - All SDK modules: >80% coverage
 - Database loaders: 100% coverage
 - Validation logic: >90% coverage
 
 **Test Data:**
-
-- Minimal valid campaign (pass validation)
-- Invalid campaigns with each error type
-- Edge cases (empty campaign, huge campaign)
-
-### Integration Tests
-
-**Test Scenarios:**
 
 - Load complete MM1-style campaign
 - Create campaign using SDK tools
@@ -1490,16 +974,6 @@ impl ItemEditor {
 
 **User Acceptance:**
 
-- Non-programmer creates simple campaign
-- Experienced modder creates complex campaign
-- All tools usable without source code access
-
-## Success Metrics
-
-### Quantitative
-
-- [ ] All quality checks pass (cargo test/clippy/fmt)
-- [ ] > 80% code coverage for SDK modules
 - [ ] Campaign load time <2 seconds for 100 maps
 - [ ] Validation completes <5 seconds for 100 maps
 
