@@ -374,7 +374,7 @@ pub fn calculate_turn_order(combat: &CombatState) -> Vec<CombatantId> {
 /// use antares::domain::combat::types::{Handicap, CombatantId, Attack};
 /// use antares::domain::character::{Character, Race, Class, Sex, Alignment};
 /// use antares::domain::types::DiceRoll;
-/// use rand::thread_rng;
+/// use rand::rng;
 ///
 /// let mut combat = CombatState::new(Handicap::Even);
 /// let mut character = Character::new("Hero".to_string(), Race::Human, Class::Knight, Sex::Male, Alignment::Good);
@@ -384,7 +384,7 @@ pub fn calculate_turn_order(combat: &CombatState) -> Vec<CombatantId> {
 /// let attack = Attack::physical(DiceRoll::new(1, 8, 2));
 /// let attacker = CombatantId::Player(0);
 /// let target = CombatantId::Player(0);
-/// let mut rng = thread_rng();
+/// let mut rng = rng();
 ///
 /// // Note: In real combat, target would be a different combatant
 /// let result = resolve_attack(&combat, attacker, target, &attack, &mut rng);
@@ -427,7 +427,7 @@ pub fn resolve_attack<R: Rng>(
 
     // Simple hit calculation: need to roll >= (10 + target_ac - attacker_accuracy)
     let hit_threshold = (10 + target_ac as i16 - attacker_accuracy as i16).max(2) as u8;
-    let roll = rng.gen_range(1..=20);
+    let roll = rng.random_range(1..=20);
 
     if roll < hit_threshold {
         // Miss
@@ -497,7 +497,7 @@ mod tests {
     use crate::domain::character::{Alignment, Class, Race, Sex, Stats};
     use crate::domain::combat::monster::LootTable;
     use crate::domain::types::DiceRoll;
-    use rand::thread_rng;
+    use rand::rng;
 
     fn create_test_character(name: &str, speed: u8) -> Character {
         let mut character = Character::new(
@@ -673,7 +673,7 @@ mod tests {
         combat.add_player(target);
 
         let attack = Attack::physical(DiceRoll::new(1, 8, 2));
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         // Test multiple attacks
         for _ in 0..10 {

@@ -19,7 +19,7 @@ fn handle_input(
     mut last_move_time: Local<f32>,
 ) {
     // Simple cooldown to prevent zooming too fast
-    if time.elapsed_seconds() - *last_move_time < 0.2 {
+    if time.delta_secs() - *last_move_time < 0.2 {
         return;
     }
 
@@ -57,7 +57,7 @@ fn handle_input(
     }
 
     if moved {
-        *last_move_time = time.elapsed_seconds();
+        *last_move_time = time.delta_secs();
         // TODO: Check for events at new position (Phase 4)
     }
 }

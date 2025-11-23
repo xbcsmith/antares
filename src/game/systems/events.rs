@@ -9,13 +9,13 @@ pub struct EventPlugin;
 
 impl Plugin for EventPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<MapEventTriggered>()
+        app.add_message::<MapEventTriggered>()
             .add_systems(Update, (check_for_events, handle_events));
     }
 }
 
 /// Event triggered when the party steps on a tile with an event
-#[derive(Event)]
+#[derive(Message)]
 pub struct MapEventTriggered {
     pub event: MapEvent,
 }
@@ -23,7 +23,7 @@ pub struct MapEventTriggered {
 /// System to check if the party is standing on an event
 fn check_for_events(
     global_state: Res<GlobalState>,
-    mut event_writer: EventWriter<MapEventTriggered>,
+    mut event_writer: MessageWriter<MapEventTriggered>,
     mut last_position: Local<Option<crate::domain::types::Position>>,
 ) {
     let game_state = &global_state.0;
@@ -36,7 +36,7 @@ fn check_for_events(
         if let Some(map) = game_state.world.get_current_map() {
             if let Some(event) = map.get_event(current_pos) {
                 // Trigger the event
-                event_writer.send(MapEventTriggered {
+                event_writer.write(MapEventTriggered {
                     event: event.clone(),
                 });
             }
@@ -46,7 +46,7 @@ fn check_for_events(
 
 /// System to handle triggered events
 fn handle_events(
-    mut event_reader: EventReader<MapEventTriggered>,
+    mut event_reader: MessageReader<MapEventTriggered>,
     mut global_state: ResMut<GlobalState>,
     mut game_log: ResMut<crate::game::systems::ui::GameLog>,
 ) {

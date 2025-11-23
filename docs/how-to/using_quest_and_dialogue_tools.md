@@ -612,7 +612,6 @@ progress.turn_in();
 
 ## Additional Resources
 
-- **Architecture**: `docs/explanation/sdk_and_campaign_architecture.md` (Phase 5)
-- **Implementation Details**: `docs/explanation/phase5_quest_dialogue_tools.md`
+- **Architecture**: `docs/explanation/sdk_and_campaign_architecture.md` - Quest and dialogue system design
 - **API Reference**: Run `cargo doc --open` and see `antares::sdk::quest_editor`, `antares::sdk::dialogue_editor`
 - **Examples**: See test modules in `src/sdk/quest_editor.rs` and `src/sdk/dialogue_editor.rs`

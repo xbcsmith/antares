@@ -850,12 +850,22 @@ impl<'a> Widget for MapGridWidget<'a> {
 
                     // Draw grid lines
                     if self.state.show_grid {
-                        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::from_gray(100)));
+                        painter.rect_stroke(
+                            rect,
+                            0.0,
+                            Stroke::new(1.0, Color32::from_gray(100)),
+                            egui::StrokeKind::Outside,
+                        );
                     }
 
                     // Highlight selected tile
                     if self.state.selected_position == Some(pos) {
-                        painter.rect_stroke(rect, 0.0, Stroke::new(2.0, Color32::YELLOW));
+                        painter.rect_stroke(
+                            rect,
+                            0.0,
+                            Stroke::new(2.0, Color32::YELLOW),
+                            egui::StrokeKind::Outside,
+                        );
                     }
                 }
             }
