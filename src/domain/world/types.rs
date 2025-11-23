@@ -233,8 +233,8 @@ pub struct Map {
     pub width: u32,
     /// Map height in tiles
     pub height: u32,
-    /// 2D grid of tiles [y][x]
-    pub tiles: Vec<Vec<Tile>>,
+    /// 2D grid of tiles (row-major order: y * width + x)
+    pub tiles: Vec<Tile>,
     /// Events at specific positions
     pub events: HashMap<Position, MapEvent>,
     /// NPCs on this map
@@ -242,7 +242,7 @@ pub struct Map {
 }
 
 impl Map {
-    /// Creates a new map with the given dimensions
+    /// Creates a new map with the given given dimensions
     ///
     /// All tiles are initialized to ground terrain with no walls.
     ///
@@ -254,16 +254,11 @@ impl Map {
     /// let map = Map::new(1, 10, 10);
     /// assert_eq!(map.width, 10);
     /// assert_eq!(map.height, 10);
-    /// assert_eq!(map.tiles.len(), 10);
-    /// assert_eq!(map.tiles[0].len(), 10);
+    /// assert_eq!(map.tiles.len(), 100);
     /// ```
     pub fn new(id: MapId, width: u32, height: u32) -> Self {
-        let tiles = (0..height)
-            .map(|_| {
-                (0..width)
-                    .map(|_| Tile::new(TerrainType::Ground, WallType::None))
-                    .collect()
-            })
+        let tiles = (0..(width * height))
+            .map(|_| Tile::new(TerrainType::Ground, WallType::None))
             .collect();
 
         Self {
@@ -281,7 +276,8 @@ impl Map {
     /// Returns `None` if the position is out of bounds.
     pub fn get_tile(&self, pos: Position) -> Option<&Tile> {
         if self.is_valid_position(pos) {
-            Some(&self.tiles[pos.y as usize][pos.x as usize])
+            let index = (pos.y as usize * self.width as usize) + pos.x as usize;
+            Some(&self.tiles[index])
         } else {
             None
         }
@@ -292,7 +288,8 @@ impl Map {
     /// Returns `None` if the position is out of bounds.
     pub fn get_tile_mut(&mut self, pos: Position) -> Option<&mut Tile> {
         if self.is_valid_position(pos) {
-            Some(&mut self.tiles[pos.y as usize][pos.x as usize])
+            let index = (pos.y as usize * self.width as usize) + pos.x as usize;
+            Some(&mut self.tiles[index])
         } else {
             None
         }

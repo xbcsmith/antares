@@ -487,12 +487,8 @@ pub fn quest_item(id: ItemId, name: &str, quest_id: &str) -> Item {
 /// ```
 pub fn town_map(id: MapId, _name: &str, width: u32, height: u32) -> Map {
     // Create 2D tile grid filled with grass
-    let tiles = (0..height)
-        .map(|_| {
-            (0..width)
-                .map(|_| Tile::new(TerrainType::Grass, WallType::None))
-                .collect()
-        })
+    let tiles = (0..(width * height))
+        .map(|_| Tile::new(TerrainType::Grass, WallType::None))
         .collect();
 
     Map {
@@ -530,12 +526,8 @@ pub fn town_map(id: MapId, _name: &str, width: u32, height: u32) -> Map {
 /// ```
 pub fn dungeon_map(id: MapId, _name: &str, width: u32, height: u32) -> Map {
     // Create 2D tile grid filled with stone floor
-    let tiles = (0..height)
-        .map(|_| {
-            (0..width)
-                .map(|_| Tile::new(TerrainType::Stone, WallType::None))
-                .collect()
-        })
+    let tiles = (0..(width * height))
+        .map(|_| Tile::new(TerrainType::Stone, WallType::None))
         .collect();
 
     Map {
@@ -562,12 +554,8 @@ pub fn dungeon_map(id: MapId, _name: &str, width: u32, height: u32) -> Map {
 /// ```
 pub fn forest_map(id: MapId, _name: &str, width: u32, height: u32) -> Map {
     // Create 2D tile grid filled with forest terrain
-    let tiles = (0..height)
-        .map(|_| {
-            (0..width)
-                .map(|_| Tile::new(TerrainType::Forest, WallType::None))
-                .collect()
-        })
+    let tiles = (0..(width * height))
+        .map(|_| Tile::new(TerrainType::Forest, WallType::None))
         .collect();
 
     Map {
@@ -724,8 +712,7 @@ mod tests {
         assert_eq!(town.id, 1);
         assert_eq!(town.width, 20);
         assert_eq!(town.height, 20);
-        assert_eq!(town.tiles.len(), 20);
-        assert_eq!(town.tiles[0].len(), 20);
+        assert_eq!(town.tiles.len(), 400);
     }
 
     #[test]
@@ -734,8 +721,7 @@ mod tests {
         assert_eq!(dungeon.id, 2);
         assert_eq!(dungeon.width, 30);
         assert_eq!(dungeon.height, 30);
-        assert_eq!(dungeon.tiles.len(), 30);
-        assert_eq!(dungeon.tiles[0].len(), 30);
+        assert_eq!(dungeon.tiles.len(), 900);
     }
 
     #[test]
@@ -744,10 +730,8 @@ mod tests {
         assert_eq!(forest.id, 3);
         assert_eq!(forest.width, 40);
         assert_eq!(forest.height, 40);
-        assert_eq!(forest.tiles.len(), 40);
-        assert_eq!(forest.tiles[0].len(), 40);
+        assert_eq!(forest.tiles.len(), 1600);
     }
-
     #[test]
     fn test_weapon_costs() {
         let sword = basic_weapon(1, "Sword", DiceRoll::new(1, 8, 0));

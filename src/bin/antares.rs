@@ -31,36 +31,40 @@ struct AntaresPlugin;
 
 impl Plugin for AntaresPlugin {
     fn build(&self, app: &mut App) {
-        // Initialize game state with a test map
-        let mut game_state = GameState::new();
-        let mut map = antares::domain::world::Map::new(1, 10, 10);
+        // Load campaign
+        let loader = antares::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
 
-        // Add some walls
-        for x in 0..10 {
-            map.get_tile_mut(antares::domain::types::Position::new(x, 0))
-                .unwrap()
-                .wall_type = antares::domain::world::WallType::Normal;
-            map.get_tile_mut(antares::domain::types::Position::new(x, 9))
-                .unwrap()
-                .wall_type = antares::domain::world::WallType::Normal;
-            map.get_tile_mut(antares::domain::types::Position::new(0, x))
-                .unwrap()
-                .wall_type = antares::domain::world::WallType::Normal;
-            map.get_tile_mut(antares::domain::types::Position::new(9, x))
-                .unwrap()
-                .wall_type = antares::domain::world::WallType::Normal;
+        // Load campaign content
+        let content_db = campaign
+            .load_content()
+            .expect("Failed to load campaign content");
+
+        // Initialize game state with campaign
+        let mut game_state = GameState::new_game(campaign.clone());
+
+        // Load all maps from campaign
+        for map_id in content_db.maps.all_maps() {
+            if let Some(map) = content_db.maps.get_map(map_id) {
+                game_state.world.add_map(map.clone());
+            }
         }
 
-        // Add a pillar
-        map.get_tile_mut(antares::domain::types::Position::new(5, 5))
-            .unwrap()
-            .wall_type = antares::domain::world::WallType::Normal;
+        // Set starting map
+        let starting_map_id = campaign.config.starting_map;
+        if game_state.world.get_map(starting_map_id).is_some() {
+            game_state.world.set_current_map(starting_map_id);
+        } else {
+            panic!("Starting map {} not found in campaign", starting_map_id);
+        }
 
-        game_state.world.add_map(map);
-        game_state.world.set_current_map(1);
+        // Set starting position
         game_state
             .world
-            .set_party_position(antares::domain::types::Position::new(2, 2));
+            .set_party_position(campaign.config.starting_position);
+        game_state.world.party_facing = campaign.config.starting_direction;
 
         app.insert_resource(GlobalState(game_state));
     }
