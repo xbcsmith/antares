@@ -806,10 +806,10 @@ mod tests {
     #[test]
     fn test_template_manager_creation() {
         let manager = TemplateManager::new();
-        assert!(manager.item_templates().len() > 0);
-        assert!(manager.monster_templates().len() > 0);
-        assert!(manager.quest_templates().len() > 0);
-        assert!(manager.dialogue_templates().len() > 0);
+        assert!(!manager.item_templates().is_empty());
+        assert!(!manager.monster_templates().is_empty());
+        assert!(!manager.quest_templates().is_empty());
+        assert!(!manager.dialogue_templates().is_empty());
     }
 
     #[test]

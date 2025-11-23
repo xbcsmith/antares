@@ -593,7 +593,6 @@ campaign_validator -e campaigns/my_campaign
 
 - **Example Campaign**: `campaigns/example/` - Working template
 - **Architecture**: `docs/explanation/sdk_and_campaign_architecture.md` - Campaign structure specification
-- **Phase 6 Details**: `docs/explanation/phase6_testing_distribution.md` - Implementation details
 - **API Reference**: Run `cargo doc --open` and see `antares::sdk::campaign_loader`
 
 ---

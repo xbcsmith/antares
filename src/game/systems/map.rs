@@ -53,30 +53,27 @@ fn spawn_map(
                 let pos = types::Position::new(x as i32, y as i32);
                 if let Some(tile) = map.get_tile(pos) {
                     // Spawn floor
-                    commands.spawn(PbrBundle {
-                        mesh: floor_mesh.clone(),
-                        material: floor_material.clone(),
-                        transform: Transform::from_xyz(x as f32, 0.0, y as f32),
-                        ..default()
-                    });
+                    commands.spawn((
+                        Mesh3d(floor_mesh.clone()),
+                        MeshMaterial3d(floor_material.clone()),
+                        Transform::from_xyz(x as f32, 0.0, y as f32),
+                    ));
 
                     // Spawn wall/door
                     match tile.wall_type {
                         world::WallType::Normal => {
-                            commands.spawn(PbrBundle {
-                                mesh: wall_mesh.clone(),
-                                material: wall_material.clone(),
-                                transform: Transform::from_xyz(x as f32, 0.5, y as f32),
-                                ..default()
-                            });
+                            commands.spawn((
+                                Mesh3d(wall_mesh.clone()),
+                                MeshMaterial3d(wall_material.clone()),
+                                Transform::from_xyz(x as f32, 0.5, y as f32),
+                            ));
                         }
                         world::WallType::Door => {
-                            commands.spawn(PbrBundle {
-                                mesh: door_mesh.clone(),
-                                material: door_material.clone(),
-                                transform: Transform::from_xyz(x as f32, 0.5, y as f32),
-                                ..default()
-                            });
+                            commands.spawn((
+                                Mesh3d(door_mesh.clone()),
+                                MeshMaterial3d(door_material.clone()),
+                                Transform::from_xyz(x as f32, 0.5, y as f32),
+                            ));
                         }
                         _ => {}
                     }
