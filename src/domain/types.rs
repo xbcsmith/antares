@@ -189,10 +189,10 @@ impl Direction {
 ///
 /// ```
 /// use antares::domain::types::DiceRoll;
-/// use rand::thread_rng;
+/// use rand::rng;
 ///
 /// let roll = DiceRoll::new(2, 6, 3); // 2d6+3
-/// let mut rng = thread_rng();
+/// let mut rng = rng();
 /// let result = roll.roll(&mut rng);
 /// assert!(result >= 5 && result <= 15); // Min: 2+3, Max: 12+3
 /// ```
@@ -232,17 +232,17 @@ impl DiceRoll {
     ///
     /// ```
     /// use antares::domain::types::DiceRoll;
-    /// use rand::thread_rng;
+    /// use rand::rng;
     ///
     /// let roll = DiceRoll::new(3, 6, 0); // 3d6
-    /// let mut rng = thread_rng();
+    /// let mut rng = rng();
     /// let result = roll.roll(&mut rng);
     /// assert!(result >= 3 && result <= 18);
     /// ```
     pub fn roll(&self, rng: &mut impl Rng) -> i32 {
         let mut total = self.bonus as i32;
         for _ in 0..self.count {
-            total += rng.gen_range(1..=self.sides as i32);
+            total += rng.random_range(1..=self.sides as i32);
         }
         total.max(0)
     }
@@ -359,7 +359,7 @@ impl GameTime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::thread_rng;
+    use rand::rng;
 
     #[test]
     fn test_position_creation() {
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     fn test_dice_roll() {
         let roll = DiceRoll::new(2, 6, 0);
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         // Test multiple rolls to ensure they're in valid range
         for _ in 0..100 {
@@ -431,7 +431,7 @@ mod tests {
     #[test]
     fn test_dice_roll_negative_bonus() {
         let roll = DiceRoll::new(1, 6, -10);
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let result = roll.roll(&mut rng);
         assert_eq!(result, 0); // Clamped to minimum of 0
     }

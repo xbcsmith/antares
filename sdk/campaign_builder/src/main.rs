@@ -1578,15 +1578,15 @@ impl eframe::App for CampaignBuilderApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Top menu bar
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("🆕 New Campaign").clicked() {
                         self.new_campaign();
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("📂 Open Campaign...").clicked() {
                         self.open_campaign();
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("💾 Save").clicked() {
                         if self.campaign_path.is_some() {
@@ -1596,16 +1596,16 @@ impl eframe::App for CampaignBuilderApp {
                         } else {
                             self.save_campaign_as();
                         }
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("💾 Save As...").clicked() {
                         self.save_campaign_as();
-                        ui.close_menu();
+                        ui.close();
                     }
                     ui.separator();
                     if ui.button("🚪 Exit").clicked() {
                         self.check_unsaved_and_exit();
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
 
@@ -1625,7 +1625,7 @@ impl eframe::App for CampaignBuilderApp {
                             }
                             Err(e) => self.status_message = e,
                         }
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui
                         .add_enabled(can_redo, egui::Button::new("↷ Redo"))
@@ -1639,29 +1639,29 @@ impl eframe::App for CampaignBuilderApp {
                             }
                             Err(e) => self.status_message = e,
                         }
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
 
                 ui.menu_button("Tools", |ui| {
                     if ui.button("📋 Template Browser...").clicked() {
                         self.show_template_browser = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                     ui.separator();
                     if ui.button("✅ Validate Campaign").clicked() {
                         self.validate_campaign();
                         self.active_tab = EditorTab::Validation;
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("📊 Advanced Validation Report...").clicked() {
                         self.run_advanced_validation();
                         self.show_validation_report = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("⚖️ Balance Statistics...").clicked() {
                         self.show_balance_stats = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                     ui.separator();
                     if ui.button("🔄 Refresh File Tree").clicked() {
@@ -1669,28 +1669,28 @@ impl eframe::App for CampaignBuilderApp {
                             self.update_file_tree(&dir);
                             self.status_message = "File tree refreshed.".to_string();
                         }
-                        ui.close_menu();
+                        ui.close();
                     }
                     ui.separator();
                     if ui.button("🧪 Test Play").clicked() {
                         self.status_message = "Test play would launch the game here...".to_string();
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("📦 Export Campaign...").clicked() {
                         self.status_message =
                             "Export would create .zip archive here...".to_string();
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
 
                 ui.menu_button("Help", |ui| {
                     if ui.button("📖 Documentation").clicked() {
                         self.status_message = "Would open documentation in browser...".to_string();
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("ℹ️ About").clicked() {
                         self.show_about_dialog = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
 
@@ -2729,7 +2729,7 @@ impl CampaignBuilderApp {
                     }
 
                     if ui.button("📋 Copy to Clipboard").clicked() {
-                        ui.output_mut(|o| o.copied_text = self.items_import_export_buffer.clone());
+                        ui.ctx().copy_text(self.items_import_export_buffer.clone());
                         self.status_message = "Copied to clipboard".to_string();
                     }
 
@@ -4690,6 +4690,7 @@ impl CampaignBuilderApp {
                         tile_rect,
                         0.0,
                         egui::Stroke::new(0.5, egui::Color32::from_gray(100)),
+                        egui::StrokeKind::Outside,
                     );
                 }
             }
@@ -4746,10 +4747,8 @@ impl CampaignBuilderApp {
                         let quest = &self.quest_editor_state.quests[selected_idx];
                         match ron::ser::to_string_pretty(quest, Default::default()) {
                             Ok(ron_string) => {
-                                self.quests_import_buffer = ron_string;
-                                ui.output_mut(|o| {
-                                    o.copied_text = self.quests_import_buffer.clone();
-                                });
+                                self.quests_import_buffer = ron_string.clone();
+                                ui.ctx().copy_text(ron_string);
                             }
                             Err(e) => eprintln!("Failed to export quest: {}", e),
                         }
@@ -4896,14 +4895,14 @@ impl CampaignBuilderApp {
                 response.context_menu(|ui| {
                     if ui.button("✏️ Edit").clicked() {
                         self.quest_editor_state.start_edit_quest(idx);
-                        ui.close_menu();
+                        ui.close();
                     }
 
                     if ui.button("🗑️ Delete").clicked() {
                         self.quest_editor_state.delete_quest(idx);
                         self.quests = self.quest_editor_state.quests.clone();
                         self.unsaved_changes = true;
-                        ui.close_menu();
+                        ui.close();
                     }
 
                     if ui.button("📋 Duplicate").clicked() {
@@ -4914,7 +4913,7 @@ impl CampaignBuilderApp {
                             self.quests.push(new_quest);
                             self.unsaved_changes = true;
                         }
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
             }
@@ -5813,7 +5812,7 @@ impl CampaignBuilderApp {
             if ui.button("📋 Export to Clipboard").clicked() {
                 match ron::ser::to_string_pretty(&self.dialogues, Default::default()) {
                     Ok(ron_str) => {
-                        ui.output_mut(|o| o.copied_text = ron_str.clone());
+                        ui.ctx().copy_text(ron_str.clone());
                         self.status_message = "Dialogues exported to clipboard".to_string();
                     }
                     Err(e) => {
@@ -7499,8 +7498,10 @@ mod tests {
 
     #[test]
     fn test_items_filter_magical() {
-        let mut app = CampaignBuilderApp::default();
-        app.items_filter_magical = Some(true);
+        let mut app = CampaignBuilderApp {
+            items_filter_magical: Some(true),
+            ..Default::default()
+        };
 
         let mut magical_item = CampaignBuilderApp::default_item();
         magical_item.id = 1;
@@ -7874,7 +7875,7 @@ mod tests {
         let filtered: Vec<_> = app
             .spells
             .iter()
-            .filter(|s| app.spells_filter_school.map_or(true, |f| s.school == f))
+            .filter(|s| app.spells_filter_school.is_none_or(|f| s.school == f))
             .collect();
 
         assert_eq!(filtered.len(), 2);
@@ -7925,7 +7926,7 @@ mod tests {
         let filtered: Vec<_> = app
             .spells
             .iter()
-            .filter(|s| app.spells_filter_level.map_or(true, |f| s.level == f))
+            .filter(|s| app.spells_filter_level.is_none_or(|f| s.level == f))
             .collect();
 
         assert_eq!(filtered.len(), 2);
@@ -7978,8 +7979,8 @@ mod tests {
             .spells
             .iter()
             .filter(|s| {
-                app.spells_filter_school.map_or(true, |f| s.school == f)
-                    && app.spells_filter_level.map_or(true, |f| s.level == f)
+                app.spells_filter_school.is_none_or(|f| s.school == f)
+                    && app.spells_filter_level.is_none_or(|f| s.level == f)
             })
             .collect();
 
@@ -7991,18 +7992,20 @@ mod tests {
 
     #[test]
     fn test_spell_context_target_editing() {
-        let mut app = CampaignBuilderApp::default();
-        app.spells_edit_buffer = Spell::new(
-            1,
-            "Test",
-            SpellSchool::Cleric,
-            1,
-            1,
-            0,
-            SpellContext::Anytime,
-            SpellTarget::Self_,
-            "Test",
-        );
+        let mut app = CampaignBuilderApp {
+            spells_edit_buffer: Spell::new(
+                1,
+                "Test",
+                SpellSchool::Cleric,
+                1,
+                1,
+                0,
+                SpellContext::Anytime,
+                SpellTarget::Self_,
+                "Test",
+            ),
+            ..Default::default()
+        };
 
         // Change context
         app.spells_edit_buffer.context = SpellContext::CombatOnly;
@@ -8047,8 +8050,10 @@ mod tests {
 
     #[test]
     fn test_monster_attacks_editor() {
-        let mut app = CampaignBuilderApp::default();
-        app.monsters_edit_buffer = CampaignBuilderApp::default_monster();
+        let mut app = CampaignBuilderApp {
+            monsters_edit_buffer: CampaignBuilderApp::default_monster(),
+            ..Default::default()
+        };
 
         // Initial attacks
         assert_eq!(app.monsters_edit_buffer.attacks.len(), 1);
@@ -8132,8 +8137,10 @@ mod tests {
 
     #[test]
     fn test_monster_loot_editor() {
-        let mut app = CampaignBuilderApp::default();
-        app.monsters_edit_buffer = CampaignBuilderApp::default_monster();
+        let mut app = CampaignBuilderApp {
+            monsters_edit_buffer: CampaignBuilderApp::default_monster(),
+            ..Default::default()
+        };
 
         // Modify loot table
         app.monsters_edit_buffer.loot.gold_min = 10;
@@ -8151,8 +8158,10 @@ mod tests {
 
     #[test]
     fn test_monster_stats_editor() {
-        let mut app = CampaignBuilderApp::default();
-        app.monsters_edit_buffer = CampaignBuilderApp::default_monster();
+        let mut app = CampaignBuilderApp {
+            monsters_edit_buffer: CampaignBuilderApp::default_monster(),
+            ..Default::default()
+        };
 
         // Modify all stats
         app.monsters_edit_buffer.stats.might.base = 20;

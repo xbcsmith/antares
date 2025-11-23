@@ -29,12 +29,14 @@ impl GameLog {
 }
 
 fn ui_system(mut contexts: EguiContexts, global_state: Res<GlobalState>, game_log: Res<GameLog>) {
-    let ctx = contexts.ctx_mut();
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
     let game_state = &global_state.0;
 
     // Top Panel: Menu Bar (Placeholder)
     egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-        egui::menu::bar(ui, |ui| {
+        egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("Quit").clicked() {
                     std::process::exit(0);

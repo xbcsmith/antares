@@ -16,7 +16,7 @@ use bevy_egui::EguiPlugin;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(EguiPlugin)
+        .add_plugins(EguiPlugin::default())
         .add_plugins(AntaresPlugin)
         .add_plugins(MapRenderingPlugin)
         .add_plugins(CameraPlugin)

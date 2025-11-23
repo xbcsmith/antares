@@ -21,24 +21,21 @@ pub struct MainCamera;
 fn setup_camera(mut commands: Commands) {
     // Spawn a 3D camera
     commands.spawn((
-        Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 1.7, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
-            ..default()
-        },
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 1.7, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
         MainCamera,
     ));
 
     // Add a light source attached to the camera (or just global for now)
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
+    commands.spawn((
+        PointLight {
             intensity: 1500.0,
             shadows_enabled: true,
             range: 20.0,
             ..default()
         },
-        transform: Transform::from_xyz(0.0, 5.0, 0.0),
-        ..default()
-    });
+        Transform::from_xyz(0.0, 5.0, 0.0),
+    ));
 }
 
 fn update_camera(
@@ -49,7 +46,7 @@ fn update_camera(
     let party_pos = game_state.world.party_position;
     let party_facing = game_state.world.party_facing;
 
-    if let Ok(mut transform) = camera_query.get_single_mut() {
+    if let Ok(mut transform) = camera_query.single_mut() {
         // Update position
         // Map (x, y) -> World (x, 0, y)
         // Add 0.5 to center in tile

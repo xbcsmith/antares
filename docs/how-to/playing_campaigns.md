@@ -335,9 +335,9 @@ cargo run --release --bin antares -- --campaign tutorial
 
 ## Next Steps
 
-- **Create Your Own Campaign**: See `docs/how-to/creating_campaigns.md`
-- **Campaign Builder Guide**: See `docs/tutorials/campaign_builder_tutorial.md`
-- **Game Mechanics**: See `docs/reference/game_mechanics.md`
+- **Create Your Own Campaign**: See [Creating Campaigns Tutorial](../tutorials/creating_campaigns.md)
+- **Modding Guide**: See [Modding Guide](../explanation/modding_guide.md) for comprehensive gameplay concepts
+- **Campaign Validation**: See [Creating and Validating Campaigns](creating_and_validating_campaigns.md)
 
 ---
 

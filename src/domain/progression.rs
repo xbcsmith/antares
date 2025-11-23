@@ -147,7 +147,7 @@ pub fn check_level_up(character: &Character) -> bool {
 /// ```
 /// use antares::domain::character::{Character, Class, Race, Sex, Alignment};
 /// use antares::domain::progression::{award_experience, level_up};
-/// use rand::thread_rng;
+/// use rand::rng;
 ///
 /// let mut knight = Character::new(
 ///     "Sir Lancelot".to_string(),
@@ -160,7 +160,7 @@ pub fn check_level_up(character: &Character) -> bool {
 /// // Give enough XP to level up
 /// award_experience(&mut knight, 10000).unwrap();
 ///
-/// let mut rng = thread_rng();
+/// let mut rng = rng();
 /// let hp_gained = level_up(&mut knight, &mut rng).unwrap();
 ///
 /// assert_eq!(knight.level, 2);
@@ -223,9 +223,9 @@ pub fn level_up(character: &mut Character, rng: &mut impl Rng) -> Result<u16, Pr
 /// ```
 /// use antares::domain::character::Class;
 /// use antares::domain::progression::roll_hp_gain;
-/// use rand::thread_rng;
+/// use rand::rng;
 ///
-/// let mut rng = thread_rng();
+/// let mut rng = rng();
 ///
 /// let knight_hp = roll_hp_gain(Class::Knight, &mut rng);
 /// assert!(knight_hp >= 1 && knight_hp <= 10);
@@ -266,10 +266,10 @@ pub fn roll_hp_gain(class: Class, rng: &mut impl Rng) -> u16 {
 /// ```
 /// use antares::domain::progression::roll_hp_gain_from_db;
 /// use antares::domain::classes::ClassDatabase;
-/// use rand::thread_rng;
+/// use rand::rng;
 ///
 /// let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
-/// let mut rng = thread_rng();
+/// let mut rng = rng();
 ///
 /// let hp = roll_hp_gain_from_db("knight", &db, &mut rng).unwrap();
 /// assert!(hp >= 1 && hp <= 10);
@@ -313,7 +313,7 @@ pub fn experience_for_level(level: u32) -> u64 {
 mod tests {
     use super::*;
     use crate::domain::character::{Alignment, Race, Sex};
-    use rand::thread_rng;
+    use rand::rng;
 
     fn create_test_character(class: Class) -> Character {
         Character::new(
@@ -370,7 +370,7 @@ mod tests {
         let required = experience_for_level(2);
         character.experience = required;
 
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let hp_gained = level_up(&mut character, &mut rng).unwrap();
 
         assert_eq!(character.level, 2);
@@ -384,7 +384,7 @@ mod tests {
         let required = experience_for_level(2);
         character.experience = required;
 
-        let mut rng = thread_rng();
+        let mut rng = rng();
         level_up(&mut character, &mut rng).unwrap();
 
         assert!(character.hp.base > initial_hp);
@@ -396,7 +396,7 @@ mod tests {
         let mut character = create_test_character(Class::Knight);
         character.experience = 500; // Not enough for level 2
 
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let result = level_up(&mut character, &mut rng);
 
         assert!(matches!(
@@ -412,7 +412,7 @@ mod tests {
         character.level = MAX_LEVEL;
         character.experience = u64::MAX;
 
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let result = level_up(&mut character, &mut rng);
 
         assert!(matches!(result, Err(ProgressionError::MaxLevelReached)));
@@ -420,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_hp_gain_by_class() {
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         // Test multiple rolls to ensure ranges are correct
         for _ in 0..20 {
@@ -454,7 +454,7 @@ mod tests {
         cleric.experience = experience_for_level(2);
 
         let initial_sp = cleric.sp.base;
-        let mut rng = thread_rng();
+        let mut rng = rng();
         level_up(&mut cleric, &mut rng).unwrap();
 
         assert!(cleric.sp.base > initial_sp);
@@ -466,7 +466,7 @@ mod tests {
         knight.experience = experience_for_level(2);
 
         let initial_sp = knight.sp.base;
-        let mut rng = thread_rng();
+        let mut rng = rng();
         level_up(&mut knight, &mut rng).unwrap();
 
         assert_eq!(knight.sp.base, initial_sp); // Should still be 0
@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn test_roll_hp_gain_from_db() {
         let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         // Test multiple rolls for each class
         for _ in 0..10 {
@@ -493,7 +493,7 @@ mod tests {
     #[test]
     fn test_roll_hp_gain_from_db_invalid_class() {
         let db = ClassDatabase::new();
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         let result = roll_hp_gain_from_db("nonexistent", &db, &mut rng);
         assert!(result.is_err());

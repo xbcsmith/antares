@@ -481,16 +481,11 @@ exits: [
 
 ## Advanced Topics
 
-### Map Builder Tool (Coming Soon)
+### Map Builder Tool
 
-Phase 2 of the implementation plan includes an interactive Map Builder tool that will:
-
-- Create maps visually
-- Validate in real-time
-- Auto-generate RON files
-- Browse available monsters/items/NPCs
-
-See `docs/explanation/map_content_implementation_plan_v2.md` for details.
+For visual map creation, see the map builder tools:
+- [Using Map Builder](using_map_builder.md) - Visual map creation tool
+- [Using SDK Map Editor](using_sdk_map_editor.md) - SDK map editor
 
 ### Procedural Generation
 
@@ -589,7 +584,6 @@ A small 12x12 indoor map with NPCs and a rest area:
 
 - **Format Specification**: [`docs/reference/map_ron_format.md`](../reference/map_ron_format.md)
 - **Architecture**: [`docs/reference/architecture.md`](../reference/architecture.md) Section 4.2
-- **Implementation Plan**: [`docs/explanation/map_content_implementation_plan_v2.md`](../explanation/map_content_implementation_plan_v2.md)
 - **Validation Tool**: `src/bin/validate_map.rs`
 
 ---
