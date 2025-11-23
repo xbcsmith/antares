@@ -25,6 +25,7 @@
 /// ```
 pub mod application;
 pub mod domain;
+pub mod game;
 pub mod sdk;
 
 // Re-export commonly used types for convenience
