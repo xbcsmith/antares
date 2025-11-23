@@ -38,36 +38,36 @@
     ],
     events: [
         (
-            position: (7, 3),
+            position: (x: 7, y: 3),
             event_type: Text("Welcome to the Training Grounds! This tutorial will teach you the basics of Antares RPG."),
         ),
         (
-            position: (5, 3),
+            position: (x: 5, y: 3),
             event_type: Treasure([
                 (item_id: 1, quantity: 1),
                 (item_id: 4, quantity: 2),
             ]),
         ),
         (
-            position: (7, 8),
+            position: (x: 7, y: 8),
             event_type: Combat([
                 (monster_id: 1, count: 2),
             ]),
         ),
         (
-            position: (10, 10),
+            position: (x: 10, y: 10),
             event_type: Combat([
                 (monster_id: 2, count: 1),
             ]),
         ),
         (
-            position: (7, 13),
+            position: (x: 7, y: 13),
             event_type: Combat([
                 (monster_id: 3, count: 1),
             ]),
         ),
         (
-            position: (7, 14),
+            position: (x: 7, y: 14),
             event_type: Text("Congratulations! You have completed the tutorial. You are now ready for adventure!"),
         ),
     ],
@@ -75,10 +75,10 @@
         (
             id: 1,
             name: "Training Master",
-            position: (7, 2),
+            position: (x: 7, y: 2),
             dialogue_id: None,
         ),
     ],
     exits: [],
-    starting_position: (7, 7),
+    starting_position: (x: 7, y: 7),
 )

@@ -16,10 +16,12 @@
 //! - `movement`: Party movement and navigation logic
 //! - `events`: Map event handling system
 
+pub mod blueprint;
 mod events;
 mod movement;
 mod types;
 
+pub use blueprint::MapBlueprint;
 pub use events::{trigger_event, EventError, EventResult};
 pub use movement::{check_tile_blocked, move_party, trigger_tile_event, MovementError};
 pub use types::{Map, MapEvent, Npc, TerrainType, Tile, WallType, World};
