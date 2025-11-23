@@ -35,7 +35,7 @@ use crate::domain::dialogue::{DialogueId, DialogueTree};
 use crate::domain::items::ItemDatabase;
 use crate::domain::quest::{Quest, QuestId};
 use crate::domain::types::{MapId, MonsterId, SpellId};
-use crate::domain::world::Map;
+use crate::domain::world::{Map, MapBlueprint};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -257,9 +257,29 @@ impl MapDatabase {
     }
 
     /// Loads maps from a directory
-    pub fn load_from_directory<P: AsRef<Path>>(_path: P) -> Result<Self, DatabaseError> {
-        // Placeholder implementation - will load all .ron files from maps directory
-        Ok(Self::new())
+    /// Loads maps from a directory
+    pub fn load_from_directory<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
+        let path = path.as_ref();
+        let mut maps = HashMap::new();
+
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "ron") {
+                let contents = std::fs::read_to_string(&path)?;
+                let blueprint: MapBlueprint =
+                    ron::from_str(&contents).map_err(|e| DatabaseError::RonError(e.code))?;
+                let map: Map = blueprint.into();
+                maps.insert(map.id, map);
+            }
+        }
+
+        Ok(Self { maps })
     }
 
     /// Gets a map by ID

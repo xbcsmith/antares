@@ -91,13 +91,15 @@ fn validate_map_file(file_path: &str) -> Result<Map, Vec<String>> {
     };
 
     // Parse RON
-    let map: Map = match ron::from_str(&contents) {
-        Ok(m) => m,
+    let blueprint: antares::domain::world::MapBlueprint = match ron::from_str(&contents) {
+        Ok(bp) => bp,
         Err(e) => {
             errors.push(format!("Failed to parse RON: {}", e));
             return Err(errors);
         }
     };
+
+    let map: Map = blueprint.into();
 
     // Validate structure
     validate_structure(&map, &mut errors);
@@ -137,24 +139,14 @@ fn validate_structure(map: &Map, errors: &mut Vec<String>) {
         ));
     }
 
-    // Check tiles array structure
-    if map.tiles.len() != map.height as usize {
+    // Validate tiles
+    let expected_tiles = (map.width * map.height) as usize;
+    if map.tiles.len() != expected_tiles {
         errors.push(format!(
-            "Tiles array has {} rows, expected {}",
-            map.tiles.len(),
-            map.height
+            "Tile count mismatch: expected {}, found {}",
+            expected_tiles,
+            map.tiles.len()
         ));
-    }
-
-    for (y, row) in map.tiles.iter().enumerate() {
-        if row.len() != map.width as usize {
-            errors.push(format!(
-                "Row {} has {} tiles, expected {}",
-                y,
-                row.len(),
-                map.width
-            ));
-        }
     }
 }
 
