@@ -1,0 +1,90 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::domain::world::MapEvent;
+use crate::game::resources::GlobalState;
+use bevy::prelude::*;
+
+pub struct EventPlugin;
+
+impl Plugin for EventPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_event::<MapEventTriggered>()
+            .add_systems(Update, (check_for_events, handle_events));
+    }
+}
+
+/// Event triggered when the party steps on a tile with an event
+#[derive(Event)]
+pub struct MapEventTriggered {
+    pub event: MapEvent,
+}
+
+/// System to check if the party is standing on an event
+fn check_for_events(
+    global_state: Res<GlobalState>,
+    mut event_writer: EventWriter<MapEventTriggered>,
+    mut last_position: Local<Option<crate::domain::types::Position>>,
+) {
+    let game_state = &global_state.0;
+    let current_pos = game_state.world.party_position;
+
+    // Only check if position changed
+    if *last_position != Some(current_pos) {
+        *last_position = Some(current_pos);
+
+        if let Some(map) = game_state.world.get_current_map() {
+            if let Some(event) = map.get_event(current_pos) {
+                // Trigger the event
+                event_writer.send(MapEventTriggered {
+                    event: event.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// System to handle triggered events
+fn handle_events(
+    mut event_reader: EventReader<MapEventTriggered>,
+    mut global_state: ResMut<GlobalState>,
+) {
+    for trigger in event_reader.read() {
+        match &trigger.event {
+            MapEvent::Teleport {
+                destination,
+                map_id,
+            } => {
+                println!("Teleporting to Map {} at {:?}", map_id, destination);
+                let game_state = &mut global_state.0;
+
+                // TODO: Load the new map if it's different
+                // For now, just update position and map ID
+                game_state.world.set_current_map(*map_id);
+                game_state.world.set_party_position(*destination);
+
+                // Note: Real implementation needs to handle map loading/unloading
+            }
+            MapEvent::Sign { text } => {
+                println!("Sign reads: {}", text);
+                // TODO: Display in UI (Phase 5)
+            }
+            MapEvent::Trap { damage, effect } => {
+                println!("IT'S A TRAP! Took {} damage. Effect: {:?}", damage, effect);
+                // TODO: Apply damage to party
+            }
+            MapEvent::Treasure { loot } => {
+                println!("Found treasure! Loot IDs: {:?}", loot);
+                // TODO: Add to inventory
+            }
+            MapEvent::Encounter { monster_group } => {
+                println!("Monsters attack! Group IDs: {:?}", monster_group);
+                // TODO: Start combat
+            }
+            MapEvent::NpcDialogue { npc_id } => {
+                println!("NPC {} wants to talk.", npc_id);
+                // TODO: Start dialogue
+            }
+        }
+    }
+}

@@ -1,0 +1,87 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::domain::types;
+use crate::domain::world;
+use crate::game::resources::GlobalState;
+use bevy::prelude::*;
+
+pub struct MapRenderingPlugin;
+
+impl Plugin for MapRenderingPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, spawn_map);
+    }
+}
+
+fn spawn_map(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    global_state: Res<GlobalState>,
+) {
+    let game_state = &global_state.0;
+
+    if let Some(map) = game_state.world.get_current_map() {
+        // Materials
+        let floor_material = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.3, 0.3, 0.3),
+            perceptual_roughness: 0.9,
+            ..default()
+        });
+
+        let wall_material = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.6, 0.6, 0.6),
+            perceptual_roughness: 0.5,
+            ..default()
+        });
+
+        let door_material = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.4, 0.2, 0.1), // Brown
+            perceptual_roughness: 0.5,
+            ..default()
+        });
+
+        // Meshes
+        let floor_mesh = meshes.add(Plane3d::default().mesh().size(1.0, 1.0));
+        let wall_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+        let door_mesh = meshes.add(Cuboid::new(1.0, 1.0, 0.2)); // Thinner
+
+        // Iterate over tiles
+        for y in 0..map.height {
+            for x in 0..map.width {
+                let pos = types::Position::new(x as i32, y as i32);
+                if let Some(tile) = map.get_tile(pos) {
+                    // Spawn floor
+                    commands.spawn(PbrBundle {
+                        mesh: floor_mesh.clone(),
+                        material: floor_material.clone(),
+                        transform: Transform::from_xyz(x as f32, 0.0, y as f32),
+                        ..default()
+                    });
+
+                    // Spawn wall/door
+                    match tile.wall_type {
+                        world::WallType::Normal => {
+                            commands.spawn(PbrBundle {
+                                mesh: wall_mesh.clone(),
+                                material: wall_material.clone(),
+                                transform: Transform::from_xyz(x as f32, 0.5, y as f32),
+                                ..default()
+                            });
+                        }
+                        world::WallType::Door => {
+                            commands.spawn(PbrBundle {
+                                mesh: door_mesh.clone(),
+                                material: door_material.clone(),
+                                transform: Transform::from_xyz(x as f32, 0.5, y as f32),
+                                ..default()
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+}
