@@ -22,6 +22,7 @@ fn main() {
         .add_plugins(CameraPlugin)
         .add_plugins(antares::game::systems::input::InputPlugin)
         .add_plugins(antares::game::systems::events::EventPlugin)
+        .add_plugins(antares::game::systems::ui::UiPlugin)
         .run();
 }
 
