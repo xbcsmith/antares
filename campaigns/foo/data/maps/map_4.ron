@@ -3606,6 +3606,24 @@
     ],
     events: {
         (
+            x: 14,
+            y: 4,
+        ): Encounter(
+            monster_group: [
+                5,
+                4,
+            ],
+        ),
+        (
+            x: 5,
+            y: 3,
+        ): Encounter(
+            monster_group: [
+                4,
+                4,
+            ],
+        ),
+        (
             x: 8,
             y: 8,
         ): Treasure(
@@ -3613,6 +3631,15 @@
                 13,
                 23,
                 32,
+            ],
+        ),
+        (
+            x: 3,
+            y: 11,
+        ): Encounter(
+            monster_group: [
+                6,
+                5,
             ],
         ),
         (
@@ -3633,6 +3660,15 @@
             text: "Exit to town.",
         ),
         (
+            x: 16,
+            y: 2,
+        ): Treasure(
+            loot: [
+                14,
+                24,
+            ],
+        ),
+        (
             x: 17,
             y: 16,
         ): Encounter(
@@ -3647,42 +3683,6 @@
         ): Trap(
             damage: 8,
             effect: None,
-        ),
-        (
-            x: 3,
-            y: 11,
-        ): Encounter(
-            monster_group: [
-                6,
-                5,
-            ],
-        ),
-        (
-            x: 14,
-            y: 4,
-        ): Encounter(
-            monster_group: [
-                5,
-                4,
-            ],
-        ),
-        (
-            x: 5,
-            y: 3,
-        ): Encounter(
-            monster_group: [
-                4,
-                4,
-            ],
-        ),
-        (
-            x: 16,
-            y: 2,
-        ): Treasure(
-            loot: [
-                14,
-                24,
-            ],
         ),
     },
     npcs: [
