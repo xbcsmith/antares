@@ -386,6 +386,9 @@ mod tests {
             context,
             SpellTarget::Self_,
             "Test spell",
+            None,
+            0,
+            false,
         )
     }
 

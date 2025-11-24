@@ -74,6 +74,7 @@ pub fn basic_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -105,6 +106,7 @@ pub fn two_handed_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -140,6 +142,7 @@ pub fn magical_weapon(id: ItemId, name: &str, damage: DiceRoll, bonus: i8) -> It
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -180,6 +183,7 @@ pub fn basic_armor(id: ItemId, name: &str, ac_bonus: u8) -> Item {
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -209,6 +213,7 @@ pub fn shield(id: ItemId, name: &str, ac_bonus: u8) -> Item {
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -240,6 +245,7 @@ pub fn magical_armor(id: ItemId, name: &str, ac_bonus: u8, magic_bonus: i8) -> I
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -274,6 +280,7 @@ pub fn basic_ring(id: ItemId, name: &str, bonus: Bonus) -> Item {
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -306,6 +313,7 @@ pub fn basic_amulet(id: ItemId, name: &str, bonus: Bonus) -> Item {
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -337,6 +345,7 @@ pub fn healing_potion(id: ItemId, name: &str, healing_amount: u16) -> Item {
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -366,6 +375,7 @@ pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item {
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -397,6 +407,7 @@ pub fn arrow_bundle(id: ItemId, count: u16) -> Item {
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -426,6 +437,7 @@ pub fn bolt_bundle(id: ItemId, count: u16) -> Item {
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 
@@ -457,6 +469,7 @@ pub fn quest_item(id: ItemId, name: &str, quest_id: &str) -> Item {
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     }
 }
 

@@ -23,3 +23,6 @@ mm1/
 
 # Map builder command history
 data/.map_builder_history
+
+
+*.DS_Store

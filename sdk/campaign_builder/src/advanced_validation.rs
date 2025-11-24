@@ -729,6 +729,7 @@ mod tests {
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
+            icon_path: None,
         }
     }
 

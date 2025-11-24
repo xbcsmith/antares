@@ -184,6 +184,7 @@ impl TemplateManager {
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
+                icon_path: None,
             }),
             "basic_dagger" => Some(Item {
                 id,
@@ -201,6 +202,7 @@ impl TemplateManager {
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
+                icon_path: None,
             }),
             "basic_bow" => Some(Item {
                 id,
@@ -218,6 +220,7 @@ impl TemplateManager {
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
+                icon_path: None,
             }),
             "basic_staff" => Some(Item {
                 id,
@@ -235,6 +238,7 @@ impl TemplateManager {
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
+                icon_path: None,
             }),
             "leather_armor" => Some(Item {
                 id,
@@ -251,6 +255,7 @@ impl TemplateManager {
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
+                icon_path: None,
             }),
             "chain_mail" => Some(Item {
                 id,
@@ -267,6 +272,7 @@ impl TemplateManager {
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
+                icon_path: None,
             }),
             "plate_mail" => Some(Item {
                 id,
@@ -283,6 +289,7 @@ impl TemplateManager {
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
+                icon_path: None,
             }),
             "healing_potion" => Some(Item {
                 id,
@@ -299,6 +306,7 @@ impl TemplateManager {
                 spell_effect: None,
                 max_charges: 1,
                 is_cursed: false,
+                icon_path: None,
             }),
             "mana_potion" => Some(Item {
                 id,
@@ -315,6 +323,7 @@ impl TemplateManager {
                 spell_effect: None,
                 max_charges: 1,
                 is_cursed: false,
+                icon_path: None,
             }),
             _ => {
                 // Check custom templates
@@ -882,6 +891,7 @@ mod tests {
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
+            icon_path: None,
         };
 
         manager.add_custom_item(custom_item.clone());

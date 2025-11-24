@@ -639,8 +639,20 @@ impl QuestEditorState {
 
     /// Start creating a new quest
     pub fn start_new_quest(&mut self) {
+        // Create a temporary quest
+        let new_quest = Quest::new(0, "New Quest", "Description");
+        self.quests.push(new_quest);
+        let new_idx = self.quests.len() - 1;
+
+        self.selected_quest = Some(new_idx);
         self.mode = QuestEditorMode::Creating;
+
+        // Initialize buffer with default values
         self.quest_buffer = QuestEditBuffer::default();
+        self.quest_buffer.id = "new_quest".to_string();
+        self.quest_buffer.name = "New Quest".to_string();
+        self.quest_buffer.description = "Description".to_string();
+
         self.selected_stage = None;
         self.selected_objective = None;
         self.validation_errors.clear();
@@ -738,6 +750,7 @@ impl QuestEditorState {
             Quest::new(id, &self.quest_buffer.name, &self.quest_buffer.description)
         };
 
+        quest.id = id;
         quest.name = self.quest_buffer.name.clone();
         quest.description = self.quest_buffer.description.clone();
         quest.min_level = min_level;
@@ -770,6 +783,14 @@ impl QuestEditorState {
 
     /// Cancel current edit
     pub fn cancel_edit(&mut self) {
+        if self.mode == QuestEditorMode::Creating {
+            if let Some(idx) = self.selected_quest {
+                if idx < self.quests.len() {
+                    self.quests.remove(idx);
+                }
+            }
+        }
+
         self.mode = QuestEditorMode::List;
         self.selected_quest = None;
         self.selected_stage = None;
@@ -811,140 +832,32 @@ impl QuestEditorState {
         }
     }
 
-    /// Add objective to current stage
-    pub fn add_objective(&mut self) -> Result<(), String> {
+    /// Add a default objective to current stage
+    pub fn add_default_objective(&mut self) -> Result<usize, String> {
         if let Some(quest_idx) = self.selected_quest {
             if quest_idx >= self.quests.len() {
                 return Err("Invalid quest index".to_string());
             }
 
-            let objective = match self.objective_buffer.objective_type {
-                ObjectiveType::KillMonsters => {
-                    let monster_id = self
-                        .objective_buffer
-                        .monster_id
-                        .parse::<MonsterId>()
-                        .map_err(|_| "Invalid monster ID".to_string())?;
-                    let quantity = self
-                        .objective_buffer
-                        .quantity
-                        .parse::<u32>()
-                        .map_err(|_| "Invalid quantity".to_string())?;
-                    QuestObjective::KillMonsters {
-                        monster_id,
-                        quantity: quantity as u16,
-                    }
-                }
-                ObjectiveType::CollectItems => {
-                    let item_id = self
-                        .objective_buffer
-                        .item_id
-                        .parse::<ItemId>()
-                        .map_err(|_| "Invalid item ID".to_string())?;
-                    let quantity = self
-                        .objective_buffer
-                        .quantity
-                        .parse::<u32>()
-                        .map_err(|_| "Invalid quantity".to_string())?;
-                    QuestObjective::CollectItems {
-                        item_id,
-                        quantity: quantity as u16,
-                    }
-                }
-                ObjectiveType::ReachLocation => {
-                    let map_id = self
-                        .objective_buffer
-                        .map_id
-                        .parse::<MapId>()
-                        .map_err(|_| "Invalid map ID".to_string())?;
-                    let x = self
-                        .objective_buffer
-                        .location_x
-                        .parse::<u32>()
-                        .map_err(|_| "Invalid X coordinate".to_string())?;
-                    let y = self
-                        .objective_buffer
-                        .location_y
-                        .parse::<u32>()
-                        .map_err(|_| "Invalid Y coordinate".to_string())?;
-                    let radius = self
-                        .objective_buffer
-                        .location_radius
-                        .parse::<u32>()
-                        .map_err(|_| "Invalid radius".to_string())?;
-                    QuestObjective::ReachLocation {
-                        map_id,
-                        position: Position::new(x as i32, y as i32),
-                        radius: radius as u8,
-                    }
-                }
-                ObjectiveType::TalkToNpc => {
-                    let map_id = self
-                        .objective_buffer
-                        .map_id
-                        .parse::<MapId>()
-                        .map_err(|_| "Invalid map ID".to_string())?;
-                    QuestObjective::TalkToNpc {
-                        npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
-                        map_id,
-                    }
-                }
-                ObjectiveType::DeliverItem => {
-                    let item_id = self
-                        .objective_buffer
-                        .item_id
-                        .parse::<ItemId>()
-                        .map_err(|_| "Invalid item ID".to_string())?;
-                    let quantity = self
-                        .objective_buffer
-                        .quantity
-                        .parse::<u32>()
-                        .map_err(|_| "Invalid quantity".to_string())?;
-                    QuestObjective::DeliverItem {
-                        item_id,
-                        npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
-                        quantity: quantity as u16,
-                    }
-                }
-                ObjectiveType::EscortNpc => {
-                    let map_id = self
-                        .objective_buffer
-                        .map_id
-                        .parse::<MapId>()
-                        .map_err(|_| "Invalid map ID".to_string())?;
-                    let x = self
-                        .objective_buffer
-                        .location_x
-                        .parse::<u32>()
-                        .map_err(|_| "Invalid X coordinate".to_string())?;
-                    let y = self
-                        .objective_buffer
-                        .location_y
-                        .parse::<u32>()
-                        .map_err(|_| "Invalid Y coordinate".to_string())?;
-                    QuestObjective::EscortNpc {
-                        npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
-                        map_id,
-                        position: Position::new(x as i32, y as i32),
-                    }
-                }
-                ObjectiveType::CustomFlag => QuestObjective::CustomFlag {
-                    flag_name: self.objective_buffer.flag_name.clone(),
-                    required_value: self.objective_buffer.flag_value,
-                },
-            };
-
             if let Some(stage_idx) = self.selected_stage {
                 if stage_idx < self.quests[quest_idx].stages.len() {
+                    // Add a default objective (Kill Monster 0, Qty 1)
+                    let objective = QuestObjective::KillMonsters {
+                        monster_id: 0,
+                        quantity: 1,
+                    };
+
                     self.quests[quest_idx].stages[stage_idx].add_objective(objective);
                     self.has_unsaved_changes = true;
-                    self.objective_buffer = ObjectiveEditBuffer::default();
-                    self.selected_objective = None;
-                    return Ok(());
-                }
-            }
 
-            Err("No stage selected".to_string())
+                    // Return the index of the new objective
+                    Ok(self.quests[quest_idx].stages[stage_idx].objectives.len() - 1)
+                } else {
+                    Err("Invalid stage index".to_string())
+                }
+            } else {
+                Err("No stage selected".to_string())
+            }
         } else {
             Err("No quest selected".to_string())
         }
