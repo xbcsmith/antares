@@ -229,6 +229,7 @@ impl ItemEditor {
             spell_effect,
             max_charges,
             is_cursed,
+            icon_path: None,
         };
 
         self.items.push(item);
@@ -834,6 +835,7 @@ mod tests {
                     spell_effect: None,
                     max_charges: 0,
                     is_cursed: false,
+                    icon_path: None,
                 },
                 Item {
                     id: 5,
@@ -850,6 +852,7 @@ mod tests {
                     spell_effect: None,
                     max_charges: 0,
                     is_cursed: false,
+                    icon_path: None,
                 },
             ],
             file_path: PathBuf::from("test.ron"),

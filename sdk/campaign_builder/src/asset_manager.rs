@@ -477,7 +477,7 @@ impl AssetManager {
 
     /// Scans campaign data to identify which assets are referenced
     ///
-    /// This method examines items, spells, monsters, maps, quests, and dialogues
+    /// This method examines items, spells, monsters, maps, quests, dialogues, and classes
     /// to determine which assets are actively used in the campaign.
     ///
     /// # Arguments
@@ -485,6 +485,8 @@ impl AssetManager {
     /// * `items` - List of campaign items
     /// * `quests` - List of campaign quests
     /// * `dialogues` - List of campaign dialogues
+    /// * `maps` - List of campaign maps
+    /// * `classes` - List of campaign classes
     ///
     /// # Examples
     ///
@@ -492,19 +494,25 @@ impl AssetManager {
     /// use antares::domain::items::types::Item;
     /// use antares::domain::quest::Quest;
     /// use antares::domain::dialogue::DialogueTree;
+    /// use antares::domain::world::Map;
+    /// use antares::domain::classes::ClassDefinition;
     /// use std::path::PathBuf;
     ///
     /// let mut manager = campaign_builder::asset_manager::AssetManager::new(PathBuf::from("/tmp/campaign"));
     /// let items = vec![];
     /// let quests = vec![];
     /// let dialogues = vec![];
-    /// manager.scan_references(&items, &quests, &dialogues);
+    /// let maps = vec![];
+    /// let classes = vec![];
+    /// manager.scan_references(&items, &quests, &dialogues, &maps, &classes);
     /// ```
     pub fn scan_references(
         &mut self,
         items: &[antares::domain::items::types::Item],
         quests: &[antares::domain::quest::Quest],
         dialogues: &[antares::domain::dialogue::DialogueTree],
+        maps: &[antares::domain::world::Map],
+        classes: &[antares::domain::classes::ClassDefinition],
     ) {
         // Reset all reference tracking
         for asset in self.assets.values_mut() {
@@ -521,8 +529,11 @@ impl AssetManager {
         // Scan dialogues for asset references (e.g., portrait images)
         self.scan_dialogues_references(dialogues);
 
-        // Note: Map references would be scanned similarly if map data structures are available
-        // self.scan_map_references(maps);
+        // Scan maps for asset references (e.g., tilesets, backgrounds)
+        self.scan_maps_references(maps);
+
+        // Scan classes for asset references (e.g., class icons)
+        self.scan_classes_references(classes);
     }
 
     /// Scans items for asset references
@@ -532,11 +543,30 @@ impl AssetManager {
             // For now, we scan for potential asset path patterns in item names
             // In a real implementation, items would have explicit asset_path fields
 
-            // Example: Check if item name suggests an asset file
-            // This is a placeholder - actual implementation would check proper asset fields
+            // Check explicit icon path if available
+            if let Some(icon_path) = &item.icon_path {
+                let path = PathBuf::from(icon_path);
+                if let Some(asset) = self.assets.get_mut(&path) {
+                    asset.is_referenced = true;
+                    asset.references.push(AssetReference::Item {
+                        id: item.id,
+                        name: item.name.clone(),
+                    });
+                }
+            }
+
+            // Heuristic fallback: Check if item name suggests an asset file
             let potential_paths = vec![
                 format!("items/{}.png", item.name.to_lowercase().replace(' ', "_")),
                 format!("icons/{}.png", item.name.to_lowercase().replace(' ', "_")),
+                format!(
+                    "assets/items/{}.png",
+                    item.name.to_lowercase().replace(' ', "_")
+                ),
+                format!(
+                    "assets/icons/{}.png",
+                    item.name.to_lowercase().replace(' ', "_")
+                ),
             ];
 
             for path_str in potential_paths {
@@ -601,6 +631,90 @@ impl AssetManager {
                         id: dialogue.id,
                         name: dialogue.name.clone(),
                     });
+                }
+            }
+        }
+    }
+
+    /// Scans maps for asset references (tilesets, backgrounds, etc.)
+    fn scan_maps_references(&mut self, maps: &[antares::domain::world::Map]) {
+        for map in maps {
+            // Maps may reference tileset images and background images
+            // Check for common naming patterns based on map ID
+
+            let potential_paths = vec![
+                format!("tilesets/map_{}.png", map.id),
+                format!("assets/tilesets/map_{}.png", map.id),
+                format!("backgrounds/map_{}.png", map.id),
+                format!("assets/backgrounds/map_{}.png", map.id),
+                // Common tileset names
+                format!("tilesets/dungeon.png"),
+                format!("tilesets/town.png"),
+                format!("tilesets/wilderness.png"),
+                format!("assets/tilesets/dungeon.png"),
+                format!("assets/tilesets/town.png"),
+                format!("assets/tilesets/wilderness.png"),
+            ];
+
+            for path_str in potential_paths {
+                let path = PathBuf::from(&path_str);
+                if let Some(asset) = self.assets.get_mut(&path) {
+                    asset.is_referenced = true;
+                    // Only add reference if not already added
+                    if !asset
+                        .references
+                        .iter()
+                        .any(|r| matches!(r, AssetReference::Map { id, .. } if *id == map.id))
+                    {
+                        asset.references.push(AssetReference::Map {
+                            id: map.id,
+                            name: format!("Map {}", map.id),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Scans classes for asset references (class icons, etc.)
+    fn scan_classes_references(&mut self, classes: &[antares::domain::classes::ClassDefinition]) {
+        for class in classes {
+            // Classes may reference icon images
+            // Check for icon assets based on class ID and name
+
+            let potential_paths = vec![
+                format!("classes/{}.png", class.id),
+                format!("icons/classes/{}.png", class.id),
+                format!("assets/classes/{}.png", class.id),
+                format!("assets/icons/classes/{}.png", class.id),
+                format!(
+                    "classes/{}.png",
+                    class.name.to_lowercase().replace(' ', "_")
+                ),
+                format!(
+                    "icons/classes/{}.png",
+                    class.name.to_lowercase().replace(' ', "_")
+                ),
+            ];
+
+            for path_str in potential_paths {
+                let path = PathBuf::from(&path_str);
+                if let Some(asset) = self.assets.get_mut(&path) {
+                    asset.is_referenced = true;
+                    // Only add reference if not already added for this class
+                    if !asset.references.iter().any(|r| {
+                        if let AssetReference::Item { name, .. } = r {
+                            name == &class.name
+                        } else {
+                            false
+                        }
+                    }) {
+                        // Use Item reference as a placeholder (we could add a Class variant to AssetReference if needed)
+                        asset.references.push(AssetReference::Item {
+                            id: 0, // Classes don't have numeric IDs
+                            name: format!("Class: {}", class.name),
+                        });
+                    }
                 }
             }
         }
@@ -968,10 +1082,11 @@ mod tests {
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
+            icon_path: None,
         };
 
         // Scan references
-        manager.scan_references(&[item], &[], &[]);
+        manager.scan_references(&[item], &[], &[], &[], &[]);
 
         // Check that the asset was marked as referenced
         let asset = manager.assets.get(&asset_path).unwrap();
@@ -1130,7 +1245,7 @@ mod tests {
             quest_giver_position: None,
         };
 
-        manager.scan_references(&[], &[quest], &[]);
+        manager.scan_references(&[], &[quest], &[], &[], &[]);
 
         let asset = manager.assets.get(&quest_icon_path).unwrap();
         assert!(asset.is_referenced);
@@ -1183,7 +1298,7 @@ mod tests {
             associated_quest: None,
         };
 
-        manager.scan_references(&[], &[], &[dialogue]);
+        manager.scan_references(&[], &[], &[dialogue], &[], &[]);
 
         let asset = manager.assets.get(&portrait_path).unwrap();
         assert!(asset.is_referenced);

@@ -1,1 +1,21 @@
-[]
+[
+    (
+        id: 1,
+        name: "Fizban Story",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "I am the Great Fizban and this is my Cave",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+        },
+        speaker_name: Some("Fizban"),
+        repeatable: true,
+        associated_quest: Some(10),
+    ),
+]

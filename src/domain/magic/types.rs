@@ -197,6 +197,12 @@ pub struct Spell {
     pub target: SpellTarget,
     /// Human-readable description of effects
     pub description: String,
+    /// Damage dice (if applicable)
+    pub damage: Option<crate::domain::types::DiceRoll>,
+    /// Duration in rounds (0 = Instant)
+    pub duration: u16,
+    /// Whether a saving throw is allowed
+    pub saving_throw: bool,
 }
 
 impl Spell {
@@ -206,6 +212,7 @@ impl Spell {
     ///
     /// ```
     /// use antares::domain::magic::types::{Spell, SpellSchool, SpellContext, SpellTarget};
+    /// use antares::domain::types::DiceRoll;
     ///
     /// let spell = Spell::new(
     ///     0x0201,
@@ -217,6 +224,9 @@ impl Spell {
     ///     SpellContext::CombatOnly,
     ///     SpellTarget::MonsterGroup,
     ///     "Deals 3d6 fire damage to multiple enemies",
+    ///     Some(DiceRoll::new(3, 6, 0)),
+    ///     0,
+    ///     true,
     /// );
     ///
     /// assert_eq!(spell.name, "Fireball");
@@ -233,6 +243,9 @@ impl Spell {
         context: SpellContext,
         target: SpellTarget,
         description: impl Into<String>,
+        damage: Option<crate::domain::types::DiceRoll>,
+        duration: u16,
+        saving_throw: bool,
     ) -> Self {
         Self {
             id,
@@ -244,6 +257,9 @@ impl Spell {
             context,
             target,
             description: description.into(),
+            damage,
+            duration,
+            saving_throw,
         }
     }
 
@@ -400,6 +416,9 @@ mod tests {
             SpellContext::Anytime,
             SpellTarget::SingleCharacter,
             "Heals 8 hit points",
+            None,
+            0,
+            false,
         );
 
         assert_eq!(spell.name, "Cure Wounds");
@@ -421,6 +440,9 @@ mod tests {
             SpellContext::Anytime,
             SpellTarget::Self_,
             "Test",
+            None,
+            0,
+            false,
         );
         assert_eq!(level1.required_level(), 1);
 
@@ -434,6 +456,9 @@ mod tests {
             SpellContext::Anytime,
             SpellTarget::Self_,
             "Test",
+            None,
+            0,
+            false,
         );
         assert_eq!(level3.required_level(), 5);
 
@@ -447,6 +472,9 @@ mod tests {
             SpellContext::Anytime,
             SpellTarget::Self_,
             "Test",
+            None,
+            0,
+            false,
         );
         assert_eq!(level7.required_level(), 13);
     }
@@ -463,6 +491,9 @@ mod tests {
             SpellContext::CombatOnly,
             SpellTarget::SingleMonster,
             "Attack spell",
+            Some(crate::domain::types::DiceRoll::new(1, 6, 0)),
+            0,
+            true,
         );
         assert!(combat_spell.is_combat_only());
         assert!(!combat_spell.is_non_combat_only());
@@ -477,6 +508,9 @@ mod tests {
             SpellContext::NonCombatOnly,
             SpellTarget::Self_,
             "Teleport to town",
+            None,
+            0,
+            false,
         );
         assert!(!utility_spell.is_combat_only());
         assert!(utility_spell.is_non_combat_only());
@@ -494,6 +528,9 @@ mod tests {
             SpellContext::Anytime,
             SpellTarget::Self_,
             "Test",
+            None,
+            0,
+            false,
         );
         assert!(!free_spell.requires_gems());
 
@@ -507,6 +544,9 @@ mod tests {
             SpellContext::Anytime,
             SpellTarget::Self_,
             "Test",
+            None,
+            0,
+            false,
         );
         assert!(gem_spell.requires_gems());
     }

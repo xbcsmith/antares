@@ -272,6 +272,9 @@ mod tests {
             context: SpellContext::Anytime,
             target: SpellTarget::SingleCharacter,
             description: "Test spell".to_string(),
+            damage: None,
+            duration: 0,
+            saving_throw: false,
         }
     }
 
@@ -385,6 +388,9 @@ mod tests {
         context: Anytime,
         target: SingleCharacter,
         description: "Awakens a sleeping character",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
     (
         id: 513,
@@ -396,6 +402,9 @@ mod tests {
         context: NonCombatOnly,
         target: Self_,
         description: "Creates light",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 ]
 "#;
