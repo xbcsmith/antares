@@ -33,7 +33,7 @@ sudo pacman -S libxcb libxkbcommon
 cd antares/
 
 # Run the prototype (will build automatically)
-cargo run --package campaign_builder --bin campaign-builder
+cargo run --package campaign_builder --bin campaign-builder wayland-devel systemd-devel alsa-lib-devel
 ```
 
 That's it! The Campaign Builder UI should launch.

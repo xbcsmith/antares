@@ -11,6 +11,8 @@ antares = { path = "../.." }
 eframe = { version = "0.33", default-features = false, features = [
     "glow",              # OpenGL backend (most compatible, works without GPU)
     "default_fonts",     # Built-in fonts
+    "wayland",           # Wayland support for Linux
+    "x11",               # X11 support as fallback
 ] }
 egui = "0.33"
 serde = { version = "1.0", features = ["derive"] }
