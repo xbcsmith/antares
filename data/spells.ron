@@ -19,6 +19,9 @@
         context: Anytime,
         target: SingleCharacter,
         description: "Awakens a sleeping character",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -31,6 +34,9 @@
         context: CombatOnly,
         target: AllCharacters,
         description: "Increases party's attack bonus temporarily",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -43,6 +49,9 @@
         context: CombatOnly,
         target: MonsterGroup,
         description: "Blinds a group of enemies, reducing accuracy",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -55,6 +64,9 @@
         context: Anytime,
         target: SingleCharacter,
         description: "Heals 8 hit points",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -67,6 +79,9 @@
         context: NonCombatOnly,
         target: Self_,
         description: "Creates light for 100 steps",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -79,6 +94,9 @@
         context: Anytime,
         target: SingleCharacter,
         description: "Heals 15 hit points",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -91,6 +109,9 @@
         context: CombatOnly,
         target: AllCharacters,
         description: "Protects party from fear effects",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     // ===== Cleric Spells - Level 2 =====
@@ -105,6 +126,9 @@
         context: Anytime,
         target: SingleCharacter,
         description: "Heals 25 hit points",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -117,6 +141,9 @@
         context: CombatOnly,
         target: AllCharacters,
         description: "Greatly increases party morale and combat effectiveness",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -129,6 +156,9 @@
         context: CombatOnly,
         target: MonsterGroup,
         description: "Inflicts pain on enemies, reducing their effectiveness",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -141,6 +171,9 @@
         context: Anytime,
         target: AllCharacters,
         description: "Protects party from cold damage",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -153,6 +186,9 @@
         context: Anytime,
         target: AllCharacters,
         description: "Protects party from fire damage",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -165,6 +201,9 @@
         context: Anytime,
         target: AllCharacters,
         description: "Protects party from poison effects",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -177,6 +216,9 @@
         context: CombatOnly,
         target: MonsterGroup,
         description: "Silences enemy spellcasters",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     // ===== Cleric Spells - Level 3 =====
@@ -191,6 +233,9 @@
         context: NonCombatOnly,
         target: Self_,
         description: "Creates food for the party",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -203,6 +248,9 @@
         context: Anytime,
         target: SingleCharacter,
         description: "Cures blindness condition",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -215,6 +263,9 @@
         context: Anytime,
         target: SingleCharacter,
         description: "Cures paralysis condition",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -227,6 +278,9 @@
         context: NonCombatOnly,
         target: Self_,
         description: "Creates light for 500 steps",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -239,6 +293,9 @@
         context: NonCombatOnly,
         target: AllCharacters,
         description: "Allows party to walk on water",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -251,6 +308,9 @@
         context: CombatOnly,
         target: SpecificMonsters,
         description: "Destroys or causes undead to flee",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -263,6 +323,9 @@
         context: Anytime,
         target: SingleCharacter,
         description: "Completely removes poison from character",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     // ===== Sorcerer Spells - Level 1 =====
@@ -277,6 +340,9 @@
         context: Anytime,
         target: SingleCharacter,
         description: "Awakens a sleeping character",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -289,6 +355,9 @@
         context: NonCombatOnly,
         target: Self_,
         description: "Detects magical traps and items",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -301,6 +370,9 @@
         context: CombatOnly,
         target: SingleMonster,
         description: "Deals 2d8 energy damage to one enemy",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -313,6 +385,9 @@
         context: CombatOnly,
         target: SingleMonster,
         description: "Deals 3d6 fire damage to one enemy",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -325,6 +400,9 @@
         context: NonCombatOnly,
         target: Self_,
         description: "Creates light for 100 steps",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -337,6 +415,9 @@
         context: NonCombatOnly,
         target: Self_,
         description: "Reveals current map coordinates",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -349,6 +430,9 @@
         context: CombatOnly,
         target: MonsterGroup,
         description: "Puts a group of enemies to sleep",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     // ===== Sorcerer Spells - Level 2 =====
@@ -363,6 +447,9 @@
         context: CombatOnly,
         target: SingleMonster,
         description: "Deals 4d6 electricity damage",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -375,6 +462,9 @@
         context: CombatOnly,
         target: MonsterGroup,
         description: "Hypnotizes enemies, making them fight for you",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -387,6 +477,9 @@
         context: CombatOnly,
         target: SingleMonster,
         description: "Reveals monster statistics and weaknesses",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -399,6 +492,9 @@
         context: NonCombatOnly,
         target: Self_,
         description: "Teleports party forward 3 spaces",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -411,6 +507,9 @@
         context: NonCombatOnly,
         target: AllCharacters,
         description: "Party can cross pits and chasms",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -423,6 +522,9 @@
         context: CombatOnly,
         target: AllCharacters,
         description: "Increases party's physical attack power",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -435,6 +537,9 @@
         context: CombatOnly,
         target: AllCharacters,
         description: "Increases party speed for improved initiative",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     // ===== Sorcerer Spells - Level 3 =====
@@ -449,6 +554,9 @@
         context: CombatOnly,
         target: MonsterGroup,
         description: "Deals 5d6 acid damage to enemy group",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -461,6 +569,9 @@
         context: CombatOnly,
         target: MonsterGroup,
         description: "Deals 6d6 cold damage to enemy group",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -473,6 +584,9 @@
         context: CombatOnly,
         target: SingleMonster,
         description: "Reduces enemy spellcasting ability",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -485,6 +599,9 @@
         context: CombatOnly,
         target: AllMonsters,
         description: "Deals 8d6 fire damage to all enemies",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -497,6 +614,9 @@
         context: NonCombatOnly,
         target: AllCharacters,
         description: "Party can fly over obstacles",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -509,6 +629,9 @@
         context: NonCombatOnly,
         target: AllCharacters,
         description: "Party becomes invisible, avoiding random encounters",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 
     (
@@ -521,5 +644,8 @@
         context: CombatOnly,
         target: MonsterGroup,
         description: "Deals 7d6 electricity damage to enemy group",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
     ),
 ]

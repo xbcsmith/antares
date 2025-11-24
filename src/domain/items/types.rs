@@ -395,6 +395,8 @@ pub struct Item {
     pub max_charges: u16,
     /// Whether the item is cursed (cannot unequip)
     pub is_cursed: bool,
+    /// Path to item icon asset (optional)
+    pub icon_path: Option<String>,
 }
 
 impl Item {
@@ -494,6 +496,7 @@ mod tests {
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
+            icon_path: None,
         };
 
         assert!(weapon.is_weapon());
@@ -522,6 +525,7 @@ mod tests {
             spell_effect: Some(0x0104),
             max_charges: 30,
             is_cursed: false,
+            icon_path: None,
         };
 
         assert!(magical_sword.is_magical());
@@ -546,6 +550,7 @@ mod tests {
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
+            icon_path: None,
         };
 
         assert_eq!(item.to_string(), "Basic Sword");
@@ -569,6 +574,7 @@ mod tests {
             spell_effect: None,
             max_charges: 0,
             is_cursed: true,
+            icon_path: None,
         };
 
         assert_eq!(cursed.to_string(), "Cursed Mace (Cursed)");

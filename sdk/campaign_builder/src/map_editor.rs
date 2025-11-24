@@ -807,15 +807,15 @@ impl<'a> MapGridWidget<'a> {
         }
 
         match tile.terrain {
-            TerrainType::Ground => Color32::from_rgb(200, 200, 180),
-            TerrainType::Grass => Color32::from_rgb(100, 180, 100),
-            TerrainType::Water => Color32::from_rgb(50, 100, 200),
-            TerrainType::Lava => Color32::from_rgb(255, 50, 0),
-            TerrainType::Swamp => Color32::from_rgb(80, 120, 80),
-            TerrainType::Stone => Color32::from_rgb(150, 150, 150),
-            TerrainType::Dirt => Color32::from_rgb(139, 90, 60),
-            TerrainType::Forest => Color32::from_rgb(50, 120, 50),
-            TerrainType::Mountain => Color32::from_rgb(120, 100, 80),
+            TerrainType::Ground => Color32::from_rgb(210, 180, 140), // Tan
+            TerrainType::Grass => Color32::from_rgb(50, 205, 50),    // Lime Green
+            TerrainType::Water => Color32::from_rgb(30, 144, 255),   // Dodger Blue
+            TerrainType::Lava => Color32::from_rgb(255, 69, 0),      // Red-Orange
+            TerrainType::Swamp => Color32::from_rgb(85, 107, 47),    // Dark Olive Green
+            TerrainType::Stone => Color32::from_rgb(169, 169, 169),  // Dark Gray
+            TerrainType::Dirt => Color32::from_rgb(139, 69, 19),     // Saddle Brown
+            TerrainType::Forest => Color32::from_rgb(34, 139, 34),   // Forest Green
+            TerrainType::Mountain => Color32::from_rgb(105, 105, 105), // Dim Gray
         }
     }
 }
@@ -1168,6 +1168,14 @@ impl<'a> MapEditorWidget<'a> {
                         ui.label(format!("Wall: {:?}", tile.wall_type));
                         ui.label(format!("Blocked: {}", tile.blocked));
                         ui.label(format!("Visited: {}", tile.visited));
+                    }
+
+                    if let Some(npc) = self.state.map.npcs.iter().find(|n| n.position == pos) {
+                        ui.separator();
+                        ui.label("NPC:");
+                        ui.label(format!("Name: {}", npc.name));
+                        ui.label(format!("ID: {}", npc.id));
+                        ui.label(format!("Dialogue: {}", npc.dialogue));
                     }
 
                     if let Some(event) = self.state.map.get_event(pos) {
