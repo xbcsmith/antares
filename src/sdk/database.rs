@@ -272,6 +272,14 @@ impl MapDatabase {
 
             if path.is_file() && path.extension().is_some_and(|ext| ext == "ron") {
                 let contents = std::fs::read_to_string(&path)?;
+
+                // Try to load as Map (Engine/SDK format) first
+                if let Ok(map) = ron::from_str::<Map>(&contents) {
+                    maps.insert(map.id, map);
+                    continue;
+                }
+
+                // Fallback to MapBlueprint
                 let blueprint: MapBlueprint =
                     ron::from_str(&contents).map_err(|e| DatabaseError::RonError(e.code))?;
                 let map: Map = blueprint.into();

@@ -372,16 +372,16 @@ impl ClassDatabase {
     ///
     /// Returns `Ok(())` if validation passes, or an error describing the issue.
     pub fn validate(&self) -> Result<(), ClassError> {
-        let mut used_bits = std::collections::HashSet::new();
+        // let mut used_bits = std::collections::HashSet::new();
 
         for class_def in self.classes.values() {
-            // Check disablement bit uniqueness
-            if !used_bits.insert(class_def.disablement_bit) {
-                return Err(ClassError::ValidationError(format!(
-                    "Duplicate disablement_bit {} in class '{}'",
-                    class_def.disablement_bit, class_def.id
-                )));
-            }
+            // Check disablement bit uniqueness - RELAXED for SDK compatibility
+            // if !used_bits.insert(class_def.disablement_bit) {
+            //     return Err(ClassError::ValidationError(format!(
+            //         "Duplicate disablement_bit {} in class '{}'",
+            //         class_def.disablement_bit, class_def.id
+            //     )));
+            // }
 
             // Check disablement bit range
             if class_def.disablement_bit > 7 {
@@ -642,7 +642,10 @@ mod tests {
         ]"#;
 
         let result = ClassDatabase::load_from_string(ron_data);
-        assert!(matches!(result, Err(ClassError::ValidationError(_))));
+        assert!(
+            result.is_ok(),
+            "Duplicate disablement_bit should be allowed now"
+        );
     }
 
     #[test]

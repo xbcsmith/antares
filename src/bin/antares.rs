@@ -36,6 +36,7 @@ impl Plugin for AntaresPlugin {
         let campaign = loader
             .load_campaign("tutorial")
             .expect("Failed to load tutorial campaign");
+        println!("Successfully loaded campaign: {}", campaign.name);
 
         // Load campaign content
         let content_db = campaign
