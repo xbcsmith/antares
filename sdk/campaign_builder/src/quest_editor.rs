@@ -842,9 +842,14 @@ impl QuestEditorState {
     }
 
     /// Start creating a new quest
-    pub fn start_new_quest(&mut self) {
+    pub fn start_new_quest(&mut self, next_id: String) {
         // Create a temporary quest
-        let new_quest = Quest::new(0, "New Quest", "Description");
+        let mut new_quest = Quest::new(0, "New Quest", "Description");
+        // Try to parse ID if numeric, otherwise use 0 (will be updated on save)
+        if let Ok(id_num) = next_id.parse::<QuestId>() {
+            new_quest.id = id_num;
+        }
+
         self.quests.push(new_quest);
         let new_idx = self.quests.len() - 1;
 
@@ -853,7 +858,7 @@ impl QuestEditorState {
 
         // Initialize buffer with default values
         self.quest_buffer = QuestEditBuffer::default();
-        self.quest_buffer.id = "new_quest".to_string();
+        self.quest_buffer.id = next_id;
         self.quest_buffer.name = "New Quest".to_string();
         self.quest_buffer.description = "Description".to_string();
 
@@ -1171,14 +1176,14 @@ mod tests {
     #[test]
     fn test_start_new_quest() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest();
+        editor.start_new_quest("1".to_string());
         assert_eq!(editor.mode, QuestEditorMode::Creating);
     }
 
     #[test]
     fn test_save_quest_creates_new() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest();
+        editor.start_new_quest("1".to_string());
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Test Quest".to_string();
         editor.quest_buffer.description = "Test Description".to_string();
@@ -1191,7 +1196,7 @@ mod tests {
     #[test]
     fn test_delete_quest() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest();
+        editor.start_new_quest("1".to_string());
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Test Quest".to_string();
         editor.save_quest().unwrap();
@@ -1204,12 +1209,12 @@ mod tests {
     #[test]
     fn test_filtered_quests() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest();
+        editor.start_new_quest("1".to_string());
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Dragon Slayer".to_string();
         editor.save_quest().unwrap();
 
-        editor.start_new_quest();
+        editor.start_new_quest("2".to_string());
         editor.quest_buffer.id = "2".to_string();
         editor.quest_buffer.name = "Treasure Hunt".to_string();
         editor.save_quest().unwrap();
@@ -1223,7 +1228,7 @@ mod tests {
     #[test]
     fn test_add_stage() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest();
+        editor.start_new_quest("1".to_string());
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Test Quest".to_string();
         editor.save_quest().unwrap();
@@ -1239,7 +1244,7 @@ mod tests {
     #[test]
     fn test_validation_empty_quest() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest();
+        editor.start_new_quest("1".to_string());
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Test".to_string();
         editor.save_quest().unwrap();
