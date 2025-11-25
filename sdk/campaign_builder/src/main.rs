@@ -4867,7 +4867,8 @@ impl CampaignBuilderApp {
         // Toolbar
         ui.horizontal(|ui| {
             if ui.button("➕ New Quest").clicked() {
-                self.quest_editor_state.start_new_quest();
+                let next_id = self.next_available_quest_id();
+                self.quest_editor_state.start_new_quest(next_id.to_string());
                 self.unsaved_changes = true;
             }
 
@@ -5186,9 +5187,6 @@ impl CampaignBuilderApp {
             // Stages editor
             self.show_quest_stages_editor(ui);
 
-            // Stages editor
-            self.show_quest_stages_editor(ui);
-
             ui.add_space(10.0);
 
             // Rewards editor
@@ -5260,6 +5258,11 @@ impl CampaignBuilderApp {
                                     );
                                 },
                             );
+
+                            // Track which stage is expanded for objective addition
+                            if header.header_response.clicked() || header.body_returned.is_some() {
+                                self.quest_editor_state.selected_stage = Some(stage_idx);
+                            }
 
                             // Stage action buttons
                             if ui.small_button("✏️").on_hover_text("Edit Stage").clicked() {
@@ -9678,7 +9681,8 @@ mod tests {
         );
 
         // Transition to creating
-        app.quest_editor_state.start_new_quest();
+        let next_id = app.next_available_quest_id();
+        app.quest_editor_state.start_new_quest(next_id.to_string());
         assert_eq!(
             app.quest_editor_state.mode,
             quest_editor::QuestEditorMode::Creating
