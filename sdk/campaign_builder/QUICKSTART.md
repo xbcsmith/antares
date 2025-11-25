@@ -20,7 +20,7 @@ sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
   libxkbcommon-dev libssl-dev
 
 # Fedora/RHEL
-sudo dnf install libxcb-devel libxkbcommon-devel
+sudo dnf install libxcb-devel libxkbcommon-devel wayland-devel systemd-devel alsa-lib-devel
 
 # Arch Linux
 sudo pacman -S libxcb libxkbcommon
@@ -33,7 +33,7 @@ sudo pacman -S libxcb libxkbcommon
 cd antares/
 
 # Run the prototype (will build automatically)
-cargo run --package campaign_builder --bin campaign-builder wayland-devel systemd-devel alsa-lib-devel
+cargo run --package campaign_builder --bin campaign-builder 
 ```
 
 That's it! The Campaign Builder UI should launch.

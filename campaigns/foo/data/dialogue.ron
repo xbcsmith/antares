@@ -6,12 +6,21 @@
         nodes: {
             1: (
                 id: 1,
-                text: "I am the Great Fizban and this is my Cave",
+                text: "I am the Great Fizban!",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
                 actions: [],
-                is_terminal: true,
+                is_terminal: false,
+            ),
+            2: (
+                id: 2,
+                text: "Hello There! Come and sit and talk a while.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
             ),
         },
         speaker_name: Some("Fizban"),
