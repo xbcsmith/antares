@@ -12,7 +12,7 @@
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
 //! See `docs/explanation/sdk_implementation_plan.md` Phase 1 for implementation details.
 
-use crate::domain::types::DiceRoll;
+use crate::domain::types::{DiceRoll, ItemId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -99,6 +99,9 @@ pub struct ClassDefinition {
     /// Display name (e.g., "Knight", "Sorcerer")
     pub name: String,
 
+    /// Description of the class
+    pub description: String,
+
     /// Hit dice for HP gain on level up (e.g., 1d10, 1d4)
     pub hp_die: DiceRoll,
 
@@ -116,6 +119,15 @@ pub struct ClassDefinition {
 
     /// Special abilities this class has (e.g., "multiple_attacks", "backstab")
     pub special_abilities: Vec<String>,
+
+    /// Starting weapon ID
+    pub starting_weapon_id: Option<ItemId>,
+
+    /// Starting armor ID
+    pub starting_armor_id: Option<ItemId>,
+
+    /// Starting items
+    pub starting_items: Vec<ItemId>,
 }
 
 impl ClassDefinition {
@@ -443,12 +455,16 @@ mod tests {
         ClassDefinition {
             id: "knight".to_string(),
             name: "Knight".to_string(),
+            description: "A brave warrior".to_string(),
             hp_die: DiceRoll::new(1, 10, 0),
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
             disablement_bit: 0,
             special_abilities: vec!["multiple_attacks".to_string()],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
         }
     }
 
@@ -456,12 +472,16 @@ mod tests {
         ClassDefinition {
             id: "sorcerer".to_string(),
             name: "Sorcerer".to_string(),
+            description: "A master of arcane magic".to_string(),
             hp_die: DiceRoll::new(1, 4, 0),
             spell_school: Some(SpellSchool::Sorcerer),
             is_pure_caster: true,
             spell_stat: Some(SpellStat::Intellect),
             disablement_bit: 4,
             special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
         }
     }
 

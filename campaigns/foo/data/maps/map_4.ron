@@ -4419,6 +4419,45 @@
             ],
         ),
         (
+            x: 0,
+            y: 10,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "Exit to town.",
+        ),
+        (
+            x: 16,
+            y: 2,
+        ): Treasure(
+            name: "",
+            description: "",
+            loot: [
+                14,
+                24,
+            ],
+        ),
+        (
+            x: 7,
+            y: 17,
+        ): Trap(
+            name: "",
+            description: "",
+            damage: 8,
+            effect: None,
+        ),
+        (
+            x: 5,
+            y: 3,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                4,
+                4,
+            ],
+        ),
+        (
             x: 3,
             y: 11,
         ): Encounter(
@@ -4443,45 +4482,6 @@
             ],
         ),
         (
-            x: 5,
-            y: 3,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                4,
-                4,
-            ],
-        ),
-        (
-            x: 0,
-            y: 10,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Exit to town.",
-        ),
-        (
-            x: 7,
-            y: 17,
-        ): Trap(
-            name: "",
-            description: "",
-            damage: 8,
-            effect: None,
-        ),
-        (
-            x: 17,
-            y: 16,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                6,
-                6,
-            ],
-        ),
-        (
             x: 8,
             y: 8,
         ): Treasure(
@@ -4494,14 +4494,14 @@
             ],
         ),
         (
-            x: 16,
-            y: 2,
-        ): Treasure(
+            x: 17,
+            y: 16,
+        ): Encounter(
             name: "",
             description: "",
-            loot: [
-                14,
-                24,
+            monster_group: [
+                6,
+                6,
             ],
         ),
     },

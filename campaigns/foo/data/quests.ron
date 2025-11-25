@@ -191,7 +191,12 @@
                 stage_number: 1,
                 name: "Kill Monsters",
                 description: "Kill Monsters",
-                objectives: [],
+                objectives: [
+                    KillMonsters(
+                        monster_id: 1,
+                        quantity: 12,
+                    ),
+                ],
                 require_all_objectives: true,
             ),
         ],
@@ -199,6 +204,7 @@
             Items([
                 (6, 1),
             ]),
+            Experience(100),
         ],
         min_level: Some(1),
         max_level: Some(30),

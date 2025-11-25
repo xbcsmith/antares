@@ -10,14 +10,43 @@ use antares::application::GameState;
 use antares::game::resources::GlobalState;
 use antares::game::systems::camera::CameraPlugin;
 use antares::game::systems::map::MapRenderingPlugin;
+use antares::sdk::campaign_loader::{Campaign, CampaignLoader};
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
+use clap::Parser;
+use std::path::PathBuf;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Path to campaign directory
+    #[arg(short, long)]
+    campaign: Option<String>,
+}
 
 fn main() {
+    let args = Args::parse();
+
+    // Load campaign
+    let campaign = if let Some(path_str) = args.campaign {
+        let path = PathBuf::from(path_str);
+        Campaign::load(&path).unwrap_or_else(|e| {
+            eprintln!("Failed to load campaign from {}: {}", path.display(), e);
+            std::process::exit(1);
+        })
+    } else {
+        let loader = CampaignLoader::new("campaigns");
+        loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign")
+    };
+
+    println!("Successfully loaded campaign: {}", campaign.name);
+
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
-        .add_plugins(AntaresPlugin)
+        .add_plugins(AntaresPlugin { campaign })
         .add_plugins(MapRenderingPlugin)
         .add_plugins(CameraPlugin)
         .add_plugins(antares::game::systems::input::InputPlugin)
@@ -27,24 +56,20 @@ fn main() {
 }
 
 /// Main game plugin organizing all systems
-struct AntaresPlugin;
+struct AntaresPlugin {
+    campaign: Campaign,
+}
 
 impl Plugin for AntaresPlugin {
     fn build(&self, app: &mut App) {
-        // Load campaign
-        let loader = antares::sdk::campaign_loader::CampaignLoader::new("campaigns");
-        let campaign = loader
-            .load_campaign("tutorial")
-            .expect("Failed to load tutorial campaign");
-        println!("Successfully loaded campaign: {}", campaign.name);
-
         // Load campaign content
-        let content_db = campaign
+        let content_db = self
+            .campaign
             .load_content()
             .expect("Failed to load campaign content");
 
         // Initialize game state with campaign
-        let mut game_state = GameState::new_game(campaign.clone());
+        let mut game_state = GameState::new_game(self.campaign.clone());
 
         // Load all maps from campaign
         for map_id in content_db.maps.all_maps() {
@@ -54,7 +79,7 @@ impl Plugin for AntaresPlugin {
         }
 
         // Set starting map
-        let starting_map_id = campaign.config.starting_map;
+        let starting_map_id = self.campaign.config.starting_map;
         if game_state.world.get_map(starting_map_id).is_some() {
             game_state.world.set_current_map(starting_map_id);
         } else {
@@ -64,8 +89,8 @@ impl Plugin for AntaresPlugin {
         // Set starting position
         game_state
             .world
-            .set_party_position(campaign.config.starting_position);
-        game_state.world.party_facing = campaign.config.starting_direction;
+            .set_party_position(self.campaign.config.starting_position);
+        game_state.world.party_facing = self.campaign.config.starting_direction;
 
         app.insert_resource(GlobalState(game_state));
     }
