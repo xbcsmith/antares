@@ -180,4 +180,34 @@
             y: 16,
         )),
     ),
+    (
+        id: 3,
+        name: "Kill Monsters",
+        description: "Kill Monsters",
+        stages: [
+            (
+                stage_number: 1,
+                name: "Kill Monsters",
+                description: "Kill Monsters",
+                objectives: [],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Items([
+                (6, 1),
+            ]),
+        ],
+        min_level: Some(1),
+        max_level: Some(30),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: Some(11),
+        quest_giver_map: Some(2),
+        quest_giver_position: Some((
+            x: 3,
+            y: 16,
+        )),
+    ),
 ]
