@@ -99,11 +99,13 @@ pub enum EventError {
 /// use antares::domain::types::Position;
 ///
 /// let mut world = World::new();
-/// let mut map = Map::new(1, 20, 20);
+/// let mut map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 20, 20);
 ///
 /// // Add a sign event
 /// let pos = Position::new(10, 10);
 /// map.add_event(pos, MapEvent::Sign {
+///     name: "Dungeon Sign".to_string(),
+///     description: "A weathered sign".to_string(),
 ///     text: "Welcome to the dungeon!".to_string(),
 /// });
 ///
@@ -140,9 +142,9 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
 
     // Process the event based on its type
     let result = match event {
-        MapEvent::Encounter { monster_group } => EventResult::Encounter { monster_group },
+        MapEvent::Encounter { monster_group, .. } => EventResult::Encounter { monster_group },
 
-        MapEvent::Treasure { loot } => {
+        MapEvent::Treasure { loot, .. } => {
             // Remove treasure event after being collected (one-time)
             world
                 .get_current_map_mut()
@@ -155,6 +157,7 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
         MapEvent::Teleport {
             destination,
             map_id,
+            ..
         } => {
             // Teleport the party
             world.set_current_map(map_id);
@@ -166,7 +169,7 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
             }
         }
 
-        MapEvent::Trap { damage, effect } => {
+        MapEvent::Trap { damage, effect, .. } => {
             // Remove trap after being triggered (one-time)
             world
                 .get_current_map_mut()
@@ -176,12 +179,12 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
             EventResult::Trap { damage, effect }
         }
 
-        MapEvent::Sign { text } => {
+        MapEvent::Sign { text, .. } => {
             // Signs are repeatable - don't remove
             EventResult::Sign { text }
         }
 
-        MapEvent::NpcDialogue { npc_id } => {
+        MapEvent::NpcDialogue { npc_id, .. } => {
             // NPC dialogues are repeatable - don't remove
             EventResult::NpcDialogue { npc_id }
         }
@@ -198,7 +201,7 @@ mod tests {
     #[test]
     fn test_no_event() {
         let mut world = World::new();
-        let map = Map::new(1, 20, 20);
+        let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 20, 20);
         world.add_map(map);
         world.set_current_map(1);
 
@@ -211,12 +214,14 @@ mod tests {
     #[test]
     fn test_encounter_event() {
         let mut world = World::new();
-        let mut map = Map::new(1, 20, 20);
+        let mut map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 20, 20);
 
         let pos = Position::new(10, 10);
         map.add_event(
             pos,
             MapEvent::Encounter {
+                name: "Encounter".to_string(),
+                description: "Desc".to_string(),
                 monster_group: vec![1, 2, 3],
             },
         );
@@ -237,12 +242,14 @@ mod tests {
     #[test]
     fn test_treasure_event() {
         let mut world = World::new();
-        let mut map = Map::new(1, 20, 20);
+        let mut map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 20, 20);
 
         let pos = Position::new(10, 10);
         map.add_event(
             pos,
             MapEvent::Treasure {
+                name: "Treasure".to_string(),
+                description: "Desc".to_string(),
                 loot: vec![10, 20, 30],
             },
         );
@@ -267,14 +274,16 @@ mod tests {
     #[test]
     fn test_teleport_event() {
         let mut world = World::new();
-        let mut map1 = Map::new(1, 20, 20);
-        let map2 = Map::new(2, 30, 30);
+        let mut map1 = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 20, 20);
+        let map2 = Map::new(2, "Map 2".to_string(), "Desc".to_string(), 30, 30);
 
         let pos = Position::new(10, 10);
         let dest = Position::new(15, 15);
         map1.add_event(
             pos,
             MapEvent::Teleport {
+                name: "Teleport".to_string(),
+                description: "Desc".to_string(),
                 destination: dest,
                 map_id: 2,
             },
@@ -303,12 +312,14 @@ mod tests {
     #[test]
     fn test_trap_event_damages_party() {
         let mut world = World::new();
-        let mut map = Map::new(1, 20, 20);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
 
         let pos = Position::new(10, 10);
         map.add_event(
             pos,
             MapEvent::Trap {
+                name: "Trap".to_string(),
+                description: "Desc".to_string(),
                 damage: 25,
                 effect: Some("Poisoned".to_string()),
             },
@@ -335,13 +346,15 @@ mod tests {
     #[test]
     fn test_sign_event() {
         let mut world = World::new();
-        let mut map = Map::new(1, 20, 20);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
 
         let pos = Position::new(10, 10);
         let sign_text = "Beware of dragons!".to_string();
         map.add_event(
             pos,
             MapEvent::Sign {
+                name: "Sign".to_string(),
+                description: "Desc".to_string(),
                 text: sign_text.clone(),
             },
         );
@@ -372,10 +385,17 @@ mod tests {
     #[test]
     fn test_npc_dialogue_event() {
         let mut world = World::new();
-        let mut map = Map::new(1, 20, 20);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
 
         let pos = Position::new(10, 10);
-        map.add_event(pos, MapEvent::NpcDialogue { npc_id: 42 });
+        map.add_event(
+            pos,
+            MapEvent::NpcDialogue {
+                name: "NPC".to_string(),
+                description: "Desc".to_string(),
+                npc_id: 42,
+            },
+        );
 
         world.add_map(map);
         world.set_current_map(1);
@@ -398,7 +418,7 @@ mod tests {
     #[test]
     fn test_event_out_of_bounds() {
         let mut world = World::new();
-        let map = Map::new(1, 20, 20);
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
         world.add_map(map);
         world.set_current_map(1);
 
@@ -422,7 +442,7 @@ mod tests {
     #[test]
     fn test_multiple_events_different_positions() {
         let mut world = World::new();
-        let mut map = Map::new(1, 20, 20);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
 
         let pos1 = Position::new(5, 5);
         let pos2 = Position::new(10, 10);
@@ -431,13 +451,24 @@ mod tests {
         map.add_event(
             pos1,
             MapEvent::Sign {
+                name: "Sign".to_string(),
+                description: "Desc".to_string(),
                 text: "North".to_string(),
             },
         );
-        map.add_event(pos2, MapEvent::Treasure { loot: vec![1, 2] });
+        map.add_event(
+            pos2,
+            MapEvent::Treasure {
+                name: "Treasure".to_string(),
+                description: "Desc".to_string(),
+                loot: vec![1, 2],
+            },
+        );
         map.add_event(
             pos3,
             MapEvent::Trap {
+                name: "Trap".to_string(),
+                description: "Desc".to_string(),
                 damage: 10,
                 effect: None,
             },

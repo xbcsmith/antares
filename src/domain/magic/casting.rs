@@ -67,6 +67,9 @@ use crate::domain::types::GameMode;
 ///     SpellContext::Anytime,
 ///     SpellTarget::SingleCharacter,
 ///     "Heals 8 hit points",
+///     None,
+///     0,
+///     false,
 /// );
 ///
 /// assert!(can_cast_spell(&cleric, &cure_wounds, &GameMode::Exploration, false, false).is_ok());
@@ -203,6 +206,9 @@ pub fn can_cast_spell(
 ///     SpellContext::CombatOnly,
 ///     SpellTarget::MonsterGroup,
 ///     "Deals 3d6 fire damage",
+///     None,
+///     0,
+///     false,
 /// );
 ///
 /// let result = cast_spell(&mut sorcerer, &fireball);
@@ -270,6 +276,9 @@ pub fn can_class_cast_school(class: Class, school: SpellSchool) -> bool {
 ///     SpellContext::Anytime,
 ///     SpellTarget::Self_,
 ///     "Test spell",
+///     None,
+///     0,
+///     false,
 /// );
 ///
 /// // Clerics can cast level 1 spells at character level 1

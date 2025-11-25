@@ -177,6 +177,9 @@ impl SpellDatabase {
     ///     context: SpellContext::Anytime,
     ///     target: SpellTarget::SingleCharacter,
     ///     description: "Awakens a sleeping character".to_string(),
+    ///     damage: None,
+    ///     duration: 0,
+    ///     saving_throw: false,
     /// };
     /// db.add_spell(spell).unwrap();
     ///
@@ -210,6 +213,9 @@ impl SpellDatabase {
     ///     context: SpellContext::Anytime,
     ///     target: SpellTarget::SingleCharacter,
     ///     description: "Awakens sleeping".to_string(),
+    ///     damage: None,
+    ///     duration: 0,
+    ///     saving_throw: false,
     /// };
     /// db.add_spell(cleric_spell).unwrap();
     ///

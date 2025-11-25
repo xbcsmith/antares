@@ -55,6 +55,7 @@ fn handle_events(
             MapEvent::Teleport {
                 destination,
                 map_id,
+                ..
             } => {
                 let msg = format!("Teleporting to Map {} at {:?}", map_id, destination);
                 println!("{}", msg);
@@ -69,30 +70,30 @@ fn handle_events(
 
                 // Note: Real implementation needs to handle map loading/unloading
             }
-            MapEvent::Sign { text } => {
+            MapEvent::Sign { text, .. } => {
                 let msg = format!("Sign reads: {}", text);
                 println!("{}", msg);
                 game_log.add(msg);
             }
-            MapEvent::Trap { damage, effect } => {
+            MapEvent::Trap { damage, effect, .. } => {
                 let msg = format!("IT'S A TRAP! Took {} damage. Effect: {:?}", damage, effect);
                 println!("{}", msg);
                 game_log.add(msg);
                 // TODO: Apply damage to party
             }
-            MapEvent::Treasure { loot } => {
+            MapEvent::Treasure { loot, .. } => {
                 let msg = format!("Found treasure! Loot IDs: {:?}", loot);
                 println!("{}", msg);
                 game_log.add(msg);
                 // TODO: Add to inventory
             }
-            MapEvent::Encounter { monster_group } => {
+            MapEvent::Encounter { monster_group, .. } => {
                 let msg = format!("Monsters attack! Group IDs: {:?}", monster_group);
                 println!("{}", msg);
                 game_log.add(msg);
                 // TODO: Start combat
             }
-            MapEvent::NpcDialogue { npc_id } => {
+            MapEvent::NpcDialogue { npc_id, .. } => {
                 let msg = format!("NPC {} wants to talk.", npc_id);
                 println!("{}", msg);
                 game_log.add(msg);

@@ -163,7 +163,7 @@ fn validate_content(map: &Map, errors: &mut Vec<String>) {
         }
 
         // Validate Monster IDs in encounters
-        if let MapEvent::Encounter { monster_group } = event {
+        if let MapEvent::Encounter { monster_group, .. } = event {
             for &monster_id in monster_group {
                 if !VALID_MONSTER_IDS.contains(&monster_id) {
                     errors.push(format!(
@@ -175,7 +175,7 @@ fn validate_content(map: &Map, errors: &mut Vec<String>) {
         }
 
         // Validate Item IDs in treasure
-        if let MapEvent::Treasure { loot } = event {
+        if let MapEvent::Treasure { loot, .. } = event {
             for &item_id in loot {
                 if !VALID_ITEM_IDS.contains(&item_id) {
                     errors.push(format!(

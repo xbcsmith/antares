@@ -393,7 +393,7 @@ impl<'a> Validator<'a> {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let db = ContentDatabase::new();
     /// let validator = Validator::new(&db);
-    /// let map = Map::new(0, 10, 10);
+    /// let map = Map::new(0, "Test Map".to_string(), "Description".to_string(), 10, 10);
     ///
     /// let errors = validator.validate_map(&map)?;
     /// println!("Map has {} validation issues", errors.len());
@@ -409,7 +409,7 @@ impl<'a> Validator<'a> {
         // Validate map events
         for (pos, event) in &map.events {
             match event {
-                crate::domain::world::MapEvent::Encounter { monster_group } => {
+                crate::domain::world::MapEvent::Encounter { monster_group, .. } => {
                     // Validate monster IDs
                     for &monster_id in monster_group {
                         if !self.db.monsters.has_monster(&(monster_id as MonsterId)) {
@@ -420,7 +420,7 @@ impl<'a> Validator<'a> {
                         }
                     }
                 }
-                crate::domain::world::MapEvent::Treasure { loot } => {
+                crate::domain::world::MapEvent::Treasure { loot, .. } => {
                     // Validate item IDs
                     for &item_id in loot {
                         if !self.db.items.has_item(&(item_id as ItemId)) {
@@ -437,6 +437,7 @@ impl<'a> Validator<'a> {
                 crate::domain::world::MapEvent::Teleport {
                     map_id,
                     destination,
+                    ..
                 } => {
                     // Validate destination map exists
                     if !self.db.maps.has_map(map_id) {
@@ -467,7 +468,7 @@ impl<'a> Validator<'a> {
                 crate::domain::world::MapEvent::Sign { .. } => {
                     // Signs are always valid
                 }
-                crate::domain::world::MapEvent::NpcDialogue { npc_id } => {
+                crate::domain::world::MapEvent::NpcDialogue { npc_id, .. } => {
                     // Validate NPC exists on this map
                     if !map.npcs.iter().any(|npc| npc.id == *npc_id) {
                         errors.push(ValidationError::BalanceWarning {

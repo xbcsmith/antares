@@ -354,7 +354,7 @@ impl MapEditorState {
             for x in min_x..=max_x {
                 let pos = Position::new(x, y);
                 if self.map.is_valid_position(pos) {
-                    let new_tile = Tile::new(terrain, wall);
+                    let new_tile = Tile::new(pos.x, pos.y, terrain, wall);
                     self.set_tile(pos, new_tile);
                 }
             }
@@ -363,7 +363,7 @@ impl MapEditorState {
 
     /// Erases a tile (resets to default)
     pub fn erase_tile(&mut self, pos: Position) {
-        let default_tile = Tile::new(TerrainType::Ground, WallType::None);
+        let default_tile = Tile::new(pos.x, pos.y, TerrainType::Ground, WallType::None);
         self.set_tile(pos, default_tile);
     }
 
@@ -569,6 +569,8 @@ impl MapEditorState {
 pub struct EventEditorState {
     pub event_type: EventType,
     pub position: Position,
+    pub name: String,
+    pub description: String,
     // Encounter fields
     pub encounter_monsters: String,
     // Treasure fields
@@ -591,6 +593,8 @@ impl Default for EventEditorState {
         Self {
             event_type: EventType::default(),
             position: Position::new(0, 0),
+            name: String::new(),
+            description: String::new(),
             encounter_monsters: String::new(),
             treasure_items: String::new(),
             teleport_x: String::new(),
@@ -668,6 +672,8 @@ impl EventEditorState {
                     return Err("Encounter must have at least one monster ID".to_string());
                 }
                 Ok(MapEvent::Encounter {
+                    name: self.name.clone(),
+                    description: self.description.clone(),
                     monster_group: monsters,
                 })
             }
@@ -677,7 +683,11 @@ impl EventEditorState {
                     .split(',')
                     .filter_map(|s| s.trim().parse().ok())
                     .collect();
-                Ok(MapEvent::Treasure { loot })
+                Ok(MapEvent::Treasure {
+                    name: self.name.clone(),
+                    description: self.description.clone(),
+                    loot,
+                })
             }
             EventType::Teleport => {
                 let x = self
@@ -690,6 +700,8 @@ impl EventEditorState {
                     .map_err(|_| "Invalid Y coordinate")?;
                 let map_id = self.teleport_map_id.parse().map_err(|_| "Invalid map ID")?;
                 Ok(MapEvent::Teleport {
+                    name: self.name.clone(),
+                    description: self.description.clone(),
                     destination: Position::new(x, y),
                     map_id,
                 })
@@ -704,19 +716,30 @@ impl EventEditorState {
                 } else {
                     Some(self.trap_effect.clone())
                 };
-                Ok(MapEvent::Trap { damage, effect })
+                Ok(MapEvent::Trap {
+                    name: self.name.clone(),
+                    description: self.description.clone(),
+                    damage,
+                    effect,
+                })
             }
             EventType::Sign => {
                 if self.sign_text.is_empty() {
                     return Err("Sign text cannot be empty".to_string());
                 }
                 Ok(MapEvent::Sign {
+                    name: self.name.clone(),
+                    description: self.description.clone(),
                     text: self.sign_text.clone(),
                 })
             }
             EventType::NpcDialogue => {
                 let npc_id = self.npc_id.parse().map_err(|_| "Invalid NPC ID")?;
-                Ok(MapEvent::NpcDialogue { npc_id })
+                Ok(MapEvent::NpcDialogue {
+                    name: self.name.clone(),
+                    description: self.description.clone(),
+                    npc_id,
+                })
             }
         }
     }
@@ -729,6 +752,7 @@ impl EventEditorState {
 pub struct NpcEditorState {
     pub npc_id: String,
     pub name: String,
+    pub description: String,
     pub position_x: String,
     pub position_y: String,
     pub dialogue: String,
@@ -753,6 +777,7 @@ impl NpcEditorState {
         Ok(Npc::new(
             id,
             self.name.clone(),
+            self.description.clone(),
             Position::new(x, y),
             self.dialogue.clone(),
         ))
@@ -761,6 +786,7 @@ impl NpcEditorState {
     pub fn clear(&mut self) {
         self.npc_id.clear();
         self.name.clear();
+        self.description.clear();
         self.position_x.clear();
         self.position_y.clear();
         self.dialogue.clear();
@@ -1182,31 +1208,32 @@ impl<'a> MapEditorWidget<'a> {
                         ui.separator();
                         ui.label("Event:");
                         match event {
-                            MapEvent::Encounter { monster_group } => {
+                            MapEvent::Encounter { monster_group, .. } => {
                                 ui.label(format!("Encounter: {:?}", monster_group));
                             }
-                            MapEvent::Treasure { loot } => {
+                            MapEvent::Treasure { loot, .. } => {
                                 ui.label(format!("Treasure: {:?}", loot));
                             }
                             MapEvent::Teleport {
                                 destination,
                                 map_id,
+                                ..
                             } => {
                                 ui.label(format!(
                                     "Teleport to map {} at ({}, {})",
                                     map_id, destination.x, destination.y
                                 ));
                             }
-                            MapEvent::Trap { damage, effect } => {
+                            MapEvent::Trap { damage, effect, .. } => {
                                 ui.label(format!("Trap: {} damage", damage));
                                 if let Some(eff) = effect {
                                     ui.label(format!("Effect: {}", eff));
                                 }
                             }
-                            MapEvent::Sign { text } => {
+                            MapEvent::Sign { text, .. } => {
                                 ui.label(format!("Sign: {}", text));
                             }
-                            MapEvent::NpcDialogue { npc_id } => {
+                            MapEvent::NpcDialogue { npc_id, .. } => {
                                 ui.label(format!("NPC Dialogue: {}", npc_id));
                             }
                         }
@@ -1478,7 +1505,7 @@ mod tests {
 
     #[test]
     fn test_map_editor_state_creation() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let state = MapEditorState::new(map);
 
         assert_eq!(state.map.id, 1);
@@ -1492,11 +1519,11 @@ mod tests {
 
     #[test]
     fn test_set_tile_creates_undo_action() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let mut state = MapEditorState::new(map);
 
         let pos = Position::new(5, 5);
-        let tile = Tile::new(TerrainType::Water, WallType::None);
+        let tile = Tile::new(5, 5, TerrainType::Water, WallType::None);
         state.set_tile(pos, tile);
 
         assert!(state.has_changes);
@@ -1506,12 +1533,12 @@ mod tests {
 
     #[test]
     fn test_undo_redo_tile_change() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let mut state = MapEditorState::new(map);
 
         let pos = Position::new(5, 5);
         let original_tile = state.map.get_tile(pos).unwrap().clone();
-        let new_tile = Tile::new(TerrainType::Water, WallType::None);
+        let new_tile = Tile::new(5, 5, TerrainType::Water, WallType::None);
 
         state.set_tile(pos, new_tile.clone());
         assert_eq!(state.map.get_tile(pos).unwrap().terrain, TerrainType::Water);
@@ -1528,7 +1555,7 @@ mod tests {
 
     #[test]
     fn test_paint_terrain() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let mut state = MapEditorState::new(map);
 
         let pos = Position::new(3, 3);
@@ -1543,7 +1570,7 @@ mod tests {
 
     #[test]
     fn test_paint_wall() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let mut state = MapEditorState::new(map);
 
         let pos = Position::new(3, 3);
@@ -1555,11 +1582,13 @@ mod tests {
 
     #[test]
     fn test_add_remove_event() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let mut state = MapEditorState::new(map);
 
         let pos = Position::new(5, 5);
         let event = MapEvent::Sign {
+            name: "Sign".to_string(),
+            description: "Desc".to_string(),
             text: "Test".to_string(),
         };
 
@@ -1573,12 +1602,13 @@ mod tests {
 
     #[test]
     fn test_add_remove_npc() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let mut state = MapEditorState::new(map);
 
         let npc = Npc::new(
             1,
             "Merchant".to_string(),
+            "Desc".to_string(),
             Position::new(5, 5),
             "Hello!".to_string(),
         );
@@ -1593,7 +1623,7 @@ mod tests {
 
     #[test]
     fn test_fill_region() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let mut state = MapEditorState::new(map);
 
         let from = Position::new(2, 2);
@@ -1611,7 +1641,7 @@ mod tests {
 
     #[test]
     fn test_validation_events_on_blocked_tiles() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let mut state = MapEditorState::new(map);
 
         // Place a wall
@@ -1620,6 +1650,8 @@ mod tests {
 
         // Add event on blocked tile
         let event = MapEvent::Sign {
+            name: "Sign".to_string(),
+            description: "Desc".to_string(),
             text: "Test".to_string(),
         };
         state.add_event(pos, event);
@@ -1635,13 +1667,15 @@ mod tests {
     fn test_event_editor_state_to_encounter() {
         let editor = EventEditorState {
             event_type: EventType::Encounter,
+            name: "Encounter".to_string(),
+            description: "Desc".to_string(),
             encounter_monsters: "1, 2, 3".to_string(),
             ..Default::default()
         };
 
         let event = editor.to_map_event().unwrap();
         match event {
-            MapEvent::Encounter { monster_group } => {
+            MapEvent::Encounter { monster_group, .. } => {
                 assert_eq!(monster_group, vec![1, 2, 3]);
             }
             _ => panic!("Expected Encounter event"),
@@ -1652,13 +1686,15 @@ mod tests {
     fn test_event_editor_state_to_sign() {
         let editor = EventEditorState {
             event_type: EventType::Sign,
+            name: "Sign".to_string(),
+            description: "Desc".to_string(),
             sign_text: "Hello World".to_string(),
             ..Default::default()
         };
 
         let event = editor.to_map_event().unwrap();
         match event {
-            MapEvent::Sign { text } => {
+            MapEvent::Sign { text, .. } => {
                 assert_eq!(text, "Hello World");
             }
             _ => panic!("Expected Sign event"),
@@ -1670,6 +1706,7 @@ mod tests {
         let editor = NpcEditorState {
             npc_id: "42".to_string(),
             name: "Guard".to_string(),
+            description: "Desc".to_string(),
             position_x: "10".to_string(),
             position_y: "15".to_string(),
             dialogue: "Halt!".to_string(),
@@ -1700,7 +1737,8 @@ mod tests {
 
     #[test]
     fn test_save_to_ron() {
-        let mut state = MapEditorState::new(Map::new(1, 5, 5));
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 5, 5));
         state.selected_terrain = TerrainType::Grass;
         state.paint_tile(Position { x: 0, y: 0 });
 
@@ -1712,7 +1750,8 @@ mod tests {
 
     #[test]
     fn test_metadata_editor() {
-        let mut state = MapEditorState::new(Map::new(1, 10, 10));
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
 
         state.metadata.name = "Test Map".to_string();
         state.metadata.description = "A test map".to_string();
@@ -1731,8 +1770,11 @@ mod tests {
 
     #[test]
     fn test_add_event_at_position() {
-        let mut state = MapEditorState::new(Map::new(1, 10, 10));
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
         let event = MapEvent::Sign {
+            name: "Sign".to_string(),
+            description: "Desc".to_string(),
             text: "Test sign".to_string(),
         };
 
@@ -1744,7 +1786,8 @@ mod tests {
 
     #[test]
     fn test_show_event_editor_ui() {
-        let mut state = MapEditorState::new(Map::new(1, 10, 10));
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
         assert!(!state.show_event_editor_ui());
 
         state.event_editor = Some(EventEditorState::default());
@@ -1753,7 +1796,7 @@ mod tests {
 
     #[test]
     fn test_map_preview_with_terrain_types() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let mut state = MapEditorState::new(map.clone());
 
         // Paint different terrain types
@@ -1781,13 +1824,18 @@ mod tests {
 
     #[test]
     fn test_map_preview_with_events() {
-        let mut state = MapEditorState::new(Map::new(1, 10, 10));
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
 
         // Add events at different positions
         let event1 = MapEvent::Sign {
+            name: "Sign".to_string(),
+            description: "Desc".to_string(),
             text: "Welcome".to_string(),
         };
         let event2 = MapEvent::Treasure {
+            name: "Treasure".to_string(),
+            description: "Desc".to_string(),
             loot: vec![1, 2, 3],
         };
 
@@ -1802,7 +1850,8 @@ mod tests {
 
     #[test]
     fn test_tile_painting_with_undo() {
-        let mut state = MapEditorState::new(Map::new(1, 5, 5));
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 5, 5));
 
         // Paint a tile
         state.selected_terrain = TerrainType::Lava;
@@ -1829,7 +1878,8 @@ mod tests {
 
     #[test]
     fn test_event_placement_tool() {
-        let mut state = MapEditorState::new(Map::new(1, 10, 10));
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
 
         // Initially no event editor
         assert!(state.event_editor.is_none());

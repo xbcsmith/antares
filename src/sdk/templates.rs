@@ -493,19 +493,26 @@ pub fn quest_item(id: ItemId, name: &str, quest_id: &str) -> Item {
 /// ```
 /// use antares::sdk::templates::town_map;
 ///
-/// let town = town_map(1, "Starting Village", 20, 20);
+/// let town = town_map(1, "Starting Village", "A peaceful village", 20, 20);
 /// assert_eq!(town.id, 1);
 /// assert_eq!(town.width, 20);
 /// assert_eq!(town.height, 20);
 /// ```
-pub fn town_map(id: MapId, _name: &str, width: u32, height: u32) -> Map {
+pub fn town_map(id: MapId, name: &str, description: &str, width: u32, height: u32) -> Map {
     // Create 2D tile grid filled with grass
     let tiles = (0..(width * height))
-        .map(|_| Tile::new(TerrainType::Grass, WallType::None))
+        .enumerate()
+        .map(|(i, _)| {
+            let x = (i as u32 % width) as i32;
+            let y = (i as u32 / width) as i32;
+            Tile::new(x, y, TerrainType::Grass, WallType::None)
+        })
         .collect();
 
     Map {
         id,
+        name: name.to_string(),
+        description: description.to_string(),
         width,
         height,
         tiles,
@@ -520,6 +527,7 @@ pub fn town_map(id: MapId, _name: &str, width: u32, height: u32) -> Map {
 ///
 /// * `id` - Map ID
 /// * `name` - Dungeon name
+/// * `description` - Dungeon description
 /// * `width` - Map width
 /// * `height` - Map height
 ///
@@ -532,19 +540,26 @@ pub fn town_map(id: MapId, _name: &str, width: u32, height: u32) -> Map {
 /// ```
 /// use antares::sdk::templates::dungeon_map;
 ///
-/// let dungeon = dungeon_map(2, "Dark Cavern", 30, 30);
+/// let dungeon = dungeon_map(2, "Dark Cavern", "A dark place", 30, 30);
 /// assert_eq!(dungeon.id, 2);
 /// assert_eq!(dungeon.width, 30);
 /// assert_eq!(dungeon.height, 30);
 /// ```
-pub fn dungeon_map(id: MapId, _name: &str, width: u32, height: u32) -> Map {
+pub fn dungeon_map(id: MapId, name: &str, description: &str, width: u32, height: u32) -> Map {
     // Create 2D tile grid filled with stone floor
     let tiles = (0..(width * height))
-        .map(|_| Tile::new(TerrainType::Stone, WallType::None))
+        .enumerate()
+        .map(|(i, _)| {
+            let x = (i as u32 % width) as i32;
+            let y = (i as u32 / width) as i32;
+            Tile::new(x, y, TerrainType::Stone, WallType::None)
+        })
         .collect();
 
     Map {
         id,
+        name: name.to_string(),
+        description: description.to_string(),
         width,
         height,
         tiles,
@@ -560,19 +575,26 @@ pub fn dungeon_map(id: MapId, _name: &str, width: u32, height: u32) -> Map {
 /// ```
 /// use antares::sdk::templates::forest_map;
 ///
-/// let forest = forest_map(3, "Darkwood Forest", 40, 40);
+/// let forest = forest_map(3, "Darkwood Forest", "Trees everywhere", 40, 40);
 /// assert_eq!(forest.id, 3);
 /// assert_eq!(forest.width, 40);
 /// assert_eq!(forest.height, 40);
 /// ```
-pub fn forest_map(id: MapId, _name: &str, width: u32, height: u32) -> Map {
+pub fn forest_map(id: MapId, name: &str, description: &str, width: u32, height: u32) -> Map {
     // Create 2D tile grid filled with forest terrain
     let tiles = (0..(width * height))
-        .map(|_| Tile::new(TerrainType::Forest, WallType::None))
+        .enumerate()
+        .map(|(i, _)| {
+            let x = (i as u32 % width) as i32;
+            let y = (i as u32 / width) as i32;
+            Tile::new(x, y, TerrainType::Forest, WallType::None)
+        })
         .collect();
 
     Map {
         id,
+        name: name.to_string(),
+        description: description.to_string(),
         width,
         height,
         tiles,
@@ -721,7 +743,7 @@ mod tests {
 
     #[test]
     fn test_town_map() {
-        let town = town_map(1, "Village", 20, 20);
+        let town = town_map(1, "Village", "A quiet village", 20, 20);
         assert_eq!(town.id, 1);
         assert_eq!(town.width, 20);
         assert_eq!(town.height, 20);
@@ -730,7 +752,7 @@ mod tests {
 
     #[test]
     fn test_dungeon_map() {
-        let dungeon = dungeon_map(2, "Cave", 30, 30);
+        let dungeon = dungeon_map(2, "Cave", "Dark cave", 30, 30);
         assert_eq!(dungeon.id, 2);
         assert_eq!(dungeon.width, 30);
         assert_eq!(dungeon.height, 30);
@@ -739,7 +761,7 @@ mod tests {
 
     #[test]
     fn test_forest_map() {
-        let forest = forest_map(3, "Forest", 40, 40);
+        let forest = forest_map(3, "Forest", "Deep forest", 40, 40);
         assert_eq!(forest.id, 3);
         assert_eq!(forest.width, 40);
         assert_eq!(forest.height, 40);
