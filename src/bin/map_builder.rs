@@ -74,7 +74,13 @@ impl MapBuilder {
             println!("⚠️  Warning: Large maps (>255 tiles) may have performance issues");
         }
 
-        self.map = Some(Map::new(id, width, height));
+        self.map = Some(Map::new(
+            id,
+            format!("Map {}", id),
+            String::new(),
+            width,
+            height,
+        ));
         println!("✅ Created {}x{} map with ID {}", width, height, id);
 
         if self.auto_show {
@@ -116,7 +122,7 @@ impl MapBuilder {
         }
 
         if let Some(tile) = map.get_tile_mut(pos) {
-            *tile = Tile::new(terrain, wall);
+            *tile = Tile::new(x, y, terrain, wall);
             println!("✅ Set tile at ({}, {}) to {:?}/{:?}", x, y, terrain, wall);
 
             if self.auto_show {
@@ -151,7 +157,7 @@ impl MapBuilder {
                 let pos = Position::new(x, y);
                 if map.is_valid_position(pos) {
                     if let Some(tile) = map.get_tile_mut(pos) {
-                        *tile = Tile::new(terrain, wall);
+                        *tile = Tile::new(x, y, terrain, wall);
                         count += 1;
                     }
                 }
@@ -202,6 +208,7 @@ impl MapBuilder {
         let npc = Npc {
             id,
             name: name.clone(),
+            description: String::new(),
             position: pos,
             dialogue,
         };
@@ -462,18 +469,34 @@ impl MapBuilder {
                 let data = parts[4..].join(" ");
 
                 let event = match event_type {
-                    "sign" => MapEvent::Sign { text: data },
-                    "treasure" => MapEvent::Treasure { loot: vec![] },
+                    "sign" => MapEvent::Sign {
+                        name: "Sign".to_string(),
+                        description: String::new(),
+                        text: data,
+                    },
+                    "treasure" => MapEvent::Treasure {
+                        name: "Treasure".to_string(),
+                        description: String::new(),
+                        loot: vec![],
+                    },
                     "encounter" => MapEvent::Encounter {
+                        name: "Encounter".to_string(),
+                        description: String::new(),
                         monster_group: vec![],
                     },
                     "trap" => MapEvent::Trap {
+                        name: "Trap".to_string(),
+                        description: String::new(),
                         damage: 10,
                         effect: None,
                     },
                     _ => {
                         println!("⚠️  Unknown event type '{}', using sign", event_type);
-                        MapEvent::Sign { text: data }
+                        MapEvent::Sign {
+                            name: "Sign".to_string(),
+                            description: String::new(),
+                            text: data,
+                        }
                     }
                 };
 
@@ -739,6 +762,8 @@ mod tests {
         builder.create_map(1, 10, 10);
 
         let event = MapEvent::Sign {
+            name: "Sign".to_string(),
+            description: String::new(),
             text: "Test sign".to_string(),
         };
         builder.add_event(3, 3, event);

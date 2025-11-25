@@ -59,7 +59,7 @@ pub enum TerrainType {
 /// ```
 /// use antares::domain::world::{Tile, TerrainType, WallType};
 ///
-/// let tile = Tile::new(TerrainType::Ground, WallType::None);
+/// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::None);
 /// assert!(!tile.blocked);
 /// assert!(!tile.visited);
 /// ```
@@ -77,6 +77,10 @@ pub struct Tile {
     pub is_dark: bool,
     /// Has been visited by party
     pub visited: bool,
+    /// X coordinate
+    pub x: i32,
+    /// Y coordinate
+    pub y: i32,
     /// Optional event trigger
     pub event_trigger: Option<EventId>,
 }
@@ -89,15 +93,17 @@ impl Tile {
     /// ```
     /// use antares::domain::world::{Tile, TerrainType, WallType};
     ///
-    /// let tile = Tile::new(TerrainType::Ground, WallType::None);
+    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::None);
     /// assert_eq!(tile.terrain, TerrainType::Ground);
     /// assert_eq!(tile.wall_type, WallType::None);
     /// ```
-    pub fn new(terrain: TerrainType, wall_type: WallType) -> Self {
+    pub fn new(x: i32, y: i32, terrain: TerrainType, wall_type: WallType) -> Self {
         let blocked = matches!(terrain, TerrainType::Mountain | TerrainType::Water)
             || matches!(wall_type, WallType::Normal);
 
         Self {
+            x,
+            y,
             terrain,
             wall_type,
             blocked,
@@ -139,16 +145,34 @@ impl Tile {
 pub enum MapEvent {
     /// Random monster encounter
     Encounter {
+        /// Event name
+        #[serde(default)]
+        name: String,
+        /// Event description
+        #[serde(default)]
+        description: String,
         /// Monster group IDs
         monster_group: Vec<u8>,
     },
     /// Treasure chest
     Treasure {
+        /// Event name
+        #[serde(default)]
+        name: String,
+        /// Event description
+        #[serde(default)]
+        description: String,
         /// Loot table or item IDs
         loot: Vec<u8>,
     },
     /// Teleport to another location
     Teleport {
+        /// Event name
+        #[serde(default)]
+        name: String,
+        /// Event description
+        #[serde(default)]
+        description: String,
         /// Destination position
         destination: Position,
         /// Target map ID
@@ -156,6 +180,12 @@ pub enum MapEvent {
     },
     /// Trap that triggers
     Trap {
+        /// Event name
+        #[serde(default)]
+        name: String,
+        /// Event description
+        #[serde(default)]
+        description: String,
         /// Damage amount
         damage: u16,
         /// Status effect
@@ -163,11 +193,23 @@ pub enum MapEvent {
     },
     /// Sign with text
     Sign {
+        /// Event name
+        #[serde(default)]
+        name: String,
+        /// Event description
+        #[serde(default)]
+        description: String,
         /// Message text
         text: String,
     },
     /// NPC dialogue trigger
     NpcDialogue {
+        /// Event name
+        #[serde(default)]
+        name: String,
+        /// Event description
+        #[serde(default)]
+        description: String,
         /// NPC identifier
         npc_id: u16,
     },
@@ -182,6 +224,9 @@ pub struct Npc {
     pub id: u16,
     /// NPC name
     pub name: String,
+    /// NPC description
+    #[serde(default)]
+    pub description: String,
     /// Position on the map
     pub position: Position,
     /// Dialogue/interaction text
@@ -197,13 +242,20 @@ impl Npc {
     /// use antares::domain::world::Npc;
     /// use antares::domain::types::Position;
     ///
-    /// let npc = Npc::new(1, "Merchant".to_string(), Position::new(5, 5), "Welcome!".to_string());
+    /// let npc = Npc::new(1, "Merchant".to_string(), "A friendly merchant".to_string(), Position::new(5, 5), "Welcome!".to_string());
     /// assert_eq!(npc.name, "Merchant");
     /// ```
-    pub fn new(id: u16, name: String, position: Position, dialogue: String) -> Self {
+    pub fn new(
+        id: u16,
+        name: String,
+        description: String,
+        position: Position,
+        dialogue: String,
+    ) -> Self {
         Self {
             id,
             name,
+            description,
             position,
             dialogue,
         }
@@ -221,7 +273,7 @@ impl Npc {
 /// ```
 /// use antares::domain::world::{Map, Tile, TerrainType, WallType};
 ///
-/// let map = Map::new(1, 20, 20);
+/// let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 20, 20);
 /// assert_eq!(map.width, 20);
 /// assert_eq!(map.height, 20);
 /// ```
@@ -233,12 +285,22 @@ pub struct Map {
     pub width: u32,
     /// Map height in tiles
     pub height: u32,
+    /// Map name
+    #[serde(default = "default_map_name")]
+    pub name: String,
+    /// Map description
+    #[serde(default)]
+    pub description: String,
     /// 2D grid of tiles (row-major order: y * width + x)
     pub tiles: Vec<Tile>,
     /// Events at specific positions
     pub events: HashMap<Position, MapEvent>,
     /// NPCs on this map
     pub npcs: Vec<Npc>,
+}
+
+fn default_map_name() -> String {
+    "Unnamed Map".to_string()
 }
 
 impl Map {
@@ -251,18 +313,28 @@ impl Map {
     /// ```
     /// use antares::domain::world::Map;
     ///
-    /// let map = Map::new(1, 10, 10);
+    /// let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
     /// assert_eq!(map.width, 10);
     /// assert_eq!(map.height, 10);
     /// assert_eq!(map.tiles.len(), 100);
     /// ```
-    pub fn new(id: MapId, width: u32, height: u32) -> Self {
-        let tiles = (0..(width * height))
-            .map(|_| Tile::new(TerrainType::Ground, WallType::None))
-            .collect();
+    pub fn new(id: MapId, name: String, description: String, width: u32, height: u32) -> Self {
+        let mut tiles = Vec::with_capacity((width * height) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                tiles.push(Tile::new(
+                    x as i32,
+                    y as i32,
+                    TerrainType::Ground,
+                    WallType::None,
+                ));
+            }
+        }
 
         Self {
             id,
+            name,
+            description,
             width,
             height,
             tiles,
@@ -303,7 +375,7 @@ impl Map {
     /// use antares::domain::world::Map;
     /// use antares::domain::types::Position;
     ///
-    /// let map = Map::new(1, 10, 10);
+    /// let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
     /// assert!(map.is_valid_position(Position::new(5, 5)));
     /// assert!(!map.is_valid_position(Position::new(10, 10)));
     /// assert!(!map.is_valid_position(Position::new(-1, 5)));
@@ -352,7 +424,7 @@ impl Map {
 /// use antares::domain::types::{Position, Direction};
 ///
 /// let mut world = World::new();
-/// let map = Map::new(1, 20, 20);
+/// let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 20, 20);
 /// world.add_map(map);
 /// world.set_current_map(1);
 /// assert_eq!(world.current_map, 1);
@@ -449,35 +521,37 @@ mod tests {
 
     #[test]
     fn test_tile_creation() {
-        let tile = Tile::new(TerrainType::Ground, WallType::None);
+        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::None);
         assert_eq!(tile.terrain, TerrainType::Ground);
         assert_eq!(tile.wall_type, WallType::None);
         assert!(!tile.blocked);
         assert!(!tile.visited);
+        assert_eq!(tile.x, 0);
+        assert_eq!(tile.y, 0);
 
-        let wall_tile = Tile::new(TerrainType::Ground, WallType::Normal);
+        let wall_tile = Tile::new(1, 1, TerrainType::Ground, WallType::Normal);
         assert!(wall_tile.blocked);
     }
 
     #[test]
     fn test_tile_door() {
-        let door = Tile::new(TerrainType::Ground, WallType::Door);
+        let door = Tile::new(0, 0, TerrainType::Ground, WallType::Door);
         assert!(door.is_door());
         assert!(!door.has_light());
     }
 
     #[test]
     fn test_tile_blocked_terrain() {
-        let water = Tile::new(TerrainType::Water, WallType::None);
+        let water = Tile::new(0, 0, TerrainType::Water, WallType::None);
         assert!(water.is_blocked());
 
-        let mountain = Tile::new(TerrainType::Mountain, WallType::None);
+        let mountain = Tile::new(0, 0, TerrainType::Mountain, WallType::None);
         assert!(mountain.is_blocked());
     }
 
     #[test]
     fn test_map_bounds() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
         assert_eq!(map.width, 10);
         assert_eq!(map.height, 10);
 
@@ -489,7 +563,7 @@ mod tests {
 
     #[test]
     fn test_map_tile_access() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
         let tile = map.get_tile(Position::new(5, 5));
         assert!(tile.is_some());
         assert_eq!(tile.unwrap().terrain, TerrainType::Ground);
@@ -500,9 +574,11 @@ mod tests {
 
     #[test]
     fn test_map_events() {
-        let mut map = Map::new(1, 10, 10);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
         let pos = Position::new(5, 5);
         let event = MapEvent::Sign {
+            name: "Sign".to_string(),
+            description: "Desc".to_string(),
             text: "Welcome!".to_string(),
         };
 
@@ -517,7 +593,7 @@ mod tests {
     #[test]
     fn test_world_map_access() {
         let mut world = World::new();
-        let map = Map::new(1, 20, 20);
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
         world.add_map(map);
 
         world.set_current_map(1);
@@ -555,6 +631,7 @@ mod tests {
         let npc = Npc::new(
             1,
             "Merchant".to_string(),
+            "Desc".to_string(),
             Position::new(10, 10),
             "Buy something!".to_string(),
         );

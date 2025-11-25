@@ -172,6 +172,9 @@ pub enum SpellTarget {
 ///     context: SpellContext::Anytime,
 ///     target: SpellTarget::SingleCharacter,
 ///     description: "Heals 8 hit points".to_string(),
+///     damage: None,
+///     duration: 0,
+///     saving_throw: false,
 /// };
 ///
 /// assert_eq!(cure_wounds.level, 1);
@@ -289,6 +292,9 @@ impl Spell {
     ///     SpellContext::Anytime,
     ///     SpellTarget::SingleCharacter,
     ///     "Resurrects a dead character",
+    ///     None,
+    ///     0,
+    ///     false,
     /// );
     ///
     /// assert_eq!(spell.required_level(), 9);

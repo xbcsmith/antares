@@ -62,7 +62,7 @@ pub enum MovementError {
 /// use antares::domain::types::{Direction, Position};
 ///
 /// let mut world = World::new();
-/// let map = Map::new(1, 20, 20);
+/// let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 20, 20);
 /// world.add_map(map);
 /// world.set_current_map(1);
 /// world.set_party_position(Position::new(10, 10));
@@ -130,7 +130,7 @@ pub fn move_party(world: &mut World, direction: Direction) -> Result<Position, M
 /// use antares::domain::world::{Map, check_tile_blocked, TerrainType, WallType, Tile};
 /// use antares::domain::types::Position;
 ///
-/// let mut map = Map::new(1, 10, 10);
+/// let mut map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
 /// let pos = Position::new(5, 5);
 ///
 /// // Ground is not blocked
@@ -180,7 +180,7 @@ pub fn check_tile_blocked(map: &Map, position: Position) -> Result<bool, Movemen
 /// use antares::domain::world::{Map, trigger_tile_event, Tile, TerrainType, WallType};
 /// use antares::domain::types::Position;
 ///
-/// let mut map = Map::new(1, 10, 10);
+/// let mut map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
 /// let pos = Position::new(5, 5);
 ///
 /// // Initially no event
@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn test_move_party_basic() {
         let mut world = World::new();
-        let map = Map::new(1, 20, 20);
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
         world.add_map(map);
         world.set_current_map(1);
         world.set_party_position(Position::new(10, 10));
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn test_move_party_all_directions() {
         let mut world = World::new();
-        let map = Map::new(1, 20, 20);
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
         world.add_map(map);
         world.set_current_map(1);
         world.set_party_position(Position::new(10, 10));
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn test_move_blocked_by_wall() {
         let mut world = World::new();
-        let mut map = Map::new(1, 20, 20);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
 
         // Place a wall to the north of starting position
         let wall_pos = Position::new(10, 9);
@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn test_move_blocked_by_water() {
         let mut world = World::new();
-        let mut map = Map::new(1, 20, 20);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
 
         // Place water to the east
         let water_pos = Position::new(11, 10);
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn test_map_boundaries() {
         let mut world = World::new();
-        let map = Map::new(1, 20, 20);
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
         world.add_map(map);
         world.set_current_map(1);
 
@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn test_door_interaction() {
         let mut world = World::new();
-        let mut map = Map::new(1, 20, 20);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
 
         // Place a door (not blocked by default in our implementation)
         let door_pos = Position::new(10, 9);
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_check_tile_blocked_basic() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
         let pos = Position::new(5, 5);
 
         let result = check_tile_blocked(&map, pos);
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn test_check_tile_blocked_wall() {
-        let mut map = Map::new(1, 10, 10);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
         let pos = Position::new(5, 5);
 
         if let Some(tile) = map.get_tile_mut(pos) {
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_check_tile_blocked_out_of_bounds() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
         let pos = Position::new(10, 10);
 
         let result = check_tile_blocked(&map, pos);
@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn test_trigger_tile_event_none() {
-        let map = Map::new(1, 10, 10);
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
         let pos = Position::new(5, 5);
 
         assert!(trigger_tile_event(&map, pos).is_none());
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn test_trigger_tile_event_exists() {
-        let mut map = Map::new(1, 10, 10);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
         let pos = Position::new(5, 5);
 
         if let Some(tile) = map.get_tile_mut(pos) {
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn test_tile_visited_after_move() {
         let mut world = World::new();
-        let map = Map::new(1, 20, 20);
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
         world.add_map(map);
         world.set_current_map(1);
         world.set_party_position(Position::new(10, 10));
