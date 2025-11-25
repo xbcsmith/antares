@@ -1050,30 +1050,26 @@ impl QuestEditorState {
     }
 
     /// Add a default objective to current stage
-    pub fn add_default_objective(&mut self) -> Result<usize, String> {
+    pub fn add_default_objective(&mut self, stage_idx: usize) -> Result<usize, String> {
         if let Some(quest_idx) = self.selected_quest {
             if quest_idx >= self.quests.len() {
                 return Err("Invalid quest index".to_string());
             }
 
-            if let Some(stage_idx) = self.selected_stage {
-                if stage_idx < self.quests[quest_idx].stages.len() {
-                    // Add a default objective (Kill Monster 0, Qty 1)
-                    let objective = QuestObjective::KillMonsters {
-                        monster_id: 0,
-                        quantity: 1,
-                    };
+            if stage_idx < self.quests[quest_idx].stages.len() {
+                // Add a default objective (Kill Monster 0, Qty 1)
+                let objective = QuestObjective::KillMonsters {
+                    monster_id: 0,
+                    quantity: 1,
+                };
 
-                    self.quests[quest_idx].stages[stage_idx].add_objective(objective);
-                    self.has_unsaved_changes = true;
+                self.quests[quest_idx].stages[stage_idx].add_objective(objective);
+                self.has_unsaved_changes = true;
 
-                    // Return the index of the new objective
-                    Ok(self.quests[quest_idx].stages[stage_idx].objectives.len() - 1)
-                } else {
-                    Err("Invalid stage index".to_string())
-                }
+                // Return the index of the new objective
+                Ok(self.quests[quest_idx].stages[stage_idx].objectives.len() - 1)
             } else {
-                Err("No stage selected".to_string())
+                Err("Invalid stage index".to_string())
             }
         } else {
             Err("No quest selected".to_string())
