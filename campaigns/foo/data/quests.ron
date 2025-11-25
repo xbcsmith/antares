@@ -71,7 +71,9 @@
                 require_all_objectives: true,
             ),
         ],
-        rewards: [],
+        rewards: [
+            Experience(100),
+        ],
         min_level: Some(1),
         max_level: Some(30),
         required_quests: [],
