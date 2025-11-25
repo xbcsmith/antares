@@ -395,6 +395,9 @@ struct CampaignBuilderApp {
     show_validation_report: bool,
     validation_report: String,
     show_balance_stats: bool,
+
+    // File I/O pattern state
+    file_load_merge_mode: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -504,6 +507,8 @@ impl Default for CampaignBuilderApp {
             show_validation_report: false,
             validation_report: String::new(),
             show_balance_stats: false,
+
+            file_load_merge_mode: true, // Default to merge mode
         }
     }
 }
@@ -696,12 +701,25 @@ impl CampaignBuilderApp {
             .iter()
             .map(|m| m.id)
             .max()
-            .unwrap_or(0)
-            .saturating_add(1)
+            .map(|id| id + 1)
+            .unwrap_or(1)
+    }
+
+    /// Get the next available class ID (string-based, numeric format)
+    fn next_available_class_id(&self) -> String {
+        let max_id = self
+            .classes_editor_state
+            .classes
+            .iter()
+            .filter_map(|c| c.id.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0);
+        (max_id + 1).to_string()
     }
 
     /// Load items from RON file
     fn load_items(&mut self) {
+        eprintln!("DEBUG: load_items() called");
         if let Some(ref dir) = self.campaign_dir {
             let items_path = dir.join(&self.campaign.items_file);
             if items_path.exists() {
@@ -729,9 +747,14 @@ impl CampaignBuilderApp {
                     },
                     Err(e) => {
                         self.status_message = format!("Failed to read items file: {}", e);
+                        eprintln!("Failed to read items file {:?}: {}", items_path, e);
                     }
                 }
+            } else {
+                eprintln!("Items file does not exist: {:?}", items_path);
             }
+        } else {
+            eprintln!("No campaign directory set when trying to load items");
         }
     }
 
@@ -789,13 +812,19 @@ impl CampaignBuilderApp {
                         }
                         Err(e) => {
                             self.status_message = format!("Failed to parse spells: {}", e);
+                            eprintln!("Failed to parse spells from {:?}: {}", spells_path, e);
                         }
                     },
                     Err(e) => {
                         self.status_message = format!("Failed to read spells file: {}", e);
+                        eprintln!("Failed to read spells file {:?}: {}", spells_path, e);
                     }
                 }
+            } else {
+                eprintln!("Spells file does not exist: {:?}", spells_path);
             }
+        } else {
+            eprintln!("No campaign directory set when trying to load spells");
         }
     }
 
@@ -853,13 +882,19 @@ impl CampaignBuilderApp {
                         }
                         Err(e) => {
                             self.status_message = format!("Failed to parse monsters: {}", e);
+                            eprintln!("Failed to parse monsters from {:?}: {}", monsters_path, e);
                         }
                     },
                     Err(e) => {
                         self.status_message = format!("Failed to read monsters file: {}", e);
+                        eprintln!("Failed to read monsters file {:?}: {}", monsters_path, e);
                     }
                 }
+            } else {
+                eprintln!("Monsters file does not exist: {:?}", monsters_path);
             }
+        } else {
+            eprintln!("No campaign directory set when trying to load monsters");
         }
     }
 
@@ -1258,9 +1293,12 @@ impl CampaignBuilderApp {
                     }
 
                     // Load data files
+                    eprintln!("DEBUG: About to load data files...");
+                    eprintln!("DEBUG: campaign_dir = {:?}", self.campaign_dir);
                     self.load_items();
                     self.load_spells();
                     self.load_monsters();
+                    self.load_classes();
                     self.load_maps();
 
                     // Load quests and dialogues
@@ -2335,6 +2373,75 @@ impl CampaignBuilderApp {
             }
 
             ui.separator();
+
+            // File I/O buttons
+            if ui.button("📂 Load from File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("RON", &["ron"])
+                    .pick_file()
+                {
+                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
+                        ron::from_str::<Vec<Item>>(&contents)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    });
+
+                    match load_result {
+                        Ok(loaded_items) => {
+                            if self.file_load_merge_mode {
+                                // Merge: update existing, add new
+                                for item in loaded_items {
+                                    if let Some(existing) =
+                                        self.items.iter_mut().find(|i| i.id == item.id)
+                                    {
+                                        *existing = item;
+                                    } else {
+                                        self.items.push(item);
+                                    }
+                                }
+                            } else {
+                                // Replace: clear and load
+                                self.items = loaded_items;
+                            }
+                            self.unsaved_changes = true;
+                            self.status_message = format!("Loaded items from: {}", path.display());
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to load items: {}", e);
+                        }
+                    }
+                }
+            }
+
+            ui.checkbox(&mut self.file_load_merge_mode, "Merge");
+            ui.label(if self.file_load_merge_mode {
+                "(adds to existing)"
+            } else {
+                "(replaces all)"
+            });
+
+            if ui.button("💾 Save to File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("items.ron")
+                    .add_filter("RON", &["ron"])
+                    .save_file()
+                {
+                    match ron::ser::to_string_pretty(&self.items, Default::default()) {
+                        Ok(contents) => match std::fs::write(&path, contents) {
+                            Ok(_) => {
+                                self.status_message = format!("Saved items to: {}", path.display());
+                            }
+                            Err(e) => {
+                                self.status_message = format!("Failed to save items: {}", e);
+                            }
+                        },
+                        Err(e) => {
+                            self.status_message = format!("Failed to serialize items: {}", e);
+                        }
+                    }
+                }
+            }
+
+            ui.separator();
             ui.label(format!("Total: {}", self.items.len()));
         });
 
@@ -2429,7 +2536,7 @@ impl CampaignBuilderApp {
     fn show_items_list(&mut self, ui: &mut egui::Ui) {
         // Clone data for display to avoid borrow issues
         let search_lower = self.items_search.to_lowercase();
-        let filtered_items: Vec<(usize, String)> = self
+        let mut filtered_items: Vec<(usize, String)> = self
             .items
             .iter()
             .enumerate()
@@ -2479,6 +2586,15 @@ impl CampaignBuilderApp {
             })
             .collect();
 
+        // Sort by ID for consistent display
+        filtered_items.sort_by_key(|(idx, _)| self.items[*idx].id);
+
+        eprintln!(
+            "DEBUG: show_items_list - self.items.len() = {}, filtered_items.len() = {}",
+            self.items.len(),
+            filtered_items.len()
+        );
+
         let selected = self.items_selected;
         let mut new_selection = selected;
         let mut action: Option<(usize, &str)> = None;
@@ -2494,7 +2610,10 @@ impl CampaignBuilderApp {
                     ui.heading("Items");
                     ui.separator();
 
+                    let available = ui.available_height();
                     egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .min_scrolled_height(available)
                         .id_salt("items_list_scroll")
                         .show(ui, |ui| {
                             ui.set_width(300.0); // Ensure scroll area takes full width of panel
@@ -2601,105 +2720,107 @@ impl CampaignBuilderApp {
     /// Displays formatted item information with type-specific stats,
     /// class restrictions, bonuses, and effects.
     fn show_item_preview(&self, ui: &mut egui::Ui, item: &Item) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.group(|ui| {
-                ui.heading("Basic Info");
-                ui.label(format!("ID: {}", item.id));
-                ui.label(format!("Base Cost: {} gold", item.base_cost));
-                ui.label(format!("Sell Cost: {} gold", item.sell_cost));
-
-                let mut flags = Vec::new();
-                if item.is_magical() {
-                    flags.push("✨ Magical");
-                }
-                if item.is_cursed {
-                    flags.push("💀 Cursed");
-                }
-                if item.is_quest_item() {
-                    flags.push("📜 Quest Item");
-                }
-                if !flags.is_empty() {
-                    ui.label(flags.join(" "));
-                }
-            });
-
-            ui.add_space(5.0);
-
-            // Type-specific display
-            ui.group(|ui| {
-                ui.heading("Item Type");
-                match &item.item_type {
-                    ItemType::Weapon(data) => {
-                        ui.label("⚔️ Weapon");
-                        ui.label(format!("  Damage: {:?}", data.damage));
-                        ui.label(format!("  Bonus: {}", data.bonus));
-                        ui.label(format!("  Hands: {}", data.hands_required));
-                    }
-                    ItemType::Armor(data) => {
-                        ui.label("🛡️ Armor");
-                        ui.label(format!("  AC Bonus: +{}", data.ac_bonus));
-                        ui.label(format!("  Weight: {} lbs", data.weight));
-                    }
-                    ItemType::Accessory(data) => {
-                        ui.label("💍 Accessory");
-                        ui.label(format!("  Slot: {:?}", data.slot));
-                    }
-                    ItemType::Consumable(data) => {
-                        ui.label("🧪 Consumable");
-                        ui.label(format!("  Effect: {:?}", data.effect));
-                        ui.label(format!("  Combat Use: {}", data.is_combat_usable));
-                    }
-                    ItemType::Ammo(data) => {
-                        ui.label("🏹 Ammunition");
-                        ui.label(format!("  Type: {:?}", data.ammo_type));
-                        ui.label(format!("  Quantity: {}", data.quantity));
-                    }
-                    ItemType::Quest(data) => {
-                        ui.label("📜 Quest Item");
-                        ui.label(format!("  Quest: {}", data.quest_id));
-                        ui.label(format!("  Key Item: {}", data.is_key_item));
-                    }
-                }
-            });
-
-            ui.add_space(5.0);
-
-            // Disablements (class restrictions)
-            ui.group(|ui| {
-                ui.heading("Class Restrictions");
-                self.show_disablement_display(ui, item.disablements);
-            });
-
-            // Bonuses and effects
-            if item.constant_bonus.is_some()
-                || item.temporary_bonus.is_some()
-                || item.spell_effect.is_some()
-            {
-                ui.add_space(5.0);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
                 ui.group(|ui| {
-                    ui.heading("Magical Effects");
+                    ui.heading("Basic Info");
+                    ui.label(format!("ID: {}", item.id));
+                    ui.label(format!("Base Cost: {} gold", item.base_cost));
+                    ui.label(format!("Sell Cost: {} gold", item.sell_cost));
 
-                    if let Some(bonus) = item.constant_bonus {
-                        ui.label(format!("Constant: {:?} {:+}", bonus.attribute, bonus.value));
+                    let mut flags = Vec::new();
+                    if item.is_magical() {
+                        flags.push("✨ Magical");
                     }
-
-                    if let Some(bonus) = item.temporary_bonus {
-                        ui.label(format!(
-                            "Temporary: {:?} {:+}",
-                            bonus.attribute, bonus.value
-                        ));
+                    if item.is_cursed {
+                        flags.push("💀 Cursed");
                     }
-
-                    if let Some(spell_id) = item.spell_effect {
-                        ui.label(format!("Spell Effect: ID {}", spell_id));
+                    if item.is_quest_item() {
+                        flags.push("📜 Quest Item");
                     }
-
-                    if item.max_charges > 0 {
-                        ui.label(format!("Max Charges: {}", item.max_charges));
+                    if !flags.is_empty() {
+                        ui.label(flags.join(" "));
                     }
                 });
-            }
-        });
+
+                ui.add_space(5.0);
+
+                // Type-specific display
+                ui.group(|ui| {
+                    ui.heading("Item Type");
+                    match &item.item_type {
+                        ItemType::Weapon(data) => {
+                            ui.label("⚔️ Weapon");
+                            ui.label(format!("  Damage: {:?}", data.damage));
+                            ui.label(format!("  Bonus: {}", data.bonus));
+                            ui.label(format!("  Hands: {}", data.hands_required));
+                        }
+                        ItemType::Armor(data) => {
+                            ui.label("🛡️ Armor");
+                            ui.label(format!("  AC Bonus: +{}", data.ac_bonus));
+                            ui.label(format!("  Weight: {} lbs", data.weight));
+                        }
+                        ItemType::Accessory(data) => {
+                            ui.label("💍 Accessory");
+                            ui.label(format!("  Slot: {:?}", data.slot));
+                        }
+                        ItemType::Consumable(data) => {
+                            ui.label("🧪 Consumable");
+                            ui.label(format!("  Effect: {:?}", data.effect));
+                            ui.label(format!("  Combat Use: {}", data.is_combat_usable));
+                        }
+                        ItemType::Ammo(data) => {
+                            ui.label("🏹 Ammunition");
+                            ui.label(format!("  Type: {:?}", data.ammo_type));
+                            ui.label(format!("  Quantity: {}", data.quantity));
+                        }
+                        ItemType::Quest(data) => {
+                            ui.label("📜 Quest Item");
+                            ui.label(format!("  Quest: {}", data.quest_id));
+                            ui.label(format!("  Key Item: {}", data.is_key_item));
+                        }
+                    }
+                });
+
+                ui.add_space(5.0);
+
+                // Disablements (class restrictions)
+                ui.group(|ui| {
+                    ui.heading("Class Restrictions");
+                    self.show_disablement_display(ui, item.disablements);
+                });
+
+                // Bonuses and effects
+                if item.constant_bonus.is_some()
+                    || item.temporary_bonus.is_some()
+                    || item.spell_effect.is_some()
+                {
+                    ui.add_space(5.0);
+                    ui.group(|ui| {
+                        ui.heading("Magical Effects");
+
+                        if let Some(bonus) = item.constant_bonus {
+                            ui.label(format!("Constant: {:?} {:+}", bonus.attribute, bonus.value));
+                        }
+
+                        if let Some(bonus) = item.temporary_bonus {
+                            ui.label(format!(
+                                "Temporary: {:?} {:+}",
+                                bonus.attribute, bonus.value
+                            ));
+                        }
+
+                        if let Some(spell_id) = item.spell_effect {
+                            ui.label(format!("Spell Effect: ID {}", spell_id));
+                        }
+
+                        if item.max_charges > 0 {
+                            ui.label(format!("Max Charges: {}", item.max_charges));
+                        }
+                    });
+                }
+            });
     }
 
     /// Phase 3B: Display disablement flags (class restrictions)
@@ -2795,148 +2916,161 @@ impl CampaignBuilderApp {
         ui.heading(if is_add { "Add New Item" } else { "Edit Item" });
         ui.separator();
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.group(|ui| {
-                ui.heading("Basic Properties");
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.heading("Basic Properties");
 
-                ui.horizontal(|ui| {
-                    ui.label("ID:");
-                    ui.add_enabled(
-                        false,
-                        egui::TextEdit::singleline(&mut self.items_edit_buffer.id.to_string()),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.label("ID:");
+                        ui.add_enabled(
+                            false,
+                            egui::TextEdit::singleline(&mut self.items_edit_buffer.id.to_string()),
+                        );
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.text_edit_singleline(&mut self.items_edit_buffer.name);
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Base Cost:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.items_edit_buffer.base_cost).speed(1.0),
+                        );
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Sell Cost:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.items_edit_buffer.sell_cost).speed(1.0),
+                        );
+                    });
+
+                    ui.checkbox(&mut self.items_edit_buffer.is_cursed, "Cursed");
+
+                    ui.horizontal(|ui| {
+                        ui.label("Max Charges:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.items_edit_buffer.max_charges)
+                                .speed(1.0),
+                        );
+                    });
                 });
 
-                ui.horizontal(|ui| {
-                    ui.label("Name:");
-                    ui.text_edit_singleline(&mut self.items_edit_buffer.name);
-                });
+                ui.add_space(10.0);
 
-                ui.horizontal(|ui| {
-                    ui.label("Base Cost:");
-                    ui.add(egui::DragValue::new(&mut self.items_edit_buffer.base_cost).speed(1.0));
-                });
+                // Phase 3B: Item type selector and type-specific editor
+                ui.group(|ui| {
+                    ui.heading("Item Type");
 
-                ui.horizontal(|ui| {
-                    ui.label("Sell Cost:");
-                    ui.add(egui::DragValue::new(&mut self.items_edit_buffer.sell_cost).speed(1.0));
-                });
-
-                ui.checkbox(&mut self.items_edit_buffer.is_cursed, "Cursed");
-
-                ui.horizontal(|ui| {
-                    ui.label("Max Charges:");
-                    ui.add(
-                        egui::DragValue::new(&mut self.items_edit_buffer.max_charges).speed(1.0),
-                    );
-                });
-            });
-
-            ui.add_space(10.0);
-
-            // Phase 3B: Item type selector and type-specific editor
-            ui.group(|ui| {
-                ui.heading("Item Type");
-
-                ui.horizontal(|ui| {
-                    if ui
-                        .selectable_label(self.items_edit_buffer.is_weapon(), "⚔️ Weapon")
-                        .clicked()
-                    {
-                        self.items_edit_buffer.item_type = ItemType::Weapon(WeaponData {
-                            damage: DiceRoll::new(1, 6, 0),
-                            bonus: 0,
-                            hands_required: 1,
-                        });
-                    }
-                    if ui
-                        .selectable_label(self.items_edit_buffer.is_armor(), "🛡️ Armor")
-                        .clicked()
-                    {
-                        self.items_edit_buffer.item_type =
-                            ItemType::Armor(antares::domain::items::types::ArmorData {
-                                ac_bonus: 0,
-                                weight: 0,
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(self.items_edit_buffer.is_weapon(), "⚔️ Weapon")
+                            .clicked()
+                        {
+                            self.items_edit_buffer.item_type = ItemType::Weapon(WeaponData {
+                                damage: DiceRoll::new(1, 6, 0),
+                                bonus: 0,
+                                hands_required: 1,
                             });
-                    }
-                    if ui
-                        .selectable_label(self.items_edit_buffer.is_accessory(), "💍 Accessory")
-                        .clicked()
-                    {
-                        self.items_edit_buffer.item_type =
-                            ItemType::Accessory(antares::domain::items::types::AccessoryData {
-                                slot: antares::domain::items::types::AccessorySlot::Ring,
-                            });
-                    }
-                    if ui
-                        .selectable_label(self.items_edit_buffer.is_consumable(), "🧪 Consumable")
-                        .clicked()
-                    {
-                        self.items_edit_buffer.item_type =
-                            ItemType::Consumable(antares::domain::items::types::ConsumableData {
-                                effect: antares::domain::items::types::ConsumableEffect::HealHp(10),
-                                is_combat_usable: true,
-                            });
-                    }
-                    if ui
-                        .selectable_label(self.items_edit_buffer.is_ammo(), "🏹 Ammo")
-                        .clicked()
-                    {
-                        self.items_edit_buffer.item_type =
-                            ItemType::Ammo(antares::domain::items::types::AmmoData {
-                                ammo_type: antares::domain::items::types::AmmoType::Arrow,
-                                quantity: 20,
-                            });
-                    }
-                    if ui
-                        .selectable_label(self.items_edit_buffer.is_quest_item(), "📜 Quest")
-                        .clicked()
-                    {
-                        self.items_edit_buffer.item_type =
-                            ItemType::Quest(antares::domain::items::types::QuestData {
-                                quest_id: String::new(),
-                                is_key_item: false,
-                            });
-                    }
+                        }
+                        if ui
+                            .selectable_label(self.items_edit_buffer.is_armor(), "🛡️ Armor")
+                            .clicked()
+                        {
+                            self.items_edit_buffer.item_type =
+                                ItemType::Armor(antares::domain::items::types::ArmorData {
+                                    ac_bonus: 0,
+                                    weight: 0,
+                                });
+                        }
+                        if ui
+                            .selectable_label(self.items_edit_buffer.is_accessory(), "💍 Accessory")
+                            .clicked()
+                        {
+                            self.items_edit_buffer.item_type =
+                                ItemType::Accessory(antares::domain::items::types::AccessoryData {
+                                    slot: antares::domain::items::types::AccessorySlot::Ring,
+                                });
+                        }
+                        if ui
+                            .selectable_label(
+                                self.items_edit_buffer.is_consumable(),
+                                "🧪 Consumable",
+                            )
+                            .clicked()
+                        {
+                            self.items_edit_buffer.item_type = ItemType::Consumable(
+                                antares::domain::items::types::ConsumableData {
+                                    effect: antares::domain::items::types::ConsumableEffect::HealHp(
+                                        10,
+                                    ),
+                                    is_combat_usable: true,
+                                },
+                            );
+                        }
+                        if ui
+                            .selectable_label(self.items_edit_buffer.is_ammo(), "🏹 Ammo")
+                            .clicked()
+                        {
+                            self.items_edit_buffer.item_type =
+                                ItemType::Ammo(antares::domain::items::types::AmmoData {
+                                    ammo_type: antares::domain::items::types::AmmoType::Arrow,
+                                    quantity: 20,
+                                });
+                        }
+                        if ui
+                            .selectable_label(self.items_edit_buffer.is_quest_item(), "📜 Quest")
+                            .clicked()
+                        {
+                            self.items_edit_buffer.item_type =
+                                ItemType::Quest(antares::domain::items::types::QuestData {
+                                    quest_id: String::new(),
+                                    is_key_item: false,
+                                });
+                        }
+                    });
+
+                    ui.separator();
+
+                    // Phase 3B: Type-specific editors
+                    self.show_item_type_editor(ui);
                 });
+
+                ui.add_space(10.0);
+
+                // Phase 3B: Disablement editor
+                ui.group(|ui| {
+                    ui.heading("Class Restrictions");
+                    self.show_disablement_editor(ui);
+                });
+
+                ui.add_space(10.0);
 
                 ui.separator();
 
-                // Phase 3B: Type-specific editors
-                self.show_item_type_editor(ui);
-            });
-
-            ui.add_space(10.0);
-
-            // Phase 3B: Disablement editor
-            ui.group(|ui| {
-                ui.heading("Class Restrictions");
-                self.show_disablement_editor(ui);
-            });
-
-            ui.add_space(10.0);
-
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                if ui.button("💾 Save").clicked() {
-                    if is_add {
-                        self.items.push(self.items_edit_buffer.clone());
-                    } else if let Some(idx) = self.items_selected {
-                        if idx < self.items.len() {
-                            self.items[idx] = self.items_edit_buffer.clone();
+                ui.horizontal(|ui| {
+                    if ui.button("💾 Save").clicked() {
+                        if is_add {
+                            self.items.push(self.items_edit_buffer.clone());
+                        } else if let Some(idx) = self.items_selected {
+                            if idx < self.items.len() {
+                                self.items[idx] = self.items_edit_buffer.clone();
+                            }
                         }
+                        let _ = self.save_items();
+                        self.items_editor_mode = EditorMode::List;
+                        self.status_message = "Item saved".to_string();
                     }
-                    let _ = self.save_items();
-                    self.items_editor_mode = EditorMode::List;
-                    self.status_message = "Item saved".to_string();
-                }
 
-                if ui.button("❌ Cancel").clicked() {
-                    self.items_editor_mode = EditorMode::List;
-                }
+                    if ui.button("❌ Cancel").clicked() {
+                        self.items_editor_mode = EditorMode::List;
+                    }
+                });
             });
-        });
     }
 
     /// Phase 3B: Type-specific item editor
@@ -3298,6 +3432,74 @@ impl CampaignBuilderApp {
             }
 
             ui.separator();
+
+            // File I/O buttons
+            if ui.button("📂 Load from File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("RON", &["ron"])
+                    .pick_file()
+                {
+                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
+                        ron::from_str::<Vec<Spell>>(&contents)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    });
+
+                    match load_result {
+                        Ok(loaded_spells) => {
+                            if self.file_load_merge_mode {
+                                for spell in loaded_spells {
+                                    if let Some(existing) =
+                                        self.spells.iter_mut().find(|s| s.id == spell.id)
+                                    {
+                                        *existing = spell;
+                                    } else {
+                                        self.spells.push(spell);
+                                    }
+                                }
+                            } else {
+                                self.spells = loaded_spells;
+                            }
+                            self.unsaved_changes = true;
+                            self.status_message = format!("Loaded spells from: {}", path.display());
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to load spells: {}", e);
+                        }
+                    }
+                }
+            }
+
+            ui.checkbox(&mut self.file_load_merge_mode, "Merge");
+            ui.label(if self.file_load_merge_mode {
+                "(adds to existing)"
+            } else {
+                "(replaces all)"
+            });
+
+            if ui.button("💾 Save to File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("spells.ron")
+                    .add_filter("RON", &["ron"])
+                    .save_file()
+                {
+                    match ron::ser::to_string_pretty(&self.spells, Default::default()) {
+                        Ok(contents) => match std::fs::write(&path, contents) {
+                            Ok(_) => {
+                                self.status_message =
+                                    format!("Saved spells to: {}", path.display());
+                            }
+                            Err(e) => {
+                                self.status_message = format!("Failed to save spells: {}", e);
+                            }
+                        },
+                        Err(e) => {
+                            self.status_message = format!("Failed to serialize spells: {}", e);
+                        }
+                    }
+                }
+            }
+
+            ui.separator();
             ui.label(format!("Total: {}", self.spells.len()));
 
             ui.checkbox(&mut self.spells_show_preview, "Preview");
@@ -3320,7 +3522,7 @@ impl CampaignBuilderApp {
     fn show_spells_list(&mut self, ui: &mut egui::Ui) {
         // Clone data for display to avoid borrow issues
         let search_lower = self.spells_search.to_lowercase();
-        let filtered_spells: Vec<(usize, String)> = self
+        let mut filtered_spells: Vec<(usize, String)> = self
             .spells
             .iter()
             .enumerate()
@@ -3355,6 +3557,9 @@ impl CampaignBuilderApp {
             })
             .collect();
 
+        // Sort by ID for consistent display
+        filtered_spells.sort_by_key(|(idx, _)| self.spells[*idx].id);
+
         let selected = self.spells_selected;
         let mut new_selection = selected;
         let mut action: Option<(usize, &str)> = None;
@@ -3370,7 +3575,10 @@ impl CampaignBuilderApp {
                     ui.heading("Spells");
                     ui.separator();
 
+                    let available = ui.available_height();
                     egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .min_scrolled_height(available)
                         .id_salt("spells_list_scroll")
                         .show(ui, |ui| {
                             ui.set_width(300.0);
@@ -3492,204 +3700,206 @@ impl CampaignBuilderApp {
         });
         ui.separator();
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("ID:");
-                ui.add_enabled(
-                    false,
-                    egui::TextEdit::singleline(&mut self.spells_edit_buffer.id.to_string()),
-                );
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Name:");
-                ui.text_edit_singleline(&mut self.spells_edit_buffer.name);
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("School:");
-                ui.radio_value(
-                    &mut self.spells_edit_buffer.school,
-                    SpellSchool::Cleric,
-                    "Cleric",
-                );
-                ui.radio_value(
-                    &mut self.spells_edit_buffer.school,
-                    SpellSchool::Sorcerer,
-                    "Sorcerer",
-                );
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Level:");
-                ui.add(egui::Slider::new(&mut self.spells_edit_buffer.level, 1..=7));
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("SP Cost:");
-                ui.add(egui::DragValue::new(&mut self.spells_edit_buffer.sp_cost).speed(1.0));
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Gem Cost:");
-                ui.add(egui::DragValue::new(&mut self.spells_edit_buffer.gem_cost).speed(1.0));
-            });
-
-            // Phase 3C: Context editor
-            ui.horizontal(|ui| {
-                ui.label("Context:");
-                egui::ComboBox::from_id_salt("spell_context")
-                    .selected_text(format!("{:?}", self.spells_edit_buffer.context))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.context,
-                            SpellContext::Anytime,
-                            "Anytime",
-                        );
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.context,
-                            SpellContext::CombatOnly,
-                            "CombatOnly",
-                        );
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.context,
-                            SpellContext::NonCombatOnly,
-                            "NonCombatOnly",
-                        );
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.context,
-                            SpellContext::OutdoorOnly,
-                            "OutdoorOnly",
-                        );
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.context,
-                            SpellContext::IndoorOnly,
-                            "IndoorOnly",
-                        );
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.context,
-                            SpellContext::OutdoorCombat,
-                            "OutdoorCombat",
-                        );
-                    });
-            });
-
-            // Phase 3C: Target editor
-            ui.horizontal(|ui| {
-                ui.label("Target:");
-                egui::ComboBox::from_id_salt("spell_target")
-                    .selected_text(format!("{:?}", self.spells_edit_buffer.target))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.target,
-                            SpellTarget::Self_,
-                            "Self",
-                        );
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.target,
-                            SpellTarget::SingleCharacter,
-                            "SingleCharacter",
-                        );
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.target,
-                            SpellTarget::AllCharacters,
-                            "AllCharacters",
-                        );
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.target,
-                            SpellTarget::SingleMonster,
-                            "SingleMonster",
-                        );
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.target,
-                            SpellTarget::MonsterGroup,
-                            "MonsterGroup",
-                        );
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.target,
-                            SpellTarget::AllMonsters,
-                            "AllMonsters",
-                        );
-                        ui.selectable_value(
-                            &mut self.spells_edit_buffer.target,
-                            SpellTarget::SpecificMonsters,
-                            "SpecificMonsters",
-                        );
-                    });
-            });
-
-            ui.separator();
-            ui.label("Effects:");
-
-            ui.horizontal(|ui| {
-                ui.label("Damage:");
-                let mut has_damage = self.spells_edit_buffer.damage.is_some();
-                if ui.checkbox(&mut has_damage, "Has Damage").changed() {
-                    if has_damage {
-                        self.spells_edit_buffer.damage =
-                            Some(antares::domain::types::DiceRoll::new(1, 6, 0));
-                    } else {
-                        self.spells_edit_buffer.damage = None;
-                    }
-                }
-
-                if let Some(damage) = &mut self.spells_edit_buffer.damage {
-                    ui.label("Count:");
-                    ui.add(
-                        egui::DragValue::new(&mut damage.count)
-                            .speed(1.0)
-                            .range(1..=100),
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("ID:");
+                    ui.add_enabled(
+                        false,
+                        egui::TextEdit::singleline(&mut self.spells_edit_buffer.id.to_string()),
                     );
-                    ui.label("d");
-                    ui.add(
-                        egui::DragValue::new(&mut damage.sides)
-                            .speed(1.0)
-                            .range(2..=100),
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Name:");
+                    ui.text_edit_singleline(&mut self.spells_edit_buffer.name);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("School:");
+                    ui.radio_value(
+                        &mut self.spells_edit_buffer.school,
+                        SpellSchool::Cleric,
+                        "Cleric",
                     );
-                    ui.label("+");
-                    ui.add(egui::DragValue::new(&mut damage.bonus).speed(1.0));
-                }
-            });
+                    ui.radio_value(
+                        &mut self.spells_edit_buffer.school,
+                        SpellSchool::Sorcerer,
+                        "Sorcerer",
+                    );
+                });
 
-            ui.horizontal(|ui| {
-                ui.label("Duration (rounds):");
-                ui.add(egui::DragValue::new(&mut self.spells_edit_buffer.duration).speed(1.0));
-                ui.label("(0 = Instant)");
-            });
+                ui.horizontal(|ui| {
+                    ui.label("Level:");
+                    ui.add(egui::Slider::new(&mut self.spells_edit_buffer.level, 1..=7));
+                });
 
-            ui.horizontal(|ui| {
-                ui.checkbox(
-                    &mut self.spells_edit_buffer.saving_throw,
-                    "Saving Throw Allowed",
-                );
-            });
+                ui.horizontal(|ui| {
+                    ui.label("SP Cost:");
+                    ui.add(egui::DragValue::new(&mut self.spells_edit_buffer.sp_cost).speed(1.0));
+                });
 
-            ui.horizontal(|ui| {
-                ui.label("Description:");
-            });
-            ui.text_edit_multiline(&mut self.spells_edit_buffer.description);
+                ui.horizontal(|ui| {
+                    ui.label("Gem Cost:");
+                    ui.add(egui::DragValue::new(&mut self.spells_edit_buffer.gem_cost).speed(1.0));
+                });
 
-            ui.separator();
+                // Phase 3C: Context editor
+                ui.horizontal(|ui| {
+                    ui.label("Context:");
+                    egui::ComboBox::from_id_salt("spell_context")
+                        .selected_text(format!("{:?}", self.spells_edit_buffer.context))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.context,
+                                SpellContext::Anytime,
+                                "Anytime",
+                            );
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.context,
+                                SpellContext::CombatOnly,
+                                "CombatOnly",
+                            );
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.context,
+                                SpellContext::NonCombatOnly,
+                                "NonCombatOnly",
+                            );
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.context,
+                                SpellContext::OutdoorOnly,
+                                "OutdoorOnly",
+                            );
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.context,
+                                SpellContext::IndoorOnly,
+                                "IndoorOnly",
+                            );
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.context,
+                                SpellContext::OutdoorCombat,
+                                "OutdoorCombat",
+                            );
+                        });
+                });
 
-            ui.horizontal(|ui| {
-                if ui.button("💾 Save").clicked() {
-                    if is_add {
-                        self.spells.push(self.spells_edit_buffer.clone());
-                    } else if let Some(idx) = self.spells_selected {
-                        if idx < self.spells.len() {
-                            self.spells[idx] = self.spells_edit_buffer.clone();
+                // Phase 3C: Target editor
+                ui.horizontal(|ui| {
+                    ui.label("Target:");
+                    egui::ComboBox::from_id_salt("spell_target")
+                        .selected_text(format!("{:?}", self.spells_edit_buffer.target))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.target,
+                                SpellTarget::Self_,
+                                "Self",
+                            );
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.target,
+                                SpellTarget::SingleCharacter,
+                                "SingleCharacter",
+                            );
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.target,
+                                SpellTarget::AllCharacters,
+                                "AllCharacters",
+                            );
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.target,
+                                SpellTarget::SingleMonster,
+                                "SingleMonster",
+                            );
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.target,
+                                SpellTarget::MonsterGroup,
+                                "MonsterGroup",
+                            );
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.target,
+                                SpellTarget::AllMonsters,
+                                "AllMonsters",
+                            );
+                            ui.selectable_value(
+                                &mut self.spells_edit_buffer.target,
+                                SpellTarget::SpecificMonsters,
+                                "SpecificMonsters",
+                            );
+                        });
+                });
+
+                ui.separator();
+                ui.label("Effects:");
+
+                ui.horizontal(|ui| {
+                    ui.label("Damage:");
+                    let mut has_damage = self.spells_edit_buffer.damage.is_some();
+                    if ui.checkbox(&mut has_damage, "Has Damage").changed() {
+                        if has_damage {
+                            self.spells_edit_buffer.damage =
+                                Some(antares::domain::types::DiceRoll::new(1, 6, 0));
+                        } else {
+                            self.spells_edit_buffer.damage = None;
                         }
                     }
-                    let _ = self.save_spells();
-                    self.spells_editor_mode = EditorMode::List;
-                    self.status_message = "Spell saved".to_string();
-                }
 
-                if ui.button("❌ Cancel").clicked() {
-                    self.spells_editor_mode = EditorMode::List;
-                }
+                    if let Some(damage) = &mut self.spells_edit_buffer.damage {
+                        ui.label("Count:");
+                        ui.add(
+                            egui::DragValue::new(&mut damage.count)
+                                .speed(1.0)
+                                .range(1..=100),
+                        );
+                        ui.label("d");
+                        ui.add(
+                            egui::DragValue::new(&mut damage.sides)
+                                .speed(1.0)
+                                .range(2..=100),
+                        );
+                        ui.label("+");
+                        ui.add(egui::DragValue::new(&mut damage.bonus).speed(1.0));
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Duration (rounds):");
+                    ui.add(egui::DragValue::new(&mut self.spells_edit_buffer.duration).speed(1.0));
+                    ui.label("(0 = Instant)");
+                });
+
+                ui.horizontal(|ui| {
+                    ui.checkbox(
+                        &mut self.spells_edit_buffer.saving_throw,
+                        "Saving Throw Allowed",
+                    );
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Description:");
+                });
+                ui.text_edit_multiline(&mut self.spells_edit_buffer.description);
+
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("💾 Save").clicked() {
+                        if is_add {
+                            self.spells.push(self.spells_edit_buffer.clone());
+                        } else if let Some(idx) = self.spells_selected {
+                            if idx < self.spells.len() {
+                                self.spells[idx] = self.spells_edit_buffer.clone();
+                            }
+                        }
+                        let _ = self.save_spells();
+                        self.spells_editor_mode = EditorMode::List;
+                        self.status_message = "Spell saved".to_string();
+                    }
+
+                    if ui.button("❌ Cancel").clicked() {
+                        self.spells_editor_mode = EditorMode::List;
+                    }
+                });
             });
-        });
     }
 
     /// Show monsters editor with full CRUD operations
@@ -3720,6 +3930,75 @@ impl CampaignBuilderApp {
             }
 
             ui.separator();
+
+            // File I/O buttons
+            if ui.button("📂 Load from File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("RON", &["ron"])
+                    .pick_file()
+                {
+                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
+                        ron::from_str::<Vec<MonsterDefinition>>(&contents)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    });
+
+                    match load_result {
+                        Ok(loaded_monsters) => {
+                            if self.file_load_merge_mode {
+                                for monster in loaded_monsters {
+                                    if let Some(existing) =
+                                        self.monsters.iter_mut().find(|m| m.id == monster.id)
+                                    {
+                                        *existing = monster;
+                                    } else {
+                                        self.monsters.push(monster);
+                                    }
+                                }
+                            } else {
+                                self.monsters = loaded_monsters;
+                            }
+                            self.unsaved_changes = true;
+                            self.status_message =
+                                format!("Loaded monsters from: {}", path.display());
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to load monsters: {}", e);
+                        }
+                    }
+                }
+            }
+
+            ui.checkbox(&mut self.file_load_merge_mode, "Merge");
+            ui.label(if self.file_load_merge_mode {
+                "(adds to existing)"
+            } else {
+                "(replaces all)"
+            });
+
+            if ui.button("💾 Save to File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("monsters.ron")
+                    .add_filter("RON", &["ron"])
+                    .save_file()
+                {
+                    match ron::ser::to_string_pretty(&self.monsters, Default::default()) {
+                        Ok(contents) => match std::fs::write(&path, contents) {
+                            Ok(_) => {
+                                self.status_message =
+                                    format!("Saved monsters to: {}", path.display());
+                            }
+                            Err(e) => {
+                                self.status_message = format!("Failed to save monsters: {}", e);
+                            }
+                        },
+                        Err(e) => {
+                            self.status_message = format!("Failed to serialize monsters: {}", e);
+                        }
+                    }
+                }
+            }
+
+            ui.separator();
             ui.label(format!("Total: {}", self.monsters.len()));
 
             ui.checkbox(&mut self.monsters_show_preview, "Preview");
@@ -3742,7 +4021,7 @@ impl CampaignBuilderApp {
     fn show_monsters_list(&mut self, ui: &mut egui::Ui) {
         // Clone data for display to avoid borrow issues
         let search_lower = self.monsters_search.to_lowercase();
-        let filtered_monsters: Vec<(usize, String)> = self
+        let mut filtered_monsters: Vec<(usize, String)> = self
             .monsters
             .iter()
             .enumerate()
@@ -3757,6 +4036,9 @@ impl CampaignBuilderApp {
                 )
             })
             .collect();
+
+        // Sort by ID for consistent display
+        filtered_monsters.sort_by_key(|(idx, _)| self.monsters[*idx].id);
 
         let selected = self.monsters_selected;
         let mut new_selection = selected;
@@ -3773,7 +4055,10 @@ impl CampaignBuilderApp {
                     ui.heading("Monsters");
                     ui.separator();
 
+                    let available = ui.available_height();
                     egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .min_scrolled_height(available)
                         .id_salt("monsters_list_scroll")
                         .show(ui, |ui| {
                             ui.set_width(300.0);
@@ -3913,176 +4198,180 @@ impl CampaignBuilderApp {
         });
         ui.separator();
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("ID:");
-                ui.add_enabled(
-                    false,
-                    egui::TextEdit::singleline(&mut self.monsters_edit_buffer.id.to_string()),
-                );
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Name:");
-                ui.text_edit_singleline(&mut self.monsters_edit_buffer.name);
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("HP:");
-                ui.add(egui::DragValue::new(&mut self.monsters_edit_buffer.hp).speed(1.0));
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("AC:");
-                ui.add(egui::DragValue::new(&mut self.monsters_edit_buffer.ac).speed(1.0));
-            });
-
-            ui.checkbox(&mut self.monsters_edit_buffer.is_undead, "Undead");
-            ui.checkbox(&mut self.monsters_edit_buffer.can_advance, "Can Advance");
-
-            ui.horizontal(|ui| {
-                ui.label("Magic Resistance:");
-                ui.add(egui::Slider::new(
-                    &mut self.monsters_edit_buffer.magic_resistance,
-                    0..=100,
-                ));
-            });
-
-            // Phase 3C: Stats editor toggle
-            ui.separator();
-            if ui
-                .button(if self.monsters_show_stats_editor {
-                    "▼ Stats"
-                } else {
-                    "▶ Stats"
-                })
-                .clicked()
-            {
-                self.monsters_show_stats_editor = !self.monsters_show_stats_editor;
-            }
-
-            if self.monsters_show_stats_editor {
-                ui.group(|ui| {
-                    self.show_monster_stats_editor(ui);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("ID:");
+                    ui.add_enabled(
+                        false,
+                        egui::TextEdit::singleline(&mut self.monsters_edit_buffer.id.to_string()),
+                    );
                 });
-            }
 
-            // Phase 3C: Attacks editor toggle
-            ui.separator();
-            if ui
-                .button(if self.monsters_show_attacks_editor {
-                    "▼ Attacks"
-                } else {
-                    "▶ Attacks"
-                })
-                .clicked()
-            {
-                self.monsters_show_attacks_editor = !self.monsters_show_attacks_editor;
-            }
-
-            if self.monsters_show_attacks_editor {
-                ui.group(|ui| {
-                    self.show_monster_attacks_editor(ui);
+                ui.horizontal(|ui| {
+                    ui.label("Name:");
+                    ui.text_edit_singleline(&mut self.monsters_edit_buffer.name);
                 });
-            }
 
-            // Phase 3C: Loot editor toggle
-            ui.separator();
-            if ui
-                .button(if self.monsters_show_loot_editor {
-                    "▼ Loot Table"
-                } else {
-                    "▶ Loot Table"
-                })
-                .clicked()
-            {
-                self.monsters_show_loot_editor = !self.monsters_show_loot_editor;
-            }
-
-            if self.monsters_show_loot_editor {
-                ui.group(|ui| {
-                    self.show_monster_loot_editor(ui);
+                ui.horizontal(|ui| {
+                    ui.label("HP:");
+                    ui.add(egui::DragValue::new(&mut self.monsters_edit_buffer.hp).speed(1.0));
                 });
-            }
 
-            ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("AC:");
+                    ui.add(egui::DragValue::new(&mut self.monsters_edit_buffer.ac).speed(1.0));
+                });
 
-            ui.horizontal(|ui| {
-                if ui.button("💾 Save").clicked() {
-                    if is_add {
-                        self.monsters.push(self.monsters_edit_buffer.clone());
-                    } else if let Some(idx) = self.monsters_selected {
-                        if idx < self.monsters.len() {
-                            self.monsters[idx] = self.monsters_edit_buffer.clone();
+                ui.checkbox(&mut self.monsters_edit_buffer.is_undead, "Undead");
+                ui.checkbox(&mut self.monsters_edit_buffer.can_advance, "Can Advance");
+
+                ui.horizontal(|ui| {
+                    ui.label("Magic Resistance:");
+                    ui.add(egui::Slider::new(
+                        &mut self.monsters_edit_buffer.magic_resistance,
+                        0..=100,
+                    ));
+                });
+
+                // Phase 3C: Stats editor toggle
+                ui.separator();
+                if ui
+                    .button(if self.monsters_show_stats_editor {
+                        "▼ Stats"
+                    } else {
+                        "▶ Stats"
+                    })
+                    .clicked()
+                {
+                    self.monsters_show_stats_editor = !self.monsters_show_stats_editor;
+                }
+
+                if self.monsters_show_stats_editor {
+                    ui.group(|ui| {
+                        self.show_monster_stats_editor(ui);
+                    });
+                }
+
+                // Phase 3C: Attacks editor toggle
+                ui.separator();
+                if ui
+                    .button(if self.monsters_show_attacks_editor {
+                        "▼ Attacks"
+                    } else {
+                        "▶ Attacks"
+                    })
+                    .clicked()
+                {
+                    self.monsters_show_attacks_editor = !self.monsters_show_attacks_editor;
+                }
+
+                if self.monsters_show_attacks_editor {
+                    ui.group(|ui| {
+                        self.show_monster_attacks_editor(ui);
+                    });
+                }
+
+                // Phase 3C: Loot editor toggle
+                ui.separator();
+                if ui
+                    .button(if self.monsters_show_loot_editor {
+                        "▼ Loot Table"
+                    } else {
+                        "▶ Loot Table"
+                    })
+                    .clicked()
+                {
+                    self.monsters_show_loot_editor = !self.monsters_show_loot_editor;
+                }
+
+                if self.monsters_show_loot_editor {
+                    ui.group(|ui| {
+                        self.show_monster_loot_editor(ui);
+                    });
+                }
+
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("💾 Save").clicked() {
+                        if is_add {
+                            self.monsters.push(self.monsters_edit_buffer.clone());
+                        } else if let Some(idx) = self.monsters_selected {
+                            if idx < self.monsters.len() {
+                                self.monsters[idx] = self.monsters_edit_buffer.clone();
+                            }
                         }
+                        let _ = self.save_monsters();
+                        self.monsters_editor_mode = EditorMode::List;
+                        self.status_message = "Monster saved".to_string();
                     }
-                    let _ = self.save_monsters();
-                    self.monsters_editor_mode = EditorMode::List;
-                    self.status_message = "Monster saved".to_string();
-                }
 
-                if ui.button("❌ Cancel").clicked() {
-                    self.monsters_editor_mode = EditorMode::List;
-                }
+                    if ui.button("❌ Cancel").clicked() {
+                        self.monsters_editor_mode = EditorMode::List;
+                    }
+                });
             });
-        });
     }
 
     /// Phase 3C: Show spell preview panel with formatted information
     fn show_spell_preview(&self, ui: &mut egui::Ui, spell: &Spell) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.group(|ui| {
-                ui.heading(&spell.name);
-                ui.separator();
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.heading(&spell.name);
+                    ui.separator();
 
-                ui.label(format!("🆔 ID: {}", spell.id));
+                    ui.label(format!("🆔 ID: {}", spell.id));
 
-                let school_icon = match spell.school {
-                    SpellSchool::Cleric => "✝️",
-                    SpellSchool::Sorcerer => "🔮",
-                };
-                ui.label(format!("{} School: {:?}", school_icon, spell.school));
-                ui.label(format!("📊 Level: {}", spell.level));
+                    let school_icon = match spell.school {
+                        SpellSchool::Cleric => "✝️",
+                        SpellSchool::Sorcerer => "🔮",
+                    };
+                    ui.label(format!("{} School: {:?}", school_icon, spell.school));
+                    ui.label(format!("📊 Level: {}", spell.level));
 
-                ui.separator();
+                    ui.separator();
 
-                ui.label(format!("💎 SP Cost: {}", spell.sp_cost));
-                if spell.gem_cost > 0 {
-                    ui.label(format!("💎 Gem Cost: {}", spell.gem_cost));
-                }
+                    ui.label(format!("💎 SP Cost: {}", spell.sp_cost));
+                    if spell.gem_cost > 0 {
+                        ui.label(format!("💎 Gem Cost: {}", spell.gem_cost));
+                    }
 
-                ui.separator();
+                    ui.separator();
 
-                ui.label(format!("🎯 Target: {:?}", spell.target));
-                ui.label(format!("📍 Context: {:?}", spell.context));
+                    ui.label(format!("🎯 Target: {:?}", spell.target));
+                    ui.label(format!("📍 Context: {:?}", spell.context));
 
-                ui.separator();
+                    ui.separator();
 
-                if let Some(damage) = &spell.damage {
-                    ui.label(format!(
-                        "⚔️ Damage: {}d{}+{}",
-                        damage.count, damage.sides, damage.bonus
-                    ));
-                }
+                    if let Some(damage) = &spell.damage {
+                        ui.label(format!(
+                            "⚔️ Damage: {}d{}+{}",
+                            damage.count, damage.sides, damage.bonus
+                        ));
+                    }
 
-                if spell.duration > 0 {
-                    ui.label(format!("⏱️ Duration: {} rounds", spell.duration));
-                } else {
-                    ui.label("⏱️ Duration: Instant");
-                }
+                    if spell.duration > 0 {
+                        ui.label(format!("⏱️ Duration: {} rounds", spell.duration));
+                    } else {
+                        ui.label("⏱️ Duration: Instant");
+                    }
 
-                if spell.saving_throw {
-                    ui.label("🛡️ Saving Throw: Yes");
-                } else {
-                    ui.label("🛡️ Saving Throw: No");
-                }
+                    if spell.saving_throw {
+                        ui.label("🛡️ Saving Throw: Yes");
+                    } else {
+                        ui.label("🛡️ Saving Throw: No");
+                    }
 
-                ui.separator();
+                    ui.separator();
 
-                ui.label("📝 Description:");
-                ui.label(&spell.description);
+                    ui.label("📝 Description:");
+                    ui.label(&spell.description);
+                });
             });
-        });
     }
 
     /// Phase 3C: Show spell import dialog
@@ -4119,77 +4408,79 @@ impl CampaignBuilderApp {
 
     /// Phase 3C: Show monster preview panel with formatted information
     fn show_monster_preview(&self, ui: &mut egui::Ui, monster: &MonsterDefinition) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.group(|ui| {
-                ui.heading(&monster.name);
-                ui.separator();
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.heading(&monster.name);
+                    ui.separator();
 
-                ui.label(format!("🆔 ID: {}", monster.id));
+                    ui.label(format!("🆔 ID: {}", monster.id));
 
-                let type_icon = if monster.is_undead { "💀" } else { "👹" };
-                ui.label(format!(
-                    "{} Type: {}",
-                    type_icon,
-                    if monster.is_undead {
-                        "Undead"
-                    } else {
-                        "Living"
+                    let type_icon = if monster.is_undead { "💀" } else { "👹" };
+                    ui.label(format!(
+                        "{} Type: {}",
+                        type_icon,
+                        if monster.is_undead {
+                            "Undead"
+                        } else {
+                            "Living"
+                        }
+                    ));
+
+                    ui.separator();
+
+                    ui.label("⚔️ Combat Stats:");
+                    ui.label(format!("  ❤️ HP: {}", monster.hp));
+                    ui.label(format!("  🛡️ AC: {}", monster.ac));
+                    ui.label(format!("  ⚡ Attacks: {}", monster.attacks.len()));
+
+                    if monster.magic_resistance > 0 {
+                        ui.label(format!(
+                            "  🔮 Magic Resistance: {}%",
+                            monster.magic_resistance
+                        ));
                     }
-                ));
 
-                ui.separator();
+                    ui.separator();
 
-                ui.label("⚔️ Combat Stats:");
-                ui.label(format!("  ❤️ HP: {}", monster.hp));
-                ui.label(format!("  🛡️ AC: {}", monster.ac));
-                ui.label(format!("  ⚡ Attacks: {}", monster.attacks.len()));
+                    ui.label("🎲 Attributes:");
+                    ui.label(format!("  Might: {}", monster.stats.might.base));
+                    ui.label(format!("  Intellect: {}", monster.stats.intellect.base));
+                    ui.label(format!("  Personality: {}", monster.stats.personality.base));
+                    ui.label(format!("  Endurance: {}", monster.stats.endurance.base));
+                    ui.label(format!("  Speed: {}", monster.stats.speed.base));
+                    ui.label(format!("  Accuracy: {}", monster.stats.accuracy.base));
+                    ui.label(format!("  Luck: {}", monster.stats.luck.base));
 
-                if monster.magic_resistance > 0 {
-                    ui.label(format!(
-                        "  🔮 Magic Resistance: {}%",
-                        monster.magic_resistance
-                    ));
-                }
+                    ui.separator();
 
-                ui.separator();
+                    ui.label("⚙️ Special Abilities:");
+                    if monster.can_regenerate {
+                        ui.label("  ♻️ Can Regenerate");
+                    }
+                    if monster.can_advance {
+                        ui.label("  🏃 Can Advance");
+                    }
 
-                ui.label("🎲 Attributes:");
-                ui.label(format!("  Might: {}", monster.stats.might.base));
-                ui.label(format!("  Intellect: {}", monster.stats.intellect.base));
-                ui.label(format!("  Personality: {}", monster.stats.personality.base));
-                ui.label(format!("  Endurance: {}", monster.stats.endurance.base));
-                ui.label(format!("  Speed: {}", monster.stats.speed.base));
-                ui.label(format!("  Accuracy: {}", monster.stats.accuracy.base));
-                ui.label(format!("  Luck: {}", monster.stats.luck.base));
+                    ui.separator();
 
-                ui.separator();
-
-                ui.label("⚙️ Special Abilities:");
-                if monster.can_regenerate {
-                    ui.label("  ♻️ Can Regenerate");
-                }
-                if monster.can_advance {
-                    ui.label("  🏃 Can Advance");
-                }
-
-                ui.separator();
-
-                ui.label("💰 Loot:");
-                if monster.loot.gold_max > 0 {
-                    ui.label(format!(
-                        "  Gold: {}-{} gp",
-                        monster.loot.gold_min, monster.loot.gold_max
-                    ));
-                }
-                if monster.loot.gems_max > 0 {
-                    ui.label(format!(
-                        "  Gems: {}-{}",
-                        monster.loot.gems_min, monster.loot.gems_max
-                    ));
-                }
-                ui.label(format!("  Experience: {} XP", monster.loot.experience));
+                    ui.label("💰 Loot:");
+                    if monster.loot.gold_max > 0 {
+                        ui.label(format!(
+                            "  Gold: {}-{} gp",
+                            monster.loot.gold_min, monster.loot.gold_max
+                        ));
+                    }
+                    if monster.loot.gems_max > 0 {
+                        ui.label(format!(
+                            "  Gems: {}-{}",
+                            monster.loot.gems_min, monster.loot.gems_max
+                        ));
+                    }
+                    ui.label(format!("  Experience: {} XP", monster.loot.experience));
+                });
             });
-        });
     }
 
     /// Phase 3C: Show monster import dialog
@@ -4568,83 +4859,89 @@ impl CampaignBuilderApp {
             }
         });
 
+        // Sort maps by ID for consistent display
+        let mut sorted_maps: Vec<_> = self.maps.iter().enumerate().collect();
+        sorted_maps.sort_by_key(|(_, map)| map.id);
+
         ui.separator();
 
         // Map list with previews
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            if self.maps.is_empty() {
-                ui.group(|ui| {
-                    ui.label("No maps found");
-                    ui.label("Create a new map or load maps from:");
-                    ui.monospace(&self.campaign.maps_dir);
-                });
-            } else {
-                let mut to_delete = None;
-                let mut to_edit = None;
-
-                for (idx, map) in self.maps.iter().enumerate() {
-                    let filter_match = self.maps_search.is_empty()
-                        || map.id.to_string().contains(&self.maps_search);
-
-                    if !filter_match {
-                        continue;
-                    }
-
-                    let is_selected = self.maps_selected == Some(idx);
-
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if self.maps.is_empty() {
                     ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.set_min_width(ui.available_width());
+                        ui.label("No maps found");
+                        ui.label("Create a new map or load maps from:");
+                        ui.monospace(&self.campaign.maps_dir);
+                    });
+                } else {
+                    let mut to_delete = None;
+                    let mut to_edit = None;
 
-                            ui.vertical(|ui| {
-                                ui.strong(format!("Map ID: {}", map.id));
-                                ui.label(format!("Size: {}x{}", map.width, map.height));
-                                ui.label(format!("Events: {}", map.events.len()));
-                                ui.label(format!("NPCs: {}", map.npcs.len()));
+                    for (idx, map) in self.maps.iter().enumerate() {
+                        let filter_match = self.maps_search.is_empty()
+                            || map.id.to_string().contains(&self.maps_search);
+
+                        if !filter_match {
+                            continue;
+                        }
+
+                        let is_selected = self.maps_selected == Some(idx);
+
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.set_min_width(ui.available_width());
+
+                                ui.vertical(|ui| {
+                                    ui.strong(format!("Map ID: {}", map.id));
+                                    ui.label(format!("Size: {}x{}", map.width, map.height));
+                                    ui.label(format!("Events: {}", map.events.len()));
+                                    ui.label(format!("NPCs: {}", map.npcs.len()));
+                                });
+
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.button("🗑").on_hover_text("Delete map").clicked() {
+                                            to_delete = Some(idx);
+                                        }
+
+                                        if ui.button("✏️").on_hover_text("Edit map").clicked() {
+                                            to_edit = Some(idx);
+                                        }
+                                    },
+                                );
                             });
 
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.button("🗑").on_hover_text("Delete map").clicked() {
-                                        to_delete = Some(idx);
-                                    }
-
-                                    if ui.button("✏️").on_hover_text("Edit map").clicked() {
-                                        to_edit = Some(idx);
-                                    }
-                                },
-                            );
+                            // Show mini preview
+                            if is_selected {
+                                ui.separator();
+                                ui.label("Preview:");
+                                self.show_map_preview(ui, map);
+                            }
                         });
 
-                        // Show mini preview
-                        if is_selected {
-                            ui.separator();
-                            ui.label("Preview:");
-                            self.show_map_preview(ui, map);
+                        ui.add_space(5.0);
+                    }
+
+                    // Handle actions after iteration
+                    if let Some(idx) = to_delete {
+                        self.maps.remove(idx);
+                        if self.maps_selected == Some(idx) {
+                            self.maps_selected = None;
                         }
-                    });
+                    }
 
-                    ui.add_space(5.0);
-                }
-
-                // Handle actions after iteration
-                if let Some(idx) = to_delete {
-                    self.maps.remove(idx);
-                    if self.maps_selected == Some(idx) {
-                        self.maps_selected = None;
+                    if let Some(idx) = to_edit {
+                        if let Some(map) = self.maps.get(idx) {
+                            self.maps_selected = Some(idx);
+                            self.map_editor_state = Some(MapEditorState::new(map.clone()));
+                            self.maps_editor_mode = EditorMode::Edit;
+                        }
                     }
                 }
-
-                if let Some(idx) = to_edit {
-                    if let Some(map) = self.maps.get(idx) {
-                        self.maps_selected = Some(idx);
-                        self.map_editor_state = Some(MapEditorState::new(map.clone()));
-                        self.maps_editor_mode = EditorMode::Edit;
-                    }
-                }
-            }
-        });
+            });
     }
 
     /// Show map editor panel
@@ -4892,6 +5189,77 @@ impl CampaignBuilderApp {
                 self.quests_show_import_dialog = true;
             }
 
+            ui.separator();
+
+            // File I/O buttons
+            if ui.button("📂 Load from File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("RON", &["ron"])
+                    .pick_file()
+                {
+                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
+                        ron::from_str::<Vec<Quest>>(&contents)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    });
+
+                    match load_result {
+                        Ok(loaded_quests) => {
+                            if self.file_load_merge_mode {
+                                for quest in loaded_quests {
+                                    if let Some(existing) =
+                                        self.quests.iter_mut().find(|q| q.id == quest.id)
+                                    {
+                                        *existing = quest;
+                                    } else {
+                                        self.quests.push(quest);
+                                    }
+                                }
+                            } else {
+                                self.quests = loaded_quests;
+                            }
+                            self.quest_editor_state.quests = self.quests.clone();
+                            self.unsaved_changes = true;
+                            self.status_message = format!("Loaded quests from: {}", path.display());
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to load quests: {}", e);
+                        }
+                    }
+                }
+            }
+
+            ui.checkbox(&mut self.file_load_merge_mode, "Merge");
+            ui.label(if self.file_load_merge_mode {
+                "(adds to existing)"
+            } else {
+                "(replaces all)"
+            });
+
+            if ui.button("💾 Save to File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("quests.ron")
+                    .add_filter("RON", &["ron"])
+                    .save_file()
+                {
+                    match ron::ser::to_string_pretty(&self.quests, Default::default()) {
+                        Ok(contents) => match std::fs::write(&path, contents) {
+                            Ok(_) => {
+                                self.status_message =
+                                    format!("Saved quests to: {}", path.display());
+                            }
+                            Err(e) => {
+                                self.status_message = format!("Failed to save quests: {}", e);
+                            }
+                        },
+                        Err(e) => {
+                            self.status_message = format!("Failed to serialize quests: {}", e);
+                        }
+                    }
+                }
+            }
+
+            ui.separator();
+
             if let Some(selected_idx) = self.quest_editor_state.selected_quest {
                 if selected_idx < self.quest_editor_state.quests.len() {
                     if ui.button("📤 Export Quest").clicked() {
@@ -4960,7 +5328,8 @@ impl CampaignBuilderApp {
                     ui.add_space(5.0);
 
                     egui::ScrollArea::vertical()
-                        .max_height(250.0)
+                        .auto_shrink([false, false])
+                        .id_salt("quests_list_scroll")
                         .show(ui, |ui| {
                             ui.add(
                                 egui::TextEdit::multiline(&mut self.quests_import_buffer)
@@ -5020,64 +5389,66 @@ impl CampaignBuilderApp {
         // Pre-calculate next ID to avoid borrowing self in closure
         let next_id = self.next_available_quest_id();
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for quest in filtered_quests_cloned.iter() {
-                let original_idx = quest.0;
-                let is_selected = self.quest_editor_state.selected_quest == Some(original_idx);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for quest in filtered_quests_cloned.iter() {
+                    let original_idx = quest.0;
+                    let is_selected = self.quest_editor_state.selected_quest == Some(original_idx);
 
-                let response = ui.selectable_label(
-                    is_selected,
-                    format!(
-                        "{} - {} {}",
-                        quest.1.id,
-                        quest.1.name,
-                        if quest.1.is_main_quest { "⭐" } else { "" }
-                    ),
-                );
+                    let response = ui.selectable_label(
+                        is_selected,
+                        format!(
+                            "{} - {} {}",
+                            quest.1.id,
+                            quest.1.name,
+                            if quest.1.is_main_quest { "⭐" } else { "" }
+                        ),
+                    );
 
-                if response.clicked() {
-                    self.quest_editor_state.selected_quest = Some(original_idx);
-                }
+                    if response.clicked() {
+                        self.quest_editor_state.selected_quest = Some(original_idx);
+                    }
 
-                if response.double_clicked() {
-                    self.quest_editor_state.start_edit_quest(original_idx);
-                }
-
-                // Context menu
-                response.context_menu(|ui| {
-                    if ui.button("✏️ Edit").clicked() {
+                    if response.double_clicked() {
                         self.quest_editor_state.start_edit_quest(original_idx);
-                        ui.close();
                     }
 
-                    if ui.button("🗑️ Delete").clicked() {
-                        self.quest_editor_state.delete_quest(original_idx);
-                        self.quests = self.quest_editor_state.quests.clone();
-                        self.unsaved_changes = true;
-                        ui.close();
-                    }
-
-                    if ui.button("📋 Duplicate").clicked() {
-                        if original_idx < self.quests.len() {
-                            let mut new_quest = self.quests[original_idx].clone();
-                            new_quest.id = next_id;
-                            new_quest.name = format!("{} (Copy)", new_quest.name);
-                            self.quests.push(new_quest);
-                            self.unsaved_changes = true;
+                    // Context menu
+                    response.context_menu(|ui| {
+                        if ui.button("✏️ Edit").clicked() {
+                            self.quest_editor_state.start_edit_quest(original_idx);
+                            ui.close();
                         }
-                        ui.close();
-                    }
-                });
-            }
 
-            if filtered_quests_cloned.is_empty() {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(20.0);
-                    ui.label("No quests found");
-                    ui.label("Click 'New Quest' to create one");
-                });
-            }
-        });
+                        if ui.button("🗑️ Delete").clicked() {
+                            self.quest_editor_state.delete_quest(original_idx);
+                            self.quests = self.quest_editor_state.quests.clone();
+                            self.unsaved_changes = true;
+                            ui.close();
+                        }
+
+                        if ui.button("📋 Duplicate").clicked() {
+                            if original_idx < self.quests.len() {
+                                let mut new_quest = self.quests[original_idx].clone();
+                                new_quest.id = next_id;
+                                new_quest.name = format!("{} (Copy)", new_quest.name);
+                                self.quests.push(new_quest);
+                                self.unsaved_changes = true;
+                            }
+                            ui.close();
+                        }
+                    });
+                }
+
+                if filtered_quests_cloned.is_empty() {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(20.0);
+                        ui.label("No quests found");
+                        ui.label("Click 'New Quest' to create one");
+                    });
+                }
+            });
     }
 
     /// Show quest form editor
@@ -5095,124 +5466,130 @@ impl CampaignBuilderApp {
 
         ui.separator();
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.group(|ui| {
-                ui.label("Basic Information");
-                ui.separator();
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.label("Basic Information");
+                    ui.separator();
 
-                ui.horizontal(|ui| {
-                    ui.label("ID:");
-                    ui.text_edit_singleline(&mut self.quest_editor_state.quest_buffer.id);
-                });
+                    ui.horizontal(|ui| {
+                        ui.label("ID:");
+                        ui.text_edit_singleline(&mut self.quest_editor_state.quest_buffer.id);
+                    });
 
-                ui.horizontal(|ui| {
-                    ui.label("Name:");
-                    ui.text_edit_singleline(&mut self.quest_editor_state.quest_buffer.name);
-                });
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.text_edit_singleline(&mut self.quest_editor_state.quest_buffer.name);
+                    });
 
-                ui.horizontal(|ui| {
-                    ui.label("Description:");
-                });
-                ui.add(
-                    egui::TextEdit::multiline(
-                        &mut self.quest_editor_state.quest_buffer.description,
-                    )
-                    .desired_rows(3)
-                    .desired_width(f32::INFINITY),
-                );
-
-                ui.horizontal(|ui| {
-                    ui.checkbox(
-                        &mut self.quest_editor_state.quest_buffer.repeatable,
-                        "Repeatable",
+                    ui.horizontal(|ui| {
+                        ui.label("Description:");
+                    });
+                    ui.add(
+                        egui::TextEdit::multiline(
+                            &mut self.quest_editor_state.quest_buffer.description,
+                        )
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY),
                     );
-                    ui.checkbox(
-                        &mut self.quest_editor_state.quest_buffer.is_main_quest,
-                        "Main Quest",
-                    );
+
+                    ui.horizontal(|ui| {
+                        ui.checkbox(
+                            &mut self.quest_editor_state.quest_buffer.repeatable,
+                            "Repeatable",
+                        );
+                        ui.checkbox(
+                            &mut self.quest_editor_state.quest_buffer.is_main_quest,
+                            "Main Quest",
+                        );
+                    });
                 });
-            });
 
-            ui.add_space(10.0);
+                ui.add_space(10.0);
 
-            ui.group(|ui| {
-                ui.label("Level Requirements");
-                ui.separator();
+                ui.group(|ui| {
+                    ui.label("Level Requirements");
+                    ui.separator();
 
+                    ui.horizontal(|ui| {
+                        ui.label("Min Level:");
+                        ui.text_edit_singleline(
+                            &mut self.quest_editor_state.quest_buffer.min_level,
+                        );
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Max Level:");
+                        ui.text_edit_singleline(
+                            &mut self.quest_editor_state.quest_buffer.max_level,
+                        );
+                    });
+                });
+
+                ui.add_space(10.0);
+
+                ui.group(|ui| {
+                    ui.label("Quest Giver");
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        ui.label("NPC ID:");
+                        ui.text_edit_singleline(
+                            &mut self.quest_editor_state.quest_buffer.quest_giver_npc,
+                        );
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Map ID:");
+                        ui.text_edit_singleline(
+                            &mut self.quest_editor_state.quest_buffer.quest_giver_map,
+                        );
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Position X:");
+                        ui.text_edit_singleline(
+                            &mut self.quest_editor_state.quest_buffer.quest_giver_x,
+                        );
+                        ui.label("Y:");
+                        ui.text_edit_singleline(
+                            &mut self.quest_editor_state.quest_buffer.quest_giver_y,
+                        );
+                    });
+                });
+
+                ui.add_space(10.0);
+
+                // Stages editor
+                self.show_quest_stages_editor(ui);
+
+                ui.add_space(10.0);
+
+                // Rewards editor
+                self.show_quest_rewards_editor(ui);
+
+                ui.add_space(10.0);
+
+                // Validation display
+                self.show_quest_validation(ui);
+
+                ui.add_space(10.0);
+
+                // Action buttons
                 ui.horizontal(|ui| {
-                    ui.label("Min Level:");
-                    ui.text_edit_singleline(&mut self.quest_editor_state.quest_buffer.min_level);
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Max Level:");
-                    ui.text_edit_singleline(&mut self.quest_editor_state.quest_buffer.max_level);
-                });
-            });
-
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.label("Quest Giver");
-                ui.separator();
-
-                ui.horizontal(|ui| {
-                    ui.label("NPC ID:");
-                    ui.text_edit_singleline(
-                        &mut self.quest_editor_state.quest_buffer.quest_giver_npc,
-                    );
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Map ID:");
-                    ui.text_edit_singleline(
-                        &mut self.quest_editor_state.quest_buffer.quest_giver_map,
-                    );
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Position X:");
-                    ui.text_edit_singleline(
-                        &mut self.quest_editor_state.quest_buffer.quest_giver_x,
-                    );
-                    ui.label("Y:");
-                    ui.text_edit_singleline(
-                        &mut self.quest_editor_state.quest_buffer.quest_giver_y,
-                    );
-                });
-            });
-
-            ui.add_space(10.0);
-
-            // Stages editor
-            self.show_quest_stages_editor(ui);
-
-            ui.add_space(10.0);
-
-            // Rewards editor
-            self.show_quest_rewards_editor(ui);
-
-            ui.add_space(10.0);
-
-            // Validation display
-            self.show_quest_validation(ui);
-
-            ui.add_space(10.0);
-
-            // Action buttons
-            ui.horizontal(|ui| {
-                if ui.button("✅ Save Quest").clicked() {
-                    if self.quest_editor_state.save_quest().is_ok() {
-                        self.quests = self.quest_editor_state.quests.clone();
-                        self.unsaved_changes = true;
+                    if ui.button("✅ Save Quest").clicked() {
+                        if self.quest_editor_state.save_quest().is_ok() {
+                            self.quests = self.quest_editor_state.quests.clone();
+                            self.unsaved_changes = true;
+                        }
                     }
-                }
 
-                if ui.button("❌ Cancel").clicked() {
-                    self.quest_editor_state.cancel_edit();
-                }
+                    if ui.button("❌ Cancel").clicked() {
+                        self.quest_editor_state.cancel_edit();
+                    }
+                });
             });
-        });
     }
 
     /// Show quest stages editor
@@ -5260,9 +5637,9 @@ impl CampaignBuilderApp {
                             );
 
                             // Track which stage is expanded for objective addition
-                            if header.header_response.clicked() || header.body_returned.is_some() {
-                                self.quest_editor_state.selected_stage = Some(stage_idx);
-                            }
+                            // if header.header_response.clicked() || header.body_returned.is_some() {
+                            //     self.quest_editor_state.selected_stage = Some(stage_idx);
+                            // }
 
                             // Stage action buttons
                             if ui.small_button("✏️").on_hover_text("Edit Stage").clicked() {
@@ -5384,7 +5761,9 @@ impl CampaignBuilderApp {
                         .on_hover_text("Add Objective")
                         .clicked()
                     {
-                        if let Ok(new_idx) = self.quest_editor_state.add_default_objective() {
+                        if let Ok(new_idx) =
+                            self.quest_editor_state.add_default_objective(stage_idx)
+                        {
                             self.unsaved_changes = true;
                             // Immediately start editing the new objective
                             let _ = self
@@ -6400,7 +6779,83 @@ impl CampaignBuilderApp {
         ui.horizontal(|ui| {
             if ui.button("➕ New Class").clicked() {
                 self.classes_editor_state.start_new_class();
+                self.classes_editor_state.buffer.id = self.next_available_class_id();
                 self.unsaved_changes = true;
+            }
+
+            ui.separator();
+
+            // File I/O buttons
+            if ui.button("📂 Load from File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("RON", &["ron"])
+                    .pick_file()
+                {
+                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
+                        ron::from_str::<Vec<antares::domain::classes::ClassDefinition>>(&contents)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    });
+
+                    match load_result {
+                        Ok(loaded_classes) => {
+                            if self.file_load_merge_mode {
+                                for class in loaded_classes {
+                                    if let Some(existing) = self
+                                        .classes_editor_state
+                                        .classes
+                                        .iter_mut()
+                                        .find(|c| c.id == class.id)
+                                    {
+                                        *existing = class;
+                                    } else {
+                                        self.classes_editor_state.classes.push(class);
+                                    }
+                                }
+                            } else {
+                                self.classes_editor_state.classes = loaded_classes;
+                            }
+                            self.unsaved_changes = true;
+                            self.status_message =
+                                format!("Loaded classes from: {}", path.display());
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Failed to load classes: {}", e);
+                        }
+                    }
+                }
+            }
+
+            ui.checkbox(&mut self.file_load_merge_mode, "Merge");
+            ui.label(if self.file_load_merge_mode {
+                "(adds to existing)"
+            } else {
+                "(replaces all)"
+            });
+
+            if ui.button("💾 Save to File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("classes.ron")
+                    .add_filter("RON", &["ron"])
+                    .save_file()
+                {
+                    match ron::ser::to_string_pretty(
+                        &self.classes_editor_state.classes,
+                        Default::default(),
+                    ) {
+                        Ok(contents) => match std::fs::write(&path, contents) {
+                            Ok(_) => {
+                                self.status_message =
+                                    format!("Saved classes to: {}", path.display());
+                            }
+                            Err(e) => {
+                                self.status_message = format!("Failed to save classes: {}", e);
+                            }
+                        },
+                        Err(e) => {
+                            self.status_message = format!("Failed to serialize classes: {}", e);
+                        }
+                    }
+                }
             }
 
             ui.separator();
@@ -6461,23 +6916,25 @@ impl CampaignBuilderApp {
             .map(|(i, c)| (i, c.clone()))
             .collect();
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (idx, class) in filtered {
-                let is_selected = self.classes_editor_state.selected_class == Some(idx);
-                if ui.selectable_label(is_selected, &class.name).clicked() {
-                    self.classes_editor_state.start_edit_class(idx);
-                }
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for (idx, class) in filtered {
+                    let is_selected = self.classes_editor_state.selected_class == Some(idx);
+                    if ui.selectable_label(is_selected, &class.name).clicked() {
+                        self.classes_editor_state.start_edit_class(idx);
+                    }
 
-                if is_selected {
-                    ui.horizontal(|ui| {
-                        if ui.button("🗑️ Delete").clicked() {
-                            self.classes_editor_state.delete_class(idx);
-                            self.unsaved_changes = true;
-                        }
-                    });
+                    if is_selected {
+                        ui.horizontal(|ui| {
+                            if ui.button("🗑️ Delete").clicked() {
+                                self.classes_editor_state.delete_class(idx);
+                                self.unsaved_changes = true;
+                            }
+                        });
+                    }
                 }
-            }
-        });
+            });
     }
 
     fn show_class_form(&mut self, ui: &mut egui::Ui) {
@@ -6490,7 +6947,9 @@ impl CampaignBuilderApp {
         });
         ui.separator();
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
             ui.group(|ui| {
                 ui.label("Basic Info");
                 ui.horizontal(|ui| {
@@ -6500,6 +6959,10 @@ impl CampaignBuilderApp {
                 ui.horizontal(|ui| {
                     ui.label("Name:");
                     ui.text_edit_singleline(&mut self.classes_editor_state.buffer.name);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Description:");
+                    ui.text_edit_multiline(&mut self.classes_editor_state.buffer.description);
                 });
             });
 
@@ -6579,11 +7042,114 @@ impl CampaignBuilderApp {
             ui.add_space(10.0);
 
             ui.group(|ui| {
-                ui.label("Other");
+                ui.label("Item Restrictions");
                 ui.horizontal(|ui| {
                     ui.label("Disablement Bit:");
                     ui.text_edit_singleline(&mut self.classes_editor_state.buffer.disablement_bit);
+                    ui.label("ℹ️").on_hover_text(
+                        "This bit flag (0-7) determines item restrictions.\n\
+                         Items can be flagged to disable usage by specific classes.\n\
+                         Bit 0 = Knight, Bit 1 = Paladin, Bit 2 = Archer, etc.\n\
+                         Example: A class with bit 2 cannot use items with disablement flag bit 2 set."
+                    );
                 });
+                if let Ok(bit) = self.classes_editor_state.buffer.disablement_bit.parse::<u8>() {
+                    if bit <= 7 {
+                        ui.label(format!("This class uses restriction bit position: {}", bit));
+                    }
+                }
+            });
+
+            ui.add_space(10.0);
+
+            ui.group(|ui| {
+                ui.label("Starting Equipment");
+
+                // Starting Weapon
+                ui.horizontal(|ui| {
+                    ui.label("Starting Weapon:");
+                    let current_weapon = if self.classes_editor_state.buffer.starting_weapon_id.is_empty() {
+                        "None".to_string()
+                    } else {
+                        self.items.iter()
+                            .find(|item| item.id.to_string() == self.classes_editor_state.buffer.starting_weapon_id)
+                            .map(|item| format!("{} (ID: {})", item.name, item.id))
+                            .unwrap_or_else(|| format!("ID: {}", self.classes_editor_state.buffer.starting_weapon_id))
+                    };
+
+                    egui::ComboBox::from_id_salt("starting_weapon")
+                        .selected_text(current_weapon)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(self.classes_editor_state.buffer.starting_weapon_id.is_empty(), "None").clicked() {
+                                self.classes_editor_state.buffer.starting_weapon_id = String::new();
+                            }
+                            for item in &self.items {
+                                if item.is_weapon() {
+                                    let is_selected = item.id.to_string() == self.classes_editor_state.buffer.starting_weapon_id;
+                                    if ui.selectable_label(is_selected, format!("{} (ID: {})", item.name, item.id)).clicked() {
+                                        self.classes_editor_state.buffer.starting_weapon_id = item.id.to_string();
+                                    }
+                                }
+                            }
+                        });
+                });
+
+                // Starting Armor
+                ui.horizontal(|ui| {
+                    ui.label("Starting Armor:");
+                    let current_armor = if self.classes_editor_state.buffer.starting_armor_id.is_empty() {
+                        "None".to_string()
+                    } else {
+                        self.items.iter()
+                            .find(|item| item.id.to_string() == self.classes_editor_state.buffer.starting_armor_id)
+                            .map(|item| format!("{} (ID: {})", item.name, item.id))
+                            .unwrap_or_else(|| format!("ID: {}", self.classes_editor_state.buffer.starting_armor_id))
+                    };
+
+                    egui::ComboBox::from_id_salt("starting_armor")
+                        .selected_text(current_armor)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(self.classes_editor_state.buffer.starting_armor_id.is_empty(), "None").clicked() {
+                                self.classes_editor_state.buffer.starting_armor_id = String::new();
+                            }
+                            for item in &self.items {
+                                if item.is_armor() {
+                                    let is_selected = item.id.to_string() == self.classes_editor_state.buffer.starting_armor_id;
+                                    if ui.selectable_label(is_selected, format!("{} (ID: {})", item.name, item.id)).clicked() {
+                                        self.classes_editor_state.buffer.starting_armor_id = item.id.to_string();
+                                    }
+                                }
+                            }
+                        });
+                });
+
+                // Starting Items List
+                ui.label("Starting Items:");
+                let mut items_to_remove = Vec::new();
+                for (idx, item_id) in self.classes_editor_state.buffer.starting_items.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        let item_name = self.items.iter()
+                            .find(|item| item.id.to_string() == *item_id)
+                            .map(|item| item.name.clone())
+                            .unwrap_or_else(|| format!("Unknown (ID: {})", item_id));
+                        ui.label(item_name);
+                        if ui.small_button("🗑️").clicked() {
+                            items_to_remove.push(idx);
+                        }
+                    });
+                }
+                for idx in items_to_remove.into_iter().rev() {
+                    self.classes_editor_state.buffer.starting_items.remove(idx);
+                }
+
+                if ui.button("➕ Add Starting Item").clicked() {
+                    self.classes_editor_state.buffer.starting_items.push(String::new());
+                }
+            });
+
+            ui.add_space(10.0);
+
+            ui.group(|ui| {
                 ui.label("Special Abilities (comma separated):");
                 ui.text_edit_multiline(&mut self.classes_editor_state.buffer.special_abilities);
             });
@@ -6609,14 +7175,34 @@ impl CampaignBuilderApp {
         if let Some(dir) = &self.campaign_dir {
             let path = dir.join(&self.campaign.classes_file);
             if path.exists() {
-                if let Ok(content) = fs::read_to_string(path) {
-                    if let Ok(classes) =
-                        ron::from_str::<Vec<antares::domain::classes::ClassDefinition>>(&content)
-                    {
-                        self.classes_editor_state.classes = classes;
+                match fs::read_to_string(&path) {
+                    Ok(content) => {
+                        match ron::from_str::<Vec<antares::domain::classes::ClassDefinition>>(
+                            &content,
+                        ) {
+                            Ok(classes) => {
+                                self.classes_editor_state.classes = classes;
+                                self.status_message = format!(
+                                    "Loaded {} classes",
+                                    self.classes_editor_state.classes.len()
+                                );
+                            }
+                            Err(e) => {
+                                self.status_message = format!("Failed to parse classes: {}", e);
+                                eprintln!("Failed to parse classes from {:?}: {}", path, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to read classes file: {}", e);
+                        eprintln!("Failed to read classes file {:?}: {}", path, e);
                     }
                 }
+            } else {
+                eprintln!("Classes file does not exist: {:?}", path);
             }
+        } else {
+            eprintln!("No campaign directory set when trying to load classes");
         }
     }
 
@@ -6912,45 +7498,50 @@ impl CampaignBuilderApp {
         let mut edit_idx: Option<usize> = None;
         let mut duplicate_idx: Option<usize> = None;
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            let filtered = self.dialogue_editor_state.filtered_dialogues();
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let filtered = self.dialogue_editor_state.filtered_dialogues();
 
-            for (idx, dialogue) in filtered {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("ID: {}", dialogue.id));
-                        ui.separator();
-                        ui.strong(&dialogue.name);
-                        if let Some(speaker) = &dialogue.speaker_name {
-                            ui.label(format!("(Speaker: {})", speaker));
-                        }
-                        ui.label(format!("({} nodes)", dialogue.nodes.len()));
+                for (idx, dialogue) in filtered {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("ID: {}", dialogue.id));
+                            ui.separator();
+                            ui.strong(&dialogue.name);
+                            if let Some(speaker) = &dialogue.speaker_name {
+                                ui.label(format!("(Speaker: {})", speaker));
+                            }
+                            ui.label(format!("({} nodes)", dialogue.nodes.len()));
 
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("🗑 Delete").clicked() {
-                                delete_idx = Some(idx);
-                            }
-                            if ui.button("✏ Edit").clicked() {
-                                edit_idx = Some(idx);
-                            }
-                            if ui.button("📋 Duplicate").clicked() {
-                                duplicate_idx = Some(idx);
-                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.button("🗑 Delete").clicked() {
+                                        delete_idx = Some(idx);
+                                    }
+                                    if ui.button("✏ Edit").clicked() {
+                                        edit_idx = Some(idx);
+                                    }
+                                    if ui.button("📋 Duplicate").clicked() {
+                                        duplicate_idx = Some(idx);
+                                    }
+                                },
+                            );
                         });
-                    });
 
-                    // Preview details
-                    if self.dialogues_show_preview {
-                        ui.separator();
-                        ui.label(format!("Root Node: {}", dialogue.root_node));
-                        ui.label(format!("Repeatable: {}", dialogue.repeatable));
-                        if let Some(quest_id) = dialogue.associated_quest {
-                            ui.label(format!("Associated Quest: {}", quest_id));
+                        // Preview details
+                        if self.dialogues_show_preview {
+                            ui.separator();
+                            ui.label(format!("Root Node: {}", dialogue.root_node));
+                            ui.label(format!("Repeatable: {}", dialogue.repeatable));
+                            if let Some(quest_id) = dialogue.associated_quest {
+                                ui.label(format!("Associated Quest: {}", quest_id));
+                            }
                         }
-                    }
-                });
-            }
-        });
+                    });
+                }
+            });
 
         // Process actions after scroll area
         if let Some(idx) = delete_idx {
