@@ -4419,6 +4419,17 @@
             ],
         ),
         (
+            x: 3,
+            y: 11,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                6,
+                5,
+            ],
+        ),
+        (
             x: 10,
             y: 13,
         ): Treasure(
@@ -4432,26 +4443,23 @@
             ],
         ),
         (
-            x: 3,
-            y: 11,
+            x: 5,
+            y: 3,
         ): Encounter(
             name: "",
             description: "",
             monster_group: [
-                6,
-                5,
+                4,
+                4,
             ],
         ),
         (
-            x: 17,
-            y: 16,
-        ): Encounter(
+            x: 0,
+            y: 10,
+        ): Sign(
             name: "",
             description: "",
-            monster_group: [
-                6,
-                6,
-            ],
+            text: "Exit to town.",
         ),
         (
             x: 7,
@@ -4463,22 +4471,14 @@
             effect: None,
         ),
         (
-            x: 0,
-            y: 10,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Exit to town.",
-        ),
-        (
-            x: 5,
-            y: 3,
+            x: 17,
+            y: 16,
         ): Encounter(
             name: "",
             description: "",
             monster_group: [
-                4,
-                4,
+                6,
+                6,
             ],
         ),
         (

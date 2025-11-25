@@ -4,18 +4,18 @@
         name: "Fizban Story",
         root_node: 1,
         nodes: {
-            1: (
-                id: 1,
-                text: "I am the Great Fizban!",
+            2: (
+                id: 2,
+                text: "Hello There! Come and sit and talk a while.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
             ),
-            2: (
-                id: 2,
-                text: "Hello There! Come and sit and talk a while.",
+            1: (
+                id: 1,
+                text: "I am the Great Fizban!",
                 speaker_override: None,
                 choices: [],
                 conditions: [],

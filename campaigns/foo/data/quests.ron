@@ -212,4 +212,35 @@
             y: 16,
         )),
     ),
+    (
+        id: 4,
+        name: "Goblin Extermination",
+        description: "Clear the goblin camp",
+        stages: [
+            (
+                stage_number: 1,
+                name: "Defeat Goblins",
+                description: "Defeat 10 goblins",
+                objectives: [
+                    KillMonsters(
+                        monster_id: 1,
+                        quantity: 10,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Experience(150),
+            Gold(200),
+        ],
+        min_level: Some(2),
+        max_level: None,
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: None,
+        quest_giver_map: None,
+        quest_giver_position: None,
+    ),
 ]
