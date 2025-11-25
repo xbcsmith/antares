@@ -45,6 +45,9 @@
 //!     SpellContext::Anytime,
 //!     SpellTarget::SingleCharacter,
 //!     "Heals 8 hit points",
+//!     None,
+//!     0,
+//!     false,
 //! );
 //!
 //! // Check if the spell can be cast

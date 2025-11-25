@@ -184,6 +184,7 @@ impl ItemDatabase {
     ///     spell_effect: None,
     ///     max_charges: 0,
     ///     is_cursed: false,
+    ///     icon_path: None,
     /// };
     /// db.add_item(club).unwrap();
     ///
@@ -279,6 +280,7 @@ impl ItemDatabase {
     ///     spell_effect: None,
     ///     max_charges: 0,
     ///     is_cursed: false,
+    ///     icon_path: None,
     /// };
     /// db.add_item(club).unwrap();
     ///

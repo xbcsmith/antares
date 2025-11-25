@@ -32,7 +32,11 @@ pub struct QuestEditorState {
     pub selected_stage: Option<usize>,
 
     /// Currently selected objective index within selected stage
+    /// Currently selected objective index within selected stage
     pub selected_objective: Option<usize>,
+
+    /// Currently selected reward index within selected quest
+    pub selected_reward: Option<usize>,
 
     /// Quest editor mode
     pub mode: QuestEditorMode,
@@ -196,6 +200,7 @@ pub struct RewardEditBuffer {
     pub flag_value: bool,
     pub faction_name: String,
     pub reputation_change: String,
+    pub item_quantity: String,
 }
 
 /// Reward type selector
@@ -234,6 +239,7 @@ impl Default for RewardEditBuffer {
             flag_value: false,
             faction_name: String::new(),
             reputation_change: "10".to_string(),
+            item_quantity: "1".to_string(),
         }
     }
 }
@@ -245,6 +251,7 @@ impl Default for QuestEditorState {
             selected_quest: None,
             selected_stage: None,
             selected_objective: None,
+            selected_reward: None,
             mode: QuestEditorMode::List,
             quest_buffer: QuestEditBuffer::default(),
             stage_buffer: StageEditBuffer::default(),
@@ -261,6 +268,199 @@ impl QuestEditorState {
     /// Create a new quest editor state
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Edit an existing reward
+    pub fn edit_reward(&mut self, quest_idx: usize, reward_idx: usize) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
+            return Err("Invalid quest index".to_string());
+        }
+
+        let quest = &self.quests[quest_idx];
+        if reward_idx >= quest.rewards.len() {
+            return Err("Invalid reward index".to_string());
+        }
+
+        let reward = &quest.rewards[reward_idx];
+        self.reward_buffer = match reward {
+            antares::domain::quest::QuestReward::Experience(xp) => RewardEditBuffer {
+                reward_type: RewardType::Experience,
+                experience: xp.to_string(),
+                ..Default::default()
+            },
+            antares::domain::quest::QuestReward::Gold(gold) => RewardEditBuffer {
+                reward_type: RewardType::Gold,
+                gold: gold.to_string(),
+                ..Default::default()
+            },
+            antares::domain::quest::QuestReward::Items(items) => {
+                // For simplicity in this editor version, we only edit the first item in the list
+                // A more complex editor would handle multiple items per reward entry
+                if let Some((id, qty)) = items.first() {
+                    RewardEditBuffer {
+                        reward_type: RewardType::Items,
+                        item_id: id.to_string(),
+                        // We use the 'quantity' field from objective buffer for item quantity here too?
+                        // No, RewardEditBuffer doesn't have quantity. We should add it or use a different field.
+                        // Let's check RewardEditBuffer definition. It doesn't have quantity.
+                        // We should add 'quantity' to RewardEditBuffer or use 'experience' field as a hack?
+                        // Better to add it. But I can't change the struct definition in this chunk easily without context.
+                        // Wait, I can see RewardEditBuffer definition in the file view.
+                        // It has: experience, gold, item_id, unlock_quest_id, flag_name, flag_value, faction_name, reputation_change.
+                        // It is missing 'quantity' for items. I should add it to the struct definition first.
+                        // For now, I will assume I can add it in a separate step or use 'gold' field as quantity? No that's bad.
+                        // I will add 'quantity' to RewardEditBuffer in a separate chunk.
+                        // For now let's use 'experience' string for quantity as a temporary placeholder if needed,
+                        // but correct way is to add the field.
+                        // Let's add the field in a separate chunk first.
+                        ..Default::default()
+                    }
+                } else {
+                    RewardEditBuffer {
+                        reward_type: RewardType::Items,
+                        ..Default::default()
+                    }
+                }
+            }
+            antares::domain::quest::QuestReward::UnlockQuest(qid) => RewardEditBuffer {
+                reward_type: RewardType::UnlockQuest,
+                unlock_quest_id: qid.to_string(),
+                ..Default::default()
+            },
+            antares::domain::quest::QuestReward::SetFlag { flag_name, value } => RewardEditBuffer {
+                reward_type: RewardType::SetFlag,
+                flag_name: flag_name.clone(),
+                flag_value: *value,
+                ..Default::default()
+            },
+            antares::domain::quest::QuestReward::Reputation { faction, change } => {
+                RewardEditBuffer {
+                    reward_type: RewardType::Reputation,
+                    faction_name: faction.clone(),
+                    reputation_change: change.to_string(),
+                    ..Default::default()
+                }
+            }
+        };
+
+        // Fix for item quantity:
+        if let antares::domain::quest::QuestReward::Items(items) = reward {
+            if let Some((_, qty)) = items.first() {
+                self.reward_buffer.item_quantity = qty.to_string();
+            }
+        }
+
+        self.selected_reward = Some(reward_idx);
+        Ok(())
+    }
+
+    /// Save edited reward
+    pub fn save_reward(&mut self, quest_idx: usize, reward_idx: usize) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
+            return Err("Invalid quest index".to_string());
+        }
+
+        if reward_idx >= self.quests[quest_idx].rewards.len() {
+            return Err("Invalid reward index".to_string());
+        }
+
+        let reward = match self.reward_buffer.reward_type {
+            RewardType::Experience => {
+                let xp = self
+                    .reward_buffer
+                    .experience
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid experience amount".to_string())?;
+                antares::domain::quest::QuestReward::Experience(xp)
+            }
+            RewardType::Gold => {
+                let gold = self
+                    .reward_buffer
+                    .gold
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid gold amount".to_string())?;
+                antares::domain::quest::QuestReward::Gold(gold)
+            }
+            RewardType::Items => {
+                let item_id = self
+                    .reward_buffer
+                    .item_id
+                    .parse::<ItemId>()
+                    .map_err(|_| "Invalid item ID".to_string())?;
+                let quantity = self
+                    .reward_buffer
+                    .item_quantity
+                    .parse::<u16>()
+                    .map_err(|_| "Invalid quantity".to_string())?;
+                antares::domain::quest::QuestReward::Items(vec![(item_id, quantity)])
+            }
+            RewardType::UnlockQuest => {
+                let qid = self
+                    .reward_buffer
+                    .unlock_quest_id
+                    .parse::<QuestId>()
+                    .map_err(|_| "Invalid quest ID".to_string())?;
+                antares::domain::quest::QuestReward::UnlockQuest(qid)
+            }
+            RewardType::SetFlag => antares::domain::quest::QuestReward::SetFlag {
+                flag_name: self.reward_buffer.flag_name.clone(),
+                value: self.reward_buffer.flag_value,
+            },
+            RewardType::Reputation => {
+                let change = self
+                    .reward_buffer
+                    .reputation_change
+                    .parse::<i16>()
+                    .map_err(|_| "Invalid reputation change".to_string())?;
+                antares::domain::quest::QuestReward::Reputation {
+                    faction: self.reward_buffer.faction_name.clone(),
+                    change,
+                }
+            }
+        };
+
+        self.quests[quest_idx].rewards[reward_idx] = reward;
+        self.has_unsaved_changes = true;
+        self.selected_reward = None;
+        Ok(())
+    }
+
+    /// Delete a reward from quest
+    pub fn delete_reward(&mut self, quest_idx: usize, reward_idx: usize) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
+            return Err("Invalid quest index".to_string());
+        }
+
+        if reward_idx >= self.quests[quest_idx].rewards.len() {
+            return Err("Invalid reward index".to_string());
+        }
+
+        self.quests[quest_idx].rewards.remove(reward_idx);
+        self.has_unsaved_changes = true;
+
+        if self.selected_reward == Some(reward_idx) {
+            self.selected_reward = None;
+        }
+
+        Ok(())
+    }
+
+    /// Add a default reward to current quest
+    pub fn add_default_reward(&mut self) -> Result<usize, String> {
+        if let Some(quest_idx) = self.selected_quest {
+            if quest_idx >= self.quests.len() {
+                return Err("Invalid quest index".to_string());
+            }
+
+            // Default reward: 100 XP
+            let reward = antares::domain::quest::QuestReward::Experience(100);
+            self.quests[quest_idx].rewards.push(reward);
+            self.has_unsaved_changes = true;
+
+            Ok(self.quests[quest_idx].rewards.len() - 1)
+        } else {
+            Err("No quest selected".to_string())
+        }
     }
 
     /// Edit an existing stage
@@ -310,6 +510,8 @@ impl QuestEditorState {
 
         self.has_unsaved_changes = true;
         self.selected_stage = None;
+        self.selected_objective = None;
+        self.selected_reward = None;
         Ok(())
     }
 
@@ -564,7 +766,9 @@ impl QuestEditorState {
 
         self.quests[quest_idx].stages[stage_idx].objectives[objective_idx] = objective;
         self.has_unsaved_changes = true;
+        self.has_unsaved_changes = true;
         self.selected_objective = None;
+        self.selected_reward = None;
         Ok(())
     }
 
@@ -654,7 +858,9 @@ impl QuestEditorState {
         self.quest_buffer.description = "Description".to_string();
 
         self.selected_stage = None;
+        self.selected_stage = None;
         self.selected_objective = None;
+        self.selected_reward = None;
         self.validation_errors.clear();
     }
 
@@ -691,7 +897,9 @@ impl QuestEditorState {
 
             self.mode = QuestEditorMode::Editing;
             self.selected_stage = None;
+            self.selected_stage = None;
             self.selected_objective = None;
+            self.selected_reward = None;
             self.validation_errors.clear();
         }
     }
@@ -777,7 +985,9 @@ impl QuestEditorState {
 
         self.has_unsaved_changes = true;
         self.mode = QuestEditorMode::List;
+        self.mode = QuestEditorMode::List;
         self.selected_quest = None;
+        self.selected_reward = None;
         Ok(())
     }
 
@@ -794,7 +1004,9 @@ impl QuestEditorState {
         self.mode = QuestEditorMode::List;
         self.selected_quest = None;
         self.selected_stage = None;
+        self.selected_stage = None;
         self.selected_objective = None;
+        self.selected_reward = None;
         self.quest_buffer = QuestEditBuffer::default();
         self.validation_errors.clear();
     }

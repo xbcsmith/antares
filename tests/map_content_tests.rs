@@ -1,12 +1,11 @@
 use antares::domain::types::Position;
-use antares::domain::world::{Map, MapBlueprint, TerrainType, WallType};
+use antares::domain::world::{Map, TerrainType, WallType};
 use std::fs;
 
 /// Helper function to load a map from RON file
 fn load_map_from_file(filename: &str) -> Result<Map, Box<dyn std::error::Error>> {
     let content = fs::read_to_string(filename)?;
-    let blueprint: MapBlueprint = ron::from_str(&content)?;
-    let map: Map = blueprint.into();
+    let map: Map = ron::from_str(&content)?;
     Ok(map)
 }
 

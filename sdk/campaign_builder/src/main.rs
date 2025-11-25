@@ -4550,7 +4550,13 @@ impl CampaignBuilderApp {
             if ui.button("➕ New Map").clicked() {
                 // Create a new empty map
                 let new_id = self.next_available_map_id();
-                let new_map = Map::new(new_id, 20, 20);
+                let new_map = Map::new(
+                    new_id,
+                    "New Map".to_string(),
+                    "Description".to_string(),
+                    20,
+                    20,
+                );
                 self.maps.push(new_map.clone());
                 self.maps_selected = Some(self.maps.len() - 1);
                 self.map_editor_state = Some(MapEditorState::new(new_map));
@@ -5014,7 +5020,7 @@ impl CampaignBuilderApp {
         let next_id = self.next_available_quest_id();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for (_idx, quest) in filtered_quests_cloned.iter().enumerate() {
+            for quest in filtered_quests_cloned.iter() {
                 let original_idx = quest.0;
                 let is_selected = self.quest_editor_state.selected_quest == Some(original_idx);
 
@@ -5179,6 +5185,14 @@ impl CampaignBuilderApp {
 
             // Stages editor
             self.show_quest_stages_editor(ui);
+
+            // Stages editor
+            self.show_quest_stages_editor(ui);
+
+            ui.add_space(10.0);
+
+            // Rewards editor
+            self.show_quest_rewards_editor(ui);
 
             ui.add_space(10.0);
 
@@ -5493,10 +5507,38 @@ impl CampaignBuilderApp {
                     match self.quest_editor_state.objective_buffer.objective_type {
                         quest_editor::ObjectiveType::KillMonsters => {
                             ui.horizontal(|ui| {
-                                ui.label("Monster ID:");
-                                ui.text_edit_singleline(
-                                    &mut self.quest_editor_state.objective_buffer.monster_id,
-                                );
+                                ui.label("Monster:");
+                                egui::ComboBox::from_id_salt("monster_selector")
+                                    .selected_text(
+                                        self.monsters
+                                            .iter()
+                                            .find(|m| {
+                                                m.id.to_string()
+                                                    == self
+                                                        .quest_editor_state
+                                                        .objective_buffer
+                                                        .monster_id
+                                            })
+                                            .map(|m| format!("{} - {}", m.id, m.name))
+                                            .unwrap_or_else(|| {
+                                                self.quest_editor_state
+                                                    .objective_buffer
+                                                    .monster_id
+                                                    .clone()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for monster in &self.monsters {
+                                            ui.selectable_value(
+                                                &mut self
+                                                    .quest_editor_state
+                                                    .objective_buffer
+                                                    .monster_id,
+                                                monster.id.to_string(),
+                                                format!("{} - {}", monster.id, monster.name),
+                                            );
+                                        }
+                                    });
                             });
                             ui.horizontal(|ui| {
                                 ui.label("Quantity:");
@@ -5507,10 +5549,38 @@ impl CampaignBuilderApp {
                         }
                         quest_editor::ObjectiveType::CollectItems => {
                             ui.horizontal(|ui| {
-                                ui.label("Item ID:");
-                                ui.text_edit_singleline(
-                                    &mut self.quest_editor_state.objective_buffer.item_id,
-                                );
+                                ui.label("Item:");
+                                egui::ComboBox::from_id_salt("item_selector")
+                                    .selected_text(
+                                        self.items
+                                            .iter()
+                                            .find(|i| {
+                                                i.id.to_string()
+                                                    == self
+                                                        .quest_editor_state
+                                                        .objective_buffer
+                                                        .item_id
+                                            })
+                                            .map(|i| format!("{} - {}", i.id, i.name))
+                                            .unwrap_or_else(|| {
+                                                self.quest_editor_state
+                                                    .objective_buffer
+                                                    .item_id
+                                                    .clone()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for item in &self.items {
+                                            ui.selectable_value(
+                                                &mut self
+                                                    .quest_editor_state
+                                                    .objective_buffer
+                                                    .item_id,
+                                                item.id.to_string(),
+                                                format!("{} - {}", item.id, item.name),
+                                            );
+                                        }
+                                    });
                             });
                             ui.horizontal(|ui| {
                                 ui.label("Quantity:");
@@ -5521,10 +5591,38 @@ impl CampaignBuilderApp {
                         }
                         quest_editor::ObjectiveType::ReachLocation => {
                             ui.horizontal(|ui| {
-                                ui.label("Map ID:");
-                                ui.text_edit_singleline(
-                                    &mut self.quest_editor_state.objective_buffer.map_id,
-                                );
+                                ui.label("Map:");
+                                egui::ComboBox::from_id_salt("map_selector")
+                                    .selected_text(
+                                        self.maps
+                                            .iter()
+                                            .find(|m| {
+                                                m.id.to_string()
+                                                    == self
+                                                        .quest_editor_state
+                                                        .objective_buffer
+                                                        .map_id
+                                            })
+                                            .map(|m| format!("{} - {}", m.id, m.name))
+                                            .unwrap_or_else(|| {
+                                                self.quest_editor_state
+                                                    .objective_buffer
+                                                    .map_id
+                                                    .clone()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for map in &self.maps {
+                                            ui.selectable_value(
+                                                &mut self
+                                                    .quest_editor_state
+                                                    .objective_buffer
+                                                    .map_id,
+                                                map.id.to_string(),
+                                                format!("{} - {}", map.id, map.name),
+                                            );
+                                        }
+                                    });
                             });
                             ui.horizontal(|ui| {
                                 ui.label("X:");
@@ -5545,31 +5643,137 @@ impl CampaignBuilderApp {
                         }
                         quest_editor::ObjectiveType::TalkToNpc => {
                             ui.horizontal(|ui| {
-                                ui.label("NPC ID:");
-                                ui.text_edit_singleline(
-                                    &mut self.quest_editor_state.objective_buffer.npc_id,
-                                );
+                                ui.label("Map:");
+                                egui::ComboBox::from_id_salt("map_selector_npc")
+                                    .selected_text(
+                                        self.maps
+                                            .iter()
+                                            .find(|m| {
+                                                m.id.to_string()
+                                                    == self
+                                                        .quest_editor_state
+                                                        .objective_buffer
+                                                        .map_id
+                                            })
+                                            .map(|m| format!("{} - {}", m.id, m.name))
+                                            .unwrap_or_else(|| {
+                                                self.quest_editor_state
+                                                    .objective_buffer
+                                                    .map_id
+                                                    .clone()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for map in &self.maps {
+                                            ui.selectable_value(
+                                                &mut self
+                                                    .quest_editor_state
+                                                    .objective_buffer
+                                                    .map_id,
+                                                map.id.to_string(),
+                                                format!("{} - {}", map.id, map.name),
+                                            );
+                                        }
+                                    });
                             });
+
+                            // Filter NPCs based on selected map
+                            let selected_map_id = self
+                                .quest_editor_state
+                                .objective_buffer
+                                .map_id
+                                .parse::<u16>()
+                                .unwrap_or(0);
+                            let map_npcs: Vec<_> = self
+                                .maps
+                                .iter()
+                                .find(|m| m.id == selected_map_id)
+                                .map(|m| m.npcs.clone())
+                                .unwrap_or_default();
+
                             ui.horizontal(|ui| {
-                                ui.label("Map ID:");
-                                ui.text_edit_singleline(
-                                    &mut self.quest_editor_state.objective_buffer.map_id,
-                                );
+                                ui.label("NPC:");
+                                egui::ComboBox::from_id_salt("npc_selector")
+                                    .selected_text(
+                                        map_npcs
+                                            .iter()
+                                            .find(|n| {
+                                                n.id.to_string()
+                                                    == self
+                                                        .quest_editor_state
+                                                        .objective_buffer
+                                                        .npc_id
+                                            })
+                                            .map(|n| format!("{} - {}", n.id, n.name))
+                                            .unwrap_or_else(|| {
+                                                self.quest_editor_state
+                                                    .objective_buffer
+                                                    .npc_id
+                                                    .clone()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for npc in &map_npcs {
+                                            ui.selectable_value(
+                                                &mut self
+                                                    .quest_editor_state
+                                                    .objective_buffer
+                                                    .npc_id,
+                                                npc.id.to_string(),
+                                                format!("{} - {}", npc.id, npc.name),
+                                            );
+                                        }
+                                    });
                             });
                         }
                         quest_editor::ObjectiveType::DeliverItem => {
                             ui.horizontal(|ui| {
-                                ui.label("Item ID:");
-                                ui.text_edit_singleline(
-                                    &mut self.quest_editor_state.objective_buffer.item_id,
-                                );
+                                ui.label("Item:");
+                                egui::ComboBox::from_id_salt("item_selector_deliver")
+                                    .selected_text(
+                                        self.items
+                                            .iter()
+                                            .find(|i| {
+                                                i.id.to_string()
+                                                    == self
+                                                        .quest_editor_state
+                                                        .objective_buffer
+                                                        .item_id
+                                            })
+                                            .map(|i| format!("{} - {}", i.id, i.name))
+                                            .unwrap_or_else(|| {
+                                                self.quest_editor_state
+                                                    .objective_buffer
+                                                    .item_id
+                                                    .clone()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for item in &self.items {
+                                            ui.selectable_value(
+                                                &mut self
+                                                    .quest_editor_state
+                                                    .objective_buffer
+                                                    .item_id,
+                                                item.id.to_string(),
+                                                format!("{} - {}", item.id, item.name),
+                                            );
+                                        }
+                                    });
                             });
+
                             ui.horizontal(|ui| {
                                 ui.label("NPC ID:");
                                 ui.text_edit_singleline(
                                     &mut self.quest_editor_state.objective_buffer.npc_id,
                                 );
+                                // Note: Could add map selector + NPC selector here too, but DeliverItem doesn't strictly require map_id in the struct,
+                                // though it's helpful. The struct has npc_id but not map_id for DeliverItem (wait, let me check domain/quest.rs).
+                                // QuestObjective::DeliverItem { item_id, npc_id, quantity } -> No map_id.
+                                // So we can't easily filter by map unless we ask for map_id just for filtering purposes.
+                                // For now, simple text edit for NPC ID is safer, or a global NPC search if we had a global NPC index.
                             });
+
                             ui.horizontal(|ui| {
                                 ui.label("Quantity:");
                                 ui.text_edit_singleline(
@@ -5579,17 +5783,89 @@ impl CampaignBuilderApp {
                         }
                         quest_editor::ObjectiveType::EscortNpc => {
                             ui.horizontal(|ui| {
-                                ui.label("NPC ID:");
-                                ui.text_edit_singleline(
-                                    &mut self.quest_editor_state.objective_buffer.npc_id,
-                                );
+                                ui.label("Map:");
+                                egui::ComboBox::from_id_salt("map_selector_escort")
+                                    .selected_text(
+                                        self.maps
+                                            .iter()
+                                            .find(|m| {
+                                                m.id.to_string()
+                                                    == self
+                                                        .quest_editor_state
+                                                        .objective_buffer
+                                                        .map_id
+                                            })
+                                            .map(|m| format!("{} - {}", m.id, m.name))
+                                            .unwrap_or_else(|| {
+                                                self.quest_editor_state
+                                                    .objective_buffer
+                                                    .map_id
+                                                    .clone()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for map in &self.maps {
+                                            ui.selectable_value(
+                                                &mut self
+                                                    .quest_editor_state
+                                                    .objective_buffer
+                                                    .map_id,
+                                                map.id.to_string(),
+                                                format!("{} - {}", map.id, map.name),
+                                            );
+                                        }
+                                    });
                             });
+
+                            // Filter NPCs based on selected map
+                            let selected_map_id = self
+                                .quest_editor_state
+                                .objective_buffer
+                                .map_id
+                                .parse::<u16>()
+                                .unwrap_or(0);
+                            let map_npcs: Vec<_> = self
+                                .maps
+                                .iter()
+                                .find(|m| m.id == selected_map_id)
+                                .map(|m| m.npcs.clone())
+                                .unwrap_or_default();
+
                             ui.horizontal(|ui| {
-                                ui.label("Map ID:");
-                                ui.text_edit_singleline(
-                                    &mut self.quest_editor_state.objective_buffer.map_id,
-                                );
+                                ui.label("NPC:");
+                                egui::ComboBox::from_id_salt("npc_selector_escort")
+                                    .selected_text(
+                                        map_npcs
+                                            .iter()
+                                            .find(|n| {
+                                                n.id.to_string()
+                                                    == self
+                                                        .quest_editor_state
+                                                        .objective_buffer
+                                                        .npc_id
+                                            })
+                                            .map(|n| format!("{} - {}", n.id, n.name))
+                                            .unwrap_or_else(|| {
+                                                self.quest_editor_state
+                                                    .objective_buffer
+                                                    .npc_id
+                                                    .clone()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for npc in &map_npcs {
+                                            ui.selectable_value(
+                                                &mut self
+                                                    .quest_editor_state
+                                                    .objective_buffer
+                                                    .npc_id,
+                                                npc.id.to_string(),
+                                                format!("{} - {}", npc.id, npc.name),
+                                            );
+                                        }
+                                    });
                             });
+
                             ui.horizontal(|ui| {
                                 ui.label("Destination X:");
                                 ui.text_edit_singleline(
@@ -5631,6 +5907,319 @@ impl CampaignBuilderApp {
 
                         if ui.button("❌ Cancel").clicked() {
                             self.quest_editor_state.selected_objective = None;
+                        }
+                    });
+                });
+        }
+    }
+
+    /// Show quest rewards editor
+    fn show_quest_rewards_editor(&mut self, ui: &mut egui::Ui) {
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.heading("Rewards");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("➕ Add Reward").clicked() {
+                        if let Ok(new_idx) = self.quest_editor_state.add_default_reward() {
+                            self.unsaved_changes = true;
+                            // Immediately start editing the new reward
+                            let _ = self.quest_editor_state.edit_reward(
+                                self.quest_editor_state.selected_quest.unwrap(),
+                                new_idx,
+                            );
+                        }
+                    }
+                });
+            });
+
+            ui.separator();
+
+            if let Some(selected_idx) = self.quest_editor_state.selected_quest {
+                if selected_idx < self.quest_editor_state.quests.len() {
+                    let rewards = self.quest_editor_state.quests[selected_idx].rewards.clone();
+                    let mut reward_to_delete: Option<usize> = None;
+                    let mut reward_to_edit: Option<usize> = None;
+
+                    for (reward_idx, reward) in rewards.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            let desc = match reward {
+                                antares::domain::quest::QuestReward::Experience(xp) => {
+                                    format!("{} XP", xp)
+                                }
+                                antares::domain::quest::QuestReward::Gold(gold) => {
+                                    format!("{} Gold", gold)
+                                }
+                                antares::domain::quest::QuestReward::Items(items) => {
+                                    let item_strs: Vec<String> = items
+                                        .iter()
+                                        .map(|(id, qty)| {
+                                            let name = self
+                                                .items
+                                                .iter()
+                                                .find(|i| i.id == *id)
+                                                .map(|i| i.name.clone())
+                                                .unwrap_or_else(|| "Unknown Item".to_string());
+                                            format!("{}x {} ({})", qty, name, id)
+                                        })
+                                        .collect();
+                                    item_strs.join(", ")
+                                }
+                                antares::domain::quest::QuestReward::UnlockQuest(qid) => {
+                                    let name = self
+                                        .quests
+                                        .iter()
+                                        .find(|q| q.id == *qid)
+                                        .map(|q| q.name.clone())
+                                        .unwrap_or_else(|| "Unknown Quest".to_string());
+                                    format!("Unlock Quest: {} ({})", name, qid)
+                                }
+                                antares::domain::quest::QuestReward::SetFlag {
+                                    flag_name,
+                                    value,
+                                } => {
+                                    format!("Set Flag '{}' to {}", flag_name, value)
+                                }
+                                antares::domain::quest::QuestReward::Reputation {
+                                    faction,
+                                    change,
+                                } => {
+                                    format!("Reputation: {} ({:+})", faction, change)
+                                }
+                            };
+
+                            ui.label(format!("{}.", reward_idx + 1));
+                            ui.label(desc);
+
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .small_button("🗑️")
+                                        .on_hover_text("Delete Reward")
+                                        .clicked()
+                                    {
+                                        reward_to_delete = Some(reward_idx);
+                                    }
+                                    if ui.small_button("✏️").on_hover_text("Edit Reward").clicked()
+                                    {
+                                        reward_to_edit = Some(reward_idx);
+                                    }
+                                },
+                            );
+                        });
+                    }
+
+                    if let Some(reward_idx) = reward_to_delete {
+                        if self
+                            .quest_editor_state
+                            .delete_reward(selected_idx, reward_idx)
+                            .is_ok()
+                        {
+                            self.unsaved_changes = true;
+                        }
+                    }
+
+                    if let Some(reward_idx) = reward_to_edit {
+                        if self
+                            .quest_editor_state
+                            .edit_reward(selected_idx, reward_idx)
+                            .is_ok()
+                        {
+                            // Modal will show
+                        }
+                    }
+
+                    if rewards.is_empty() {
+                        ui.label("No rewards defined");
+                    }
+                }
+            } else {
+                ui.label("No quest selected");
+            }
+        });
+
+        // Reward editor modal
+        if let Some(reward_idx) = self.quest_editor_state.selected_reward {
+            egui::Window::new("Edit Reward")
+                .collapsible(false)
+                .resizable(true)
+                .default_size([400.0, 300.0])
+                .show(ui.ctx(), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Type:");
+                        egui::ComboBox::from_id_salt("reward_type_selector")
+                            .selected_text(
+                                self.quest_editor_state.reward_buffer.reward_type.as_str(),
+                            )
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.reward_buffer.reward_type,
+                                    quest_editor::RewardType::Experience,
+                                    "Experience",
+                                );
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.reward_buffer.reward_type,
+                                    quest_editor::RewardType::Gold,
+                                    "Gold",
+                                );
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.reward_buffer.reward_type,
+                                    quest_editor::RewardType::Items,
+                                    "Items",
+                                );
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.reward_buffer.reward_type,
+                                    quest_editor::RewardType::UnlockQuest,
+                                    "Unlock Quest",
+                                );
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.reward_buffer.reward_type,
+                                    quest_editor::RewardType::SetFlag,
+                                    "Set Flag",
+                                );
+                                ui.selectable_value(
+                                    &mut self.quest_editor_state.reward_buffer.reward_type,
+                                    quest_editor::RewardType::Reputation,
+                                    "Reputation",
+                                );
+                            });
+                    });
+
+                    ui.separator();
+
+                    match self.quest_editor_state.reward_buffer.reward_type {
+                        quest_editor::RewardType::Experience => {
+                            ui.horizontal(|ui| {
+                                ui.label("Amount:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.reward_buffer.experience,
+                                );
+                            });
+                        }
+                        quest_editor::RewardType::Gold => {
+                            ui.horizontal(|ui| {
+                                ui.label("Amount:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.reward_buffer.gold,
+                                );
+                            });
+                        }
+                        quest_editor::RewardType::Items => {
+                            ui.horizontal(|ui| {
+                                ui.label("Item:");
+                                egui::ComboBox::from_id_salt("reward_item_selector")
+                                    .selected_text(
+                                        self.items
+                                            .iter()
+                                            .find(|i| {
+                                                i.id.to_string()
+                                                    == self.quest_editor_state.reward_buffer.item_id
+                                            })
+                                            .map(|i| format!("{} - {}", i.id, i.name))
+                                            .unwrap_or_else(|| {
+                                                self.quest_editor_state
+                                                    .reward_buffer
+                                                    .item_id
+                                                    .clone()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for item in &self.items {
+                                            ui.selectable_value(
+                                                &mut self.quest_editor_state.reward_buffer.item_id,
+                                                item.id.to_string(),
+                                                format!("{} - {}", item.id, item.name),
+                                            );
+                                        }
+                                    });
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Quantity:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.reward_buffer.item_quantity,
+                                );
+                            });
+                        }
+                        quest_editor::RewardType::UnlockQuest => {
+                            ui.horizontal(|ui| {
+                                ui.label("Quest:");
+                                egui::ComboBox::from_id_salt("reward_quest_selector")
+                                    .selected_text(
+                                        self.quests
+                                            .iter()
+                                            .find(|q| {
+                                                q.id.to_string()
+                                                    == self
+                                                        .quest_editor_state
+                                                        .reward_buffer
+                                                        .unlock_quest_id
+                                            })
+                                            .map(|q| format!("{} - {}", q.id, q.name))
+                                            .unwrap_or_else(|| {
+                                                self.quest_editor_state
+                                                    .reward_buffer
+                                                    .unlock_quest_id
+                                                    .clone()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for quest in &self.quests {
+                                            ui.selectable_value(
+                                                &mut self
+                                                    .quest_editor_state
+                                                    .reward_buffer
+                                                    .unlock_quest_id,
+                                                quest.id.to_string(),
+                                                format!("{} - {}", quest.id, quest.name),
+                                            );
+                                        }
+                                    });
+                            });
+                        }
+                        quest_editor::RewardType::SetFlag => {
+                            ui.horizontal(|ui| {
+                                ui.label("Flag Name:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.reward_buffer.flag_name,
+                                );
+                            });
+                            ui.checkbox(
+                                &mut self.quest_editor_state.reward_buffer.flag_value,
+                                "Value",
+                            );
+                        }
+                        quest_editor::RewardType::Reputation => {
+                            ui.horizontal(|ui| {
+                                ui.label("Faction:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.reward_buffer.faction_name,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Change:");
+                                ui.text_edit_singleline(
+                                    &mut self.quest_editor_state.reward_buffer.reputation_change,
+                                );
+                            });
+                        }
+                    }
+
+                    ui.add_space(10.0);
+
+                    ui.horizontal(|ui| {
+                        if ui.button("✅ Save").clicked() {
+                            if let Some(selected_idx) = self.quest_editor_state.selected_quest {
+                                if self
+                                    .quest_editor_state
+                                    .save_reward(selected_idx, reward_idx)
+                                    .is_ok()
+                                {
+                                    self.unsaved_changes = true;
+                                }
+                            }
+                        }
+                        if ui.button("❌ Cancel").clicked() {
+                            self.quest_editor_state.selected_reward = None;
                         }
                     });
                 });
@@ -7680,10 +8269,10 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
 
         // Add maps with duplicate IDs
-        let map1 = Map::new(10, 20, 20);
+        let map1 = Map::new(10, "Map 1".to_string(), "Desc 1".to_string(), 20, 20);
         app.maps.push(map1);
 
-        let map2 = Map::new(10, 30, 30); // Duplicate ID
+        let map2 = Map::new(10, "Map 2".to_string(), "Desc 2".to_string(), 30, 30); // Duplicate ID
         app.maps.push(map2);
 
         // Validate
@@ -7749,10 +8338,10 @@ mod tests {
     fn test_next_available_map_id() {
         let mut app = CampaignBuilderApp::default();
 
-        let map1 = Map::new(5, 20, 20);
+        let map1 = Map::new(5, "Map 1".to_string(), "Desc 1".to_string(), 20, 20);
         app.maps.push(map1);
 
-        let map2 = Map::new(8, 30, 30);
+        let map2 = Map::new(8, "Map 2".to_string(), "Desc 2".to_string(), 30, 30);
         app.maps.push(map2);
 
         assert_eq!(app.next_available_map_id(), 9);

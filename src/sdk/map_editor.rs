@@ -20,7 +20,7 @@
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let db = ContentDatabase::load_campaign("campaigns/my_campaign")?;
-//! let map = Map::new(0, 10, 10);
+//! let map = Map::new(0, "Test Map".to_string(), "Description".to_string(), 10, 10);
 //!
 //! // Browse available monsters
 //! let monsters = browse_monsters(&db);
@@ -297,7 +297,7 @@ pub fn suggest_map_ids(db: &ContentDatabase, partial: &str) -> Vec<MapId> {
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let db = ContentDatabase::new();
-/// let map = Map::new(0, 10, 10);
+/// let map = Map::new(0, "Test Map".to_string(), "Description".to_string(), 10, 10);
 ///
 /// let errors = validate_map(&db, &map)?;
 /// println!("Map has {} validation issues", errors.len());
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn test_validate_map_empty_database() {
         let db = ContentDatabase::new();
-        let map = Map::new(0, 10, 10);
+        let map = Map::new(0, "Test Map".to_string(), "Description".to_string(), 10, 10);
 
         let result = validate_map(&db, &map);
         assert!(result.is_ok());
