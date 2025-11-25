@@ -4409,11 +4409,11 @@
     events: {
         (
             x: 5,
-            y: 10,
+            y: 4,
         ): Sign(
             name: "",
             description: "",
-            text: "General Store - Buy and Sell items for your party!",
+            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
         (
             x: 13,
@@ -4433,11 +4433,11 @@
         ),
         (
             x: 5,
-            y: 4,
+            y: 10,
         ): Sign(
             name: "",
             description: "",
-            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+            text: "General Store - Buy and Sell items for your party!",
         ),
     },
     npcs: [
