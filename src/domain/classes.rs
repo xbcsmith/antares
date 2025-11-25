@@ -100,6 +100,7 @@ pub struct ClassDefinition {
     pub name: String,
 
     /// Description of the class
+    #[serde(default)]
     pub description: String,
 
     /// Hit dice for HP gain on level up (e.g., 1d10, 1d4)
@@ -121,12 +122,15 @@ pub struct ClassDefinition {
     pub special_abilities: Vec<String>,
 
     /// Starting weapon ID
+    #[serde(default)]
     pub starting_weapon_id: Option<ItemId>,
 
     /// Starting armor ID
+    #[serde(default)]
     pub starting_armor_id: Option<ItemId>,
 
     /// Starting items
+    #[serde(default)]
     pub starting_items: Vec<ItemId>,
 }
 

@@ -52,6 +52,10 @@ pub struct ClassEditBuffer {
     pub spell_stat: Option<SpellStat>,
     pub disablement_bit: String,
     pub special_abilities: String, // Comma-separated
+    pub description: String,
+    pub starting_weapon_id: String,
+    pub starting_armor_id: String,
+    pub starting_items: Vec<String>,
 }
 
 impl Default for ClassEditBuffer {
@@ -67,6 +71,10 @@ impl Default for ClassEditBuffer {
             spell_stat: None,
             disablement_bit: "0".to_string(),
             special_abilities: String::new(),
+            description: String::new(),
+            starting_weapon_id: String::new(),
+            starting_armor_id: String::new(),
+            starting_items: Vec::new(),
         }
     }
 }
@@ -111,6 +119,20 @@ impl ClassesEditorState {
                 spell_stat: class.spell_stat,
                 disablement_bit: class.disablement_bit.to_string(),
                 special_abilities: class.special_abilities.join(", "),
+                description: class.description.clone(),
+                starting_weapon_id: class
+                    .starting_weapon_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
+                starting_armor_id: class
+                    .starting_armor_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
+                starting_items: class
+                    .starting_items
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect(),
             };
         }
     }
@@ -156,15 +178,38 @@ impl ClassesEditorState {
             .filter(|s| !s.is_empty())
             .collect();
 
+        let starting_weapon_id = if self.buffer.starting_weapon_id.is_empty() {
+            None
+        } else {
+            self.buffer.starting_weapon_id.parse::<u8>().ok()
+        };
+
+        let starting_armor_id = if self.buffer.starting_armor_id.is_empty() {
+            None
+        } else {
+            self.buffer.starting_armor_id.parse::<u8>().ok()
+        };
+
+        let starting_items: Vec<u8> = self
+            .buffer
+            .starting_items
+            .iter()
+            .filter_map(|id| id.parse::<u8>().ok())
+            .collect();
+
         let class_def = ClassDefinition {
             id: id.clone(),
             name,
+            description: self.buffer.description.clone(),
             hp_die: DiceRoll::new(hp_count, hp_sides, hp_mod),
             spell_school: self.buffer.spell_school,
             is_pure_caster: self.buffer.is_pure_caster,
             spell_stat: self.buffer.spell_stat,
             disablement_bit: disablement,
             special_abilities: abilities,
+            starting_weapon_id,
+            starting_armor_id,
+            starting_items,
         };
 
         if let Some(idx) = self.selected_class {

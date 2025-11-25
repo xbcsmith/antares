@@ -37,7 +37,7 @@ if header.header_response.clicked() || header.body_returned.is_some() {
 
 #### 1.3 Fixed Quest ID Auto-Population
 
-**Files**: 
+**Files**:
 - `sdk/campaign_builder/src/main.rs` (call site)
 - `sdk/campaign_builder/src/quest_editor.rs` (already had the parameter)
 
