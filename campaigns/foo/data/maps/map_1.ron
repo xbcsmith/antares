@@ -4409,19 +4409,19 @@
     events: {
         (
             x: 5,
-            y: 4,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
-        ),
-        (
-            x: 5,
             y: 10,
         ): Sign(
             name: "",
             description: "",
             text: "General Store - Buy and Sell items for your party!",
+        ),
+        (
+            x: 13,
+            y: 18,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "WARNING: Dungeon Entrance Ahead. PREPARE FOR COMBAT!",
         ),
         (
             x: 13,
@@ -4432,12 +4432,12 @@
             text: "Temple of Healing - The priests can restore your health.",
         ),
         (
-            x: 13,
-            y: 18,
+            x: 5,
+            y: 4,
         ): Sign(
             name: "",
             description: "",
-            text: "WARNING: Dungeon Entrance Ahead. PREPARE FOR COMBAT!",
+            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
     },
     npcs: [
