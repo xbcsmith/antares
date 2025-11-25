@@ -4,6 +4,19 @@
 
 This plan outlines the updates to the Antares SDK Quest Editor that must be made to improve quality of life.
 
+## General
+
+- All tabs should have a load from file button that lets the user select a file outside of hte campaign directory. Items, Monsters, Maps, Quests, and Classes should all have a load from file button.
+- All tabs should have a save to file button that saves the file outside of the campaign directory. Items, Monsters, Maps, Quests, and Classes should all have a save to file button.
+- All tabs should have a save button that saves the file to the campaign directory. Items, Monsters, Maps, Quests, and Classes should all have a save button.
+- All ScrollArea boxes should expand to fill the available space in the window.
+
+## Classes Tab
+
+Should prepopulate with the classes in the campaign directory.
+Should have a description of the class.
+Should have a way to create the starting equipment for the class populated from the campaign items data.
+
 ## Quest Rewards
 
 [PASSED] - Add edit_reward, save_reward, delete_reward methods to QuestEditorState.
@@ -23,35 +36,10 @@ Update the Quest Editor UI to use dropdowns for ID selection.
 [FAILED] - Ensure the  ObjectiveEditBuffer is updated correctly when a dropdown selection changes.
 
 
-## Phase 3: SDK UI - Quest Rewards Implementation
-
-Add support for managing Quest Rewards in the UI.
-
-[MODIFY] 
-main.rs
-Implement show_quest_rewards_editor method (similar to objectives editor).
-Add "Rewards" section to 
-show_quest_form
-.
-Implement the Reward Editor Modal with support for:
-Experience (Integer input)
-Gold (Integer input)
-Items (Dropdown for Item ID + Quantity input)
-Unlock Quest (Dropdown for Quest ID)
-Set Flag (Text input for flag name + Checkbox for value)
-Reputation (Text input for faction + Integer input for change)
-
-## Phase 4: Verification & Polish
-
-Verify that all dropdowns populate correctly with loaded data.
-Verify that saving/loading quests works with the new fields.
-Verify that cargo check passes.
-
 ### Verification Plan
 
-Write Automated Tests
+Write Automated Tests did not happen as there are numerous issues with the UI.  
 
-Run cargo test -p campaign_builder to verify state logic changes.
 
 #### Problems in Manual Verification
 

@@ -4409,6 +4409,14 @@
     events: {
         (
             x: 5,
+            y: 4,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+        ),
+        (
+            x: 5,
             y: 10,
         ): Sign(
             name: "",
@@ -4422,14 +4430,6 @@
             name: "",
             description: "",
             text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
-            x: 5,
-            y: 4,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
         (
             x: 13,
