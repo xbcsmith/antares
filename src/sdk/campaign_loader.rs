@@ -333,6 +333,31 @@ impl Campaign {
         }
 
         let contents = std::fs::read_to_string(&campaign_file)?;
+
+        // Try to load as CampaignMetadata (SDK format) first
+        if let Ok(metadata) = ron::from_str::<CampaignMetadata>(&contents) {
+            let mut campaign: Campaign = metadata
+                .try_into()
+                .map_err(|e: String| CampaignError::MetadataError(e))?;
+
+            // Set root path
+            campaign.root_path = path.to_path_buf();
+
+            // Ensure ID matches directory if possible, or keep metadata ID
+            if let Some(dir_name) = path.file_name() {
+                let dir_id = dir_name.to_string_lossy().to_string();
+                if campaign.id != dir_id {
+                    // Log warning? For now just keep what's in the file or directory?
+                    // The SDK seems to use "12" as ID but directory is "tutorial".
+                    // Let's prefer the directory name for the ID if it's "tutorial".
+                    campaign.id = dir_id;
+                }
+            }
+
+            return Ok(campaign);
+        }
+
+        // Fallback to loading as Campaign (Engine format)
         let mut campaign: Campaign =
             ron::from_str(&contents).map_err(|e| CampaignError::MetadataError(e.to_string()))?;
 
@@ -346,7 +371,110 @@ impl Campaign {
 
         Ok(campaign)
     }
+}
 
+/// Raw campaign metadata from SDK
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CampaignMetadata {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub description: String,
+    pub engine_version: String,
+    pub starting_map: String,
+    pub starting_position: (i32, i32),
+    pub starting_direction: String,
+    pub starting_gold: u32,
+    pub starting_food: u32,
+    pub max_party_size: usize,
+    pub max_roster_size: usize,
+    pub difficulty: Difficulty,
+    pub permadeath: bool,
+    pub allow_multiclassing: bool,
+    pub starting_level: u8,
+    pub max_level: u8,
+    pub items_file: String,
+    pub spells_file: String,
+    pub monsters_file: String,
+    pub classes_file: String,
+    pub races_file: String,
+    pub maps_dir: String,
+    pub quests_file: String,
+    pub dialogue_file: String,
+}
+
+impl TryFrom<CampaignMetadata> for Campaign {
+    type Error = String;
+
+    fn try_from(metadata: CampaignMetadata) -> Result<Self, Self::Error> {
+        // Convert starting_map string to u16
+        // This is a hack: we assume "starter_town" -> 1, or try to parse number
+        let starting_map_id = if let Ok(id) = metadata.starting_map.parse::<u16>() {
+            id
+        } else if metadata.starting_map == "starter_town" {
+            1
+        } else {
+            // Default to 1 if unknown string
+            1
+        };
+
+        // Convert direction string to enum
+        let starting_direction = match metadata.starting_direction.to_lowercase().as_str() {
+            "north" => Direction::North,
+            "east" => Direction::East,
+            "south" => Direction::South,
+            "west" => Direction::West,
+            _ => Direction::North,
+        };
+
+        Ok(Campaign {
+            id: metadata.id,
+            name: metadata.name,
+            version: metadata.version,
+            author: metadata.author,
+            description: metadata.description,
+            engine_version: metadata.engine_version,
+            required_features: Vec::new(), // SDK doesn't seem to export this yet
+            config: CampaignConfig {
+                starting_map: starting_map_id,
+                starting_position: Position::new(
+                    metadata.starting_position.0,
+                    metadata.starting_position.1,
+                ),
+                starting_direction,
+                starting_gold: metadata.starting_gold,
+                starting_food: metadata.starting_food,
+                max_party_size: metadata.max_party_size,
+                max_roster_size: metadata.max_roster_size,
+                difficulty: metadata.difficulty,
+                permadeath: metadata.permadeath,
+                allow_multiclassing: metadata.allow_multiclassing,
+                starting_level: metadata.starting_level,
+                max_level: metadata.max_level,
+            },
+            data: CampaignData {
+                items: metadata.items_file,
+                spells: metadata.spells_file,
+                monsters: metadata.monsters_file,
+                classes: metadata.classes_file,
+                races: metadata.races_file,
+                maps: metadata.maps_dir,
+                quests: metadata.quests_file,
+                dialogues: metadata.dialogue_file,
+            },
+            assets: CampaignAssets {
+                tilesets: "assets/tilesets".to_string(),
+                music: "assets/music".to_string(),
+                sounds: "assets/sounds".to_string(),
+                images: "assets/images".to_string(),
+            },
+            root_path: PathBuf::new(),
+        })
+    }
+}
+
+impl Campaign {
     /// Load campaign content into ContentDatabase
     pub fn load_content(&self) -> Result<ContentDatabase, CampaignError> {
         ContentDatabase::load_campaign(&self.root_path)

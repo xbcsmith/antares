@@ -38,7 +38,7 @@ Update the Quest Editor UI to use dropdowns for ID selection.
 
 ### Verification Plan
 
-Write Automated Tests did not happen as there are numerous issues with the UI.  
+Write Automated Tests did not happen as there are numerous issues with the UI.
 
 
 #### Problems in Manual Verification
@@ -58,7 +58,7 @@ Objectives:
 
 Can not add Objectives
 
-No way to add objectives to the quest. 
+No way to add objectives to the quest.
 
 - FAILED - Add a "Kill Monsters" objective. Verify the Monster ID dropdown shows loaded monsters.
 - FAILED - Add a "Collect Items" objective. Verify the Item ID dropdown shows loaded items.
