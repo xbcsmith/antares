@@ -192,12 +192,16 @@ impl ClassEditor {
         let class_def = ClassDefinition {
             id: id.clone(),
             name: name.trim().to_string(),
+            description: String::new(),
             hp_die,
             spell_school,
             is_pure_caster,
             spell_stat,
             disablement_bit,
             special_abilities,
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: Vec::new(),
         };
 
         self.classes.push(class_def);
@@ -626,22 +630,30 @@ mod tests {
             ClassDefinition {
                 id: "knight".to_string(),
                 name: "Knight".to_string(),
+                description: String::new(),
                 hp_die: DiceRoll::new(1, 10, 0),
                 spell_school: None,
                 is_pure_caster: false,
                 spell_stat: None,
                 disablement_bit: 0,
                 special_abilities: vec![],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: Vec::new(),
             },
             ClassDefinition {
                 id: "sorcerer".to_string(),
                 name: "Sorcerer".to_string(),
+                description: String::new(),
                 hp_die: DiceRoll::new(1, 4, 0),
                 spell_school: Some(SpellSchool::Sorcerer),
                 is_pure_caster: true,
                 spell_stat: Some(SpellStat::Intellect),
                 disablement_bit: 1,
                 special_abilities: vec![],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: Vec::new(),
             },
         ];
 
