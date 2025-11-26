@@ -397,6 +397,7 @@ pub struct Item {
     /// Whether the item is cursed (cannot unequip)
     pub is_cursed: bool,
     /// Path to item icon asset (optional)
+    #[serde(default)]
     pub icon_path: Option<String>,
 }
 
