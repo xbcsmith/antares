@@ -2601,43 +2601,40 @@ impl CampaignBuilderApp {
 
         ui.horizontal(|ui| {
             let height = ui.available_height();
+            eprintln!("DEBUG: show_items_list available height: {}", height);
 
             // Left panel - item list
-            ui.allocate_ui_with_layout(
-                egui::vec2(300.0, height),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.heading("Items");
-                    ui.separator();
+            ui.vertical(|ui| {
+                ui.set_width(300.0);
+                ui.set_height(height);
 
-                    let available = ui.available_height();
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .min_scrolled_height(available)
-                        .id_salt("items_list_scroll")
-                        .show(ui, |ui| {
-                            ui.set_width(300.0); // Ensure scroll area takes full width of panel
-                            for (idx, label) in &filtered_items {
-                                let is_selected = selected == Some(*idx);
-                                if ui.selectable_label(is_selected, label).clicked() {
-                                    new_selection = Some(*idx);
-                                }
-                            }
+                ui.heading("Items");
+                ui.separator();
 
-                            if filtered_items.is_empty() {
-                                ui.label("No items found");
+                egui::ScrollArea::vertical()
+                    .id_salt("items_list_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        for (idx, label) in &filtered_items {
+                            let is_selected = selected == Some(*idx);
+                            if ui.selectable_label(is_selected, label).clicked() {
+                                new_selection = Some(*idx);
                             }
-                        });
-                },
-            );
+                        }
+
+                        if filtered_items.is_empty() {
+                            ui.label("No items found");
+                        }
+                    });
+            });
 
             ui.separator();
 
             // Right panel - item details
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), height),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
+            ui.vertical(|ui| {
+                ui.set_height(height);
+                ui.set_min_width(ui.available_width());
                     if let Some(idx) = selected {
                         if idx < self.items.len() {
                             let item = self.items[idx].clone();
@@ -2671,8 +2668,7 @@ impl CampaignBuilderApp {
                             ui.label("Select an item to view details");
                         });
                     }
-                },
-            );
+                });
         });
 
         // Apply selection change
@@ -3568,41 +3564,37 @@ impl CampaignBuilderApp {
             let height = ui.available_height();
 
             // Left panel - spell list
-            ui.allocate_ui_with_layout(
-                egui::vec2(300.0, height),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.heading("Spells");
-                    ui.separator();
+            ui.vertical(|ui| {
+                ui.set_width(300.0);
+                ui.set_height(height);
 
-                    let available = ui.available_height();
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .min_scrolled_height(available)
-                        .id_salt("spells_list_scroll")
-                        .show(ui, |ui| {
-                            ui.set_width(300.0);
-                            for (idx, label) in &filtered_spells {
-                                let is_selected = selected == Some(*idx);
-                                if ui.selectable_label(is_selected, label).clicked() {
-                                    new_selection = Some(*idx);
-                                }
-                            }
+                ui.heading("Spells");
+                ui.separator();
 
-                            if filtered_spells.is_empty() {
-                                ui.label("No spells found");
+                egui::ScrollArea::vertical()
+                    .id_salt("spells_list_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        for (idx, label) in &filtered_spells {
+                            let is_selected = selected == Some(*idx);
+                            if ui.selectable_label(is_selected, label).clicked() {
+                                new_selection = Some(*idx);
                             }
-                        });
-                },
-            );
+                        }
+
+                        if filtered_spells.is_empty() {
+                            ui.label("No spells found");
+                        }
+                    });
+            });
 
             ui.separator();
 
             // Right panel - spell details
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), height),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
+            ui.vertical(|ui| {
+                ui.set_height(height);
+                ui.set_min_width(ui.available_width());
                     if let Some(idx) = selected {
                         if idx < self.spells.len() {
                             let spell = self.spells[idx].clone();
@@ -3653,8 +3645,7 @@ impl CampaignBuilderApp {
                             ui.label("Select a spell to view details");
                         });
                     }
-                },
-            );
+                });
         });
 
         // Apply selection change
@@ -4048,41 +4039,37 @@ impl CampaignBuilderApp {
             let height = ui.available_height();
 
             // Left panel - monster list
-            ui.allocate_ui_with_layout(
-                egui::vec2(300.0, height),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.heading("Monsters");
-                    ui.separator();
+            ui.vertical(|ui| {
+                ui.set_width(300.0);
+                ui.set_height(height);
 
-                    let available = ui.available_height();
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .min_scrolled_height(available)
-                        .id_salt("monsters_list_scroll")
-                        .show(ui, |ui| {
-                            ui.set_width(300.0);
-                            for (idx, label) in &filtered_monsters {
-                                let is_selected = selected == Some(*idx);
-                                if ui.selectable_label(is_selected, label).clicked() {
-                                    new_selection = Some(*idx);
-                                }
-                            }
+                ui.heading("Monsters");
+                ui.separator();
 
-                            if filtered_monsters.is_empty() {
-                                ui.label("No monsters found");
+                egui::ScrollArea::vertical()
+                    .id_salt("monsters_list_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        for (idx, label) in &filtered_monsters {
+                            let is_selected = selected == Some(*idx);
+                            if ui.selectable_label(is_selected, label).clicked() {
+                                new_selection = Some(*idx);
                             }
-                        });
-                },
-            );
+                        }
+
+                        if filtered_monsters.is_empty() {
+                            ui.label("No monsters found");
+                        }
+                    });
+            });
 
             ui.separator();
 
             // Right panel - monster details
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), height),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
+            ui.vertical(|ui| {
+                ui.set_height(height);
+                ui.set_min_width(ui.available_width());
                     if let Some(idx) = selected {
                         if idx < self.monsters.len() {
                             let monster = self.monsters[idx].clone();
@@ -4151,8 +4138,7 @@ impl CampaignBuilderApp {
                             ui.label("Select a monster to view details");
                         });
                     }
-                },
-            );
+                });
         });
 
         // Apply selection change
@@ -6742,10 +6728,28 @@ impl CampaignBuilderApp {
         if let Some(dir) = &self.campaign_dir {
             let quests_path = dir.join(&self.campaign.quests_file);
             if quests_path.exists() {
-                let contents = fs::read_to_string(&quests_path)?;
-                self.quests = ron::from_str(&contents)?;
-                self.quest_editor_state.load_quests(self.quests.clone());
+                match fs::read_to_string(&quests_path) {
+                    Ok(contents) => match ron::from_str::<Vec<antares::domain::quest::Quest>>(&contents) {
+                        Ok(quests) => {
+                            self.quests = quests;
+                            self.quest_editor_state.load_quests(self.quests.clone());
+                            self.status_message = format!("Loaded {} quests", self.quests.len());
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to parse quests from {:?}: {}", quests_path, e);
+                            return Err(CampaignError::Deserialization(e));
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to read quests file {:?}: {}", quests_path, e);
+                        return Err(CampaignError::Io(e));
+                    }
+                }
+            } else {
+                eprintln!("Quests file does not exist: {:?}", quests_path);
             }
+        } else {
+            eprintln!("No campaign directory set when trying to load quests");
         }
         Ok(())
     }
@@ -7342,10 +7346,25 @@ impl CampaignBuilderApp {
 
     /// Load dialogues from file
     fn load_dialogues_from_file(&mut self, path: &std::path::Path) -> Result<(), CampaignError> {
-        let contents = std::fs::read_to_string(path)?;
-        let dialogues: Vec<DialogueTree> = ron::from_str(&contents)?;
-        self.dialogues = dialogues;
-        Ok(())
+        match std::fs::read_to_string(path) {
+            Ok(contents) => match ron::from_str::<Vec<DialogueTree>>(&contents) {
+                Ok(dialogues) => {
+                    self.dialogues = dialogues;
+                    // Update editor state
+                    self.dialogue_editor_state.load_dialogues(self.dialogues.clone());
+                    self.status_message = format!("Loaded {} dialogues", self.dialogues.len());
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Failed to parse dialogues from {:?}: {}", path, e);
+                    Err(CampaignError::Deserialization(e))
+                }
+            },
+            Err(e) => {
+                eprintln!("Failed to read dialogues file {:?}: {}", path, e);
+                Err(CampaignError::Io(e))
+            }
+        }
     }
 
     /// Show dialogues editor
