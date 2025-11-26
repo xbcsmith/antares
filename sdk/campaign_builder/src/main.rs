@@ -1306,13 +1306,8 @@ impl CampaignBuilderApp {
                         eprintln!("Warning: Failed to load quests: {}", e);
                     }
 
-                    if let Some(dir) = &self.campaign_dir {
-                        let dialogue_path = dir.join(&self.campaign.dialogue_file);
-                        if dialogue_path.exists() {
-                            if let Err(e) = self.load_dialogues_from_file(&dialogue_path) {
-                                eprintln!("Warning: Failed to load dialogues: {}", e);
-                            }
-                        }
+                    if let Err(e) = self.load_dialogues() {
+                        eprintln!("Warning: Failed to load dialogues: {}", e);
                     }
 
                     self.unsaved_changes = false;
@@ -2635,40 +2630,40 @@ impl CampaignBuilderApp {
             ui.vertical(|ui| {
                 ui.set_height(height);
                 ui.set_min_width(ui.available_width());
-                    if let Some(idx) = selected {
-                        if idx < self.items.len() {
-                            let item = self.items[idx].clone();
+                if let Some(idx) = selected {
+                    if idx < self.items.len() {
+                        let item = self.items[idx].clone();
 
-                            ui.heading(&item.name);
-                            ui.separator();
+                        ui.heading(&item.name);
+                        ui.separator();
 
-                            ui.horizontal(|ui| {
-                                if ui.button("✏️ Edit").clicked() {
-                                    action = Some((idx, "edit"));
-                                }
-                                if ui.button("🗑️ Delete").clicked() {
-                                    action = Some((idx, "delete"));
-                                }
-                                if ui.button("📋 Duplicate").clicked() {
-                                    action = Some((idx, "duplicate"));
-                                }
-                                if ui.button("📤 Export").clicked() {
-                                    action = Some((idx, "export"));
-                                }
-                            });
-
-                            ui.separator();
-
-                            // Phase 3B: Enhanced preview panel
-                            self.show_item_preview(ui, &item);
-                        }
-                    } else {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(100.0);
-                            ui.label("Select an item to view details");
+                        ui.horizontal(|ui| {
+                            if ui.button("✏️ Edit").clicked() {
+                                action = Some((idx, "edit"));
+                            }
+                            if ui.button("🗑️ Delete").clicked() {
+                                action = Some((idx, "delete"));
+                            }
+                            if ui.button("📋 Duplicate").clicked() {
+                                action = Some((idx, "duplicate"));
+                            }
+                            if ui.button("📤 Export").clicked() {
+                                action = Some((idx, "export"));
+                            }
                         });
+
+                        ui.separator();
+
+                        // Phase 3B: Enhanced preview panel
+                        self.show_item_preview(ui, &item);
                     }
-                });
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(100.0);
+                        ui.label("Select an item to view details");
+                    });
+                }
+            });
         });
 
         // Apply selection change
@@ -3595,57 +3590,57 @@ impl CampaignBuilderApp {
             ui.vertical(|ui| {
                 ui.set_height(height);
                 ui.set_min_width(ui.available_width());
-                    if let Some(idx) = selected {
-                        if idx < self.spells.len() {
-                            let spell = self.spells[idx].clone();
+                if let Some(idx) = selected {
+                    if idx < self.spells.len() {
+                        let spell = self.spells[idx].clone();
 
-                            ui.heading(&spell.name);
-                            ui.separator();
+                        ui.heading(&spell.name);
+                        ui.separator();
 
-                            ui.horizontal(|ui| {
-                                if ui.button("✏️ Edit").clicked() {
-                                    action = Some((idx, "edit"));
-                                }
-                                if ui.button("🗑️ Delete").clicked() {
-                                    action = Some((idx, "delete"));
-                                }
-                                if ui.button("📋 Duplicate").clicked() {
-                                    action = Some((idx, "duplicate"));
-                                }
-                                if ui.button("📤 Export").clicked() {
-                                    action = Some((idx, "export"));
-                                }
-                            });
-
-                            ui.separator();
-
-                            // Phase 3C: Spell preview
-                            if self.spells_show_preview {
-                                self.show_spell_preview(ui, &spell);
-                            } else {
-                                egui::ScrollArea::vertical().show(ui, |ui| {
-                                    ui.group(|ui| {
-                                        ui.label(format!("ID: {}", spell.id));
-                                        ui.label(format!("School: {:?}", spell.school));
-                                        ui.label(format!("Level: {}", spell.level));
-                                        ui.label(format!("SP Cost: {}", spell.sp_cost));
-                                        ui.label(format!("Gem Cost: {}", spell.gem_cost));
-                                        ui.label(format!("Context: {:?}", spell.context));
-                                        ui.label(format!("Target: {:?}", spell.target));
-                                        ui.separator();
-                                        ui.label("Description:");
-                                        ui.label(&spell.description);
-                                    });
-                                });
+                        ui.horizontal(|ui| {
+                            if ui.button("✏️ Edit").clicked() {
+                                action = Some((idx, "edit"));
                             }
-                        }
-                    } else {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(100.0);
-                            ui.label("Select a spell to view details");
+                            if ui.button("🗑️ Delete").clicked() {
+                                action = Some((idx, "delete"));
+                            }
+                            if ui.button("📋 Duplicate").clicked() {
+                                action = Some((idx, "duplicate"));
+                            }
+                            if ui.button("📤 Export").clicked() {
+                                action = Some((idx, "export"));
+                            }
                         });
+
+                        ui.separator();
+
+                        // Phase 3C: Spell preview
+                        if self.spells_show_preview {
+                            self.show_spell_preview(ui, &spell);
+                        } else {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                ui.group(|ui| {
+                                    ui.label(format!("ID: {}", spell.id));
+                                    ui.label(format!("School: {:?}", spell.school));
+                                    ui.label(format!("Level: {}", spell.level));
+                                    ui.label(format!("SP Cost: {}", spell.sp_cost));
+                                    ui.label(format!("Gem Cost: {}", spell.gem_cost));
+                                    ui.label(format!("Context: {:?}", spell.context));
+                                    ui.label(format!("Target: {:?}", spell.target));
+                                    ui.separator();
+                                    ui.label("Description:");
+                                    ui.label(&spell.description);
+                                });
+                            });
+                        }
                     }
-                });
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(100.0);
+                        ui.label("Select a spell to view details");
+                    });
+                }
+            });
         });
 
         // Apply selection change
@@ -4070,75 +4065,75 @@ impl CampaignBuilderApp {
             ui.vertical(|ui| {
                 ui.set_height(height);
                 ui.set_min_width(ui.available_width());
-                    if let Some(idx) = selected {
-                        if idx < self.monsters.len() {
-                            let monster = self.monsters[idx].clone();
+                if let Some(idx) = selected {
+                    if idx < self.monsters.len() {
+                        let monster = self.monsters[idx].clone();
 
-                            ui.heading(&monster.name);
-                            ui.separator();
+                        ui.heading(&monster.name);
+                        ui.separator();
 
-                            ui.horizontal(|ui| {
-                                if ui.button("✏️ Edit").clicked() {
-                                    action = Some((idx, "edit"));
-                                }
-                                if ui.button("🗑️ Delete").clicked() {
-                                    action = Some((idx, "delete"));
-                                }
-                                if ui.button("📋 Duplicate").clicked() {
-                                    action = Some((idx, "duplicate"));
-                                }
-                                if ui.button("📤 Export").clicked() {
-                                    action = Some((idx, "export"));
-                                }
-                            });
-
-                            ui.separator();
-
-                            // Phase 3C: Monster preview
-                            if self.monsters_show_preview {
-                                self.show_monster_preview(ui, &monster);
-                            } else {
-                                egui::ScrollArea::vertical().show(ui, |ui| {
-                                    ui.group(|ui| {
-                                        ui.label(format!("ID: {}", monster.id));
-                                        ui.label(format!("HP: {}", monster.hp));
-                                        ui.label(format!("AC: {}", monster.ac));
-                                        ui.label(format!("Attacks: {}", monster.attacks.len()));
-                                        ui.label(format!("Undead: {}", monster.is_undead));
-                                        ui.label(format!(
-                                            "Can Regenerate: {}!",
-                                            monster.can_regenerate
-                                        ));
-                                        ui.label(format!("Can Advance: {}!", monster.can_advance));
-                                        ui.label(format!(
-                                            "Magic Resistance: {}%!",
-                                            monster.magic_resistance,
-                                        ));
-                                        ui.separator();
-                                        ui.label("Loot:");
-                                        ui.label(format!(
-                                            "  Gold: {}-{} gp",
-                                            monster.loot.gold_min, monster.loot.gold_max
-                                        ));
-                                        ui.label(format!(
-                                            "  Gems: {}-{}",
-                                            monster.loot.gems_min, monster.loot.gems_max
-                                        ));
-                                        ui.label(format!(
-                                            "  Experience: {} XP",
-                                            monster.loot.experience
-                                        ));
-                                    });
-                                });
+                        ui.horizontal(|ui| {
+                            if ui.button("✏️ Edit").clicked() {
+                                action = Some((idx, "edit"));
                             }
-                        }
-                    } else {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(100.0);
-                            ui.label("Select a monster to view details");
+                            if ui.button("🗑️ Delete").clicked() {
+                                action = Some((idx, "delete"));
+                            }
+                            if ui.button("📋 Duplicate").clicked() {
+                                action = Some((idx, "duplicate"));
+                            }
+                            if ui.button("📤 Export").clicked() {
+                                action = Some((idx, "export"));
+                            }
                         });
+
+                        ui.separator();
+
+                        // Phase 3C: Monster preview
+                        if self.monsters_show_preview {
+                            self.show_monster_preview(ui, &monster);
+                        } else {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                ui.group(|ui| {
+                                    ui.label(format!("ID: {}", monster.id));
+                                    ui.label(format!("HP: {}", monster.hp));
+                                    ui.label(format!("AC: {}", monster.ac));
+                                    ui.label(format!("Attacks: {}", monster.attacks.len()));
+                                    ui.label(format!("Undead: {}", monster.is_undead));
+                                    ui.label(format!(
+                                        "Can Regenerate: {}!",
+                                        monster.can_regenerate
+                                    ));
+                                    ui.label(format!("Can Advance: {}!", monster.can_advance));
+                                    ui.label(format!(
+                                        "Magic Resistance: {}%!",
+                                        monster.magic_resistance,
+                                    ));
+                                    ui.separator();
+                                    ui.label("Loot:");
+                                    ui.label(format!(
+                                        "  Gold: {}-{} gp",
+                                        monster.loot.gold_min, monster.loot.gold_max
+                                    ));
+                                    ui.label(format!(
+                                        "  Gems: {}-{}",
+                                        monster.loot.gems_min, monster.loot.gems_max
+                                    ));
+                                    ui.label(format!(
+                                        "  Experience: {} XP",
+                                        monster.loot.experience
+                                    ));
+                                });
+                            });
+                        }
                     }
-                });
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(100.0);
+                        ui.label("Select a monster to view details");
+                    });
+                }
+            });
         });
 
         // Apply selection change
@@ -6729,17 +6724,20 @@ impl CampaignBuilderApp {
             let quests_path = dir.join(&self.campaign.quests_file);
             if quests_path.exists() {
                 match fs::read_to_string(&quests_path) {
-                    Ok(contents) => match ron::from_str::<Vec<antares::domain::quest::Quest>>(&contents) {
-                        Ok(quests) => {
-                            self.quests = quests;
-                            self.quest_editor_state.load_quests(self.quests.clone());
-                            self.status_message = format!("Loaded {} quests", self.quests.len());
+                    Ok(contents) => {
+                        match ron::from_str::<Vec<antares::domain::quest::Quest>>(&contents) {
+                            Ok(quests) => {
+                                self.quests = quests;
+                                self.quest_editor_state.load_quests(self.quests.clone());
+                                self.status_message =
+                                    format!("Loaded {} quests", self.quests.len());
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to parse quests from {:?}: {}", quests_path, e);
+                                return Err(CampaignError::Deserialization(e));
+                            }
                         }
-                        Err(e) => {
-                            eprintln!("Failed to parse quests from {:?}: {}", quests_path, e);
-                            return Err(CampaignError::Deserialization(e));
-                        }
-                    },
+                    }
                     Err(e) => {
                         eprintln!("Failed to read quests file {:?}: {}", quests_path, e);
                         return Err(CampaignError::Io(e));
@@ -7344,6 +7342,17 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load dialogues from campaign file
+    fn load_dialogues(&mut self) -> Result<(), CampaignError> {
+        if let Some(dir) = &self.campaign_dir {
+            let dialogue_path = dir.join(&self.campaign.dialogue_file);
+            if dialogue_path.exists() {
+                self.load_dialogues_from_file(&dialogue_path)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Load dialogues from file
     fn load_dialogues_from_file(&mut self, path: &std::path::Path) -> Result<(), CampaignError> {
         match std::fs::read_to_string(path) {
@@ -7351,7 +7360,8 @@ impl CampaignBuilderApp {
                 Ok(dialogues) => {
                     self.dialogues = dialogues;
                     // Update editor state
-                    self.dialogue_editor_state.load_dialogues(self.dialogues.clone());
+                    self.dialogue_editor_state
+                        .load_dialogues(self.dialogues.clone());
                     self.status_message = format!("Loaded {} dialogues", self.dialogues.len());
                     Ok(())
                 }
