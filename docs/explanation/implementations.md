@@ -2,6 +2,66 @@
 
 This document tracks completed implementations and changes to the Antares project.
 
+## ClassDefinition Test Updates (2024-12-01)
+
+**Objective**: Update tests, data files, and documentation examples to include all ClassDefinition fields, ensuring completeness and fixing compilation errors in doc examples.
+
+### Changes Implemented
+
+#### 1. Updated data/classes.ron
+
+**File**: `data/classes.ron`
+
+**Issue**: The RON file was missing the `description`, `starting_weapon_id`, `starting_armor_id`, and `starting_items` fields for all class definitions, relying on serde defaults.
+
+**Fix**: Added appropriate descriptions and default values (None for IDs, empty vec for items) to all six class definitions (Knight, Paladin, Archer, Cleric, Sorcerer, Robber).
+
+**Impact**: Data file now explicitly defines all fields, improving clarity and maintainability.
+
+#### 2. Updated Documentation Examples in src/domain/classes.rs
+
+**File**: `src/domain/classes.rs`
+
+**Issue**: Doc examples for `can_cast_spells`, `disablement_mask`, and `has_ability` methods were missing the `description`, `starting_weapon_id`, `starting_armor_id`, and `starting_items` fields in ClassDefinition initializers, causing compilation errors.
+
+**Fix**: Added the missing fields with appropriate default values to all doc example code blocks.
+
+**Impact**: Documentation examples now compile correctly and serve as runnable tests.
+
+#### 3. Updated RON Data in Test Functions
+
+**File**: `src/domain/classes.rs`
+
+**Issue**: Test functions using RON strings (e.g., `test_class_database_load_from_string`, `test_class_database_get_class`, etc.) were missing the same fields, potentially causing issues if serde defaults were not applied consistently.
+
+**Fix**: Added the missing fields to all RON data strings in test functions, ensuring explicit completeness.
+
+**Impact**: Tests are more robust and consistent with the full struct definition.
+
+### Testing
+
+All existing tests pass:
+
+- ✅ `cargo fmt --all` - Code formatted successfully
+- ✅ `cargo check --all-targets --all-features` - Compilation successful
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- ✅ `cargo test --all-features` - 354 tests passed
+
+### Architecture Compliance
+
+- Used existing type aliases (`ItemId`) and patterns
+- No changes to core domain structures (ClassDefinition remains unchanged)
+- Maintained RON format for data files as per architecture.md Section 7.1
+- All fields now properly initialized in examples and tests
+- Followed serde default attribute usage for optional fields
+
+### Success Criteria Met
+
+- ✅ All ClassDefinition initializers include all required fields
+- ✅ Data file loads successfully with explicit field definitions
+- ✅ Documentation examples compile without errors
+- ✅ All quality gates pass
+
 ## Phase 1: Critical Quest Editor Fixes (2025-11-25)
 
 **Objective**: Restore basic quest editing functionality in the Campaign Builder SDK.
@@ -38,6 +98,7 @@ if header.header_response.clicked() || header.body_returned.is_some() {
 #### 1.3 Fixed Quest ID Auto-Population
 
 **Files**:
+
 - `sdk/campaign_builder/src/main.rs` (call site)
 - `sdk/campaign_builder/src/quest_editor.rs` (already had the parameter)
 
@@ -60,6 +121,7 @@ The `start_new_quest` method already accepted a `next_id: String` parameter and 
 ### Testing
 
 All existing tests pass:
+
 - ✅ `cargo fmt --all` - Code formatted successfully
 - ✅ `cargo check --all-targets --all-features` - Compilation successful
 - ✅ `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
@@ -85,6 +147,7 @@ Updated test in `main.rs` to pass the next available ID to `start_new_quest()` m
 ### Next Steps
 
 Phase 2 of the SDK UI Improvements plan can now proceed, focusing on:
+
 - Classes Editor enhancements
 - Pre-populating classes from campaign directory
 - Adding description and starting equipment fields
