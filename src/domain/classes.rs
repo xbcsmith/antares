@@ -146,12 +146,16 @@ impl ClassDefinition {
     /// let knight = ClassDefinition {
     ///     id: "knight".to_string(),
     ///     name: "Knight".to_string(),
+    ///     description: "A brave warrior".to_string(),
     ///     hp_die: DiceRoll::new(1, 10, 0),
     ///     spell_school: None,
     ///     is_pure_caster: false,
     ///     spell_stat: None,
     ///     disablement_bit: 1,
     ///     special_abilities: vec![],
+    ///     starting_weapon_id: None,
+    ///     starting_armor_id: None,
+    ///     starting_items: vec![],
     /// };
     ///
     /// assert!(!knight.can_cast_spells());
@@ -171,12 +175,16 @@ impl ClassDefinition {
     /// let knight = ClassDefinition {
     ///     id: "knight".to_string(),
     ///     name: "Knight".to_string(),
+    ///     description: "A brave warrior".to_string(),
     ///     hp_die: DiceRoll::new(1, 10, 0),
     ///     spell_school: None,
     ///     is_pure_caster: false,
     ///     spell_stat: None,
     ///     disablement_bit: 0,
     ///     special_abilities: vec![],
+    ///     starting_weapon_id: None,
+    ///     starting_armor_id: None,
+    ///     starting_items: vec![],
     /// };
     ///
     /// assert_eq!(knight.disablement_mask(), 0b00000001);
@@ -196,12 +204,16 @@ impl ClassDefinition {
     /// let robber = ClassDefinition {
     ///     id: "robber".to_string(),
     ///     name: "Robber".to_string(),
+    ///     description: "A cunning rogue".to_string(),
     ///     hp_die: DiceRoll::new(1, 6, 0),
     ///     spell_school: None,
     ///     is_pure_caster: false,
     ///     spell_stat: None,
     ///     disablement_bit: 5,
     ///     special_abilities: vec!["backstab".to_string(), "disarm_trap".to_string()],
+    ///     starting_weapon_id: None,
+    ///     starting_armor_id: None,
+    ///     starting_items: vec![],
     /// };
     ///
     /// assert!(robber.has_ability("backstab"));
@@ -285,12 +297,16 @@ impl ClassDatabase {
     ///     (
     ///         id: "knight",
     ///         name: "Knight",
+    ///         description: "A brave warrior",
     ///         hp_die: (count: 1, sides: 10, bonus: 0),
     ///         spell_school: None,
     ///         is_pure_caster: false,
     ///         spell_stat: None,
     ///         disablement_bit: 0,
     ///         special_abilities: [],
+    ///         starting_weapon_id: None,
+    ///         starting_armor_id: None,
+    ///         starting_items: [],
     ///     ),
     /// ]"#;
     ///
@@ -332,12 +348,16 @@ impl ClassDatabase {
     ///     (
     ///         id: "knight",
     ///         name: "Knight",
+    ///         description: "A brave warrior",
     ///         hp_die: (count: 1, sides: 10, bonus: 0),
     ///         spell_school: None,
     ///         is_pure_caster: false,
     ///         spell_stat: None,
     ///         disablement_bit: 0,
     ///         special_abilities: [],
+    ///         starting_weapon_id: None,
+    ///         starting_armor_id: None,
+    ///         starting_items: [],
     ///     ),
     /// ]"#;
     ///
@@ -360,12 +380,16 @@ impl ClassDatabase {
     ///     (
     ///         id: "knight",
     ///         name: "Knight",
+    ///         description: "A brave warrior",
     ///         hp_die: (count: 1, sides: 10, bonus: 0),
     ///         spell_school: None,
     ///         is_pure_caster: false,
     ///         spell_stat: None,
     ///         disablement_bit: 0,
     ///         special_abilities: [],
+    ///         starting_weapon_id: None,
+    ///         starting_armor_id: None,
+    ///         starting_items: [],
     ///     ),
     /// ]"#;
     ///
@@ -527,22 +551,30 @@ mod tests {
             (
                 id: "knight",
                 name: "Knight",
+                description: "A brave warrior",
                 hp_die: (count: 1, sides: 10, bonus: 0),
                 spell_school: None,
                 is_pure_caster: false,
                 spell_stat: None,
                 disablement_bit: 0,
                 special_abilities: ["multiple_attacks"],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
             (
                 id: "sorcerer",
                 name: "Sorcerer",
+                description: "A master of arcane magic",
                 hp_die: (count: 1, sides: 4, bonus: 0),
                 spell_school: Some(Sorcerer),
                 is_pure_caster: true,
                 spell_stat: Some(Intellect),
                 disablement_bit: 4,
                 special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
         ]"#;
 
@@ -558,12 +590,16 @@ mod tests {
             (
                 id: "knight",
                 name: "Knight",
+                description: "A brave warrior",
                 hp_die: (count: 1, sides: 10, bonus: 0),
                 spell_school: None,
                 is_pure_caster: false,
                 spell_stat: None,
                 disablement_bit: 0,
                 special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
         ]"#;
 
@@ -587,22 +623,30 @@ mod tests {
             (
                 id: "knight",
                 name: "Knight",
+                description: "A brave warrior",
                 hp_die: (count: 1, sides: 10, bonus: 0),
                 spell_school: None,
                 is_pure_caster: false,
                 spell_stat: None,
                 disablement_bit: 0,
                 special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
             (
                 id: "cleric",
                 name: "Cleric",
+                description: "A devoted priest",
                 hp_die: (count: 1, sides: 6, bonus: 0),
                 spell_school: Some(Cleric),
                 is_pure_caster: true,
                 spell_stat: Some(Personality),
                 disablement_bit: 3,
                 special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
         ]"#;
 
@@ -617,22 +661,30 @@ mod tests {
             (
                 id: "knight",
                 name: "Knight",
+                description: "A brave warrior",
                 hp_die: (count: 1, sides: 10, bonus: 0),
                 spell_school: None,
                 is_pure_caster: false,
                 spell_stat: None,
                 disablement_bit: 0,
                 special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
             (
                 id: "knight",
                 name: "Knight Duplicate",
+                description: "A duplicate knight",
                 hp_die: (count: 1, sides: 8, bonus: 0),
                 spell_school: None,
                 is_pure_caster: false,
                 spell_stat: None,
                 disablement_bit: 1,
                 special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
         ]"#;
 
@@ -646,22 +698,30 @@ mod tests {
             (
                 id: "knight",
                 name: "Knight",
+                description: "A brave warrior",
                 hp_die: (count: 1, sides: 10, bonus: 0),
                 spell_school: None,
                 is_pure_caster: false,
                 spell_stat: None,
                 disablement_bit: 0,
                 special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
             (
                 id: "paladin",
                 name: "Paladin",
+                description: "A holy warrior",
                 hp_die: (count: 1, sides: 8, bonus: 0),
                 spell_school: Some(Cleric),
                 is_pure_caster: false,
                 spell_stat: Some(Personality),
                 disablement_bit: 0,
                 special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
         ]"#;
 
@@ -678,12 +738,16 @@ mod tests {
             (
                 id: "broken_caster",
                 name: "Broken Caster",
+                description: "A broken caster",
                 hp_die: (count: 1, sides: 6, bonus: 0),
                 spell_school: Some(Cleric),
                 is_pure_caster: true,
                 spell_stat: None,
                 disablement_bit: 0,
                 special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
         ]"#;
 
@@ -697,12 +761,16 @@ mod tests {
             (
                 id: "broken_knight",
                 name: "Broken Knight",
+                description: "A broken knight",
                 hp_die: (count: 1, sides: 100, bonus: 0),
                 spell_school: None,
                 is_pure_caster: false,
                 spell_stat: None,
                 disablement_bit: 0,
                 special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
         ]"#;
 
@@ -716,12 +784,16 @@ mod tests {
             (
                 id: "broken_knight",
                 name: "Broken Knight",
+                description: "A broken knight",
                 hp_die: (count: 1, sides: 10, bonus: 0),
                 spell_school: None,
                 is_pure_caster: false,
                 spell_stat: None,
                 disablement_bit: 10,
                 special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
             ),
         ]"#;
 
