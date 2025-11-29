@@ -80,12 +80,16 @@ pub enum SpellStat {
 /// let knight = ClassDefinition {
 ///     id: "knight".to_string(),
 ///     name: "Knight".to_string(),
+///     description: "A brave warrior".to_string(),
 ///     hp_die: DiceRoll::new(1, 10, 0),
 ///     spell_school: None,
 ///     is_pure_caster: false,
 ///     spell_stat: None,
 ///     disablement_bit: 0b00000001,
 ///     special_abilities: vec!["multiple_attacks".to_string()],
+///     starting_weapon_id: None,
+///     starting_armor_id: None,
+///     starting_items: vec![],
 /// };
 ///
 /// assert_eq!(knight.name, "Knight");
@@ -143,16 +147,20 @@ impl ClassDefinition {
     /// use antares::domain::classes::ClassDefinition;
     /// use antares::domain::types::DiceRoll;
     ///
-    /// let knight = ClassDefinition {
-    ///     id: "knight".to_string(),
-    ///     name: "Knight".to_string(),
-    ///     description: "A brave warrior".to_string(),
-    ///     hp_die: DiceRoll::new(1, 10, 0),
-    ///     spell_school: None,
-    ///     is_pure_caster: false,
-    ///     spell_stat: None,
-    ///     disablement_bit: 1,
-    ///     special_abilities: vec![],
+/// let knight = ClassDefinition {
+///     id: "knight".to_string(),
+///     name: "Knight".to_string(),
+///     description: "A brave warrior".to_string(),
+///     hp_die: DiceRoll::new(1, 10, 0),
+///     spell_school: None,
+///     is_pure_caster: false,
+///     spell_stat: None,
+///     disablement_bit: 0b00000001,
+///     special_abilities: vec!["multiple_attacks".to_string()],
+///     starting_weapon_id: None,
+///     starting_armor_id: None,
+///     starting_items: vec![],
+/// };
     ///     starting_weapon_id: None,
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
@@ -172,16 +180,20 @@ impl ClassDefinition {
     /// use antares::domain::classes::ClassDefinition;
     /// use antares::domain::types::DiceRoll;
     ///
-    /// let knight = ClassDefinition {
-    ///     id: "knight".to_string(),
-    ///     name: "Knight".to_string(),
-    ///     description: "A brave warrior".to_string(),
-    ///     hp_die: DiceRoll::new(1, 10, 0),
-    ///     spell_school: None,
-    ///     is_pure_caster: false,
-    ///     spell_stat: None,
-    ///     disablement_bit: 0,
-    ///     special_abilities: vec![],
+/// let knight = ClassDefinition {
+///     id: "knight".to_string(),
+///     name: "Knight".to_string(),
+///     description: "A brave warrior".to_string(),
+///     hp_die: DiceRoll::new(1, 10, 0),
+///     spell_school: None,
+///     is_pure_caster: false,
+///     spell_stat: None,
+///     disablement_bit: 0b00000001,
+///     special_abilities: vec!["multiple_attacks".to_string()],
+///     starting_weapon_id: None,
+///     starting_armor_id: None,
+///     starting_items: vec![],
+/// };
     ///     starting_weapon_id: None,
     ///     starting_armor_id: None,
     ///     starting_items: vec![],

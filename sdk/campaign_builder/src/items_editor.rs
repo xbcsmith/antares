@@ -31,15 +31,15 @@ pub enum ItemTypeFilter {
 
 impl ItemTypeFilter {
     pub fn matches(&self, item: &Item) -> bool {
-        match (self, &item.item_type) {
-            (ItemTypeFilter::Weapon, ItemType::Weapon(_)) => true,
-            (ItemTypeFilter::Armor, ItemType::Armor(_)) => true,
-            (ItemTypeFilter::Accessory, ItemType::Accessory(_)) => true,
-            (ItemTypeFilter::Consumable, ItemType::Consumable(_)) => true,
-            (ItemTypeFilter::Ammo, ItemType::Ammo(_)) => true,
-            (ItemTypeFilter::Quest, ItemType::Quest(_)) => true,
-            _ => false,
-        }
+        matches!(
+            (self, &item.item_type),
+            (ItemTypeFilter::Weapon, ItemType::Weapon(_))
+                | (ItemTypeFilter::Armor, ItemType::Armor(_))
+                | (ItemTypeFilter::Accessory, ItemType::Accessory(_))
+                | (ItemTypeFilter::Consumable, ItemType::Consumable(_))
+                | (ItemTypeFilter::Ammo, ItemType::Ammo(_))
+                | (ItemTypeFilter::Quest, ItemType::Quest(_))
+        )
     }
 
     pub fn as_str(&self) -> &str {
@@ -124,6 +124,7 @@ impl ItemsEditorState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,

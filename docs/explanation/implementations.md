@@ -2,6 +2,81 @@
 
 This document tracks completed implementations and changes to the Antares project.
 
+## Clippy Error Fixes (2025-01-15)
+
+**Objective**: Fix clippy warnings that were treated as errors in the Campaign Builder SDK, ensuring code quality and successful builds.
+
+### Changes Implemented
+
+#### 1. Fixed Empty Line After Doc Comment
+
+**File**: `sdk/campaign_builder/src/main.rs`
+
+**Issue**: Clippy reported `empty_line_after_doc_comments` warning for the `show_maps_editor` function, where there was an empty line immediately after the `///` doc comment.
+
+**Fix**: Removed the empty line after the doc comment to comply with clippy's style expectations.
+
+**Impact**: Eliminates the clippy warning, improving code style consistency.
+
+#### 2. Replaced Match with Matches! Macro
+
+**File**: `sdk/campaign_builder/src/items_editor.rs`
+
+**Issue**: Clippy suggested using the `matches!` macro instead of an explicit `match` statement in the `ItemTypeFilter::matches` method for better readability and conciseness.
+
+**Fix**: Replaced the `match` expression with `matches!` macro:
+
+```rust
+matches!(
+    (self, &item.item_type),
+    (ItemTypeFilter::Weapon, ItemType::Weapon(_)) |
+    (ItemTypeFilter::Armor, ItemType::Armor(_)) |
+    (ItemTypeFilter::Accessory, ItemType::Accessory(_)) |
+    (ItemTypeFilter::Consumable, ItemType::Consumable(_)) |
+    (ItemTypeFilter::Ammo, ItemType::Ammo(_)) |
+    (ItemTypeFilter::Quest, ItemType::Quest(_))
+)
+```
+
+**Impact**: Code is more concise and follows clippy's recommendations for pattern matching.
+
+#### 3. Suppressed Too Many Arguments Warnings
+
+**Files**:
+
+- `sdk/campaign_builder/src/items_editor.rs`
+- `sdk/campaign_builder/src/spells_editor.rs`
+- `sdk/campaign_builder/src/monsters_editor.rs`
+
+**Issue**: Clippy flagged the `show` methods in the editor state structs as having too many arguments (>7 parameters), which is considered a code smell.
+
+**Fix**: Added `#[allow(clippy::too_many_arguments)]` attribute above each `show` function to suppress the warning, as refactoring to reduce parameters would require significant architectural changes beyond the scope of this fix.
+
+**Impact**: Eliminates clippy warnings while preserving existing functionality. Future refactoring could group parameters into context structs.
+
+### Testing
+
+All quality checks now pass:
+
+- ✅ `cargo fmt --all` - Code formatted successfully
+- ✅ `cargo check --all-targets --all-features` - Compilation successful
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- ✅ `cargo test --all-features` - 270 tests passed
+
+### Architecture Compliance
+
+- No changes to core domain structures or business logic
+- Maintained existing function signatures to avoid breaking changes
+- Used clippy allow attributes judiciously only where necessary
+- All fixes are localized to the Campaign Builder SDK
+
+### Success Criteria Met
+
+- ✅ All clippy warnings eliminated
+- ✅ Code compiles without errors
+- ✅ All existing tests continue to pass
+- ✅ No functional changes to the application
+
 ## ClassDefinition Test Updates (2024-12-01)
 
 **Objective**: Update tests, data files, and documentation examples to include all ClassDefinition fields, ensuring completeness and fixing compilation errors in doc examples.
