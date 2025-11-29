@@ -78,6 +78,7 @@ impl MonstersEditorState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -330,38 +331,41 @@ impl MonstersEditorState {
                         if self.show_preview {
                             self.show_preview(ui, &monster);
                         } else {
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                ui.group(|ui| {
-                                    ui.label(format!("ID: {}", monster.id));
-                                    ui.label(format!("HP: {}", monster.hp));
-                                    ui.label(format!("AC: {}", monster.ac));
-                                    ui.label(format!("Attacks: {}", monster.attacks.len()));
-                                    ui.label(format!("Undead: {}", monster.is_undead));
-                                    ui.label(format!(
-                                        "Can Regenerate: {}!",
-                                        monster.can_regenerate
-                                    ));
-                                    ui.label(format!("Can Advance: {}!", monster.can_advance));
-                                    ui.label(format!(
-                                        "Magic Resistance: {}%!",
-                                        monster.magic_resistance,
-                                    ));
-                                    ui.separator();
-                                    ui.label("Loot:");
-                                    ui.label(format!(
-                                        "  Gold: {}-{} gp",
-                                        monster.loot.gold_min, monster.loot.gold_max
-                                    ));
-                                    ui.label(format!(
-                                        "  Gems: {}-{}",
-                                        monster.loot.gems_min, monster.loot.gems_max
-                                    ));
-                                    ui.label(format!(
-                                        "  Experience: {} XP",
-                                        monster.loot.experience
-                                    ));
+                            egui::ScrollArea::vertical()
+                                .id_salt("monster_details_scroll")
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    ui.group(|ui| {
+                                        ui.label(format!("ID: {}", monster.id));
+                                        ui.label(format!("HP: {}", monster.hp));
+                                        ui.label(format!("AC: {}", monster.ac));
+                                        ui.label(format!("Attacks: {}", monster.attacks.len()));
+                                        ui.label(format!("Undead: {}", monster.is_undead));
+                                        ui.label(format!(
+                                            "Can Regenerate: {}!",
+                                            monster.can_regenerate
+                                        ));
+                                        ui.label(format!("Can Advance: {}!", monster.can_advance));
+                                        ui.label(format!(
+                                            "Magic Resistance: {}%!",
+                                            monster.magic_resistance,
+                                        ));
+                                        ui.separator();
+                                        ui.label("Loot:");
+                                        ui.label(format!(
+                                            "  Gold: {}-{} gp",
+                                            monster.loot.gold_min, monster.loot.gold_max
+                                        ));
+                                        ui.label(format!(
+                                            "  Gems: {}-{}",
+                                            monster.loot.gems_min, monster.loot.gems_max
+                                        ));
+                                        ui.label(format!(
+                                            "  Experience: {} XP",
+                                            monster.loot.experience
+                                        ));
+                                    });
                                 });
-                            });
                         }
                     }
                 } else {
@@ -884,7 +888,7 @@ impl MonstersEditorState {
         }
     }
 
-    fn calculate_monster_xp(&self, monster: &MonsterDefinition) -> u32 {
+    pub fn calculate_monster_xp(&self, monster: &MonsterDefinition) -> u32 {
         let mut xp = monster.hp as u32 * 10;
 
         if monster.ac < 10 {

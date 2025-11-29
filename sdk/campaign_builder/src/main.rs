@@ -66,7 +66,7 @@ fn main() -> Result<(), eframe::Error> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 720.0])
             .with_min_inner_size([800.0, 600.0])
-            .with_title("Antares Campaign Builder - Phase 2"),
+            .with_title("Antares Campaign Builder"),
 
         renderer: eframe::Renderer::default(),
         ..Default::default()
@@ -2315,7 +2315,6 @@ impl CampaignBuilderApp {
     }
 
     /// Show maps editor with integrated map editor
-
     fn show_maps_editor(&mut self, ui: &mut egui::Ui) {
         match self.maps_editor_mode {
             EditorMode::List => self.show_maps_list(ui),
@@ -2649,221 +2648,18 @@ impl CampaignBuilderApp {
 
     /// Show quests editor (Phase 4A: Full Quest Editor Integration)
     fn show_quests_editor(&mut self, ui: &mut egui::Ui) {
-        ui.heading("📜 Quests Editor");
-        ui.add_space(5.0);
-
-        // Sync quests between app and editor state only in List mode
-        // This prevents overwriting temporary quests during creation
-        if self.quest_editor_state.mode == quest_editor::QuestEditorMode::List {
-            self.quest_editor_state.quests = self.quests.clone();
-        }
-
-        // Toolbar
-        ui.horizontal(|ui| {
-            if ui.button("➕ New Quest").clicked() {
-                let next_id = self.next_available_quest_id();
-                self.quest_editor_state.start_new_quest(next_id.to_string());
-                self.unsaved_changes = true;
-            }
-
-            ui.separator();
-
-            if ui.button("💾 Save Quests").clicked() {
-                if let Err(e) = self.save_quests() {
-                    eprintln!("Failed to save quests: {}", e);
-                }
-            }
-
-            if ui.button("📂 Load Quests").clicked() {
-                if let Err(e) = self.load_quests() {
-                    eprintln!("Failed to load quests: {}", e);
-                }
-            }
-
-            ui.separator();
-
-            if ui.button("📥 Import Quest").clicked() {
-                self.quests_show_import_dialog = true;
-            }
-
-            ui.separator();
-
-            // File I/O buttons
-            if ui.button("📂 Load from File").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<Quest>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_quests) => {
-                            if self.file_load_merge_mode {
-                                for quest in loaded_quests {
-                                    if let Some(existing) =
-                                        self.quests.iter_mut().find(|q| q.id == quest.id)
-                                    {
-                                        *existing = quest;
-                                    } else {
-                                        self.quests.push(quest);
-                                    }
-                                }
-                            } else {
-                                self.quests = loaded_quests;
-                            }
-                            self.quest_editor_state.quests = self.quests.clone();
-                            self.unsaved_changes = true;
-                            self.status_message = format!("Loaded quests from: {}", path.display());
-                        }
-                        Err(e) => {
-                            self.status_message = format!("Failed to load quests: {}", e);
-                        }
-                    }
-                }
-            }
-
-            ui.checkbox(&mut self.file_load_merge_mode, "Merge");
-            ui.label(if self.file_load_merge_mode {
-                "(adds to existing)"
-            } else {
-                "(replaces all)"
-            });
-
-            if ui.button("💾 Save to File").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("quests.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(&self.quests, Default::default()) {
-                        Ok(contents) => match std::fs::write(&path, contents) {
-                            Ok(_) => {
-                                self.status_message =
-                                    format!("Saved quests to: {}", path.display());
-                            }
-                            Err(e) => {
-                                self.status_message = format!("Failed to save quests: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            self.status_message = format!("Failed to serialize quests: {}", e);
-                        }
-                    }
-                }
-            }
-
-            ui.separator();
-
-            if let Some(selected_idx) = self.quest_editor_state.selected_quest {
-                if selected_idx < self.quest_editor_state.quests.len() {
-                    if ui.button("📤 Export Quest").clicked() {
-                        let quest = &self.quest_editor_state.quests[selected_idx];
-                        match ron::ser::to_string_pretty(quest, Default::default()) {
-                            Ok(ron_string) => {
-                                self.quests_import_buffer = ron_string.clone();
-                                ui.ctx().copy_text(ron_string);
-                            }
-                            Err(e) => eprintln!("Failed to export quest: {}", e),
-                        }
-                    }
-                }
-            }
-
-            ui.separator();
-
-            ui.checkbox(&mut self.quests_show_preview, "Show Preview");
-        });
-
-        ui.separator();
-
-        // Search filter
-        ui.horizontal(|ui| {
-            ui.label("🔍 Search:");
-            ui.text_edit_singleline(&mut self.quest_editor_state.search_filter);
-        });
-
-        ui.separator();
-
-        // Main content - split view or form editor
-        match self.quest_editor_state.mode {
-            quest_editor::QuestEditorMode::List => {
-                // Split view: list on left, preview on right
-                egui::SidePanel::left("quest_list_panel")
-                    .resizable(true)
-                    .default_width(300.0)
-                    .show_inside(ui, |ui| {
-                        self.show_quest_list(ui);
-                    });
-
-                egui::CentralPanel::default().show_inside(ui, |ui| {
-                    if self.quests_show_preview {
-                        self.show_quest_preview(ui);
-                    } else {
-                        ui.centered_and_justified(|ui| {
-                            ui.label("Select a quest to view details or create a new quest");
-                        });
-                    }
-                });
-            }
-            quest_editor::QuestEditorMode::Creating | quest_editor::QuestEditorMode::Editing => {
-                // Full-screen quest form editor
-                self.show_quest_form(ui);
-            }
-        }
-
-        // Import dialog
-        if self.quests_show_import_dialog {
-            egui::Window::new("Import Quest from RON")
-                .collapsible(false)
-                .resizable(true)
-                .default_size([600.0, 400.0])
-                .show(ui.ctx(), |ui| {
-                    ui.label("Paste RON-formatted quest data:");
-                    ui.add_space(5.0);
-
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .id_salt("quests_list_scroll")
-                        .show(ui, |ui| {
-                            ui.add(
-                                egui::TextEdit::multiline(&mut self.quests_import_buffer)
-                                    .desired_width(f32::INFINITY)
-                                    .font(egui::TextStyle::Monospace),
-                            );
-                        });
-
-                    ui.add_space(10.0);
-
-                    ui.horizontal(|ui| {
-                        if ui.button("✅ Import").clicked() {
-                            match ron::from_str::<Quest>(&self.quests_import_buffer) {
-                                Ok(mut quest) => {
-                                    // Assign new ID to avoid conflicts
-                                    quest.id = self.next_available_quest_id();
-                                    self.quests.push(quest);
-                                    self.unsaved_changes = true;
-                                    self.quests_import_buffer.clear();
-                                    self.quests_show_import_dialog = false;
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to parse quest RON: {}", e);
-                                }
-                            }
-                        }
-
-                        if ui.button("❌ Cancel").clicked() {
-                            self.quests_show_import_dialog = false;
-                            self.quests_import_buffer.clear();
-                        }
-                    });
-                });
-        }
-
-        // Sync back any changes
-        self.quests = self.quest_editor_state.quests.clone();
+        self.quest_editor_state.show(
+            ui,
+            &mut self.quests,
+            &self.items,
+            &self.monsters,
+            &self.maps,
+            self.campaign_dir.as_ref(),
+            &self.campaign.quests_file,
+            &mut self.unsaved_changes,
+            &mut self.status_message,
+            &mut self.file_load_merge_mode,
+        );
     }
 
     /// Show quest list view
@@ -5808,19 +5604,31 @@ mod tests {
     #[test]
     fn test_editor_mode_transitions() {
         let mut app = CampaignBuilderApp::default();
-        assert_eq!(app.items_editor_mode, EditorMode::List);
+        assert_eq!(
+            app.items_editor_state.mode,
+            items_editor::ItemsEditorMode::List
+        );
 
         // Simulate adding an item
-        app.items_editor_mode = EditorMode::Add;
-        assert_eq!(app.items_editor_mode, EditorMode::Add);
+        app.items_editor_state.mode = items_editor::ItemsEditorMode::Add;
+        assert_eq!(
+            app.items_editor_state.mode,
+            items_editor::ItemsEditorMode::Add
+        );
 
         // Simulate editing an item
-        app.items_editor_mode = EditorMode::Edit;
-        assert_eq!(app.items_editor_mode, EditorMode::Edit);
+        app.items_editor_state.mode = items_editor::ItemsEditorMode::Edit;
+        assert_eq!(
+            app.items_editor_state.mode,
+            items_editor::ItemsEditorMode::Edit
+        );
 
         // Return to list
-        app.items_editor_mode = EditorMode::List;
-        assert_eq!(app.items_editor_mode, EditorMode::List);
+        app.items_editor_state.mode = items_editor::ItemsEditorMode::List;
+        assert_eq!(
+            app.items_editor_state.mode,
+            items_editor::ItemsEditorMode::List
+        );
     }
 
     #[test]
@@ -5862,27 +5670,36 @@ mod tests {
     fn test_items_data_structure_initialization() {
         let app = CampaignBuilderApp::default();
         assert_eq!(app.items.len(), 0);
-        assert_eq!(app.items_search, "");
-        assert_eq!(app.items_selected, None);
-        assert_eq!(app.items_editor_mode, EditorMode::List);
+        assert_eq!(app.items_editor_state.search_query, "");
+        assert_eq!(app.items_editor_state.selected_item, None);
+        assert_eq!(
+            app.items_editor_state.mode,
+            items_editor::ItemsEditorMode::List
+        );
     }
 
     #[test]
     fn test_spells_data_structure_initialization() {
         let app = CampaignBuilderApp::default();
         assert_eq!(app.spells.len(), 0);
-        assert_eq!(app.spells_search, "");
-        assert_eq!(app.spells_selected, None);
-        assert_eq!(app.spells_editor_mode, EditorMode::List);
+        assert_eq!(app.spells_editor_state.search_query, "");
+        assert_eq!(app.spells_editor_state.selected_spell, None);
+        assert_eq!(
+            app.spells_editor_state.mode,
+            spells_editor::SpellsEditorMode::List
+        );
     }
 
     #[test]
     fn test_monsters_data_structure_initialization() {
         let app = CampaignBuilderApp::default();
         assert_eq!(app.monsters.len(), 0);
-        assert_eq!(app.monsters_search, "");
-        assert_eq!(app.monsters_selected, None);
-        assert_eq!(app.monsters_editor_mode, EditorMode::List);
+        assert_eq!(app.monsters_editor_state.search_query, "");
+        assert_eq!(app.monsters_editor_state.selected_monster, None);
+        assert_eq!(
+            app.monsters_editor_state.mode,
+            monsters_editor::MonstersEditorMode::List
+        );
     }
 
     #[test]
@@ -6067,7 +5884,7 @@ mod tests {
 
         // Delete first stage
         assert_eq!(app.quest_editor_state.quests[0].stages.len(), 2);
-        let result = app.quest_editor_state.delete_stage(0, 0);
+        let result = app.quest_editor_state.delete_stage(0, 0, 0);
         assert!(result.is_ok());
         assert_eq!(app.quest_editor_state.quests[0].stages.len(), 1);
         assert_eq!(app.quest_editor_state.quests[0].stages[0].name, "Stage 2");
@@ -6200,16 +6017,16 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
 
         // Test with no quests
-        let result = app.quest_editor_state.edit_stage(0, 0);
+        let result = app.quest_editor_state.edit_stage(0, 0, 0);
         assert!(result.is_err());
 
-        let result = app.quest_editor_state.edit_objective(0, 0, 0);
+        let result = app.quest_editor_state.edit_objective(0, 0, 0, 0);
         assert!(result.is_err());
 
-        let result = app.quest_editor_state.delete_stage(0, 0);
+        let result = app.quest_editor_state.delete_stage(0, 0, 0);
         assert!(result.is_err());
 
-        let result = app.quest_editor_state.delete_objective(0, 0, 0);
+        let result = app.quest_editor_state.delete_objective(0, 0, 0, 0);
         assert!(result.is_err());
     }
 
@@ -6641,10 +6458,8 @@ mod tests {
 
     #[test]
     fn test_items_filter_magical() {
-        let mut app = CampaignBuilderApp {
-            items_filter_magical: Some(true),
-            ..Default::default()
-        };
+        let mut app = CampaignBuilderApp::default();
+        app.items_editor_state.filter_magical = Some(true);
 
         let mut magical_item = CampaignBuilderApp::default_item();
         magical_item.id = 1;
@@ -6890,30 +6705,36 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
 
         // Set all classes enabled
-        app.items_edit_buffer.disablements = Disablement(0b0011_1111);
+        app.items_editor_state.edit_buffer.disablements = Disablement(0b0011_1111);
 
         assert!(app
-            .items_edit_buffer
+            .items_editor_state
+            .edit_buffer
             .disablements
             .can_use_class(Disablement::KNIGHT));
         assert!(app
-            .items_edit_buffer
+            .items_editor_state
+            .edit_buffer
             .disablements
             .can_use_class(Disablement::PALADIN));
         assert!(app
-            .items_edit_buffer
+            .items_editor_state
+            .edit_buffer
             .disablements
             .can_use_class(Disablement::ARCHER));
         assert!(app
-            .items_edit_buffer
+            .items_editor_state
+            .edit_buffer
             .disablements
             .can_use_class(Disablement::CLERIC));
         assert!(app
-            .items_edit_buffer
+            .items_editor_state
+            .edit_buffer
             .disablements
             .can_use_class(Disablement::SORCERER));
         assert!(app
-            .items_edit_buffer
+            .items_editor_state
+            .edit_buffer
             .disablements
             .can_use_class(Disablement::ROBBER));
     }
@@ -6923,19 +6744,22 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
 
         // Only knight and paladin
-        app.items_edit_buffer.disablements =
+        app.items_editor_state.edit_buffer.disablements =
             Disablement(Disablement::KNIGHT | Disablement::PALADIN);
 
         assert!(app
-            .items_edit_buffer
+            .items_editor_state
+            .edit_buffer
             .disablements
             .can_use_class(Disablement::KNIGHT));
         assert!(app
-            .items_edit_buffer
+            .items_editor_state
+            .edit_buffer
             .disablements
             .can_use_class(Disablement::PALADIN));
         assert!(!app
-            .items_edit_buffer
+            .items_editor_state
+            .edit_buffer
             .disablements
             .can_use_class(Disablement::SORCERER));
     }
@@ -7029,12 +6853,16 @@ mod tests {
         ));
 
         // Apply Cleric filter
-        app.spells_filter_school = Some(SpellSchool::Cleric);
+        app.spells_editor_state.filter_school = Some(SpellSchool::Cleric);
 
         let filtered: Vec<_> = app
             .spells
             .iter()
-            .filter(|s| app.spells_filter_school.is_none_or(|f| s.school == f))
+            .filter(|s| {
+                app.spells_editor_state
+                    .filter_school
+                    .is_none_or(|f| s.school == f)
+            })
             .collect();
 
         assert_eq!(filtered.len(), 2);
@@ -7089,12 +6917,16 @@ mod tests {
         ));
 
         // Filter level 3 spells
-        app.spells_filter_level = Some(3);
+        app.spells_editor_state.filter_level = Some(3);
 
         let filtered: Vec<_> = app
             .spells
             .iter()
-            .filter(|s| app.spells_filter_level.is_none_or(|f| s.level == f))
+            .filter(|s| {
+                app.spells_editor_state
+                    .filter_level
+                    .is_none_or(|f| s.level == f)
+            })
             .collect();
 
         assert_eq!(filtered.len(), 2);
@@ -7149,15 +6981,20 @@ mod tests {
         ));
 
         // Filter: Cleric + Level 3
-        app.spells_filter_school = Some(SpellSchool::Cleric);
-        app.spells_filter_level = Some(3);
+        app.spells_editor_state.filter_school = Some(SpellSchool::Cleric);
+        app.spells_editor_state.filter_level = Some(3);
 
         let filtered: Vec<_> = app
             .spells
             .iter()
             .filter(|s| {
-                app.spells_filter_school.is_none_or(|f| s.school == f)
-                    && app.spells_filter_level.is_none_or(|f| s.level == f)
+                app.spells_editor_state
+                    .filter_school
+                    .is_none_or(|f| s.school == f)
+                    && app
+                        .spells_editor_state
+                        .filter_level
+                        .is_none_or(|f| s.level == f)
             })
             .collect();
 
@@ -7169,31 +7006,35 @@ mod tests {
 
     #[test]
     fn test_spell_context_target_editing() {
-        let mut app = CampaignBuilderApp {
-            spells_edit_buffer: Spell::new(
-                1,
-                "Test",
-                SpellSchool::Cleric,
-                1,
-                1,
-                0,
-                SpellContext::Anytime,
-                SpellTarget::Self_,
-                "Test",
-                None,
-                0,
-                false,
-            ),
-            ..Default::default()
-        };
+        let mut app = CampaignBuilderApp::default();
+        app.spells_editor_state.edit_buffer = Spell::new(
+            1,
+            "Test",
+            SpellSchool::Cleric,
+            1,
+            1,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::Self_,
+            "Test",
+            None,
+            0,
+            false,
+        );
 
         // Change context
-        app.spells_edit_buffer.context = SpellContext::CombatOnly;
-        assert_eq!(app.spells_edit_buffer.context, SpellContext::CombatOnly);
+        app.spells_editor_state.edit_buffer.context = SpellContext::CombatOnly;
+        assert_eq!(
+            app.spells_editor_state.edit_buffer.context,
+            SpellContext::CombatOnly
+        );
 
         // Change target
-        app.spells_edit_buffer.target = SpellTarget::AllCharacters;
-        assert_eq!(app.spells_edit_buffer.target, SpellTarget::AllCharacters);
+        app.spells_editor_state.edit_buffer.target = SpellTarget::AllCharacters;
+        assert_eq!(
+            app.spells_editor_state.edit_buffer.target,
+            SpellTarget::AllCharacters
+        );
     }
 
     #[test]
@@ -7233,31 +7074,44 @@ mod tests {
 
     #[test]
     fn test_monster_attacks_editor() {
-        let mut app = CampaignBuilderApp {
-            monsters_edit_buffer: CampaignBuilderApp::default_monster(),
-            ..Default::default()
-        };
+        let mut app = CampaignBuilderApp::default();
+        app.monsters_editor_state.edit_buffer = CampaignBuilderApp::default_monster();
 
         // Initial attacks
-        assert_eq!(app.monsters_edit_buffer.attacks.len(), 1);
+        assert_eq!(app.monsters_editor_state.edit_buffer.attacks.len(), 1);
 
         // Add attack
-        app.monsters_edit_buffer.attacks.push(Attack {
+        app.monsters_editor_state.edit_buffer.attacks.push(Attack {
             damage: DiceRoll::new(2, 8, 3),
             attack_type: AttackType::Fire,
             special_effect: Some(SpecialEffect::Poison),
         });
 
-        assert_eq!(app.monsters_edit_buffer.attacks.len(), 2);
-        assert_eq!(app.monsters_edit_buffer.attacks[1].damage.count, 2);
-        assert_eq!(app.monsters_edit_buffer.attacks[1].damage.sides, 8);
-        assert_eq!(app.monsters_edit_buffer.attacks[1].damage.bonus, 3);
+        assert_eq!(app.monsters_editor_state.edit_buffer.attacks.len(), 2);
         assert_eq!(
-            app.monsters_edit_buffer.attacks[1].attack_type,
+            app.monsters_editor_state.edit_buffer.attacks[1]
+                .damage
+                .count,
+            2
+        );
+        assert_eq!(
+            app.monsters_editor_state.edit_buffer.attacks[1]
+                .damage
+                .sides,
+            8
+        );
+        assert_eq!(
+            app.monsters_editor_state.edit_buffer.attacks[1]
+                .damage
+                .bonus,
+            3
+        );
+        assert_eq!(
+            app.monsters_editor_state.edit_buffer.attacks[1].attack_type,
             AttackType::Fire
         );
         assert_eq!(
-            app.monsters_edit_buffer.attacks[1].special_effect,
+            app.monsters_editor_state.edit_buffer.attacks[1].special_effect,
             Some(SpecialEffect::Poison)
         );
     }
@@ -7320,48 +7174,56 @@ mod tests {
 
     #[test]
     fn test_monster_loot_editor() {
-        let mut app = CampaignBuilderApp {
-            monsters_edit_buffer: CampaignBuilderApp::default_monster(),
-            ..Default::default()
-        };
+        let mut app = CampaignBuilderApp::default();
+        app.monsters_editor_state.edit_buffer = CampaignBuilderApp::default_monster();
 
         // Modify loot table
-        app.monsters_edit_buffer.loot.gold_min = 10;
-        app.monsters_edit_buffer.loot.gold_max = 50;
-        app.monsters_edit_buffer.loot.gems_min = 0;
-        app.monsters_edit_buffer.loot.gems_max = 2;
-        app.monsters_edit_buffer.loot.experience = 150;
+        app.monsters_editor_state.edit_buffer.loot.gold_min = 10;
+        app.monsters_editor_state.edit_buffer.loot.gold_max = 50;
+        app.monsters_editor_state.edit_buffer.loot.gems_min = 0;
+        app.monsters_editor_state.edit_buffer.loot.gems_max = 2;
+        app.monsters_editor_state.edit_buffer.loot.experience = 150;
 
-        assert_eq!(app.monsters_edit_buffer.loot.gold_min, 10);
-        assert_eq!(app.monsters_edit_buffer.loot.gold_max, 50);
-        assert_eq!(app.monsters_edit_buffer.loot.gems_min, 0);
-        assert_eq!(app.monsters_edit_buffer.loot.gems_max, 2);
-        assert_eq!(app.monsters_edit_buffer.loot.experience, 150);
+        assert_eq!(app.monsters_editor_state.edit_buffer.loot.gold_min, 10);
+        assert_eq!(app.monsters_editor_state.edit_buffer.loot.gold_max, 50);
+        assert_eq!(app.monsters_editor_state.edit_buffer.loot.gems_min, 0);
+        assert_eq!(app.monsters_editor_state.edit_buffer.loot.gems_max, 2);
+        assert_eq!(app.monsters_editor_state.edit_buffer.loot.experience, 150);
     }
 
     #[test]
     fn test_monster_stats_editor() {
-        let mut app = CampaignBuilderApp {
-            monsters_edit_buffer: CampaignBuilderApp::default_monster(),
-            ..Default::default()
-        };
+        let mut app = CampaignBuilderApp::default();
+        app.monsters_editor_state.edit_buffer = CampaignBuilderApp::default_monster();
 
         // Modify all stats
-        app.monsters_edit_buffer.stats.might.base = 20;
-        app.monsters_edit_buffer.stats.intellect.base = 5;
-        app.monsters_edit_buffer.stats.personality.base = 8;
-        app.monsters_edit_buffer.stats.endurance.base = 18;
-        app.monsters_edit_buffer.stats.speed.base = 12;
-        app.monsters_edit_buffer.stats.accuracy.base = 15;
-        app.monsters_edit_buffer.stats.luck.base = 6;
+        app.monsters_editor_state.edit_buffer.stats.might.base = 20;
+        app.monsters_editor_state.edit_buffer.stats.intellect.base = 5;
+        app.monsters_editor_state.edit_buffer.stats.personality.base = 8;
+        app.monsters_editor_state.edit_buffer.stats.endurance.base = 18;
+        app.monsters_editor_state.edit_buffer.stats.speed.base = 12;
+        app.monsters_editor_state.edit_buffer.stats.accuracy.base = 15;
+        app.monsters_editor_state.edit_buffer.stats.luck.base = 6;
 
-        assert_eq!(app.monsters_edit_buffer.stats.might.base, 20);
-        assert_eq!(app.monsters_edit_buffer.stats.intellect.base, 5);
-        assert_eq!(app.monsters_edit_buffer.stats.personality.base, 8);
-        assert_eq!(app.monsters_edit_buffer.stats.endurance.base, 18);
-        assert_eq!(app.monsters_edit_buffer.stats.speed.base, 12);
-        assert_eq!(app.monsters_edit_buffer.stats.accuracy.base, 15);
-        assert_eq!(app.monsters_edit_buffer.stats.luck.base, 6);
+        assert_eq!(app.monsters_editor_state.edit_buffer.stats.might.base, 20);
+        assert_eq!(
+            app.monsters_editor_state.edit_buffer.stats.intellect.base,
+            5
+        );
+        assert_eq!(
+            app.monsters_editor_state.edit_buffer.stats.personality.base,
+            8
+        );
+        assert_eq!(
+            app.monsters_editor_state.edit_buffer.stats.endurance.base,
+            18
+        );
+        assert_eq!(app.monsters_editor_state.edit_buffer.stats.speed.base, 12);
+        assert_eq!(
+            app.monsters_editor_state.edit_buffer.stats.accuracy.base,
+            15
+        );
+        assert_eq!(app.monsters_editor_state.edit_buffer.stats.luck.base, 6);
     }
 
     #[test]
@@ -7395,7 +7257,7 @@ mod tests {
             },
         };
 
-        let xp = app.calculate_monster_xp(&monster);
+        let xp = app.monsters_editor_state.calculate_monster_xp(&monster);
 
         // Base: 20 HP * 10 = 200
         // + 1 attack * 20 = 20
@@ -7443,7 +7305,7 @@ mod tests {
             },
         };
 
-        let xp = app.calculate_monster_xp(&monster);
+        let xp = app.monsters_editor_state.calculate_monster_xp(&monster);
 
         // Should have significant XP due to:
         // - High HP (50 * 10 = 500)

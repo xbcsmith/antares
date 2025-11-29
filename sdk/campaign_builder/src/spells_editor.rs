@@ -67,6 +67,7 @@ impl SpellsEditorState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
