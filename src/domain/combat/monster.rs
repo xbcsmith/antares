@@ -302,6 +302,8 @@ pub struct Monster {
     pub magic_resistance: u8,
     /// Current condition (paralyzed, asleep, etc.)
     pub conditions: MonsterCondition,
+    /// Active data-driven conditions
+    pub active_conditions: Vec<crate::domain::conditions::ActiveCondition>,
     /// Has acted this turn (for turn order tracking)
     pub has_acted: bool,
 }
@@ -336,6 +338,7 @@ impl Monster {
             is_undead: false,
             magic_resistance: 0,
             conditions: MonsterCondition::Normal,
+            active_conditions: Vec::new(),
             has_acted: false,
         }
     }
@@ -389,6 +392,36 @@ impl Monster {
     /// Marks the monster as having acted this turn
     pub fn mark_acted(&mut self) {
         self.has_acted = true;
+    }
+
+    /// Adds a condition to the monster
+    pub fn add_condition(&mut self, condition: crate::domain::conditions::ActiveCondition) {
+        // Check if condition already exists, if so, refresh/overwrite it
+        if let Some(existing) = self
+            .active_conditions
+            .iter_mut()
+            .find(|c| c.condition_id == condition.condition_id)
+        {
+            existing.duration = condition.duration;
+        } else {
+            self.active_conditions.push(condition);
+        }
+    }
+
+    /// Removes a condition by ID
+    pub fn remove_condition(&mut self, condition_id: &str) {
+        self.active_conditions
+            .retain(|c| c.condition_id != condition_id);
+    }
+
+    /// Updates conditions based on round tick
+    pub fn tick_conditions_round(&mut self) {
+        self.active_conditions.retain_mut(|c| !c.tick_round());
+    }
+
+    /// Updates conditions based on minute tick
+    pub fn tick_conditions_minute(&mut self) {
+        self.active_conditions.retain_mut(|c| !c.tick_minute());
     }
 }
 

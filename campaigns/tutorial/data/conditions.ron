@@ -1,0 +1,56 @@
+[
+    (
+        id: "blind",
+        name: "Blind",
+        description: "Reduces accuracy and perception.",
+        effects: [
+            StatusEffect("blind"),
+            AttributeModifier(
+                attribute: "accuracy",
+                value: -5,
+            ),
+        ],
+        default_duration: Rounds(5),
+        icon_id: Some("icon_blind"),
+    ),
+    (
+        id: "sleep",
+        name: "Sleep",
+        description: "Target is asleep and cannot act.",
+        effects: [
+            StatusEffect("asleep"),
+        ],
+        default_duration: Rounds(3),
+        icon_id: Some("icon_sleep"),
+    ),
+    (
+        id: "bless",
+        name: "Bless",
+        description: "Increases accuracy and morale.",
+        effects: [
+            AttributeModifier(
+                attribute: "accuracy",
+                value: 2,
+            ),
+        ],
+        default_duration: Rounds(10),
+        icon_id: Some("icon_bless"),
+    ),
+    (
+        id: "poison",
+        name: "Poison",
+        description: "Takes damage over time.",
+        effects: [
+            DamageOverTime(
+                damage: (
+                    count: 1,
+                    sides: 4,
+                    modifier: 0,
+                ),
+                element: "poison",
+            ),
+        ],
+        default_duration: Permanent,
+        icon_id: Some("icon_poison"),
+    ),
+]

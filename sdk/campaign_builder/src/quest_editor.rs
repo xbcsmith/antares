@@ -477,17 +477,12 @@ impl QuestEditorState {
     }
 
     /// Edit an existing stage
-    pub fn edit_stage(
-        &mut self,
-        quests: &[Quest],
-        quest_idx: usize,
-        stage_idx: usize,
-    ) -> Result<(), String> {
-        if quest_idx >= quests.len() {
+    pub fn edit_stage(&mut self, quest_idx: usize, stage_idx: usize) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        let quest = &quests[quest_idx];
+        let quest = &self.quests[quest_idx];
         if stage_idx >= quest.stages.len() {
             return Err("Invalid stage index".to_string());
         }
@@ -505,17 +500,12 @@ impl QuestEditorState {
     }
 
     /// Save edited stage
-    pub fn save_stage(
-        &mut self,
-        quests: &mut Vec<Quest>,
-        quest_idx: usize,
-        stage_idx: usize,
-    ) -> Result<(), String> {
-        if quest_idx >= quests.len() {
+    pub fn save_stage(&mut self, quest_idx: usize, stage_idx: usize) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        if stage_idx >= quests[quest_idx].stages.len() {
+        if stage_idx >= self.quests[quest_idx].stages.len() {
             return Err("Invalid stage index".to_string());
         }
 
@@ -525,7 +515,7 @@ impl QuestEditorState {
             .parse::<u8>()
             .map_err(|_| "Invalid stage number".to_string())?;
 
-        let stage = &mut quests[quest_idx].stages[stage_idx];
+        let stage = &mut self.quests[quest_idx].stages[stage_idx];
         stage.stage_number = stage_num;
         stage.name = self.stage_buffer.name.clone();
         stage.description = self.stage_buffer.description.clone();
@@ -539,21 +529,16 @@ impl QuestEditorState {
     }
 
     /// Delete a stage from quest
-    pub fn delete_stage(
-        &mut self,
-        quests: &mut Vec<Quest>,
-        quest_idx: usize,
-        stage_idx: usize,
-    ) -> Result<(), String> {
-        if quest_idx >= quests.len() {
+    pub fn delete_stage(&mut self, quest_idx: usize, stage_idx: usize) -> Result<(), String> {
+        if quest_idx >= self.quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        if stage_idx >= quests[quest_idx].stages.len() {
+        if stage_idx >= self.quests[quest_idx].stages.len() {
             return Err("Invalid stage index".to_string());
         }
 
-        quests[quest_idx].stages.remove(stage_idx);
+        self.quests[quest_idx].stages.remove(stage_idx);
         self.has_unsaved_changes = true;
 
         if self.selected_stage == Some(stage_idx) {
@@ -566,16 +551,15 @@ impl QuestEditorState {
     /// Edit an existing objective
     pub fn edit_objective(
         &mut self,
-        quests: &[Quest],
         quest_idx: usize,
         stage_idx: usize,
         objective_idx: usize,
     ) -> Result<(), String> {
-        if quest_idx >= quests.len() {
+        if quest_idx >= self.quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        let quest = &quests[quest_idx];
+        let quest = &self.quests[quest_idx];
         if stage_idx >= quest.stages.len() {
             return Err("Invalid stage index".to_string());
         }
@@ -661,20 +645,19 @@ impl QuestEditorState {
     /// Save edited objective
     pub fn save_objective(
         &mut self,
-        quests: &mut Vec<Quest>,
         quest_idx: usize,
         stage_idx: usize,
         objective_idx: usize,
     ) -> Result<(), String> {
-        if quest_idx >= quests.len() {
+        if quest_idx >= self.quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        if stage_idx >= quests[quest_idx].stages.len() {
+        if stage_idx >= self.quests[quest_idx].stages.len() {
             return Err("Invalid stage index".to_string());
         }
 
-        if objective_idx >= quests[quest_idx].stages[stage_idx].objectives.len() {
+        if objective_idx >= self.quests[quest_idx].stages[stage_idx].objectives.len() {
             return Err("Invalid objective index".to_string());
         }
 
@@ -794,8 +777,7 @@ impl QuestEditorState {
             },
         };
 
-        quests[quest_idx].stages[stage_idx].objectives[objective_idx] = objective;
-        self.has_unsaved_changes = true;
+        self.quests[quest_idx].stages[stage_idx].objectives[objective_idx] = objective;
         self.has_unsaved_changes = true;
         self.selected_objective = None;
         self.selected_reward = None;
@@ -805,24 +787,23 @@ impl QuestEditorState {
     /// Delete an objective from a stage
     pub fn delete_objective(
         &mut self,
-        quests: &mut Vec<Quest>,
         quest_idx: usize,
         stage_idx: usize,
         objective_idx: usize,
     ) -> Result<(), String> {
-        if quest_idx >= quests.len() {
+        if quest_idx >= self.quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        if stage_idx >= quests[quest_idx].stages.len() {
+        if stage_idx >= self.quests[quest_idx].stages.len() {
             return Err("Invalid stage index".to_string());
         }
 
-        if objective_idx >= quests[quest_idx].stages[stage_idx].objectives.len() {
+        if objective_idx >= self.quests[quest_idx].stages[stage_idx].objectives.len() {
             return Err("Invalid objective index".to_string());
         }
 
-        quests[quest_idx].stages[stage_idx]
+        self.quests[quest_idx].stages[stage_idx]
             .objectives
             .remove(objective_idx);
         self.has_unsaved_changes = true;
@@ -1026,6 +1007,35 @@ impl QuestEditorState {
         Ok(())
     }
 
+    /// Render the Quest Editor UI and manage editor state transitions.
+    ///
+    /// The Quest Editor comprises a left-hand list view, a right-hand preview, and full
+    /// screen editor forms for creating/editing quests. This method renders the toolbar
+    /// (New, Save, Load), synchronizes the editor's internal quest buffer with the `quests`
+    /// parameter, and delegates to the modular helpers for list/preview/form rendering.
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - egui `Ui` instance to draw the editor into
+    /// * `quests` - Mutable reference to the global quests vector (synchronized on exit)
+    /// * `items` - Available items used for objective/reward selection
+    /// * `monsters` - Monster definitions used for objective selection
+    /// * `maps` - Map definitions and NPC lists used for location/objective selection
+    /// * `campaign_dir` - Optional campaign directory path used for file saving/loading
+    /// * `quests_file` - Filename within the campaign directory for quests
+    /// * `unsaved_changes` - Mutable flag indicating application-level unsaved changes
+    /// * `status_message` - Mutable status string to show operation results to the user
+    /// * `file_load_merge_mode` - Toggle controlling whether imported quests replace or merge
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::campaign_builder::quest_editor::{QuestEditorState, QuestEditorMode};
+    ///
+    /// let mut editor = QuestEditorState::new();
+    /// editor.start_new_quest("1".to_string());
+    /// assert_eq!(editor.mode, QuestEditorMode::Creating);
+    /// ```
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -1206,17 +1216,17 @@ impl QuestEditorState {
                     .resizable(true)
                     .default_width(300.0)
                     .show_inside(ui, |ui| {
-                        // Assuming self.show_quest_list exists or will be added
-                        // self.show_quest_list(ui, quests, unsaved_changes);
-                        ui.label("Quest List (Not implemented yet)"); // Placeholder
+                        // Use the passed `quests` parameter instead of `self.quests` to avoid
+                        // overlapping borrows between `self` and `quests` in closures.
+                        self.show_quest_list(ui, quests, unsaved_changes);
                     });
 
                 egui::CentralPanel::default().show_inside(ui, |ui| {
                     if let Some(selected_idx) = self.selected_quest {
+                        // Use the passed `quests` parameter to avoid borrowing `self.quests`
+                        // and `self` (mutably) at the same time.
                         if selected_idx < quests.len() {
-                            // Assuming self.show_quest_preview exists or will be added
-                            // self.show_quest_preview(ui, &quests[selected_idx]);
-                            ui.label("Quest Preview (Not implemented yet)"); // Placeholder
+                            self.show_quest_preview(ui, &quests[selected_idx]);
                         } else {
                             ui.centered_and_justified(|ui| {
                                 ui.label("Quest not found");
@@ -1230,10 +1240,9 @@ impl QuestEditorState {
                 });
             }
             QuestEditorMode::Creating | QuestEditorMode::Editing => {
-                // Full-screen quest form editor
-                // Assuming self.show_quest_form exists or will be added
-                // self.show_quest_form(ui, quests, items, monsters, maps, unsaved_changes);
-                ui.label("Quest Form (Not implemented yet)"); // Placeholder
+                // Full-screen quest form editor - use the external `quests` buffer to
+                // prevent overlapping mutable borrows of `self.quests` within UI closures.
+                self.show_quest_form(ui, quests, items, monsters, maps, unsaved_changes);
             }
         }
 
@@ -1418,7 +1427,7 @@ impl QuestEditorState {
             .filter(|(_, q)| {
                 search_filter.is_empty()
                     || q.name.to_lowercase().contains(&search_filter)
-                    || q.id.contains(&search_filter)
+                    || q.description.to_lowercase().contains(&search_filter)
             })
             .map(|(idx, q)| (idx, q.clone()))
             .collect();
@@ -1451,18 +1460,18 @@ impl QuestEditorState {
                     }
 
                     if response.double_clicked() {
-                        self.start_edit_quest(quests, original_idx);
+                        self.start_edit_quest(original_idx);
                     }
 
                     // Context menu
                     response.context_menu(|ui| {
                         if ui.button("✏️ Edit").clicked() {
-                            self.start_edit_quest(quests, original_idx);
+                            self.start_edit_quest(original_idx);
                             ui.close();
                         }
 
                         if ui.button("🗑️ Delete").clicked() {
-                            let _ = self.delete_quest(quests, original_idx);
+                            let _ = self.delete_quest(original_idx);
                             *unsaved_changes = true;
                             ui.close();
                         }
@@ -1681,7 +1690,7 @@ impl QuestEditorState {
                 ui.add_space(10.0);
 
                 // Validation display
-                self.show_quest_validation(ui, quests);
+                self.show_quest_validation(ui);
 
                 ui.add_space(10.0);
 
@@ -1711,7 +1720,7 @@ impl QuestEditorState {
                 ui.heading("Quest Stages");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("➕ Add Stage").clicked() {
-                        let _ = self.add_stage(quests);
+                        let _ = self.add_stage();
                         *unsaved_changes = true;
                     }
                 });
@@ -1769,14 +1778,14 @@ impl QuestEditorState {
 
                     // Handle stage deletion
                     if let Some(stage_idx) = stage_to_delete {
-                        if self.delete_stage(quests, selected_idx, stage_idx).is_ok() {
+                        if self.delete_stage(selected_idx, stage_idx).is_ok() {
                             *unsaved_changes = true;
                         }
                     }
 
                     // Handle stage editing
                     if let Some(stage_idx) = stage_to_edit {
-                        if self.edit_stage(quests, selected_idx, stage_idx).is_ok() {
+                        if self.edit_stage(selected_idx, stage_idx).is_ok() {
                             self.mode = QuestEditorMode::Editing;
                         }
                     }
@@ -1827,7 +1836,7 @@ impl QuestEditorState {
                     ui.horizontal(|ui| {
                         if ui.button("✅ Save").clicked() {
                             if let Some(selected_idx) = self.selected_quest {
-                                if self.save_stage(quests, selected_idx, stage_idx).is_ok() {
+                                if self.save_stage(selected_idx, stage_idx).is_ok() {
                                     *unsaved_changes = true;
                                 }
                             }
@@ -1863,10 +1872,10 @@ impl QuestEditorState {
                         .on_hover_text("Add Objective")
                         .clicked()
                     {
-                        if let Ok(new_idx) = self.add_default_objective(quests, stage_idx) {
+                        if let Ok(new_idx) = self.add_default_objective(stage_idx) {
                             *unsaved_changes = true;
                             // Immediately start editing the new objective
-                            let _ = self.edit_objective(quests, quest_idx, stage_idx, new_idx);
+                            let _ = self.edit_objective(quest_idx, stage_idx, new_idx);
                         }
                     }
                 });
@@ -1903,20 +1912,14 @@ impl QuestEditorState {
 
             // Handle objective deletion
             if let Some(obj_idx) = objective_to_delete {
-                if self
-                    .delete_objective(quests, quest_idx, stage_idx, obj_idx)
-                    .is_ok()
-                {
+                if self.delete_objective(quest_idx, stage_idx, obj_idx).is_ok() {
                     *unsaved_changes = true;
                 }
             }
 
             // Handle objective editing
             if let Some(obj_idx) = objective_to_edit {
-                if self
-                    .edit_objective(quests, quest_idx, stage_idx, obj_idx)
-                    .is_ok()
-                {
+                if self.edit_objective(quest_idx, stage_idx, obj_idx).is_ok() {
                     // Objective editing modal will be shown below
                 }
             }
@@ -2249,10 +2252,7 @@ impl QuestEditorState {
 
                     ui.horizontal(|ui| {
                         if ui.button("✅ Save").clicked() {
-                            if self
-                                .save_objective(quests, quest_idx, stage_idx, obj_idx)
-                                .is_ok()
-                            {
+                            if self.save_objective(quest_idx, stage_idx, obj_idx).is_ok() {
                                 *unsaved_changes = true;
                             }
                         }
@@ -2281,7 +2281,11 @@ impl QuestEditorState {
                         if let Ok(new_idx) = self.add_default_reward(quests) {
                             *unsaved_changes = true;
                             // Immediately start editing the new reward
-                            let _ = self.edit_reward(quests, self.selected_quest.unwrap(), new_idx);
+                            let _ = self.edit_reward(
+                                quests.as_slice(),
+                                self.selected_quest.unwrap(),
+                                new_idx,
+                            );
                         }
                     }
                 });
@@ -2363,7 +2367,10 @@ impl QuestEditorState {
                     }
 
                     if let Some(reward_idx) = reward_to_edit {
-                        if self.edit_reward(quests, selected_idx, reward_idx).is_ok() {
+                        if self
+                            .edit_reward(quests.as_slice(), selected_idx, reward_idx)
+                            .is_ok()
+                        {
                             // Modal will show
                         }
                     }
@@ -2530,8 +2537,8 @@ impl QuestEditorState {
     }
 
     /// Show quest validation display
-    fn show_quest_validation(&mut self, ui: &mut egui::Ui, quests: &[Quest]) {
-        self.validate_current_quest(quests);
+    fn show_quest_validation(&mut self, ui: &mut egui::Ui) {
+        self.validate_current_quest();
         let errors = &self.validation_errors;
 
         if !errors.is_empty() {

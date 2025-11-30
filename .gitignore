@@ -26,3 +26,4 @@ data/.map_builder_history
 
 
 *.DS_Store
+*.vscode

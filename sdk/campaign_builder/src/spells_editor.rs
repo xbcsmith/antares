@@ -64,6 +64,7 @@ impl SpellsEditorState {
             duration: 0,
             saving_throw: false,
             description: String::new(),
+            applied_conditions: Vec::new(),
         }
     }
 
@@ -323,12 +324,15 @@ impl SpellsEditorState {
         let mut new_selection = selected;
         let mut action: Option<(usize, &str)> = None;
 
-        ui.horizontal(|ui| {
-            let height = ui.available_height();
+        let panel_height = crate::ui_helpers::compute_panel_height(
+            ui,
+            crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
+        );
 
+        ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.set_width(300.0);
-                ui.set_height(height);
+                ui.set_width(crate::ui_helpers::DEFAULT_LEFT_COLUMN_WIDTH);
+                ui.set_min_height(panel_height);
 
                 ui.heading("Spells");
                 ui.separator();
@@ -336,6 +340,7 @@ impl SpellsEditorState {
                 egui::ScrollArea::vertical()
                     .id_salt("spells_list_scroll")
                     .auto_shrink([false, false])
+                    .max_height(panel_height)
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
                         for (idx, label) in &filtered_spells {
@@ -354,7 +359,7 @@ impl SpellsEditorState {
             ui.separator();
 
             ui.vertical(|ui| {
-                ui.set_height(height);
+                ui.set_min_height(panel_height);
                 ui.set_min_width(ui.available_width());
                 if let Some(idx) = selected {
                     if idx < spells.len() {
@@ -383,20 +388,22 @@ impl SpellsEditorState {
                         if self.show_preview {
                             self.show_preview(ui, &spell);
                         } else {
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                ui.group(|ui| {
-                                    ui.label(format!("ID: {}", spell.id));
-                                    ui.label(format!("School: {:?}", spell.school));
-                                    ui.label(format!("Level: {}", spell.level));
-                                    ui.label(format!("SP Cost: {}", spell.sp_cost));
-                                    ui.label(format!("Gem Cost: {}", spell.gem_cost));
-                                    ui.label(format!("Context: {:?}", spell.context));
-                                    ui.label(format!("Target: {:?}", spell.target));
-                                    ui.separator();
-                                    ui.label("Description:");
-                                    ui.label(&spell.description);
+                            egui::ScrollArea::vertical()
+                                .max_height(panel_height)
+                                .show(ui, |ui| {
+                                    ui.group(|ui| {
+                                        ui.label(format!("ID: {}", spell.id));
+                                        ui.label(format!("School: {:?}", spell.school));
+                                        ui.label(format!("Level: {}", spell.level));
+                                        ui.label(format!("SP Cost: {}", spell.sp_cost));
+                                        ui.label(format!("Gem Cost: {}", spell.gem_cost));
+                                        ui.label(format!("Context: {:?}", spell.context));
+                                        ui.label(format!("Target: {:?}", spell.target));
+                                        ui.separator();
+                                        ui.label("Description:");
+                                        ui.label(&spell.description);
+                                    });
                                 });
-                            });
                         }
                     }
                 } else {
