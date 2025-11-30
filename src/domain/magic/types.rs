@@ -370,6 +370,8 @@ pub struct SpellResult {
     pub healing: Option<i32>,
     /// Indices of affected targets (party members or monsters)
     pub affected_targets: Vec<usize>,
+    /// Conditions to apply to targets
+    pub applied_conditions: Vec<crate::domain::conditions::ConditionId>,
 }
 
 impl SpellResult {
@@ -381,6 +383,7 @@ impl SpellResult {
             damage: None,
             healing: None,
             affected_targets: Vec::new(),
+            applied_conditions: Vec::new(),
         }
     }
 
@@ -392,6 +395,7 @@ impl SpellResult {
             damage: None,
             healing: None,
             affected_targets: Vec::new(),
+            applied_conditions: Vec::new(),
         }
     }
 
@@ -406,6 +410,15 @@ impl SpellResult {
     pub fn with_healing(mut self, healing: i32, targets: Vec<usize>) -> Self {
         self.healing = Some(healing);
         self.affected_targets = targets;
+        self
+    }
+
+    /// Adds conditions to the result
+    pub fn with_conditions(
+        mut self,
+        conditions: Vec<crate::domain::conditions::ConditionId>,
+    ) -> Self {
+        self.applied_conditions = conditions;
         self
     }
 }

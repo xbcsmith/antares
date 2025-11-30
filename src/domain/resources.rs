@@ -247,6 +247,9 @@ pub fn rest_party(
         let _ = consume_food(party, food_needed); // Consume what we can
     }
 
+    // Calculate total minutes of rest
+    let total_minutes = hours * 60;
+
     // Restore HP and SP for each party member
     for character in &mut party.members {
         // Skip dead/unconscious characters
@@ -261,6 +264,11 @@ pub fn rest_party(
         // Restore SP
         let sp_to_restore = (character.sp.base as f32 * SP_RESTORE_RATE * hours as f32) as u16;
         character.sp.current = (character.sp.current + sp_to_restore).min(character.sp.base);
+
+        // Tick conditions for the duration of rest
+        for _ in 0..total_minutes {
+            character.tick_conditions_minute();
+        }
     }
 
     // Advance time
