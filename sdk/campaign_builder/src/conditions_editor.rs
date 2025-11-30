@@ -6,6 +6,20 @@ use antares::domain::conditions::{
 };
 use eframe::egui;
 
+/// Transient state used by the Conditions editor UI.
+///
+/// This state keeps the user's current search filter, the currently selected
+/// condition (if any), a temporary edit buffer for creating or editing a
+/// condition, and whether the preview pane is visible.
+///
+/// # Examples
+///
+/// ```no_run
+/// use antares::sdk::campaign_builder::conditions_editor::ConditionsEditorState;
+///
+/// // In an egui context you would store and reuse the state:
+/// // let mut state = ConditionsEditorState::new();
+/// ```
 pub struct ConditionsEditorState {
     pub search_filter: String,
     pub selected_condition_id: Option<ConditionId>,
@@ -30,15 +44,39 @@ impl ConditionsEditorState {
     }
 }
 
+/// Render the Conditions Editor UI into the provided `egui::Ui`.
+///
+/// # Arguments
+///
+/// * `ui` - The immediate egui `Ui` that owns the current layout region.
+/// * `state` - Mutable editor state for the conditions editor (selection, filters, editing buffer).
+/// * `conditions` - Mutable vector of `ConditionDefinition` representing the campaign conditions.
+///   The New Condition form may push a new condition onto this vector.
+///
+/// # Examples
+///
+/// ```no_run
+/// use antares::domain::conditions::ConditionDefinition;
+/// use antares::sdk::campaign_builder::conditions_editor::{ConditionsEditorState, render_conditions_editor};
+///
+/// let mut _state = ConditionsEditorState::new();
+/// let mut _conditions: Vec<ConditionDefinition> = Vec::new();
+/// // Called inside an egui UI context:
+/// // render_conditions_editor(&mut ui, &mut _state, &mut _conditions);
+/// ```
 pub fn render_conditions_editor(
     ui: &mut egui::Ui,
     state: &mut ConditionsEditorState,
     conditions: &mut Vec<ConditionDefinition>,
 ) {
+    let panel_height =
+        crate::ui_helpers::compute_panel_height(ui, crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT);
+
     ui.horizontal(|ui| {
         // Left panel: List
         ui.vertical(|ui| {
-            ui.set_width(250.0);
+            ui.set_width(crate::ui_helpers::DEFAULT_LEFT_COLUMN_WIDTH);
+            ui.set_min_height(panel_height);
             ui.heading("Conditions");
             ui.separator();
 
@@ -51,28 +89,35 @@ pub fn render_conditions_editor(
 
             ui.separator();
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let filtered: Vec<(usize, &ConditionDefinition)> = conditions
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| {
-                        state.search_filter.is_empty()
-                            || c.name.to_lowercase().contains(&state.search_filter.to_lowercase())
-                            || c.id.to_lowercase().contains(&state.search_filter.to_lowercase())
-                    })
-                    .collect();
+            egui::ScrollArea::vertical()
+                .id_salt("conditions_list_scroll")
+                .auto_shrink([false, false])
+                .max_height(panel_height)
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    let filtered: Vec<(usize, &ConditionDefinition)> = conditions
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, c)| {
+                            state.search_filter.is_empty()
+                                || c.name
+                                    .to_lowercase()
+                                    .contains(&state.search_filter.to_lowercase())
+                                || c.id
+                                    .to_lowercase()
+                                    .contains(&state.search_filter.to_lowercase())
+                        })
+                        .collect();
 
-                for (idx, condition) in filtered {
-                    let is_selected = state.selected_condition_id.as_ref() == Some(&condition.id);
-                    if ui
-                        .selectable_label(is_selected, &condition.name)
-                        .clicked()
-                    {
-                        state.selected_condition_id = Some(condition.id.clone());
-                        state.edit_buffer = Some(condition.clone());
+                    for (idx, condition) in filtered {
+                        let is_selected =
+                            state.selected_condition_id.as_ref() == Some(&condition.id);
+                        if ui.selectable_label(is_selected, &condition.name).clicked() {
+                            state.selected_condition_id = Some(condition.id.clone());
+                            state.edit_buffer = Some(condition.clone());
+                        }
                     }
-                }
-            });
+                });
 
             ui.separator();
             if ui.button("➕ New Condition").clicked() {
@@ -92,87 +137,100 @@ pub fn render_conditions_editor(
         ui.separator();
 
         // Right panel: Editor
-        if let Some(condition_id) = &state.selected_condition_id.clone() {
-            if let Some(condition) = conditions.iter_mut().find(|c| &c.id == condition_id) {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.heading("Edit Condition");
-                    ui.separator();
+        ui.vertical(|ui| {
+            ui.set_min_height(panel_height);
+            ui.set_min_width(ui.available_width());
 
-                    egui::Grid::new("condition_editor_grid")
-                        .num_columns(2)
-                        .spacing([10.0, 10.0])
+            if let Some(condition_id) = &state.selected_condition_id.clone() {
+                if let Some(condition) = conditions.iter_mut().find(|c| &c.id == condition_id) {
+                    egui::ScrollArea::vertical()
+                        .id_salt("condition_editor_scroll")
+                        .auto_shrink([false, false])
+                        .max_height(panel_height)
                         .show(ui, |ui| {
-                            ui.label("ID:");
-                            ui.label(&condition.id);
-                            ui.end_row();
+                            ui.heading("Edit Condition");
+                            ui.separator();
 
-                            ui.label("Name:");
-                            ui.text_edit_singleline(&mut condition.name);
-                            ui.end_row();
+                            egui::Grid::new("condition_editor_grid")
+                                .num_columns(2)
+                                .spacing([10.0, 10.0])
+                                .show(ui, |ui| {
+                                    ui.label("ID:");
+                                    ui.label(&condition.id);
+                                    ui.end_row();
 
-                            ui.label("Description:");
-                            ui.text_edit_multiline(&mut condition.description);
-                            ui.end_row();
+                                    ui.label("Name:");
+                                    ui.text_edit_singleline(&mut condition.name);
+                                    ui.end_row();
+
+                                    ui.label("Description:");
+                                    ui.text_edit_multiline(&mut condition.description);
+                                    ui.end_row();
+                                });
+
+                            ui.separator();
+                            ui.label("Effects (read-only for now):");
+                            for (idx, effect) in condition.effects.iter().enumerate() {
+                                ui.label(format!("Effect #{}: {:?}", idx + 1, effect));
+                            }
+                        });
+                }
+            } else if state.edit_buffer.is_some() {
+                // New condition
+                if let Some(new_cond) = &mut state.edit_buffer {
+                    let mut should_save = false;
+                    let mut should_cancel = false;
+
+                    egui::ScrollArea::vertical()
+                        .id_salt("condition_new_scroll")
+                        .auto_shrink([false, false])
+                        .max_height(panel_height)
+                        .show(ui, |ui| {
+                            ui.heading("New Condition");
+                            ui.separator();
+
+                            egui::Grid::new("condition_editor_grid")
+                                .num_columns(2)
+                                .spacing([10.0, 10.0])
+                                .show(ui, |ui| {
+                                    ui.label("ID:");
+                                    ui.text_edit_singleline(&mut new_cond.id);
+                                    ui.end_row();
+
+                                    ui.label("Name:");
+                                    ui.text_edit_singleline(&mut new_cond.name);
+                                    ui.end_row();
+
+                                    ui.label("Description:");
+                                    ui.text_edit_multiline(&mut new_cond.description);
+                                    ui.end_row();
+                                });
+
+                            ui.separator();
+
+                            ui.horizontal(|ui| {
+                                if ui.button("💾 Save").clicked() {
+                                    should_save = true;
+                                }
+                                if ui.button("❌ Cancel").clicked() {
+                                    should_cancel = true;
+                                }
+                            });
                         });
 
-                    ui.separator();
-                    ui.label("Effects (read-only for now):");
-                    for (idx, effect) in condition.effects.iter().enumerate() {
-                        ui.label(format!("Effect #{}: {:?}", idx + 1, effect));
+                    if should_save {
+                        conditions.push(new_cond.clone());
+                        state.selected_condition_id = Some(new_cond.id.clone());
+                        state.edit_buffer = None;
                     }
-                });
-            }
-        } else if state.edit_buffer.is_some() {
-            // New condition
-            if let Some(new_cond) = &mut state.edit_buffer {
-                let mut should_save = false;
-                let mut should_cancel = false;
-                
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.heading("New Condition");
-                    ui.separator();
 
-                    egui::Grid::new("condition_editor_grid")
-                        .num_columns(2)
-                        .spacing([10.0, 10.0])
-                        .show(ui, |ui| {
-                            ui.label("ID:");
-                            ui.text_edit_singleline(&mut new_cond.id);
-                            ui.end_row();
-
-                            ui.label("Name:");
-                            ui.text_edit_singleline(&mut new_cond.name);
-                            ui.end_row();
-
-                            ui.label("Description:");
-                            ui.text_edit_multiline(&mut new_cond.description);
-                            ui.end_row();
-                        });
-
-                    ui.separator();
-                    
-                    ui.horizontal(|ui| {
-                        if ui.button("💾 Save").clicked() {
-                            should_save = true;
-                        }
-                        if ui.button("❌ Cancel").clicked() {
-                            should_cancel = true;
-                        }
-                    });
-                });
-                
-                if should_save {
-                    conditions.push(new_cond.clone());
-                    state.selected_condition_id = Some(new_cond.id.clone());
-                    state.edit_buffer = None;
+                    if should_cancel {
+                        state.edit_buffer = None;
+                    }
                 }
-                
-                if should_cancel {
-                    state.edit_buffer = None;
-                }
+            } else {
+                ui.label("Select a condition to edit or click '➕ New Condition' to create one.");
             }
-        } else {
-            ui.label("Select a condition to edit or click '➕ New Condition' to create one.");
-        }
+        });
     });
 }

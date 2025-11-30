@@ -423,6 +423,55 @@ impl Monster {
     pub fn tick_conditions_minute(&mut self) {
         self.active_conditions.retain_mut(|c| !c.tick_minute());
     }
+
+    /// Calculates the total modifier from active conditions for a given attribute
+    pub fn get_condition_modifier(
+        &self,
+        attribute: &str,
+        condition_defs: &[crate::domain::conditions::ConditionDefinition],
+    ) -> i16 {
+        let mut total_modifier = 0i16;
+
+        for active in &self.active_conditions {
+            // Find the definition
+            if let Some(def) = condition_defs.iter().find(|d| d.id == active.condition_id) {
+                for effect in &def.effects {
+                    if let crate::domain::conditions::ConditionEffect::AttributeModifier {
+                        attribute: attr,
+                        value,
+                    } = effect
+                    {
+                        if attr == attribute {
+                            let modified = (*value as f32 * active.magnitude).round() as i16;
+                            total_modifier = total_modifier.saturating_add(modified);
+                        }
+                    }
+                }
+            }
+        }
+
+        total_modifier
+    }
+
+    /// Returns true if monster has a specific status effect from conditions
+    pub fn has_status_effect(
+        &self,
+        status: &str,
+        condition_defs: &[crate::domain::conditions::ConditionDefinition],
+    ) -> bool {
+        for active in &self.active_conditions {
+            if let Some(def) = condition_defs.iter().find(|d| d.id == active.condition_id) {
+                for effect in &def.effects {
+                    if let crate::domain::conditions::ConditionEffect::StatusEffect(s) = effect {
+                        if s == status {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 #[cfg(test)]

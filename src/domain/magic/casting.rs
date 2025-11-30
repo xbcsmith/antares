@@ -228,6 +228,7 @@ pub fn cast_spell(character: &mut Character, spell: &Spell) -> SpellResult {
     // Return a basic success result
     // Actual spell effects are handled by combat/exploration systems
     SpellResult::success(format!("{} casts {}!", character.name, spell.name))
+        .with_conditions(spell.applied_conditions.clone())
 }
 
 // ===== Helper Functions =====
@@ -535,5 +536,18 @@ mod tests {
         assert!(!can_class_cast_school(Class::Robber, SpellSchool::Sorcerer));
         assert!(!can_class_cast_school(Class::Cleric, SpellSchool::Sorcerer));
         assert!(!can_class_cast_school(Class::Sorcerer, SpellSchool::Cleric));
+    }
+
+    #[test]
+    fn test_cast_spell_returns_conditions() {
+        let mut cleric = create_test_character(Class::Cleric, 5, 10, 5);
+        let mut spell = create_test_spell(SpellSchool::Cleric, 1, 2, 0, SpellContext::Anytime);
+        spell.applied_conditions = vec!["bless".to_string()];
+
+        let result = cast_spell(&mut cleric, &spell);
+
+        assert!(result.success);
+        assert_eq!(result.applied_conditions.len(), 1);
+        assert_eq!(result.applied_conditions[0], "bless");
     }
 }

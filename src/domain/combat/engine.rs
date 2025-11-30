@@ -209,29 +209,107 @@ impl CombatState {
     }
 
     /// Advances to the next turn
-    pub fn advance_turn(&mut self) {
+    ///
+    /// Returns any effects (damage/healing) that occurred if a new round started
+    pub fn advance_turn(
+        &mut self,
+        condition_defs: &[crate::domain::conditions::ConditionDefinition],
+    ) -> Vec<(CombatantId, i16)> {
         self.current_turn += 1;
         if self.current_turn >= self.turn_order.len() {
             self.current_turn = 0;
-            self.advance_round();
+            return self.advance_round(condition_defs);
         }
+        Vec::new()
     }
 
     /// Advances to the next round
-    fn advance_round(&mut self) {
+    fn advance_round(
+        &mut self,
+        condition_defs: &[crate::domain::conditions::ConditionDefinition],
+    ) -> Vec<(CombatantId, i16)> {
         self.round += 1;
 
-        // Reset has_acted flags for monsters
-        for participant in &mut self.participants {
-            if let Combatant::Monster(monster) = participant {
-                monster.reset_turn();
+        let mut effects = Vec::new();
 
-                // Monster regeneration
-                if self.monsters_regenerate && monster.can_regenerate {
-                    monster.regenerate(1);
+        // Tick conditions and reset flags for all participants
+        for participant in &mut self.participants {
+            match participant {
+                Combatant::Player(character) => {
+                    // Tick round-based conditions
+                    character.tick_conditions_round();
+                }
+                Combatant::Monster(monster) => {
+                    // Tick round-based conditions
+                    monster.tick_conditions_round();
+
+                    // Reset has_acted flag
+                    monster.reset_turn();
+
+                    // Monster regeneration
+                    if self.monsters_regenerate && monster.can_regenerate {
+                        monster.regenerate(1);
+                    }
                 }
             }
         }
+
+        // Apply DoT/HoT effects
+        effects.extend(self.apply_dot_effects(condition_defs));
+
+        effects
+    }
+
+    /// Applies damage/healing over time effects from conditions
+    ///
+    /// This should be called at the start of each round after ticking conditions.
+    /// Requires condition definitions to look up effect details.
+    ///
+    /// Returns a list of (combatant_id, damage_amount) tuples for logging/display
+    pub fn apply_dot_effects(
+        &mut self,
+        condition_defs: &[crate::domain::conditions::ConditionDefinition],
+    ) -> Vec<(CombatantId, i16)> {
+        use crate::domain::magic::apply_condition_dot_effects;
+
+        let mut effects = Vec::new();
+
+        for (idx, participant) in self.participants.iter_mut().enumerate() {
+            let combatant_id = match participant {
+                Combatant::Player(_) => CombatantId::Player(idx),
+                Combatant::Monster(_) => CombatantId::Monster(idx),
+            };
+
+            let damage = match participant {
+                Combatant::Player(character) => {
+                    apply_condition_dot_effects(&character.active_conditions, condition_defs)
+                }
+                Combatant::Monster(monster) => {
+                    apply_condition_dot_effects(&monster.active_conditions, condition_defs)
+                }
+            };
+
+            if damage != 0 {
+                // Apply the damage (negative = healing)
+                match participant {
+                    Combatant::Player(character) => {
+                        character.hp.modify(-damage as i32);
+                    }
+                    Combatant::Monster(monster) => {
+                        if damage > 0 {
+                            monster.take_damage(damage as u16);
+                        } else {
+                            // Healing
+                            monster.hp.modify((-damage) as i32);
+                        }
+                    }
+                }
+
+                effects.push((combatant_id, damage));
+            }
+        }
+
+        effects
     }
 
     /// Gets the current combatant
@@ -735,7 +813,7 @@ mod tests {
 
         // Advance one full round
         for _ in 0..combat.turn_order.len() {
-            combat.advance_turn();
+            combat.advance_turn(&[]);
         }
 
         if let Some(Combatant::Monster(m)) = combat.participants.first() {
@@ -755,12 +833,116 @@ mod tests {
         assert_eq!(combat.current_turn, 0);
         assert_eq!(combat.round, 1);
 
-        combat.advance_turn();
+        combat.advance_turn(&[]);
         assert_eq!(combat.current_turn, 1);
         assert_eq!(combat.round, 1);
 
-        combat.advance_turn();
+        combat.advance_turn(&[]);
         assert_eq!(combat.current_turn, 0);
         assert_eq!(combat.round, 2); // New round
+    }
+
+    #[test]
+    fn test_dot_effects_application() {
+        use crate::domain::conditions::{
+            ActiveCondition, ConditionDefinition, ConditionDuration, ConditionEffect,
+        };
+        use crate::domain::types::DiceRoll;
+
+        let mut combat = CombatState::new(Handicap::Even);
+
+        // Add a character with a poison condition
+        let mut character = create_test_character("Hero", 10);
+        character.hp.current = 20;
+
+        // Create poison condition (1d4 damage per round)
+        let poison = ActiveCondition::new("poison".to_string(), ConditionDuration::Rounds(3));
+        character.add_condition(poison);
+
+        combat.add_player(character);
+
+        // Create condition definition
+        let poison_def = ConditionDefinition {
+            id: "poison".to_string(),
+            name: "Poison".to_string(),
+            description: "Takes damage each round".to_string(),
+            effects: vec![ConditionEffect::DamageOverTime {
+                damage: DiceRoll::new(1, 4, 0),
+                element: "poison".to_string(),
+            }],
+            default_duration: ConditionDuration::Permanent,
+            icon_id: None,
+        };
+
+        start_combat(&mut combat);
+
+        // Apply DoT effects
+        let effects = combat.apply_dot_effects(&[poison_def]);
+
+        // Should have one effect entry
+        assert_eq!(effects.len(), 1);
+
+        // Damage should be between 1 and 4
+        let (combatant_id, damage) = effects[0];
+        assert!(matches!(combatant_id, CombatantId::Player(0)));
+        assert!(damage >= 1 && damage <= 4);
+
+        // Character should have taken damage
+        if let Some(Combatant::Player(c)) = combat.participants.first() {
+            assert!(c.hp.current < 20);
+            assert!(c.hp.current >= 16); // 20 - 4 max
+        }
+    }
+
+    #[test]
+    fn test_hot_effects_application() {
+        use crate::domain::conditions::{
+            ActiveCondition, ConditionDefinition, ConditionDuration, ConditionEffect,
+        };
+        use crate::domain::types::DiceRoll;
+
+        let mut combat = CombatState::new(Handicap::Even);
+
+        // Add a character with regeneration
+        let mut character = create_test_character("Hero", 10);
+        character.hp.current = 10;
+        character.hp.base = 20;
+
+        // Create regen condition (1d4 healing per round)
+        let regen = ActiveCondition::new("regeneration".to_string(), ConditionDuration::Rounds(3));
+        character.add_condition(regen);
+
+        combat.add_player(character);
+
+        // Create condition definition
+        let regen_def = ConditionDefinition {
+            id: "regeneration".to_string(),
+            name: "Regeneration".to_string(),
+            description: "Heals each round".to_string(),
+            effects: vec![ConditionEffect::HealOverTime {
+                amount: DiceRoll::new(1, 4, 0),
+            }],
+            default_duration: ConditionDuration::Rounds(3),
+            icon_id: None,
+        };
+
+        start_combat(&mut combat);
+
+        // Apply HoT effects
+        let effects = combat.apply_dot_effects(&[regen_def]);
+
+        // Should have one effect entry
+        assert_eq!(effects.len(), 1);
+
+        // Damage should be negative (healing)
+        let (combatant_id, damage) = effects[0];
+        assert!(matches!(combatant_id, CombatantId::Player(0)));
+        assert!(damage >= -4 && damage <= -1);
+
+        // Character should have healed
+        if let Some(Combatant::Player(c)) = combat.participants.first() {
+            assert!(c.hp.current > 10);
+            assert!(c.hp.current <= 14); // 10 + 4 max
+        }
     }
 }

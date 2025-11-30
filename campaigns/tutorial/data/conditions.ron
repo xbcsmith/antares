@@ -45,7 +45,7 @@
                 damage: (
                     count: 1,
                     sides: 4,
-                    modifier: 0,
+                    bonus: 0,
                 ),
                 element: "poison",
             ),

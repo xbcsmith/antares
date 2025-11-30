@@ -841,7 +841,10 @@ impl CampaignBuilderApp {
                     },
                     Err(e) => {
                         self.status_message = format!("Failed to read conditions file: {}", e);
-                        eprintln!("Failed to read conditions file {:?}: {}", conditions_path, e);
+                        eprintln!(
+                            "Failed to read conditions file {:?}: {}",
+                            conditions_path, e
+                        );
                     }
                 }
             } else {
@@ -4246,6 +4249,7 @@ mod tests {
             maps_dir: "data/maps/".to_string(),
             quests_file: "data/quests.ron".to_string(),
             dialogue_file: "data/dialogue.ron".to_string(),
+            conditions_file: "data/conditions.ron".to_string(),
         };
 
         let ron_config = ron::ser::PrettyConfig::new()

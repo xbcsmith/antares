@@ -43,7 +43,6 @@ fn spawn_map(
         let forest_color = Color::srgb(forest_rgb.0, forest_rgb.1, forest_rgb.2);
         let grass_color = Color::srgb(grass_rgb.0, grass_rgb.1, grass_rgb.2);
 
-
         let floor_material = materials.add(StandardMaterial {
             base_color: floor_color,
             perceptual_roughness: 0.9,

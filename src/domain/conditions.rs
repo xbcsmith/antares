@@ -41,9 +41,7 @@ pub enum ConditionEffect {
         element: String, // "fire", "poison", etc.
     },
     /// Heals over time
-    HealOverTime {
-        amount: DiceRoll,
-    },
+    HealOverTime { amount: DiceRoll },
 }
 
 /// Definition of a condition (static data)
@@ -70,8 +68,8 @@ pub struct ActiveCondition {
     pub condition_id: ConditionId,
     /// Remaining duration
     pub duration: ConditionDuration,
-    /// Source of the condition (optional)
-    pub source: Option<String>,
+    /// Magnitude multiplier (default 1.0)
+    pub magnitude: f32,
 }
 
 impl ActiveCondition {
@@ -79,8 +77,13 @@ impl ActiveCondition {
         Self {
             condition_id,
             duration,
-            source: None,
+            magnitude: 1.0,
         }
+    }
+
+    pub fn with_magnitude(mut self, magnitude: f32) -> Self {
+        self.magnitude = magnitude;
+        self
     }
 
     /// Decrements duration for round-based conditions

@@ -1,11 +1,15 @@
 # Races
 
 
+## Placeholder
 
+in src/sdk/database.rs there is already a race system in place.
+
+line 91 // ===== Race System (Placeholder) =====
 
 ## Examples of Races
 
-Primary playable races available were: 
+Primary playable races available were:
 
     Dwarf
     Elf
@@ -17,7 +21,7 @@ Primary playable races available were:
 
 Key descriptive characteristics and mechanical limitations defined these races in the 1st Edition rules:
 AD&D 1st Edition Race Descriptions and Mechanics
-Rather than a simple description table, the game presented races with specific ability score requirements, bonuses/penalties, and class limitations. A central feature was the "race as class" mechanic in the Basic/Expert sets and class restrictions in AD&D, where non-human characters often had level limits in certain classes. 
+Rather than a simple description table, the game presented races with specific ability score requirements, bonuses/penalties, and class limitations. A central feature was the "race as class" mechanic in the Basic/Expert sets and class restrictions in AD&D, where non-human characters often had level limits in certain classes.
 
     Dwarves
         Description: Short, stout, hardy, and known for their skill in mining, stone-working, and combat. They are often stubborn and value ale and craftsmanship.
@@ -40,9 +44,9 @@ Rather than a simple description table, the game presented races with specific a
     Humans
         Description: Highly adaptable, ambitious, and diverse, without the inherent biases or physical limitations of other races.
         Mechanics: Humans were unique because they could choose any single class and advance without any level restrictions, making them superior for high-level play. They did not have the ability score bonuses/penalties or special immunities other races received
-        
+
  Races have specific ability score adjustments, as shown in a sample table. For example, Dwarves get a \(+1\) Constitution and \(-1\) Charisma, while Elves get \(+1\) Dexterity and \(-1\) Constitution. Humans receive no bonuses or penalties, and races like Gnomes, Half-Elves, and Half-Orcs also have their own unique sets of adjustments and restrictions.
- 
+
 Race Ability Adjustments
 
 Dwarf +1 Constitution; -1 Charisma

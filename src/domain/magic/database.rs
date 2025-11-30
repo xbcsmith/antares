@@ -281,6 +281,7 @@ mod tests {
             damage: None,
             duration: 0,
             saving_throw: false,
+            applied_conditions: Vec::new(),
         }
     }
 
