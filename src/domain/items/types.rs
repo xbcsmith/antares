@@ -339,6 +339,34 @@ impl Disablement {
     pub fn evil_only(&self) -> bool {
         (self.0 & Self::EVIL) != 0
     }
+
+    /// Create a `Disablement` from a bit index (0..=7), producing the corresponding mask.
+    ///
+    /// This is useful when you have a bit position and need the bitmask.
+    pub const fn from_index(index: u8) -> Self {
+        // Constrain to 0..=7 by masking the index
+        Self(1u8 << (index & 0x07))
+    }
+
+    /// Return the raw mask for a given bit index (0..=7).
+    pub const fn mask_from_index(index: u8) -> u8 {
+        1u8 << (index & 0x07)
+    }
+
+    /// If this Disablement represents a single bit, return its index.
+    /// Returns `None` for 0 or multi-bit masks.
+    pub fn to_index(&self) -> Option<u8> {
+        let n = self.0;
+        if n == 0 {
+            return None;
+        }
+        // If multiple bits set, it's not a single index
+        if n & (n - 1) != 0 {
+            return None;
+        }
+        // trailing_zeros gives position of single bit
+        Some(n.trailing_zeros() as u8)
+    }
 }
 
 // ===== Complete Item Definition =====
@@ -457,6 +485,35 @@ impl fmt::Display for Item {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_disablement_from_index_and_mask() {
+        assert_eq!(Disablement::from_index(0).0, 1_u8);
+        assert_eq!(Disablement::from_index(4).0, 1_u8 << 4);
+
+        assert_eq!(Disablement::mask_from_index(0), 0b0000_0001);
+        assert_eq!(Disablement::mask_from_index(3), 0b0000_1000);
+    }
+
+    #[test]
+    fn disablement_to_index_examples() {
+        assert_eq!(Disablement(0b0000_1000).to_index(), Some(3));
+        assert_eq!(Disablement(0).to_index(), None);
+        assert_eq!(Disablement(0b0000_0110).to_index(), None);
+        assert_eq!(Disablement(0b1111_1111).to_index(), None);
+    }
+
+    #[test]
+    fn can_use_class_and_alignment() {
+        let d = Disablement::from_index(0); // mask 0b0000_0001
+        assert!(d.can_use_class(Disablement::KNIGHT));
+        assert!(!d.can_use_class(Disablement::ARCHER));
+        let d = Disablement::ALL;
+        assert!(d.can_use_class(Disablement::KNIGHT));
+        // presence tested for compile/coverage only
+        assert!(d.good_only());
+        assert!(d.evil_only());
+    }
 
     #[test]
     fn test_disablement_all_classes() {

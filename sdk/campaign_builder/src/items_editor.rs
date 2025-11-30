@@ -415,12 +415,17 @@ impl ItemsEditorState {
         let mut new_selection = selected;
         let mut action: Option<(usize, &str)> = None;
 
-        ui.horizontal(|ui| {
-            let height = ui.available_height();
+        // Compute target panel height using shared UI helper so all editors behave
+        // consistently (using a sensible minimum to avoid collapsing).
+        let panel_height = crate::ui_helpers::compute_panel_height(
+            ui,
+            crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
+        );
 
+        ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.set_width(300.0);
-                ui.set_height(height);
+                ui.set_width(crate::ui_helpers::DEFAULT_LEFT_COLUMN_WIDTH);
+                ui.set_min_height(panel_height);
 
                 ui.heading("Items");
                 ui.separator();
@@ -428,6 +433,7 @@ impl ItemsEditorState {
                 egui::ScrollArea::vertical()
                     .id_salt("items_list_scroll")
                     .auto_shrink([false, false])
+                    .max_height(panel_height)
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
                         for (idx, label) in &filtered_items {
@@ -446,8 +452,9 @@ impl ItemsEditorState {
             ui.separator();
 
             ui.vertical(|ui| {
-                ui.set_height(height);
+                // Ensure the preview column grows to the same height as the list.
                 ui.set_min_width(ui.available_width());
+                ui.set_min_height(panel_height);
                 if let Some(idx) = selected {
                     if idx < items.len() {
                         let item = items[idx].clone();
@@ -532,7 +539,14 @@ impl ItemsEditorState {
     }
 
     fn show_preview(&self, ui: &mut egui::Ui, item: &Item) {
+        // Compute panel height using shared UI helper so preview pane expands with window.
+        let panel_height = crate::ui_helpers::compute_panel_height(
+            ui,
+            crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
+        );
+
         egui::ScrollArea::vertical()
+            .max_height(panel_height)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.group(|ui| {

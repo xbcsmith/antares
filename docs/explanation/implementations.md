@@ -226,3 +226,80 @@ Phase 2 of the SDK UI Improvements plan can now proceed, focusing on:
 - Classes Editor enhancements
 - Pre-populating classes from campaign directory
 - Adding description and starting equipment fields
+
+### Phase 2.1: Shared UI Helper and Editor Refactor (2025-11-29)
+
+Objective:
+Introduce a shared UI helper module to centralize layout logic for editor panels and refactor existing editors to use it, improving consistency and maintainability.
+
+Summary:
+
+- Added `sdk/campaign_builder/src/ui_helpers.rs` which exposes:
+  - `pub const DEFAULT_LEFT_COLUMN_WIDTH: f32` — default left column width used in editors (300.0).
+  - `pub const DEFAULT_PANEL_MIN_HEIGHT: f32` — default minimum panel height to avoid collapse (100.0).
+  - `pub fn compute_panel_height(ui: &mut egui::Ui, min_height: f32) -> f32` — computes a panel height using `ui.available_size_before_wrap()`.
+  - `pub fn compute_panel_height_from_size(size: egui::Vec2, min_height: f32) -> f32` — pure function that computes height from a size, suitable for unit tests.
+- Declared the module in `main.rs` (added `mod ui_helpers;`).
+- Refactored the following editors to use the new constants and helpers:
+  - `sdk/campaign_builder/src/items_editor.rs`
+  - `sdk/campaign_builder/src/monsters_editor.rs`
+  - `sdk/campaign_builder/src/spells_editor.rs`
+- Refactor details:
+  - Replace manual `available_size` computations with calls to `crate::ui_helpers::compute_panel_height(...)`.
+  - Replace hard-coded left column width `300.0` with `crate::ui_helpers::DEFAULT_LEFT_COLUMN_WIDTH`.
+  - Use the `panel_height` computed from the helper to set `ui.set_min_height(panel_height)` and `egui::ScrollArea::vertical().max_height(panel_height)`.
+- Tests:
+  - Added unit tests for `compute_panel_height_from_size` in `ui_helpers.rs` to validate pure logic and ensure it respects the minimum height threshold.
+- Rationale:
+  - Centralizes layout defaults and logic so multiple editors show consistent behavior when windows are resized.
+  - Enables developers to maintain UI constants and adjustments in one place.
+  - Facilitates unit testing for layout computation logic.
+
+Files changed (high-level):
+
+- `sdk/campaign_builder/src/ui_helpers.rs` — new module with constants, helpers, and tests
+- `sdk/campaign_builder/src/main.rs` — `mod ui_helpers;` was added to the module list
+- `sdk/campaign_builder/src/items_editor.rs` — refactored to use `compute_panel_height` and `DEFAULT_LEFT_COLUMN_WIDTH`
+- `sdk/campaign_builder/src/monsters_editor.rs` — refactored to use `compute_panel_height` and `DEFAULT_LEFT_COLUMN_WIDTH`
+- `sdk/campaign_builder/src/spells_editor.rs` — refactored to use `compute_panel_height` and `DEFAULT_LEFT_COLUMN_WIDTH`
+
+Validation:
+
+- The campaign builder package compiles and the test suite for the package passes.
+- The shared helper uses a pure function (`compute_panel_height_from_size`) that is unit tested and isolates the logic for correct behavior under varying sizes.
+
+Follow-up:
+
+- Are there other editors or UI regions you’d like refactored to use `ui_helpers` for consistent layout behavior? If so, I’ll update them in the same way and add any additional tests necessary.
+
+## Phase 2: Campaign Builder UI - List & Preview Panel Scaling (2025-11-29)
+
+Objective:
+Ensure the items, monster, and spell editor list and details/preview panels expand with the window height so users can view more rows without unnecessary vertical scrolling.
+
+Summary:
+
+- Problem: The editors' list and preview columns were constrained to a small height because they computed the height using `ui.available_height()` inside a nested `ui.horizontal(|ui| { ... })` closure. In some UI scenarios this returns a small height because the layout hadn't yet allocated the full available panel area, resulting in only a few rows visible even with a large window.
+- Root cause: calculating height from the nested `ui` instead of from the parent UI/context meant `available_height()` could be lower than expected and would not grow to fill the window.
+- Fix implemented:
+  - Compute available vertical space before starting the horizontal split using `ui.available_size_before_wrap()` and derive a `panel_height` with a sensible minimum: `let panel_height = ui.available_size_before_wrap().y.max(100.0)`.
+  - For both the list and preview columns:
+    - Use `ui.set_min_height(panel_height)` on the vertical containers so they use this minimum and grow with the window.
+    - Add `.max_height(panel_height)` to the `egui::ScrollArea::vertical()` builder to allow it to expand up to the panel height while still allowing scrolling when content exceeds that.
+  - Apply these changes consistently across the three editors to normalize behavior:
+    - `sdk/campaign_builder/src/items_editor.rs`
+    - `sdk/campaign_builder/src/monsters_editor.rs`
+    - `sdk/campaign_builder/src/spells_editor.rs`
+  - Where appropriate, the preview `show_preview` scroll areas were also updated to use `.max_height(panel_height)` so preview content will expand with the window.
+
+Test & Validation:
+
+- Confirmed compile (`cargo check`) and campaign-builder package unit tests (`cargo test -p campaign_builder`) are unchanged and still pass.
+- Visual verification is still recommended: enlarge the Campaign Builder window and confirm that the lists/preview panels grow vertically and show additional rows before the scrollbar becomes necessary.
+- This pattern should be applied to other editor split layouts where list and details panes are set side-by-side and should scale with the window (e.g., classes editor, quest editor, etc.) as a follow-up task.
+
+Notes:
+
+- This change is intentionally minimal and localized to UI layout improvements.
+- The implementation avoids changing domain data structures or the editor state shape.
+- If there are other UI areas that exhibit similar fixed-height behavior, extend the same pattern to them.

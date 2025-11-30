@@ -41,6 +41,9 @@ build-macos: ; $(info $(M) running cargo build with target x86_64-apple-darwin..
 run: ; $(info $(M) running cargo run...) @ ## Runs a cargo run
 	$Q $(CARGO) run
 
+sdk: ; $(info $(M) running  cargo run --package campaign_builder --bin campaign-builder) @ ## Runs a cargo run --package campaign_builder --bin campaign-builder
+	$Q $(CARGO) run --package campaign_builder --bin campaign-builder
+
 # Run tests
 test: ; $(info $(M) running cargo test...) @ ## Runs a cargo test
 	$Q $(CARGO) test
@@ -52,15 +55,15 @@ clean: ; $(info $(M) running cargo clean...) @ ## Runs a cargo clean
 
 # Format the code
 format: ; $(info $(M) running cargo fmt...) @ ## Runs a cargo fmt
-	$Q $(CARGO) fmt
+	$Q $(CARGO) fmt --all
 
 # Check for warnings and errors
 check: ; $(info $(M) running cargo check...) @ ## Runs a cargo check
-	$Q $(CARGO) check
+	$Q $(CARGO) check --all-targets --all-features
 
 # Lint the code
 lint: ; $(info $(M) running cargo clippy...) @ ## Runs a cargo clippy
-	$Q $(CARGO) clippy
+	$Q $(CARGO) clippy --all-targets --all-features -- -D warnings
 
 install: ; $(info $(M) running cargo install...) @ ## Runs a cargo install
 	$Q $(CARGO) install --path .
@@ -79,4 +82,4 @@ help:
 	@grep -E '^[ a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
         awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-.PHONY: all build run test clean format check lint install megalint doc help
+.PHONY: all build run sdk test clean format check lint install megalint doc help

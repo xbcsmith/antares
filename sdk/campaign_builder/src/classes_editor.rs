@@ -50,7 +50,7 @@ pub struct ClassEditBuffer {
     pub spell_school: Option<SpellSchool>,
     pub is_pure_caster: bool,
     pub spell_stat: Option<SpellStat>,
-    pub disablement_bit: String,
+    pub disablement_bit_index: String,
     pub special_abilities: String, // Comma-separated
     pub description: String,
     pub starting_weapon_id: String,
@@ -69,7 +69,7 @@ impl Default for ClassEditBuffer {
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            disablement_bit: "0".to_string(),
+            disablement_bit_index: "0".to_string(),
             special_abilities: String::new(),
             description: String::new(),
             starting_weapon_id: String::new(),
@@ -117,7 +117,7 @@ impl ClassesEditorState {
                 spell_school: class.spell_school,
                 is_pure_caster: class.is_pure_caster,
                 spell_stat: class.spell_stat,
-                disablement_bit: class.disablement_bit.to_string(),
+                disablement_bit_index: class.disablement_bit_index.to_string(),
                 special_abilities: class.special_abilities.join(", "),
                 description: class.description.clone(),
                 starting_weapon_id: class
@@ -166,7 +166,7 @@ impl ClassesEditorState {
 
         let disablement = self
             .buffer
-            .disablement_bit
+            .disablement_bit_index
             .parse::<u8>()
             .map_err(|_| "Invalid Disablement Bit")?;
 
@@ -205,7 +205,7 @@ impl ClassesEditorState {
             spell_school: self.buffer.spell_school,
             is_pure_caster: self.buffer.is_pure_caster,
             spell_stat: self.buffer.spell_stat,
-            disablement_bit: disablement,
+            disablement_bit_index: disablement,
             special_abilities: abilities,
             starting_weapon_id,
             starting_armor_id,

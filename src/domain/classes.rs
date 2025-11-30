@@ -85,7 +85,7 @@ pub enum SpellStat {
 ///     spell_school: None,
 ///     is_pure_caster: false,
 ///     spell_stat: None,
-///     disablement_bit: 0b00000001,
+///     disablement_bit_index: 0,
 ///     special_abilities: vec!["multiple_attacks".to_string()],
 ///     starting_weapon_id: None,
 ///     starting_armor_id: None,
@@ -119,8 +119,10 @@ pub struct ClassDefinition {
     /// Stat used for spell point calculation
     pub spell_stat: Option<SpellStat>,
 
-    /// Bitflag for item disablement checking (0b00000001 = bit 0)
-    pub disablement_bit: u8,
+    /// Bit index for item disablement checking (0 = bit 0).
+    /// Use values 0..=7; compute the bitmask with `1 << disablement_bit_index`.
+    #[serde(rename = "disablement_bit")]
+    pub disablement_bit_index: u8,
 
     /// Special abilities this class has (e.g., "multiple_attacks", "backstab")
     pub special_abilities: Vec<String>,
@@ -147,20 +149,16 @@ impl ClassDefinition {
     /// use antares::domain::classes::ClassDefinition;
     /// use antares::domain::types::DiceRoll;
     ///
-/// let knight = ClassDefinition {
-///     id: "knight".to_string(),
-///     name: "Knight".to_string(),
-///     description: "A brave warrior".to_string(),
-///     hp_die: DiceRoll::new(1, 10, 0),
-///     spell_school: None,
-///     is_pure_caster: false,
-///     spell_stat: None,
-///     disablement_bit: 0b00000001,
-///     special_abilities: vec!["multiple_attacks".to_string()],
-///     starting_weapon_id: None,
-///     starting_armor_id: None,
-///     starting_items: vec![],
-/// };
+    /// let knight = ClassDefinition {
+    ///     id: "knight".to_string(),
+    ///     name: "Knight".to_string(),
+    ///     description: "A brave warrior".to_string(),
+    ///     hp_die: DiceRoll::new(1, 10, 0),
+    ///     spell_school: None,
+    ///     is_pure_caster: false,
+    ///     spell_stat: None,
+    ///     disablement_bit_index: 0,
+    ///     special_abilities: vec!["multiple_attacks".to_string()],
     ///     starting_weapon_id: None,
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
@@ -180,20 +178,16 @@ impl ClassDefinition {
     /// use antares::domain::classes::ClassDefinition;
     /// use antares::domain::types::DiceRoll;
     ///
-/// let knight = ClassDefinition {
-///     id: "knight".to_string(),
-///     name: "Knight".to_string(),
-///     description: "A brave warrior".to_string(),
-///     hp_die: DiceRoll::new(1, 10, 0),
-///     spell_school: None,
-///     is_pure_caster: false,
-///     spell_stat: None,
-///     disablement_bit: 0b00000001,
-///     special_abilities: vec!["multiple_attacks".to_string()],
-///     starting_weapon_id: None,
-///     starting_armor_id: None,
-///     starting_items: vec![],
-/// };
+    /// let knight = ClassDefinition {
+    ///     id: "knight".to_string(),
+    ///     name: "Knight".to_string(),
+    ///     description: "A brave warrior".to_string(),
+    ///     hp_die: DiceRoll::new(1, 10, 0),
+    ///     spell_school: None,
+    ///     is_pure_caster: false,
+    ///     spell_stat: None,
+    ///     disablement_bit_index: 0,
+    ///     special_abilities: vec!["multiple_attacks".to_string()],
     ///     starting_weapon_id: None,
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
@@ -202,7 +196,7 @@ impl ClassDefinition {
     /// assert_eq!(knight.disablement_mask(), 0b00000001);
     /// ```
     pub fn disablement_mask(&self) -> u8 {
-        1 << self.disablement_bit
+        1 << self.disablement_bit_index
     }
 
     /// Checks if this class has a specific special ability
@@ -221,7 +215,7 @@ impl ClassDefinition {
     ///     spell_school: None,
     ///     is_pure_caster: false,
     ///     spell_stat: None,
-    ///     disablement_bit: 5,
+    ///     disablement_bit_index: 5,
     ///     special_abilities: vec!["backstab".to_string(), "disarm_trap".to_string()],
     ///     starting_weapon_id: None,
     ///     starting_armor_id: None,
@@ -436,10 +430,10 @@ impl ClassDatabase {
             // }
 
             // Check disablement bit range
-            if class_def.disablement_bit > 7 {
+            if class_def.disablement_bit_index > 7 {
                 return Err(ClassError::ValidationError(format!(
-                    "Invalid disablement_bit {} in class '{}' (must be 0-7)",
-                    class_def.disablement_bit, class_def.id
+                    "Invalid disablement_bit_index {} in class '{}' (must be 0-7)",
+                    class_def.disablement_bit_index, class_def.id
                 )));
             }
 
@@ -500,7 +494,7 @@ mod tests {
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            disablement_bit: 0,
+            disablement_bit_index: 0,
             special_abilities: vec!["multiple_attacks".to_string()],
             starting_weapon_id: None,
             starting_armor_id: None,
@@ -517,7 +511,7 @@ mod tests {
             spell_school: Some(SpellSchool::Sorcerer),
             is_pure_caster: true,
             spell_stat: Some(SpellStat::Intellect),
-            disablement_bit: 4,
+            disablement_bit_index: 4,
             special_abilities: vec![],
             starting_weapon_id: None,
             starting_armor_id: None,
@@ -839,7 +833,7 @@ mod tests {
         assert_eq!(knight.name, "Knight");
         assert_eq!(knight.hp_die.sides, 10);
         assert!(!knight.can_cast_spells());
-        assert_eq!(knight.disablement_bit, 0);
+        assert_eq!(knight.disablement_bit_index, 0);
 
         // Verify Sorcerer properties
         let sorcerer = db.get_class("sorcerer").unwrap();
@@ -849,7 +843,7 @@ mod tests {
         assert_eq!(sorcerer.spell_school, Some(SpellSchool::Sorcerer));
         assert_eq!(sorcerer.spell_stat, Some(SpellStat::Intellect));
         assert!(sorcerer.is_pure_caster);
-        assert_eq!(sorcerer.disablement_bit, 4);
+        assert_eq!(sorcerer.disablement_bit_index, 4);
 
         // Verify Cleric properties
         let cleric = db.get_class("cleric").unwrap();

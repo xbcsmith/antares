@@ -197,7 +197,7 @@ impl ClassEditor {
             spell_school,
             is_pure_caster,
             spell_stat,
-            disablement_bit,
+            disablement_bit_index: disablement_bit,
             special_abilities,
             starting_weapon_id: None,
             starting_armor_id: None,
@@ -372,9 +372,9 @@ impl ClassEditor {
                 .unwrap_or_else(|| "N/A".to_string())
         );
         println!(
-            "  Disablement Bit: {} (mask: 0b{:08b})",
-            class.disablement_bit,
-            1 << class.disablement_bit
+            "  Disablement Bit Index: {} (mask: 0b{:08b})",
+            class.disablement_bit_index,
+            1 << class.disablement_bit_index
         );
 
         if class.special_abilities.is_empty() {
@@ -527,8 +527,8 @@ impl ClassEditor {
         let mut used_bits = [false; 8];
 
         for class in &self.classes {
-            if (class.disablement_bit as usize) < 8 {
-                used_bits[class.disablement_bit as usize] = true;
+            if (class.disablement_bit_index as usize) < 8 {
+                used_bits[class.disablement_bit_index as usize] = true;
             }
         }
 
@@ -635,7 +635,7 @@ mod tests {
                 spell_school: None,
                 is_pure_caster: false,
                 spell_stat: None,
-                disablement_bit: 0,
+                disablement_bit_index: 0,
                 special_abilities: vec![],
                 starting_weapon_id: None,
                 starting_armor_id: None,
@@ -649,7 +649,7 @@ mod tests {
                 spell_school: Some(SpellSchool::Sorcerer),
                 is_pure_caster: true,
                 spell_stat: Some(SpellStat::Intellect),
-                disablement_bit: 1,
+                disablement_bit_index: 1,
                 special_abilities: vec![],
                 starting_weapon_id: None,
                 starting_armor_id: None,

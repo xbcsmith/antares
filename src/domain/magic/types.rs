@@ -206,6 +206,9 @@ pub struct Spell {
     pub duration: u16,
     /// Whether a saving throw is allowed
     pub saving_throw: bool,
+    /// Conditions applied by this spell
+    #[serde(default)]
+    pub applied_conditions: Vec<crate::domain::conditions::ConditionId>,
 }
 
 impl Spell {
@@ -263,6 +266,7 @@ impl Spell {
             damage,
             duration,
             saving_throw,
+            applied_conditions: Vec::new(),
         }
     }
 

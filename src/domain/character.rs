@@ -663,6 +663,8 @@ pub struct Character {
     pub spells: SpellBook,
     /// Active status conditions (bitflags)
     pub conditions: Condition,
+    /// Active data-driven conditions
+    pub active_conditions: Vec<crate::domain::conditions::ActiveCondition>,
     /// Damage resistances
     pub resistances: Resistances,
     /// Per-character quest/event tracking
@@ -702,6 +704,7 @@ impl Character {
             equipment: Equipment::new(),
             spells: SpellBook::new(),
             conditions: Condition::new(),
+            active_conditions: Vec::new(),
             resistances: Resistances::new(),
             quest_flags: QuestFlags::new(),
             portrait_id: 0,
@@ -720,6 +723,36 @@ impl Character {
     /// Returns true if the character can act in combat
     pub fn can_act(&self) -> bool {
         self.is_alive() && !self.conditions.is_bad()
+    }
+
+    /// Adds a condition to the character
+    pub fn add_condition(&mut self, condition: crate::domain::conditions::ActiveCondition) {
+        // Check if condition already exists, if so, refresh/overwrite it
+        if let Some(existing) = self
+            .active_conditions
+            .iter_mut()
+            .find(|c| c.condition_id == condition.condition_id)
+        {
+            existing.duration = condition.duration;
+        } else {
+            self.active_conditions.push(condition);
+        }
+    }
+
+    /// Removes a condition by ID
+    pub fn remove_condition(&mut self, condition_id: &str) {
+        self.active_conditions
+            .retain(|c| c.condition_id != condition_id);
+    }
+
+    /// Updates conditions based on round tick
+    pub fn tick_conditions_round(&mut self) {
+        self.active_conditions.retain_mut(|c| !c.tick_round());
+    }
+
+    /// Updates conditions based on minute tick
+    pub fn tick_conditions_minute(&mut self) {
+        self.active_conditions.retain_mut(|c| !c.tick_minute());
     }
 }
 
