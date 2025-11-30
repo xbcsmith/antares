@@ -51,7 +51,7 @@ fn main() {
         .add_plugins(CameraPlugin)
         .add_plugins(antares::game::systems::input::InputPlugin)
         .add_plugins(antares::game::systems::events::EventPlugin)
-        .add_plugins(antares::game::systems::ui::UiPlugin)
+        // .add_plugins(antares::game::systems::ui::UiPlugin) // Temporarily disabled due to egui context issue
         .run();
 }
 

@@ -1,9 +1,9 @@
 CampaignMetadata(
-    id: "12",
-    name: "Foo",
+    id: "42",
+    name: "Tutorial",
     version: "1.0.0",
     author: "Brett Smith",
-    description: "Foo Campaign",
+    description: "Tutorial Campaign",
     engine_version: "0.1.0",
     starting_map: "starter_town",
     starting_position: (10, 10),

@@ -271,12 +271,16 @@ impl MonstersEditorState {
         let mut new_selection = selected;
         let mut action: Option<(usize, &str)> = None;
 
-        ui.horizontal(|ui| {
-            let height = ui.available_height();
+        // Compute panel height using shared helper to keep consistent across editors.
+        let panel_height = crate::ui_helpers::compute_panel_height(
+            ui,
+            crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
+        );
 
+        ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.set_width(300.0);
-                ui.set_height(height);
+                ui.set_width(crate::ui_helpers::DEFAULT_LEFT_COLUMN_WIDTH);
+                ui.set_min_height(panel_height);
 
                 ui.heading("Monsters");
                 ui.separator();
@@ -284,6 +288,7 @@ impl MonstersEditorState {
                 egui::ScrollArea::vertical()
                     .id_salt("monsters_list_scroll")
                     .auto_shrink([false, false])
+                    .max_height(panel_height)
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
                         for (idx, label) in &filtered_monsters {
@@ -302,7 +307,7 @@ impl MonstersEditorState {
             ui.separator();
 
             ui.vertical(|ui| {
-                ui.set_height(height);
+                ui.set_min_height(panel_height);
                 ui.set_min_width(ui.available_width());
                 if let Some(idx) = selected {
                     if idx < monsters.len() {

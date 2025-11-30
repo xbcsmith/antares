@@ -819,20 +819,8 @@ impl<'a> MapGridWidget<'a> {
             return Color32::from_rgb(255, 200, 0); // Yellow for NPCs
         }
 
-        if has_event {
-            return Color32::from_rgb(255, 100, 100); // Red for events
-        }
-
-        if tile.wall_type != WallType::None {
-            return match tile.wall_type {
-                WallType::Normal => Color32::from_rgb(80, 80, 80),
-                WallType::Door => Color32::from_rgb(139, 69, 19),
-                WallType::Torch => Color32::from_rgb(255, 165, 0),
-                WallType::None => Color32::WHITE,
-            };
-        }
-
-        match tile.terrain {
+        // Determine terrain color first so we can blend it with wall color if needed
+        let terrain_color = match tile.terrain {
             TerrainType::Ground => Color32::from_rgb(210, 180, 140), // Tan
             TerrainType::Grass => Color32::from_rgb(50, 205, 50),    // Lime Green
             TerrainType::Water => Color32::from_rgb(30, 144, 255),   // Dodger Blue
@@ -842,7 +830,32 @@ impl<'a> MapGridWidget<'a> {
             TerrainType::Dirt => Color32::from_rgb(139, 69, 19),     // Saddle Brown
             TerrainType::Forest => Color32::from_rgb(34, 139, 34),   // Forest Green
             TerrainType::Mountain => Color32::from_rgb(105, 105, 105), // Dim Gray
+        };
+
+        if has_event {
+            return Color32::from_rgb(255, 100, 100); // Red for events
         }
+
+        if tile.wall_type != WallType::None {
+            return match tile.wall_type {
+                // For normal walls, render a darker version of the terrain color
+                // so that Forest Normal looks like a green wall while Stone Normal
+                // remains greyish, keeping the wall/terrain visual distinction.
+                WallType::Normal => {
+                    // darken factor (0.0..1.0) — lower = darker
+                    let factor = 0.60_f32;
+                    let r = (terrain_color.r() as f32 * factor).round() as u8;
+                    let g = (terrain_color.g() as f32 * factor).round() as u8;
+                    let b = (terrain_color.b() as f32 * factor).round() as u8;
+                    Color32::from_rgb(r, g, b)
+                }
+                WallType::Door => Color32::from_rgb(139, 69, 19),
+                WallType::Torch => Color32::from_rgb(255, 165, 0),
+                WallType::None => Color32::WHITE,
+            };
+        }
+
+        terrain_color
     }
 }
 

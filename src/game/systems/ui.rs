@@ -4,6 +4,7 @@
 use crate::game::resources::GlobalState;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
+// use bevy_egui::EguiSet;
 
 pub struct UiPlugin;
 
@@ -29,10 +30,12 @@ impl GameLog {
 }
 
 fn ui_system(mut contexts: EguiContexts, global_state: Res<GlobalState>, game_log: Res<GameLog>) {
-    let Ok(ctx) = contexts.ctx_mut() else {
-        return;
-    };
     let game_state = &global_state.0;
+
+    let ctx = match contexts.ctx_mut() {
+        Ok(ctx) => ctx,
+        Err(_) => return,
+    };
 
     // Top Panel: Menu Bar (Placeholder)
     egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {

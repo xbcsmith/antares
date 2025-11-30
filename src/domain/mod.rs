@@ -18,6 +18,7 @@
 pub mod character;
 pub mod classes;
 pub mod combat;
+pub mod conditions;
 pub mod dialogue;
 pub mod items;
 pub mod magic;

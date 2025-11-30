@@ -48,7 +48,7 @@ fn check_for_events(
 fn handle_events(
     mut event_reader: MessageReader<MapEventTriggered>,
     mut global_state: ResMut<GlobalState>,
-    mut game_log: ResMut<crate::game::systems::ui::GameLog>,
+    mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
 ) {
     for trigger in event_reader.read() {
         match &trigger.event {
@@ -59,7 +59,9 @@ fn handle_events(
             } => {
                 let msg = format!("Teleporting to Map {} at {:?}", map_id, destination);
                 println!("{}", msg);
-                game_log.add(msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
 
                 let game_state = &mut global_state.0;
 
@@ -73,30 +75,40 @@ fn handle_events(
             MapEvent::Sign { text, .. } => {
                 let msg = format!("Sign reads: {}", text);
                 println!("{}", msg);
-                game_log.add(msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
             }
             MapEvent::Trap { damage, effect, .. } => {
                 let msg = format!("IT'S A TRAP! Took {} damage. Effect: {:?}", damage, effect);
                 println!("{}", msg);
-                game_log.add(msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
                 // TODO: Apply damage to party
             }
             MapEvent::Treasure { loot, .. } => {
                 let msg = format!("Found treasure! Loot IDs: {:?}", loot);
                 println!("{}", msg);
-                game_log.add(msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
                 // TODO: Add to inventory
             }
             MapEvent::Encounter { monster_group, .. } => {
                 let msg = format!("Monsters attack! Group IDs: {:?}", monster_group);
                 println!("{}", msg);
-                game_log.add(msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
                 // TODO: Start combat
             }
             MapEvent::NpcDialogue { npc_id, .. } => {
                 let msg = format!("NPC {} wants to talk.", npc_id);
                 println!("{}", msg);
-                game_log.add(msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
                 // TODO: Start dialogue
             }
         }
