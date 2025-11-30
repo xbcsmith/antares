@@ -244,6 +244,7 @@ Summary:
   - `sdk/campaign_builder/src/items_editor.rs`
   - `sdk/campaign_builder/src/monsters_editor.rs`
   - `sdk/campaign_builder/src/spells_editor.rs`
+  - `sdk/campaign_builder/src/conditions_editor.rs`
 - Refactor details:
   - Replace manual `available_size` computations with calls to `crate::ui_helpers::compute_panel_height(...)`.
   - Replace hard-coded left column width `300.0` with `crate::ui_helpers::DEFAULT_LEFT_COLUMN_WIDTH`.
@@ -262,6 +263,7 @@ Files changed (high-level):
 - `sdk/campaign_builder/src/items_editor.rs` — refactored to use `compute_panel_height` and `DEFAULT_LEFT_COLUMN_WIDTH`
 - `sdk/campaign_builder/src/monsters_editor.rs` — refactored to use `compute_panel_height` and `DEFAULT_LEFT_COLUMN_WIDTH`
 - `sdk/campaign_builder/src/spells_editor.rs` — refactored to use `compute_panel_height` and `DEFAULT_LEFT_COLUMN_WIDTH`
+- `sdk/campaign_builder/src/conditions_editor.rs` — refactored to use `compute_panel_height` and `DEFAULT_LEFT_COLUMN_WIDTH`
 
 Validation:
 
@@ -275,7 +277,7 @@ Follow-up:
 ## Phase 2: Campaign Builder UI - List & Preview Panel Scaling (2025-11-29)
 
 Objective:
-Ensure the items, monster, and spell editor list and details/preview panels expand with the window height so users can view more rows without unnecessary vertical scrolling.
+Ensure the items, monster, spell, and conditions editor list and details/preview panels expand with the window height so users can view more rows without unnecessary vertical scrolling.
 
 Summary:
 

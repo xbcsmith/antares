@@ -62,6 +62,7 @@
 
 pub mod casting;
 pub mod database;
+pub mod spell_effects;
 pub mod types;
 
 // Re-export commonly used types
@@ -70,4 +71,8 @@ pub use casting::{
     get_required_level_for_spell,
 };
 pub use database::{SpellDatabase, SpellDatabaseError};
+pub use spell_effects::{
+    apply_condition_dot_effects, apply_spell_conditions_to_character,
+    apply_spell_conditions_to_monster,
+};
 pub use types::{Spell, SpellContext, SpellError, SpellResult, SpellSchool, SpellTarget};
