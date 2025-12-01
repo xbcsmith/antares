@@ -885,7 +885,7 @@ mod tests {
         // Damage should be between 1 and 4
         let (combatant_id, damage) = effects[0];
         assert!(matches!(combatant_id, CombatantId::Player(0)));
-        assert!(damage >= 1 && damage <= 4);
+        assert!((1..=4).contains(&damage));
 
         // Character should have taken damage
         if let Some(Combatant::Player(c)) = combat.participants.first() {
@@ -937,7 +937,7 @@ mod tests {
         // Damage should be negative (healing)
         let (combatant_id, damage) = effects[0];
         assert!(matches!(combatant_id, CombatantId::Player(0)));
-        assert!(damage >= -4 && damage <= -1);
+        assert!((-4..=-1).contains(&damage));
 
         // Character should have healed
         if let Some(Combatant::Player(c)) = combat.participants.first() {
