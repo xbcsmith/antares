@@ -11,7 +11,7 @@
 //! See `docs/reference/architecture.md` Section 7.1-7.2 for data file specifications.
 
 use crate::domain::character::Stats;
-use crate::domain::combat::monster::{LootTable, Monster, MonsterResistances};
+use crate::domain::combat::monster::{LootTable, Monster, MonsterResistances, MonsterCondition};
 use crate::domain::combat::types::Attack;
 use crate::domain::types::MonsterId;
 use serde::{Deserialize, Serialize};
@@ -50,7 +50,7 @@ pub enum MonsterDatabaseError {
 /// ```
 /// use antares::domain::combat::database::MonsterDefinition;
 /// use antares::domain::combat::monster::{LootTable, MonsterResistances};
-/// use antares::domain::character::{Stats, AttributePair};
+/// use antares::domain::character::{Stats, AttributePair, AttributePair16};
 /// use antares::domain::combat::types::Attack;
 /// use antares::domain::types::DiceRoll;
 ///
@@ -66,8 +66,8 @@ pub enum MonsterDatabaseError {
 ///         accuracy: AttributePair::new(6),
 ///         luck: AttributePair::new(4),
 ///     },
-///     hp: 8,
-///     ac: 10,
+///     hp: AttributePair16::new(8),
+///     ac: AttributePair::new(10),
 ///     attacks: vec![
 ///         Attack::physical(DiceRoll::new(1, 4, 0)),
 ///     ],
@@ -89,14 +89,14 @@ pub struct MonsterDefinition {
     pub name: String,
     /// Monster attributes
     pub stats: Stats,
-    /// Base hit points
-    pub hp: u16,
-    /// Base armor class
-    pub ac: u8,
+    /// Hit points (current/base)
+    pub hp: crate::domain::character::AttributePair16,
+    /// Armor class (higher is better)
+    pub ac: crate::domain::character::AttributePair,
     /// Attack patterns
     pub attacks: Vec<Attack>,
     /// HP threshold to attempt fleeing
-    pub flee_threshold: u16,
+    pub flee_threshold: u8,
     /// Percentage chance to use special attack
     pub special_attack_threshold: u8,
     /// Damage resistances
@@ -111,6 +111,15 @@ pub struct MonsterDefinition {
     pub magic_resistance: u8,
     /// Loot table
     pub loot: LootTable,
+    /// Current condition
+    #[serde(default)]
+    pub conditions: crate::domain::combat::monster::MonsterCondition,
+    /// Active conditions
+    #[serde(default)]
+    pub active_conditions: Vec<crate::domain::conditions::ActiveCondition>,
+    /// Has acted flag
+    #[serde(default)]
+    pub has_acted: bool,
 }
 
 impl MonsterDefinition {
@@ -120,16 +129,16 @@ impl MonsterDefinition {
     ///
     /// ```
     /// use antares::domain::combat::database::MonsterDefinition;
-    /// use antares::domain::combat::monster::{LootTable, MonsterResistances};
-    /// use antares::domain::character::{Stats, AttributePair};
+    /// use antares::domain::combat::monster::{LootTable, MonsterResistances, MonsterCondition};
+    /// use antares::domain::character::{Stats, AttributePair, AttributePair16};
     /// use antares::domain::combat::types::Attack;
     ///
     /// let definition = MonsterDefinition {
     ///     id: 1,
     ///     name: "Goblin".to_string(),
     ///     stats: Stats::new(10, 8, 6, 10, 12, 10, 8),
-    ///     hp: 15,
-    ///     ac: 6,
+    ///     hp: AttributePair16::new(15),
+    ///     ac: AttributePair::new(6),
     ///     attacks: vec![],
     ///     flee_threshold: 5,
     ///     special_attack_threshold: 0,
@@ -139,6 +148,9 @@ impl MonsterDefinition {
     ///     is_undead: false,
     ///     magic_resistance: 0,
     ///     loot: LootTable::new(5, 15, 0, 0, 25),
+    ///     conditions: MonsterCondition::Normal,
+    ///     active_conditions: vec![],
+    ///     has_acted: false,
     /// };
     ///
     /// let monster = definition.to_monster();
@@ -150,20 +162,23 @@ impl MonsterDefinition {
             self.id,
             self.name.clone(),
             self.stats.clone(),
-            self.hp,
-            self.ac,
+            self.hp.base,
+            self.ac.base,
             self.attacks.clone(),
             self.loot.clone(),
             self.loot.experience,
         );
 
-        monster.flee_threshold = self.flee_threshold as u8;
+        monster.flee_threshold = self.flee_threshold;
         monster.special_attack_threshold = self.special_attack_threshold;
         monster.resistances = self.resistances.clone();
         monster.can_regenerate = self.can_regenerate;
         monster.can_advance = self.can_advance;
         monster.is_undead = self.is_undead;
         monster.magic_resistance = self.magic_resistance;
+        monster.conditions = self.conditions;
+        monster.active_conditions = self.active_conditions.clone();
+        monster.has_acted = self.has_acted;
 
         monster
     }
@@ -299,8 +314,8 @@ impl MonsterDatabase {
     ///
     /// ```
     /// use antares::domain::combat::database::{MonsterDatabase, MonsterDefinition};
-    /// use antares::domain::combat::monster::{LootTable, MonsterResistances};
-    /// use antares::domain::character::{Stats, AttributePair};
+    /// use antares::domain::combat::monster::{LootTable, MonsterResistances, MonsterCondition};
+    /// use antares::domain::character::{Stats, AttributePair, AttributePair16};
     ///
     /// let mut db = MonsterDatabase::new();
     /// let goblin = MonsterDefinition {
@@ -315,8 +330,8 @@ impl MonsterDatabase {
     ///         accuracy: AttributePair::new(6),
     ///         luck: AttributePair::new(4),
     ///     },
-    ///     hp: 8,
-    ///     ac: 10,
+    ///     hp: AttributePair16::new(8),
+    ///     ac: AttributePair::new(10),
     ///     attacks: vec![],
     ///     flee_threshold: 3,
     ///     special_attack_threshold: 20,
@@ -326,6 +341,9 @@ impl MonsterDatabase {
     ///     is_undead: false,
     ///     magic_resistance: 0,
     ///     loot: LootTable::new(1, 10, 0, 0, 10),
+    ///     conditions: MonsterCondition::Normal,
+    ///     active_conditions: vec![],
+    ///     has_acted: false,
     /// };
     /// db.add_monster(goblin).unwrap();
     ///
@@ -361,7 +379,7 @@ impl MonsterDatabase {
     pub fn get_monsters_by_hp_range(&self, min_hp: u16, max_hp: u16) -> Vec<&MonsterDefinition> {
         self.monsters
             .values()
-            .filter(|monster| monster.hp >= min_hp && monster.hp <= max_hp)
+            .filter(|monster| monster.hp.base >= min_hp && monster.hp.base <= max_hp)
             .collect()
     }
 
@@ -385,7 +403,7 @@ impl Default for MonsterDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::AttributePair;
+    use crate::domain::character::{AttributePair, AttributePair16};
 
     fn create_test_monster(id: MonsterId, name: &str, hp: u16) -> MonsterDefinition {
         MonsterDefinition {
@@ -400,8 +418,8 @@ mod tests {
                 accuracy: AttributePair::new(10),
                 luck: AttributePair::new(10),
             },
-            hp,
-            ac: 10,
+            hp: AttributePair16::new(hp),
+            ac: AttributePair::new(10),
             attacks: vec![],
             flee_threshold: 5,
             special_attack_threshold: 20,
@@ -411,6 +429,9 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: LootTable::new(1, 10, 0, 0, 10),
+            conditions: crate::domain::combat::monster::MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
         }
     }
 
