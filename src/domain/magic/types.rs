@@ -162,20 +162,20 @@ pub enum SpellTarget {
 /// ```
 /// use antares::domain::magic::types::{Spell, SpellSchool, SpellContext, SpellTarget};
 ///
-/// let cure_wounds = Spell {
-///     id: 0x0101, // Cleric school, spell 1
-///     name: "Cure Wounds".to_string(),
-///     school: SpellSchool::Cleric,
-///     level: 1,
-///     sp_cost: 2,
-///     gem_cost: 0,
-///     context: SpellContext::Anytime,
-///     target: SpellTarget::SingleCharacter,
-///     description: "Heals 8 hit points".to_string(),
-///     damage: None,
-///     duration: 0,
-///     saving_throw: false,
-/// };
+/// let cure_wounds = Spell::new(
+///     0x0101, // Cleric school, spell 1
+///     "Cure Wounds",
+///     SpellSchool::Cleric,
+///     1,
+///     2,
+///     0,
+///     SpellContext::Anytime,
+///     SpellTarget::SingleCharacter,
+///     "Heals 8 hit points",
+///     None,
+///     0,
+///     false,
+/// );
 ///
 /// assert_eq!(cure_wounds.level, 1);
 /// assert_eq!(cure_wounds.sp_cost, 2);
@@ -347,13 +347,8 @@ impl Spell {
 /// ```
 /// use antares::domain::magic::types::SpellResult;
 ///
-/// let result = SpellResult {
-///     success: true,
-///     effect_message: "The party is healed!".to_string(),
-///     damage: None,
-///     healing: Some(20),
-///     affected_targets: vec![0, 1, 2],
-/// };
+/// let result = SpellResult::success("The party is healed!")
+///     .with_healing(20, vec![0, 1, 2]);
 ///
 /// assert!(result.success);
 /// assert_eq!(result.healing, Some(20));

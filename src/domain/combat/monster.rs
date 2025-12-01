@@ -265,6 +265,7 @@ impl Default for LootTable {
 ///     is_undead: false,
 ///     magic_resistance: 0,
 ///     conditions: MonsterCondition::Normal,
+///     active_conditions: Vec::new(),
 ///     has_acted: false,
 /// };
 /// ```
