@@ -167,20 +167,20 @@ impl SpellDatabase {
     /// use antares::domain::magic::{SpellDatabase, Spell, SpellSchool, SpellContext, SpellTarget};
     ///
     /// let mut db = SpellDatabase::new();
-    /// let spell = Spell {
-    ///     id: 257,
-    ///     name: "Awaken".to_string(),
-    ///     school: SpellSchool::Cleric,
-    ///     level: 1,
-    ///     sp_cost: 5,
-    ///     gem_cost: 0,
-    ///     context: SpellContext::Anytime,
-    ///     target: SpellTarget::SingleCharacter,
-    ///     description: "Awakens a sleeping character".to_string(),
-    ///     damage: None,
-    ///     duration: 0,
-    ///     saving_throw: false,
-    /// };
+    /// let spell = Spell::new(
+    ///     257,
+    ///     "Awaken",
+    ///     SpellSchool::Cleric,
+    ///     1,
+    ///     5,
+    ///     0,
+    ///     SpellContext::Anytime,
+    ///     SpellTarget::SingleCharacter,
+    ///     "Awakens a sleeping character",
+    ///     None,
+    ///     0,
+    ///     false,
+    /// );
     /// db.add_spell(spell).unwrap();
     ///
     /// assert!(db.get_spell(257).is_some());
@@ -203,20 +203,20 @@ impl SpellDatabase {
     /// use antares::domain::magic::{SpellDatabase, Spell, SpellSchool, SpellContext, SpellTarget};
     ///
     /// let mut db = SpellDatabase::new();
-    /// let cleric_spell = Spell {
-    ///     id: 257,
-    ///     name: "Awaken".to_string(),
-    ///     school: SpellSchool::Cleric,
-    ///     level: 1,
-    ///     sp_cost: 5,
-    ///     gem_cost: 0,
-    ///     context: SpellContext::Anytime,
-    ///     target: SpellTarget::SingleCharacter,
-    ///     description: "Awakens sleeping".to_string(),
-    ///     damage: None,
-    ///     duration: 0,
-    ///     saving_throw: false,
-    /// };
+    /// let cleric_spell = Spell::new(
+    ///     257,
+    ///     "Awaken",
+    ///     SpellSchool::Cleric,
+    ///     1,
+    ///     5,
+    ///     0,
+    ///     SpellContext::Anytime,
+    ///     SpellTarget::SingleCharacter,
+    ///     "Awakens sleeping",
+    ///     None,
+    ///     0,
+    ///     false,
+    /// );
     /// db.add_spell(cleric_spell).unwrap();
     ///
     /// let cleric_spells = db.get_spells_by_school(SpellSchool::Cleric);
