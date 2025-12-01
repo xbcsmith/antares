@@ -565,6 +565,14 @@ impl DialogueDatabase {
     pub fn add_dialogue(&mut self, dialogue: DialogueTree) {
         self.dialogues.insert(dialogue.id, dialogue);
     }
+
+    /// Validates all dialogues in the database
+    pub fn validate(&self) -> Result<(), String> {
+        for dialogue in self.dialogues.values() {
+            dialogue.validate()?;
+        }
+        Ok(())
+    }
 }
 
 // ===== Content Database =====
@@ -887,7 +895,58 @@ impl ContentDatabase {
             .validate()
             .map_err(|e| DatabaseError::ValidationError(e.to_string()))?;
 
-        // Additional validation can be added here for other content types
+        // Validate dialogues
+        self.dialogues
+            .validate()
+            .map_err(|e| DatabaseError::ValidationError(e.to_string()))?;
+
+        // Cross-reference validation
+
+        // Check quests
+        for quest in self.quests.quests.values() {
+            // Check quest stages objectives
+            for stage in &quest.stages {
+                for objective in &stage.objectives {
+                    match objective {
+                        crate::domain::quest::QuestObjective::KillMonsters {
+                            monster_id, ..
+                        } => {
+                            if !self.monsters.has_monster(monster_id) {
+                                return Err(DatabaseError::ValidationError(format!(
+                                    "Quest '{}' references non-existent monster {}",
+                                    quest.name, monster_id
+                                )));
+                            }
+                        }
+                        crate::domain::quest::QuestObjective::CollectItems { item_id, .. } => {
+                            if !self.items.has_item(item_id) {
+                                return Err(DatabaseError::ValidationError(format!(
+                                    "Quest '{}' references non-existent item {}",
+                                    quest.name, item_id
+                                )));
+                            }
+                        }
+                        crate::domain::quest::QuestObjective::DeliverItem { item_id, .. } => {
+                            if !self.items.has_item(item_id) {
+                                return Err(DatabaseError::ValidationError(format!(
+                                    "Quest '{}' references non-existent item {}",
+                                    quest.name, item_id
+                                )));
+                            }
+                        }
+                        crate::domain::quest::QuestObjective::ReachLocation { map_id, .. } => {
+                            if !self.maps.has_map(map_id) {
+                                return Err(DatabaseError::ValidationError(format!(
+                                    "Quest '{}' references non-existent map {}",
+                                    quest.name, map_id
+                                )));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
 
         Ok(())
     }

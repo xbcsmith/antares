@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-use antares::domain::character::Stats;
+use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
-use antares::domain::combat::monster::{LootTable, MonsterResistances};
+use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
 use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
 use antares::domain::types::DiceRoll;
 use eframe::egui;
@@ -59,8 +59,8 @@ impl MonstersEditorState {
         MonsterDefinition {
             id: 0,
             name: "New Monster".to_string(),
-            hp: 10,
-            ac: 10,
+            hp: AttributePair16::new(10),
+            ac: AttributePair::new(10),
             attacks: vec![Attack {
                 damage: DiceRoll::new(1, 6, 0),
                 attack_type: AttackType::Physical,
@@ -75,6 +75,9 @@ impl MonstersEditorState {
             loot: LootTable::default(),
             flee_threshold: 0,
             special_attack_threshold: 0,
+            conditions: MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
         }
     }
 
@@ -260,7 +263,7 @@ impl MonstersEditorState {
                 let undead_icon = if monster.is_undead { "💀" } else { "👹" };
                 (
                     idx,
-                    format!("{} {} (HP:{})", undead_icon, monster.name, monster.hp),
+                    format!("{} {} (HP:{})", undead_icon, monster.name, monster.hp.base),
                 )
             })
             .collect();
@@ -342,8 +345,8 @@ impl MonstersEditorState {
                                 .show(ui, |ui| {
                                     ui.group(|ui| {
                                         ui.label(format!("ID: {}", monster.id));
-                                        ui.label(format!("HP: {}", monster.hp));
-                                        ui.label(format!("AC: {}", monster.ac));
+                                        ui.label(format!("HP: {}", monster.hp.base));
+                                        ui.label(format!("AC: {}", monster.ac.base));
                                         ui.label(format!("Attacks: {}", monster.attacks.len()));
                                         ui.label(format!("Undead: {}", monster.is_undead));
                                         ui.label(format!(
@@ -450,8 +453,8 @@ impl MonstersEditorState {
                     ui.separator();
 
                     ui.label("⚔️ Combat Stats:");
-                    ui.label(format!("  ❤️ HP: {}", monster.hp));
-                    ui.label(format!("  🛡️ AC: {}", monster.ac));
+                    ui.label(format!("  ❤️ HP: {}", monster.hp.base));
+                    ui.label(format!("  🛡️ AC: {}", monster.ac.base));
                     ui.label(format!("  ⚡ Attacks: {}", monster.attacks.len()));
 
                     if monster.magic_resistance > 0 {
@@ -537,12 +540,12 @@ impl MonstersEditorState {
 
                 ui.horizontal(|ui| {
                     ui.label("HP:");
-                    ui.add(egui::DragValue::new(&mut self.edit_buffer.hp).speed(1.0));
+                    ui.add(egui::DragValue::new(&mut self.edit_buffer.hp.base).speed(1.0));
                 });
 
                 ui.horizontal(|ui| {
                     ui.label("AC:");
-                    ui.add(egui::DragValue::new(&mut self.edit_buffer.ac).speed(1.0));
+                    ui.add(egui::DragValue::new(&mut self.edit_buffer.ac.base).speed(1.0));
                 });
 
                 ui.checkbox(&mut self.edit_buffer.is_undead, "Undead");
@@ -614,6 +617,10 @@ impl MonstersEditorState {
 
                 ui.horizontal(|ui| {
                     if ui.button("💾 Save").clicked() {
+                        // Sync current with base for hp and ac before saving
+                        self.edit_buffer.hp.current = self.edit_buffer.hp.base;
+                        self.edit_buffer.ac.current = self.edit_buffer.ac.base;
+
                         if is_add {
                             monsters.push(self.edit_buffer.clone());
                         } else if let Some(idx) = self.selected_monster {
@@ -894,10 +901,10 @@ impl MonstersEditorState {
     }
 
     pub fn calculate_monster_xp(&self, monster: &MonsterDefinition) -> u32 {
-        let mut xp = monster.hp as u32 * 10;
+        let mut xp = monster.hp.base as u32 * 10;
 
-        if monster.ac < 10 {
-            xp += (10 - monster.ac as u32) * 50;
+        if monster.ac.base < 10 {
+            xp += (10 - monster.ac.base as u32) * 50;
         }
 
         xp += monster.attacks.len() as u32 * 20;

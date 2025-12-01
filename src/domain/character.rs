@@ -55,7 +55,7 @@ pub enum CharacterError {
 /// attr.reset();
 /// assert_eq!(attr.current, 10);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct AttributePair {
     /// Permanent base value
     pub base: u8,
@@ -108,6 +108,28 @@ impl AttributePair {
     }
 }
 
+// Deserialization: accept either a simple number or an object with base/current.
+// This maintains backward compatibility for data files that use raw numbers for attributes.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum AttributePairDef {
+    Full { base: u8, current: u8 },
+    Simple(u8),
+}
+
+impl<'de> serde::Deserialize<'de> for AttributePair {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let helper = AttributePairDef::deserialize(deserializer)?;
+        match helper {
+            AttributePairDef::Full { base, current } => Ok(AttributePair { base, current }),
+            AttributePairDef::Simple(v) => Ok(AttributePair::new(v)),
+        }
+    }
+}
+
 /// AttributePair for 16-bit values (HP, SP)
 ///
 /// # Examples
@@ -119,7 +141,7 @@ impl AttributePair {
 /// hp.modify(-20);
 /// assert_eq!(hp.current, 30);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct AttributePair16 {
     /// Permanent base value
     pub base: u16,
@@ -144,6 +166,27 @@ impl AttributePair16 {
     /// Apply a temporary modifier (positive or negative)
     pub fn modify(&mut self, amount: i32) {
         self.current = self.current.saturating_add_signed(amount as i16);
+    }
+}
+
+// Deserialization: accept either a raw u16 (interpreted as base == current) or the struct form.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum AttributePair16Def {
+    Full { base: u16, current: u16 },
+    Simple(u16),
+}
+
+impl<'de> serde::Deserialize<'de> for AttributePair16 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let helper = AttributePair16Def::deserialize(deserializer)?;
+        match helper {
+            AttributePair16Def::Full { base, current } => Ok(AttributePair16 { base, current }),
+            AttributePair16Def::Simple(v) => Ok(AttributePair16::new(v)),
+        }
     }
 }
 

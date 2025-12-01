@@ -1,0 +1,160 @@
+[
+    (
+        id: "blind",
+        name: "Blind",
+        description: "Reduces accuracy and perception.",
+        effects: [
+            StatusEffect("blind"),
+            AttributeModifier(
+                attribute: "accuracy",
+                value: -5,
+            ),
+        ],
+        default_duration: Rounds(5),
+        icon_id: Some("icon_blind"),
+    ),
+    (
+        id: "sleep",
+        name: "Sleep",
+        description: "Target is asleep and cannot act.",
+        effects: [
+            StatusEffect("asleep"),
+        ],
+        default_duration: Rounds(3),
+        icon_id: Some("icon_sleep"),
+    ),
+    (
+        id: "bless",
+        name: "Bless",
+        description: "Increases accuracy and morale.",
+        effects: [
+            AttributeModifier(
+                attribute: "accuracy",
+                value: 2,
+            ),
+        ],
+        default_duration: Rounds(10),
+        icon_id: Some("icon_bless"),
+    ),
+    (
+        id: "poison",
+        name: "Poison",
+        description: "Takes poison damage each round.",
+        effects: [
+            DamageOverTime(
+                damage: (
+                    count: 1,
+                    sides: 4,
+                    bonus: 0,
+                ),
+                element: "poison",
+            ),
+        ],
+        default_duration: Permanent,
+        icon_id: Some("icon_poison"),
+    ),
+    (
+        id: "regeneration",
+        name: "Regeneration",
+        description: "Heals each round.",
+        effects: [
+            HealOverTime(
+                amount: (
+                    count: 1,
+                    sides: 4,
+                    bonus: 0,
+                ),
+            ),
+        ],
+        default_duration: Rounds(3),
+        icon_id: Some("icon_regeneration"),
+    ),
+    (
+        id: "giants_strength",
+        name: "Giant's Strength",
+        description: "Increases might temporarily.",
+        effects: [
+            AttributeModifier(
+                attribute: "might",
+                value: 5,
+            ),
+        ],
+        default_duration: Minutes(10),
+        icon_id: Some("icon_giants_strength"),
+    ),
+    (
+        id: "poisoned_weakness",
+        name: "Poisoned Weakness",
+        description: "Suffers poison damage and reduced strength.",
+        effects: [
+            DamageOverTime(
+                damage: (
+                    count: 1,
+                    sides: 4,
+                    bonus: 0,
+                ),
+                element: "poison",
+            ),
+            AttributeModifier(
+                attribute: "might",
+                value: -2,
+            ),
+        ],
+        default_duration: Rounds(4),
+        icon_id: Some("icon_poisoned_weakness"),
+    ),
+    (
+        id: "empty_effects",
+        name: "Empty Effects",
+        description: "A condition with no effects to test editor behavior.",
+        effects: [],
+        default_duration: Rounds(1),
+        icon_id: None,
+    ),
+    (
+        id: "max_strength_value",
+        name: "Max Strength Value",
+        description: "A condition with a large attribute modifier value to test bounds.",
+        effects: [
+            AttributeModifier(
+                attribute: "might",
+                value: 32767,
+            ),
+        ],
+        default_duration: Rounds(1),
+        icon_id: Some("icon_max"),
+    ),
+    (
+        id: "weird id 1",
+        name: "Weird ID Test",
+        description: "ID contains spaces and special characters.",
+        effects: [
+            StatusEffect("weird"),
+        ],
+        default_duration: Permanent,
+        icon_id: None,
+    ),
+    (
+        id: "dup1",
+        name: "Duplicate Example 1",
+        description: "First entry with duplicate ID to test validation.",
+        effects: [
+            StatusEffect("duplicate"),
+        ],
+        default_duration: Rounds(2),
+        icon_id: None,
+    ),
+    (
+        id: "dup1",
+        name: "Duplicate Example 2",
+        description: "Second entry with duplicate ID to test validation errors.",
+        effects: [
+            AttributeModifier(
+                attribute: "accuracy",
+                value: -1,
+            ),
+        ],
+        default_duration: Rounds(2),
+        icon_id: None,
+    ),
+]

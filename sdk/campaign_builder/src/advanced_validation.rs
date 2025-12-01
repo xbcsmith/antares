@@ -10,7 +10,9 @@
 //! - Unreachable content detector
 //! - Difficulty curve analyzer
 
+use antares::domain::character::{AttributePair, AttributePair16};
 use antares::domain::combat::database::MonsterDefinition;
+use antares::domain::combat::monster::MonsterCondition;
 use antares::domain::items::types::Item;
 use antares::domain::quest::{Quest, QuestObjective};
 use antares::domain::world::Map;
@@ -147,7 +149,7 @@ impl AdvancedValidator {
         let stats = self.calculate_balance_stats();
 
         // Check for level gaps based on AC (using AC as proxy for difficulty)
-        let levels: Vec<u8> = self.monsters.iter().map(|m| m.ac).collect();
+        let levels: Vec<u8> = self.monsters.iter().map(|m| m.ac.base).collect();
         let min_level = *levels.iter().min().unwrap_or(&1);
         let max_level = *levels.iter().max().unwrap_or(&1);
 
@@ -173,7 +175,7 @@ impl AdvancedValidator {
         // Check for overpowered bosses
         for monster in &self.monsters {
             let avg_hp = stats.average_monster_hp;
-            let monster_hp = monster.hp as f64;
+            let monster_hp = monster.hp.base as f64;
 
             if monster_hp > avg_hp * 5.0 {
                 results.push(
@@ -192,7 +194,7 @@ impl AdvancedValidator {
         let total_exp: u32 = self
             .monsters
             .iter()
-            .map(|m| (m.hp as u32) * (m.ac as u32))
+            .map(|m| (m.hp.base as u32) * (m.ac.base as u32))
             .sum();
         let quest_exp: u32 = self
             .quests
@@ -539,7 +541,7 @@ impl AdvancedValidator {
         }
 
         // Check monster level distribution (using AC as difficulty metric)
-        let monster_levels: Vec<u8> = self.monsters.iter().map(|m| m.ac).collect();
+        let monster_levels: Vec<u8> = self.monsters.iter().map(|m| m.ac.base).collect();
         if !monster_levels.is_empty() {
             let _monster_min = *monster_levels.iter().min().unwrap();
             let monster_max = *monster_levels.iter().max().unwrap();
@@ -569,23 +571,24 @@ impl AdvancedValidator {
         if !self.monsters.is_empty() {
             // Use AC as proxy for level/difficulty
             stats.average_monster_level =
-                self.monsters.iter().map(|m| m.ac as f64).sum::<f64>() / self.monsters.len() as f64;
+                self.monsters.iter().map(|m| m.ac.base as f64).sum::<f64>()
+                    / self.monsters.len() as f64;
 
-            stats.average_monster_hp =
-                self.monsters.iter().map(|m| m.hp as f64).sum::<f64>() / self.monsters.len() as f64;
+            stats.average_monster_hp = self.monsters.iter().map(|m| m.hp.base as f64).sum::<f64>()
+                / self.monsters.len() as f64;
 
             // Use hp * ac as proxy for experience value
             stats.average_monster_exp = self
                 .monsters
                 .iter()
-                .map(|m| (m.hp as f64) * (m.ac as f64))
+                .map(|m| (m.hp.base as f64) * (m.ac.base as f64))
                 .sum::<f64>()
                 / self.monsters.len() as f64;
 
             for monster in &self.monsters {
                 *stats
                     .monster_level_distribution
-                    .entry(monster.ac)
+                    .entry(monster.ac.base)
                     .or_insert(0) += 1;
             }
         }
@@ -746,8 +749,8 @@ mod tests {
                 accuracy: AttributePair::new(10),
                 luck: AttributePair::new(10),
             },
-            hp,
-            ac,
+            hp: AttributePair16::new(hp),
+            ac: AttributePair::new(ac),
             attacks: vec![Attack {
                 damage: DiceRoll::new(1, 6, 0),
                 attack_type: AttackType::Physical,
@@ -768,6 +771,9 @@ mod tests {
                 items: Vec::new(),
                 experience: 10,
             },
+            conditions: MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
         }
     }
 
