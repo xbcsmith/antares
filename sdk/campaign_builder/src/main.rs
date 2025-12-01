@@ -39,7 +39,7 @@ mod undo_redo;
 
 use antares::domain::character::Stats;
 use antares::domain::combat::database::MonsterDefinition;
-use antares::domain::combat::monster::{LootTable, MonsterResistances};
+use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
 use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
 use antares::domain::conditions::ConditionDefinition;
 use antares::domain::dialogue::{DialogueTree, NodeId};
@@ -519,12 +519,15 @@ impl CampaignBuilderApp {
 
     /// Create a default monster for the edit buffer
     fn default_monster() -> MonsterDefinition {
+        use antares::domain::character::{AttributePair, AttributePair16};
+        use antares::domain::combat::monster::MonsterCondition;
+
         MonsterDefinition {
             id: 0,
             name: String::new(),
             stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
-            hp: 10,
-            ac: 10,
+            hp: AttributePair16::new(10),
+            ac: AttributePair::new(10),
             attacks: vec![Attack {
                 damage: DiceRoll::new(1, 4, 0),
                 attack_type: AttackType::Physical,
@@ -545,6 +548,9 @@ impl CampaignBuilderApp {
                 items: Vec::new(),
                 experience: 0,
             },
+            conditions: MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
         }
     }
 
@@ -4038,6 +4044,8 @@ impl CampaignBuilderApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antares::domain::character::{AttributePair, AttributePair16};
+    use antares::domain::combat::monster::MonsterCondition;
     use antares::domain::quest::QuestStage;
 
     #[test]
@@ -4372,8 +4380,8 @@ mod tests {
         let monster = CampaignBuilderApp::default_monster();
         assert_eq!(monster.id, 0);
         assert_eq!(monster.name, "");
-        assert_eq!(monster.hp, 10);
-        assert_eq!(monster.ac, 10);
+        assert_eq!(monster.hp.base, 10);
+        assert_eq!(monster.ac.base, 10);
         assert!(!monster.is_undead);
         assert!(!monster.can_regenerate);
         assert!(monster.can_advance);
@@ -5947,8 +5955,8 @@ mod tests {
             id: 1,
             name: "Test Monster".to_string(),
             stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
-            hp: 20,
-            ac: 10,
+            hp: AttributePair16::new(20),
+            ac: AttributePair::new(10),
             attacks: vec![Attack {
                 damage: DiceRoll::new(1, 6, 0),
                 attack_type: AttackType::Physical,
@@ -5969,6 +5977,9 @@ mod tests {
                 items: Vec::new(),
                 experience: 0,
             },
+            conditions: MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
         };
 
         let xp = app.monsters_editor_state.calculate_monster_xp(&monster);
@@ -5988,8 +5999,8 @@ mod tests {
             id: 1,
             name: "Powerful Monster".to_string(),
             stats: Stats::new(20, 10, 10, 20, 15, 15, 10),
-            hp: 50,
-            ac: 5,
+            hp: AttributePair16::new(50),
+            ac: AttributePair::new(5),
             attacks: vec![
                 Attack {
                     damage: DiceRoll::new(2, 8, 5),
@@ -6017,6 +6028,9 @@ mod tests {
                 items: Vec::new(),
                 experience: 0,
             },
+            conditions: MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
         };
 
         let xp = app.monsters_editor_state.calculate_monster_xp(&monster);
@@ -6039,8 +6053,8 @@ mod tests {
             id: 42,
             name: "Test Monster".to_string(),
             stats: Stats::new(15, 12, 10, 14, 13, 11, 8),
-            hp: 30,
-            ac: 8,
+            hp: AttributePair16::new(30),
+            ac: AttributePair::new(8),
             attacks: vec![Attack {
                 damage: DiceRoll::new(2, 6, 2),
                 attack_type: AttackType::Fire,
@@ -6061,6 +6075,9 @@ mod tests {
                 items: Vec::new(),
                 experience: 200,
             },
+            conditions: MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
         };
 
         // Export to RON
@@ -6088,8 +6105,8 @@ mod tests {
             id: 1,
             name: "Goblin".to_string(),
             stats: Stats::new(12, 8, 6, 10, 14, 10, 5),
-            hp: 15,
-            ac: 12,
+            hp: AttributePair16::new(15),
+            ac: AttributePair::new(12),
             attacks: vec![Attack {
                 damage: DiceRoll::new(1, 4, 1),
                 attack_type: AttackType::Physical,
@@ -6110,12 +6127,15 @@ mod tests {
                 items: Vec::new(),
                 experience: 25,
             },
+            conditions: MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
         };
 
         // Verify all preview fields exist
         assert_eq!(monster.name, "Goblin");
-        assert_eq!(monster.hp, 15);
-        assert_eq!(monster.ac, 12);
+        assert_eq!(monster.hp.base, 15);
+        assert_eq!(monster.ac.base, 12);
         assert_eq!(monster.attacks.len(), 1);
         assert!(!monster.is_undead);
         assert!(!monster.can_regenerate);

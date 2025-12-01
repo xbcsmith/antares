@@ -2,6 +2,32 @@
 
 This document tracks completed implementations and changes to the Antares project.
 
+## Phase 0: Conditions Editor — Discovery & Preparation (2025-11-XX)
+
+Summary:
+
+- Completed Phase 0: Discovery & Preparation for the Conditions Editor refactor (toolbar, per-variant effect editor, file I/O).
+- Documented all usages of `ConditionEffect` across the codebase, validated runtime integration points, and captured a prioritized list of changes to implement in Phase 1.
+- Created a dedicated discovery summary with full audit, references, and sample RON data:
+  - `docs/explanation/conditions_editor_phase_0_discovery.md`
+- Key outcomes:
+  - Identified domain & runtime usage (domain definitions, character/monster effect application, combat engine, and spell effects).
+  - Verified `ActiveCondition.magnitude` is a runtime-only field (should not be serialized by the editor).
+  - Identified reusable UI components: dice editor (from `spells_editor.rs`), toolbar/import-save patterns (from `items_editor.rs` and `monsters_editor.rs`), and file merge/load patterns.
+  - Prepared example RON test data for DOT/HOT/Status/AttributeModifier cases and edge cases (to be used by Phases 1–3).
+  - Documented the exact state additions and API shape recommended for the Conditions editor integration (e.g., `ConditionsEditorState::show`, new state fields, `EffectEditBuffer`).
+  - Added follow-up task list for Phase 1 through Phase 5 (see discovery doc for details and examples).
+- Files created during Phase 0:
+  - `docs/explanation/conditions_editor_phase_0_discovery.md` — contains the full audit and next steps.
+  - Example/test RON file(s) are prepared for Phase 1 usage (see the discovery doc).
+- Next steps (Phase 1 priority):
+  - Convert `render_conditions_editor(...)` to `ConditionsEditorState::show(...)` with the toolbar and import/export.
+  - Implement load/save/import/merge using patterns from `items_editor.rs` and `monsters_editor.rs`.
+  - Add ID uniqueness checks and editor validation similar to existing validators (e.g., `validate_item_ids`).
+  - Add per-variant effect editors using the dice editor patterns for DOT/HOT and ComboBox/validation for attributes/elements.
+
+(See the detailed Phase 0 discovery document for complete findings, file references, UI/UX mockups, data samples, and follow-up tasks.)
+
 ## Clippy Error Fixes (2025-01-15)
 
 **Objective**: Fix clippy warnings that were treated as errors in the Campaign Builder SDK, ensuring code quality and successful builds.

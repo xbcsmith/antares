@@ -10,9 +10,9 @@
 //! - Dialogues (merchant, quest giver, guard)
 //! - Maps (town, dungeon, wilderness)
 
-use antares::domain::character::{AttributePair, Stats};
+use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
-use antares::domain::combat::monster::{LootTable, MonsterResistances};
+use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
 use antares::domain::combat::types::Attack;
 use antares::domain::dialogue::{DialogueNode, DialogueTree};
 use antares::domain::items::types::{
@@ -397,8 +397,8 @@ impl TemplateManager {
                     accuracy: AttributePair::new(6),
                     luck: AttributePair::new(4),
                 },
-                hp: 8,
-                ac: 12,
+                hp: AttributePair16::new(8),
+                ac: AttributePair::new(12),
                 attacks: vec![Attack::physical(DiceRoll::new(1, 4, 0))],
                 flee_threshold: 2,
                 special_attack_threshold: 10,
@@ -408,9 +408,12 @@ impl TemplateManager {
                 is_undead: false,
                 magic_resistance: 0,
                 loot: LootTable::new(1, 10, 0, 0, 25),
+                conditions: MonsterCondition::Normal,
+                active_conditions: vec![],
+                has_acted: false,
             }),
             "skeleton" => Some(MonsterDefinition {
-                id: id.try_into().ok()?,
+                id,
                 name: "Skeleton".to_string(),
                 stats: Stats {
                     might: AttributePair::new(8),
@@ -421,8 +424,8 @@ impl TemplateManager {
                     accuracy: AttributePair::new(7),
                     luck: AttributePair::new(2),
                 },
-                hp: 10,
-                ac: 13,
+                hp: AttributePair16::new(10),
+                ac: AttributePair::new(13),
                 attacks: vec![Attack::physical(DiceRoll::new(1, 6, 0))],
                 flee_threshold: 0,
                 special_attack_threshold: 5,
@@ -432,9 +435,12 @@ impl TemplateManager {
                 is_undead: true,
                 magic_resistance: 5,
                 loot: LootTable::new(5, 20, 0, 0, 50),
+                conditions: MonsterCondition::Normal,
+                active_conditions: vec![],
+                has_acted: false,
             }),
             "orc" => Some(MonsterDefinition {
-                id: id.try_into().ok()?,
+                id,
                 name: "Orc".to_string(),
                 stats: Stats {
                     might: AttributePair::new(14),
@@ -445,8 +451,8 @@ impl TemplateManager {
                     accuracy: AttributePair::new(9),
                     luck: AttributePair::new(5),
                 },
-                hp: 18,
-                ac: 14,
+                hp: AttributePair16::new(18),
+                ac: AttributePair::new(14),
                 attacks: vec![Attack::physical(DiceRoll::new(1, 8, 1))],
                 flee_threshold: 5,
                 special_attack_threshold: 15,
@@ -456,9 +462,12 @@ impl TemplateManager {
                 is_undead: false,
                 magic_resistance: 0,
                 loot: LootTable::new(10, 50, 0, 0, 100),
+                conditions: MonsterCondition::Normal,
+                active_conditions: vec![],
+                has_acted: false,
             }),
             "dragon" => Some(MonsterDefinition {
-                id: id.try_into().ok()?,
+                id,
                 name: "Dragon".to_string(),
                 stats: Stats {
                     might: AttributePair::new(20),
@@ -469,8 +478,8 @@ impl TemplateManager {
                     accuracy: AttributePair::new(15),
                     luck: AttributePair::new(12),
                 },
-                hp: 120,
-                ac: 18,
+                hp: AttributePair16::new(120),
+                ac: AttributePair::new(18),
                 attacks: vec![
                     Attack::physical(DiceRoll::new(2, 10, 5)),
                     Attack::physical(DiceRoll::new(1, 8, 3)),
@@ -483,6 +492,9 @@ impl TemplateManager {
                 is_undead: false,
                 magic_resistance: 50,
                 loot: LootTable::new(1000, 5000, 0, 0, 5000),
+                conditions: MonsterCondition::Normal,
+                active_conditions: vec![],
+                has_acted: false,
             }),
             _ => None,
         }
