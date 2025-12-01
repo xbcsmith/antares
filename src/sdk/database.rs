@@ -31,8 +31,10 @@
 //! ```
 
 use crate::domain::classes::ClassDatabase;
+use crate::domain::combat::monster::Monster;
 use crate::domain::dialogue::{DialogueId, DialogueTree};
 use crate::domain::items::ItemDatabase;
+use crate::domain::magic::types::Spell;
 use crate::domain::quest::{Quest, QuestId};
 use crate::domain::types::{MapId, MonsterId, SpellId};
 use crate::domain::world::{Map, MapBlueprint};
@@ -136,21 +138,12 @@ impl RaceDatabase {
     }
 }
 
-// ===== Spell System (Placeholder) =====
+// ===== Spell System =====
 
-/// Spell definition structure (full implementation pending)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpellDefinition {
-    /// Spell ID
-    pub id: SpellId,
-    /// Spell name
-    pub name: String,
-}
-
-/// Spell database
+/// Spell database for loading and managing spells
 #[derive(Debug, Clone, Default)]
 pub struct SpellDatabase {
-    spells: HashMap<SpellId, SpellDefinition>,
+    spells: HashMap<SpellId, Spell>,
 }
 
 impl SpellDatabase {
@@ -162,13 +155,56 @@ impl SpellDatabase {
     }
 
     /// Loads spells from a RON file
-    pub fn load_from_file<P: AsRef<Path>>(_path: P) -> Result<Self, DatabaseError> {
-        // Placeholder implementation
-        Ok(Self::new())
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the RON file containing spell definitions
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(SpellDatabase)` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns `DatabaseError::SpellLoadError` if file cannot be read or parsed
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::sdk::database::SpellDatabase;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let db = SpellDatabase::load_from_file("campaigns/tutorial/data/spells.ron")?;
+    /// println!("Loaded {} spells", db.count());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
+        let path = path.as_ref();
+
+        // Return empty database if file doesn't exist
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+
+        // Read and parse RON file
+        let contents = std::fs::read_to_string(path)
+            .map_err(|e| DatabaseError::SpellLoadError(format!("Failed to read file: {}", e)))?;
+
+        let spells: Vec<Spell> = ron::from_str(&contents)
+            .map_err(|e| DatabaseError::SpellLoadError(format!("Failed to parse RON: {}", e)))?;
+
+        // Build HashMap from vector
+        let mut spell_map = HashMap::new();
+        for spell in spells {
+            spell_map.insert(spell.id, spell);
+        }
+
+        Ok(Self { spells: spell_map })
     }
 
     /// Gets a spell by ID
-    pub fn get_spell(&self, id: SpellId) -> Option<&SpellDefinition> {
+    pub fn get_spell(&self, id: SpellId) -> Option<&Spell> {
         self.spells.get(&id)
     }
 
@@ -188,21 +224,12 @@ impl SpellDatabase {
     }
 }
 
-// ===== Monster System (Placeholder) =====
+// ===== Monster System =====
 
-/// Monster definition structure (full implementation pending)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MonsterDefinition {
-    /// Monster ID
-    pub id: MonsterId,
-    /// Monster name
-    pub name: String,
-}
-
-/// Monster database
+/// Monster database for loading and managing monsters
 #[derive(Debug, Clone, Default)]
 pub struct MonsterDatabase {
-    monsters: HashMap<MonsterId, MonsterDefinition>,
+    monsters: HashMap<MonsterId, Monster>,
 }
 
 impl MonsterDatabase {
@@ -214,13 +241,58 @@ impl MonsterDatabase {
     }
 
     /// Loads monsters from a RON file
-    pub fn load_from_file<P: AsRef<Path>>(_path: P) -> Result<Self, DatabaseError> {
-        // Placeholder implementation
-        Ok(Self::new())
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the RON file containing monster definitions
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(MonsterDatabase)` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns `DatabaseError::MonsterLoadError` if file cannot be read or parsed
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::sdk::database::MonsterDatabase;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let db = MonsterDatabase::load_from_file("campaigns/tutorial/data/monsters.ron")?;
+    /// println!("Loaded {} monsters", db.count());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
+        let path = path.as_ref();
+
+        // Return empty database if file doesn't exist
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+
+        // Read and parse RON file
+        let contents = std::fs::read_to_string(path)
+            .map_err(|e| DatabaseError::MonsterLoadError(format!("Failed to read file: {}", e)))?;
+
+        let monsters: Vec<Monster> = ron::from_str(&contents)
+            .map_err(|e| DatabaseError::MonsterLoadError(format!("Failed to parse RON: {}", e)))?;
+
+        // Build HashMap from vector
+        let mut monster_map = HashMap::new();
+        for monster in monsters {
+            monster_map.insert(monster.id, monster);
+        }
+
+        Ok(Self {
+            monsters: monster_map,
+        })
     }
 
     /// Gets a monster by ID
-    pub fn get_monster(&self, id: MonsterId) -> Option<&MonsterDefinition> {
+    pub fn get_monster(&self, id: MonsterId) -> Option<&Monster> {
         self.monsters.get(&id)
     }
 
@@ -328,9 +400,52 @@ impl QuestDatabase {
     }
 
     /// Loads quests from a RON file
-    pub fn load_from_file<P: AsRef<Path>>(_path: P) -> Result<Self, DatabaseError> {
-        // Placeholder implementation - will load quests from RON file
-        Ok(Self::new())
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the RON file containing quest definitions
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(QuestDatabase)` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns `DatabaseError::QuestLoadError` if file cannot be read or parsed
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::sdk::database::QuestDatabase;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let db = QuestDatabase::load_from_file("campaigns/tutorial/data/quests.ron")?;
+    /// println!("Loaded {} quests", db.count());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
+        let path = path.as_ref();
+
+        // Return empty database if file doesn't exist
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+
+        // Read and parse RON file
+        let contents = std::fs::read_to_string(path)
+            .map_err(|e| DatabaseError::QuestLoadError(format!("Failed to read file: {}", e)))?;
+
+        let quests: Vec<Quest> = ron::from_str(&contents)
+            .map_err(|e| DatabaseError::QuestLoadError(format!("Failed to parse RON: {}", e)))?;
+
+        // Build HashMap from vector
+        let mut quest_map = HashMap::new();
+        for quest in quests {
+            quest_map.insert(quest.id, quest);
+        }
+
+        Ok(Self { quests: quest_map })
     }
 
     /// Gets a quest by ID
@@ -376,9 +491,54 @@ impl DialogueDatabase {
     }
 
     /// Loads dialogues from a RON file
-    pub fn load_from_file<P: AsRef<Path>>(_path: P) -> Result<Self, DatabaseError> {
-        // Placeholder implementation - will load dialogues from RON file
-        Ok(Self::new())
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the RON file containing dialogue definitions
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(DialogueDatabase)` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns `DatabaseError::DialogueLoadError` if file cannot be read or parsed
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::sdk::database::DialogueDatabase;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let db = DialogueDatabase::load_from_file("campaigns/tutorial/data/dialogues.ron")?;
+    /// println!("Loaded {} dialogues", db.count());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
+        let path = path.as_ref();
+
+        // Return empty database if file doesn't exist
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+
+        // Read and parse RON file
+        let contents = std::fs::read_to_string(path)
+            .map_err(|e| DatabaseError::DialogueLoadError(format!("Failed to read file: {}", e)))?;
+
+        let dialogues: Vec<DialogueTree> = ron::from_str(&contents)
+            .map_err(|e| DatabaseError::DialogueLoadError(format!("Failed to parse RON: {}", e)))?;
+
+        // Build HashMap from vector
+        let mut dialogue_map = HashMap::new();
+        for dialogue in dialogues {
+            dialogue_map.insert(dialogue.id, dialogue);
+        }
+
+        Ok(Self {
+            dialogues: dialogue_map,
+        })
     }
 
     /// Gets a dialogue by ID
@@ -889,6 +1049,73 @@ mod tests {
     }
 
     #[test]
+    fn test_spell_database_load_from_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create temporary RON file with test spells
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let ron_data = r#"[
+            (
+                id: 1,
+                name: "Magic Missile",
+                school: Sorcerer,
+                level: 1,
+                sp_cost: 5,
+                gem_cost: 0,
+                context: CombatOnly,
+                target: SingleMonster,
+                description: "A bolt of magical energy",
+                damage: Some((count: 1, sides: 4, bonus: 1)),
+                duration: 0,
+                saving_throw: false,
+                applied_conditions: [],
+            ),
+            (
+                id: 2,
+                name: "Bless",
+                school: Cleric,
+                level: 1,
+                sp_cost: 5,
+                gem_cost: 0,
+                context: Anytime,
+                target: AllCharacters,
+                description: "Blesses the party",
+                damage: None,
+                duration: 10,
+                saving_throw: false,
+                applied_conditions: ["bless"],
+            ),
+        ]"#;
+        temp_file.write_all(ron_data.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Test loading
+        let db = SpellDatabase::load_from_file(temp_file.path()).unwrap();
+        assert_eq!(db.count(), 2);
+        assert!(db.has_spell(&1));
+        assert!(db.has_spell(&2));
+
+        // Test retrieval
+        let spell1 = db.get_spell(1).unwrap();
+        assert_eq!(spell1.name, "Magic Missile");
+        assert_eq!(spell1.level, 1);
+
+        let spell2 = db.get_spell(2).unwrap();
+        assert_eq!(spell2.name, "Bless");
+        assert_eq!(spell2.applied_conditions.len(), 1);
+    }
+
+    #[test]
+    fn test_spell_database_load_nonexistent_file() {
+        // Should return empty database for missing file
+        let result = SpellDatabase::load_from_file("/nonexistent/path/spells.ron");
+        assert!(result.is_ok());
+        let db = result.unwrap();
+        assert_eq!(db.count(), 0);
+    }
+
+    #[test]
     fn test_monster_database_new() {
         let db = MonsterDatabase::new();
         assert_eq!(db.count(), 0);
@@ -896,10 +1123,199 @@ mod tests {
     }
 
     #[test]
+    fn test_monster_database_load_from_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create temporary RON file with test monsters
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let ron_data = r#"[
+            (
+                id: 1,
+                name: "Goblin",
+                stats: (
+                    might: (current: 10, base: 10),
+                    intellect: (current: 8, base: 8),
+                    personality: (current: 8, base: 8),
+                    endurance: (current: 10, base: 10),
+                    speed: (current: 12, base: 12),
+                    accuracy: (current: 10, base: 10),
+                    luck: (current: 10, base: 10)
+                ),
+                hp: (current: 5, base: 5),
+                ac: (current: 12, base: 12),
+                attacks: [],
+                loot: (
+                    gold_min: 1,
+                    gold_max: 5,
+                    gems_min: 0,
+                    gems_max: 0,
+                    items: [],
+                    experience: 10
+                ),
+                experience_value: 10,
+                flee_threshold: 20,
+                special_attack_threshold: 0,
+                resistances: (physical: false, fire: false, cold: false, electricity: false, energy: false, paralysis: false, fear: false, sleep: false),
+                can_regenerate: false,
+                can_advance: true,
+                is_undead: false,
+                magic_resistance: 0,
+                conditions: Normal,
+                active_conditions: [],
+                has_acted: false,
+            ),
+        ]"#;
+        temp_file.write_all(ron_data.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Test loading
+        let db = MonsterDatabase::load_from_file(temp_file.path()).unwrap();
+        assert_eq!(db.count(), 1);
+        assert!(db.has_monster(&1));
+
+        // Test retrieval
+        let monster = db.get_monster(1).unwrap();
+        assert_eq!(monster.name, "Goblin");
+        assert_eq!(monster.hp.base, 5);
+    }
+
+    #[test]
     fn test_map_database_new() {
         let db = MapDatabase::new();
         assert_eq!(db.count(), 0);
         assert!(db.all_maps().is_empty());
+    }
+
+    #[test]
+    fn test_quest_database_load_from_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create temporary RON file with test quests
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let ron_data = r#"[
+            (
+                id: 1,
+                name: "Rat Problem",
+                description: "Kill the rats in the cellar.",
+                stages: [
+                    (
+                        stage_number: 1,
+                        name: "Kill Rats",
+                        description: "Kill 5 rats",
+                        objectives: [
+                            KillMonsters(monster_id: 1, quantity: 5)
+                        ],
+                        require_all_objectives: true,
+                    ),
+                    (
+                        stage_number: 2,
+                        name: "Return",
+                        description: "Return to innkeeper",
+                        objectives: [
+                            TalkToNpc(npc_id: 1, map_id: 1)
+                        ],
+                        require_all_objectives: true,
+                    )
+                ],
+                rewards: [Experience(100), Gold(50)],
+                min_level: Some(1),
+                max_level: None,
+                required_quests: [],
+                repeatable: false,
+                is_main_quest: false,
+                quest_giver_npc: Some(1),
+                quest_giver_map: Some(1),
+                quest_giver_position: None,
+            ),
+        ]"#;
+        temp_file.write_all(ron_data.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Test loading
+        let db = QuestDatabase::load_from_file(temp_file.path()).unwrap();
+        assert_eq!(db.count(), 1);
+        assert!(db.has_quest(&1));
+
+        // Test retrieval
+        let quest = db.get_quest(1).unwrap();
+        assert_eq!(quest.name, "Rat Problem");
+        assert_eq!(quest.stages.len(), 2);
+    }
+
+    #[test]
+    fn test_dialogue_database_load_from_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create temporary RON file with test dialogues
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let ron_data = r#"[
+            (
+                id: 1,
+                name: "Innkeeper Greeting",
+                root_node: 1,
+                nodes: {
+                    1: (
+                        id: 1,
+                        text: "Welcome to the inn!",
+                        speaker_override: None,
+                        choices: [
+                            (
+                                text: "I need a room.",
+                                target_node: Some(2),
+                                conditions: [],
+                                actions: [],
+                                ends_dialogue: false,
+                            ),
+                            (
+                                text: "Goodbye.",
+                                target_node: None,
+                                conditions: [],
+                                actions: [],
+                                ends_dialogue: true,
+                            )
+                        ],
+                        conditions: [],
+                        actions: [],
+                        is_terminal: false,
+                    ),
+                    2: (
+                        id: 2,
+                        text: "That will be 10 gold.",
+                        speaker_override: None,
+                        choices: [
+                            (
+                                text: "Here is the gold.",
+                                target_node: None,
+                                conditions: [],
+                                actions: [],
+                                ends_dialogue: true,
+                            )
+                        ],
+                        conditions: [],
+                        actions: [],
+                        is_terminal: true,
+                    )
+                },
+                speaker_name: Some("Innkeeper"),
+                repeatable: true,
+                associated_quest: None,
+            ),
+        ]"#;
+        temp_file.write_all(ron_data.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Test loading
+        let db = DialogueDatabase::load_from_file(temp_file.path()).unwrap();
+        assert_eq!(db.count(), 1);
+        assert!(db.has_dialogue(&1));
+
+        // Test retrieval
+        let dialogue = db.get_dialogue(1).unwrap();
+        assert_eq!(dialogue.name, "Innkeeper Greeting");
+        assert_eq!(dialogue.nodes.len(), 2);
     }
 
     #[test]

@@ -1,5 +1,46 @@
 # Database Placeholder Implementation Plan
 
+## Critical Distinction: Editor vs. Game Runtime
+
+**IMPORTANT**: This plan addresses placeholders in the **game engine's runtime database** (`src/sdk/database.rs`), NOT the Campaign Builder editor.
+
+### Two Separate Systems
+
+1. **Campaign Builder SDK** (`sdk/campaign_builder/src/main.rs`)
+   - **Purpose**: Editor UI for creating/modifying content
+   - **Status**: ✅ **Already working** - Loads quests/dialogues directly for editing
+   - **Location**: Loads files on-demand in the UI code (around lines 840-850 in `main.rs`)
+
+2. **Content Database** (`src/sdk/database.rs`)
+   - **Purpose**: Runtime game engine content loading (used during actual gameplay)
+   - **Status**: ❌ **Broken** - The `load_from_file()` methods return empty databases
+   - **Impact**: The *game engine* can't load quests/dialogues even though the *editor* can
+
+### The Problem
+
+```rust
+// Current placeholder implementation (line 332):
+pub fn load_from_file<P: AsRef<Path>>(_path: P) -> Result<Self, DatabaseError> {
+    // Placeholder implementation - will load quests from RON file
+    Ok(Self::new())  // ← Returns EMPTY database! Game can't access quests!
+}
+```
+
+When the game tries to load content:
+```rust
+let db = ContentDatabase::load_campaign("campaigns/tutorial")?;
+let quest = db.quests.get_quest(1); // ← Always returns None!
+```
+
+### Summary
+
+- ✅ **Campaign Builder**: Can edit quests/dialogues (works fine)
+- ❌ **Game Engine**: Can't load quests/dialogues for gameplay (broken)
+
+This plan implements RON loading **for the game engine's ContentDatabase**, which is separate from how the Campaign Builder loads files for editing.
+
+---
+
 ## Overview
 
 This plan addresses the 9 remaining placeholder implementations in `src/sdk/database.rs`. The database currently has functional infrastructure for Classes, Items, and Maps, but lacks implementation for Spells, Monsters, Quests, and Dialogues. This plan focuses on leveraging existing domain types and implementing proper RON file loading for each system. Races are deferred to a future phase as they lack full SDK definition.

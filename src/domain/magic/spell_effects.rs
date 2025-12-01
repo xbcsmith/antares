@@ -166,7 +166,7 @@ pub fn apply_condition_dot_effects(
 mod tests {
     use super::*;
     use crate::domain::character::{Alignment, Character, Class, Race, Sex};
-    use crate::domain::conditions::{ConditionDefinition, ConditionDuration, ConditionEffect};
+    use crate::domain::conditions::{ConditionDefinition, ConditionDuration};
     use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
 
     #[test]
