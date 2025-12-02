@@ -626,6 +626,24 @@ impl CampaignBuilderApp {
         errors
     }
 
+    /// Validate condition IDs for uniqueness
+    ///
+    /// Returns validation errors for any duplicate IDs found.
+    fn validate_condition_ids(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for cond in &self.conditions {
+            if !seen_ids.insert(cond.id.clone()) {
+                errors.push(ValidationError {
+                    severity: Severity::Error,
+                    message: format!("Duplicate condition ID: {}", cond.id),
+                });
+            }
+        }
+        errors
+    }
+
     /// Get next available item ID
     ///
     /// Returns the next unique ID by finding the maximum existing ID and adding 1.
@@ -834,8 +852,20 @@ impl CampaignBuilderApp {
                     Ok(contents) => match ron::from_str::<Vec<ConditionDefinition>>(&contents) {
                         Ok(conditions) => {
                             self.conditions = conditions;
-                            self.status_message =
-                                format!("Loaded {} conditions", self.conditions.len());
+
+                            // Validate IDs after loading
+                            let id_errors = self.validate_condition_ids();
+                            if !id_errors.is_empty() {
+                                self.validation_errors.extend(id_errors.clone());
+                                self.status_message = format!(
+                                    "⚠️ Loaded {} conditions with {} ID conflicts",
+                                    self.conditions.len(),
+                                    id_errors.len()
+                                );
+                            } else {
+                                self.status_message =
+                                    format!("Loaded {} conditions", self.conditions.len());
+                            }
                         }
                         Err(e) => {
                             self.status_message = format!("Failed to parse conditions: {}", e);
@@ -1048,6 +1078,7 @@ impl CampaignBuilderApp {
         self.validation_errors.extend(self.validate_spell_ids());
         self.validation_errors.extend(self.validate_monster_ids());
         self.validation_errors.extend(self.validate_map_ids());
+        self.validation_errors.extend(self.validate_condition_ids());
 
         // Required fields
         if self.campaign.id.is_empty() {
@@ -1925,11 +1956,31 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,
             ),
-            EditorTab::Conditions => conditions_editor::render_conditions_editor(
-                ui,
-                &mut self.conditions_editor_state,
-                &mut self.conditions,
-            ),
+            EditorTab::Conditions => {
+                self.conditions_editor_state.show(
+                    ui,
+                    &mut self.conditions,
+                    &mut self.spells,
+                    self.campaign_dir.as_ref(),
+                    &self.campaign.conditions_file,
+                    &mut self.unsaved_changes,
+                    &mut self.status_message,
+                    &mut self.file_load_merge_mode,
+                );
+                // Handle navigation request from conditions editor
+                if let Some(spell_name) = self.conditions_editor_state.navigate_to_spell.take() {
+                    // Find the spell index by name and select it in spells editor
+                    if let Some(idx) = self.spells.iter().position(|s| s.name == spell_name) {
+                        self.spells_editor_state.selected_spell = Some(idx);
+                        self.spells_editor_state.mode = spells_editor::SpellsEditorMode::Edit;
+                        self.spells_editor_state.edit_buffer = self.spells[idx].clone();
+                        self.active_tab = EditorTab::Spells;
+                        self.status_message = format!("Jumped to spell: {}", spell_name);
+                    } else {
+                        self.status_message = format!("Spell '{}' not found", spell_name);
+                    }
+                }
+            }
             EditorTab::Monsters => self.monsters_editor_state.show(
                 ui,
                 &mut self.monsters,
@@ -4961,6 +5012,457 @@ mod tests {
     }
 
     #[test]
+    fn test_condition_id_uniqueness_validation() {
+        let mut app = CampaignBuilderApp::default();
+
+        let cond1 = ConditionDefinition {
+            id: "dup_test".to_string(),
+            name: "Duplicate 1".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: antares::domain::conditions::ConditionDuration::Rounds(3),
+            icon_id: None,
+        };
+
+        let mut cond2 = cond1.clone();
+        cond2.name = "Duplicate 2".to_string();
+        app.conditions.push(cond1);
+        app.conditions.push(cond2);
+
+        // Validate
+        let errors = app.validate_condition_ids();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0]
+            .message
+            .contains("Duplicate condition ID: dup_test"));
+    }
+
+    #[test]
+    fn test_conditions_save_load_roundtrip() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Create a unique temporary directory under the system temp dir
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "antares_test_conditions_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+
+        app.campaign_dir = Some(tmp_dir);
+        app.campaign.conditions_file = "conditions_test.ron".to_string();
+
+        let c1 = ConditionDefinition {
+            id: "c1".to_string(),
+            name: "Condition 1".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: antares::domain::conditions::ConditionDuration::Rounds(2),
+            icon_id: None,
+        };
+        let c2 = ConditionDefinition {
+            id: "c2".to_string(),
+            name: "Condition 2".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: antares::domain::conditions::ConditionDuration::Rounds(4),
+            icon_id: None,
+        };
+
+        app.conditions.push(c1);
+        app.conditions.push(c2);
+
+        assert!(app.save_conditions().is_ok());
+
+        app.conditions.clear();
+        app.load_conditions();
+
+        assert_eq!(app.conditions.len(), 2);
+        assert_eq!(app.conditions[0].id, "c1");
+        assert_eq!(app.conditions[1].id, "c2");
+    }
+
+    #[test]
+    fn test_apply_condition_edits_insert() {
+        use crate::conditions_editor::apply_condition_edits;
+
+        let mut conditions: Vec<ConditionDefinition> = Vec::new();
+
+        let new_cond = ConditionDefinition {
+            id: "insert_test".to_string(),
+            name: "Insert Test".to_string(),
+            description: "Insert via helper".to_string(),
+            effects: vec![],
+            default_duration: antares::domain::conditions::ConditionDuration::Rounds(1),
+            icon_id: Some("icon_insert".to_string()),
+        };
+
+        // Insert should succeed
+        assert!(apply_condition_edits(&mut conditions, None, &new_cond).is_ok());
+        assert_eq!(conditions.len(), 1);
+        assert_eq!(conditions[0].id, "insert_test");
+    }
+
+    #[test]
+    fn test_apply_condition_edits_update_success() {
+        use crate::conditions_editor::apply_condition_edits;
+
+        let mut conditions: Vec<ConditionDefinition> = Vec::new();
+
+        let c1 = ConditionDefinition {
+            id: "c1".to_string(),
+            name: "C1".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: antares::domain::conditions::ConditionDuration::Rounds(2),
+            icon_id: None,
+        };
+        let c2 = ConditionDefinition {
+            id: "c2".to_string(),
+            name: "C2".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: antares::domain::conditions::ConditionDuration::Minutes(3),
+            icon_id: None,
+        };
+
+        conditions.push(c1.clone());
+        conditions.push(c2.clone());
+
+        // Update c1 to have id 'c3'
+        let mut edited = c1.clone();
+        edited.id = "c3".to_string();
+        edited.name = "C3 changed".to_string();
+        edited.icon_id = Some("icon_c3".to_string());
+        match apply_condition_edits(&mut conditions, Some("c1"), &edited) {
+            Ok(()) => {
+                assert!(conditions.iter().any(|c| c.id == "c3"));
+                assert!(!conditions.iter().any(|c| c.id == "c1"));
+                // confirm name/icon changed
+                let found = conditions.iter().find(|c| c.id == "c3").unwrap();
+                assert_eq!(found.name, "C3 changed");
+                assert_eq!(found.icon_id.as_ref().unwrap(), "icon_c3");
+            }
+            Err(e) => panic!("apply_condition_edits failed: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_apply_condition_edits_update_duplicate_error() {
+        use crate::conditions_editor::apply_condition_edits;
+
+        let mut conditions: Vec<ConditionDefinition> = Vec::new();
+
+        let c1 = ConditionDefinition {
+            id: "c1".to_string(),
+            name: "C1".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: antares::domain::conditions::ConditionDuration::Rounds(2),
+            icon_id: None,
+        };
+        let c2 = ConditionDefinition {
+            id: "c2".to_string(),
+            name: "C2".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: antares::domain::conditions::ConditionDuration::Minutes(3),
+            icon_id: None,
+        };
+
+        conditions.push(c1.clone());
+        conditions.push(c2.clone());
+
+        // Attempt to update c1 to id 'c2' (duplicate) -> should fail
+        let mut edited = c1.clone();
+        edited.id = "c2".to_string();
+        let res = apply_condition_edits(&mut conditions, Some("c1"), &edited);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_apply_condition_edits_insert_duplicate_error() {
+        use crate::conditions_editor::apply_condition_edits;
+
+        let mut conditions: Vec<ConditionDefinition> = Vec::new();
+
+        let c1 = ConditionDefinition {
+            id: "dup".to_string(),
+            name: "Dup".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: antares::domain::conditions::ConditionDuration::Rounds(2),
+            icon_id: None,
+        };
+
+        conditions.push(c1.clone());
+
+        // Attempt to insert a new condition with id 'dup' -> should fail
+        let new_dup = ConditionDefinition {
+            id: "dup".to_string(),
+            name: "Dup New".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: antares::domain::conditions::ConditionDuration::Minutes(1),
+            icon_id: None,
+        };
+        let res = apply_condition_edits(&mut conditions, None, &new_dup);
+        assert!(res.is_err());
+    }
+
+    // New tests for effect helpers (Phase 3 - Effects editing helpers)
+    #[test]
+    fn test_condition_effect_helpers_success_flow() {
+        use crate::conditions_editor::{
+            add_effect_to_condition, delete_effect_from_condition, duplicate_effect_in_condition,
+            move_effect_in_condition, update_effect_in_condition,
+        };
+
+        use antares::domain::conditions::{
+            ConditionDefinition, ConditionDuration, ConditionEffect,
+        };
+
+        let mut condition = ConditionDefinition {
+            id: "c_effects".to_string(),
+            name: "Effect Test".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: ConditionDuration::Rounds(1),
+            icon_id: None,
+        };
+
+        // Add a status effect 'sleep'
+        let sleep_eff = ConditionEffect::StatusEffect("sleep".to_string());
+        add_effect_to_condition(&mut condition, sleep_eff.clone());
+        assert_eq!(condition.effects.len(), 1);
+        assert_eq!(condition.effects[0], sleep_eff);
+
+        // Add an AttributeModifier effect
+        let buff = ConditionEffect::AttributeModifier {
+            attribute: "might".to_string(),
+            value: 5,
+        };
+        add_effect_to_condition(&mut condition, buff.clone());
+        assert_eq!(condition.effects.len(), 2);
+        assert_eq!(condition.effects[1], buff);
+
+        // Duplicate the sleep effect (index 0), now effects [sleep, sleep, buff]
+        duplicate_effect_in_condition(&mut condition, 0).unwrap();
+        assert_eq!(condition.effects.len(), 3);
+        assert_eq!(condition.effects[1], sleep_eff);
+
+        // Move the buff up (index 2 -> index 1)
+        move_effect_in_condition(&mut condition, 2, -1).unwrap();
+        // After moving, index 1 should be the AttributeModifier and index 2 is the duplicate sleep
+        if let ConditionEffect::AttributeModifier { attribute, value } = &condition.effects[1] {
+            assert_eq!(attribute, "might");
+            assert_eq!(*value, 5);
+        } else {
+            panic!("Expected AttributeModifier at index 1 after move");
+        }
+
+        // Update the moved buff to a different value
+        let buff2 = ConditionEffect::AttributeModifier {
+            attribute: "might".to_string(),
+            value: 10,
+        };
+        update_effect_in_condition(&mut condition, 1, buff2.clone()).unwrap();
+        assert_eq!(condition.effects[1], buff2);
+
+        // Delete effect at index 0 (original sleep)
+        delete_effect_from_condition(&mut condition, 0).unwrap();
+        assert_eq!(condition.effects.len(), 2);
+    }
+
+    #[test]
+    fn test_update_effect_out_of_range() {
+        use crate::conditions_editor::update_effect_in_condition;
+        use antares::domain::conditions::{
+            ConditionDefinition, ConditionDuration, ConditionEffect,
+        };
+
+        let mut condition = ConditionDefinition {
+            id: "c_effects2".to_string(),
+            name: "Effect Test 2".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: ConditionDuration::Rounds(1),
+            icon_id: None,
+        };
+
+        let res = update_effect_in_condition(
+            &mut condition,
+            0,
+            ConditionEffect::StatusEffect("x".to_string()),
+        );
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_spells_referencing_condition_and_removal() {
+        use crate::conditions_editor::{
+            remove_condition_references_from_spells, spells_referencing_condition,
+        };
+        use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+        use antares::domain::types::DiceRoll;
+
+        // Create a small set of spells, some referencing 'bless', others not.
+        let mut spells: Vec<Spell> = Vec::new();
+
+        spells.push(Spell {
+            id: 0x0101,
+            name: "Bless".to_string(),
+            school: SpellSchool::Cleric,
+            level: 1,
+            sp_cost: 1,
+            gem_cost: 0,
+            context: SpellContext::Anytime,
+            target: SpellTarget::SingleCharacter,
+            description: "A simple buff".to_string(),
+            damage: None,
+            duration: 0,
+            saving_throw: false,
+            applied_conditions: vec!["bless".to_string()],
+        });
+
+        spells.push(Spell {
+            id: 0x0201,
+            name: "Fireball".to_string(),
+            school: SpellSchool::Sorcerer,
+            level: 3,
+            sp_cost: 5,
+            gem_cost: 0,
+            context: SpellContext::CombatOnly,
+            target: SpellTarget::MonsterGroup,
+            description: "A large blast of fire".to_string(),
+            damage: Some(DiceRoll::new(3, 6, 0)),
+            duration: 0,
+            saving_throw: false,
+            applied_conditions: vec!["burn".to_string()],
+        });
+
+        // No match for a nonexistent condition
+        let used = spells_referencing_condition(&spells, "nonexistent");
+        assert!(used.is_empty());
+
+        // A single spell references 'bless'
+        let used = spells_referencing_condition(&spells, "bless");
+        assert_eq!(used.len(), 1);
+        assert_eq!(used[0], "Bless");
+
+        // Remove references from spells (should remove from Bless)
+        let removed = remove_condition_references_from_spells(&mut spells, "bless");
+        assert_eq!(removed, 1);
+        assert!(spells[0].applied_conditions.is_empty());
+    }
+
+    #[test]
+    fn test_apply_condition_edits_validation_and_effect_types() {
+        use crate::conditions_editor::apply_condition_edits;
+        use antares::domain::conditions::{
+            ConditionDefinition, ConditionDuration, ConditionEffect,
+        };
+        use antares::domain::types::DiceRoll;
+
+        let mut conditions: Vec<ConditionDefinition> = Vec::new();
+
+        // Invalid DOT - zero dice count should fail validation.
+        let invalid_dot = ConditionDefinition {
+            id: "invalid_dot".to_string(),
+            name: "Invalid DOT".to_string(),
+            description: "".to_string(),
+            effects: vec![ConditionEffect::DamageOverTime {
+                damage: DiceRoll::new(0, 6, 0),
+                element: "fire".to_string(),
+            }],
+            default_duration: ConditionDuration::Rounds(1),
+            icon_id: None,
+        };
+
+        assert!(apply_condition_edits(&mut conditions, None, &invalid_dot).is_err());
+
+        // Invalid attribute modifier value (too large).
+        let invalid_attr = ConditionDefinition {
+            id: "invalid_attr".to_string(),
+            name: "Invalid Attribute".to_string(),
+            description: "".to_string(),
+            effects: vec![ConditionEffect::AttributeModifier {
+                attribute: "might".to_string(),
+                value: 9999,
+            }],
+            default_duration: ConditionDuration::Rounds(1),
+            icon_id: None,
+        };
+
+        assert!(apply_condition_edits(&mut conditions, None, &invalid_attr).is_err());
+
+        // Valid round-trip: each effect type present and valid should be accepted.
+        let valid_all = ConditionDefinition {
+            id: "valid_all".to_string(),
+            name: "Valid All".to_string(),
+            description: "".to_string(),
+            effects: vec![
+                ConditionEffect::StatusEffect("sleep".to_string()),
+                ConditionEffect::AttributeModifier {
+                    attribute: "might".to_string(),
+                    value: 5,
+                },
+                ConditionEffect::DamageOverTime {
+                    damage: DiceRoll::new(1, 6, 0),
+                    element: "poison".to_string(),
+                },
+                ConditionEffect::HealOverTime {
+                    amount: DiceRoll::new(1, 4, 0),
+                },
+            ],
+            default_duration: ConditionDuration::Rounds(1),
+            icon_id: None,
+        };
+
+        assert!(apply_condition_edits(&mut conditions, None, &valid_all).is_ok());
+        assert_eq!(conditions.len(), 1);
+    }
+
+    #[test]
+    fn test_validate_effect_edit_buffer() {
+        use crate::conditions_editor::{validate_effect_edit_buffer, EffectEditBuffer};
+        use antares::domain::types::DiceRoll;
+
+        // Attribute modifier - empty attribute fails
+        let mut buf = EffectEditBuffer::default();
+        buf.effect_type = Some("AttributeModifier".to_string());
+        buf.attribute = "".to_string();
+        assert!(validate_effect_edit_buffer(&buf).is_err());
+
+        // Attribute present but value out of allowed range fails
+        buf.attribute = "might".to_string();
+        buf.attribute_value = 300; // out of range
+        assert!(validate_effect_edit_buffer(&buf).is_err());
+
+        // Status effect - empty tag fails
+        let mut buf2 = EffectEditBuffer::default();
+        buf2.effect_type = Some("StatusEffect".to_string());
+        buf2.status_tag = "".to_string();
+        assert!(validate_effect_edit_buffer(&buf2).is_err());
+
+        // DOT validation - invalid dice count should fail
+        let mut buf3 = EffectEditBuffer::default();
+        buf3.effect_type = Some("DamageOverTime".to_string());
+        buf3.dice = DiceRoll::new(0, 6, 0);
+        buf3.element = "fire".to_string();
+        assert!(validate_effect_edit_buffer(&buf3).is_err());
+
+        // HOT validation - invalid dice sides should fail
+        let mut buf4 = EffectEditBuffer::default();
+        buf4.effect_type = Some("HealOverTime".to_string());
+        buf4.dice = DiceRoll::new(1, 1, 0); // invalid sides
+        assert!(validate_effect_edit_buffer(&buf4).is_err());
+    }
+
+    #[test]
     fn test_next_available_item_id_empty() {
         let app = CampaignBuilderApp::default();
         assert_eq!(app.next_available_item_id(), 1);
@@ -6820,5 +7322,215 @@ mod tests {
 
         app.dialogue_editor_state.start_new_dialogue();
         assert!(app.dialogue_editor_state.validation_errors.is_empty());
+    }
+
+    // ===== Conditions Editor QoL Tests =====
+
+    #[test]
+    fn test_effect_type_filter_matches() {
+        use crate::conditions_editor::EffectTypeFilter;
+        use antares::domain::conditions::{
+            ConditionDefinition, ConditionDuration, ConditionEffect,
+        };
+        use antares::domain::types::DiceRoll;
+
+        // Condition with AttributeModifier
+        let attr_cond = ConditionDefinition {
+            id: "attr".to_string(),
+            name: "Attribute Buff".to_string(),
+            description: "".to_string(),
+            effects: vec![ConditionEffect::AttributeModifier {
+                attribute: "might".to_string(),
+                value: 5,
+            }],
+            default_duration: ConditionDuration::Rounds(3),
+            icon_id: None,
+        };
+
+        // Condition with DOT
+        let dot_cond = ConditionDefinition {
+            id: "dot".to_string(),
+            name: "Burning".to_string(),
+            description: "".to_string(),
+            effects: vec![ConditionEffect::DamageOverTime {
+                damage: DiceRoll::new(1, 6, 0),
+                element: "fire".to_string(),
+            }],
+            default_duration: ConditionDuration::Rounds(3),
+            icon_id: None,
+        };
+
+        // Condition with HOT
+        let hot_cond = ConditionDefinition {
+            id: "hot".to_string(),
+            name: "Regeneration".to_string(),
+            description: "".to_string(),
+            effects: vec![ConditionEffect::HealOverTime {
+                amount: DiceRoll::new(1, 4, 1),
+            }],
+            default_duration: ConditionDuration::Rounds(5),
+            icon_id: None,
+        };
+
+        // Empty condition
+        let empty_cond = ConditionDefinition {
+            id: "empty".to_string(),
+            name: "Empty".to_string(),
+            description: "".to_string(),
+            effects: vec![],
+            default_duration: ConditionDuration::Instant,
+            icon_id: None,
+        };
+
+        // Test All filter matches everything
+        assert!(EffectTypeFilter::All.matches(&attr_cond));
+        assert!(EffectTypeFilter::All.matches(&dot_cond));
+        assert!(EffectTypeFilter::All.matches(&hot_cond));
+        assert!(EffectTypeFilter::All.matches(&empty_cond));
+
+        // Test specific filters
+        assert!(EffectTypeFilter::AttributeModifier.matches(&attr_cond));
+        assert!(!EffectTypeFilter::AttributeModifier.matches(&dot_cond));
+
+        assert!(EffectTypeFilter::DamageOverTime.matches(&dot_cond));
+        assert!(!EffectTypeFilter::DamageOverTime.matches(&hot_cond));
+
+        assert!(EffectTypeFilter::HealOverTime.matches(&hot_cond));
+        assert!(!EffectTypeFilter::HealOverTime.matches(&attr_cond));
+
+        // Empty condition doesn't match specific filters
+        assert!(!EffectTypeFilter::AttributeModifier.matches(&empty_cond));
+        assert!(!EffectTypeFilter::DamageOverTime.matches(&empty_cond));
+    }
+
+    #[test]
+    fn test_condition_sort_order_as_str() {
+        use crate::conditions_editor::ConditionSortOrder;
+
+        assert_eq!(ConditionSortOrder::NameAsc.as_str(), "Name (A-Z)");
+        assert_eq!(ConditionSortOrder::NameDesc.as_str(), "Name (Z-A)");
+        assert_eq!(ConditionSortOrder::IdAsc.as_str(), "ID (A-Z)");
+        assert_eq!(ConditionSortOrder::IdDesc.as_str(), "ID (Z-A)");
+        assert_eq!(ConditionSortOrder::EffectCount.as_str(), "Effect Count");
+    }
+
+    #[test]
+    fn test_condition_statistics_computation() {
+        use crate::conditions_editor::compute_condition_statistics;
+        use antares::domain::conditions::{
+            ConditionDefinition, ConditionDuration, ConditionEffect,
+        };
+        use antares::domain::types::DiceRoll;
+
+        let conditions = vec![
+            ConditionDefinition {
+                id: "c1".to_string(),
+                name: "Buff".to_string(),
+                description: "".to_string(),
+                effects: vec![ConditionEffect::AttributeModifier {
+                    attribute: "might".to_string(),
+                    value: 5,
+                }],
+                default_duration: ConditionDuration::Rounds(3),
+                icon_id: None,
+            },
+            ConditionDefinition {
+                id: "c2".to_string(),
+                name: "Burning".to_string(),
+                description: "".to_string(),
+                effects: vec![ConditionEffect::DamageOverTime {
+                    damage: DiceRoll::new(1, 6, 0),
+                    element: "fire".to_string(),
+                }],
+                default_duration: ConditionDuration::Rounds(3),
+                icon_id: None,
+            },
+            ConditionDefinition {
+                id: "c3".to_string(),
+                name: "Multi".to_string(),
+                description: "".to_string(),
+                effects: vec![
+                    ConditionEffect::StatusEffect("poisoned".to_string()),
+                    ConditionEffect::DamageOverTime {
+                        damage: DiceRoll::new(1, 4, 0),
+                        element: "poison".to_string(),
+                    },
+                ],
+                default_duration: ConditionDuration::Rounds(5),
+                icon_id: None,
+            },
+            ConditionDefinition {
+                id: "c4".to_string(),
+                name: "Empty".to_string(),
+                description: "".to_string(),
+                effects: vec![],
+                default_duration: ConditionDuration::Instant,
+                icon_id: None,
+            },
+        ];
+
+        let stats = compute_condition_statistics(&conditions);
+
+        assert_eq!(stats.total, 4);
+        assert_eq!(stats.attribute_count, 1);
+        assert_eq!(stats.dot_count, 2); // c2 has 1, c3 has 1
+        assert_eq!(stats.status_count, 1);
+        assert_eq!(stats.hot_count, 0);
+        assert_eq!(stats.empty_count, 1);
+        assert_eq!(stats.multi_effect_count, 1); // only c3 has multiple effects
+    }
+
+    #[test]
+    fn test_conditions_editor_navigation_request() {
+        let mut state = conditions_editor::ConditionsEditorState::new();
+
+        // Initially no navigation request
+        assert!(state.navigate_to_spell.is_none());
+
+        // Set a navigation request
+        state.navigate_to_spell = Some("Fireball".to_string());
+        assert_eq!(state.navigate_to_spell, Some("Fireball".to_string()));
+
+        // Take clears the request
+        let nav = state.navigate_to_spell.take();
+        assert_eq!(nav, Some("Fireball".to_string()));
+        assert!(state.navigate_to_spell.is_none());
+    }
+
+    #[test]
+    fn test_conditions_editor_state_qol_defaults() {
+        use crate::conditions_editor::{ConditionSortOrder, EffectTypeFilter};
+
+        let state = conditions_editor::ConditionsEditorState::new();
+
+        // Verify new QoL fields have correct defaults
+        assert_eq!(state.filter_effect_type, EffectTypeFilter::All);
+        assert_eq!(state.sort_order, ConditionSortOrder::NameAsc);
+        assert!(!state.show_statistics);
+        assert!(state.navigate_to_spell.is_none());
+    }
+
+    #[test]
+    fn test_effect_type_filter_all_variants() {
+        use crate::conditions_editor::EffectTypeFilter;
+
+        let all = EffectTypeFilter::all();
+        assert_eq!(all.len(), 5);
+        assert_eq!(all[0], EffectTypeFilter::All);
+        assert_eq!(all[1], EffectTypeFilter::AttributeModifier);
+        assert_eq!(all[2], EffectTypeFilter::StatusEffect);
+        assert_eq!(all[3], EffectTypeFilter::DamageOverTime);
+        assert_eq!(all[4], EffectTypeFilter::HealOverTime);
+    }
+
+    #[test]
+    fn test_effect_type_filter_as_str() {
+        use crate::conditions_editor::EffectTypeFilter;
+
+        assert_eq!(EffectTypeFilter::All.as_str(), "All");
+        assert_eq!(EffectTypeFilter::AttributeModifier.as_str(), "Attribute");
+        assert_eq!(EffectTypeFilter::StatusEffect.as_str(), "Status");
+        assert_eq!(EffectTypeFilter::DamageOverTime.as_str(), "DOT");
+        assert_eq!(EffectTypeFilter::HealOverTime.as_str(), "HOT");
     }
 }

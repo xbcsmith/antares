@@ -182,17 +182,19 @@ fn test_campaign_save_creates_all_data_files() {
 fn test_items_tab_widget_ids_unique() {
     // Specific test for Items tab widget ID uniqueness
 
-    let source_code = fs::read_to_string("src/main.rs").expect("Failed to read main.rs");
+    // We refactored the items editor into its own file; inspect it directly.
+    let source_code =
+        fs::read_to_string("src/items_editor.rs").expect("Failed to read src/items_editor.rs");
 
-    // In Items editor, check for ID patterns
-    let items_section = if let Some(start) = source_code.find("fn show_items_editor") {
-        if let Some(end) = source_code[start..].find("fn show_items_list") {
+    // In Items editor file, check for ID patterns within the 'show' method
+    let items_section = if let Some(start) = source_code.find("pub fn show(") {
+        if let Some(end) = source_code[start..].find("fn show_list(") {
             &source_code[start..start + end]
         } else {
             &source_code[start..]
         }
     } else {
-        panic!("Could not find show_items_editor function");
+        panic!("Could not find ItemsEditorState::show function");
     };
 
     // Verify item_type_filter uses from_id_salt
@@ -207,17 +209,19 @@ fn test_items_tab_widget_ids_unique() {
 fn test_monsters_tab_widget_ids_unique() {
     // Specific test for Monsters tab widget ID uniqueness
 
-    let source_code = fs::read_to_string("src/main.rs").expect("Failed to read main.rs");
+    // We refactored the monsters editor into its own file; inspect it directly.
+    let source_code = fs::read_to_string("src/monsters_editor.rs")
+        .expect("Failed to read src/monsters_editor.rs");
 
-    // In Monsters editor, verify no ID clashes
-    let monsters_section = if let Some(start) = source_code.find("fn show_monsters_editor") {
-        if let Some(end) = source_code[start..].find("fn show_monsters_list") {
+    // In Monsters editor file, verify no ID clashes within the 'show' method
+    let monsters_section = if let Some(start) = source_code.find("pub fn show(") {
+        if let Some(end) = source_code[start..].find("fn show_list(") {
             &source_code[start..start + end]
         } else {
             &source_code[start..]
         }
     } else {
-        panic!("Could not find show_monsters_editor function");
+        panic!("Could not find MonstersEditorState::show function");
     };
 
     // Check for any from_label usage (should be zero)
