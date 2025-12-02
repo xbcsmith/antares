@@ -4,6 +4,172 @@ Note: As of 2025-12-02, two pre-existing UI tests in `sdk/campaign_builder/tests
 
 This document tracks completed implementations and changes to the Antares project.
 
+## Phase 1: SDK Campaign Builder UI - Foundation Components (2025-01-XX)
+
+**Objective**: Create reusable, centralized UI components for the Campaign Builder SDK to reduce code duplication, ensure consistency across editors, and improve maintainability.
+
+### Background
+
+Per the SDK QOL Implementation Plan (`docs/explanation/sdk_qol_implementation_plan.md`), Phase 1 focuses on creating shared UI components that all editors can use. This phase establishes the foundation components without refactoring the existing editors, allowing incremental adoption.
+
+### Components Created
+
+All components were added to `sdk/campaign_builder/src/ui_helpers.rs`:
+
+#### 1. EditorToolbar Component
+
+A reusable toolbar component with standard buttons for all editors:
+
+- **`ToolbarAction` enum**: `New`, `Save`, `Load`, `Import`, `Export`, `Reload`, `None`
+- **`EditorToolbar` struct**: Builder pattern for configuring toolbar options
+- Features:
+  - Optional search field with customizable id salt
+  - Optional merge mode checkbox
+  - Optional total count display
+  - Configurable save button visibility
+- Usage: `EditorToolbar::new("Items").with_search(&mut query).show(ui)`
+
+#### 2. ActionButtons Component
+
+Reusable action buttons for detail panels:
+
+- **`ItemAction` enum**: `Edit`, `Delete`, `Duplicate`, `Export`, `None`
+- **`ActionButtons` struct**: Builder pattern for button configuration
+- Features:
+  - Enable/disable state
+  - Per-button visibility control
+  - Consistent button styling across editors
+- Usage: `ActionButtons::new().enabled(has_selection).show(ui)`
+
+#### 3. TwoColumnLayout Component
+
+Standard two-column list/detail layout:
+
+- **`TwoColumnLayout` struct**: Manages consistent column layout
+- Features:
+  - Uses `DEFAULT_LEFT_COLUMN_WIDTH` (300.0 points)
+  - Uses `compute_panel_height()` for responsive sizing
+  - Automatic scroll area setup with unique id salts
+  - `show_split()` method for separate left/right closures
+- Usage: `TwoColumnLayout::new("items").show_split(ui, left_fn, right_fn)`
+
+#### 4. ImportExportDialog Component
+
+Reusable import/export dialog for RON data:
+
+- **`ImportExportResult` enum**: `Import(String)`, `Cancel`, `Open`
+- **`ImportExportDialogState` struct**: Manages dialog state
+- **`ImportExportDialog` struct**: Modal dialog implementation
+- Features:
+  - Separate import (editable) and export (read-only) modes
+  - Error message display
+  - Copy to clipboard support
+  - Configurable dimensions
+- Usage: `ImportExportDialog::new("Title", &mut state).show(ctx)`
+
+#### 5. AttributePairInput Widget
+
+Widget for editing `AttributePair` (u8 base/current):
+
+- **`AttributePairInputState` struct**: Tracks auto-sync behavior
+- **`AttributePairInput` struct**: Widget implementation
+- Features:
+  - Dual input fields for base and current values
+  - Auto-sync option (current follows base when enabled)
+  - Reset button to restore current to base
+  - Customizable id salt
+- Usage: `AttributePairInput::new("AC", &mut value).show(ui)`
+
+#### 6. AttributePair16Input Widget
+
+Widget for editing `AttributePair16` (u16 base/current):
+
+- Same features as `AttributePairInput` but for 16-bit values
+- Configurable maximum value
+- Used for HP, SP, and other larger value attributes
+- Usage: `AttributePair16Input::new("HP", &mut hp).with_max_value(9999).show(ui)`
+
+#### 7. File I/O Helper Functions
+
+Utility functions for common file operations:
+
+- `load_ron_file<T>()` - Load and deserialize RON files
+- `save_ron_file<T>()` - Serialize and save RON files
+- `handle_file_load<T>()` - Complete file load with merge support
+- `handle_file_save<T>()` - Complete file save with dialog
+- `handle_reload<T>()` - Reload from campaign directory
+
+### Tests Added
+
+Comprehensive tests added to `ui_helpers.rs`:
+
+- Panel height calculation tests (existing + new edge cases)
+- `ToolbarAction` enum value tests
+- `EditorToolbar` builder pattern tests
+- `ItemAction` enum value tests
+- `ActionButtons` builder pattern tests
+- `TwoColumnLayout` configuration tests
+- `ImportExportDialogState` lifecycle tests
+- `ImportExportResult` enum tests
+- `AttributePairInputState` tests
+- `AttributePair` and `AttributePair16` reset behavior tests
+- Constants validation tests
+
+### Validation
+
+All quality checks pass:
+
+- `cargo fmt --all` - Code formatted
+- `cargo check --all-targets --all-features` - No compilation errors
+- `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- `cargo test --all-features` - 218 tests pass
+
+### Architecture Compliance
+
+- Type aliases used consistently (no raw types)
+- `AttributePair` pattern respected for modifiable stats
+- RON format used for all data files
+- Module structure follows architecture.md Section 3.2
+- No circular dependencies introduced
+
+### Success Criteria Met
+
+- [x] All shared components are created and tested
+- [x] Components are callable from any editor
+- [x] All existing tests continue to pass
+- [x] New component tests pass
+- [x] AttributePair widgets support dual base/current editing
+
+### Files Modified
+
+- `sdk/campaign_builder/src/ui_helpers.rs` - Added all shared components and tests
+
+### Deferred to Phase 1.6
+
+The following refactoring was deferred to allow incremental adoption:
+
+- Refactor items_editor.rs to use shared components
+- Refactor monsters_editor.rs to use shared components
+- Refactor spells_editor.rs to use shared components
+
+This refactoring requires careful attention to type compatibility between the shared components and each editor's specific domain types (e.g., `ConsumableEffect` variants, `AmmoType` enum values, `Disablement` flags). It is recommended to refactor one editor at a time with thorough testing.
+
+### Next Steps (Phase 1.6 / Phase 2)
+
+Per the implementation plan:
+
+**Phase 1.6 - Editor Refactoring (when ready):**
+
+- Incrementally refactor items_editor, monsters_editor, spells_editor to use shared components
+- Test each editor thoroughly before moving to the next
+
+**Phase 2 - Extract Editor UI:**
+
+- Extract Classes editor UI from `main.rs` to `classes_editor.rs`
+- Extract Dialogues editor UI from `main.rs` to `dialogue_editor.rs`
+- Ensure each editor auto-loads campaign data when opened
+- Apply shared components to newly extracted editors
+
 ## Phase 0: Conditions Editor — Discovery & Preparation (2025-11-XX)
 
 Summary:
