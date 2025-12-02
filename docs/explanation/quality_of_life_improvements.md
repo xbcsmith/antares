@@ -6,7 +6,7 @@ Let's write a plan to refactor `main.rs` and move UI code for the remaining edit
 
 ## Editor Layout Continuity
 
-The monsters_editor, items_editor, and spells_editor all have the same layout and workflow. In the display panel there are buttons to manipulate the data. The buttons are Edit, Delete, Duplicate, and Export. All the editors should follow this pattern. 
+The monsters_editor, items_editor, and spells_editor all have the same layout and workflow. In the display panel there are buttons to manipulate the data. The buttons are Edit, Delete, Duplicate, and Export. All the editors should follow this pattern.
 
 Editors that need to be fixed are the conditions_editor, quests_editor, dialog_editor, and maps_editor should all follow the same layout and workflow as monsters_editor, items_editor, and spells_editor. This will include a massive refactor for maps_editor
 
@@ -43,13 +43,13 @@ EXAMPLE in ASCII:
 │ └──────────────┘ │                                              │
 └──────────────────┴──────────────────────────────────────────────┘
 
-## Campaign Validation 
+## Campaign Validation
 
-The Validation UI should list all the things it validated with a Green Check or Red X icon next to each file. Use a table like layout to make sure all the CHecks/Errors line up nicely. 
+The Validation UI should list all the things it validated with a Green Check or Red X icon next to each file. Use a table like layout to make sure all the CHecks/Errors line up nicely.
 
 ## Assets
 
-Assets panel reports 13 unreferenced assets found and lists all the files in the campaign data folder as Unused. I am not sure what we are accomplishing with the Assets panel. It should report the files that are loaded as Loaded or something similar to indicate all the files in the Campaign loaded. If an asset failed to load it should show Error. 
+Assets panel reports 13 unreferenced assets found and lists all the files in the campaign data folder as Unused. I am not sure what we are accomplishing with the Assets panel. It should report the files that are loaded as Loaded or something similar to indicate all the files in the Campaign loaded. If an asset failed to load it should show Error.
 
 This is lower priority than UI improvements.
 

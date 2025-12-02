@@ -6,6 +6,8 @@
 //! This module provides a visual dialogue tree editor for creating and managing
 //! NPC conversations with branching paths, conditions, and dialogue actions.
 //!
+//! The `show()` method provides full UI rendering following the standard editor pattern.
+//!
 //! # Features
 //!
 //! - Dialogue tree list view with search and filtering
@@ -14,6 +16,7 @@
 //! - Choice editor for player responses
 //! - Condition and action configuration
 //! - Dialogue tree validation and preview
+//! - Import/export RON support
 
 use antares::domain::dialogue::{
     DialogueAction, DialogueChoice, DialogueCondition, DialogueId, DialogueNode, DialogueTree,
@@ -21,7 +24,9 @@ use antares::domain::dialogue::{
 };
 use antares::domain::quest::QuestId;
 use antares::domain::types::ItemId;
+use eframe::egui;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Editor state for dialogue tree editing
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +78,15 @@ pub struct DialogueEditorState {
 
     /// Available item IDs (for conditions/actions)
     pub available_item_ids: Vec<ItemId>,
+
+    /// Whether to show dialogue preview in list view
+    pub show_preview: bool,
+
+    /// Whether to show import dialog
+    pub show_import_dialog: bool,
+
+    /// Import buffer for RON text
+    pub import_buffer: String,
 }
 
 /// Dialogue editor mode
@@ -297,6 +311,9 @@ impl Default for DialogueEditorState {
             available_dialogue_ids: Vec::new(),
             available_quest_ids: Vec::new(),
             available_item_ids: Vec::new(),
+            show_preview: false,
+            show_import_dialog: false,
+            import_buffer: String::new(),
         }
     }
 }
@@ -956,6 +973,519 @@ impl DialogueEditorState {
 
         preview
     }
+
+    /// Generate next available dialogue ID
+    pub fn next_available_dialogue_id(&self) -> u16 {
+        self.dialogues
+            .iter()
+            .map(|d| d.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+    }
+
+    /// Load dialogues from a file path
+    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let content =
+            std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+        let dialogues: Vec<DialogueTree> =
+            ron::from_str(&content).map_err(|e| format!("Failed to parse dialogues: {}", e))?;
+        self.dialogues = dialogues;
+        self.has_unsaved_changes = false;
+        Ok(())
+    }
+
+    /// Save dialogues to a file path
+    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+        let content = ron::ser::to_string_pretty(&self.dialogues, Default::default())
+            .map_err(|e| format!("Failed to serialize dialogues: {}", e))?;
+        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+        Ok(())
+    }
+
+    /// Main UI rendering method following standard editor signature
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - The egui UI context
+    /// * `dialogues` - Mutable reference to the dialogues data (synced with app state)
+    /// * `campaign_dir` - Optional campaign directory path
+    /// * `dialogue_file` - Filename for dialogue data
+    /// * `unsaved_changes` - Mutable flag for tracking unsaved changes
+    /// * `status_message` - Mutable string for status messages
+    /// * `file_load_merge_mode` - Whether to merge or replace when loading files
+    #[allow(clippy::too_many_arguments)]
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        dialogues: &mut Vec<DialogueTree>,
+        campaign_dir: Option<&PathBuf>,
+        dialogue_file: &str,
+        unsaved_changes: &mut bool,
+        status_message: &mut String,
+        file_load_merge_mode: &mut bool,
+    ) {
+        // Sync dialogues from parameter to internal state
+        self.dialogues = dialogues.clone();
+
+        ui.heading("💬 Dialogues Editor");
+        ui.add_space(5.0);
+
+        // Toolbar
+        ui.horizontal(|ui| {
+            if ui.button("➕ New Dialogue").clicked() {
+                self.start_new_dialogue();
+            }
+
+            if ui.button("💾 Save to Campaign").clicked() {
+                // Sync back
+                *dialogues = self.dialogues.clone();
+                *status_message = "Dialogues saved to campaign".to_string();
+            }
+
+            if ui.button("📂 Load from File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("RON", &["ron"])
+                    .pick_file()
+                {
+                    match self.load_from_file(&path) {
+                        Ok(()) => {
+                            *dialogues = self.dialogues.clone();
+                            *status_message = format!("Loaded {} dialogues", self.dialogues.len());
+                        }
+                        Err(e) => {
+                            *status_message = format!("Failed to load dialogues: {}", e);
+                        }
+                    }
+                }
+            }
+
+            if ui.button("📤 Import RON").clicked() {
+                self.show_import_dialog = true;
+                self.import_buffer.clear();
+            }
+
+            if ui.button("📋 Export to Clipboard").clicked() {
+                match ron::ser::to_string_pretty(&self.dialogues, Default::default()) {
+                    Ok(ron_str) => {
+                        ui.ctx().copy_text(ron_str.clone());
+                        *status_message = "Dialogues exported to clipboard".to_string();
+                    }
+                    Err(e) => {
+                        *status_message = format!("Export failed: {:?}", e);
+                    }
+                }
+            }
+
+            ui.checkbox(&mut self.show_preview, "Show Preview");
+        });
+
+        ui.separator();
+
+        // Import dialog
+        self.show_import_dialog_window(ui, dialogues, status_message);
+
+        ui.horizontal(|ui| {
+            ui.label("Search:");
+            ui.text_edit_singleline(&mut self.search_filter);
+        });
+
+        ui.separator();
+
+        // Main content area
+        match self.mode {
+            DialogueEditorMode::List => {
+                self.show_dialogue_list(ui, dialogues);
+            }
+            DialogueEditorMode::Creating | DialogueEditorMode::Editing => {
+                self.show_dialogue_form(ui, dialogues, status_message);
+            }
+        }
+    }
+
+    /// Show the import dialog window
+    fn show_import_dialog_window(
+        &mut self,
+        ui: &mut egui::Ui,
+        dialogues: &mut Vec<DialogueTree>,
+        status_message: &mut String,
+    ) {
+        let mut import_complete = false;
+        let mut import_result: Option<Result<DialogueTree, String>> = None;
+        let mut cancel_import = false;
+
+        if self.show_import_dialog {
+            let mut show_dialog = self.show_import_dialog;
+            egui::Window::new("Import Dialogue RON")
+                .open(&mut show_dialog)
+                .show(ui.ctx(), |ui| {
+                    ui.label("Paste RON dialogue data:");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.import_buffer)
+                            .desired_width(500.0)
+                            .desired_rows(15),
+                    );
+
+                    ui.horizontal(|ui| {
+                        if ui.button("Import").clicked() {
+                            match ron::from_str::<DialogueTree>(&self.import_buffer) {
+                                Ok(dialogue) => {
+                                    import_result = Some(Ok(dialogue));
+                                    import_complete = true;
+                                }
+                                Err(e) => {
+                                    import_result = Some(Err(format!("{:?}", e)));
+                                    import_complete = true;
+                                }
+                            }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            cancel_import = true;
+                        }
+                    });
+                });
+            self.show_import_dialog = show_dialog;
+        }
+
+        // Process import result outside window closure
+        if cancel_import {
+            self.show_import_dialog = false;
+        }
+        if import_complete {
+            if let Some(result) = import_result {
+                match result {
+                    Ok(mut dialogue) => {
+                        let new_id = self.next_available_dialogue_id();
+                        dialogue.id = new_id;
+                        self.dialogues.push(dialogue);
+                        *dialogues = self.dialogues.clone();
+                        *status_message = format!("Imported dialogue {}", new_id);
+                        self.show_import_dialog = false;
+                    }
+                    Err(e) => {
+                        *status_message = format!("Import failed: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Show dialogue list view
+    fn show_dialogue_list(&mut self, ui: &mut egui::Ui, dialogues: &mut Vec<DialogueTree>) {
+        ui.label(format!("Total Dialogues: {}", self.dialogues.len()));
+
+        // Collect actions to avoid borrow conflicts
+        let mut delete_idx: Option<usize> = None;
+        let mut edit_idx: Option<usize> = None;
+        let mut duplicate_idx: Option<usize> = None;
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let filtered = self.filtered_dialogues();
+
+                for (idx, dialogue) in filtered {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("ID: {}", dialogue.id));
+                            ui.separator();
+                            ui.strong(&dialogue.name);
+                            if let Some(speaker) = &dialogue.speaker_name {
+                                ui.label(format!("(Speaker: {})", speaker));
+                            }
+                            ui.label(format!("({} nodes)", dialogue.nodes.len()));
+
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.button("🗑 Delete").clicked() {
+                                        delete_idx = Some(idx);
+                                    }
+                                    if ui.button("✏ Edit").clicked() {
+                                        edit_idx = Some(idx);
+                                    }
+                                    if ui.button("📋 Duplicate").clicked() {
+                                        duplicate_idx = Some(idx);
+                                    }
+                                },
+                            );
+                        });
+
+                        // Preview details
+                        if self.show_preview {
+                            ui.separator();
+                            ui.label(format!("Root Node: {}", dialogue.root_node));
+                            ui.label(format!("Repeatable: {}", dialogue.repeatable));
+                            if let Some(quest_id) = dialogue.associated_quest {
+                                ui.label(format!("Associated Quest: {}", quest_id));
+                            }
+                        }
+                    });
+                }
+            });
+
+        // Process actions after scroll area
+        if let Some(idx) = delete_idx {
+            self.delete_dialogue(idx);
+            *dialogues = self.dialogues.clone();
+        }
+        if let Some(idx) = edit_idx {
+            self.start_edit_dialogue(idx);
+        }
+        if let Some(idx) = duplicate_idx {
+            if let Some(dialogue) = self.dialogues.get(idx) {
+                let mut new_dialogue = dialogue.clone();
+                new_dialogue.id = self.next_available_dialogue_id();
+                new_dialogue.name = format!("{} (Copy)", new_dialogue.name);
+                self.dialogues.push(new_dialogue);
+                *dialogues = self.dialogues.clone();
+            }
+        }
+    }
+
+    /// Show dialogue form editor
+    fn show_dialogue_form(
+        &mut self,
+        ui: &mut egui::Ui,
+        dialogues: &mut Vec<DialogueTree>,
+        status_message: &mut String,
+    ) {
+        ui.horizontal(|ui| {
+            if ui.button("⬅ Back to List").clicked() {
+                self.cancel_edit();
+            }
+
+            if ui.button("💾 Save Dialogue").clicked() {
+                match self.save_dialogue() {
+                    Ok(()) => {
+                        *dialogues = self.dialogues.clone();
+                        *status_message = "Dialogue saved".to_string();
+                    }
+                    Err(e) => {
+                        *status_message = format!("Save failed: {}", e);
+                    }
+                }
+            }
+        });
+
+        ui.separator();
+
+        // Dialogue form
+        egui::Grid::new("dialogue_form_grid")
+            .num_columns(2)
+            .spacing([10.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("Dialogue ID:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.dialogue_buffer.id).desired_width(200.0),
+                );
+                ui.end_row();
+
+                ui.label("Name:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.dialogue_buffer.name).desired_width(300.0),
+                );
+                ui.end_row();
+
+                ui.label("Speaker Name:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.dialogue_buffer.speaker_name)
+                        .desired_width(200.0),
+                );
+                ui.end_row();
+
+                ui.label("Repeatable:");
+                ui.checkbox(&mut self.dialogue_buffer.repeatable, "");
+                ui.end_row();
+
+                ui.label("Associated Quest ID:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.dialogue_buffer.associated_quest)
+                        .desired_width(150.0),
+                );
+                ui.end_row();
+            });
+
+        ui.separator();
+
+        // Node tree editor
+        if let Some(dialogue_idx) = self.selected_dialogue {
+            if dialogue_idx < self.dialogues.len() {
+                ui.heading("Dialogue Nodes");
+                self.show_dialogue_nodes_editor(ui, dialogue_idx, status_message);
+            }
+        } else {
+            ui.label("Save dialogue to add nodes");
+        }
+    }
+
+    /// Show dialogue node tree editor
+    fn show_dialogue_nodes_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        dialogue_idx: usize,
+        status_message: &mut String,
+    ) {
+        // Add node form
+        let mut add_node_clicked = false;
+        ui.horizontal(|ui| {
+            ui.label("Add New Node:");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.node_buffer.id)
+                    .hint_text("Node ID")
+                    .desired_width(80.0),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.node_buffer.text)
+                    .hint_text("Node text")
+                    .desired_width(250.0),
+            );
+            ui.checkbox(&mut self.node_buffer.is_terminal, "Terminal");
+
+            if ui.button("➕ Add Node").clicked() {
+                add_node_clicked = true;
+            }
+        });
+
+        if add_node_clicked {
+            match self.add_node() {
+                Ok(()) => {
+                    *status_message = "Node added".to_string();
+                }
+                Err(e) => {
+                    *status_message = format!("Failed to add node: {}", e);
+                }
+            }
+        }
+
+        ui.separator();
+
+        // Clone dialogue data to avoid borrow conflicts
+        let dialogue = self.dialogues[dialogue_idx].clone();
+        let mut select_node: Option<NodeId> = None;
+
+        // Display nodes
+        egui::ScrollArea::vertical()
+            .max_height(400.0)
+            .show(ui, |ui| {
+                for (node_id, node) in &dialogue.nodes {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.strong(format!("Node {}", node_id));
+                            if *node_id == dialogue.root_node {
+                                ui.label("(ROOT)");
+                            }
+                            if node.is_terminal {
+                                ui.label("(TERMINAL)");
+                            }
+                        });
+
+                        ui.label(&node.text);
+
+                        if let Some(speaker) = &node.speaker_override {
+                            ui.label(format!("Speaker: {}", speaker));
+                        }
+
+                        // Show choices
+                        if !node.choices.is_empty() {
+                            ui.separator();
+                            ui.label("Choices:");
+                            for (choice_idx, choice) in node.choices.iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("  {}. {}", choice_idx + 1, choice.text));
+                                    if let Some(target) = choice.target_node {
+                                        ui.label(format!("→ Node {}", target));
+                                    }
+                                    if choice.ends_dialogue {
+                                        ui.label("(Ends)");
+                                    }
+                                });
+                            }
+                        }
+
+                        // Show conditions
+                        if !node.conditions.is_empty() {
+                            ui.separator();
+                            ui.label(format!("Conditions: {}", node.conditions.len()));
+                        }
+
+                        // Show actions
+                        if !node.actions.is_empty() {
+                            ui.separator();
+                            ui.label(format!("Actions: {}", node.actions.len()));
+                        }
+
+                        // Add choice to this node
+                        if ui.button("➕ Add Choice").clicked() {
+                            select_node = Some(*node_id);
+                        }
+                    });
+                }
+            });
+
+        // Process node selection outside scroll area
+        if let Some(node_id) = select_node {
+            self.selected_node = Some(node_id);
+        }
+
+        // Choice editor panel
+        self.show_choice_editor_panel(ui, status_message);
+    }
+
+    /// Show the choice editor panel
+    fn show_choice_editor_panel(&mut self, ui: &mut egui::Ui, status_message: &mut String) {
+        let mut add_choice_clicked = false;
+        let mut cancel_choice_clicked = false;
+
+        if let Some(selected_node_id) = self.selected_node {
+            ui.separator();
+            ui.heading(format!("Add Choice to Node {}", selected_node_id));
+
+            ui.horizontal(|ui| {
+                ui.label("Choice Text:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.choice_buffer.text).desired_width(250.0),
+                );
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Target Node ID:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.choice_buffer.target_node)
+                        .desired_width(80.0),
+                );
+                ui.checkbox(&mut self.choice_buffer.ends_dialogue, "Ends Dialogue");
+            });
+
+            ui.horizontal(|ui| {
+                if ui.button("✓ Add Choice").clicked() {
+                    add_choice_clicked = true;
+                }
+                if ui.button("✗ Cancel").clicked() {
+                    cancel_choice_clicked = true;
+                }
+            });
+        }
+
+        // Process choice actions outside choice panel
+        if add_choice_clicked {
+            match self.add_choice() {
+                Ok(()) => {
+                    *status_message = "Choice added".to_string();
+                }
+                Err(e) => {
+                    *status_message = format!("Failed to add choice: {}", e);
+                }
+            }
+        }
+        if cancel_choice_clicked {
+            self.selected_node = None;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -967,6 +1497,30 @@ mod tests {
         let editor = DialogueEditorState::new();
         assert_eq!(editor.dialogues.len(), 0);
         assert_eq!(editor.mode, DialogueEditorMode::List);
+        assert!(!editor.show_preview);
+        assert!(!editor.show_import_dialog);
+        assert!(editor.import_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_next_available_dialogue_id() {
+        let mut editor = DialogueEditorState::new();
+
+        // Empty list
+        assert_eq!(editor.next_available_dialogue_id(), 1);
+
+        // Add dialogues
+        editor.start_new_dialogue();
+        editor.dialogue_buffer.id = "1".to_string();
+        editor.dialogue_buffer.name = "Dialogue 1".to_string();
+        editor.save_dialogue().unwrap();
+
+        editor.start_new_dialogue();
+        editor.dialogue_buffer.id = "5".to_string();
+        editor.dialogue_buffer.name = "Dialogue 5".to_string();
+        editor.save_dialogue().unwrap();
+
+        assert_eq!(editor.next_available_dialogue_id(), 6);
     }
 
     #[test]

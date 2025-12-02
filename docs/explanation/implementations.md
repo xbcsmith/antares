@@ -154,7 +154,7 @@ The following refactoring was deferred to allow incremental adoption:
 
 This refactoring requires careful attention to type compatibility between the shared components and each editor's specific domain types (e.g., `ConsumableEffect` variants, `AmmoType` enum values, `Disablement` flags). It is recommended to refactor one editor at a time with thorough testing.
 
-### Next Steps (Phase 1.6 / Phase 2)
+### Next Steps (Phase 1.6 / Phase 3+)
 
 Per the implementation plan:
 
@@ -163,12 +163,200 @@ Per the implementation plan:
 - Incrementally refactor items_editor, monsters_editor, spells_editor to use shared components
 - Test each editor thoroughly before moving to the next
 
-**Phase 2 - Extract Editor UI:**
+**Phase 3+ - Layout Continuity & Further Improvements:**
 
-- Extract Classes editor UI from `main.rs` to `classes_editor.rs`
-- Extract Dialogues editor UI from `main.rs` to `dialogue_editor.rs`
-- Ensure each editor auto-loads campaign data when opened
-- Apply shared components to newly extracted editors
+- Update editor layouts for consistency
+- Apply AttributePair widgets across all editors
+- Improve validation and asset panels
+
+## Phase 2: Extract Editor UI Code from main.rs (2025-01-XX)
+
+**Objective**: Extract Classes and Dialogues editor UI code from `main.rs` into their respective module files, following the standard editor pattern with `show()` methods.
+
+### Background
+
+Per the SDK QOL Implementation Plan (`docs/explanation/sdk_qol_implementation_plan.md`), Phase 2 focuses on extracting UI code from `main.rs` into dedicated editor files. This reduces complexity in `main.rs` and enables test file searches to target specific editor files.
+
+### Changes Implemented
+
+#### 2.1 Classes Editor UI Extraction
+
+Extracted all Classes editor UI from `main.rs` to `classes_editor.rs`:
+
+**Methods Added to `ClassesEditorState`:**
+
+- `show()` - Main UI rendering method following standard signature
+- `show_classes_list()` - List panel rendering
+- `show_class_form()` - Edit form rendering
+- `next_available_class_id()` - ID generation helper
+- `load_from_file()` - Load classes from RON file
+- `save_to_file()` - Save classes to RON file
+
+**Standard Signature:**
+
+```rust
+pub fn show(
+    &mut self,
+    ui: &mut egui::Ui,
+    items: &[Item],  // For starting equipment selection
+    campaign_dir: Option<&PathBuf>,
+    classes_file: &str,
+    unsaved_changes: &mut bool,
+    status_message: &mut String,
+    file_load_merge_mode: &mut bool,
+)
+```
+
+**Tests Added:**
+
+- `test_classes_editor_state_creation`
+- `test_start_new_class`
+- `test_save_class_creates_new`
+- `test_save_class_empty_id_error`
+- `test_save_class_empty_name_error`
+- `test_save_class_duplicate_id_error`
+- `test_delete_class`
+- `test_cancel_edit`
+- `test_filtered_classes`
+- `test_next_available_class_id`
+- `test_start_edit_class`
+- `test_edit_class_saves_changes`
+- `test_class_edit_buffer_default`
+- `test_editor_mode_transitions`
+
+#### 2.2 Dialogues Editor UI Extraction
+
+Extracted all Dialogues editor UI from `main.rs` to `dialogue_editor.rs`:
+
+**Methods Added to `DialogueEditorState`:**
+
+- `show()` - Main UI rendering method following standard signature
+- `show_import_dialog_window()` - Import dialog rendering
+- `show_dialogue_list()` - List view rendering
+- `show_dialogue_form()` - Edit form rendering
+- `show_dialogue_nodes_editor()` - Node tree editor
+- `show_choice_editor_panel()` - Choice editor panel
+- `next_available_dialogue_id()` - ID generation helper
+- `load_from_file()` - Load dialogues from RON file
+- `save_to_file()` - Save dialogues to RON file
+
+**State Fields Added to `DialogueEditorState`:**
+
+- `show_preview: bool` - Preview toggle (moved from main.rs)
+- `show_import_dialog: bool` - Import dialog toggle (moved from main.rs)
+- `import_buffer: String` - Import text buffer (moved from main.rs)
+
+**Standard Signature:**
+
+```rust
+pub fn show(
+    &mut self,
+    ui: &mut egui::Ui,
+    dialogues: &mut Vec<DialogueTree>,
+    campaign_dir: Option<&PathBuf>,
+    dialogue_file: &str,
+    unsaved_changes: &mut bool,
+    status_message: &mut String,
+    file_load_merge_mode: &mut bool,
+)
+```
+
+**Tests Added:**
+
+- `test_next_available_dialogue_id`
+- Updated existing state creation test to verify new fields
+
+#### 2.3 Auto-load Verification
+
+All editors now auto-load when a campaign is opened:
+
+| Editor     | Load Method                    | Status      |
+| ---------- | ------------------------------ | ----------- |
+| Items      | `load_items()`                 | ✓           |
+| Spells     | `load_spells()`                | ✓           |
+| Monsters   | `load_monsters()`              | ✓           |
+| Conditions | `load_conditions()`            | ✓           |
+| Classes    | `load_classes_from_campaign()` | ✓ (Updated) |
+| Maps       | `load_maps()`                  | ✓           |
+| Quests     | `load_quests()`                | ✓           |
+| Dialogues  | `load_dialogues()`             | ✓           |
+
+#### 2.4 main.rs Simplification
+
+**Removed from `CampaignBuilderApp` struct:**
+
+- `dialogues_search_filter: String`
+- `dialogues_show_preview: bool`
+- `dialogues_import_buffer: String`
+- `dialogues_show_import_dialog: bool`
+
+**Removed Methods:**
+
+- `show_classes_editor()` - Replaced with `classes_editor_state.show()`
+- `show_classes_list()` - Moved to `classes_editor.rs`
+- `show_class_form()` - Moved to `classes_editor.rs`
+- `load_classes()` - Replaced with `load_classes_from_campaign()`
+- `save_classes()` - Moved to `classes_editor.rs`
+- `show_dialogues_editor()` - Replaced with `dialogue_editor_state.show()`
+- `show_dialogue_list()` - Moved to `dialogue_editor.rs`
+- `show_dialogue_form()` - Moved to `dialogue_editor.rs`
+- `show_dialogue_nodes_editor()` - Moved to `dialogue_editor.rs`
+- `load_dialogues_from_file()` - Inlined into `load_dialogues()`
+- `save_dialogues_to_file()` - Moved to `dialogue_editor.rs`
+- `next_available_dialogue_id()` - Moved to `dialogue_editor.rs`
+
+**Updated Tab Handling:**
+
+```rust
+EditorTab::Classes => self.classes_editor_state.show(
+    ui,
+    &self.items,
+    self.campaign_dir.as_ref(),
+    &self.campaign.classes_file,
+    &mut self.unsaved_changes,
+    &mut self.status_message,
+    &mut self.file_load_merge_mode,
+),
+EditorTab::Dialogues => self.dialogue_editor_state.show(
+    ui,
+    &mut self.dialogues,
+    self.campaign_dir.as_ref(),
+    &self.campaign.dialogue_file,
+    &mut self.unsaved_changes,
+    &mut self.status_message,
+    &mut self.file_load_merge_mode,
+),
+```
+
+### Validation
+
+All quality checks pass:
+
+- `cargo fmt --all` - Code formatted
+- `cargo check --all-targets --all-features` - No compilation errors
+- `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- `cargo test --all-features` - 218 tests pass
+
+### Success Criteria Met
+
+- [x] `main.rs` no longer contains Classes editor UI rendering logic
+- [x] `main.rs` no longer contains Dialogues editor UI rendering logic
+- [x] `ClassesEditorState::show()` method implemented with consistent signature
+- [x] `DialogueEditorState::show()` method implemented with consistent signature
+- [x] Auto-load works for all editors when campaign opens
+- [x] Test file searches can target specific editor files
+- [x] All existing tests continue to pass
+- [x] New editor tests added and passing
+
+### Files Modified
+
+- `sdk/campaign_builder/src/classes_editor.rs` - Added `show()` and UI methods, tests
+- `sdk/campaign_builder/src/dialogue_editor.rs` - Added `show()` and UI methods, state fields, tests
+- `sdk/campaign_builder/src/main.rs` - Removed extracted UI code, updated tab handlers
+
+### Lines of Code Removed from main.rs
+
+Approximately 920 lines of editor-specific UI code were removed from `main.rs` and consolidated into the respective editor modules.
 
 ## Phase 0: Conditions Editor — Discovery & Preparation (2025-11-XX)
 
