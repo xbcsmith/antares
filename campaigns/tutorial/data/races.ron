@@ -1,0 +1,30 @@
+// races.ron - Race definitions for Tutorial Campaign
+//
+// This file contains race definitions for the tutorial campaign.
+// Simplified set for introductory gameplay.
+
+[
+    // ===== Human - Balanced, versatile =====
+    (
+        id: "human",
+        name: "Human",
+    ),
+
+    // ===== Elf - Agile and magical =====
+    (
+        id: "elf",
+        name: "Elf",
+    ),
+
+    // ===== Dwarf - Sturdy and resilient =====
+    (
+        id: "dwarf",
+        name: "Dwarf",
+    ),
+
+    // ===== Gnome - Clever and lucky =====
+    (
+        id: "gnome",
+        name: "Gnome",
+    ),
+]

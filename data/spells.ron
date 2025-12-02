@@ -22,6 +22,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -37,6 +38,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["bless"],
     ),
 
     (
@@ -52,6 +54,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["blind"],
     ),
 
     (
@@ -67,6 +70,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -82,6 +86,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -97,6 +102,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -112,6 +118,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     // ===== Cleric Spells - Level 2 =====
@@ -129,6 +136,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -144,6 +152,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -159,6 +168,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -174,6 +184,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -189,6 +200,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -204,6 +216,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -219,6 +232,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     // ===== Cleric Spells - Level 3 =====
@@ -236,6 +250,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -251,6 +266,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -266,6 +282,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -281,6 +298,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -296,6 +314,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -311,6 +330,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -326,6 +346,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     // ===== Sorcerer Spells - Level 1 =====
@@ -343,6 +364,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -358,6 +380,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -373,6 +396,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -388,6 +412,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -403,6 +428,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -418,6 +444,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -433,6 +460,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["sleep"],
     ),
 
     // ===== Sorcerer Spells - Level 2 =====
@@ -450,6 +478,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -465,6 +494,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -480,6 +510,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -495,6 +526,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -510,6 +542,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -525,6 +558,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -540,6 +574,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     // ===== Sorcerer Spells - Level 3 =====
@@ -557,6 +592,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -572,6 +608,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -587,6 +624,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -602,6 +640,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -617,6 +656,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -632,6 +672,7 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 
     (
@@ -647,5 +688,6 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 ]

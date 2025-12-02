@@ -1,4 +1,11 @@
+// spells.ron - Spell definitions for Tutorial Campaign
+//
+// This file contains spell definitions for the tutorial campaign.
+// Includes all fields required by the Spell struct for editor consistency.
+
 [
+    // ===== Cleric Spells - Level 1 =====
+
     (
         id: 257,
         name: "Awaken",
@@ -12,7 +19,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 258,
         name: "Bless",
@@ -22,11 +31,13 @@
         gem_cost: 0,
         context: CombatOnly,
         target: AllCharacters,
-        description: "Increases party\'s attack bonus temporarily",
+        description: "Increases party's attack bonus temporarily",
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["bless"],
     ),
+
     (
         id: 259,
         name: "Blind",
@@ -40,7 +51,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["blind"],
     ),
+
     (
         id: 260,
         name: "First Aid",
@@ -54,7 +67,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 261,
         name: "Light",
@@ -68,7 +83,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 262,
         name: "Power Cure",
@@ -82,7 +99,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 263,
         name: "Protection from Fear",
@@ -96,7 +115,11 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
+    // ===== Cleric Spells - Level 2 =====
+
     (
         id: 513,
         name: "Cure Wounds",
@@ -110,7 +133,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 514,
         name: "Heroism",
@@ -124,7 +149,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["heroism"],
     ),
+
     (
         id: 515,
         name: "Pain",
@@ -138,7 +165,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 516,
         name: "Protection from Cold",
@@ -152,7 +181,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["cold_resistance"],
     ),
+
     (
         id: 517,
         name: "Protection from Fire",
@@ -166,7 +197,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["fire_resistance"],
     ),
+
     (
         id: 518,
         name: "Protection from Poison",
@@ -180,7 +213,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["poison_resistance"],
     ),
+
     (
         id: 519,
         name: "Silence",
@@ -194,7 +229,11 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["silenced"],
     ),
+
+    // ===== Cleric Spells - Level 3 =====
+
     (
         id: 769,
         name: "Create Food",
@@ -208,7 +247,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 770,
         name: "Cure Blindness",
@@ -222,7 +263,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 771,
         name: "Cure Paralysis",
@@ -236,7 +279,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 772,
         name: "Lasting Light",
@@ -250,7 +295,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 773,
         name: "Walk on Water",
@@ -264,7 +311,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 774,
         name: "Turn Undead",
@@ -278,7 +327,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 775,
         name: "Neutralize Poison",
@@ -292,7 +343,11 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
+    // ===== Sorcerer Spells - Level 1 =====
+
     (
         id: 1025,
         name: "Awaken",
@@ -306,7 +361,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1026,
         name: "Detect Magic",
@@ -320,7 +377,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1027,
         name: "Energy Blast",
@@ -334,7 +393,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1028,
         name: "Flame Arrow",
@@ -348,7 +409,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1029,
         name: "Light",
@@ -362,7 +425,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1030,
         name: "Location",
@@ -376,7 +441,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1031,
         name: "Sleep",
@@ -390,7 +457,11 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["sleep"],
     ),
+
+    // ===== Sorcerer Spells - Level 2 =====
+
     (
         id: 1281,
         name: "Electric Arrow",
@@ -404,7 +475,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1282,
         name: "Hypnotize",
@@ -418,7 +491,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1283,
         name: "Identify Monster",
@@ -432,7 +507,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1284,
         name: "Jump",
@@ -446,7 +523,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1285,
         name: "Levitate",
@@ -460,7 +539,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1286,
         name: "Power",
@@ -470,11 +551,13 @@
         gem_cost: 0,
         context: CombatOnly,
         target: AllCharacters,
-        description: "Increases party\'s physical attack power",
+        description: "Increases party's physical attack power",
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["giants_strength"],
     ),
+
     (
         id: 1287,
         name: "Quickness",
@@ -488,7 +571,11 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["haste"],
     ),
+
+    // ===== Sorcerer Spells - Level 3 =====
+
     (
         id: 1537,
         name: "Acid Stream",
@@ -502,7 +589,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1538,
         name: "Cold Ray",
@@ -516,7 +605,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1539,
         name: "Feeble Mind",
@@ -530,7 +621,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1540,
         name: "Fireball",
@@ -544,7 +637,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1541,
         name: "Fly",
@@ -558,7 +653,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
+
     (
         id: 1542,
         name: "Invisibility",
@@ -572,7 +669,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: ["invisibility"],
     ),
+
     (
         id: 1543,
         name: "Lightning Bolt",
@@ -586,5 +685,6 @@
         damage: None,
         duration: 0,
         saving_throw: false,
+        applied_conditions: [],
     ),
 ]

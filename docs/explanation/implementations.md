@@ -1818,3 +1818,128 @@ assert_eq!(result.combobox_from_label_count, 0);
 
 - Phase 6: Data Files Update
 - Phase 7: Logging and Developer Experience
+
+## Phase 6: Data Files Update (2025-01-XX)
+
+### Background
+
+Phase 6 focuses on updating all data files to ensure format consistency with
+editor output and fixing any missing or inconsistent fields. This ensures that
+data files can be loaded, edited, and saved without data loss or format changes.
+
+### Changes Implemented
+
+#### 6.1 Core Data Files Updated
+
+**Created `data/races.ron`:**
+
+A new races data file was created with standard RPG races:
+
+- Human (balanced, versatile)
+- Elf (agile and intelligent)
+- Dwarf (tough and strong)
+- Gnome (clever and lucky)
+- Half-Elf (blend of human and elf traits)
+- Half-Orc (strong and tough)
+
+**Updated `data/items.ron`:**
+
+Added `icon_path: None` field to all items for consistency with the `Item`
+struct which has `#[serde(default)]` on this field. This ensures items saved
+from the editor will match the expected format.
+
+**Updated `data/spells.ron`:**
+
+Added `applied_conditions` field to all spells to match the `Spell` struct.
+Spells that apply conditions now reference the appropriate condition IDs:
+
+- Bless spell applies `["bless"]`
+- Blind spell applies `["blind"]`
+- Sleep spell applies `["sleep"]`
+
+**Cleaned up `data/conditions.ron`:**
+
+- Removed test/duplicate conditions (dup1, weird id 1, empty_effects, max_strength_value)
+- Added proper game conditions: paralyzed, silenced, feared, disease, weakness, slowed
+- Added resistance conditions: fire_resistance, cold_resistance, poison_resistance
+- Reorganized into logical sections (Negative, Positive, Resistance)
+- Added file header comments
+
+#### 6.2 Tutorial Campaign Updated
+
+**Created `campaigns/tutorial/data/races.ron`:**
+
+Tutorial campaign races file with simplified set for introductory gameplay:
+
+- Human, Elf, Dwarf, Gnome
+
+**Updated `campaigns/tutorial/data/classes.ron`:**
+
+- Changed numeric IDs to descriptive strings (e.g., "1" -> "knight")
+- Added missing `description` field to all classes
+- Added proper `disablement_bit` values matching architecture spec
+- Added `special_abilities` arrays with appropriate abilities
+- Added `starting_weapon_id`, `starting_armor_id`, `starting_items` fields
+- Fixed Archer class to not have Sorcerer spell school
+
+**Updated `campaigns/tutorial/data/spells.ron`:**
+
+- Added `applied_conditions` field to all spells
+- Connected spells to appropriate conditions (e.g., Heroism -> heroism condition)
+- Added file header comments and section organization
+- Fixed escaped quotes in descriptions
+
+**Updated `campaigns/tutorial/data/conditions.ron`:**
+
+- Expanded from 4 conditions to 12
+- Added conditions referenced by spells: heroism, giants_strength, haste, invisibility
+- Added resistance conditions: fire_resistance, cold_resistance, poison_resistance
+- Reorganized into logical sections
+
+**Renamed dialogue file:**
+
+- Renamed `data/dialogues.ron` to match ContentDatabase expected filename
+- Updated `campaign.ron` to reference `data/dialogues.ron` for consistency
+
+### Files Modified
+
+- `data/races.ron` (NEW)
+- `data/items.ron` (added icon_path field)
+- `data/spells.ron` (added applied_conditions field)
+- `data/conditions.ron` (cleaned up and expanded)
+- `campaigns/tutorial/data/races.ron` (NEW)
+- `campaigns/tutorial/data/classes.ron` (complete rewrite with all fields)
+- `campaigns/tutorial/data/spells.ron` (added applied_conditions)
+- `campaigns/tutorial/data/conditions.ron` (expanded)
+- `campaigns/tutorial/campaign.ron` (fixed dialogue_file reference)
+
+### Validation
+
+All quality gates pass:
+
+```bash
+cargo fmt --all        # No formatting issues
+cargo check --all-targets --all-features  # Compiles successfully
+cargo clippy --all-targets --all-features -- -D warnings  # No warnings
+cargo test --all-features  # 218 tests pass, including database_integration_test
+```
+
+### Architecture Compliance
+
+- All data files use RON format as specified in architecture Section 7.1
+- Field names match struct definitions exactly
+- Type aliases respected (SpellId, ItemId, etc.)
+- Constants used where applicable (disablement_bit values)
+- Optional fields properly handled with serde defaults
+
+### Success Criteria Met
+
+- [x] All data files load without errors
+- [x] Tutorial campaign passes full validation
+- [x] No data loss during migration
+- [x] `test_load_full_campaign` integration test passes
+- [x] All files have consistent formatting with editor output
+
+### Next Steps
+
+- Phase 7: Logging and Developer Experience
