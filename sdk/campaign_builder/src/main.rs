@@ -36,6 +36,7 @@ mod templates;
 mod test_play;
 mod ui_helpers;
 mod undo_redo;
+mod validation;
 
 use antares::domain::character::Stats;
 use antares::domain::combat::database::MonsterDefinition;
@@ -226,27 +227,8 @@ impl EditorTab {
     }
 }
 
-/// Validation error with severity
-#[derive(Debug, Clone)]
-struct ValidationError {
-    severity: Severity,
-    message: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Severity {
-    Error,
-    Warning,
-}
-
-impl Severity {
-    fn icon(&self) -> &str {
-        match self {
-            Severity::Error => "❌",
-            Severity::Warning => "⚠️",
-        }
-    }
-}
+// NOTE: ValidationError and Severity types have been replaced by the validation module.
+// Use validation::ValidationResult and validation::ValidationSeverity instead.
 
 /// Item type filter for search
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -318,7 +300,7 @@ struct CampaignBuilderApp {
     campaign_dir: Option<PathBuf>,
     status_message: String,
     unsaved_changes: bool,
-    validation_errors: Vec<ValidationError>,
+    validation_errors: Vec<validation::ValidationResult>,
     show_about_dialog: bool,
     show_unsaved_warning: bool,
     pending_action: Option<PendingAction>,
@@ -549,16 +531,16 @@ impl CampaignBuilderApp {
     /// Validate item IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    fn validate_item_ids(&self) -> Vec<ValidationError> {
+    fn validate_item_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
         for item in &self.items {
             if !seen_ids.insert(item.id) {
-                errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("Duplicate item ID: {}", item.id),
-                });
+                errors.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Items,
+                    format!("Duplicate item ID: {}", item.id),
+                ));
             }
         }
         errors
@@ -567,16 +549,16 @@ impl CampaignBuilderApp {
     /// Validate spell IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    fn validate_spell_ids(&self) -> Vec<ValidationError> {
+    fn validate_spell_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
         for spell in &self.spells {
             if !seen_ids.insert(spell.id) {
-                errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("Duplicate spell ID: {}", spell.id),
-                });
+                errors.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Spells,
+                    format!("Duplicate spell ID: {}", spell.id),
+                ));
             }
         }
         errors
@@ -585,16 +567,16 @@ impl CampaignBuilderApp {
     /// Validate monster IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    fn validate_monster_ids(&self) -> Vec<ValidationError> {
+    fn validate_monster_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
         for monster in &self.monsters {
             if !seen_ids.insert(monster.id) {
-                errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("Duplicate monster ID: {}", monster.id),
-                });
+                errors.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Monsters,
+                    format!("Duplicate monster ID: {}", monster.id),
+                ));
             }
         }
         errors
@@ -603,16 +585,16 @@ impl CampaignBuilderApp {
     /// Validate map IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    fn validate_map_ids(&self) -> Vec<ValidationError> {
+    fn validate_map_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
         for map in &self.maps {
             if !seen_ids.insert(map.id) {
-                errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("Duplicate map ID: {}", map.id),
-                });
+                errors.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Maps,
+                    format!("Duplicate map ID: {}", map.id),
+                ));
             }
         }
         errors
@@ -621,16 +603,16 @@ impl CampaignBuilderApp {
     /// Validate condition IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    fn validate_condition_ids(&self) -> Vec<ValidationError> {
+    fn validate_condition_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
         for cond in &self.conditions {
             if !seen_ids.insert(cond.id.clone()) {
-                errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("Duplicate condition ID: {}", cond.id),
-                });
+                errors.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Conditions,
+                    format!("Duplicate condition ID: {}", cond.id),
+                ));
             }
         }
         errors
@@ -699,13 +681,20 @@ impl CampaignBuilderApp {
     /// Load items from RON file
     fn load_items(&mut self) {
         eprintln!("DEBUG: load_items() called");
+        let items_file = self.campaign.items_file.clone();
         if let Some(ref dir) = self.campaign_dir {
-            let items_path = dir.join(&self.campaign.items_file);
+            let items_path = dir.join(&items_file);
             if items_path.exists() {
                 match fs::read_to_string(&items_path) {
                     Ok(contents) => match ron::from_str::<Vec<Item>>(&contents) {
                         Ok(items) => {
+                            let count = items.len();
                             self.items = items;
+
+                            // Mark data file as loaded in asset manager
+                            if let Some(ref mut manager) = self.asset_manager {
+                                manager.mark_data_file_loaded(&items_file, count);
+                            }
 
                             // Validate IDs after loading
                             let id_errors = self.validate_item_ids();
@@ -721,10 +710,18 @@ impl CampaignBuilderApp {
                             }
                         }
                         Err(e) => {
+                            // Mark data file as error in asset manager
+                            if let Some(ref mut manager) = self.asset_manager {
+                                manager.mark_data_file_error(&items_file, &e.to_string());
+                            }
                             self.status_message = format!("Failed to parse items: {}", e);
                         }
                     },
                     Err(e) => {
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(&items_file, &e.to_string());
+                        }
                         self.status_message = format!("Failed to read items file: {}", e);
                         eprintln!("Failed to read items file {:?}: {}", items_path, e);
                     }
@@ -767,13 +764,20 @@ impl CampaignBuilderApp {
 
     /// Load spells from RON file
     fn load_spells(&mut self) {
+        let spells_file = self.campaign.spells_file.clone();
         if let Some(ref dir) = self.campaign_dir {
-            let spells_path = dir.join(&self.campaign.spells_file);
+            let spells_path = dir.join(&spells_file);
             if spells_path.exists() {
                 match fs::read_to_string(&spells_path) {
                     Ok(contents) => match ron::from_str::<Vec<Spell>>(&contents) {
                         Ok(spells) => {
+                            let count = spells.len();
                             self.spells = spells;
+
+                            // Mark data file as loaded in asset manager
+                            if let Some(ref mut manager) = self.asset_manager {
+                                manager.mark_data_file_loaded(&spells_file, count);
+                            }
 
                             // Validate IDs after loading
                             let id_errors = self.validate_spell_ids();
@@ -790,20 +794,23 @@ impl CampaignBuilderApp {
                             }
                         }
                         Err(e) => {
+                            // Mark data file as error in asset manager
+                            if let Some(ref mut manager) = self.asset_manager {
+                                manager.mark_data_file_error(&spells_file, &e.to_string());
+                            }
                             self.status_message = format!("Failed to parse spells: {}", e);
-                            eprintln!("Failed to parse spells from {:?}: {}", spells_path, e);
                         }
                     },
                     Err(e) => {
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(&spells_file, &e.to_string());
+                        }
                         self.status_message = format!("Failed to read spells file: {}", e);
                         eprintln!("Failed to read spells file {:?}: {}", spells_path, e);
                     }
                 }
-            } else {
-                eprintln!("Spells file does not exist: {:?}", spells_path);
             }
-        } else {
-            eprintln!("No campaign directory set when trying to load spells");
         }
     }
 
@@ -911,15 +918,51 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Save dialogues to a file path
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to save dialogues to
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if save was successful
+    fn save_dialogues_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+        // Create directory if it doesn't exist
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create dialogues directory: {}", e))?;
+        }
+
+        let ron_config = ron::ser::PrettyConfig::new()
+            .struct_names(false)
+            .enumerate_arrays(false);
+
+        let contents = ron::ser::to_string_pretty(&self.dialogues, ron_config)
+            .map_err(|e| format!("Failed to serialize dialogues: {}", e))?;
+
+        std::fs::write(path, contents)
+            .map_err(|e| format!("Failed to write dialogues file: {}", e))?;
+
+        Ok(())
+    }
+
     /// Load monsters from RON file
     fn load_monsters(&mut self) {
+        let monsters_file = self.campaign.monsters_file.clone();
         if let Some(ref dir) = self.campaign_dir {
-            let monsters_path = dir.join(&self.campaign.monsters_file);
+            let monsters_path = dir.join(&monsters_file);
             if monsters_path.exists() {
                 match fs::read_to_string(&monsters_path) {
                     Ok(contents) => match ron::from_str::<Vec<MonsterDefinition>>(&contents) {
                         Ok(monsters) => {
+                            let count = monsters.len();
                             self.monsters = monsters;
+
+                            // Mark data file as loaded in asset manager
+                            if let Some(ref mut manager) = self.asset_manager {
+                                manager.mark_data_file_loaded(&monsters_file, count);
+                            }
 
                             // Validate IDs after loading
                             let id_errors = self.validate_monster_ids();
@@ -936,11 +979,18 @@ impl CampaignBuilderApp {
                             }
                         }
                         Err(e) => {
+                            // Mark data file as error in asset manager
+                            if let Some(ref mut manager) = self.asset_manager {
+                                manager.mark_data_file_error(&monsters_file, &e.to_string());
+                            }
                             self.status_message = format!("Failed to parse monsters: {}", e);
-                            eprintln!("Failed to parse monsters from {:?}: {}", monsters_path, e);
                         }
                     },
                     Err(e) => {
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(&monsters_file, &e.to_string());
+                        }
                         self.status_message = format!("Failed to read monsters file: {}", e);
                         eprintln!("Failed to read monsters file {:?}: {}", monsters_path, e);
                     }
@@ -1072,84 +1122,93 @@ impl CampaignBuilderApp {
         self.validation_errors.extend(self.validate_map_ids());
         self.validation_errors.extend(self.validate_condition_ids());
 
-        // Required fields
+        // Required fields - Metadata category
         if self.campaign.id.is_empty() {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Campaign ID is required".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Metadata,
+                    "Campaign ID is required",
+                ));
         } else if !self
             .campaign
             .id
             .chars()
             .all(|c| c.is_alphanumeric() || c == '_')
         {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Campaign ID must contain only alphanumeric characters and underscores"
-                    .to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Metadata,
+                    "Campaign ID must contain only alphanumeric characters and underscores",
+                ));
         }
 
         if self.campaign.name.is_empty() {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Campaign name is required".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Metadata,
+                    "Campaign name is required",
+                ));
         }
 
         if self.campaign.author.is_empty() {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Warning,
-                message: "Author name is recommended".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Metadata,
+                    "Author name is recommended",
+                ));
         }
 
-        // Version validation
+        // Version validation - Metadata category
         if !self.campaign.version.contains('.') {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Version should follow semantic versioning (e.g., 1.0.0)".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Metadata,
+                    "Version should follow semantic versioning (e.g., 1.0.0)",
+                ));
         }
 
-        // Engine version validation
+        // Engine version validation - Metadata category
         if !self.campaign.engine_version.contains('.') {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Warning,
-                message: "Engine version should follow semantic versioning".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Metadata,
+                    "Engine version should follow semantic versioning",
+                ));
         }
 
         // Configuration validation
         if self.campaign.starting_map.is_empty() {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Starting map is required".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Configuration,
+                    "Starting map is required",
+                ));
         }
 
         if self.campaign.max_party_size == 0 || self.campaign.max_party_size > 10 {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Warning,
-                message: "Max party size should be between 1 and 10".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Configuration,
+                    "Max party size should be between 1 and 10",
+                ));
         }
 
         if self.campaign.max_roster_size < self.campaign.max_party_size {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Max roster size must be >= max party size".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Configuration,
+                    "Max roster size must be >= max party size",
+                ));
         }
 
         if self.campaign.starting_level == 0
             || self.campaign.starting_level > self.campaign.max_level
         {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Starting level must be between 1 and max level".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Configuration,
+                    "Starting level must be between 1 and max level",
+                ));
         }
 
         // File path validation
@@ -1163,36 +1222,29 @@ impl CampaignBuilderApp {
             ("Dialogue file", &self.campaign.dialogue_file),
         ] {
             if path.is_empty() {
-                self.validation_errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("{} path is required", field),
-                });
+                self.validation_errors
+                    .push(validation::ValidationResult::error(
+                        validation::ValidationCategory::FilePaths,
+                        format!("{} path is required", field),
+                    ));
             } else if !path.ends_with(".ron") {
-                self.validation_errors.push(ValidationError {
-                    severity: Severity::Warning,
-                    message: format!("{} should use .ron extension", field),
-                });
+                self.validation_errors
+                    .push(validation::ValidationResult::warning(
+                        validation::ValidationCategory::FilePaths,
+                        format!("{} should use .ron extension", field),
+                    ));
             }
         }
 
-        // Update status
-        let error_count = self
-            .validation_errors
-            .iter()
-            .filter(|e| e.severity == Severity::Error)
-            .count();
-        let warning_count = self
-            .validation_errors
-            .iter()
-            .filter(|e| e.severity == Severity::Warning)
-            .count();
+        // Update status using ValidationSummary
+        let summary = validation::ValidationSummary::from_results(&self.validation_errors);
 
         if self.validation_errors.is_empty() {
             self.status_message = "✅ Validation passed!".to_string();
         } else {
             self.status_message = format!(
                 "Validation: {} error(s), {} warning(s)",
-                error_count, warning_count
+                summary.error_count, summary.warning_count
             );
         }
     }
@@ -2932,6 +2984,9 @@ impl CampaignBuilderApp {
     }
 
     /// Show validation results panel
+    ///
+    /// Displays validation results in a table-based layout grouped by category.
+    /// Uses icons to indicate severity: ✅ passed, ❌ error, ⚠️ warning, ℹ️ info.
     fn show_validation_panel(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("✅ Campaign Validation");
@@ -2945,16 +3000,8 @@ impl CampaignBuilderApp {
         ui.label("Check your campaign for errors and warnings");
         ui.separator();
 
-        let error_count = self
-            .validation_errors
-            .iter()
-            .filter(|e| e.severity == Severity::Error)
-            .count();
-        let warning_count = self
-            .validation_errors
-            .iter()
-            .filter(|e| e.severity == Severity::Warning)
-            .count();
+        // Calculate summary using the validation module
+        let summary = validation::ValidationSummary::from_results(&self.validation_errors);
 
         if self.validation_errors.is_empty() {
             ui.vertical_centered(|ui| {
@@ -2969,37 +3016,86 @@ impl CampaignBuilderApp {
                 ui.label("• Test play your campaign");
             });
         } else {
+            // Summary counts at the top
             ui.horizontal(|ui| {
-                if error_count > 0 {
+                if summary.error_count > 0 {
                     ui.colored_label(
-                        egui::Color32::from_rgb(255, 0, 0),
-                        format!("❌ {} Error(s)", error_count),
+                        validation::ValidationSeverity::Error.color(),
+                        format!("❌ {} Error(s)", summary.error_count),
                     );
                 }
-                if warning_count > 0 {
+                if summary.warning_count > 0 {
                     ui.colored_label(
-                        egui::Color32::from_rgb(255, 165, 0),
-                        format!("⚠️ {} Warning(s)", warning_count),
+                        validation::ValidationSeverity::Warning.color(),
+                        format!("⚠️ {} Warning(s)", summary.warning_count),
+                    );
+                }
+                if summary.info_count > 0 {
+                    ui.colored_label(
+                        validation::ValidationSeverity::Info.color(),
+                        format!("ℹ️ {} Info", summary.info_count),
+                    );
+                }
+                if summary.passed_count > 0 {
+                    ui.colored_label(
+                        validation::ValidationSeverity::Passed.color(),
+                        format!("✅ {} Passed", summary.passed_count),
                     );
                 }
             });
 
             ui.separator();
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for error in &self.validation_errors {
-                    ui.horizontal(|ui| {
-                        let color = match error.severity {
-                            Severity::Error => egui::Color32::from_rgb(255, 0, 0),
-                            Severity::Warning => egui::Color32::from_rgb(255, 165, 0),
-                        };
+            // Group results by category and display in table format
+            let grouped = validation::group_results_by_category(&self.validation_errors);
 
-                        ui.colored_label(color, error.severity.icon());
-                        ui.label(&error.message);
-                    });
-                    ui.add_space(5.0);
-                }
-            });
+            egui::ScrollArea::vertical()
+                .id_salt("validation_panel_scroll")
+                .show(ui, |ui| {
+                    for (category, results) in grouped {
+                        // Category header with icon
+                        ui.horizontal(|ui| {
+                            ui.label(category.icon());
+                            ui.heading(category.display_name());
+                            ui.label(format!("({})", results.len()));
+                        });
+
+                        // Table-like display for results in this category
+                        egui::Grid::new(format!("validation_grid_{:?}", category))
+                            .num_columns(3)
+                            .spacing([10.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                // Header row
+                                ui.label(egui::RichText::new("Status").strong());
+                                ui.label(egui::RichText::new("Message").strong());
+                                ui.label(egui::RichText::new("File").strong());
+                                ui.end_row();
+
+                                // Result rows
+                                for result in results {
+                                    // Status icon with color
+                                    ui.colored_label(
+                                        result.severity.color(),
+                                        result.severity.icon(),
+                                    );
+
+                                    // Message
+                                    ui.label(&result.message);
+
+                                    // File path (if any)
+                                    if let Some(ref path) = result.file_path {
+                                        ui.label(path.display().to_string());
+                                    } else {
+                                        ui.label("-");
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+
+                        ui.add_space(10.0);
+                    }
+                });
 
             ui.separator();
             ui.label("💡 Tip: Fix errors in the Metadata and Config tabs");
@@ -3036,6 +3132,9 @@ impl CampaignBuilderApp {
     }
 
     /// Show assets editor
+    ///
+    /// Displays campaign data file status and asset management tools.
+    /// Data files show Loaded/Error/Missing status; orphaned assets can be cleaned up.
     fn show_assets_editor(&mut self, ui: &mut egui::Ui) {
         ui.heading("📦 Asset Manager");
         ui.add_space(5.0);
@@ -3049,6 +3148,17 @@ impl CampaignBuilderApp {
                 if let Err(e) = manager.scan_directory() {
                     self.status_message = format!("Failed to scan assets: {}", e);
                 } else {
+                    // Initialize data file tracking
+                    manager.init_data_files(
+                        &self.campaign.items_file,
+                        &self.campaign.spells_file,
+                        &self.campaign.monsters_file,
+                        &self.campaign.classes_file,
+                        &self.campaign.races_file,
+                        &self.campaign.quests_file,
+                        &self.campaign.dialogue_file,
+                        Some("data/conditions.ron"),
+                    );
                     self.asset_manager = Some(manager);
                 }
             }
@@ -3101,15 +3211,105 @@ impl CampaignBuilderApp {
 
             ui.separator();
 
-            // Unreferenced assets warning and cleanup
-            let unreferenced_count = manager.unreferenced_assets().len();
+            // Data Files Status Section
+            ui.collapsing("📁 Campaign Data Files", |ui| {
+                let data_files = manager.data_files();
+                if data_files.is_empty() {
+                    ui.label("No data files tracked");
+                } else {
+                    egui::Grid::new("data_files_grid")
+                        .num_columns(4)
+                        .spacing([10.0, 4.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            // Header row
+                            ui.label(egui::RichText::new("Status").strong());
+                            ui.label(egui::RichText::new("Type").strong());
+                            ui.label(egui::RichText::new("Path").strong());
+                            ui.label(egui::RichText::new("Entries").strong());
+                            ui.end_row();
+
+                            // Data file rows
+                            for file_info in data_files {
+                                // Status icon with color
+                                ui.colored_label(file_info.status.color(), file_info.status.icon());
+
+                                // Display name
+                                ui.label(&file_info.display_name);
+
+                                // Path
+                                ui.label(file_info.path.display().to_string());
+
+                                // Entry count or error
+                                match file_info.status {
+                                    asset_manager::DataFileStatus::Loaded => {
+                                        if let Some(count) = file_info.entry_count {
+                                            ui.label(format!("{}", count));
+                                        } else {
+                                            ui.label("-");
+                                        }
+                                    }
+                                    asset_manager::DataFileStatus::Error => {
+                                        if let Some(ref msg) = file_info.error_message {
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(255, 80, 80),
+                                                msg.chars().take(30).collect::<String>(),
+                                            );
+                                        } else {
+                                            ui.label("Error");
+                                        }
+                                    }
+                                    _ => {
+                                        ui.label("-");
+                                    }
+                                }
+                                ui.end_row();
+                            }
+                        });
+
+                    // Summary
+                    ui.add_space(5.0);
+                    let loaded_count = data_files
+                        .iter()
+                        .filter(|f| f.status == asset_manager::DataFileStatus::Loaded)
+                        .count();
+                    let error_count = manager.data_file_error_count();
+                    let missing_count = manager.data_file_missing_count();
+
+                    ui.horizontal(|ui| {
+                        if loaded_count > 0 {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(80, 200, 80),
+                                format!("✅ {} loaded", loaded_count),
+                            );
+                        }
+                        if error_count > 0 {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(255, 80, 80),
+                                format!("❌ {} errors", error_count),
+                            );
+                        }
+                        if missing_count > 0 {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(255, 180, 0),
+                                format!("⚠️ {} missing", missing_count),
+                            );
+                        }
+                    });
+                }
+            });
+
+            ui.separator();
+
+            // Orphaned assets warning and cleanup (only truly orphaned, not data files)
+            let orphaned_count = manager.orphaned_assets().len();
             let cleanup_candidates_count = manager.get_cleanup_candidates().len();
 
-            if unreferenced_count > 0 {
+            if orphaned_count > 0 {
                 ui.horizontal(|ui| {
                     ui.colored_label(
                         egui::Color32::YELLOW,
-                        format!("⚠ {} unreferenced assets found", unreferenced_count),
+                        format!("⚠ {} orphaned asset files found", orphaned_count),
                     );
 
                     if cleanup_candidates_count > 0 {
@@ -3263,7 +3463,7 @@ mod tests {
         let has_id_error = app
             .validation_errors
             .iter()
-            .filter(|e| e.severity == Severity::Error)
+            .filter(|e| e.is_error())
             .any(|e| e.message.contains("Campaign ID"));
         assert!(!has_id_error);
     }
@@ -3360,7 +3560,7 @@ mod tests {
         let error_count = app
             .validation_errors
             .iter()
-            .filter(|e| e.severity == Severity::Error)
+            .filter(|e| e.is_error())
             .count();
         assert_eq!(error_count, 0);
     }
@@ -3454,18 +3654,21 @@ mod tests {
 
     #[test]
     fn test_severity_icons() {
-        assert_eq!(Severity::Error.icon(), "❌");
-        assert_eq!(Severity::Warning.icon(), "⚠️");
+        assert_eq!(validation::ValidationSeverity::Error.icon(), "❌");
+        assert_eq!(validation::ValidationSeverity::Warning.icon(), "⚠️");
+        assert_eq!(validation::ValidationSeverity::Passed.icon(), "✅");
+        assert_eq!(validation::ValidationSeverity::Info.icon(), "ℹ️");
     }
 
     #[test]
-    fn test_validation_error_creation() {
-        let error = ValidationError {
-            severity: Severity::Error,
-            message: "Test error".to_string(),
-        };
-        assert_eq!(error.severity, Severity::Error);
+    fn test_validation_result_creation() {
+        let error = validation::ValidationResult::error(
+            validation::ValidationCategory::Metadata,
+            "Test error",
+        );
+        assert!(error.is_error());
         assert_eq!(error.message, "Test error");
+        assert_eq!(error.category, validation::ValidationCategory::Metadata);
     }
 
     #[test]
@@ -4039,7 +4242,8 @@ mod tests {
         // Validate
         let errors = app.validate_item_ids();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].is_error());
+        assert_eq!(errors[0].category, validation::ValidationCategory::Items);
         assert!(errors[0].message.contains("Duplicate item ID: 1"));
     }
 
@@ -4061,7 +4265,8 @@ mod tests {
         // Validate
         let errors = app.validate_spell_ids();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].is_error());
+        assert_eq!(errors[0].category, validation::ValidationCategory::Spells);
         assert!(errors[0].message.contains("Duplicate spell ID: 100"));
     }
 
@@ -4083,7 +4288,8 @@ mod tests {
         // Validate
         let errors = app.validate_monster_ids();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].is_error());
+        assert_eq!(errors[0].category, validation::ValidationCategory::Monsters);
         assert!(errors[0].message.contains("Duplicate monster ID: 5"));
     }
 
@@ -4101,7 +4307,8 @@ mod tests {
         // Validate
         let errors = app.validate_map_ids();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].is_error());
+        assert_eq!(errors[0].category, validation::ValidationCategory::Maps);
         assert!(errors[0].message.contains("Duplicate map ID: 10"));
     }
 
@@ -4126,7 +4333,11 @@ mod tests {
         // Validate
         let errors = app.validate_condition_ids();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].is_error());
+        assert_eq!(
+            errors[0].category,
+            validation::ValidationCategory::Conditions
+        );
         assert!(errors[0]
             .message
             .contains("Duplicate condition ID: dup_test"));
@@ -6038,10 +6249,11 @@ mod tests {
             app.dialogue_editor_state.mode,
             dialogue_editor::DialogueEditorMode::List
         );
-        assert!(app.dialogues_search_filter.is_empty());
-        assert!(!app.dialogues_show_preview);
-        assert!(app.dialogues_import_buffer.is_empty());
-        assert!(!app.dialogues_show_import_dialog);
+        // Search filter and import state are managed by DialogueEditorState
+        assert!(app.dialogue_editor_state.search_filter.is_empty());
+        assert!(!app.dialogue_editor_state.show_preview);
+        assert!(app.dialogue_editor_state.import_buffer.is_empty());
+        assert!(!app.dialogue_editor_state.show_import_dialog);
     }
 
     #[test]
@@ -6264,14 +6476,16 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
 
         // Empty list - should return 1
-        assert_eq!(app.next_available_dialogue_id(), 1);
+        assert_eq!(app.dialogue_editor_state.next_available_dialogue_id(), 1);
 
         // With dialogues - should return max + 1
         app.dialogues.push(DialogueTree::new(1, "D1", 1));
         app.dialogues.push(DialogueTree::new(5, "D2", 1));
         app.dialogues.push(DialogueTree::new(3, "D3", 1));
+        app.dialogue_editor_state
+            .load_dialogues(app.dialogues.clone());
 
-        assert_eq!(app.next_available_dialogue_id(), 6);
+        assert_eq!(app.dialogue_editor_state.next_available_dialogue_id(), 6);
     }
 
     #[test]
@@ -6401,8 +6615,9 @@ mod tests {
     #[test]
     fn test_dialogue_import_buffer() {
         let app = CampaignBuilderApp::default();
-        assert!(app.dialogues_import_buffer.is_empty());
-        assert!(!app.dialogues_show_import_dialog);
+        // Import buffer and dialog state are managed by DialogueEditorState
+        assert!(app.dialogue_editor_state.import_buffer.is_empty());
+        assert!(!app.dialogue_editor_state.show_import_dialog);
     }
 
     #[test]

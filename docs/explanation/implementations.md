@@ -1371,3 +1371,259 @@ if let Some(cond) = conditions.iter().find(|c| c.id == edit_id) {
 - No changes to domain types
 - Single-line fix localized to UI state management
 - Follows existing editor patterns for edit mode transitions
+
+## Phase 4: Validation and Assets UI Improvements (2025-01-XX)
+
+**Objective**: Improve the validation panel with structured result types and table-based layout, and fix the assets panel to correctly report data file load status.
+
+### Background
+
+Per the SDK QOL Implementation Plan (`docs/explanation/sdk_qol_implementation_plan.md`), Phase 4 focuses on:
+
+1. Creating structured validation result types with categories
+2. Improving the validation panel layout with table-based grouping
+3. Fixing assets panel to correctly report loaded/error status for data files
+
+### Changes Implemented
+
+#### 4.1 Validation Module Created
+
+**File**: `sdk/campaign_builder/src/validation.rs`
+
+Created a new module with structured validation types:
+
+**`ValidationCategory` enum**:
+
+- `Metadata` - Campaign ID, name, author, version
+- `Configuration` - Party size, starting level, starting map
+- `FilePaths` - Data file path validation
+- `Items`, `Spells`, `Monsters`, `Maps`, `Conditions`, `Quests`, `Dialogues`, `Classes`, `Races` - Data type validation
+- `Assets` - Asset file validation
+
+Each category has:
+
+- `display_name()` - Human-readable name
+- `icon()` - Emoji icon for display
+- `all()` - List of all categories in display order
+
+**`ValidationSeverity` enum**:
+
+- `Error` - Critical error that must be fixed
+- `Warning` - Should be addressed but doesn't block
+- `Info` - Informational message
+- `Passed` - Validation check passed
+
+Each severity has:
+
+- `icon()` - Display icon (❌, ⚠️, ℹ️, ✅)
+- `color()` - `egui::Color32` for display
+- `display_name()` - Human-readable name
+
+**`ValidationResult` struct**:
+
+- `category: ValidationCategory`
+- `severity: ValidationSeverity`
+- `message: String`
+- `file_path: Option<PathBuf>`
+
+Factory methods:
+
+- `error()`, `warning()`, `info()`, `passed()` - Create results with specific severity
+- `with_file_path()` - Add file path to result
+- `is_error()`, `is_warning()`, `is_passed()` - Predicate methods
+
+**`ValidationSummary` struct**:
+
+- Counts errors, warnings, info, and passed results
+- `from_results()` - Compute summary from result slice
+- `has_no_errors()`, `all_passed()` - Predicate methods
+
+**Helper functions**:
+
+- `group_results_by_category()` - Groups results for display
+- `count_by_category()`, `count_errors_by_category()` - Statistics
+
+#### 4.2 Validation Panel UI Improvements
+
+**File**: `sdk/campaign_builder/src/main.rs`
+
+Updated `show_validation_panel()`:
+
+- Uses `ValidationSummary` for counts instead of manual iteration
+- Groups results by category using `group_results_by_category()`
+- Displays results in table format using `egui::Grid`:
+  - Category header with icon and count
+  - Columns: Status Icon, Message, File Path
+  - Striped rows for readability
+- Shows summary counts for all severity levels (errors, warnings, info, passed)
+- Color-coded severity icons
+
+#### 4.3 Validate Campaign Updates
+
+Updated `validate_campaign()` and ID validation functions to use new types:
+
+- `validate_item_ids()` → Returns `Vec<ValidationResult>` with `ValidationCategory::Items`
+- `validate_spell_ids()` → Returns `Vec<ValidationResult>` with `ValidationCategory::Spells`
+- `validate_monster_ids()` → Returns `Vec<ValidationResult>` with `ValidationCategory::Monsters`
+- `validate_map_ids()` → Returns `Vec<ValidationResult>` with `ValidationCategory::Maps`
+- `validate_condition_ids()` → Returns `Vec<ValidationResult>` with `ValidationCategory::Conditions`
+
+Main validation now uses appropriate categories:
+
+- Campaign ID, name, author, version → `ValidationCategory::Metadata`
+- Party size, roster size, starting level, starting map → `ValidationCategory::Configuration`
+- File paths → `ValidationCategory::FilePaths`
+
+#### 4.4 Data File Status Tracking
+
+**File**: `sdk/campaign_builder/src/asset_manager.rs`
+
+Added data file load status tracking:
+
+**`DataFileStatus` enum**:
+
+- `NotLoaded` - File not yet loaded (⏳)
+- `Loaded` - File loaded successfully (✅)
+- `Error` - Failed to load/parse (❌)
+- `Missing` - File does not exist (⚠️)
+
+Each status has `icon()`, `display_name()`, and `color()` methods.
+
+**`DataFileInfo` struct**:
+
+- `path: PathBuf` - Relative path to file
+- `display_name: String` - Human-readable type (e.g., "Items")
+- `status: DataFileStatus`
+- `entry_count: Option<usize>` - Number of entries if loaded
+- `error_message: Option<String>` - Error details if failed
+
+Methods: `mark_loaded()`, `mark_error()`, `mark_missing()`
+
+**AssetManager additions**:
+
+- `data_files: Vec<DataFileInfo>` - Tracked data files
+- `init_data_files()` - Initialize tracking for campaign files
+- `mark_data_file_loaded()` - Mark file as loaded with count
+- `mark_data_file_error()` - Mark file as having error
+- `data_files()` - Get tracked files
+- `all_data_files_loaded()` - Check if all files loaded
+- `data_file_error_count()`, `data_file_missing_count()` - Statistics
+- `is_data_file()` - Check if path is a tracked data file
+- `orphaned_assets()` - Get truly orphaned assets (excludes data files)
+
+#### 4.5 Assets Panel UI Improvements
+
+**File**: `sdk/campaign_builder/src/main.rs`
+
+Updated `show_assets_editor()`:
+
+- Initializes data file tracking when asset manager is created
+- Adds collapsible "Campaign Data Files" section showing:
+  - Grid with Status, Type, Path, Entries columns
+  - Color-coded status icons
+  - Entry counts for loaded files
+  - Error messages for failed files
+  - Summary counts (loaded, errors, missing)
+- Uses `orphaned_assets()` instead of `unreferenced_assets()` for cleanup warnings
+- Only reports truly orphaned assets (not data files or documentation)
+
+#### 4.6 Load Functions Update Data File Status
+
+Updated data loading functions to track status:
+
+- `load_items()` - Marks items file loaded/error
+- `load_spells()` - Marks spells file loaded/error
+- `load_monsters()` - Marks monsters file loaded/error
+
+Each function:
+
+- Captures file path before borrow
+- Calls `mark_data_file_loaded()` on success with entry count
+- Calls `mark_data_file_error()` on parse or read failure
+
+### Files Modified
+
+- `sdk/campaign_builder/src/validation.rs` (NEW) - Validation types module
+- `sdk/campaign_builder/src/main.rs` - Updated validation and assets panels
+- `sdk/campaign_builder/src/asset_manager.rs` - Added data file tracking
+- `sdk/campaign_builder/src/packager.rs` - Use `is_error()` method
+- `sdk/campaign_builder/src/test_play.rs` - Use `is_error()` method
+
+### Removed Code
+
+- Local `ValidationError` struct (replaced by `validation::ValidationResult`)
+- Local `Severity` enum (replaced by `validation::ValidationSeverity`)
+
+### Tests Added
+
+**validation.rs tests**:
+
+- `test_validation_category_display_name`
+- `test_validation_category_all`
+- `test_validation_category_icon`
+- `test_validation_severity_icon`
+- `test_validation_severity_display_name`
+- `test_validation_result_new`
+- `test_validation_result_error`
+- `test_validation_result_warning`
+- `test_validation_result_passed`
+- `test_validation_result_with_file_path`
+- `test_validation_summary_from_results`
+- `test_validation_summary_has_no_errors`
+- `test_validation_summary_all_passed`
+- `test_group_results_by_category`
+- `test_count_by_category`
+- `test_count_errors_by_category`
+- `test_validation_summary_empty`
+
+**asset_manager.rs tests**:
+
+- `test_data_file_status_icon`
+- `test_data_file_status_display_name`
+- `test_data_file_info_new`
+- `test_data_file_info_mark_loaded`
+- `test_data_file_info_mark_error`
+- `test_data_file_info_mark_missing`
+- `test_asset_manager_data_file_tracking`
+- `test_asset_manager_mark_data_file_loaded`
+- `test_asset_manager_all_data_files_loaded`
+
+**main.rs test updates**:
+
+- Updated `test_severity_icons` to use `validation::ValidationSeverity`
+- Updated `test_validation_result_creation` to use new types
+- Updated ID validation tests to check `is_error()` and `category`
+- Fixed dialogue editor tests to use `DialogueEditorState` fields
+
+### Validation
+
+All quality checks pass:
+
+- `cargo fmt --all` ✓
+- `cargo check --all-targets --all-features` ✓
+- `cargo clippy --all-targets --all-features -- -D warnings` ✓
+- `cargo test --all-features` ✓ (218 doc tests + all unit tests pass)
+- `cargo test -p campaign_builder` ✓ (all tests pass)
+
+### Architecture Compliance
+
+- Uses standard module pattern for validation types
+- No changes to domain types
+- Validation categories align with existing editor tabs
+- Data file tracking integrates cleanly with existing asset manager
+- Follows existing patterns for error handling and status display
+
+### Success Criteria Met
+
+- [x] Validation results display in aligned table format
+- [x] Results grouped by category with icons
+- [x] Each validated item shows clear pass/fail icon
+- [x] Assets panel shows data file load status (Loaded/Error/Missing)
+- [x] Orphaned assets reporting excludes data files
+- [x] All quality gates pass
+
+### Next Steps
+
+- Phase 5: Testing Infrastructure Improvements
+- Phase 6: Data Files Update
+- Phase 7: Logging and Developer Experience
