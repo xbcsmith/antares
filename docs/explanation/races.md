@@ -1,5 +1,8 @@
 # Races
 
+## Introduction
+
+This section provides an overview of the races implementation. Basically we want a generic Race data type that allows users to define their own races. This data type should include properties such as name, description, ability score bonuses, and class restrictions.
 
 ## Placeholder
 

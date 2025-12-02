@@ -11,7 +11,7 @@
 //! See `docs/reference/architecture.md` Section 7.1-7.2 for data file specifications.
 
 use crate::domain::character::Stats;
-use crate::domain::combat::monster::{LootTable, Monster, MonsterResistances, MonsterCondition};
+use crate::domain::combat::monster::{LootTable, Monster, MonsterResistances};
 use crate::domain::combat::types::Attack;
 use crate::domain::types::MonsterId;
 use serde::{Deserialize, Serialize};
@@ -79,6 +79,9 @@ pub enum MonsterDatabaseError {
 ///     is_undead: false,
 ///     magic_resistance: 0,
 ///     loot: LootTable::new(1, 10, 0, 0, 10),
+///     conditions: Default::default(),
+///     active_conditions: Vec::new(),
+///     has_acted: false,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]

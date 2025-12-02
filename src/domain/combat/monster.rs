@@ -288,24 +288,34 @@ pub struct Monster {
     /// Experience points awarded when defeated
     pub experience_value: u32,
     /// HP percentage at which monster attempts to flee (0-100)
+    #[serde(default)]
     pub flee_threshold: u8,
     /// Percentage chance of special attack per turn (0-100)
+    #[serde(default)]
     pub special_attack_threshold: u8,
     /// Damage and effect resistances
+    #[serde(default)]
     pub resistances: MonsterResistances,
     /// Can regenerate HP each round
+    #[serde(default)]
     pub can_regenerate: bool,
     /// Can move forward in combat formation
+    #[serde(default)]
     pub can_advance: bool,
     /// Is undead (affected by Turn Undead, etc.)
+    #[serde(default)]
     pub is_undead: bool,
     /// Magic resistance percentage (0-100)
+    #[serde(default)]
     pub magic_resistance: u8,
-    /// Current condition (paralyzed, asleep, etc.)
+    /// Current condition (paralyzed, asleep, etc.) - runtime state, defaults to Normal
+    #[serde(default)]
     pub conditions: MonsterCondition,
-    /// Active data-driven conditions
+    /// Active data-driven conditions - runtime state, defaults to empty
+    #[serde(default)]
     pub active_conditions: Vec<crate::domain::conditions::ActiveCondition>,
-    /// Has acted this turn (for turn order tracking)
+    /// Has acted this turn (for turn order tracking) - runtime state, defaults to false
+    #[serde(default)]
     pub has_acted: bool,
 }
 
