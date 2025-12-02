@@ -1624,6 +1624,197 @@ All quality checks pass:
 
 ### Next Steps
 
-- Phase 5: Testing Infrastructure Improvements
+- Phase 6: Data Files Update
+- Phase 7: Logging and Developer Experience
+
+---
+
+## Phase 5: Testing Infrastructure Improvements (2025-12-XX)
+
+**Objective**: Improve test resilience with pattern matching, add ComboBox ID salt verification, and create editor pattern compliance tests.
+
+### Background
+
+Per the SDK QOL Implementation Plan (`docs/explanation/sdk_qol_implementation_plan.md`), Phase 5 focuses on improving the testing infrastructure to catch code quality issues and ensure editors follow established patterns. The goal is to create tests that are resilient to minor refactors and can verify pattern compliance across all editor files.
+
+### Components Created
+
+#### 1. test_utils.rs Module (NEW)
+
+A new module providing pattern matching helpers and source code scanning utilities:
+
+**Source File Types**:
+
+- `SourceFile` struct - Represents a source file with path, content, and name
+- `PatternMatch` struct - Captures line number, matched text, line content, and capture groups
+
+**PatternMatcher Component**:
+
+- `PatternMatcher` struct - Reusable regex-based pattern matcher
+- Factory methods for common patterns:
+  - `combobox_id_salt()` - Matches `ComboBox::from_id_salt("id")`
+  - `combobox_from_label()` - Detects improper `ComboBox::from_label` usage
+  - `pub_fn_show()` - Matches public show method signatures
+  - `pub_fn_new()` - Matches public new method signatures
+  - `editor_state_struct()` - Matches `*EditorState` struct definitions
+  - `toolbar_button()` - Matches toolbar buttons with emoji
+  - `editor_toolbar_usage()` - Detects `EditorToolbar::new` usage
+  - `action_buttons_usage()` - Detects `ActionButtons::new` usage
+  - `two_column_layout_usage()` - Detects `TwoColumnLayout::new` usage
+  - `test_annotation()` - Matches `#[test]` annotations
+  - `test_module()` - Matches `#[cfg(test)]` modules
+
+**Source Scanning Functions**:
+
+- `scan_source_files()` - Scan all `.rs` files in a directory
+- `find_source_file()` - Find a specific file by name
+
+**Compliance Checking**:
+
+- `EditorComplianceResult` struct - Result of compliance check with:
+  - Feature detection flags (has_show_method, has_new_method, etc.)
+  - ComboBox usage counts
+  - Issue list
+  - `is_compliant()` and `compliance_score()` methods
+- `check_editor_compliance()` - Check single file for compliance
+- `check_all_editors_compliance()` - Check all editors in directory
+
+**ComboBox ID Verification**:
+
+- `verify_combobox_id_salt_usage()` - Find from_label violations
+- `collect_combobox_id_salts()` - Collect all ID salts in a file
+- `find_duplicate_combobox_ids()` - Detect duplicate IDs across files
+
+**Test Assertion Helpers**:
+
+- `assert_pattern_exists()` - Assert pattern found in file
+- `assert_pattern_absent()` - Assert pattern not found
+- `assert_editor_compliant()` - Assert file passes compliance
+- `assert_no_combobox_from_label()` - Assert no from_label usage
+
+**Summary Generation**:
+
+- `ComplianceSummary` struct - Aggregates compliance results with:
+  - Total/compliant editor counts
+  - Total issues and from_label violations
+  - Average compliance score
+  - `from_results()` and `to_string()` methods
+
+#### 2. Dependencies Added
+
+- `regex = "1.11"` added to `sdk/campaign_builder/Cargo.toml`
+
+### Tests Added
+
+**test_utils.rs unit tests** (37 tests):
+
+- `test_source_file_new`
+- `test_source_file_line_count`
+- `test_source_file_contains_pattern`
+- `test_pattern_matcher_combobox_id_salt`
+- `test_pattern_matcher_combobox_from_label`
+- `test_pattern_matcher_pub_fn_show`
+- `test_pattern_matcher_pub_fn_new`
+- `test_pattern_matcher_count_matches`
+- `test_pattern_matcher_editor_state_struct`
+- `test_editor_compliance_result_score`
+- `test_editor_compliance_result_partial_score`
+- `test_check_editor_compliance_basic`
+- `test_check_editor_compliance_with_violations`
+- `test_collect_combobox_id_salts`
+- `test_find_duplicate_combobox_ids`
+- `test_compliance_summary_from_results`
+- `test_compliance_summary_to_string`
+- `test_assert_pattern_exists_success`
+- `test_assert_pattern_exists_failure`
+- `test_assert_pattern_absent_success`
+- `test_assert_pattern_absent_failure`
+- `test_assert_no_combobox_from_label_success`
+- `test_assert_no_combobox_from_label_failure`
+
+**main.rs compliance tests** (20 tests):
+
+- `test_pattern_matcher_combobox_id_salt_detection`
+- `test_pattern_matcher_combobox_from_label_detection`
+- `test_pattern_matcher_pub_fn_show_detection`
+- `test_pattern_matcher_editor_state_struct_detection`
+- `test_source_file_creation_and_analysis`
+- `test_editor_compliance_check_detects_issues`
+- `test_editor_compliance_check_passes_good_editor`
+- `test_compliance_score_calculation`
+- `test_collect_combobox_id_salts`
+- `test_find_duplicate_combobox_ids_detects_conflicts`
+- `test_compliance_summary_calculation`
+- `test_pattern_match_line_numbers`
+- `test_pattern_matcher_test_annotation`
+- `test_pattern_matcher_toolbar_usage`
+- `test_pattern_matcher_action_buttons_usage`
+- `test_pattern_matcher_two_column_layout_usage`
+- `test_editor_compliance_result_is_compliant`
+- `test_compliance_summary_to_string_format`
+
+### Bug Fixes
+
+**Updated existing tests to exclude test code from pattern scanning**:
+
+- `tests/bug_verification.rs::test_bug_2_verify_unique_widget_ids` - Now extracts production code before `#[cfg(test)]` to avoid false positives from test string literals
+- `tests/integration_tests.rs::test_no_ui_id_clashes` - Same fix applied
+
+These fixes ensure that test assertions containing pattern strings (like `r#"ComboBox::from_label("bad")"#`) don't trigger violations when the tests are scanning for actual production code issues.
+
+### Files Modified
+
+- `sdk/campaign_builder/src/test_utils.rs` (NEW) - Pattern matching and compliance utilities
+- `sdk/campaign_builder/src/main.rs` - Added test_utils module, added compliance tests
+- `sdk/campaign_builder/Cargo.toml` - Added regex dependency
+- `sdk/campaign_builder/tests/bug_verification.rs` - Fixed false positive detection
+- `sdk/campaign_builder/tests/integration_tests.rs` - Fixed false positive detection
+
+### Validation
+
+All quality checks pass:
+
+- `cargo fmt --all` ✓
+- `cargo check --all-targets --all-features` ✓
+- `cargo clippy --all-targets --all-features -- -D warnings` ✓
+- `cargo test --all-features` ✓ (218 doc tests + all unit tests pass)
+- `cargo test -p campaign_builder` ✓ (394+ tests pass)
+
+### Architecture Compliance
+
+- Uses regex crate for pattern matching (standard Rust ecosystem)
+- No changes to domain types or core architecture
+- Test utilities are isolated in dedicated module
+- Pattern matchers are reusable and well-documented
+- Compliance checks can be extended for new patterns
+
+### Success Criteria Met
+
+- [x] Tests pass when editor files are renamed/reorganized (pattern-based, not exact string matching)
+- [x] Tests catch ComboBox ID conflicts via pattern matching
+- [x] Tests verify all editors follow standard patterns
+- [x] Helper functions available for common test assertions
+- [x] ComboBox from_label violations detected and reported
+- [x] Duplicate ComboBox ID detection available
+- [x] All quality gates pass
+
+### Usage Examples
+
+```rust
+use crate::test_utils::{PatternMatcher, SourceFile, check_editor_compliance};
+
+// Check for ComboBox pattern compliance
+let matcher = PatternMatcher::combobox_from_label();
+let file = SourceFile::new("editor.rs", source_content);
+assert!(!matcher.matches(&file.content), "Should not use from_label");
+
+// Full compliance check
+let result = check_editor_compliance(&file);
+assert!(result.is_compliant());
+assert_eq!(result.combobox_from_label_count, 0);
+```
+
+### Next Steps
+
 - Phase 6: Data Files Update
 - Phase 7: Logging and Developer Experience

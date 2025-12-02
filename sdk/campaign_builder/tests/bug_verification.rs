@@ -62,12 +62,20 @@ fn test_bug_2_verify_unique_widget_ids() {
 
     let source_code = fs::read_to_string("src/main.rs").expect("Failed to read main.rs");
 
-    // Check that ComboBox uses from_id_salt (not from_label)
-    let from_label_count = source_code.matches("ComboBox::from_label").count();
+    // Extract only production code (before #[cfg(test)] module)
+    // This avoids false positives from test string literals that contain "from_label"
+    let production_code = if let Some(test_start) = source_code.find("#[cfg(test)]") {
+        &source_code[..test_start]
+    } else {
+        &source_code[..]
+    };
+
+    // Check that ComboBox uses from_id_salt (not from_label) in production code
+    let from_label_count = production_code.matches("ComboBox::from_label").count();
 
     assert_eq!(
         from_label_count, 0,
-        "Found {} uses of ComboBox::from_label which can cause ID clashes. \
+        "Found {} uses of ComboBox::from_label in production code which can cause ID clashes. \
          All combo boxes should use from_id_salt() with unique IDs.",
         from_label_count
     );
@@ -82,7 +90,7 @@ fn test_bug_2_verify_unique_widget_ids() {
     ];
 
     for pattern in id_patterns {
-        let count = source_code.matches(pattern).count();
+        let count = production_code.matches(pattern).count();
         assert!(
             count <= 1,
             "ID pattern '{}' appears {} times. Each ID should be unique.",

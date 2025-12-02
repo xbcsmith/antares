@@ -34,6 +34,7 @@ mod quest_editor;
 mod spells_editor;
 mod templates;
 mod test_play;
+mod test_utils;
 mod ui_helpers;
 mod undo_redo;
 mod validation;
@@ -6841,5 +6842,447 @@ mod tests {
         assert_eq!(EffectTypeFilter::StatusEffect.as_str(), "Status");
         assert_eq!(EffectTypeFilter::DamageOverTime.as_str(), "DOT");
         assert_eq!(EffectTypeFilter::HealOverTime.as_str(), "HOT");
+    }
+
+    // =========================================================================
+    // Phase 5: Testing Infrastructure Improvements
+    // Pattern Matching and Compliance Tests
+    // =========================================================================
+
+    #[test]
+    fn test_pattern_matcher_combobox_id_salt_detection() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::combobox_id_salt();
+
+        // Valid patterns
+        assert!(matcher.matches(r#"ComboBox::from_id_salt("test_combo")"#));
+        assert!(matcher.matches(r#"egui::ComboBox::from_id_salt("another_combo")"#));
+        assert!(matcher.matches(r#"ComboBox::from_id_salt('single_quotes')"#));
+
+        // Invalid patterns (should not match)
+        assert!(!matcher.matches("ComboBox::new()"));
+        assert!(!matcher.matches("from_id_salt without ComboBox"));
+    }
+
+    #[test]
+    fn test_pattern_matcher_combobox_from_label_detection() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::combobox_from_label();
+
+        // Should detect from_label usage
+        assert!(matcher.matches(r#"ComboBox::from_label("bad_pattern")"#));
+        assert!(matcher.matches(r#"egui::ComboBox::from_label("also_bad")"#));
+
+        // Should not match from_id_salt
+        assert!(!matcher.matches(r#"ComboBox::from_id_salt("good")"#));
+    }
+
+    #[test]
+    fn test_pattern_matcher_pub_fn_show_detection() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::pub_fn_show();
+
+        // Valid patterns
+        assert!(matcher.matches("pub fn show(&mut self, ui: &mut Ui)"));
+        assert!(matcher.matches("    pub fn show("));
+        assert!(matcher.matches("pub fn show(&self)"));
+
+        // Invalid patterns
+        assert!(!matcher.matches("fn show(")); // not public
+        assert!(!matcher.matches("pub fn show_items(")); // different function name
+        assert!(!matcher.matches("pub fn showing(")); // partial match
+    }
+
+    #[test]
+    fn test_pattern_matcher_editor_state_struct_detection() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::editor_state_struct();
+
+        // Valid patterns
+        assert!(matcher.matches("pub struct ItemsEditorState {"));
+        assert!(matcher.matches("pub struct SpellsEditorState {"));
+        assert!(matcher.matches("pub struct MonstersEditorState {"));
+
+        // Invalid patterns
+        assert!(!matcher.matches("struct ItemsEditorState {")); // not pub
+        assert!(!matcher.matches("pub struct SomeOtherState {")); // not *EditorState
+    }
+
+    #[test]
+    fn test_source_file_creation_and_analysis() {
+        use crate::test_utils::SourceFile;
+
+        let content = r#"
+pub struct TestEditorState {
+    items: Vec<String>,
+}
+
+impl TestEditorState {
+    pub fn new() -> Self {
+        Self { items: vec![] }
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui) {
+        // editor content
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_something() {}
+}
+"#;
+
+        let file = SourceFile::new("test_editor.rs", content);
+
+        assert_eq!(file.name, "test_editor");
+        assert!(file.line_count() > 10);
+        assert!(file.contains_pattern("pub struct"));
+        assert!(file.contains_pattern("pub fn show"));
+    }
+
+    #[test]
+    fn test_editor_compliance_check_detects_issues() {
+        use crate::test_utils::{check_editor_compliance, SourceFile};
+
+        // Editor with from_label violation
+        let bad_content = r#"
+impl BadEditor {
+    pub fn show(&mut self, ui: &mut egui::Ui) {
+        egui::ComboBox::from_label("Bad ID")
+            .show_ui(ui, |ui| {});
+    }
+}
+"#;
+
+        let file = SourceFile::new("bad_editor.rs", bad_content);
+        let result = check_editor_compliance(&file);
+
+        assert_eq!(result.combobox_from_label_count, 1);
+        assert!(!result.is_compliant());
+        assert!(result.issues.iter().any(|i| i.contains("from_label")));
+    }
+
+    #[test]
+    fn test_editor_compliance_check_passes_good_editor() {
+        use crate::test_utils::{check_editor_compliance, SourceFile};
+
+        let good_content = r#"
+pub struct GoodEditorState {
+    data: Vec<String>,
+}
+
+impl GoodEditorState {
+    pub fn new() -> Self {
+        Self { data: vec![] }
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui) {
+        egui::ComboBox::from_id_salt("good_combo")
+            .show_ui(ui, |ui| {});
+        EditorToolbar::new("Good").show(ui);
+        ActionButtons::new().show(ui);
+        TwoColumnLayout::new("good").show(ui, |ui| {});
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_good_editor() {}
+}
+"#;
+
+        let file = SourceFile::new("good_editor.rs", good_content);
+        let result = check_editor_compliance(&file);
+
+        assert!(result.has_show_method);
+        assert!(result.has_new_method);
+        assert!(result.has_state_struct);
+        assert!(result.has_tests);
+        assert_eq!(result.combobox_from_label_count, 0);
+        assert_eq!(result.combobox_id_salt_count, 1);
+    }
+
+    #[test]
+    fn test_compliance_score_calculation() {
+        use crate::test_utils::EditorComplianceResult;
+
+        // Full compliance = 100 points
+        let full = EditorComplianceResult {
+            editor_name: "full".to_string(),
+            has_show_method: true,        // 20
+            has_new_method: true,         // 10
+            has_state_struct: true,       // 15
+            uses_toolbar: true,           // 15
+            uses_action_buttons: true,    // 10
+            uses_two_column_layout: true, // 10
+            has_tests: true,              // 10
+            combobox_id_salt_count: 5,
+            combobox_from_label_count: 0, // 10
+            issues: vec![],
+        };
+        assert_eq!(full.compliance_score(), 100);
+
+        // Partial compliance
+        let partial = EditorComplianceResult {
+            editor_name: "partial".to_string(),
+            has_show_method: true,         // 20
+            has_new_method: false,         // 0
+            has_state_struct: false,       // 0
+            uses_toolbar: true,            // 15
+            uses_action_buttons: false,    // 0
+            uses_two_column_layout: false, // 0
+            has_tests: true,               // 10
+            combobox_id_salt_count: 0,
+            combobox_from_label_count: 0, // 10
+            issues: vec![],
+        };
+        assert_eq!(partial.compliance_score(), 55);
+    }
+
+    #[test]
+    fn test_collect_combobox_id_salts() {
+        use crate::test_utils::{collect_combobox_id_salts, SourceFile};
+
+        let content = r#"
+egui::ComboBox::from_id_salt("difficulty_combo")
+    .show_ui(ui, |ui| {});
+egui::ComboBox::from_id_salt("terrain_combo")
+    .show_ui(ui, |ui| {});
+egui::ComboBox::from_id_salt("wall_combo")
+    .show_ui(ui, |ui| {});
+"#;
+
+        let file = SourceFile::new("test.rs", content);
+        let salts = collect_combobox_id_salts(&file);
+
+        assert_eq!(salts.len(), 3);
+        assert!(salts.contains(&"difficulty_combo".to_string()));
+        assert!(salts.contains(&"terrain_combo".to_string()));
+        assert!(salts.contains(&"wall_combo".to_string()));
+    }
+
+    #[test]
+    fn test_find_duplicate_combobox_ids_detects_conflicts() {
+        use crate::test_utils::{find_duplicate_combobox_ids, SourceFile};
+
+        let file1 = SourceFile::new(
+            "editor1.rs",
+            r#"egui::ComboBox::from_id_salt("duplicate_id")"#,
+        );
+        let file2 = SourceFile::new(
+            "editor2.rs",
+            r#"egui::ComboBox::from_id_salt("duplicate_id")"#,
+        );
+        let file3 = SourceFile::new("editor3.rs", r#"egui::ComboBox::from_id_salt("unique_id")"#);
+
+        let files = vec![file1, file2, file3];
+        let duplicates = find_duplicate_combobox_ids(&files);
+
+        // Only "duplicate_id" should be reported as duplicate
+        assert_eq!(duplicates.len(), 1);
+        assert!(duplicates.contains_key("duplicate_id"));
+        assert_eq!(duplicates["duplicate_id"].len(), 2);
+        assert!(!duplicates.contains_key("unique_id"));
+    }
+
+    #[test]
+    fn test_compliance_summary_calculation() {
+        use crate::test_utils::{ComplianceSummary, EditorComplianceResult};
+        use std::collections::HashMap;
+
+        let mut results = HashMap::new();
+
+        results.insert(
+            "compliant_editor".to_string(),
+            EditorComplianceResult {
+                editor_name: "compliant_editor".to_string(),
+                has_show_method: true,
+                has_new_method: true,
+                has_state_struct: true,
+                uses_toolbar: true,
+                uses_action_buttons: true,
+                uses_two_column_layout: true,
+                has_tests: true,
+                combobox_id_salt_count: 2,
+                combobox_from_label_count: 0,
+                issues: vec![],
+            },
+        );
+
+        results.insert(
+            "noncompliant_editor".to_string(),
+            EditorComplianceResult {
+                editor_name: "noncompliant_editor".to_string(),
+                has_show_method: true,
+                has_new_method: false,
+                has_state_struct: false,
+                uses_toolbar: false,
+                uses_action_buttons: false,
+                uses_two_column_layout: false,
+                has_tests: false,
+                combobox_id_salt_count: 0,
+                combobox_from_label_count: 2,
+                issues: vec!["Missing tests".to_string(), "Uses from_label".to_string()],
+            },
+        );
+
+        let summary = ComplianceSummary::from_results(&results);
+
+        assert_eq!(summary.total_editors, 2);
+        assert_eq!(summary.compliant_editors, 1);
+        assert_eq!(summary.total_issues, 2);
+        assert_eq!(summary.from_label_violations, 2);
+        assert!(summary.average_score > 0.0);
+    }
+
+    #[test]
+    fn test_pattern_match_line_numbers() {
+        use crate::test_utils::PatternMatcher;
+
+        let content = r#"line 1
+line 2
+ComboBox::from_id_salt("test")
+line 4
+line 5
+ComboBox::from_id_salt("another")
+line 7"#;
+
+        let matcher = PatternMatcher::combobox_id_salt();
+        let matches = matcher.find_matches(content);
+
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].line_number, 3);
+        assert_eq!(matches[1].line_number, 6);
+    }
+
+    #[test]
+    fn test_pattern_matcher_test_annotation() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::test_annotation();
+        let content = r#"
+#[test]
+fn test_something() {}
+
+#[test]
+fn test_another() {}
+"#;
+
+        assert_eq!(matcher.count_matches(content), 2);
+    }
+
+    #[test]
+    fn test_pattern_matcher_toolbar_usage() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::editor_toolbar_usage();
+
+        assert!(matcher.matches("EditorToolbar::new(\"Items\")"));
+        assert!(matcher.matches("    EditorToolbar::new("));
+        assert!(!matcher.matches("Toolbar::new(")); // different struct
+    }
+
+    #[test]
+    fn test_pattern_matcher_action_buttons_usage() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::action_buttons_usage();
+
+        assert!(matcher.matches("ActionButtons::new()"));
+        assert!(matcher.matches("    ActionButtons::new("));
+        assert!(!matcher.matches("Buttons::new(")); // different struct
+    }
+
+    #[test]
+    fn test_pattern_matcher_two_column_layout_usage() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::two_column_layout_usage();
+
+        assert!(matcher.matches("TwoColumnLayout::new(\"items\")"));
+        assert!(matcher.matches("    TwoColumnLayout::new("));
+        assert!(!matcher.matches("ColumnLayout::new(")); // different struct
+    }
+
+    #[test]
+    fn test_editor_compliance_result_is_compliant() {
+        use crate::test_utils::EditorComplianceResult;
+
+        // Compliant: no issues and no from_label
+        let compliant = EditorComplianceResult {
+            editor_name: "test".to_string(),
+            has_show_method: true,
+            has_new_method: true,
+            has_state_struct: true,
+            uses_toolbar: true,
+            uses_action_buttons: true,
+            uses_two_column_layout: true,
+            has_tests: true,
+            combobox_id_salt_count: 1,
+            combobox_from_label_count: 0,
+            issues: vec![],
+        };
+        assert!(compliant.is_compliant());
+
+        // Not compliant: has from_label usage
+        let with_from_label = EditorComplianceResult {
+            editor_name: "test".to_string(),
+            has_show_method: true,
+            has_new_method: true,
+            has_state_struct: true,
+            uses_toolbar: true,
+            uses_action_buttons: true,
+            uses_two_column_layout: true,
+            has_tests: true,
+            combobox_id_salt_count: 1,
+            combobox_from_label_count: 1,
+            issues: vec![],
+        };
+        assert!(!with_from_label.is_compliant());
+
+        // Not compliant: has issues
+        let with_issues = EditorComplianceResult {
+            editor_name: "test".to_string(),
+            has_show_method: true,
+            has_new_method: true,
+            has_state_struct: true,
+            uses_toolbar: true,
+            uses_action_buttons: true,
+            uses_two_column_layout: true,
+            has_tests: true,
+            combobox_id_salt_count: 1,
+            combobox_from_label_count: 0,
+            issues: vec!["Some issue".to_string()],
+        };
+        assert!(!with_issues.is_compliant());
+    }
+
+    #[test]
+    fn test_compliance_summary_to_string_format() {
+        use crate::test_utils::ComplianceSummary;
+
+        let summary = ComplianceSummary {
+            total_editors: 5,
+            compliant_editors: 4,
+            total_issues: 2,
+            from_label_violations: 1,
+            average_score: 90.5,
+            all_issues: vec!["issue1".to_string(), "issue2".to_string()],
+        };
+
+        let output = summary.to_string();
+
+        assert!(output.contains("Total Editors: 5"));
+        assert!(output.contains("Compliant: 4"));
+        assert!(output.contains("Total Issues: 2"));
+        assert!(output.contains("from_label Violations: 1"));
+        assert!(output.contains("Average Score: 90.5"));
     }
 }
