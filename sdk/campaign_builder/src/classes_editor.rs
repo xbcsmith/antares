@@ -5,7 +5,9 @@
 //!
 //! This module provides a visual editor for character classes with full UI
 //! rendering via the `show()` method, following the standard editor pattern.
+//! Uses shared UI components for consistent layout.
 
+use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
 use antares::domain::classes::{ClassDefinition, SpellSchool, SpellStat};
 use antares::domain::items::types::Item;
 use antares::domain::types::DiceRoll;
@@ -330,18 +332,35 @@ impl ClassesEditorState {
         ui.heading("🛡️ Classes Editor");
         ui.add_space(5.0);
 
-        // Toolbar
-        ui.horizontal(|ui| {
-            if ui.button("➕ New Class").clicked() {
+        // Use shared EditorToolbar component
+        let toolbar_action = EditorToolbar::new("Classes")
+            .with_search(&mut self.search_filter)
+            .with_merge_mode(file_load_merge_mode)
+            .with_total_count(self.classes.len())
+            .with_id_salt("classes_toolbar")
+            .show(ui);
+
+        // Handle toolbar actions
+        match toolbar_action {
+            ToolbarAction::New => {
                 self.start_new_class();
                 self.buffer.id = self.next_available_class_id();
                 *unsaved_changes = true;
             }
-
-            ui.separator();
-
-            // File I/O buttons
-            if ui.button("📂 Load from File").clicked() {
+            ToolbarAction::Save => {
+                if let Some(dir) = campaign_dir {
+                    let path = dir.join(classes_file);
+                    match self.save_to_file(&path) {
+                        Ok(_) => {
+                            *status_message = format!("Saved {} classes", self.classes.len());
+                        }
+                        Err(e) => {
+                            *status_message = format!("Failed to save classes: {}", e);
+                        }
+                    }
+                }
+            }
+            ToolbarAction::Load => {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("RON", &["ron"])
                     .pick_file()
@@ -375,15 +394,11 @@ impl ClassesEditorState {
                     }
                 }
             }
-
-            ui.checkbox(file_load_merge_mode, "Merge");
-            ui.label(if *file_load_merge_mode {
-                "(adds to existing)"
-            } else {
-                "(replaces all)"
-            });
-
-            if ui.button("💾 Save to File").clicked() {
+            ToolbarAction::Import => {
+                // Import not yet implemented for classes
+                *status_message = "Import not yet implemented for classes".to_string();
+            }
+            ToolbarAction::Export => {
                 if let Some(path) = rfd::FileDialog::new()
                     .set_file_name("classes.ron")
                     .add_filter("RON", &["ron"])
@@ -404,24 +419,7 @@ impl ClassesEditorState {
                     }
                 }
             }
-
-            ui.separator();
-
-            if ui.button("💾 Save Classes").clicked() {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(classes_file);
-                    match self.save_to_file(&path) {
-                        Ok(_) => {
-                            *status_message = format!("Saved {} classes", self.classes.len());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to save classes: {}", e);
-                        }
-                    }
-                }
-            }
-
-            if ui.button("📂 Load Classes").clicked() {
+            ToolbarAction::Reload => {
                 if let Some(dir) = campaign_dir {
                     let path = dir.join(classes_file);
                     if path.exists() {
@@ -438,71 +436,170 @@ impl ClassesEditorState {
                     }
                 }
             }
-        });
+            ToolbarAction::None => {}
+        }
 
         ui.separator();
 
-        // Search
-        ui.horizontal(|ui| {
-            ui.label("🔍 Search:");
-            ui.text_edit_singleline(&mut self.search_filter);
-        });
-
-        ui.separator();
-
-        // Main content
+        // Main content - use TwoColumnLayout for list mode
         match self.mode {
             ClassesEditorMode::List => {
-                egui::SidePanel::left("classes_list_panel")
-                    .resizable(true)
-                    .default_width(300.0)
-                    .show_inside(ui, |ui| {
-                        self.show_classes_list(ui, unsaved_changes);
-                    });
+                // Clone data needed for closures to avoid borrow conflicts
+                let selected_class_idx = self.selected_class;
+                let search_filter = self.search_filter.clone();
+                let classes_snapshot: Vec<(usize, ClassDefinition)> = self
+                    .classes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| {
+                        search_filter.is_empty()
+                            || c.name
+                                .to_lowercase()
+                                .contains(&search_filter.to_lowercase())
+                            || c.id.to_lowercase().contains(&search_filter.to_lowercase())
+                    })
+                    .map(|(i, c)| (i, c.clone()))
+                    .collect();
 
-                egui::CentralPanel::default().show_inside(ui, |ui| {
-                    ui.centered_and_justified(|ui| {
-                        ui.label("Select a class to edit or create a new one");
-                    });
-                });
+                // Track actions from UI
+                let mut new_selection: Option<usize> = None;
+                let mut action_requested: Option<ItemAction> = None;
+
+                TwoColumnLayout::new("classes").show_split(
+                    ui,
+                    |left_ui| {
+                        // Left panel: Classes list
+                        left_ui.heading("Classes");
+                        left_ui.separator();
+
+                        for (idx, class) in &classes_snapshot {
+                            let is_selected = selected_class_idx == Some(*idx);
+                            if left_ui.selectable_label(is_selected, &class.name).clicked() {
+                                new_selection = Some(*idx);
+                            }
+                        }
+                    },
+                    |right_ui| {
+                        // Right panel: Detail view
+                        if let Some(idx) = selected_class_idx {
+                            if let Some((_, class)) =
+                                classes_snapshot.iter().find(|(i, _)| *i == idx)
+                            {
+                                right_ui.heading(&class.name);
+                                right_ui.separator();
+
+                                // Action buttons using shared component
+                                let action = ActionButtons::new().enabled(true).show(right_ui);
+                                if action != ItemAction::None {
+                                    action_requested = Some(action);
+                                }
+
+                                right_ui.separator();
+
+                                // Class details
+                                egui::Grid::new("class_detail_grid")
+                                    .num_columns(2)
+                                    .spacing([10.0, 5.0])
+                                    .show(right_ui, |ui| {
+                                        ui.label("ID:");
+                                        ui.label(&class.id);
+                                        ui.end_row();
+
+                                        ui.label("HP Die:");
+                                        ui.label(format!(
+                                            "{}d{}{:+}",
+                                            class.hp_die.count,
+                                            class.hp_die.sides,
+                                            class.hp_die.bonus
+                                        ));
+                                        ui.end_row();
+
+                                        ui.label("Spell School:");
+                                        ui.label(
+                                            class
+                                                .spell_school
+                                                .map(|s| format!("{:?}", s))
+                                                .unwrap_or_else(|| "None".to_string()),
+                                        );
+                                        ui.end_row();
+
+                                        ui.label("Pure Caster:");
+                                        ui.label(if class.is_pure_caster { "Yes" } else { "No" });
+                                        ui.end_row();
+
+                                        ui.label("Description:");
+                                        ui.label(&class.description);
+                                        ui.end_row();
+                                    });
+                            } else {
+                                right_ui.label("Select a class to view details");
+                            }
+                        } else {
+                            right_ui.label("Select a class to view details");
+                        }
+                    },
+                );
+
+                // Apply selection change after closures
+                if let Some(idx) = new_selection {
+                    self.selected_class = Some(idx);
+                }
+
+                // Handle action button clicks after closures
+                if let Some(action) = action_requested {
+                    match action {
+                        ItemAction::Edit => {
+                            if let Some(idx) = self.selected_class {
+                                self.start_edit_class(idx);
+                            }
+                        }
+                        ItemAction::Delete => {
+                            if let Some(idx) = self.selected_class {
+                                self.delete_class(idx);
+                                *unsaved_changes = true;
+                            }
+                        }
+                        ItemAction::Duplicate => {
+                            if let Some(idx) = self.selected_class {
+                                if let Some(class) = self.classes.get(idx).cloned() {
+                                    let mut dup = class;
+                                    let base_id = dup.id.clone();
+                                    let mut suffix = 1;
+                                    while self.classes.iter().any(|c| c.id == dup.id) {
+                                        dup.id = format!("{}_copy{}", base_id, suffix);
+                                        suffix += 1;
+                                    }
+                                    self.classes.push(dup);
+                                    *unsaved_changes = true;
+                                    *status_message = "Class duplicated".to_string();
+                                }
+                            }
+                        }
+                        ItemAction::Export => {
+                            if let Some(idx) = self.selected_class {
+                                if let Some(class) = self.classes.get(idx) {
+                                    match ron::ser::to_string_pretty(class, Default::default()) {
+                                        Ok(contents) => {
+                                            ui.ctx().copy_text(contents);
+                                            *status_message =
+                                                "Copied class to clipboard".to_string();
+                                        }
+                                        Err(e) => {
+                                            *status_message =
+                                                format!("Failed to serialize class: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        ItemAction::None => {}
+                    }
+                }
             }
             ClassesEditorMode::Creating | ClassesEditorMode::Editing => {
                 self.show_class_form(ui, items, unsaved_changes);
             }
         }
-    }
-
-    /// Shows the classes list panel
-    fn show_classes_list(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
-        ui.heading("Classes List");
-        ui.separator();
-
-        // Clone to avoid borrow checker issues
-        let filtered: Vec<(usize, ClassDefinition)> = self
-            .filtered_classes()
-            .into_iter()
-            .map(|(i, c)| (i, c.clone()))
-            .collect();
-
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for (idx, class) in filtered {
-                    let is_selected = self.selected_class == Some(idx);
-                    if ui.selectable_label(is_selected, &class.name).clicked() {
-                        self.start_edit_class(idx);
-                    }
-
-                    if is_selected {
-                        ui.horizontal(|ui| {
-                            if ui.button("🗑️ Delete").clicked() {
-                                self.delete_class(idx);
-                                *unsaved_changes = true;
-                            }
-                        });
-                    }
-                }
-            });
     }
 
     /// Shows the class edit form

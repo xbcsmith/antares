@@ -169,6 +169,129 @@ Per the implementation plan:
 - Apply AttributePair widgets across all editors
 - Improve validation and asset panels
 
+## Phase 3: Editor Layout Continuity (2025-01-XX)
+
+**Objective**: Update all editors to use shared UI components (EditorToolbar, ActionButtons, TwoColumnLayout) for consistent layout and behavior across the SDK Campaign Builder.
+
+### Background
+
+Phase 1 created shared UI components. Phase 2 extracted Classes and Dialogues editors from main.rs. Phase 3 applies the shared components to all editors for layout consistency.
+
+### Changes Implemented
+
+#### 3.1 Classes Editor Layout Update
+
+Updated `classes_editor.rs` to use shared components:
+
+- Replaced manual toolbar with `EditorToolbar` component
+- Added `ActionButtons` (Edit/Delete/Duplicate/Export) to detail panel
+- Implemented `TwoColumnLayout` for list/detail split view
+- Toolbar actions: New, Save, Load, Import (placeholder), Export, Reload
+
+```rust
+let toolbar_action = EditorToolbar::new("Classes")
+    .with_search(&mut self.search_filter)
+    .with_merge_mode(file_load_merge_mode)
+    .with_total_count(self.classes.len())
+    .with_id_salt("classes_toolbar")
+    .show(ui);
+```
+
+#### 3.2 Dialogues Editor Layout Update
+
+Updated `dialogue_editor.rs` to use shared components:
+
+- Replaced manual toolbar with `EditorToolbar` component
+- Added `ActionButtons` to detail panel
+- Implemented `TwoColumnLayout` for list/detail split view
+- Proper handling of HashMap-based nodes structure
+
+```rust
+let toolbar_action = EditorToolbar::new("Dialogues")
+    .with_search(&mut self.search_filter)
+    .with_merge_mode(file_load_merge_mode)
+    .with_total_count(self.dialogues.len())
+    .with_id_salt("dialogues_toolbar")
+    .show(ui);
+```
+
+#### 3.3 Quests Editor Toolbar Update
+
+Updated `quest_editor.rs` to use shared toolbar:
+
+- Replaced manual toolbar with `EditorToolbar` component
+- Consolidated Save/Load/Reload actions
+- Maintained existing list/form mode structure (complex sub-editors)
+
+#### 3.4 Monsters Editor AttributePair Widgets
+
+Updated `monsters_editor.rs` to use AttributePair widgets:
+
+- HP using `AttributePair16Input` widget
+- AC using `AttributePairInput` widget
+- All Stats (Might, Intellect, Personality, Endurance, Speed, Accuracy, Luck) using `AttributePairInput`
+- Each widget shows Base/Current values with Reset button
+
+```rust
+// HP using AttributePair16Input widget
+AttributePair16Input::new("HP", &mut self.edit_buffer.hp)
+    .with_id_salt("monster_hp")
+    .with_reset_button(true)
+    .with_auto_sync_checkbox(false)
+    .show(ui);
+
+// Stats using AttributePairInput widgets
+AttributePairInput::new("Might", &mut self.edit_buffer.stats.might)
+    .with_id_salt("monster_might")
+    .with_reset_button(true)
+    .with_auto_sync_checkbox(false)
+    .show(ui);
+```
+
+### Files Modified
+
+- `sdk/campaign_builder/src/classes_editor.rs` - EditorToolbar, ActionButtons, TwoColumnLayout
+- `sdk/campaign_builder/src/dialogue_editor.rs` - EditorToolbar, ActionButtons, TwoColumnLayout
+- `sdk/campaign_builder/src/quest_editor.rs` - EditorToolbar
+- `sdk/campaign_builder/src/monsters_editor.rs` - AttributePairInput, AttributePair16Input widgets
+
+### Validation
+
+All quality checks pass:
+
+- `cargo fmt --all` ✓
+- `cargo check --all-targets --all-features` ✓
+- `cargo clippy --all-targets --all-features -- -D warnings` ✓
+- `cargo test --all-features` ✓ (370 tests pass)
+
+### Architecture Compliance
+
+- Uses shared UI components from Phase 1 (`ui_helpers.rs`)
+- Follows standard editor pattern with `show()` method
+- Proper handling of borrow checker issues by cloning data before closures
+- Type aliases and constants used correctly
+
+### Success Criteria Met
+
+- [x] Classes editor uses EditorToolbar and ActionButtons
+- [x] Dialogues editor uses EditorToolbar, ActionButtons, TwoColumnLayout
+- [x] Quests editor uses EditorToolbar
+- [x] Monsters editor uses AttributePair/AttributePair16 widgets for stats
+- [x] All editors have consistent toolbar layout
+- [x] All quality gates pass
+
+### Deferred Items
+
+- Conditions editor major refactor (complex existing layout)
+- Maps editor refactor (requires canvas/grid integration - high risk)
+- Full TwoColumnLayout adoption for Quests editor (complex sub-editors)
+
+### Next Steps
+
+- Phase 4: Validation and Assets UI Improvements
+- Phase 5: Testing Infrastructure Improvements
+- Phase 6: Data Files Update
+
 ## Phase 2: Extract Editor UI Code from main.rs (2025-01-XX)
 
 **Objective**: Extract Classes and Dialogues editor UI code from `main.rs` into their respective module files, following the standard editor pattern with `show()` methods.

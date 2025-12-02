@@ -5,6 +5,7 @@
 //!
 //! This module provides a visual quest designer with support for creating,
 //! editing, and managing quests with multiple stages, objectives, and rewards.
+//! Uses shared UI components for consistent layout.
 //!
 //! # Features
 //!
@@ -15,6 +16,7 @@
 //! - Prerequisite chain management
 //! - Quest validation and preview
 
+use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
 use antares::domain::quest::{Quest, QuestId, QuestObjective, QuestReward, QuestStage};
@@ -1055,17 +1057,22 @@ impl QuestEditorState {
         ui.heading("📜 Quests Editor");
         ui.add_space(5.0);
 
-        // Toolbar
-        ui.horizontal(|ui| {
-            if ui.button("➕ New Quest").clicked() {
+        // Use shared EditorToolbar component
+        let toolbar_action = EditorToolbar::new("Quests")
+            .with_search(&mut self.search_filter)
+            .with_merge_mode(file_load_merge_mode)
+            .with_total_count(quests.len())
+            .with_id_salt("quests_toolbar")
+            .show(ui);
+
+        // Handle toolbar actions
+        match toolbar_action {
+            ToolbarAction::New => {
                 let next_id = quests.iter().map(|q| q.id).max().unwrap_or(0) + 1;
                 self.start_new_quest(next_id.to_string());
                 *unsaved_changes = true;
             }
-
-            ui.separator();
-
-            if ui.button("💾 Save Quests").clicked() {
+            ToolbarAction::Save => {
                 if let Some(dir) = campaign_dir {
                     let quests_path = dir.join(quests_file);
                     if let Some(parent) = quests_path.parent() {
@@ -1088,35 +1095,7 @@ impl QuestEditorState {
                     }
                 }
             }
-
-            if ui.button("📂 Load Quests").clicked() {
-                if let Some(dir) = campaign_dir {
-                    let quests_path = dir.join(quests_file);
-                    if quests_path.exists() {
-                        match std::fs::read_to_string(&quests_path) {
-                            Ok(contents) => match ron::from_str::<Vec<Quest>>(&contents) {
-                                Ok(loaded_quests) => {
-                                    *quests = loaded_quests;
-                                    *status_message = format!("Loaded {} quests", quests.len());
-                                }
-                                Err(e) => {
-                                    *status_message = format!("Failed to parse quests: {}", e);
-                                }
-                            },
-                            Err(e) => {
-                                *status_message = format!("Failed to read quests file: {}", e);
-                            }
-                        }
-                    } else {
-                        *status_message = "Quests file does not exist".to_string();
-                    }
-                }
-            }
-
-            ui.separator();
-
-            // File I/O buttons
-            if ui.button("📂 Load from File").clicked() {
+            ToolbarAction::Load => {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("RON", &["ron"])
                     .pick_file()
@@ -1150,15 +1129,11 @@ impl QuestEditorState {
                     }
                 }
             }
-
-            ui.checkbox(file_load_merge_mode, "Merge");
-            ui.label(if *file_load_merge_mode {
-                "(adds to existing)"
-            } else {
-                "(replaces all)"
-            });
-
-            if ui.button("💾 Save to File").clicked() {
+            ToolbarAction::Import => {
+                // Import not yet implemented for quests
+                *status_message = "Import not yet implemented for quests".to_string();
+            }
+            ToolbarAction::Export => {
                 if let Some(path) = rfd::FileDialog::new()
                     .set_file_name("quests.ron")
                     .add_filter("RON", &["ron"])
@@ -1179,32 +1154,32 @@ impl QuestEditorState {
                     }
                 }
             }
-
-            ui.separator();
-
-            if let Some(selected_idx) = self.selected_quest {
-                if selected_idx < quests.len() {
-                    if ui.button("📤 Export Quest").clicked() {
-                        let quest = &quests[selected_idx];
-                        match ron::ser::to_string_pretty(quest, Default::default()) {
-                            Ok(ron_string) => {
-                                ui.ctx().copy_text(ron_string);
-                                *status_message = "Quest copied to clipboard".to_string();
+            ToolbarAction::Reload => {
+                if let Some(dir) = campaign_dir {
+                    let quests_path = dir.join(quests_file);
+                    if quests_path.exists() {
+                        match std::fs::read_to_string(&quests_path) {
+                            Ok(contents) => match ron::from_str::<Vec<Quest>>(&contents) {
+                                Ok(loaded_quests) => {
+                                    *quests = loaded_quests;
+                                    self.quests = quests.clone();
+                                    *status_message = format!("Reloaded {} quests", quests.len());
+                                }
+                                Err(e) => {
+                                    *status_message = format!("Failed to parse quests: {}", e);
+                                }
+                            },
+                            Err(e) => {
+                                *status_message = format!("Failed to read quests file: {}", e);
                             }
-                            Err(e) => eprintln!("Failed to export quest: {}", e),
                         }
+                    } else {
+                        *status_message = "Quests file does not exist".to_string();
                     }
                 }
             }
-        });
-
-        ui.separator();
-
-        // Search filter
-        ui.horizontal(|ui| {
-            ui.label("🔍 Search:");
-            ui.text_edit_singleline(&mut self.search_filter);
-        });
+            ToolbarAction::None => {}
+        }
 
         ui.separator();
 

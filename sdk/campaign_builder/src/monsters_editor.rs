@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::ui_helpers::{AttributePair16Input, AttributePairInput};
 use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
@@ -647,70 +648,67 @@ impl MonstersEditorState {
     }
 
     fn show_stats_editor(&mut self, ui: &mut egui::Ui) {
+        ui.label("Core Stats:");
+
+        // HP using AttributePair16Input widget
+        AttributePair16Input::new("HP", &mut self.edit_buffer.hp)
+            .with_id_salt("monster_hp")
+            .with_reset_button(true)
+            .with_auto_sync_checkbox(false)
+            .show(ui);
+
+        // AC using AttributePairInput widget
+        AttributePairInput::new("AC", &mut self.edit_buffer.ac)
+            .with_id_salt("monster_ac")
+            .with_reset_button(true)
+            .with_auto_sync_checkbox(false)
+            .show(ui);
+
+        ui.separator();
         ui.label("Attributes:");
 
-        ui.horizontal(|ui| {
-            ui.label("Might:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.might.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
+        // Stats using AttributePairInput widgets
+        AttributePairInput::new("Might", &mut self.edit_buffer.stats.might)
+            .with_id_salt("monster_might")
+            .with_reset_button(true)
+            .with_auto_sync_checkbox(false)
+            .show(ui);
 
-        ui.horizontal(|ui| {
-            ui.label("Intellect:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.intellect.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
+        AttributePairInput::new("Intellect", &mut self.edit_buffer.stats.intellect)
+            .with_id_salt("monster_intellect")
+            .with_reset_button(true)
+            .with_auto_sync_checkbox(false)
+            .show(ui);
 
-        ui.horizontal(|ui| {
-            ui.label("Personality:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.personality.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
+        AttributePairInput::new("Personality", &mut self.edit_buffer.stats.personality)
+            .with_id_salt("monster_personality")
+            .with_reset_button(true)
+            .with_auto_sync_checkbox(false)
+            .show(ui);
 
-        ui.horizontal(|ui| {
-            ui.label("Endurance:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.endurance.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
+        AttributePairInput::new("Endurance", &mut self.edit_buffer.stats.endurance)
+            .with_id_salt("monster_endurance")
+            .with_reset_button(true)
+            .with_auto_sync_checkbox(false)
+            .show(ui);
 
-        ui.horizontal(|ui| {
-            ui.label("Speed:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.speed.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
+        AttributePairInput::new("Speed", &mut self.edit_buffer.stats.speed)
+            .with_id_salt("monster_speed")
+            .with_reset_button(true)
+            .with_auto_sync_checkbox(false)
+            .show(ui);
 
-        ui.horizontal(|ui| {
-            ui.label("Accuracy:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.accuracy.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
+        AttributePairInput::new("Accuracy", &mut self.edit_buffer.stats.accuracy)
+            .with_id_salt("monster_accuracy")
+            .with_reset_button(true)
+            .with_auto_sync_checkbox(false)
+            .show(ui);
 
-        ui.horizontal(|ui| {
-            ui.label("Luck:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.luck.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
+        AttributePairInput::new("Luck", &mut self.edit_buffer.stats.luck)
+            .with_id_salt("monster_luck")
+            .with_reset_button(true)
+            .with_auto_sync_checkbox(false)
+            .show(ui);
 
         ui.separator();
 
