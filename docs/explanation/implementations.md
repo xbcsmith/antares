@@ -1,5 +1,7 @@
 # Implementation Summary
 
+Note: As of 2025-12-02, two pre-existing UI tests in `sdk/campaign_builder/tests/bug_verification.rs` were updated to reflect refactoring that moved editor implementations into separate module files. These tests — `test_items_tab_widget_ids_unique` and `test_monsters_tab_widget_ids_unique` — now inspect the refactored editor files (`src/items_editor.rs` and `src/monsters_editor.rs`, respectively) and validate the correct use of `egui::ComboBox::from_id_salt` rather than implicit ID generation methods (e.g., `from_label`) to avoid widget ID collisions.
+
 This document tracks completed implementations and changes to the Antares project.
 
 ## Phase 0: Conditions Editor — Discovery & Preparation (2025-11-XX)
@@ -164,6 +166,270 @@ All existing tests pass:
 - ✅ All quality gates pass
 
 ## Phase 1: Critical Quest Editor Fixes (2025-11-25)
+
+## Phase 1: Conditions Editor — Core Implementation (Toolbar & File I/O) (2025-11-XX)
+
+### Changes Implemented
+
+- Converted the legacy `render_conditions_editor` module-level function into a `ConditionsEditorState::show(...)` method that mirrors other editors (`Items`, `Monsters`, `Spells`) and accepts the campaign directory, file path, status messages, unsaved change flag, and `file_load_merge_mode`.
+- Added editor-level UI state fields to `ConditionsEditorState`:
+  - `show_import_dialog: bool` and `import_export_buffer: String` for import/export clipboard flow.
+  - `duplicate_dialog_open: bool`, `delete_confirmation_open: bool`, and `selected_for_delete: Option<ConditionId>` for delete/duplicate UX flow.
+  - `effect_edit_buffer: Option<EffectEditBuffer>` as a phase-1 placeholder for per-effect editing.
+- Implemented a consistent top toolbar for the Conditions editor:
+  - Search field, "➕ New Condition" (creates default edit buffer), "🔄 Reload" (loads from campaign folder), "📥 Import", "📂 Load from File" (Open & merge/replace toggle), "💾 Save to File", and "📋 Export Selected/All".
+  - Reused `ui_helpers::DEFAULT_LEFT_COLUMN_WIDTH`, `compute_panel_height`, and standard toolbar layout from `items_editor.rs`.
+- Implemented import & file I/O patterns:
+  - `show_import_dialog(ctx, ...)` allows pasting single `ConditionDefinition` or `Vec<ConditionDefinition>` RON content and will import them, ensuring unique IDs when collisions occur.
+  - `Load from File` uses a `rfd::FileDialog` to choose a file; `Merge` toggle supports merging loaded conditions (replace-by-id) or replacing all.
+  - `Save to File` supports choosing an arbitrary save path and serializes the conditions as RON using `ron::ser::to_string_pretty`.
+  - Implemented a `save_conditions` helper on the Conditions editor that writes to `campaign_dir.join(conditions_file)` for autosave-capable behavior.
+- Implemented duplicate and delete:
+  - Duplicate clones a selected `ConditionDefinition` and generates a unique id suffix until there’s no conflict.
+  - Delete shows a confirmation dialog and removes the selected condition upon confirmation.
+- Validation & integration:
+  - Added `CampaignBuilderApp::validate_condition_ids()` to check for duplicate IDs and integrated its usage into `validate_campaign()` and into the `load_conditions()` flow so ID collisions are surfaced as validation warnings.
+  - Inline validation for new conditions: ID required and uniqueness checked before saving.
+- Tests:
+  - `test_condition_id_uniqueness_validation` added to `sdk/campaign_builder/src/main.rs` to validate duplicate detection.
+  - `test_conditions_save_load_roundtrip` added to verify `CampaignBuilderApp::save_conditions()` / `load_conditions()` round-trip behavior (saves conditions to a temporary campaign directory and loads them back).
+- UX notes:
+  - `ActiveCondition.magnitude` remains a runtime-only field (not persisted to RON).
+  - A placeholder `EffectEditBuffer` was added for Phase 2 per-variant effect editor work.
+
+### Implementation Notes
+
+- Reused many UI and file I/O patterns from existing editors (`items_editor.rs`, `monsters_editor.rs`, and `spells_editor.rs`) to preserve cross-editor UX and to maintain consistent code style.
+- The new `ConditionsEditorState::show()` signature is consistent with other editors and is used by `main.rs`:
+  - `self.conditions_editor_state.show(ui, &mut self.conditions, self.campaign_dir.as_ref(), &self.campaign.conditions_file, &mut self.unsaved_changes, &mut self.status_message, &mut self.file_load_merge_mode);`
+- `render_conditions_editor(ui, state, conditions)` wrapper retained for backward compatibility (it calls `ConditionsEditorState::show()` with sane defaults), easing the transition for code that still referenced the prior function.
+- The code respects the domain separation policy: no changes were made to core domain types (`ConditionDefinition`, `ConditionEffect`) or runtime-only fields (`ActiveCondition.magnitude`).
+
+### Tests & Next Steps
+
+- The implemented tests verify RON load/parse, duplicate detection, and load/save roundtrip. Additional tests and UI-level tests will be added in later phases:
+  - Per-variant effect editors (Phase 3) will require coverage for dice UI, attribute selectors, and effect list manipulation.
+  - UI integration tests for import/export clipboard, file load/merge behavior, and duplicate/delete confirmation behavior.
+- Phase 2 implementation completed; the next step is Phase 3 — Effects List & Basic Effect Editing.
+
+## Phase 2: ConditionDefinition Core Editing Fields (2025-11-XX)
+
+### Changes Implemented
+
+- Core editing approach:
+
+  - Introduced `editing_original_id: Option<ConditionId>` and kept `edit_buffer: Option<ConditionDefinition>` as an editing staging area to support both "create new" and "edit existing" flows consistently.
+  - Left-list selection sets only `selected_condition_id`. Users open the editor using the "✏️ Edit" or "➕ New Condition" actions which populate `edit_buffer`.
+  - The editor uses the `edit_buffer` to present editable fields for both new and existing condition edits; changes are applied or rejected atomically when saving.
+
+- New UI fields & behavior added:
+
+  - ID (editable): text field with uniqueness checks on Save; ID cannot be empty.
+  - Name: text field (no domain change).
+  - Description: multiline text field (unchanged but editable).
+  - Default Duration: ComboBox with variants:
+    - Instant
+    - Rounds(u16) — numeric input for rounds
+    - Minutes(u16) — numeric input for minutes
+    - Permanent
+  - Icon ID: Optional string text field with `Clear` button (entered `None` when cleared).
+  - Effects: Read-only display in Phase 2 (Phase 3 will provide the effect list editing UI).
+
+- Save path:
+
+  - Introduced `apply_condition_edits(conditions, original_id, edited)` helper (module-level function) that validates IDs and handles:
+    - Updating an existing condition (if `original_id` is Some) while ensuring ID changes do not collide.
+    - Inserting a new condition (if `original_id` is None) ensuring ID uniqueness.
+  - `apply_condition_edits` returns a descriptive error string on failure, enabling the editor to show inline status and not apply invalid saves.
+
+- Editing workflow:
+
+  - `Edit` button: The right-side details view exposes an "✏️ Edit" button which populates the `edit_buffer` and `editing_original_id`.
+  - Save button: Calls `apply_condition_edits` with `editing_original_id.as_deref()` and the editing buffer; if success, updates the conditions collection and selection, clears the edit buffer and original id; otherwise shows an error in the status.
+  - Cancel button: Discards changes and clears the edit buffer.
+
+- Validation & messaging:
+  - ID must be non-empty and unique (except when editing the same record).
+  - The editor shows inline messages and status updates on validation or save errors.
+
+### Tests & Validation
+
+- Added focused unit tests for the `apply_condition_edits` helper that cover:
+  - Insertion success
+  - Update success (including ID change)
+  - Update failure due to collision with existing IDs
+  - Insertion failure due to duplicate IDs
+- These tests ensure the logic applied by the UI is consistent and avoids data corruption.
+
+### Outcome & Acceptance Criteria
+
+- The right-side editor now supports editing and saving of the core `ConditionDefinition` fields (ID, name, description, icon id, and default duration).
+- The editing workflow is consistent for both new and existing conditions, with atomic validation & save semantics and clear error messages for ID collisions and missing fields.
+- The `apply_condition_edits` helper centralizes edit validation logic making it easier to test and maintain.
+- Tests exist that verify the core editing logic works and prevents invalid updates.
+
+## Phase 3: Effects List & Basic Effect Editing (2025-12-02)
+
+Summary:
+
+- Implemented the Phase 3 changes to the Conditions Editor in the Campaign Builder SDK to support an editable Effects list and basic per-effect editors for the canonical `ConditionEffect` variants.
+
+Changes Implemented:
+
+- UI & State:
+
+  - Implemented an interactive Effects list inside the editor's `edit_buffer` flow within `ConditionsEditorState::show(...)`. The list supports:
+    - Add Effect (default: `StatusEffect`),
+    - Edit Effect (invokes an `EffectEditBuffer` typed editor),
+    - Duplicate Effect (clone and insert copy),
+    - Delete Effect,
+    - Reorder (⬆️ / ⬇️) effects.
+  - Effects editing happens within the `edit_buffer` context (changes persist to the in-memory `edit_buffer` immediately; the whole `ConditionDefinition` must be saved with the existing "Save" button to commit into the campaign).
+  - Added the `EffectEditBuffer` state to hold typed edit values:
+    - `effect_type: Option<String>` - current variant string,
+    - `editing_index: Option<usize>` - index within parent `effects` vector if editing an existing effect,
+    - `attribute: String`, `attribute_value: i16` - for `AttributeModifier`,
+    - `status_tag: String` - for `StatusEffect`,
+    - `dice: DiceRoll`, `element: String` - for `DamageOverTime` and `HealOverTime`.
+  - Created `render_condition_effect_summary()` to provide concise UI summaries for effect preview lists.
+
+- Per-Variant Editors:
+
+  - `AttributeModifier`: attribute selector (default attribute names suggested) + signed value via `egui::DragValue`.
+  - `StatusEffect`: text field for the status tag (suggested tags in a ComboBox with a 'Custom' option).
+  - `DamageOverTime`: re-used the dice UI (count, sides, bonus) and element selection/Custom element text input.
+  - `HealOverTime`: re-used dice UI for healing amounts.
+
+- Reuse & Design:
+
+  - Reused `DiceRoll` UI design (from `spells_editor.rs`) for DOT/HOT editing.
+  - Adopted the attribute & element suggestion lists from project documentation for UI convenience but kept text-edit freedom (no strict enforcement of enumerations).
+  - Preserved the Domain separation: editor changes only touch the UI & ephemeral `edit_buffer` and the per-session `conditions` collection — no domain type changes were performed.
+
+- New editor helpers (module-level `sdk/campaign_builder/src/conditions_editor.rs`):
+  - `add_effect_to_condition(condition, effect)` - Append effect to `ConditionDefinition::effects`.
+  - `update_effect_in_condition(condition, index, effect)` - In-place update of an effect.
+  - `delete_effect_from_condition(condition, index)` - Remove effect at index.
+  - `duplicate_effect_in_condition(condition, index)` - Clone and insert at index+1.
+  - `move_effect_in_condition(condition, index, dir)` - Reorder effects (-1 or +1).
+  - These helpers are `pub(crate)` so they can be tested against the editor state.
+
+Testing & Validation:
+
+- Added unit tests validating basic effect operations (helper functions):
+  - `test_condition_effect_helpers_success_flow` — adds, duplicates, moves, updates, and deletes effects successfully.
+  - `test_update_effect_out_of_range` — verifies errors are returned if effect index is invalid.
+- Editor-level tests and UI interactions will be expanded in future phases to cover the full end-to-end Add/Edit/Delete flows, import/export merge behaviors, dice validation, attribute/element suggestions, and preview interactions.
+- Maintained `apply_condition_edits(...)` semantics (atomic validation and save semantics for the `ConditionDefinition`) and ensured that effect edits remain within `edit_buffer` until the overarching Save is performed.
+
+UX Details and Notes:
+
+- The editing workflow honors user expectations in other editors:
+  - Selection vs Edit separation: selecting a condition shows a read-only preview; clicking ✏️ Edit opens the `edit_buffer` to edit fields and effects.
+  - Effects are visible in read-only preview with a concise summary string; the edit UI is only available inside the active `edit_buffer`.
+- The Edit Effect panel allows choosing a variant and editing variant-specific fields with inline layout & Save Effect / Cancel buttons.
+- Add Effect opens the same editor panel in "create" mode with `editing_index = None` and defaults to `StatusEffect`.
+- Saving an effect updates the `edit_buffer`'s `effects` list (not the persisted campaign) until the `ConditionDefinition` is saved by calling `apply_condition_edits`.
+- Effects editing preserves the `ActiveCondition.magnitude` runtime-only semantics — this runtime-only field is not part of saved RON data.
+
+Files & Artifacts:
+
+- `sdk/campaign_builder/src/conditions_editor.rs`:
+  - `ConditionsEditorState::show(...)` updated with the Effects list UI & effect edit panel using `EffectEditBuffer`.
+  - `EffectEditBuffer` structure added (typed fields).
+  - New helper functions for effect operations and `render_condition_effect_summary`.
+- `sdk/campaign_builder/src/main.rs`:
+  - Added unit tests for effect helper functions.
+- No domain model changes (no modifications to `antares/src/domain/conditions.rs`) — the domain remains the source of truth with `ConditionEffect` variants unchanged.
+
+Phase 4: Per-Variant Effect Editor Implementation & UX Polish (2025-12-02)
+
+Summary
+
+- Per-variant editors fully implemented for all canonical `ConditionEffect` variants:
+  - `AttributeModifier`: attribute ComboBox + optional custom attribute text + signed `DragValue`
+  - `StatusEffect`: tag text input (non-empty validation)
+  - `DamageOverTime`: dice editor (count, sides, bonus) + element ComboBox + custom element text
+  - `HealOverTime`: dice editor (count, sides, bonus)
+- Inline validation improvements:
+  - `ConditionDefinition` ID uniqueness and non-empty ID checks in the editor (inline hint and prevented saves).
+  - Per-effect validations (dice ranges: count >= 1, sides >= 2; attribute value range checks; non-empty tags/elements).
+  - Disabled Save Effect button and inline error messages for invalid fields in the per-variant effect editor.
+- Preview & UX:
+  - Added a `Preview` pane with an interactive `Magnitude` slider (simulation-only) that displays scaled effect summaries:
+    - Attribute modifiers scaled by magnitude (rounded).
+    - DOT/HOT average per-tick scaled by magnitude (approximate, shown as single-line summary).
+  - `Used by` panel displays spells referencing the selected condition (lists spell names).
+    - Each referencing spell includes a small "Copy" button to copy the spell name to clipboard and provide a quick status message.
+    - Delete confirmation highlights referencing spells and offers the option to "Remove references from spells when deleting".
+  - Tooltips & hover help added to attribute & element selectors in the per-variant editor for discoverability.
+  - Effects list now supports Add / Edit / Duplicate / Delete / Reorder (Up/Down) with immediate edit buffer support and Save/Cancel semantics.
+- Helper APIs & Tests:
+  - Added UI and logic helper functions:
+    - `validate_effect_edit_buffer` (per-variant UI validation).
+    - `validate_condition_definition` (complete ConditionDefinition-level validation).
+    - `render_condition_effect_preview` (human-readable preview with magnitude scaling).
+    - `spells_referencing_condition` and `remove_condition_references_from_spells` for "Used by" detection / cleanup.
+    - Effect list helpers: `add_effect_to_condition`, `update_effect_in_condition`, `duplicate_effect_in_condition`, `delete_effect_from_condition`, `move_effect_in_condition`.
+  - Unit & integration coverage:
+    - Tests added for effect list helpers, effect validation failures (e.g., invalid dice), `apply_condition_edits` validations, and spells referencing & removal logic.
+- Domain Preservation:
+  - No structural changes to `ConditionDefinition`, `ConditionEffect`, or `ActiveCondition` domain types were made (domain remains authoritative).
+  - `ActiveCondition.magnitude` remains runtime-only and is never persisted to RON; the preview is a UX-only simulation.
+- Deliverables & Impact:
+  - A significantly more usable and discoverable Conditions Editor where designers can edit complex condition effects with immediate validation and preview.
+  - Clear warnings and actionable UI when conditions are referenced by existing spells (preventing accidental broken references).
+  - Reusable helper functions make effects manipulation easier to test and maintain.
+
+Next Steps
+
+- Add keyboard shortcuts and/or context menu for reorder/duplicate actions.
+- Consider adding undo/redo for effect and condition edits (requires integration with existing undo stack).
+- Add editor-level integration tests for end-to-end Add / Edit / Delete flows (covering import/export and spells that reference conditions).
+- Explore in-editor quick navigation to referenced spells (open spells editor and select the spell), and a safer "rename with references update" flow.
+
+### Changes Implemented
+
+- Converted the legacy `render_conditions_editor(...)` module-level function into a `ConditionsEditorState::show(...)` method that mirrors other editors (`Items`, `Monsters`, `Spells`) and accepts the campaign directory, file path, status messages, unsaved change flag, and `file_load_merge_mode`.
+- Added editor-level UI state fields to `ConditionsEditorState`:
+  - `show_import_dialog: bool` and `import_export_buffer: String` for import/export clipboard flow.
+  - `duplicate_dialog_open: bool`, `delete_confirmation_open: bool`, and `selected_for_delete: Option<ConditionId>` for delete/duplicate UX flow.
+  - `effect_edit_buffer: Option<EffectEditBuffer>` as a phase-1 placeholder for per-effect editing.
+- Implemented a consistent top toolbar for the Conditions editor:
+  - Search field, "➕ New Condition" (creates default edit buffer), "🔄 Reload" (loads from campaign folder), "📥 Import", "📂 Load from File" (Open & merge/replace toggle), "💾 Save to File", and "📋 Export Selected/All".
+  - Reused `ui_helpers::DEFAULT_LEFT_COLUMN_WIDTH`, `compute_panel_height`, and standard toolbar layout from `items_editor.rs`.
+- Implemented import & file I/O patterns:
+  - `show_import_dialog(ctx, ...)` allows pasting single `ConditionDefinition` or `Vec<ConditionDefinition>` RON content and will import them, ensuring unique IDs when collisions occur.
+  - `Load from File` uses a `rfd::FileDialog` to choose a file; `Merge` toggle supports merging loaded conditions (replace-by-id) or replacing all.
+  - `Save to File` supports choosing an arbitrary save path and serializes the conditions as RON using `ron::ser::to_string_pretty`.
+  - Implemented a `save_conditions` helper on the Conditions editor that writes to `campaign_dir.join(conditions_file)` for autosave-capable behavior.
+- Implemented duplicate and delete:
+  - Duplicate clones a selected `ConditionDefinition` and generates a unique id suffix until there’s no conflict.
+  - Delete shows a confirmation dialog and removes the selected condition upon confirmation.
+- Validation & integration:
+  - Added `CampaignBuilderApp::validate_condition_ids()` to check for duplicate IDs and integrated its usage into `validate_campaign()` and into the `load_conditions()` flow so ID collisions are surfaced as validation warnings.
+  - Inline validation for new conditions: ID required and uniqueness checked before saving.
+- Tests:
+  - `test_condition_id_uniqueness_validation` added to `sdk/campaign_builder/src/main.rs` to validate duplicate detection.
+  - `test_conditions_save_load_roundtrip` added to verify `CampaignBuilderApp::save_conditions()` / `load_conditions()` round-trip behavior (saves conditions to a temporary campaign directory and loads them back).
+- UX notes:
+  - `ActiveCondition.magnitude` remains a runtime-only field (not persisted to RON).
+  - A placeholder `EffectEditBuffer` was added for Phase 2 per-variant effect editor work.
+
+### Implementation Notes
+
+- Reused many UI and file I/O patterns from existing editors (`items_editor.rs`, `monsters_editor.rs`, and `spells_editor.rs`) to preserve cross-editor UX and to maintain consistent code style.
+- The new `ConditionsEditorState::show()` signature is consistent with other editors and is used by `main.rs`:
+  - `self.conditions_editor_state.show(ui, &mut self.conditions, self.campaign_dir.as_ref(), &self.campaign.conditions_file, &mut self.unsaved_changes, &mut self.status_message, &mut self.file_load_merge_mode);`
+- `render_conditions_editor(ui, state, conditions)` wrapper retained for backward compatibility (it calls `ConditionsEditorState::show()` with sane defaults), easing the transition for code that still referenced the prior function.
+- The code respects the domain separation policy: no changes were made to core domain types (`ConditionDefinition`, `ConditionEffect`) or runtime-only fields (`ActiveCondition.magnitude`).
+
+### Tests & Next Steps
+
+- The implemented tests verify RON load/parse, duplicate detection, and load/save roundtrip. Additional tests and UI-level tests will be added in later phases:
+  - Per-variant effect editors (Phase 2/3) will require coverage for dice UI, attribute selectors, and effect list manipulation.
+  - UI integration tests for import/export clipboard, file load/merge behavior, and duplicate/delete confirmation behavior.
+- Phase 2 will implement per-variant (effect) editing UI, the dice editor reuse, and more validation regarding attribute/element names.
 
 **Objective**: Restore basic quest editing functionality in the Campaign Builder SDK.
 
@@ -331,3 +597,300 @@ Notes:
 - This change is intentionally minimal and localized to UI layout improvements.
 - The implementation avoids changing domain data structures or the editor state shape.
 - If there are other UI areas that exhibit similar fixed-height behavior, extend the same pattern to them.
+
+## Conditions Editor QoL Improvements (2025-01-XX)
+
+**Objective**: Enhance the Conditions Editor with quality-of-life features for improved usability and workflow efficiency.
+
+### Changes Implemented
+
+#### 1. Effect Type Filter
+
+**Files**: `sdk/campaign_builder/src/conditions_editor.rs`
+
+- Added `EffectTypeFilter` enum with variants: `All`, `AttributeModifier`, `StatusEffect`, `DamageOverTime`, `HealOverTime`
+- Filter dropdown in toolbar allows filtering conditions by effect type
+- Selecting a filter automatically clears the current selection
+- Filter uses the `matches()` method to check if any effect in a condition matches the selected type
+
+#### 2. Sort Order Options
+
+- Added `ConditionSortOrder` enum with variants: `NameAsc`, `NameDesc`, `IdAsc`, `IdDesc`, `EffectCount`
+- Sort dropdown in toolbar allows sorting conditions by name, ID, or effect count
+- Sorting is applied after filtering for consistent results
+
+#### 3. Effect Type Indicators in List
+
+- Conditions list now shows emoji indicators for the primary effect type:
+  - `⬆` = Buff (positive attribute modifier)
+  - `⬇` = Debuff (negative attribute modifier)
+  - `◆` = Status effect
+  - `🔥` = Damage over time
+  - `💚` = Heal over time
+  - `○` = Empty (no effects)
+
+#### 4. Statistics Panel
+
+- Added optional statistics panel (toggle via "Stats" checkbox in toolbar)
+- Shows counts: Attribute modifiers, Status effects, DOT, HOT, Empty conditions, Multi-effect conditions
+- Hovering over "Total" count shows condensed statistics tooltip
+
+#### 5. Jump to Spell Navigation
+
+**Files**: `sdk/campaign_builder/src/conditions_editor.rs`, `sdk/campaign_builder/src/main.rs`
+
+- Added "→" button next to referenced spell names in "Used by" panel
+- Clicking the button sets `navigate_to_spell` request in editor state
+- Main app handles navigation request: switches to Spells tab and selects the spell
+- Works in both view mode and edit mode for conditions
+
+#### 6. Clear All Effects Button
+
+- Added "🗑️ Clear All" button next to the Effects label when editing a condition
+- Button only appears when the condition has effects
+- Includes hover tooltip explaining the action
+
+#### 7. Enhanced Tooltips
+
+Added descriptive tooltips throughout the editor:
+
+- Filter and Sort dropdowns explain their purpose
+- Duration types: Explains Instant, Rounds, Minutes, Permanent
+- Icon ID field: Explains it's optional for UI display
+- Preview panel: Explains magnitude scaling is for design visualization only
+- Remove refs on delete: Explains the automatic reference removal feature
+
+### State Changes
+
+Added to `ConditionsEditorState`:
+
+- `filter_effect_type: EffectTypeFilter` - Current effect type filter
+- `sort_order: ConditionSortOrder` - Current sort order
+- `show_statistics: bool` - Whether statistics panel is visible
+- `navigate_to_spell: Option<String>` - Navigation request for jump-to-spell
+
+### Tests Added
+
+- `test_effect_type_filter_matches` - Verifies filter matching logic for all effect types
+- `test_condition_sort_order_as_str` - Verifies sort order display names
+- `test_condition_statistics_computation` - Verifies statistics calculation
+- `test_conditions_editor_navigation_request` - Verifies navigation request handling
+- `test_conditions_editor_state_qol_defaults` - Verifies default values for new fields
+- `test_effect_type_filter_all_variants` - Verifies filter enum variants
+- `test_effect_type_filter_as_str` - Verifies filter display names
+
+### Validation
+
+- All cargo quality checks pass:
+  - `cargo fmt --all`
+  - `cargo check --all-targets --all-features`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - `cargo test -p campaign_builder --bin campaign-builder` (291 tests pass)
+
+### Architecture Compliance
+
+- No domain model changes
+- All changes confined to SDK/editor code
+- New types (`EffectTypeFilter`, `ConditionSortOrder`, `ConditionStatistics`) are UI-only
+- Navigation request pattern allows loose coupling between editors via app state
+
+### Future Improvements Suggested
+
+- Undo/redo integration for condition edits (hook into global `UndoRedoManager`)
+- Collapsible sections for Effects and Preview panels
+- Effect templates/presets for common effect combinations
+- Better visual feedback for ID uniqueness (green checkmark when unique)
+- Multi-select for batch operations
+
+## Database Placeholder Implementation & QoL Improvements (2025-01-XX)
+
+**Objective**: Complete the game engine's database loading implementation and add quality-of-life improvements for compatibility with the Campaign Builder SDK.
+
+### Background
+
+The database placeholder implementation plan (`docs/explanation/database_placeholder_implementation_plan.md`) addressed the separation between:
+
+- **Campaign Builder SDK** (`sdk/campaign_builder/src/main.rs`) - Editor UI for creating/modifying content (already working)
+- **Content Database** (`src/sdk/database.rs`) - Runtime game engine content loading (needed implementation)
+
+### Changes Implemented
+
+#### 1. Monster Serde Defaults for Cleaner Campaign Data
+
+**File**: `src/domain/combat/monster.rs`
+
+Added `#[serde(default)]` attributes to Monster runtime state fields:
+
+- `flee_threshold`
+- `special_attack_threshold`
+- `resistances`
+- `can_regenerate`
+- `can_advance`
+- `is_undead`
+- `magic_resistance`
+- `conditions` (runtime state, defaults to Normal)
+- `active_conditions` (runtime state, defaults to empty)
+- `has_acted` (runtime state, defaults to false)
+
+**Impact**: Campaign data files can now omit these fields and they'll default to sensible values. This makes hand-edited RON files cleaner and allows backward compatibility when new fields are added.
+
+#### 2. ConditionDatabase Added to ContentDatabase
+
+**File**: `src/sdk/database.rs`
+
+Added `ConditionDatabase` struct with methods:
+
+- `new()` - Creates empty database
+- `load_from_file()` - Loads conditions from RON file
+- `get_condition()` - Get condition by ID
+- `get_condition_by_name()` - Get condition by name (case-insensitive)
+- `all_conditions()` - List all condition IDs
+- `count()` - Number of conditions
+- `has_condition()` - Check if condition exists
+- `add_condition()` - Add condition to database
+
+**Integration**:
+
+- Added `conditions: ConditionDatabase` field to `ContentDatabase`
+- Updated `ContentDatabase::load_campaign()` to load `conditions.ron`
+- Updated `ContentDatabase::load_core()` to load `conditions.ron`
+- Added `condition_count` to `ContentStats`
+
+#### 3. QoL Helper Methods for All Databases
+
+Added convenient query methods to make database usage more ergonomic:
+
+**SpellDatabase**:
+
+- `get_spell_by_name()` - Case-insensitive name lookup
+- `spells_by_school()` - Filter by spell school
+- `spells_by_level()` - Filter by spell level
+
+**MonsterDatabase**:
+
+- `get_monster_by_name()` - Case-insensitive name lookup
+- `undead_monsters()` - Get all undead monsters
+- `monsters_by_experience_range()` - Filter by XP range
+
+**QuestDatabase**:
+
+- `get_quest_by_name()` - Case-insensitive name lookup
+- `main_quests()` - Get all main quests
+- `repeatable_quests()` - Get all repeatable quests
+- `quests_for_level()` - Get quests available at a given level
+
+**ConditionDatabase**:
+
+- `get_condition_by_name()` - Case-insensitive name lookup
+
+**DialogueDatabase**:
+
+- `get_dialogue_by_name()` - Case-insensitive name lookup
+- `repeatable_dialogues()` - Get all repeatable dialogues
+- `dialogues_for_quest()` - Get dialogues associated with a quest
+
+#### 4. DatabaseError Enhancement
+
+Added new error variant:
+
+- `ConditionLoadError(String)` - For condition loading failures
+
+#### 5. Doctest Fix
+
+**File**: `src/domain/combat/database.rs`
+
+Fixed `MonsterDefinition` doctest example to include the new default fields (`conditions`, `active_conditions`, `has_acted`).
+
+### Tests Added
+
+- `test_condition_database_new()` - Verifies empty database creation
+- `test_condition_database_load_from_file()` - Tests RON loading with multiple conditions
+- `test_condition_database_load_nonexistent_file()` - Verifies graceful handling of missing files
+
+### Validation
+
+- All cargo quality checks pass:
+  - `cargo fmt --all`
+  - `cargo check --all-targets --all-features`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - `cargo test -p antares --lib` (370 tests pass)
+  - `cargo test -p campaign_builder --bin campaign-builder` (291 tests pass)
+
+### Campaign Builder Compatibility
+
+The Campaign Builder and game engine database now use compatible formats:
+
+- Both load `conditions.ron` for condition definitions
+- Spell `applied_conditions` field uses `#[serde(default)]` for backward compatibility
+- Monster files can omit runtime state fields (they'll default appropriately)
+
+### Architecture Compliance
+
+- No breaking changes to public API
+- Condition loading follows existing patterns from Spell/Monster/Quest databases
+- Error handling uses existing `DatabaseError` enum pattern
+- All new fields have `#[serde(default)]` for backward compatibility
+
+## Conditions Editor Edit Mode Bug Fix (2025-01-XX)
+
+**Objective**: Fix bug where clicking "Edit" on an existing condition only allowed editing name and description, not duration, icon, or effects.
+
+### Problem
+
+When selecting a condition from the list and clicking "Edit", users could only edit the `name` and `description` fields. The full editor (with duration, icon_id, and effects editing) was not shown.
+
+### Root Cause
+
+The right panel rendering had an if-else chain that checked `selected_condition_id` first:
+
+```rust
+if let Some(condition_id) = &self.selected_condition_id.clone() {
+    // READ-ONLY view - only name/description editable inline
+} else if self.edit_buffer.is_some() {
+    // FULL EDITOR - all fields editable including effects
+}
+```
+
+When the "Edit" button was clicked, it correctly populated:
+
+- `edit_buffer` with the condition clone
+- `editing_original_id` with the original condition ID
+
+However, it did **not** clear `selected_condition_id`. This caused the first branch to still match, showing the read-only view instead of the full editor.
+
+### Fix
+
+**File**: `sdk/campaign_builder/src/conditions_editor.rs`
+
+Added one line to clear the selection when entering edit mode:
+
+```rust
+if let Some(cond) = conditions.iter().find(|c| c.id == edit_id) {
+    self.edit_buffer = Some(cond.clone());
+    self.editing_original_id = Some(edit_id);
+    // Clear selection so the full editor panel shows instead of read-only view
+    self.selected_condition_id = None;
+}
+```
+
+### Impact
+
+- Users can now fully edit existing conditions from `conditions.ron`
+- All fields are editable: ID, name, description, default duration, icon ID, and effects
+- Effects can be added, edited, duplicated, deleted, and reordered
+- Preview and validation work correctly in edit mode
+
+### Testing
+
+- All quality checks pass:
+  - `cargo fmt --all`
+  - `cargo check --all-targets --all-features`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - `cargo test -p campaign_builder conditions` (5 tests pass)
+  - `cargo test --all-features` (all tests pass)
+
+### Architecture Compliance
+
+- No changes to domain types
+- Single-line fix localized to UI state management
+- Follows existing editor patterns for edit mode transitions

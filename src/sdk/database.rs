@@ -32,6 +32,7 @@
 
 use crate::domain::classes::ClassDatabase;
 use crate::domain::combat::monster::Monster;
+use crate::domain::conditions::{ConditionDefinition, ConditionId};
 use crate::domain::dialogue::{DialogueId, DialogueTree};
 use crate::domain::items::ItemDatabase;
 use crate::domain::magic::types::Spell;
@@ -68,6 +69,9 @@ pub enum DatabaseError {
 
     #[error("Failed to load dialogues: {0}")]
     DialogueLoadError(String),
+
+    #[error("Failed to load conditions: {0}")]
+    ConditionLoadError(String),
 
     #[error("Failed to load map {map_id}: {error}")]
     MapLoadError { map_id: MapId, error: String },
@@ -222,6 +226,30 @@ impl SpellDatabase {
     pub fn has_spell(&self, id: &SpellId) -> bool {
         self.spells.contains_key(id)
     }
+
+    /// Gets a spell by name (case-insensitive)
+    pub fn get_spell_by_name(&self, name: &str) -> Option<&Spell> {
+        let name_lower = name.to_lowercase();
+        self.spells
+            .values()
+            .find(|s| s.name.to_lowercase() == name_lower)
+    }
+
+    /// Returns all spells for a given school
+    pub fn spells_by_school(
+        &self,
+        school: crate::domain::magic::types::SpellSchool,
+    ) -> Vec<&Spell> {
+        self.spells
+            .values()
+            .filter(|s| s.school == school)
+            .collect()
+    }
+
+    /// Returns all spells of a given level
+    pub fn spells_by_level(&self, level: u8) -> Vec<&Spell> {
+        self.spells.values().filter(|s| s.level == level).collect()
+    }
 }
 
 // ===== Monster System =====
@@ -309,6 +337,27 @@ impl MonsterDatabase {
     /// Checks if a monster exists in the database
     pub fn has_monster(&self, id: &MonsterId) -> bool {
         self.monsters.contains_key(id)
+    }
+
+    /// Gets a monster by name (case-insensitive)
+    pub fn get_monster_by_name(&self, name: &str) -> Option<&Monster> {
+        let name_lower = name.to_lowercase();
+        self.monsters
+            .values()
+            .find(|m| m.name.to_lowercase() == name_lower)
+    }
+
+    /// Returns all undead monsters
+    pub fn undead_monsters(&self) -> Vec<&Monster> {
+        self.monsters.values().filter(|m| m.is_undead).collect()
+    }
+
+    /// Returns monsters within an experience value range
+    pub fn monsters_by_experience_range(&self, min_xp: u32, max_xp: u32) -> Vec<&Monster> {
+        self.monsters
+            .values()
+            .filter(|m| m.experience_value >= min_xp && m.experience_value <= max_xp)
+            .collect()
     }
 }
 
@@ -472,6 +521,139 @@ impl QuestDatabase {
     pub fn add_quest(&mut self, quest: Quest) {
         self.quests.insert(quest.id, quest);
     }
+
+    /// Gets a quest by name (case-insensitive)
+    pub fn get_quest_by_name(&self, name: &str) -> Option<&Quest> {
+        let name_lower = name.to_lowercase();
+        self.quests
+            .values()
+            .find(|q| q.name.to_lowercase() == name_lower)
+    }
+
+    /// Returns all main quests
+    pub fn main_quests(&self) -> Vec<&Quest> {
+        self.quests.values().filter(|q| q.is_main_quest).collect()
+    }
+
+    /// Returns all repeatable quests
+    pub fn repeatable_quests(&self) -> Vec<&Quest> {
+        self.quests.values().filter(|q| q.repeatable).collect()
+    }
+
+    /// Returns quests available at a given level
+    pub fn quests_for_level(&self, level: u8) -> Vec<&Quest> {
+        self.quests
+            .values()
+            .filter(|q| {
+                let min_ok = q.min_level.is_none_or(|min| level >= min);
+                let max_ok = q.max_level.is_none_or(|max| level <= max);
+                min_ok && max_ok
+            })
+            .collect()
+    }
+}
+
+// ===== Condition Database =====
+
+/// Condition database for loading and managing condition definitions
+#[derive(Debug, Clone, Default)]
+pub struct ConditionDatabase {
+    conditions: HashMap<ConditionId, ConditionDefinition>,
+}
+
+impl ConditionDatabase {
+    /// Creates an empty condition database
+    pub fn new() -> Self {
+        Self {
+            conditions: HashMap::new(),
+        }
+    }
+
+    /// Loads conditions from a RON file
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the RON file containing condition definitions
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(ConditionDatabase)` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns `DatabaseError::ConditionLoadError` if file cannot be read or parsed
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::sdk::database::ConditionDatabase;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let db = ConditionDatabase::load_from_file("campaigns/tutorial/data/conditions.ron")?;
+    /// println!("Loaded {} conditions", db.count());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
+        let path = path.as_ref();
+
+        // Return empty database if file doesn't exist
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+
+        // Read and parse RON file
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            DatabaseError::ConditionLoadError(format!("Failed to read file: {}", e))
+        })?;
+
+        let conditions: Vec<ConditionDefinition> = ron::from_str(&contents).map_err(|e| {
+            DatabaseError::ConditionLoadError(format!("Failed to parse RON: {}", e))
+        })?;
+
+        // Build HashMap from vector
+        let mut condition_map = HashMap::new();
+        for condition in conditions {
+            condition_map.insert(condition.id.clone(), condition);
+        }
+
+        Ok(Self {
+            conditions: condition_map,
+        })
+    }
+
+    /// Gets a condition by ID
+    pub fn get_condition(&self, id: &ConditionId) -> Option<&ConditionDefinition> {
+        self.conditions.get(id)
+    }
+
+    /// Returns all condition IDs
+    pub fn all_conditions(&self) -> Vec<&ConditionId> {
+        self.conditions.keys().collect()
+    }
+
+    /// Returns the number of conditions
+    pub fn count(&self) -> usize {
+        self.conditions.len()
+    }
+
+    /// Checks if a condition exists in the database
+    pub fn has_condition(&self, id: &ConditionId) -> bool {
+        self.conditions.contains_key(id)
+    }
+
+    /// Adds a condition to the database
+    pub fn add_condition(&mut self, condition: ConditionDefinition) {
+        self.conditions.insert(condition.id.clone(), condition);
+    }
+
+    /// Gets a condition by name (case-insensitive)
+    pub fn get_condition_by_name(&self, name: &str) -> Option<&ConditionDefinition> {
+        let name_lower = name.to_lowercase();
+        self.conditions
+            .values()
+            .find(|c| c.name.to_lowercase() == name_lower)
+    }
 }
 
 // ===== Dialogue Database =====
@@ -573,6 +755,27 @@ impl DialogueDatabase {
         }
         Ok(())
     }
+
+    /// Gets a dialogue by name (case-insensitive)
+    pub fn get_dialogue_by_name(&self, name: &str) -> Option<&DialogueTree> {
+        let name_lower = name.to_lowercase();
+        self.dialogues
+            .values()
+            .find(|d| d.name.to_lowercase() == name_lower)
+    }
+
+    /// Returns all repeatable dialogues
+    pub fn repeatable_dialogues(&self) -> Vec<&DialogueTree> {
+        self.dialogues.values().filter(|d| d.repeatable).collect()
+    }
+
+    /// Returns dialogues associated with a specific quest
+    pub fn dialogues_for_quest(&self, quest_id: QuestId) -> Vec<&DialogueTree> {
+        self.dialogues
+            .values()
+            .filter(|d| d.associated_quest == Some(quest_id))
+            .collect()
+    }
 }
 
 // ===== Content Database =====
@@ -630,6 +833,9 @@ pub struct ContentDatabase {
 
     /// Dialogue definitions database
     pub dialogues: DialogueDatabase,
+
+    /// Condition definitions database
+    pub conditions: ConditionDatabase,
 }
 
 impl ContentDatabase {
@@ -653,6 +859,7 @@ impl ContentDatabase {
             maps: MapDatabase::new(),
             quests: QuestDatabase::new(),
             dialogues: DialogueDatabase::new(),
+            conditions: ConditionDatabase::new(),
         }
     }
 
@@ -767,6 +974,13 @@ impl ContentDatabase {
             DialogueDatabase::new()
         };
 
+        // Load conditions
+        let conditions = if data_dir.join("conditions.ron").exists() {
+            ConditionDatabase::load_from_file(data_dir.join("conditions.ron"))?
+        } else {
+            ConditionDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -776,6 +990,7 @@ impl ContentDatabase {
             maps,
             quests,
             dialogues,
+            conditions,
         })
     }
 
@@ -859,6 +1074,13 @@ impl ContentDatabase {
             DialogueDatabase::new()
         };
 
+        // Load conditions
+        let conditions = if data_path.join("conditions.ron").exists() {
+            ConditionDatabase::load_from_file(data_path.join("conditions.ron"))?
+        } else {
+            ConditionDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -868,6 +1090,7 @@ impl ContentDatabase {
             maps,
             quests,
             dialogues,
+            conditions,
         })
     }
 
@@ -967,12 +1190,13 @@ impl ContentDatabase {
         ContentStats {
             class_count: self.classes.all_classes().count(),
             race_count: self.races.count(),
-            item_count: self.items.all_items().len(),
+            item_count: self.items.len(),
             monster_count: self.monsters.count(),
             spell_count: self.spells.count(),
             map_count: self.maps.count(),
             quest_count: self.quests.count(),
             dialogue_count: self.dialogues.count(),
+            condition_count: self.conditions.count(),
         }
     }
 }
@@ -1024,6 +1248,9 @@ pub struct ContentStats {
 
     /// Number of dialogue definitions
     pub dialogue_count: usize,
+
+    /// Number of condition definitions
+    pub condition_count: usize,
 }
 
 impl ContentStats {
@@ -1035,17 +1262,18 @@ impl ContentStats {
     /// use antares::sdk::database::ContentStats;
     ///
     /// let stats = ContentStats {
-    ///     class_count: 6,
-    ///     race_count: 5,
+    ///     class_count: 5,
+    ///     race_count: 3,
     ///     item_count: 100,
     ///     monster_count: 50,
-    ///     spell_count: 40,
+    ///     spell_count: 30,
     ///     map_count: 10,
     ///     quest_count: 20,
     ///     dialogue_count: 15,
+    ///     condition_count: 10,
     /// };
     ///
-    /// assert_eq!(stats.total(), 246);
+    /// assert_eq!(stats.total(), 243);
     /// ```
     pub fn total(&self) -> usize {
         self.class_count
@@ -1056,6 +1284,7 @@ impl ContentStats {
             + self.map_count
             + self.quest_count
             + self.dialogue_count
+            + self.condition_count
     }
 }
 
@@ -1080,17 +1309,17 @@ mod tests {
     #[test]
     fn test_content_stats_total() {
         let stats = ContentStats {
-            class_count: 6,
-            race_count: 5,
+            class_count: 5,
+            race_count: 3,
             item_count: 100,
             monster_count: 50,
-            spell_count: 40,
+            spell_count: 30,
             map_count: 10,
             quest_count: 20,
             dialogue_count: 15,
+            condition_count: 10,
         };
-
-        assert_eq!(stats.total(), 246);
+        assert_eq!(stats.total(), 243);
     }
 
     #[test]
@@ -1387,5 +1616,71 @@ mod tests {
     fn test_content_database_validate_empty() {
         let db = ContentDatabase::new();
         assert!(db.validate().is_ok());
+    }
+
+    #[test]
+    fn test_condition_database_new() {
+        let db = ConditionDatabase::new();
+        assert_eq!(db.count(), 0);
+        assert!(db.all_conditions().is_empty());
+    }
+
+    #[test]
+    fn test_condition_database_load_from_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create temporary RON file with test conditions
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let ron_data = r#"[
+            (
+                id: "poisoned",
+                name: "Poisoned",
+                description: "Taking damage over time from poison",
+                effects: [
+                    DamageOverTime(
+                        damage: (count: 1, sides: 4, bonus: 0),
+                        element: "poison",
+                    ),
+                ],
+                default_duration: Rounds(3),
+                icon_id: None,
+            ),
+            (
+                id: "blessed",
+                name: "Blessed",
+                description: "Receiving divine protection",
+                effects: [
+                    AttributeModifier(
+                        attribute: "luck",
+                        value: 5,
+                    ),
+                ],
+                default_duration: Rounds(10),
+                icon_id: None,
+            ),
+        ]"#;
+        temp_file.write_all(ron_data.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        // Test loading
+        let db = ConditionDatabase::load_from_file(temp_file.path()).unwrap();
+        assert_eq!(db.count(), 2);
+        assert!(db.has_condition(&"poisoned".to_string()));
+        assert!(db.has_condition(&"blessed".to_string()));
+
+        // Test retrieval
+        let poisoned = db.get_condition(&"poisoned".to_string()).unwrap();
+        assert_eq!(poisoned.name, "Poisoned");
+        assert_eq!(poisoned.effects.len(), 1);
+
+        let blessed = db.get_condition(&"blessed".to_string()).unwrap();
+        assert_eq!(blessed.name, "Blessed");
+    }
+
+    #[test]
+    fn test_condition_database_load_nonexistent_file() {
+        let db = ConditionDatabase::load_from_file("nonexistent_file.ron").unwrap();
+        assert_eq!(db.count(), 0);
     }
 }
