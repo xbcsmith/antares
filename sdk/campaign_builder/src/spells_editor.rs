@@ -845,3 +845,177 @@ impl SpellsEditorState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // SpellsEditorState Tests
+    // =========================================================================
+
+    #[test]
+    fn test_spells_editor_state_new() {
+        let state = SpellsEditorState::new();
+        assert_eq!(state.mode, SpellsEditorMode::List);
+        assert!(state.search_query.is_empty());
+        assert!(state.selected_spell.is_none());
+        assert!(!state.show_import_dialog);
+        assert!(state.import_export_buffer.is_empty());
+        assert!(!state.show_preview);
+    }
+
+    #[test]
+    fn test_spells_editor_state_default() {
+        let state = SpellsEditorState::default();
+        assert_eq!(state.mode, SpellsEditorMode::List);
+        assert!(state.filter_school.is_none());
+        assert!(state.filter_level.is_none());
+    }
+
+    #[test]
+    fn test_default_spell_creation() {
+        let spell = SpellsEditorState::default_spell();
+        assert_eq!(spell.id, 0);
+        assert_eq!(spell.name, "New Spell");
+        assert_eq!(spell.school, SpellSchool::Cleric);
+        assert_eq!(spell.level, 1);
+        assert_eq!(spell.sp_cost, 1);
+        assert_eq!(spell.gem_cost, 0);
+        assert_eq!(spell.context, SpellContext::Anytime);
+        assert_eq!(spell.target, SpellTarget::SingleCharacter);
+        assert!(spell.damage.is_none());
+        assert_eq!(spell.duration, 0);
+        assert!(!spell.saving_throw);
+        assert!(spell.description.is_empty());
+        assert!(spell.applied_conditions.is_empty());
+    }
+
+    // =========================================================================
+    // SpellsEditorMode Tests
+    // =========================================================================
+
+    #[test]
+    fn test_spells_editor_mode_variants() {
+        assert_eq!(SpellsEditorMode::List, SpellsEditorMode::List);
+        assert_eq!(SpellsEditorMode::Add, SpellsEditorMode::Add);
+        assert_eq!(SpellsEditorMode::Edit, SpellsEditorMode::Edit);
+        assert_ne!(SpellsEditorMode::List, SpellsEditorMode::Add);
+    }
+
+    // =========================================================================
+    // Editor State Transitions Tests
+    // =========================================================================
+
+    #[test]
+    fn test_editor_mode_transitions() {
+        let mut state = SpellsEditorState::new();
+        assert_eq!(state.mode, SpellsEditorMode::List);
+
+        state.mode = SpellsEditorMode::Add;
+        assert_eq!(state.mode, SpellsEditorMode::Add);
+
+        state.mode = SpellsEditorMode::Edit;
+        assert_eq!(state.mode, SpellsEditorMode::Edit);
+
+        state.mode = SpellsEditorMode::List;
+        assert_eq!(state.mode, SpellsEditorMode::List);
+    }
+
+    #[test]
+    fn test_selected_spell_handling() {
+        let mut state = SpellsEditorState::new();
+        assert!(state.selected_spell.is_none());
+
+        state.selected_spell = Some(0);
+        assert_eq!(state.selected_spell, Some(0));
+
+        state.selected_spell = Some(5);
+        assert_eq!(state.selected_spell, Some(5));
+
+        state.selected_spell = None;
+        assert!(state.selected_spell.is_none());
+    }
+
+    #[test]
+    fn test_filter_combinations() {
+        let mut state = SpellsEditorState::new();
+
+        // Set school filter
+        state.filter_school = Some(SpellSchool::Sorcerer);
+        assert_eq!(state.filter_school, Some(SpellSchool::Sorcerer));
+
+        // Set level filter
+        state.filter_level = Some(3);
+        assert_eq!(state.filter_level, Some(3));
+
+        // Clear filters
+        state.filter_school = None;
+        state.filter_level = None;
+        assert!(state.filter_school.is_none());
+        assert!(state.filter_level.is_none());
+    }
+
+    #[test]
+    fn test_edit_buffer_modification() {
+        let mut state = SpellsEditorState::new();
+
+        // Modify the edit buffer
+        state.edit_buffer.name = "Fireball".to_string();
+        state.edit_buffer.school = SpellSchool::Sorcerer;
+        state.edit_buffer.level = 3;
+        state.edit_buffer.sp_cost = 5;
+        state.edit_buffer.gem_cost = 1;
+
+        assert_eq!(state.edit_buffer.name, "Fireball");
+        assert_eq!(state.edit_buffer.school, SpellSchool::Sorcerer);
+        assert_eq!(state.edit_buffer.level, 3);
+        assert_eq!(state.edit_buffer.sp_cost, 5);
+        assert_eq!(state.edit_buffer.gem_cost, 1);
+    }
+
+    #[test]
+    fn test_spell_context_values() {
+        // Test that SpellContext variants are correctly used
+        let mut spell = SpellsEditorState::default_spell();
+
+        spell.context = SpellContext::CombatOnly;
+        assert_eq!(spell.context, SpellContext::CombatOnly);
+
+        spell.context = SpellContext::NonCombatOnly;
+        assert_eq!(spell.context, SpellContext::NonCombatOnly);
+
+        spell.context = SpellContext::Anytime;
+        assert_eq!(spell.context, SpellContext::Anytime);
+    }
+
+    #[test]
+    fn test_spell_target_values() {
+        // Test that SpellTarget variants are correctly used
+        let mut spell = SpellsEditorState::default_spell();
+
+        spell.target = SpellTarget::SingleCharacter;
+        assert_eq!(spell.target, SpellTarget::SingleCharacter);
+
+        spell.target = SpellTarget::AllCharacters;
+        assert_eq!(spell.target, SpellTarget::AllCharacters);
+
+        spell.target = SpellTarget::SingleMonster;
+        assert_eq!(spell.target, SpellTarget::SingleMonster);
+
+        spell.target = SpellTarget::AllMonsters;
+        assert_eq!(spell.target, SpellTarget::AllMonsters);
+    }
+
+    #[test]
+    fn test_preview_toggle() {
+        let mut state = SpellsEditorState::new();
+        assert!(!state.show_preview);
+
+        state.show_preview = true;
+        assert!(state.show_preview);
+
+        state.show_preview = false;
+        assert!(!state.show_preview);
+    }
+}

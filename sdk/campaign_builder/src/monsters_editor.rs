@@ -1017,3 +1017,200 @@ impl MonstersEditorState {
         xp
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // MonstersEditorState Tests
+    // =========================================================================
+
+    #[test]
+    fn test_monsters_editor_state_new() {
+        let state = MonstersEditorState::new();
+        assert_eq!(state.mode, MonstersEditorMode::List);
+        assert!(state.search_query.is_empty());
+        assert!(state.selected_monster.is_none());
+        assert!(!state.show_import_dialog);
+        assert!(state.import_export_buffer.is_empty());
+        assert!(!state.show_preview);
+    }
+
+    #[test]
+    fn test_monsters_editor_state_default() {
+        let state = MonstersEditorState::default();
+        assert_eq!(state.mode, MonstersEditorMode::List);
+        assert!(!state.show_stats_editor);
+        assert!(!state.show_attacks_editor);
+        assert!(!state.show_loot_editor);
+    }
+
+    #[test]
+    fn test_default_monster_creation() {
+        let monster = MonstersEditorState::default_monster();
+        assert_eq!(monster.id, 0);
+        assert_eq!(monster.name, "New Monster");
+        assert_eq!(monster.hp.base, 10);
+        assert_eq!(monster.hp.current, 10);
+        assert_eq!(monster.ac.base, 10);
+        assert_eq!(monster.ac.current, 10);
+        assert!(!monster.is_undead);
+        assert!(!monster.can_regenerate);
+        assert!(!monster.can_advance);
+        assert_eq!(monster.magic_resistance, 0);
+        assert_eq!(monster.flee_threshold, 0);
+        assert_eq!(monster.attacks.len(), 1);
+    }
+
+    // =========================================================================
+    // MonstersEditorMode Tests
+    // =========================================================================
+
+    #[test]
+    fn test_monsters_editor_mode_variants() {
+        assert_eq!(MonstersEditorMode::List, MonstersEditorMode::List);
+        assert_eq!(MonstersEditorMode::Add, MonstersEditorMode::Add);
+        assert_eq!(MonstersEditorMode::Edit, MonstersEditorMode::Edit);
+        assert_ne!(MonstersEditorMode::List, MonstersEditorMode::Add);
+    }
+
+    // =========================================================================
+    // Editor State Transitions Tests
+    // =========================================================================
+
+    #[test]
+    fn test_editor_mode_transitions() {
+        let mut state = MonstersEditorState::new();
+        assert_eq!(state.mode, MonstersEditorMode::List);
+
+        state.mode = MonstersEditorMode::Add;
+        assert_eq!(state.mode, MonstersEditorMode::Add);
+
+        state.mode = MonstersEditorMode::Edit;
+        assert_eq!(state.mode, MonstersEditorMode::Edit);
+
+        state.mode = MonstersEditorMode::List;
+        assert_eq!(state.mode, MonstersEditorMode::List);
+    }
+
+    #[test]
+    fn test_selected_monster_handling() {
+        let mut state = MonstersEditorState::new();
+        assert!(state.selected_monster.is_none());
+
+        state.selected_monster = Some(0);
+        assert_eq!(state.selected_monster, Some(0));
+
+        state.selected_monster = Some(5);
+        assert_eq!(state.selected_monster, Some(5));
+
+        state.selected_monster = None;
+        assert!(state.selected_monster.is_none());
+    }
+
+    #[test]
+    fn test_editor_toggle_states() {
+        let mut state = MonstersEditorState::new();
+
+        // Toggle stats editor
+        state.show_stats_editor = true;
+        assert!(state.show_stats_editor);
+
+        // Toggle attacks editor
+        state.show_attacks_editor = true;
+        assert!(state.show_attacks_editor);
+
+        // Toggle loot editor
+        state.show_loot_editor = true;
+        assert!(state.show_loot_editor);
+    }
+
+    // =========================================================================
+    // Monster XP Calculation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_calculate_monster_xp_basic() {
+        let state = MonstersEditorState::new();
+        let monster = MonstersEditorState::default_monster();
+        let xp = state.calculate_monster_xp(&monster);
+        // Base XP for a level 1 monster with default stats
+        assert!(xp > 0);
+    }
+
+    #[test]
+    fn test_calculate_monster_xp_with_abilities() {
+        let state = MonstersEditorState::new();
+        let mut monster = MonstersEditorState::default_monster();
+        let base_xp = state.calculate_monster_xp(&monster);
+
+        // Add regeneration
+        monster.can_regenerate = true;
+        let regen_xp = state.calculate_monster_xp(&monster);
+        assert!(regen_xp > base_xp, "Regeneration should increase XP");
+
+        // Add undead
+        monster.is_undead = true;
+        let undead_xp = state.calculate_monster_xp(&monster);
+        assert!(undead_xp > regen_xp, "Undead should increase XP");
+    }
+
+    #[test]
+    fn test_calculate_monster_xp_with_magic_resistance() {
+        let state = MonstersEditorState::new();
+        let mut monster = MonstersEditorState::default_monster();
+        let base_xp = state.calculate_monster_xp(&monster);
+
+        monster.magic_resistance = 50;
+        let resistant_xp = state.calculate_monster_xp(&monster);
+        assert!(
+            resistant_xp > base_xp,
+            "Magic resistance should increase XP"
+        );
+    }
+
+    #[test]
+    fn test_edit_buffer_modification() {
+        let mut state = MonstersEditorState::new();
+
+        // Modify the edit buffer
+        state.edit_buffer.name = "Dragon".to_string();
+        state.edit_buffer.hp.base = 100;
+        state.edit_buffer.hp.current = 100;
+        state.edit_buffer.ac.base = 20;
+        state.edit_buffer.is_undead = false;
+        state.edit_buffer.can_regenerate = true;
+
+        assert_eq!(state.edit_buffer.name, "Dragon");
+        assert_eq!(state.edit_buffer.hp.base, 100);
+        assert_eq!(state.edit_buffer.ac.base, 20);
+        assert!(state.edit_buffer.can_regenerate);
+    }
+
+    #[test]
+    fn test_monster_stats_initialization() {
+        let monster = MonstersEditorState::default_monster();
+
+        // Check all stats are initialized
+        assert_eq!(monster.stats.might.base, 10);
+        assert_eq!(monster.stats.intellect.base, 10);
+        assert_eq!(monster.stats.personality.base, 10);
+        assert_eq!(monster.stats.endurance.base, 10);
+        assert_eq!(monster.stats.speed.base, 10);
+        assert_eq!(monster.stats.accuracy.base, 10);
+        assert_eq!(monster.stats.luck.base, 10);
+    }
+
+    #[test]
+    fn test_preview_toggle() {
+        let mut state = MonstersEditorState::new();
+        assert!(!state.show_preview);
+
+        state.show_preview = true;
+        assert!(state.show_preview);
+
+        state.show_preview = false;
+        assert!(!state.show_preview);
+    }
+}

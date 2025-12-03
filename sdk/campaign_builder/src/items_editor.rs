@@ -1154,3 +1154,205 @@ impl ItemsEditorState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // ItemsEditorState Tests
+    // =========================================================================
+
+    #[test]
+    fn test_items_editor_state_new() {
+        let state = ItemsEditorState::new();
+        assert_eq!(state.mode, ItemsEditorMode::List);
+        assert!(state.search_query.is_empty());
+        assert!(state.selected_item.is_none());
+        assert!(!state.show_import_dialog);
+        assert!(state.import_export_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_items_editor_state_default() {
+        let state = ItemsEditorState::default();
+        assert_eq!(state.mode, ItemsEditorMode::List);
+        assert!(state.filter_type.is_none());
+        assert!(state.filter_magical.is_none());
+        assert!(state.filter_cursed.is_none());
+        assert!(state.filter_quest.is_none());
+    }
+
+    #[test]
+    fn test_default_item_creation() {
+        let item = ItemsEditorState::default_item();
+        assert_eq!(item.id, 0);
+        assert_eq!(item.name, "New Item");
+        assert_eq!(item.base_cost, 10);
+        assert_eq!(item.sell_cost, 5);
+        assert!(!item.is_cursed);
+        assert_eq!(item.max_charges, 0);
+        assert!(matches!(item.item_type, ItemType::Weapon(_)));
+    }
+
+    // =========================================================================
+    // ItemsEditorMode Tests
+    // =========================================================================
+
+    #[test]
+    fn test_items_editor_mode_variants() {
+        assert_eq!(ItemsEditorMode::List, ItemsEditorMode::List);
+        assert_eq!(ItemsEditorMode::Add, ItemsEditorMode::Add);
+        assert_eq!(ItemsEditorMode::Edit, ItemsEditorMode::Edit);
+        assert_ne!(ItemsEditorMode::List, ItemsEditorMode::Add);
+    }
+
+    // =========================================================================
+    // ItemTypeFilter Tests
+    // =========================================================================
+
+    #[test]
+    fn test_item_type_filter_as_str() {
+        assert_eq!(ItemTypeFilter::Weapon.as_str(), "Weapon");
+        assert_eq!(ItemTypeFilter::Armor.as_str(), "Armor");
+        assert_eq!(ItemTypeFilter::Accessory.as_str(), "Accessory");
+        assert_eq!(ItemTypeFilter::Consumable.as_str(), "Consumable");
+        assert_eq!(ItemTypeFilter::Ammo.as_str(), "Ammo");
+        assert_eq!(ItemTypeFilter::Quest.as_str(), "Quest");
+    }
+
+    #[test]
+    fn test_item_type_filter_all() {
+        let filters = ItemTypeFilter::all();
+        assert_eq!(filters.len(), 6);
+        assert!(filters.contains(&ItemTypeFilter::Weapon));
+        assert!(filters.contains(&ItemTypeFilter::Armor));
+        assert!(filters.contains(&ItemTypeFilter::Accessory));
+        assert!(filters.contains(&ItemTypeFilter::Consumable));
+        assert!(filters.contains(&ItemTypeFilter::Ammo));
+        assert!(filters.contains(&ItemTypeFilter::Quest));
+    }
+
+    #[test]
+    fn test_item_type_filter_matches_weapon() {
+        let weapon_item = Item {
+            id: 1,
+            name: "Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 6, 0),
+                bonus: 0,
+                hands_required: 1,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            is_cursed: false,
+            disablements: Disablement(0),
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            icon_path: None,
+        };
+
+        assert!(ItemTypeFilter::Weapon.matches(&weapon_item));
+        assert!(!ItemTypeFilter::Armor.matches(&weapon_item));
+        assert!(!ItemTypeFilter::Quest.matches(&weapon_item));
+    }
+
+    #[test]
+    fn test_item_type_filter_matches_armor() {
+        let armor_item = Item {
+            id: 2,
+            name: "Plate".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 5,
+                weight: 50,
+            }),
+            base_cost: 100,
+            sell_cost: 50,
+            is_cursed: false,
+            disablements: Disablement(0),
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            icon_path: None,
+        };
+
+        assert!(ItemTypeFilter::Armor.matches(&armor_item));
+        assert!(!ItemTypeFilter::Weapon.matches(&armor_item));
+    }
+
+    #[test]
+    fn test_item_type_filter_matches_quest() {
+        let quest_item = Item {
+            id: 3,
+            name: "Magic Key".to_string(),
+            item_type: ItemType::Quest(QuestData {
+                quest_id: "quest_1".to_string(),
+                is_key_item: true,
+            }),
+            base_cost: 0,
+            sell_cost: 0,
+            is_cursed: false,
+            disablements: Disablement(0),
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            icon_path: None,
+        };
+
+        assert!(ItemTypeFilter::Quest.matches(&quest_item));
+        assert!(!ItemTypeFilter::Weapon.matches(&quest_item));
+    }
+
+    // =========================================================================
+    // Editor State Transitions Tests
+    // =========================================================================
+
+    #[test]
+    fn test_editor_mode_transitions() {
+        let mut state = ItemsEditorState::new();
+        assert_eq!(state.mode, ItemsEditorMode::List);
+
+        state.mode = ItemsEditorMode::Add;
+        assert_eq!(state.mode, ItemsEditorMode::Add);
+
+        state.mode = ItemsEditorMode::Edit;
+        assert_eq!(state.mode, ItemsEditorMode::Edit);
+
+        state.mode = ItemsEditorMode::List;
+        assert_eq!(state.mode, ItemsEditorMode::List);
+    }
+
+    #[test]
+    fn test_selected_item_handling() {
+        let mut state = ItemsEditorState::new();
+        assert!(state.selected_item.is_none());
+
+        state.selected_item = Some(0);
+        assert_eq!(state.selected_item, Some(0));
+
+        state.selected_item = Some(5);
+        assert_eq!(state.selected_item, Some(5));
+
+        state.selected_item = None;
+        assert!(state.selected_item.is_none());
+    }
+
+    #[test]
+    fn test_filter_combinations() {
+        let mut state = ItemsEditorState::new();
+
+        // Set multiple filters
+        state.filter_type = Some(ItemTypeFilter::Weapon);
+        state.filter_magical = Some(true);
+        state.filter_cursed = Some(false);
+
+        assert_eq!(state.filter_type, Some(ItemTypeFilter::Weapon));
+        assert_eq!(state.filter_magical, Some(true));
+        assert_eq!(state.filter_cursed, Some(false));
+        assert!(state.filter_quest.is_none());
+    }
+}

@@ -1995,3 +1995,312 @@ pub fn render_conditions_editor(
         &mut file_load_merge_mode,
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // ConditionsEditorState Tests
+    // =========================================================================
+
+    #[test]
+    fn test_conditions_editor_state_new() {
+        let state = ConditionsEditorState::new();
+        assert_eq!(state.mode, ConditionsEditorMode::List);
+        assert!(state.search_filter.is_empty());
+        assert!(state.selected_condition_idx.is_none());
+        assert!(!state.show_import_dialog);
+        assert!(state.import_export_buffer.is_empty());
+        assert!(state.show_preview); // Default is true
+    }
+
+    #[test]
+    fn test_conditions_editor_state_default() {
+        let state = ConditionsEditorState::default();
+        assert_eq!(state.mode, ConditionsEditorMode::List);
+        assert_eq!(state.filter_effect_type, EffectTypeFilter::All);
+        assert_eq!(state.sort_order, ConditionSortOrder::NameAsc);
+        assert!(!state.show_statistics);
+        assert!(state.navigate_to_spell.is_none());
+    }
+
+    #[test]
+    fn test_default_condition_creation() {
+        let condition = ConditionsEditorState::default_condition();
+        assert_eq!(condition.id, "new_condition");
+        assert_eq!(condition.name, "New Condition");
+        assert!(condition.description.is_empty());
+        assert!(condition.effects.is_empty());
+        assert_eq!(condition.default_duration, ConditionDuration::Rounds(3));
+        assert!(condition.icon_id.is_none());
+    }
+
+    // =========================================================================
+    // ConditionsEditorMode Tests
+    // =========================================================================
+
+    #[test]
+    fn test_conditions_editor_mode_variants() {
+        assert_eq!(ConditionsEditorMode::List, ConditionsEditorMode::List);
+        assert_eq!(ConditionsEditorMode::Add, ConditionsEditorMode::Add);
+        assert_eq!(ConditionsEditorMode::Edit, ConditionsEditorMode::Edit);
+        assert_ne!(ConditionsEditorMode::List, ConditionsEditorMode::Add);
+    }
+
+    // =========================================================================
+    // EffectTypeFilter Tests
+    // =========================================================================
+
+    #[test]
+    fn test_effect_type_filter_as_str() {
+        assert_eq!(EffectTypeFilter::All.as_str(), "All");
+        assert_eq!(EffectTypeFilter::AttributeModifier.as_str(), "Attribute");
+        assert_eq!(EffectTypeFilter::StatusEffect.as_str(), "Status");
+        assert_eq!(EffectTypeFilter::DamageOverTime.as_str(), "DOT");
+        assert_eq!(EffectTypeFilter::HealOverTime.as_str(), "HOT");
+    }
+
+    #[test]
+    fn test_effect_type_filter_all() {
+        let filters = EffectTypeFilter::all();
+        assert_eq!(filters.len(), 5);
+        assert!(filters.contains(&EffectTypeFilter::All));
+        assert!(filters.contains(&EffectTypeFilter::AttributeModifier));
+        assert!(filters.contains(&EffectTypeFilter::StatusEffect));
+        assert!(filters.contains(&EffectTypeFilter::DamageOverTime));
+        assert!(filters.contains(&EffectTypeFilter::HealOverTime));
+    }
+
+    #[test]
+    fn test_effect_type_filter_matches_all() {
+        let condition = ConditionsEditorState::default_condition();
+        assert!(EffectTypeFilter::All.matches(&condition));
+    }
+
+    // =========================================================================
+    // ConditionSortOrder Tests
+    // =========================================================================
+
+    #[test]
+    fn test_condition_sort_order_as_str() {
+        assert_eq!(ConditionSortOrder::NameAsc.as_str(), "Name (A-Z)");
+        assert_eq!(ConditionSortOrder::NameDesc.as_str(), "Name (Z-A)");
+        assert_eq!(ConditionSortOrder::IdAsc.as_str(), "ID (A-Z)");
+        assert_eq!(ConditionSortOrder::IdDesc.as_str(), "ID (Z-A)");
+        assert_eq!(ConditionSortOrder::EffectCount.as_str(), "Effect Count");
+    }
+
+    // =========================================================================
+    // EffectEditBuffer Tests
+    // =========================================================================
+
+    #[test]
+    fn test_effect_edit_buffer_default() {
+        let buffer = EffectEditBuffer::default();
+        assert!(buffer.effect_type.is_none());
+        assert!(buffer.editing_index.is_none());
+        assert_eq!(buffer.attribute, "might"); // Default is "might"
+        assert_eq!(buffer.attribute_value, 0);
+        assert!(buffer.status_tag.is_empty());
+        assert_eq!(buffer.element, "physical"); // Default is "physical"
+    }
+
+    // =========================================================================
+    // Editor State Transitions Tests
+    // =========================================================================
+
+    #[test]
+    fn test_editor_mode_transitions() {
+        let mut state = ConditionsEditorState::new();
+        assert_eq!(state.mode, ConditionsEditorMode::List);
+
+        state.mode = ConditionsEditorMode::Add;
+        assert_eq!(state.mode, ConditionsEditorMode::Add);
+
+        state.mode = ConditionsEditorMode::Edit;
+        assert_eq!(state.mode, ConditionsEditorMode::Edit);
+
+        state.mode = ConditionsEditorMode::List;
+        assert_eq!(state.mode, ConditionsEditorMode::List);
+    }
+
+    #[test]
+    fn test_selected_condition_handling() {
+        let mut state = ConditionsEditorState::new();
+        assert!(state.selected_condition_idx.is_none());
+
+        state.selected_condition_idx = Some(0);
+        assert_eq!(state.selected_condition_idx, Some(0));
+
+        state.selected_condition_idx = Some(5);
+        assert_eq!(state.selected_condition_idx, Some(5));
+
+        state.selected_condition_idx = None;
+        assert!(state.selected_condition_idx.is_none());
+    }
+
+    #[test]
+    fn test_filter_and_sort_changes() {
+        let mut state = ConditionsEditorState::new();
+
+        // Change filter
+        state.filter_effect_type = EffectTypeFilter::DamageOverTime;
+        assert_eq!(state.filter_effect_type, EffectTypeFilter::DamageOverTime);
+
+        // Change sort order
+        state.sort_order = ConditionSortOrder::IdDesc;
+        assert_eq!(state.sort_order, ConditionSortOrder::IdDesc);
+    }
+
+    // =========================================================================
+    // Condition Statistics Tests
+    // =========================================================================
+
+    #[test]
+    fn test_compute_condition_statistics_empty() {
+        let conditions: Vec<ConditionDefinition> = Vec::new();
+        let stats = compute_condition_statistics(&conditions);
+        assert_eq!(stats.total, 0);
+        assert_eq!(stats.attribute_count, 0);
+        assert_eq!(stats.status_count, 0);
+        assert_eq!(stats.dot_count, 0);
+        assert_eq!(stats.hot_count, 0);
+        assert_eq!(stats.empty_count, 0);
+        assert_eq!(stats.multi_effect_count, 0);
+    }
+
+    #[test]
+    fn test_compute_condition_statistics_with_conditions() {
+        let conditions = vec![
+            ConditionDefinition {
+                id: "empty".to_string(),
+                name: "Empty".to_string(),
+                description: String::new(),
+                effects: vec![],
+                default_duration: ConditionDuration::Permanent,
+                icon_id: None,
+            },
+            ConditionDefinition {
+                id: "strength_buff".to_string(),
+                name: "Strength Buff".to_string(),
+                description: String::new(),
+                effects: vec![ConditionEffect::AttributeModifier {
+                    attribute: "might".to_string(),
+                    value: 5,
+                }],
+                default_duration: ConditionDuration::Permanent,
+                icon_id: None,
+            },
+        ];
+        let stats = compute_condition_statistics(&conditions);
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.attribute_count, 1);
+        assert_eq!(stats.empty_count, 1);
+    }
+
+    // =========================================================================
+    // Validation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_validate_effect_edit_buffer_attribute_modifier() {
+        let mut buffer = EffectEditBuffer::default();
+        buffer.effect_type = Some("AttributeModifier".to_string());
+        buffer.attribute = "might".to_string();
+        buffer.attribute_value = 5;
+
+        let result = validate_effect_edit_buffer(&buffer);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_effect_edit_buffer_empty_attribute() {
+        let mut buffer = EffectEditBuffer::default();
+        buffer.effect_type = Some("AttributeModifier".to_string());
+        buffer.attribute = "".to_string();
+        buffer.attribute_value = 5;
+
+        let result = validate_effect_edit_buffer(&buffer);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_effect_edit_buffer_status_effect() {
+        let mut buffer = EffectEditBuffer::default();
+        buffer.effect_type = Some("StatusEffect".to_string());
+        buffer.status_tag = "poisoned".to_string();
+
+        let result = validate_effect_edit_buffer(&buffer);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_effect_edit_buffer_empty_status() {
+        let mut buffer = EffectEditBuffer::default();
+        buffer.effect_type = Some("StatusEffect".to_string());
+        buffer.status_tag = "".to_string();
+
+        let result = validate_effect_edit_buffer(&buffer);
+        assert!(result.is_err());
+    }
+
+    // =========================================================================
+    // Effect Rendering Tests
+    // =========================================================================
+
+    #[test]
+    fn test_render_condition_effect_summary_attribute() {
+        let effect = ConditionEffect::AttributeModifier {
+            attribute: "might".to_string(),
+            value: 5,
+        };
+        let summary = render_condition_effect_summary(&effect);
+        assert!(summary.contains("Attribute"));
+        assert!(summary.contains("might"));
+        assert!(summary.contains("+5"));
+    }
+
+    #[test]
+    fn test_render_condition_effect_summary_negative() {
+        let effect = ConditionEffect::AttributeModifier {
+            attribute: "speed".to_string(),
+            value: -3,
+        };
+        let summary = render_condition_effect_summary(&effect);
+        assert!(summary.contains("speed"));
+        assert!(summary.contains("-3"));
+    }
+
+    #[test]
+    fn test_render_condition_effect_summary_status() {
+        let effect = ConditionEffect::StatusEffect("poisoned".to_string());
+        let summary = render_condition_effect_summary(&effect);
+        assert!(summary.contains("Status"));
+        assert!(summary.contains("poisoned"));
+    }
+
+    #[test]
+    fn test_preview_toggle() {
+        let mut state = ConditionsEditorState::new();
+        assert!(state.show_preview); // Default is true
+
+        state.show_preview = false;
+        assert!(!state.show_preview);
+
+        state.show_preview = true;
+        assert!(state.show_preview);
+    }
+
+    #[test]
+    fn test_statistics_toggle() {
+        let mut state = ConditionsEditorState::new();
+        assert!(!state.show_statistics);
+
+        state.show_statistics = true;
+        assert!(state.show_statistics);
+
+        state.show_statistics = false;
+        assert!(!state.show_statistics);
+    }
+}

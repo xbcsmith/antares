@@ -969,4 +969,291 @@ mod tests {
         let files = vec![SourceFile::new("bad.rs", "ComboBox::from_label(\"bad\")")];
         assert_no_combobox_from_label(&files);
     }
+
+    // =========================================================================
+    // Editor Pattern Compliance Integration Tests
+    // =========================================================================
+
+    /// Creates mock source representing an editor that uses all shared patterns
+    fn create_compliant_editor_source(name: &str) -> SourceFile {
+        let content = format!(
+            r#"
+            pub struct {}EditorState {{
+                mode: EditorMode,
+                search_filter: String,
+            }}
+
+            impl {}EditorState {{
+                pub fn new() -> Self {{
+                    Self::default()
+                }}
+
+                pub fn show(&mut self, ui: &mut egui::Ui) {{
+                    let toolbar_action = EditorToolbar::new("{}")
+                        .with_search(&mut self.search_filter)
+                        .show(ui);
+
+                    TwoColumnLayout::new("{}").show_split(ui, |left| {{}}, |right| {{
+                        let action = ActionButtons::new().enabled(true).show(right);
+                    }});
+                }}
+            }}
+
+            #[cfg(test)]
+            mod tests {{
+                #[test]
+                fn test_editor_state_new() {{}}
+            }}
+            "#,
+            name,
+            name,
+            name.to_lowercase(),
+            name.to_lowercase()
+        );
+        SourceFile::new(&format!("{}_editor.rs", name.to_lowercase()), &content)
+    }
+
+    /// Creates mock source representing an editor missing some patterns
+    fn create_partial_editor_source(name: &str) -> SourceFile {
+        let content = format!(
+            r#"
+            pub struct {}EditorState {{
+                mode: EditorMode,
+            }}
+
+            impl {}EditorState {{
+                pub fn new() -> Self {{
+                    Self::default()
+                }}
+
+                pub fn show(&mut self, ui: &mut egui::Ui) {{
+                    // Missing EditorToolbar
+                    // Missing TwoColumnLayout
+                    // Missing ActionButtons
+                }}
+            }}
+            "#,
+            name, name
+        );
+        SourceFile::new(&format!("{}_editor.rs", name.to_lowercase()), &content)
+    }
+
+    #[test]
+    fn test_compliant_editor_passes_all_checks() {
+        let file = create_compliant_editor_source("Items");
+        let result = check_editor_compliance(&file);
+
+        assert!(result.has_show_method, "Should have show method");
+        assert!(result.has_new_method, "Should have new method");
+        assert!(result.has_state_struct, "Should have state struct");
+        assert!(result.uses_toolbar, "Should use EditorToolbar");
+        assert!(result.uses_action_buttons, "Should use ActionButtons");
+        assert!(result.uses_two_column_layout, "Should use TwoColumnLayout");
+        assert!(result.has_tests, "Should have tests");
+        assert_eq!(result.combobox_from_label_count, 0);
+        assert!(
+            result.compliance_score() >= 90,
+            "Compliant editor should score >= 90"
+        );
+    }
+
+    #[test]
+    fn test_partial_editor_detects_missing_patterns() {
+        let file = create_partial_editor_source("Broken");
+        let result = check_editor_compliance(&file);
+
+        assert!(result.has_show_method, "Should have show method");
+        assert!(result.has_new_method, "Should have new method");
+        assert!(result.has_state_struct, "Should have state struct");
+        assert!(!result.uses_toolbar, "Should NOT use EditorToolbar");
+        assert!(!result.uses_action_buttons, "Should NOT use ActionButtons");
+        assert!(
+            !result.uses_two_column_layout,
+            "Should NOT use TwoColumnLayout"
+        );
+        assert!(!result.has_tests, "Should NOT have tests");
+        assert!(
+            result.compliance_score() < 70,
+            "Partial editor should score < 70"
+        );
+    }
+
+    #[test]
+    fn test_compliance_summary_with_mixed_editors() {
+        let compliant = create_compliant_editor_source("Good");
+        let partial = create_partial_editor_source("Partial");
+
+        let mut results = HashMap::new();
+        results.insert(
+            "good_editor".to_string(),
+            check_editor_compliance(&compliant),
+        );
+        results.insert(
+            "partial_editor".to_string(),
+            check_editor_compliance(&partial),
+        );
+
+        let summary = ComplianceSummary::from_results(&results);
+
+        assert_eq!(summary.total_editors, 2);
+        // At least one should be compliant (the good one)
+        assert!(summary.compliant_editors >= 1);
+    }
+
+    #[test]
+    fn test_editor_toolbar_pattern_detection() {
+        let with_toolbar = SourceFile::new(
+            "test_editor.rs",
+            r#"
+            let action = EditorToolbar::new("Test")
+                .with_search(&mut self.query)
+                .show(ui);
+            "#,
+        );
+
+        let without_toolbar = SourceFile::new(
+            "test_editor.rs",
+            r#"
+            ui.horizontal(|ui| {
+                if ui.button("New").clicked() {}
+            });
+            "#,
+        );
+
+        let matcher = PatternMatcher::editor_toolbar_usage();
+        assert!(matcher.matches(&with_toolbar.content));
+        assert!(!matcher.matches(&without_toolbar.content));
+    }
+
+    #[test]
+    fn test_action_buttons_pattern_detection() {
+        let with_buttons = SourceFile::new(
+            "test_editor.rs",
+            r#"
+            let action = ActionButtons::new()
+                .enabled(true)
+                .show(ui);
+            "#,
+        );
+
+        let without_buttons = SourceFile::new(
+            "test_editor.rs",
+            r#"
+            if ui.button("Edit").clicked() {}
+            if ui.button("Delete").clicked() {}
+            "#,
+        );
+
+        let matcher = PatternMatcher::action_buttons_usage();
+        assert!(matcher.matches(&with_buttons.content));
+        assert!(!matcher.matches(&without_buttons.content));
+    }
+
+    #[test]
+    fn test_two_column_layout_pattern_detection() {
+        let with_layout = SourceFile::new(
+            "test_editor.rs",
+            r#"
+            TwoColumnLayout::new("items").show_split(ui, |left| {}, |right| {});
+            "#,
+        );
+
+        let without_layout = SourceFile::new(
+            "test_editor.rs",
+            r#"
+            ui.columns(2, |cols| {});
+            "#,
+        );
+
+        let matcher = PatternMatcher::two_column_layout_usage();
+        assert!(matcher.matches(&with_layout.content));
+        assert!(!matcher.matches(&without_layout.content));
+    }
+
+    #[test]
+    fn test_all_standard_editors_have_required_structure() {
+        // Test that standard editor naming patterns are detected
+        let editor_names = [
+            "items",
+            "spells",
+            "monsters",
+            "conditions",
+            "quests",
+            "classes",
+            "dialogues",
+            "maps",
+        ];
+
+        for name in editor_names {
+            let file = create_compliant_editor_source(&capitalize_first(name));
+            let result = check_editor_compliance(&file);
+
+            assert!(
+                result.has_show_method,
+                "{}_editor should have show method",
+                name
+            );
+            assert!(
+                result.has_new_method,
+                "{}_editor should have new method",
+                name
+            );
+            assert!(
+                result.has_state_struct,
+                "{}_editor should have state struct",
+                name
+            );
+        }
+    }
+
+    /// Helper to capitalize first letter
+    fn capitalize_first(s: &str) -> String {
+        let mut chars = s.chars();
+        match chars.next() {
+            None => String::new(),
+            Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        }
+    }
+
+    #[test]
+    fn test_compliance_score_calculation() {
+        // Test score calculation with known values
+        let result = EditorComplianceResult {
+            editor_name: "test_editor".to_string(),
+            has_show_method: true,        // 20 points
+            has_new_method: true,         // 10 points
+            has_state_struct: true,       // 15 points
+            uses_toolbar: true,           // 15 points
+            uses_action_buttons: true,    // 10 points
+            uses_two_column_layout: true, // 10 points
+            has_tests: true,              // 10 points
+            combobox_id_salt_count: 5,
+            combobox_from_label_count: 0, // 10 points (no violations)
+            issues: vec![],
+        };
+
+        assert_eq!(result.compliance_score(), 100);
+        assert!(result.is_compliant());
+    }
+
+    #[test]
+    fn test_compliance_score_with_missing_elements() {
+        let result = EditorComplianceResult {
+            editor_name: "test_editor".to_string(),
+            has_show_method: true,         // 20 points
+            has_new_method: false,         // 0 points
+            has_state_struct: true,        // 15 points
+            uses_toolbar: false,           // 0 points
+            uses_action_buttons: true,     // 10 points
+            uses_two_column_layout: false, // 0 points
+            has_tests: false,              // 0 points
+            combobox_id_salt_count: 0,
+            combobox_from_label_count: 2, // 0 points (has violations)
+            issues: vec!["Issue 1".to_string()],
+        };
+
+        // 20 + 0 + 15 + 0 + 10 + 0 + 0 + 0 = 45
+        assert_eq!(result.compliance_score(), 45);
+        assert!(!result.is_compliant());
+    }
 }
