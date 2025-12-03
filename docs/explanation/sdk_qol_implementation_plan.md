@@ -646,21 +646,22 @@ Create optional debug panel for development:
 
 - `sdk/campaign_builder/src/main.rs` - add debug panel toggle and rendering
 
-
-
 ---
 
 ## Implementation Order Summary
 
-| Phase | Focus                        | Priority | Estimated Effort     |
-| ----- | ---------------------------- | -------- | -------------------- |
-| 1     | Foundation (Toolbar/Buttons) | High     | Medium               |
-| 2     | Extract UI from main.rs      | High     | Medium               |
-| 3     | Layout Continuity            | High     | High (Maps is major) |
-| 4     | Validation/Assets UI         | Medium   | Medium               |
-| 5     | Testing Improvements         | Medium   | Low                  |
-| 6     | Data Files Update            | High     | Low                  |
-| 7     | Logging/Debug                | Low      | Low                  |
+| Phase | Focus                        | Priority | Estimated Effort     | Status   |
+| ----- | ---------------------------- | -------- | -------------------- | -------- |
+| 1     | Foundation (Toolbar/Buttons) | High     | Medium               | Complete |
+| 2     | Extract UI from main.rs      | High     | Medium               | Complete |
+| 3     | Layout Continuity            | High     | High (Maps is major) | Partial  |
+| 4     | Validation/Assets UI         | Medium   | Medium               | Complete |
+| 5     | Testing Improvements         | Medium   | Low                  | Complete |
+| 6     | Data Files Update            | High     | Low                  | Complete |
+| 7     | Logging/Debug                | Low      | Low                  | Complete |
+| 8     | Complete Skipped Items       | High     | Medium               | New      |
+| 9     | Maps Editor Major Refactor   | Medium   | High                 | New      |
+| 10    | Final Polish & Verification  | Medium   | Low                  | New      |
 
 ## Design Decisions
 
@@ -701,6 +702,9 @@ Create optional debug panel for development:
 - Phase 5 can run in parallel with Phases 3-4
 - Phase 6 depends on Phases 1-5 (data update after all UI changes)
 - Phase 7 can run at any time (independent)
+- Phase 8 depends on Phases 1-7 (uses shared components created earlier)
+- Phase 9 depends on Phase 8 (patterns validated before major refactor)
+- Phase 10 depends on Phases 8-9 (final verification after all work)
 
 ## Risk Mitigation
 
@@ -709,3 +713,229 @@ Create optional debug panel for development:
 2. **Test Breakage**: Run full test suite after each phase
 3. **UI Regression**: Manual testing of each editor after changes
 4. **Merge Conflicts**: Complete phases in order to minimize conflicts
+
+---
+
+### Phase 8: Complete Phase 1.6 and Phase 3 Skipped Items (High Priority)
+
+The following items were deferred during earlier phases and need completion.
+
+**Skipped Items Identified:**
+
+- Phase 1.6: items_editor, spells_editor, monsters_editor never refactored to use shared components
+- Phase 3.1: conditions_editor layout not updated
+- Phase 3.2: quests_editor only has EditorToolbar, missing ActionButtons and TwoColumnLayout
+- Phase 3.5: conditions_editor AttributePair widgets not applied
+
+#### 8.1 Items Editor Shared Components (Phase 1.6 Deferred)
+
+Refactor `items_editor.rs` to use shared components:
+
+- Replace manual toolbar with `EditorToolbar` component
+- Add `ActionButtons` (Edit/Delete/Duplicate/Export) to detail panel
+- Implement `TwoColumnLayout` for list/detail split view
+- Maintain existing filter functionality within toolbar
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/items_editor.rs`
+
+#### 8.2 Spells Editor Shared Components (Phase 1.6 Deferred)
+
+Refactor `spells_editor.rs` to use shared components:
+
+- Replace manual toolbar with `EditorToolbar` component
+- Add `ActionButtons` to detail panel
+- Implement `TwoColumnLayout` for consistent layout
+- Maintain school/level filter functionality
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/spells_editor.rs`
+
+#### 8.3 Monsters Editor Layout Components (Phase 1.6 Deferred)
+
+Complete refactor of `monsters_editor.rs` (already has AttributePair widgets):
+
+- Replace manual toolbar with `EditorToolbar` component
+- Add `ActionButtons` to detail panel
+- Implement `TwoColumnLayout` for consistent layout
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/monsters_editor.rs`
+
+#### 8.4 Conditions Editor Layout (Phase 3.1 Deferred)
+
+Refactor `conditions_editor.rs` to use standard layout:
+
+- Replace manual toolbar with `EditorToolbar` component
+- Add `ActionButtons` (Edit/Delete/Duplicate/Export) to display panel
+- Implement `TwoColumnLayout` for list/detail split
+- Apply `AttributePairInput` widgets where effects modify AttributePair values
+  (Phase 3.5)
+- Maintain existing effect type filter and sort functionality
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/conditions_editor.rs`
+
+#### 8.5 Quests Editor Layout Completion (Phase 3.2 Partial)
+
+Complete refactor of `quest_editor.rs` (already has EditorToolbar):
+
+- Add `ActionButtons` to detail panel
+- Implement `TwoColumnLayout` for list/detail split
+- Maintain stage/objective sub-editors within detail view
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/quest_editor.rs`
+
+#### 8.6 Testing Requirements
+
+- Visual regression tests (manual) for each editor
+- Test Edit/Delete/Duplicate/Export actions work correctly
+- Test toolbar actions (New/Save/Load/Import/Export) for each editor
+- Verify existing tests continue to pass
+
+#### 8.7 Deliverables
+
+- Items editor using all shared components
+- Spells editor using all shared components
+- Monsters editor using EditorToolbar, ActionButtons, TwoColumnLayout
+- Conditions editor using all shared components plus AttributePair widgets
+- Quests editor using ActionButtons and TwoColumnLayout
+
+#### 8.8 Success Criteria
+
+- Every editor (items, spells, monsters, conditions, quests) uses EditorToolbar
+- Every editor has Edit/Delete/Duplicate/Export buttons via ActionButtons
+- Every editor uses TwoColumnLayout for consistent list/detail split
+- All existing tests continue to pass
+- User can navigate any editor with same mental model
+
+---
+
+### Phase 9: Maps Editor Major Refactor (Phase 3.6 Deferred - High Risk)
+
+This is the most significant refactor, deferred from Phase 3.6 due to complexity.
+
+#### 9.1 Create MapsEditorState::show() Pattern
+
+Refactor `map_editor.rs` to follow standard editor pattern:
+
+- Create `MapsEditorState::show()` following standard signature
+- Integrate canvas/grid rendering into the `show()` method
+- Remove separate `MapEditorWidget` pattern
+- Implement two-column layout: map list on left, map preview/editor on right
+- Add standard toolbar via `EditorToolbar`: New, Save, Load, Import (w/Merge),
+  Export
+- Add `ActionButtons` (Edit/Delete/Duplicate/Export) to display panel
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/map_editor.rs`
+
+#### 9.2 Integrate Maps Editor into Main Application
+
+Update main.rs to delegate to `MapsEditorState::show()`:
+
+- Remove `show_maps_editor()`, `show_maps_list()`, `show_map_editor_panel()`
+  functions from main.rs
+- Delegate to `maps_editor.show()` like other editors
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/main.rs`
+
+#### 9.3 Move Tile Tools to Detail Panel
+
+When in edit mode, tile editing tools should be in the detail panel:
+
+- Tool palette (Select, Paint, Event, NPC, Fill, Erase)
+- Terrain type selector
+- Wall type selector
+- Event/NPC configuration
+
+#### 9.4 Add Map Preview Thumbnails
+
+Map list should show preview thumbnails like items show type icons:
+
+- Generate small preview of map terrain
+- Show map name and dimensions
+
+#### 9.5 Testing Requirements
+
+- Visual regression tests for map editing functionality
+- Test undo/redo continues to work
+- Test tile painting, event placement, NPC placement
+- Test map list navigation and selection
+
+#### 9.6 Deliverables
+
+- `MapsEditorState::show()` method following standard pattern
+- Maps editor using EditorToolbar, ActionButtons, TwoColumnLayout
+- Simplified main.rs with delegation to maps_editor
+- Map preview thumbnails in list view
+
+#### 9.7 Success Criteria
+
+- Maps editor behaves exactly like items_editor pattern
+- Canvas/grid rendering integrated into show() method
+- All map editing functionality preserved
+- Undo/redo works correctly
+- Two-column layout is consistent with other editors
+
+---
+
+### Phase 10: Final Polish and Verification (Post-Cleanup)
+
+#### 10.1 Audit All Editors for Pattern Compliance
+
+Verify every editor follows the standard pattern:
+
+- [ ] items_editor - EditorToolbar, ActionButtons, TwoColumnLayout
+- [ ] spells_editor - EditorToolbar, ActionButtons, TwoColumnLayout
+- [ ] monsters_editor - EditorToolbar, ActionButtons, TwoColumnLayout,
+      AttributePair widgets
+- [ ] conditions_editor - EditorToolbar, ActionButtons, TwoColumnLayout,
+      AttributePair widgets
+- [ ] quest_editor - EditorToolbar, ActionButtons, TwoColumnLayout
+- [ ] classes_editor - EditorToolbar, ActionButtons, TwoColumnLayout
+- [ ] dialogue_editor - EditorToolbar, ActionButtons, TwoColumnLayout
+- [ ] map_editor - EditorToolbar, ActionButtons, TwoColumnLayout
+
+#### 10.2 Add Editor Compliance Tests
+
+Add automated tests that verify each editor uses shared components:
+
+- Pattern matcher tests for EditorToolbar usage
+- Pattern matcher tests for ActionButtons usage
+- Pattern matcher tests for TwoColumnLayout usage
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/test_utils.rs`
+- Add tests for each editor file
+
+#### 10.3 Update Documentation
+
+- Update implementations.md with Phase 8-10 completion
+- Verify all editors documented consistently
+- Update any outdated screenshots/examples
+
+#### 10.4 Re-export Data Files
+
+After all UI changes are complete:
+
+- Re-export data/items.ron, data/spells.ron, etc. using updated editors
+- Re-export campaigns/tutorial/ data files
+- Verify all RON files parse correctly
+
+#### 10.5 Success Criteria
+
+- All 8 editors use identical shared component patterns
+- Automated tests verify pattern compliance
+- All data files updated and parseable
+- Documentation reflects final state
