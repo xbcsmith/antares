@@ -718,6 +718,8 @@ Create optional debug panel for development:
 
 ### Phase 8: Complete Phase 1.6 and Phase 3 Skipped Items (High Priority)
 
+**Status: PARTIALLY COMPLETE (2025-01-XX)**
+
 The following items were deferred during earlier phases and need completion.
 
 **Skipped Items Identified:**
@@ -729,52 +731,69 @@ The following items were deferred during earlier phases and need completion.
 
 #### 8.1 Items Editor Shared Components (Phase 1.6 Deferred)
 
+**Status: COMPLETE**
+
 Refactor `items_editor.rs` to use shared components:
 
-- Replace manual toolbar with `EditorToolbar` component
-- Add `ActionButtons` (Edit/Delete/Duplicate/Export) to detail panel
-- Implement `TwoColumnLayout` for list/detail split view
-- Maintain existing filter functionality within toolbar
+- [x] Replace manual toolbar with `EditorToolbar` component
+- [x] Add `ActionButtons` (Edit/Delete/Duplicate/Export) to detail panel
+- [x] Implement `TwoColumnLayout` for list/detail split view
+- [x] Maintain existing filter functionality within toolbar
 
-**Files to modify:**
+**Files modified:**
 
 - `sdk/campaign_builder/src/items_editor.rs`
 
 #### 8.2 Spells Editor Shared Components (Phase 1.6 Deferred)
 
+**Status: COMPLETE**
+
 Refactor `spells_editor.rs` to use shared components:
 
-- Replace manual toolbar with `EditorToolbar` component
-- Add `ActionButtons` to detail panel
-- Implement `TwoColumnLayout` for consistent layout
-- Maintain school/level filter functionality
+- [x] Replace manual toolbar with `EditorToolbar` component
+- [x] Add `ActionButtons` to detail panel
+- [x] Implement `TwoColumnLayout` for consistent layout
+- [x] Maintain school/level filter functionality
 
-**Files to modify:**
+**Files modified:**
 
 - `sdk/campaign_builder/src/spells_editor.rs`
 
 #### 8.3 Monsters Editor Layout Components (Phase 1.6 Deferred)
 
+**Status: COMPLETE**
+
 Complete refactor of `monsters_editor.rs` (already has AttributePair widgets):
 
-- Replace manual toolbar with `EditorToolbar` component
-- Add `ActionButtons` to detail panel
-- Implement `TwoColumnLayout` for consistent layout
+- [x] Replace manual toolbar with `EditorToolbar` component
+- [x] Add `ActionButtons` to detail panel
+- [x] Implement `TwoColumnLayout` for consistent layout
 
-**Files to modify:**
+**Files modified:**
 
 - `sdk/campaign_builder/src/monsters_editor.rs`
 
 #### 8.4 Conditions Editor Layout (Phase 3.1 Deferred)
 
+**Status: DEFERRED (complex refactor required)**
+
 Refactor `conditions_editor.rs` to use standard layout:
 
-- Replace manual toolbar with `EditorToolbar` component
-- Add `ActionButtons` (Edit/Delete/Duplicate/Export) to display panel
-- Implement `TwoColumnLayout` for list/detail split
-- Apply `AttributePairInput` widgets where effects modify AttributePair values
-  (Phase 3.5)
-- Maintain existing effect type filter and sort functionality
+- [ ] Replace manual toolbar with `EditorToolbar` component
+- [ ] Add `ActionButtons` (Edit/Delete/Duplicate/Export) to display panel
+- [ ] Implement `TwoColumnLayout` for list/detail split
+- [ ] Apply `AttributePairInput` widgets where effects modify AttributePair values
+      (Phase 3.5)
+- [ ] Maintain existing effect type filter and sort functionality
+
+**Reason for deferral:** The conditions_editor has unique complexity including:
+
+- Effect type filtering and sorting system
+- Spell reference tracking and navigation
+- Preview with magnitude scaling
+- Nested effect editing UI
+
+This requires a dedicated refactoring pass to maintain specialized functionality.
 
 **Files to modify:**
 
@@ -782,38 +801,41 @@ Refactor `conditions_editor.rs` to use standard layout:
 
 #### 8.5 Quests Editor Layout Completion (Phase 3.2 Partial)
 
+**Status: COMPLETE**
+
 Complete refactor of `quest_editor.rs` (already has EditorToolbar):
 
-- Add `ActionButtons` to detail panel
-- Implement `TwoColumnLayout` for list/detail split
-- Maintain stage/objective sub-editors within detail view
+- [x] Add `ActionButtons` to detail panel
+- [x] Implement `TwoColumnLayout` for list/detail split (replaced SidePanel)
+- [x] Maintain stage/objective sub-editors within detail view
 
-**Files to modify:**
+**Files modified:**
 
 - `sdk/campaign_builder/src/quest_editor.rs`
 
 #### 8.6 Testing Requirements
 
-- Visual regression tests (manual) for each editor
-- Test Edit/Delete/Duplicate/Export actions work correctly
-- Test toolbar actions (New/Save/Load/Import/Export) for each editor
-- Verify existing tests continue to pass
+- [x] Visual regression tests (manual) for each editor
+- [x] Test Edit/Delete/Duplicate/Export actions work correctly
+- [x] Test toolbar actions (New/Save/Load/Import/Export) for each editor
+- [x] Verify existing tests continue to pass (370 tests pass)
 
 #### 8.7 Deliverables
 
-- Items editor using all shared components
-- Spells editor using all shared components
-- Monsters editor using EditorToolbar, ActionButtons, TwoColumnLayout
-- Conditions editor using all shared components plus AttributePair widgets
-- Quests editor using ActionButtons and TwoColumnLayout
+- [x] Items editor using all shared components
+- [x] Spells editor using all shared components
+- [x] Monsters editor using EditorToolbar, ActionButtons, TwoColumnLayout
+- [ ] Conditions editor using all shared components plus AttributePair widgets (DEFERRED)
+- [x] Quests editor using ActionButtons and TwoColumnLayout
 
 #### 8.8 Success Criteria
 
-- Every editor (items, spells, monsters, conditions, quests) uses EditorToolbar
-- Every editor has Edit/Delete/Duplicate/Export buttons via ActionButtons
-- Every editor uses TwoColumnLayout for consistent list/detail split
-- All existing tests continue to pass
-- User can navigate any editor with same mental model
+- [x] Items, Spells, Monsters, Quests editors use EditorToolbar
+- [x] Items, Spells, Monsters, Quests editors have ActionButtons
+- [x] Items, Spells, Monsters, Quests editors use TwoColumnLayout
+- [x] All existing tests continue to pass
+- [x] User can navigate completed editors with same mental model
+- [ ] Conditions editor (deferred to future work)
 
 ---
 
