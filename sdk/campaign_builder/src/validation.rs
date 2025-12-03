@@ -13,6 +13,7 @@
 //! - [`ValidationSeverity`] - Severity levels (Error, Warning, Info, Passed)
 //! - [`ValidationResult`] - Structured validation result with category, severity, message
 
+use std::fmt;
 use std::path::PathBuf;
 
 /// Categories for grouping validation results.
@@ -48,6 +49,12 @@ pub enum ValidationCategory {
     Races,
     /// Asset files (images, sounds, etc.)
     Assets,
+}
+
+impl fmt::Display for ValidationCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
 }
 
 impl ValidationCategory {

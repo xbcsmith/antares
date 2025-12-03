@@ -1942,4 +1942,155 @@ cargo test --all-features  # 218 tests pass, including database_integration_test
 
 ### Next Steps
 
-- Phase 7: Logging and Developer Experience
+- Consider adding more verbose logging to individual editor modules
+- Monitor logging performance impact in production builds
+
+## Phase 7: Logging and Developer Experience (2025-01-XX)
+
+### Background
+
+Phase 7 implements configurable logging and a debug panel for the Campaign
+Builder SDK. This enables developers to monitor application state, track
+file I/O operations, and debug issues during campaign development.
+
+### Changes Implemented
+
+#### 7.1 Logging Module Created
+
+New file: `sdk/campaign_builder/src/logging.rs`
+
+Features:
+
+- **LogLevel enum**: Error, Warn, Info, Debug, Verbose (ordered by severity)
+- **LogMessage struct**: Stores level, message, category, and timestamp
+- **Logger struct**: Configurable log level, message buffer, stderr output
+- **Log categories**: APP, FILE_IO, EDITOR, VALIDATION, UI, DATA
+- **Command-line argument parsing**: `--verbose`/`-v`, `--debug`/`-d`, `--quiet`/`-q`
+
+```antares/sdk/campaign_builder/src/logging.rs#L36-47
+pub enum LogLevel {
+    /// Critical errors
+    Error = 0,
+    /// Warnings about potential issues
+    Warn = 1,
+    /// General informational messages
+    Info = 2,
+    /// Debug information
+    Debug = 3,
+    /// Verbose trace-level information
+    Verbose = 4,
+}
+```
+
+#### 7.2 Debug Panel Window
+
+Added `show_debug_panel_window()` method to `CampaignBuilderApp`:
+
+- **Current State section**: Shows active tab, campaign path, unsaved changes,
+  log level, and application uptime
+- **Loaded Data section**: Displays counts for items, spells, monsters, maps,
+  quests, dialogues, conditions, and classes
+- **Log Messages section**: Filterable log viewer with:
+  - Level filter dropdown
+  - Auto-scroll toggle
+  - Clear button
+  - Message counts by level (E/W/I/D/V)
+  - Color-coded log entries
+
+#### 7.3 View Menu Added
+
+New "View" menu between Edit and Tools menus:
+
+- Toggle Debug Panel (also accessible via F12)
+- Log Level selector (Error, Warn, Info, Debug, Verbose)
+
+#### 7.4 Logging Integration
+
+Added logging calls throughout the application:
+
+**File I/O Operations:**
+
+- `load_items()`: Debug on entry, verbose for file path and bytes read,
+  info on success, warn/error on failure
+- `save_items()`: Debug on entry, verbose for file path, info on success
+- `do_open_campaign()`: Info on campaign open, verbose for directory,
+  debug for data file loading
+
+**Editor State Transitions:**
+
+- Tab changes logged at debug level with previous and new tab names
+
+**Validation:**
+
+- `validate_campaign()`: Debug on entry, info on completion with
+  error/warning counts, debug for individual validation results
+
+### Application State Changes
+
+New fields in `CampaignBuilderApp`:
+
+- `logger: Logger` - The application logger instance
+- `show_debug_panel: bool` - Debug panel visibility toggle
+- `debug_panel_filter_level: LogLevel` - Filter level for log display
+- `debug_panel_auto_scroll: bool` - Auto-scroll behavior for log panel
+
+### Command-Line Arguments
+
+The Campaign Builder now supports logging flags:
+
+- `--verbose` or `-v`: Enable verbose (trace-level) logging
+- `--debug` or `-d`: Enable debug logging
+- `--quiet` or `-q`: Show only warnings and errors
+
+Example usage:
+
+```bash
+cargo run --bin campaign-builder -- --verbose
+```
+
+### Tests Added
+
+In `logging.rs`:
+
+- `test_log_level_ordering`: Verifies log level comparison
+- `test_logger_stores_messages`: Verifies message buffer
+- `test_logger_filters_by_level`: Verifies level filtering
+- `test_logger_max_capacity`: Verifies ring buffer behavior (500 messages)
+- `test_message_counts`: Verifies count tracking by level
+- `test_log_message_format`: Verifies message formatting
+- `test_log_level_colors`: Verifies color definitions
+
+### Files Modified
+
+- `sdk/campaign_builder/src/logging.rs` (NEW) - Logging module
+- `sdk/campaign_builder/src/main.rs` - Integrated logging throughout
+
+### Validation
+
+```bash
+cargo fmt --all                                        # OK
+cargo check --all-targets --all-features              # OK
+cargo clippy --all-targets --all-features -- -D warnings  # OK
+cargo test --all-features                              # All tests pass
+```
+
+### Architecture Compliance
+
+- [x] No core data structures modified
+- [x] Uses proper Rust patterns (enums, structs, impl blocks)
+- [x] Comprehensive documentation with examples
+- [x] Test coverage for logging module
+- [x] Follows existing code style and conventions
+
+### Success Criteria Met
+
+- [x] Verbose logging level implemented (more detailed than Debug)
+- [x] Command-line flags for verbose logging (`--verbose`, `-v`)
+- [x] Editor state transitions logged
+- [x] File I/O operations logged
+- [x] Validation details logged
+- [x] Debug panel shows current editor state
+- [x] Debug panel shows loaded data counts
+- [x] Debug panel shows recent log messages
+- [x] Toggle via menu (View > Show Debug Panel)
+- [x] Toggle via keyboard shortcut (F12)

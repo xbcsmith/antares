@@ -27,6 +27,7 @@ mod classes_editor;
 mod conditions_editor;
 mod dialogue_editor;
 mod items_editor;
+mod logging;
 mod map_editor;
 mod monsters_editor;
 mod packager;
@@ -38,6 +39,8 @@ mod test_utils;
 mod ui_helpers;
 mod undo_redo;
 mod validation;
+
+use logging::{category, LogLevel, Logger};
 
 use antares::domain::character::Stats;
 use antares::domain::combat::database::MonsterDefinition;
@@ -68,6 +71,21 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 fn main() -> Result<(), eframe::Error> {
+    // Initialize logger from command-line arguments
+    let logger = Logger::from_args();
+    let log_level = logger.level();
+
+    // Print startup message based on log level
+    if log_level >= LogLevel::Info {
+        eprintln!(
+            "[INFO] Antares Campaign Builder starting (log level: {})",
+            log_level
+        );
+    }
+    if log_level >= LogLevel::Verbose {
+        eprintln!("[VERBOSE] Verbose logging enabled - showing detailed trace information");
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 720.0])
@@ -81,7 +99,12 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "Antares Campaign Builder",
         options,
-        Box::new(|_cc| Ok(Box::<CampaignBuilderApp>::default())),
+        Box::new(move |_cc| {
+            let mut app = CampaignBuilderApp::default();
+            app.logger = logger.clone();
+            app.logger.info(category::APP, "Application initialized");
+            Ok(Box::new(app))
+        }),
     )
 }
 
@@ -364,6 +387,12 @@ struct CampaignBuilderApp {
 
     // File I/O pattern state
     file_load_merge_mode: bool,
+
+    // Phase 7: Logging and developer experience
+    logger: Logger,
+    show_debug_panel: bool,
+    debug_panel_filter_level: LogLevel,
+    debug_panel_auto_scroll: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -447,6 +476,12 @@ impl Default for CampaignBuilderApp {
             show_balance_stats: false,
 
             file_load_merge_mode: true, // Default to merge mode
+
+            // Phase 7: Logging and developer experience
+            logger: Logger::default(),
+            show_debug_panel: false,
+            debug_panel_filter_level: LogLevel::Info,
+            debug_panel_auto_scroll: true,
         }
     }
 }
@@ -681,64 +716,109 @@ impl CampaignBuilderApp {
 
     /// Load items from RON file
     fn load_items(&mut self) {
-        eprintln!("DEBUG: load_items() called");
+        self.logger.debug(category::FILE_IO, "load_items() called");
         let items_file = self.campaign.items_file.clone();
         if let Some(ref dir) = self.campaign_dir {
             let items_path = dir.join(&items_file);
+            self.logger.verbose(
+                category::FILE_IO,
+                &format!("Loading items from: {}", items_path.display()),
+            );
             if items_path.exists() {
                 match fs::read_to_string(&items_path) {
-                    Ok(contents) => match ron::from_str::<Vec<Item>>(&contents) {
-                        Ok(items) => {
-                            let count = items.len();
-                            self.items = items;
+                    Ok(contents) => {
+                        self.logger.verbose(
+                            category::FILE_IO,
+                            &format!("Read {} bytes from items file", contents.len()),
+                        );
+                        match ron::from_str::<Vec<Item>>(&contents) {
+                            Ok(items) => {
+                                let count = items.len();
+                                self.items = items;
 
-                            // Mark data file as loaded in asset manager
-                            if let Some(ref mut manager) = self.asset_manager {
-                                manager.mark_data_file_loaded(&items_file, count);
+                                // Mark data file as loaded in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager.mark_data_file_loaded(&items_file, count);
+                                }
+
+                                // Validate IDs after loading
+                                let id_errors = self.validate_item_ids();
+                                if !id_errors.is_empty() {
+                                    self.validation_errors.extend(id_errors.clone());
+                                    self.logger.warn(
+                                        category::DATA,
+                                        &format!(
+                                            "Loaded {} items with {} ID conflicts",
+                                            self.items.len(),
+                                            id_errors.len()
+                                        ),
+                                    );
+                                    self.status_message = format!(
+                                        "⚠️ Loaded {} items with {} ID conflicts",
+                                        self.items.len(),
+                                        id_errors.len()
+                                    );
+                                } else {
+                                    self.logger.info(
+                                        category::FILE_IO,
+                                        &format!("Loaded {} items", self.items.len()),
+                                    );
+                                    self.status_message =
+                                        format!("Loaded {} items", self.items.len());
+                                }
                             }
-
-                            // Validate IDs after loading
-                            let id_errors = self.validate_item_ids();
-                            if !id_errors.is_empty() {
-                                self.validation_errors.extend(id_errors.clone());
-                                self.status_message = format!(
-                                    "⚠️ Loaded {} items with {} ID conflicts",
-                                    self.items.len(),
-                                    id_errors.len()
+                            Err(e) => {
+                                // Mark data file as error in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager.mark_data_file_error(&items_file, &e.to_string());
+                                }
+                                self.logger.error(
+                                    category::FILE_IO,
+                                    &format!("Failed to parse items: {}", e),
                                 );
-                            } else {
-                                self.status_message = format!("Loaded {} items", self.items.len());
+                                self.status_message = format!("Failed to parse items: {}", e);
                             }
                         }
-                        Err(e) => {
-                            // Mark data file as error in asset manager
-                            if let Some(ref mut manager) = self.asset_manager {
-                                manager.mark_data_file_error(&items_file, &e.to_string());
-                            }
-                            self.status_message = format!("Failed to parse items: {}", e);
-                        }
-                    },
+                    }
                     Err(e) => {
                         // Mark data file as error in asset manager
                         if let Some(ref mut manager) = self.asset_manager {
                             manager.mark_data_file_error(&items_file, &e.to_string());
                         }
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!("Failed to read items file: {}", e),
+                        );
                         self.status_message = format!("Failed to read items file: {}", e);
-                        eprintln!("Failed to read items file {:?}: {}", items_path, e);
                     }
                 }
             } else {
-                eprintln!("Items file does not exist: {:?}", items_path);
+                self.logger.warn(
+                    category::FILE_IO,
+                    &format!("Items file does not exist: {}", items_path.display()),
+                );
             }
         } else {
-            eprintln!("No campaign directory set when trying to load items");
+            self.logger.warn(
+                category::FILE_IO,
+                "No campaign directory set when trying to load items",
+            );
         }
     }
 
     /// Save items to RON file
     fn save_items(&mut self) -> Result<(), String> {
+        self.logger.debug(category::FILE_IO, "save_items() called");
         if let Some(ref dir) = self.campaign_dir {
             let items_path = dir.join(&self.campaign.items_file);
+            self.logger.verbose(
+                category::FILE_IO,
+                &format!(
+                    "Saving {} items to: {}",
+                    self.items.len(),
+                    items_path.display()
+                ),
+            );
 
             // Create items directory if it doesn't exist
             if let Some(parent) = items_path.parent() {
@@ -753,12 +833,24 @@ impl CampaignBuilderApp {
             let contents = ron::ser::to_string_pretty(&self.items, ron_config)
                 .map_err(|e| format!("Failed to serialize items: {}", e))?;
 
-            fs::write(&items_path, contents)
+            fs::write(&items_path, &contents)
                 .map_err(|e| format!("Failed to write items file: {}", e))?;
 
+            self.logger.info(
+                category::FILE_IO,
+                &format!(
+                    "Saved {} items ({} bytes)",
+                    self.items.len(),
+                    contents.len()
+                ),
+            );
             self.unsaved_changes = true;
             Ok(())
         } else {
+            self.logger.error(
+                category::FILE_IO,
+                "No campaign directory set when trying to save items",
+            );
             Err("No campaign directory set".to_string())
         }
     }
@@ -1114,6 +1206,8 @@ impl CampaignBuilderApp {
 
     /// Validate the campaign metadata
     fn validate_campaign(&mut self) {
+        self.logger
+            .debug(category::VALIDATION, "validate_campaign() called");
         self.validation_errors.clear();
 
         // Validate data IDs for uniqueness
@@ -1241,8 +1335,30 @@ impl CampaignBuilderApp {
         let summary = validation::ValidationSummary::from_results(&self.validation_errors);
 
         if self.validation_errors.is_empty() {
+            self.logger
+                .info(category::VALIDATION, "Validation passed with no issues");
             self.status_message = "✅ Validation passed!".to_string();
         } else {
+            self.logger.info(
+                category::VALIDATION,
+                &format!(
+                    "Validation complete: {} error(s), {} warning(s)",
+                    summary.error_count, summary.warning_count
+                ),
+            );
+            // Log individual errors at debug level
+            for result in &self.validation_errors {
+                let level_str = match result.severity {
+                    validation::ValidationSeverity::Error => "ERROR",
+                    validation::ValidationSeverity::Warning => "WARN",
+                    validation::ValidationSeverity::Info => "INFO",
+                    validation::ValidationSeverity::Passed => "PASS",
+                };
+                self.logger.debug(
+                    category::VALIDATION,
+                    &format!("[{}] {}: {}", level_str, result.category, result.message),
+                );
+            }
             self.status_message = format!(
                 "Validation: {} error(s), {} warning(s)",
                 summary.error_count, summary.warning_count
@@ -1390,10 +1506,16 @@ impl CampaignBuilderApp {
     }
 
     fn do_open_campaign(&mut self) {
+        self.logger
+            .debug(category::FILE_IO, "do_open_campaign() called");
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("RON Files", &["ron"])
             .pick_file()
         {
+            self.logger.info(
+                category::FILE_IO,
+                &format!("Opening campaign: {}", path.display()),
+            );
             match self.load_campaign_file(&path) {
                 Ok(()) => {
                     self.campaign_path = Some(path.clone());
@@ -1402,12 +1524,16 @@ impl CampaignBuilderApp {
                     if let Some(parent) = path.parent() {
                         let parent_buf = parent.to_path_buf();
                         self.campaign_dir = Some(parent_buf.clone());
+                        self.logger.verbose(
+                            category::FILE_IO,
+                            &format!("Campaign directory: {}", parent_buf.display()),
+                        );
                         self.update_file_tree(&parent_buf);
                     }
 
                     // Load data files
-                    eprintln!("DEBUG: About to load data files...");
-                    eprintln!("DEBUG: campaign_dir = {:?}", self.campaign_dir);
+                    self.logger
+                        .debug(category::FILE_IO, "Loading data files...");
                     self.load_items();
                     self.load_spells();
                     self.load_monsters();
@@ -1417,17 +1543,29 @@ impl CampaignBuilderApp {
 
                     // Load quests and dialogues
                     if let Err(e) = self.load_quests() {
-                        eprintln!("Warning: Failed to load quests: {}", e);
+                        self.logger
+                            .warn(category::FILE_IO, &format!("Failed to load quests: {}", e));
                     }
 
                     if let Err(e) = self.load_dialogues() {
-                        eprintln!("Warning: Failed to load dialogues: {}", e);
+                        self.logger.warn(
+                            category::FILE_IO,
+                            &format!("Failed to load dialogues: {}", e),
+                        );
                     }
 
                     self.unsaved_changes = false;
+                    self.logger.info(
+                        category::FILE_IO,
+                        &format!("Campaign opened successfully: {}", self.campaign.name),
+                    );
                     self.status_message = format!("Opened campaign from: {}", path.display());
                 }
                 Err(e) => {
+                    self.logger.error(
+                        category::FILE_IO,
+                        &format!("Failed to load campaign: {}", e),
+                    );
                     self.status_message = format!("Failed to load campaign: {}", e);
                 }
             }
@@ -1703,6 +1841,196 @@ impl CampaignBuilderApp {
         self.show_validation_report = open;
     }
 
+    /// Show the debug panel window
+    ///
+    /// Displays:
+    /// - Current editor state
+    /// - Loaded data counts
+    /// - Recent log messages with filtering
+    fn show_debug_panel_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_debug_panel;
+        egui::Window::new("🐛 Debug Panel")
+            .open(&mut open)
+            .resizable(true)
+            .default_size([500.0, 400.0])
+            .show(ctx, |ui| {
+                // Current state section
+                ui.collapsing("📊 Current State", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Active Tab:");
+                        ui.strong(self.active_tab.name());
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Campaign Path:");
+                        if let Some(ref path) = self.campaign_path {
+                            ui.monospace(path.display().to_string());
+                        } else {
+                            ui.weak("(none)");
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Unsaved Changes:");
+                        if self.unsaved_changes {
+                            ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "Yes");
+                        } else {
+                            ui.label("No");
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Log Level:");
+                        ui.strong(self.logger.level().name());
+                    });
+                    let uptime = self.logger.uptime();
+                    ui.horizontal(|ui| {
+                        ui.label("Uptime:");
+                        ui.monospace(format!("{:.1}s", uptime.as_secs_f64()));
+                    });
+                });
+
+                ui.add_space(5.0);
+
+                // Data counts section
+                ui.collapsing("📦 Loaded Data", |ui| {
+                    egui::Grid::new("debug_data_counts")
+                        .num_columns(2)
+                        .spacing([20.0, 4.0])
+                        .show(ui, |ui| {
+                            ui.label("Items:");
+                            ui.strong(self.items.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Spells:");
+                            ui.strong(self.spells.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Monsters:");
+                            ui.strong(self.monsters.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Maps:");
+                            ui.strong(self.maps.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Quests:");
+                            ui.strong(self.quests.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Dialogues:");
+                            ui.strong(self.dialogues.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Conditions:");
+                            ui.strong(self.conditions.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Classes:");
+                            ui.strong(self.classes_editor_state.classes.len().to_string());
+                            ui.end_row();
+                        });
+                });
+
+                ui.add_space(5.0);
+
+                // Log messages section
+                ui.collapsing("📝 Log Messages", |ui| {
+                    // Controls
+                    ui.horizontal(|ui| {
+                        ui.label("Filter:");
+                        egui::ComboBox::from_id_salt("debug_log_filter")
+                            .selected_text(self.debug_panel_filter_level.name())
+                            .show_ui(ui, |ui| {
+                                for level in [
+                                    LogLevel::Error,
+                                    LogLevel::Warn,
+                                    LogLevel::Info,
+                                    LogLevel::Debug,
+                                    LogLevel::Verbose,
+                                ] {
+                                    ui.selectable_value(
+                                        &mut self.debug_panel_filter_level,
+                                        level,
+                                        level.name(),
+                                    );
+                                }
+                            });
+
+                        ui.checkbox(&mut self.debug_panel_auto_scroll, "Auto-scroll");
+
+                        if ui.button("Clear").clicked() {
+                            self.logger.clear();
+                        }
+                    });
+
+                    // Message counts
+                    let counts = self.logger.message_counts();
+                    ui.horizontal(|ui| {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(255, 100, 100),
+                            format!("E:{}", counts.error),
+                        );
+                        ui.colored_label(
+                            egui::Color32::from_rgb(255, 200, 100),
+                            format!("W:{}", counts.warn),
+                        );
+                        ui.colored_label(
+                            egui::Color32::from_rgb(200, 200, 200),
+                            format!("I:{}", counts.info),
+                        );
+                        ui.colored_label(
+                            egui::Color32::from_rgb(150, 200, 255),
+                            format!("D:{}", counts.debug),
+                        );
+                        ui.colored_label(
+                            egui::Color32::from_rgb(150, 150, 150),
+                            format!("V:{}", counts.verbose),
+                        );
+                        ui.label(format!("Total: {}", counts.total()));
+                    });
+
+                    ui.separator();
+
+                    // Log messages list
+                    let scroll_area = egui::ScrollArea::vertical()
+                        .max_height(200.0)
+                        .auto_shrink([false, false]);
+
+                    scroll_area.show(ui, |ui| {
+                        let filter_level = self.debug_panel_filter_level;
+                        for msg in self.logger.messages_at_level(filter_level) {
+                            let color = msg.level.color();
+                            ui.horizontal(|ui| {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(color[0], color[1], color[2]),
+                                    format!("[{}]", msg.level.prefix()),
+                                );
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(150, 150, 200),
+                                    format!("[{}]", msg.category),
+                                );
+                                ui.label(&msg.message);
+                            });
+                        }
+
+                        // Auto-scroll to bottom
+                        if self.debug_panel_auto_scroll {
+                            ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
+                        }
+                    });
+                });
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Press F12 to toggle this panel");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Close").clicked() {
+                            self.show_debug_panel = false;
+                        }
+                    });
+                });
+            });
+        self.show_debug_panel = open;
+    }
+
     /// Show balance statistics dialog
     fn show_balance_stats_dialog(&mut self, ctx: &egui::Context) {
         let mut open = self.show_balance_stats;
@@ -1825,6 +2153,53 @@ impl eframe::App for CampaignBuilderApp {
                     }
                 });
 
+                ui.menu_button("View", |ui| {
+                    // Debug panel toggle
+                    let debug_label = if self.show_debug_panel {
+                        "🐛 Hide Debug Panel"
+                    } else {
+                        "🐛 Show Debug Panel"
+                    };
+                    if ui.button(debug_label).clicked() {
+                        self.show_debug_panel = !self.show_debug_panel;
+                        self.logger.info(
+                            category::UI,
+                            &format!(
+                                "Debug panel {}",
+                                if self.show_debug_panel {
+                                    "opened"
+                                } else {
+                                    "closed"
+                                }
+                            ),
+                        );
+                        ui.close();
+                    }
+
+                    ui.separator();
+                    ui.label("Log Level:");
+
+                    for level in [
+                        LogLevel::Error,
+                        LogLevel::Warn,
+                        LogLevel::Info,
+                        LogLevel::Debug,
+                        LogLevel::Verbose,
+                    ] {
+                        if ui
+                            .selectable_label(self.logger.level() == level, level.name())
+                            .clicked()
+                        {
+                            self.logger.set_level(level);
+                            self.logger.info(
+                                category::APP,
+                                &format!("Log level changed to {}", level.name()),
+                            );
+                            ui.close();
+                        }
+                    }
+                });
+
                 ui.menu_button("Tools", |ui| {
                     if ui.button("📋 Template Browser...").clicked() {
                         self.show_template_browser = true;
@@ -1933,6 +2308,22 @@ impl eframe::App for CampaignBuilderApp {
             }
         }
 
+        // F12 = Toggle Debug Panel
+        if ctx.input(|i| i.key_pressed(egui::Key::F12)) {
+            self.show_debug_panel = !self.show_debug_panel;
+            self.logger.info(
+                category::UI,
+                &format!(
+                    "Debug panel {} (F12)",
+                    if self.show_debug_panel {
+                        "opened"
+                    } else {
+                        "closed"
+                    }
+                ),
+            );
+        }
+
         // Left sidebar with tabs
         egui::SidePanel::left("tab_panel")
             .resizable(false)
@@ -1958,7 +2349,12 @@ impl eframe::App for CampaignBuilderApp {
                 for tab in &tabs {
                     let is_selected = self.active_tab == *tab;
                     if ui.selectable_label(is_selected, tab.name()).clicked() {
+                        let previous_tab = self.active_tab;
                         self.active_tab = *tab;
+                        self.logger.debug(
+                            category::EDITOR,
+                            &format!("Tab changed: {} -> {}", previous_tab.name(), tab.name()),
+                        );
                     }
                 }
 
@@ -2144,6 +2540,11 @@ impl eframe::App for CampaignBuilderApp {
         // Phase 15: Balance statistics dialog
         if self.show_balance_stats {
             self.show_balance_stats_dialog(ctx);
+        }
+
+        // Phase 7: Debug panel
+        if self.show_debug_panel {
+            self.show_debug_panel_window(ctx);
         }
     }
 }
