@@ -2495,3 +2495,114 @@ Phase 9 refactor. The map_editor.rs changes compile and pass clippy.
   - Add editor compliance tests
   - Update documentation
   - Re-export data files
+
+---
+
+## Stat Ranges Documentation (2025-01-XX)
+
+**Objective**: Document all character, monster, and game statistic ranges with
+constants in code, a dedicated reference document, and architecture updates.
+
+### Background
+
+The valid ranges for character statistics (attributes, HP, SP, AC, etc.) were
+not explicitly documented, leading to inconsistent validation across different
+parts of the codebase. This work establishes canonical ranges with constants
+and comprehensive documentation.
+
+### Changes Made
+
+#### 1. Added Constants to `src/domain/character.rs`
+
+New stat range constants added:
+
+| Constant                 | Value | Description                         |
+| ------------------------ | ----- | ----------------------------------- |
+| `ATTRIBUTE_MIN`          | 3     | Minimum primary attribute value     |
+| `ATTRIBUTE_MAX`          | 255   | Maximum primary attribute value     |
+| `ATTRIBUTE_DEFAULT`      | 10    | Default starting attribute value    |
+| `HP_SP_MIN`              | 0     | Minimum HP/SP value                 |
+| `HP_SP_MAX`              | 9999  | Maximum HP/SP value                 |
+| `AC_MIN`                 | 0     | Minimum Armor Class                 |
+| `AC_MAX`                 | 30    | Maximum Armor Class                 |
+| `AC_DEFAULT`             | 10    | Default unarmored AC                |
+| `LEVEL_MIN`              | 1     | Minimum character level             |
+| `LEVEL_MAX`              | 200   | Maximum character level             |
+| `SPELL_LEVEL_MIN`        | 1     | Minimum spell level                 |
+| `SPELL_LEVEL_MAX`        | 7     | Maximum spell level                 |
+| `AGE_MIN`                | 18    | Minimum character age               |
+| `AGE_MAX`                | 200   | Maximum character age               |
+| `FOOD_MIN`               | 0     | Minimum food units                  |
+| `FOOD_MAX`               | 40    | Maximum food units                  |
+| `FOOD_DEFAULT`           | 10    | Default starting food               |
+| `RESISTANCE_MIN`         | 0     | Minimum resistance (0%)             |
+| `RESISTANCE_MAX`         | 100   | Maximum resistance (100%)           |
+| `PARTY_MAX_SIZE`         | 6     | Maximum party members               |
+| `ROSTER_MAX_SIZE`        | 18    | Maximum roster characters           |
+| `INVENTORY_MAX_SLOTS`    | 6     | Inventory slots per character       |
+| `EQUIPMENT_MAX_SLOTS`    | 6     | Equipment slots per character       |
+| `ATTRIBUTE_MODIFIER_MIN` | -255  | Min modifier for effects/conditions |
+| `ATTRIBUTE_MODIFIER_MAX` | 255   | Max modifier for effects/conditions |
+
+#### 2. Created `docs/reference/stat_ranges.md`
+
+Comprehensive reference document covering:
+
+- Numeric type overview (AttributePair, AttributePair16, modifiers)
+- Character statistics (attributes, HP/SP, AC, level, spell level, age, food)
+- Resistances (all 8 types)
+- Party and roster limits
+- Monster statistics
+- Attribute modifiers
+- Item statistics (charges, value)
+- Dice roll components
+- Currency ranges
+- Map coordinates
+- Validation rules (editor and runtime)
+- Code examples for using constants
+
+#### 3. Updated `docs/reference/architecture.md`
+
+- Added note linking to stat_ranges.md in Character section
+- Added documentation comments to AttributePair showing valid ranges
+- Added documentation comments to AttributePair16 showing valid ranges
+- Added complete stat range constants section with all values
+
+#### 4. Updated Validation Code
+
+Updated `sdk/campaign_builder/src/conditions_editor.rs`:
+
+- Added import for `ATTRIBUTE_MODIFIER_MIN` and `ATTRIBUTE_MODIFIER_MAX`
+- Updated `apply_condition_edits()` validation to use constants
+- Error messages now reference the constant values
+
+#### 5. Updated Test Data
+
+- Updated `data/conditions.ron` `max_strength_value` condition to use 255
+- Updated `tests/conditions_examples.rs` to expect 255 (valid range)
+
+### Files Modified
+
+- `src/domain/character.rs` - Added stat range constants
+- `docs/reference/stat_ranges.md` - Created comprehensive reference
+- `docs/reference/architecture.md` - Added ranges and constants section
+- `sdk/campaign_builder/src/conditions_editor.rs` - Uses constants for validation
+- `data/conditions.ron` - Fixed test condition value
+- `sdk/campaign_builder/tests/conditions_examples.rs` - Updated expected value
+
+### Validation
+
+```bash
+cargo fmt --all                                        # OK
+cargo check --all-targets --all-features              # OK
+cargo clippy --all-targets --all-features -- -D warnings  # OK
+cargo test --all-features                              # 218 tests pass
+```
+
+### Architecture Compliance
+
+- [x] Constants defined in appropriate module (`domain/character.rs`)
+- [x] Documentation follows Diataxis framework (reference document)
+- [x] Architecture.md updated with specification
+- [x] Validation uses defined constants, not magic numbers
+- [x] All tests pass with updated ranges

@@ -177,6 +177,8 @@ pub enum WallType {
 
 #### 4.3 Character
 
+> **Note:** For comprehensive stat range documentation, see [stat_ranges.md](stat_ranges.md).
+
 ```rust
 /// Represents a single character (party member or roster character)
 pub struct Character {
@@ -210,6 +212,11 @@ pub struct Character {
 
 /// Core pattern: base value + current temporary value for buffs/debuffs
 /// When saving, save base. When loading, restore current = base.
+///
+/// Valid ranges for u8 AttributePair:
+/// - Primary attributes: 3-255 (ATTRIBUTE_MIN to ATTRIBUTE_MAX)
+/// - AC: 0-30 (AC_MIN to AC_MAX)
+/// - Resistances: 0-100 (percentage)
 pub struct AttributePair {
     pub base: u8,      // Permanent value
     pub current: u8,   // Temporary value (includes buffs/debuffs)
@@ -227,6 +234,11 @@ impl AttributePair {
     }
 }
 
+/// AttributePair for 16-bit values (HP, SP)
+///
+/// Valid ranges:
+/// - HP: 0-9999 (HP_SP_MIN to HP_SP_MAX)
+/// - SP: 0-9999 (HP_SP_MIN to HP_SP_MAX)
 pub struct AttributePair16 {
     pub base: u16,     // Permanent value
     pub current: u16,  // Temporary value
@@ -237,6 +249,46 @@ impl AttributePair16 {
         self.current = self.base;
     }
 }
+
+// ===== Stat Range Constants =====
+//
+// These constants define valid ranges for character statistics.
+// See docs/reference/stat_ranges.md for detailed documentation.
+
+pub const ATTRIBUTE_MIN: u8 = 3;      // Minimum primary attribute value
+pub const ATTRIBUTE_MAX: u8 = 255;    // Maximum primary attribute value
+pub const ATTRIBUTE_DEFAULT: u8 = 10; // Default starting attribute value
+
+pub const HP_SP_MIN: u16 = 0;         // Minimum HP/SP value
+pub const HP_SP_MAX: u16 = 9999;      // Maximum HP/SP value
+
+pub const AC_MIN: u8 = 0;             // Minimum Armor Class
+pub const AC_MAX: u8 = 30;            // Maximum Armor Class
+pub const AC_DEFAULT: u8 = 10;        // Default unarmored AC
+
+pub const LEVEL_MIN: u32 = 1;         // Minimum character level
+pub const LEVEL_MAX: u32 = 200;       // Maximum character level
+
+pub const SPELL_LEVEL_MIN: u8 = 1;    // Minimum spell level
+pub const SPELL_LEVEL_MAX: u8 = 7;    // Maximum spell level
+
+pub const AGE_MIN: u16 = 18;          // Minimum character age
+pub const AGE_MAX: u16 = 200;         // Maximum character age
+
+pub const FOOD_MIN: u8 = 0;           // Minimum food units
+pub const FOOD_MAX: u8 = 40;          // Maximum food units
+pub const FOOD_DEFAULT: u8 = 10;      // Default starting food
+
+pub const RESISTANCE_MIN: u8 = 0;     // Minimum resistance (0%)
+pub const RESISTANCE_MAX: u8 = 100;   // Maximum resistance (100%)
+
+pub const PARTY_MAX_SIZE: usize = 6;      // Maximum party members
+pub const ROSTER_MAX_SIZE: usize = 18;    // Maximum roster characters
+pub const INVENTORY_MAX_SLOTS: usize = 6; // Inventory slots per character
+pub const EQUIPMENT_MAX_SLOTS: usize = 6; // Equipment slots per character
+
+pub const ATTRIBUTE_MODIFIER_MIN: i16 = -255; // Min modifier for effects
+pub const ATTRIBUTE_MODIFIER_MAX: i16 = 255;  // Max modifier for effects
 
 /// Primary character attributes
 pub struct Stats {

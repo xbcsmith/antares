@@ -326,7 +326,7 @@
         effects: [
             AttributeModifier(
                 attribute: "might",
-                value: 32767,
+                value: 255,
             ),
         ],
         default_duration: Rounds(1),

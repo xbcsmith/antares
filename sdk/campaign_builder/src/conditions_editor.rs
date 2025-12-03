@@ -5,6 +5,7 @@ use crate::ui_helpers::{
     ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout,
     DEFAULT_PANEL_MIN_HEIGHT,
 };
+use antares::domain::character::{ATTRIBUTE_MODIFIER_MAX, ATTRIBUTE_MODIFIER_MIN};
 use antares::domain::conditions::{
     ConditionDefinition, ConditionDuration, ConditionEffect, ConditionId,
 };
@@ -1644,11 +1645,11 @@ pub(crate) fn apply_condition_edits(
                 if attribute.trim().is_empty() {
                     return Err("Attribute modifier must have a non-empty attribute".to_string());
                 }
-                // Check value is in reasonable range (-255 to 255)
-                if *value < -255 || *value > 255 {
+                // Check value is in reasonable range using defined constants
+                if *value < ATTRIBUTE_MODIFIER_MIN || *value > ATTRIBUTE_MODIFIER_MAX {
                     return Err(format!(
-                        "Attribute modifier value {} is out of range (-255 to 255)",
-                        value
+                        "Attribute modifier value {} is out of range ({} to {})",
+                        value, ATTRIBUTE_MODIFIER_MIN, ATTRIBUTE_MODIFIER_MAX
                     ));
                 }
             }

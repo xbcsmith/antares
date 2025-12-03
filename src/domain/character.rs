@@ -9,6 +9,7 @@
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 4.3 for complete specifications.
+//! See `docs/reference/stat_ranges.md` for detailed stat range documentation.
 
 use crate::domain::types::{ItemId, SpellId, TownId};
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,86 @@ pub enum CharacterError {
     #[error("Character not found at index {0}")]
     CharacterNotFound(usize),
 }
+
+// ===== Stat Range Constants =====
+//
+// These constants define the valid ranges for character statistics.
+// See docs/reference/stat_ranges.md for detailed documentation.
+
+/// Minimum value for primary attributes (Might, Intellect, etc.)
+pub const ATTRIBUTE_MIN: u8 = 3;
+
+/// Maximum value for primary attributes (Might, Intellect, etc.)
+pub const ATTRIBUTE_MAX: u8 = 255;
+
+/// Default starting value for primary attributes
+pub const ATTRIBUTE_DEFAULT: u8 = 10;
+
+/// Minimum value for HP/SP (AttributePair16)
+pub const HP_SP_MIN: u16 = 0;
+
+/// Maximum value for HP/SP (AttributePair16)
+pub const HP_SP_MAX: u16 = 9999;
+
+/// Minimum Armor Class value
+pub const AC_MIN: u8 = 0;
+
+/// Maximum Armor Class value (practical limit)
+pub const AC_MAX: u8 = 30;
+
+/// Default Armor Class for unarmored character
+pub const AC_DEFAULT: u8 = 10;
+
+/// Minimum character level
+pub const LEVEL_MIN: u32 = 1;
+
+/// Maximum character level
+pub const LEVEL_MAX: u32 = 200;
+
+/// Minimum spell level
+pub const SPELL_LEVEL_MIN: u8 = 1;
+
+/// Maximum spell level
+pub const SPELL_LEVEL_MAX: u8 = 7;
+
+/// Minimum character age
+pub const AGE_MIN: u16 = 18;
+
+/// Maximum character age before death from old age
+pub const AGE_MAX: u16 = 200;
+
+/// Minimum food units
+pub const FOOD_MIN: u8 = 0;
+
+/// Maximum food units per character
+pub const FOOD_MAX: u8 = 40;
+
+/// Default starting food units
+pub const FOOD_DEFAULT: u8 = 10;
+
+/// Minimum resistance value (0%)
+pub const RESISTANCE_MIN: u8 = 0;
+
+/// Maximum resistance value (100%)
+pub const RESISTANCE_MAX: u8 = 100;
+
+/// Maximum party size
+pub const PARTY_MAX_SIZE: usize = 6;
+
+/// Maximum roster size (characters stored at inns)
+pub const ROSTER_MAX_SIZE: usize = 18;
+
+/// Maximum inventory slots per character
+pub const INVENTORY_MAX_SLOTS: usize = 6;
+
+/// Maximum equipment slots per character
+pub const EQUIPMENT_MAX_SLOTS: usize = 6;
+
+/// Minimum attribute modifier value (for effects/conditions)
+pub const ATTRIBUTE_MODIFIER_MIN: i16 = -255;
+
+/// Maximum attribute modifier value (for effects/conditions)
+pub const ATTRIBUTE_MODIFIER_MAX: i16 = 255;
 
 // ===== Core Pattern: AttributePair =====
 
