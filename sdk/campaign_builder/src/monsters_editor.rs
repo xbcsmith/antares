@@ -805,8 +805,8 @@ impl MonstersEditorState {
                             ui.selectable_value(&mut attack.attack_type, AttackType::Cold, "Cold");
                             ui.selectable_value(
                                 &mut attack.attack_type,
-                                AttackType::Electric,
-                                "Electric",
+                                AttackType::Electricity,
+                                "Electricity",
                             );
                             ui.selectable_value(&mut attack.attack_type, AttackType::Acid, "Acid");
                             ui.selectable_value(
@@ -816,8 +816,8 @@ impl MonstersEditorState {
                             );
                             ui.selectable_value(
                                 &mut attack.attack_type,
-                                AttackType::Magic,
-                                "Magic",
+                                AttackType::Energy,
+                                "Energy",
                             );
                         });
                 });
@@ -837,15 +837,12 @@ impl MonstersEditorState {
                             .selected_text(format!("{:?}", effect))
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(effect, SpecialEffect::Poison, "Poison");
-                                ui.selectable_value(effect, SpecialEffect::Paralyze, "Paralyze");
+                                ui.selectable_value(effect, SpecialEffect::Disease, "Disease");
+                                ui.selectable_value(effect, SpecialEffect::Paralysis, "Paralysis");
                                 ui.selectable_value(effect, SpecialEffect::Sleep, "Sleep");
+                                ui.selectable_value(effect, SpecialEffect::Drain, "Drain");
                                 ui.selectable_value(effect, SpecialEffect::Stone, "Stone");
-                                ui.selectable_value(
-                                    effect,
-                                    SpecialEffect::DrainLevel,
-                                    "Drain Level",
-                                );
-                                ui.selectable_value(effect, SpecialEffect::DrainStat, "Drain Stat");
+                                ui.selectable_value(effect, SpecialEffect::Death, "Death");
                             });
                     }
                 });
@@ -905,7 +902,7 @@ impl MonstersEditorState {
         ui.label("Item Drops:");
 
         let mut items_to_remove: Vec<usize> = Vec::new();
-        for (i, (item_id, chance)) in self.edit_buffer.loot.item_drops.iter_mut().enumerate() {
+        for (i, (chance, item_id)) in self.edit_buffer.loot.items.iter_mut().enumerate() {
             ui.horizontal(|ui| {
                 ui.label(format!("Item {}:", i + 1));
                 ui.add(egui::DragValue::new(item_id).prefix("ID: "));
@@ -922,11 +919,11 @@ impl MonstersEditorState {
         }
 
         for idx in items_to_remove.into_iter().rev() {
-            self.edit_buffer.loot.item_drops.remove(idx);
+            self.edit_buffer.loot.items.remove(idx);
         }
 
         if ui.button("➕ Add Item Drop").clicked() {
-            self.edit_buffer.loot.item_drops.push((0, 10));
+            self.edit_buffer.loot.items.push((0.1, 0));
         }
     }
 
@@ -965,5 +962,58 @@ impl MonstersEditorState {
                 }
             }
         }
+    }
+
+    /// Calculate experience points for a monster based on its stats and abilities.
+    ///
+    /// The formula considers:
+    /// - Base HP (HP * 10)
+    /// - Armor Class bonus ((10 - AC) * 50, if AC < 10)
+    /// - Number of attacks (attacks * 20)
+    /// - Average damage per attack (avg_damage * 5)
+    /// - Special effects (+50 per attack with special)
+    /// - Regeneration ability (+100)
+    /// - Undead status (+50)
+    /// - Magic resistance (resistance * 2)
+    pub fn calculate_monster_xp(&self, monster: &MonsterDefinition) -> u32 {
+        let mut xp: u32 = 0;
+
+        // Base XP from HP
+        xp += monster.hp.current as u32 * 10;
+
+        // AC bonus (lower AC = harder to hit = more XP)
+        if monster.ac.current < 10 {
+            xp += (10 - monster.ac.current) as u32 * 50;
+        }
+
+        // Attack bonuses
+        xp += monster.attacks.len() as u32 * 20;
+
+        // Damage contribution
+        for attack in &monster.attacks {
+            // Average damage = (count * (sides + 1) / 2) + bonus
+            let avg_damage = (attack.damage.count as f32 * (attack.damage.sides as f32 + 1.0)
+                / 2.0)
+                + attack.damage.bonus as f32;
+            xp += (avg_damage * 5.0) as u32;
+
+            // Special effect bonus
+            if attack.special_effect.is_some() {
+                xp += 50;
+            }
+        }
+
+        // Ability bonuses
+        if monster.can_regenerate {
+            xp += 100;
+        }
+        if monster.is_undead {
+            xp += 50;
+        }
+
+        // Magic resistance bonus
+        xp += monster.magic_resistance as u32 * 2;
+
+        xp
     }
 }

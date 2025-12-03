@@ -284,4 +284,52 @@
         default_duration: Minutes(10),
         icon_id: Some("icon_poison_resistance"),
     ),
+
+    // ===== Test Conditions =====
+    // These conditions are used by integration tests
+
+    (
+        id: "empty_effects",
+        name: "Empty Effects Test",
+        description: "A condition with no effects for testing.",
+        effects: [],
+        default_duration: Rounds(1),
+        icon_id: None,
+    ),
+
+    (
+        id: "dup1",
+        name: "Duplicate Test 1",
+        description: "First duplicate for testing duplicate detection.",
+        effects: [
+            StatusEffect("test"),
+        ],
+        default_duration: Rounds(1),
+        icon_id: None,
+    ),
+
+    (
+        id: "dup1",
+        name: "Duplicate Test 1 Copy",
+        description: "Second duplicate for testing duplicate detection.",
+        effects: [
+            StatusEffect("test"),
+        ],
+        default_duration: Rounds(1),
+        icon_id: None,
+    ),
+
+    (
+        id: "max_strength_value",
+        name: "Max Strength Value Test",
+        description: "A condition with maximum attribute modifier value.",
+        effects: [
+            AttributeModifier(
+                attribute: "might",
+                value: 32767,
+            ),
+        ],
+        default_duration: Rounds(1),
+        icon_id: None,
+    ),
 ]

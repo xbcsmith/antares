@@ -625,7 +625,7 @@ impl SpellsEditorState {
                                 );
                                 ui.selectable_value(
                                     &mut self.edit_buffer.context,
-                                    SpellContext::NonCombat,
+                                    SpellContext::NonCombatOnly,
                                     "Non-Combat",
                                 );
                                 ui.selectable_value(
@@ -663,8 +663,8 @@ impl SpellsEditorState {
                                 );
                                 ui.selectable_value(
                                     &mut self.edit_buffer.target,
-                                    SpellTarget::Caster,
-                                    "Caster",
+                                    SpellTarget::Self_,
+                                    "Self",
                                 );
                             });
                     });

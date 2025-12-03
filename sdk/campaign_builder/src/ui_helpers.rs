@@ -1698,8 +1698,7 @@ mod tests {
 
     #[test]
     fn default_constants_have_expected_values() {
-        assert!(DEFAULT_LEFT_COLUMN_WIDTH > 0.0);
-        assert!(DEFAULT_PANEL_MIN_HEIGHT > 0.0);
+        // Verify constants have the expected values
         assert_eq!(DEFAULT_LEFT_COLUMN_WIDTH, 300.0);
         assert_eq!(DEFAULT_PANEL_MIN_HEIGHT, 100.0);
     }

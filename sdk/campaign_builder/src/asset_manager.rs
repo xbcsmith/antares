@@ -377,6 +377,7 @@ impl AssetManager {
     /// * `quests_file` - Path to quests data file
     /// * `dialogue_file` - Path to dialogues data file
     /// * `conditions_file` - Path to conditions data file (optional)
+    #[allow(clippy::too_many_arguments)]
     pub fn init_data_files(
         &mut self,
         items_file: &str,

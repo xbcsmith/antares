@@ -33,6 +33,7 @@
 
 use regex::Regex;
 use std::collections::HashMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 // =============================================================================
@@ -400,7 +401,7 @@ pub fn check_editor_compliance(file: &SourceFile) -> EditorComplianceResult {
         has_show_method: has_show,
         has_new_method: has_new,
         has_state_struct: has_state,
-        uses_toolbar: uses_toolbar,
+        uses_toolbar,
         uses_action_buttons: uses_action,
         uses_two_column_layout: uses_layout,
         has_tests,
@@ -607,10 +608,12 @@ impl ComplianceSummary {
             all_issues,
         }
     }
+}
 
-    /// Returns a formatted summary string.
-    pub fn to_string(&self) -> String {
-        format!(
+impl fmt::Display for ComplianceSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
             "Compliance Summary:\n\
              - Total Editors: {}\n\
              - Compliant: {} ({:.1}%)\n\

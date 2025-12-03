@@ -257,11 +257,12 @@ impl ConditionsEditorState {
     ///
     /// This follows the toolbar, import/load/save patterns used across other
     /// editors (items, monsters, spells).
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         conditions: &mut Vec<ConditionDefinition>,
-        spells: &mut Vec<Spell>,
+        spells: &mut [Spell],
         campaign_dir: Option<&PathBuf>,
         conditions_file: &str,
         unsaved_changes: &mut bool,
@@ -502,11 +503,12 @@ impl ConditionsEditorState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_list(
         &mut self,
         ui: &mut egui::Ui,
         conditions: &mut Vec<ConditionDefinition>,
-        spells: &mut Vec<Spell>,
+        spells: &mut [Spell],
         unsaved_changes: &mut bool,
         status_message: &mut String,
         campaign_dir: Option<&PathBuf>,
@@ -798,11 +800,12 @@ impl ConditionsEditorState {
             });
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_form(
         &mut self,
         ui: &mut egui::Ui,
         conditions: &mut Vec<ConditionDefinition>,
-        spells: &mut Vec<Spell>,
+        spells: &mut [Spell],
         unsaved_changes: &mut bool,
         status_message: &mut String,
         campaign_dir: Option<&PathBuf>,
@@ -1083,9 +1086,7 @@ impl ConditionsEditorState {
                     "edit" => {
                         if idx < new_cond.effects.len() {
                             let eff = new_cond.effects[idx].clone();
-                            let mut buf = EffectEditBuffer::default();
-                            buf.editing_index = Some(idx);
-                            buf.effect_type = Some(match &eff {
+                            let effect_type = Some(match &eff {
                                 ConditionEffect::AttributeModifier { .. } => {
                                     "AttributeModifier".to_string()
                                 }
@@ -1095,6 +1096,11 @@ impl ConditionsEditorState {
                                 }
                                 ConditionEffect::HealOverTime { .. } => "HealOverTime".to_string(),
                             });
+                            let mut buf = EffectEditBuffer {
+                                editing_index: Some(idx),
+                                effect_type,
+                                ..Default::default()
+                            };
 
                             match eff {
                                 ConditionEffect::AttributeModifier { attribute, value } => {
@@ -1279,41 +1285,39 @@ impl ConditionsEditorState {
 
                 ui.horizontal(|ui| {
                     let effect_validation = validate_effect_edit_buffer(&buf);
-                    if effect_validation.is_ok() {
-                        if ui.button("💾 Save Effect").clicked() {
-                            let new_effect = match buf.effect_type.as_deref() {
-                                Some("AttributeModifier") => ConditionEffect::AttributeModifier {
-                                    attribute: buf.attribute.clone(),
-                                    value: buf.attribute_value,
-                                },
-                                Some("StatusEffect") => {
-                                    ConditionEffect::StatusEffect(buf.status_tag.clone())
-                                }
-                                Some("DamageOverTime") => ConditionEffect::DamageOverTime {
-                                    damage: buf.dice.clone(),
-                                    element: buf.element.clone(),
-                                },
-                                Some("HealOverTime") => ConditionEffect::HealOverTime {
-                                    amount: buf.dice.clone(),
-                                },
-                                _ => ConditionEffect::StatusEffect(buf.status_tag.clone()),
-                            };
+                    if let Err(ref validation_error) = effect_validation {
+                        ui.colored_label(egui::Color32::RED, validation_error);
+                        ui.add_enabled(false, egui::Button::new("💾 Save Effect"));
+                    } else if ui.button("💾 Save Effect").clicked() {
+                        let new_effect = match buf.effect_type.as_deref() {
+                            Some("AttributeModifier") => ConditionEffect::AttributeModifier {
+                                attribute: buf.attribute.clone(),
+                                value: buf.attribute_value,
+                            },
+                            Some("StatusEffect") => {
+                                ConditionEffect::StatusEffect(buf.status_tag.clone())
+                            }
+                            Some("DamageOverTime") => ConditionEffect::DamageOverTime {
+                                damage: buf.dice,
+                                element: buf.element.clone(),
+                            },
+                            Some("HealOverTime") => {
+                                ConditionEffect::HealOverTime { amount: buf.dice }
+                            }
+                            _ => ConditionEffect::StatusEffect(buf.status_tag.clone()),
+                        };
 
-                            if let Some(idx) = buf.editing_index {
-                                if idx < new_cond.effects.len() {
-                                    new_cond.effects[idx] = new_effect;
-                                } else {
-                                    new_cond.effects.push(new_effect);
-                                }
+                        if let Some(idx) = buf.editing_index {
+                            if idx < new_cond.effects.len() {
+                                new_cond.effects[idx] = new_effect;
                             } else {
                                 new_cond.effects.push(new_effect);
                             }
-
-                            keep_buf = false;
+                        } else {
+                            new_cond.effects.push(new_effect);
                         }
-                    } else {
-                        ui.colored_label(egui::Color32::RED, effect_validation.unwrap_err());
-                        ui.add_enabled(false, egui::Button::new("💾 Save Effect"));
+
+                        keep_buf = false;
                     }
                     if ui.button("❌ Cancel").clicked() {
                         keep_buf = false;
@@ -1477,11 +1481,12 @@ impl ConditionsEditorState {
         self.show_import_dialog = open;
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_delete_confirmation(
         &mut self,
         ctx: &egui::Context,
         conditions: &mut Vec<ConditionDefinition>,
-        spells: &mut Vec<Spell>,
+        spells: &mut [Spell],
         unsaved_changes: &mut bool,
         status_message: &mut String,
         campaign_dir: Option<&PathBuf>,
@@ -1632,6 +1637,48 @@ pub(crate) fn apply_condition_edits(
         return Err("Name cannot be empty".to_string());
     }
 
+    // Validate each effect
+    for effect in &new_cond.effects {
+        match effect {
+            ConditionEffect::AttributeModifier { attribute, value } => {
+                if attribute.trim().is_empty() {
+                    return Err("Attribute modifier must have a non-empty attribute".to_string());
+                }
+                // Check value is in reasonable range (-255 to 255)
+                if *value < -255 || *value > 255 {
+                    return Err(format!(
+                        "Attribute modifier value {} is out of range (-255 to 255)",
+                        value
+                    ));
+                }
+            }
+            ConditionEffect::StatusEffect(tag) => {
+                if tag.trim().is_empty() {
+                    return Err("Status effect must have a non-empty tag".to_string());
+                }
+            }
+            ConditionEffect::DamageOverTime { damage, element } => {
+                if damage.count < 1 {
+                    return Err("Damage over time dice count must be >= 1".to_string());
+                }
+                if damage.sides < 2 {
+                    return Err("Damage over time dice sides must be >= 2".to_string());
+                }
+                if element.trim().is_empty() {
+                    return Err("Damage over time must have a non-empty element".to_string());
+                }
+            }
+            ConditionEffect::HealOverTime { amount } => {
+                if amount.count < 1 {
+                    return Err("Heal over time dice count must be >= 1".to_string());
+                }
+                if amount.sides < 2 {
+                    return Err("Heal over time dice sides must be >= 2".to_string());
+                }
+            }
+        }
+    }
+
     // Check for ID collision (excluding the original)
     let id_collision = conditions.iter().any(|c| {
         if let Some(orig) = original_id {
@@ -1749,8 +1796,100 @@ pub(crate) fn validate_effect_edit_buffer(buf: &EffectEditBuffer) -> Result<(), 
     }
 }
 
+// ===== Effect Helper Functions (for tests and external use) =====
+
+/// Add an effect to a condition's effects list.
+pub fn add_effect_to_condition(
+    condition: &mut antares::domain::conditions::ConditionDefinition,
+    effect: antares::domain::conditions::ConditionEffect,
+) {
+    condition.effects.push(effect);
+}
+
+/// Delete an effect from a condition's effects list by index.
+/// Returns an error if the index is out of bounds.
+pub fn delete_effect_from_condition(
+    condition: &mut antares::domain::conditions::ConditionDefinition,
+    index: usize,
+) -> Result<(), String> {
+    if index >= condition.effects.len() {
+        return Err(format!(
+            "Index {} out of bounds (effects count: {})",
+            index,
+            condition.effects.len()
+        ));
+    }
+    condition.effects.remove(index);
+    Ok(())
+}
+
+/// Duplicate an effect in a condition's effects list.
+/// The duplicated effect is inserted right after the original.
+/// Returns an error if the index is out of bounds.
+pub fn duplicate_effect_in_condition(
+    condition: &mut antares::domain::conditions::ConditionDefinition,
+    index: usize,
+) -> Result<(), String> {
+    if index >= condition.effects.len() {
+        return Err(format!(
+            "Index {} out of bounds (effects count: {})",
+            index,
+            condition.effects.len()
+        ));
+    }
+    let effect = condition.effects[index].clone();
+    condition.effects.insert(index + 1, effect);
+    Ok(())
+}
+
+/// Move an effect in a condition's effects list by a relative offset.
+/// Positive offset moves down, negative offset moves up.
+/// Returns an error if the index or resulting position is out of bounds.
+pub fn move_effect_in_condition(
+    condition: &mut antares::domain::conditions::ConditionDefinition,
+    index: usize,
+    offset: i32,
+) -> Result<(), String> {
+    if index >= condition.effects.len() {
+        return Err(format!(
+            "Index {} out of bounds (effects count: {})",
+            index,
+            condition.effects.len()
+        ));
+    }
+    let new_index = (index as i32 + offset) as usize;
+    if new_index >= condition.effects.len() {
+        return Err(format!(
+            "New index {} out of bounds (effects count: {})",
+            new_index,
+            condition.effects.len()
+        ));
+    }
+    let effect = condition.effects.remove(index);
+    condition.effects.insert(new_index, effect);
+    Ok(())
+}
+
+/// Update an effect at a given index with a new effect.
+/// Returns an error if the index is out of bounds.
+pub fn update_effect_in_condition(
+    condition: &mut antares::domain::conditions::ConditionDefinition,
+    index: usize,
+    new_effect: antares::domain::conditions::ConditionEffect,
+) -> Result<(), String> {
+    if index >= condition.effects.len() {
+        return Err(format!(
+            "Index {} out of bounds (effects count: {})",
+            index,
+            condition.effects.len()
+        ));
+    }
+    condition.effects[index] = new_effect;
+    Ok(())
+}
+
 /// Returns a vector of spell names that reference condition_id.
-pub(crate) fn spells_referencing_condition(spells: &Vec<Spell>, condition_id: &str) -> Vec<String> {
+pub(crate) fn spells_referencing_condition(spells: &[Spell], condition_id: &str) -> Vec<String> {
     let mut result = Vec::new();
     for spell in spells.iter() {
         if spell.applied_conditions.iter().any(|c| c == condition_id) {
@@ -1762,7 +1901,7 @@ pub(crate) fn spells_referencing_condition(spells: &Vec<Spell>, condition_id: &s
 
 /// Remove references of condition_id from spells and return the number of spells modified.
 pub(crate) fn remove_condition_references_from_spells(
-    spells: &mut Vec<Spell>,
+    spells: &mut [Spell],
     condition_id: &str,
 ) -> usize {
     let mut modified = 0usize;

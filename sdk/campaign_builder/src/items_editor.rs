@@ -933,8 +933,6 @@ impl ItemsEditorState {
                             ui.selectable_value(&mut data.slot, AccessorySlot::Ring, "Ring");
                             ui.selectable_value(&mut data.slot, AccessorySlot::Amulet, "Amulet");
                             ui.selectable_value(&mut data.slot, AccessorySlot::Belt, "Belt");
-                            ui.selectable_value(&mut data.slot, AccessorySlot::Boots, "Boots");
-                            ui.selectable_value(&mut data.slot, AccessorySlot::Gloves, "Gloves");
                             ui.selectable_value(&mut data.slot, AccessorySlot::Cloak, "Cloak");
                         });
                 });
@@ -947,11 +945,9 @@ impl ItemsEditorState {
                     ui.label("Effect:");
                     let effect_type = match &data.effect {
                         ConsumableEffect::HealHp(_) => "Heal HP",
-                        ConsumableEffect::HealSp(_) => "Heal SP",
-                        ConsumableEffect::RestoreCondition => "Restore Condition",
-                        ConsumableEffect::CastSpell(_) => "Cast Spell",
-                        ConsumableEffect::GrantExperience(_) => "Grant XP",
-                        ConsumableEffect::Food(_) => "Food",
+                        ConsumableEffect::RestoreSp(_) => "Restore SP",
+                        ConsumableEffect::CureCondition(_) => "Cure Condition",
+                        ConsumableEffect::BoostAttribute(_, _) => "Boost Attribute",
                     };
                     egui::ComboBox::from_id_salt("consumable_effect")
                         .selected_text(effect_type)
@@ -963,34 +959,26 @@ impl ItemsEditorState {
                                 data.effect = ConsumableEffect::HealHp(10);
                             }
                             if ui
-                                .selectable_label(effect_type == "Heal SP", "Heal SP")
+                                .selectable_label(effect_type == "Restore SP", "Restore SP")
                                 .clicked()
                             {
-                                data.effect = ConsumableEffect::HealSp(10);
+                                data.effect = ConsumableEffect::RestoreSp(10);
+                            }
+                            if ui
+                                .selectable_label(effect_type == "Cure Condition", "Cure Condition")
+                                .clicked()
+                            {
+                                data.effect = ConsumableEffect::CureCondition(0xFF);
                             }
                             if ui
                                 .selectable_label(
-                                    effect_type == "Restore Condition",
-                                    "Restore Condition",
+                                    effect_type == "Boost Attribute",
+                                    "Boost Attribute",
                                 )
                                 .clicked()
                             {
-                                data.effect = ConsumableEffect::RestoreCondition;
-                            }
-                            if ui
-                                .selectable_label(effect_type == "Cast Spell", "Cast Spell")
-                                .clicked()
-                            {
-                                data.effect = ConsumableEffect::CastSpell(0);
-                            }
-                            if ui
-                                .selectable_label(effect_type == "Grant XP", "Grant XP")
-                                .clicked()
-                            {
-                                data.effect = ConsumableEffect::GrantExperience(100);
-                            }
-                            if ui.selectable_label(effect_type == "Food", "Food").clicked() {
-                                data.effect = ConsumableEffect::Food(1);
+                                data.effect =
+                                    ConsumableEffect::BoostAttribute(AttributeType::Might, 1);
                             }
                         });
                 });
@@ -1003,31 +991,54 @@ impl ItemsEditorState {
                             ui.add(egui::DragValue::new(amount).range(1..=999));
                         });
                     }
-                    ConsumableEffect::HealSp(amount) => {
+                    ConsumableEffect::RestoreSp(amount) => {
                         ui.horizontal(|ui| {
                             ui.label("Amount:");
                             ui.add(egui::DragValue::new(amount).range(1..=999));
                         });
                     }
-                    ConsumableEffect::CastSpell(spell_id) => {
+                    ConsumableEffect::CureCondition(flags) => {
                         ui.horizontal(|ui| {
-                            ui.label("Spell ID:");
-                            ui.add(egui::DragValue::new(spell_id).range(0..=999));
+                            ui.label("Condition Flags:");
+                            ui.add(egui::DragValue::new(flags).range(0..=255));
                         });
                     }
-                    ConsumableEffect::GrantExperience(xp) => {
+                    ConsumableEffect::BoostAttribute(attr_type, amount) => {
                         ui.horizontal(|ui| {
-                            ui.label("XP Amount:");
-                            ui.add(egui::DragValue::new(xp).range(1..=99999));
+                            ui.label("Attribute:");
+                            egui::ComboBox::from_id_salt("boost_attr_type")
+                                .selected_text(format!("{:?}", attr_type))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(attr_type, AttributeType::Might, "Might");
+                                    ui.selectable_value(
+                                        attr_type,
+                                        AttributeType::Intellect,
+                                        "Intellect",
+                                    );
+                                    ui.selectable_value(
+                                        attr_type,
+                                        AttributeType::Personality,
+                                        "Personality",
+                                    );
+                                    ui.selectable_value(
+                                        attr_type,
+                                        AttributeType::Endurance,
+                                        "Endurance",
+                                    );
+                                    ui.selectable_value(attr_type, AttributeType::Speed, "Speed");
+                                    ui.selectable_value(
+                                        attr_type,
+                                        AttributeType::Accuracy,
+                                        "Accuracy",
+                                    );
+                                    ui.selectable_value(attr_type, AttributeType::Luck, "Luck");
+                                });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Amount:");
+                            ui.add(egui::DragValue::new(amount).range(-128..=127));
                         });
                     }
-                    ConsumableEffect::Food(portions) => {
-                        ui.horizontal(|ui| {
-                            ui.label("Portions:");
-                            ui.add(egui::DragValue::new(portions).range(1..=20));
-                        });
-                    }
-                    ConsumableEffect::RestoreCondition => {}
                 }
             }
             ItemType::Ammo(data) => {
@@ -1040,11 +1051,6 @@ impl ItemsEditorState {
                             ui.selectable_value(&mut data.ammo_type, AmmoType::Arrow, "Arrow");
                             ui.selectable_value(&mut data.ammo_type, AmmoType::Bolt, "Bolt");
                             ui.selectable_value(&mut data.ammo_type, AmmoType::Stone, "Stone");
-                            ui.selectable_value(
-                                &mut data.ammo_type,
-                                AmmoType::ThrowingKnife,
-                                "Throwing Knife",
-                            );
                         });
                 });
                 ui.horizontal(|ui| {
@@ -1081,9 +1087,9 @@ impl ItemsEditorState {
                 let mut can_use = disablement.can_use_class(*flag);
                 if ui.checkbox(&mut can_use, *name).changed() {
                     if can_use {
-                        disablement.allow_class(*flag);
+                        disablement.0 |= *flag;
                     } else {
-                        disablement.disallow_class(*flag);
+                        disablement.0 &= !*flag;
                     }
                 }
             }
@@ -1099,16 +1105,15 @@ impl ItemsEditorState {
                 .radio_value(&mut good_only, false, "Any Alignment")
                 .changed()
             {
-                disablement.set_good_only(false);
-                disablement.set_evil_only(false);
+                disablement.0 &= !(Disablement::GOOD | Disablement::EVIL);
             }
             if ui.radio_value(&mut good_only, true, "Good Only").changed() {
-                disablement.set_good_only(true);
-                disablement.set_evil_only(false);
+                disablement.0 |= Disablement::GOOD;
+                disablement.0 &= !Disablement::EVIL;
             }
             if ui.radio_value(&mut evil_only, true, "Evil Only").changed() {
-                disablement.set_good_only(false);
-                disablement.set_evil_only(true);
+                disablement.0 &= !Disablement::GOOD;
+                disablement.0 |= Disablement::EVIL;
             }
         });
     }

@@ -362,7 +362,7 @@ impl QuestEditorState {
     /// Save edited reward
     pub fn save_reward(
         &mut self,
-        quests: &mut Vec<Quest>,
+        quests: &mut [Quest],
         quest_idx: usize,
         reward_idx: usize,
     ) -> Result<(), String> {
@@ -438,7 +438,7 @@ impl QuestEditorState {
     /// Delete a reward from quest
     pub fn delete_reward(
         &mut self,
-        quests: &mut Vec<Quest>,
+        quests: &mut [Quest],
         quest_idx: usize,
         reward_idx: usize,
     ) -> Result<(), String> {
@@ -461,7 +461,7 @@ impl QuestEditorState {
     }
 
     /// Add a default reward to current quest
-    pub fn add_default_reward(&mut self, quests: &mut Vec<Quest>) -> Result<usize, String> {
+    pub fn add_default_reward(&mut self, quests: &mut [Quest]) -> Result<usize, String> {
         if let Some(quest_idx) = self.selected_quest {
             if quest_idx >= quests.len() {
                 return Err("Invalid quest index".to_string());
@@ -1038,6 +1038,7 @@ impl QuestEditorState {
     /// editor.start_new_quest("1".to_string());
     /// assert_eq!(editor.mode, QuestEditorMode::Creating);
     /// ```
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -1683,7 +1684,7 @@ impl QuestEditorState {
 
                 // Action buttons
                 ui.horizontal(|ui| {
-                    if ui.button("✅ Save Quest").clicked() {}
+                    let _ = ui.button("✅ Save Quest");
 
                     if ui.button("❌ Cancel").clicked() {
                         self.cancel_edit();
@@ -1696,7 +1697,7 @@ impl QuestEditorState {
     fn show_quest_stages_editor(
         &mut self,
         ui: &mut egui::Ui,
-        quests: &mut Vec<Quest>,
+        quests: &mut [Quest],
         items: &[Item],
         monsters: &[MonsterDefinition],
         maps: &[Map],
@@ -1838,13 +1839,14 @@ impl QuestEditorState {
     }
 
     /// Show quest objectives editor
+    #[allow(clippy::too_many_arguments)]
     fn show_quest_objectives_editor(
         &mut self,
         ui: &mut egui::Ui,
         quest_idx: usize,
         stage_idx: usize,
         objectives: &[QuestObjective],
-        quests: &mut Vec<Quest>,
+        quests: &mut [Quest],
         items: &[Item],
         monsters: &[MonsterDefinition],
         maps: &[Map],

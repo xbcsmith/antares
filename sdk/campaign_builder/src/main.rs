@@ -61,7 +61,7 @@ use conditions_editor::ConditionsEditorState;
 use dialogue_editor::DialogueEditorState;
 use eframe::egui;
 use items_editor::ItemsEditorState;
-use map_editor::{MapEditorState, MapEditorWidget};
+use map_editor::MapsEditorState;
 use monsters_editor::MonstersEditorState;
 use quest_editor::QuestEditorState;
 use serde::{Deserialize, Serialize};
@@ -100,8 +100,10 @@ fn main() -> Result<(), eframe::Error> {
         "Antares Campaign Builder",
         options,
         Box::new(move |_cc| {
-            let mut app = CampaignBuilderApp::default();
-            app.logger = logger.clone();
+            let mut app = CampaignBuilderApp {
+                logger: logger.clone(),
+                ..Default::default()
+            };
             app.logger.info(category::APP, "Application initialized");
             Ok(Box::new(app))
         }),
@@ -345,10 +347,7 @@ struct CampaignBuilderApp {
 
     // Map editor state
     maps: Vec<Map>,
-    maps_search: String,
-    maps_selected: Option<usize>,
-    maps_editor_mode: EditorMode,
-    map_editor_state: Option<MapEditorState>,
+    maps_editor_state: MapsEditorState,
 
     // Quest editor state
     quests: Vec<Quest>,
@@ -439,10 +438,7 @@ impl Default for CampaignBuilderApp {
             conditions_editor_state: ConditionsEditorState::new(),
 
             maps: Vec::new(),
-            maps_search: String::new(),
-            maps_selected: None,
-            maps_editor_mode: EditorMode::List,
-            map_editor_state: None,
+            maps_editor_state: MapsEditorState::new(),
 
             quests: Vec::new(),
             quest_editor_state: QuestEditorState::default(),
@@ -2431,7 +2427,14 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,
             ),
-            EditorTab::Maps => self.show_maps_editor(ui),
+            EditorTab::Maps => self.maps_editor_state.show(
+                ui,
+                &mut self.maps,
+                self.campaign_dir.as_ref(),
+                &self.campaign.maps_dir,
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+            ),
             EditorTab::Quests => self.show_quests_editor(ui),
             EditorTab::Classes => self.classes_editor_state.show(
                 ui,
@@ -2911,338 +2914,6 @@ impl CampaignBuilderApp {
                     self.active_tab = EditorTab::Validation;
                 }
             });
-        });
-    }
-
-    /// Show maps editor with integrated map editor
-    fn show_maps_editor(&mut self, ui: &mut egui::Ui) {
-        match self.maps_editor_mode {
-            EditorMode::List => self.show_maps_list(ui),
-            EditorMode::Add | EditorMode::Edit => self.show_map_editor_panel(ui),
-        }
-    }
-
-    /// Show maps list view
-    fn show_maps_list(&mut self, ui: &mut egui::Ui) {
-        ui.heading("🗺️ Maps Editor");
-        ui.add_space(5.0);
-        ui.label("Manage world maps and dungeons");
-        ui.separator();
-
-        ui.horizontal(|ui| {
-            ui.label("🔍 Search:");
-            ui.text_edit_singleline(&mut self.maps_search);
-            ui.separator();
-
-            if ui.button("➕ New Map").clicked() {
-                // Create a new empty map
-                let new_id = self.next_available_map_id();
-                let new_map = Map::new(
-                    new_id,
-                    "New Map".to_string(),
-                    "Description".to_string(),
-                    20,
-                    20,
-                );
-                self.maps.push(new_map.clone());
-                self.maps_selected = Some(self.maps.len() - 1);
-                self.map_editor_state = Some(MapEditorState::new(new_map));
-                self.maps_editor_mode = EditorMode::Add;
-            }
-
-            if ui.button("🔄 Reload").clicked() {
-                self.load_maps();
-            }
-        });
-
-        // Sort maps by ID for consistent display
-        let mut sorted_maps: Vec<_> = self.maps.iter().enumerate().collect();
-        sorted_maps.sort_by_key(|(_, map)| map.id);
-
-        ui.separator();
-
-        // Map list with previews
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if self.maps.is_empty() {
-                    ui.group(|ui| {
-                        ui.label("No maps found");
-                        ui.label("Create a new map or load maps from:");
-                        ui.monospace(&self.campaign.maps_dir);
-                    });
-                } else {
-                    let mut to_delete = None;
-                    let mut to_edit = None;
-
-                    for (idx, map) in self.maps.iter().enumerate() {
-                        let filter_match = self.maps_search.is_empty()
-                            || map.id.to_string().contains(&self.maps_search);
-
-                        if !filter_match {
-                            continue;
-                        }
-
-                        let is_selected = self.maps_selected == Some(idx);
-
-                        ui.group(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.set_min_width(ui.available_width());
-
-                                ui.vertical(|ui| {
-                                    ui.strong(format!("Map ID: {}", map.id));
-                                    ui.label(format!("Size: {}x{}", map.width, map.height));
-                                    ui.label(format!("Events: {}", map.events.len()));
-                                    ui.label(format!("NPCs: {}", map.npcs.len()));
-                                });
-
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if ui.button("🗑").on_hover_text("Delete map").clicked() {
-                                            to_delete = Some(idx);
-                                        }
-
-                                        if ui.button("✏️").on_hover_text("Edit map").clicked() {
-                                            to_edit = Some(idx);
-                                        }
-                                    },
-                                );
-                            });
-
-                            // Show mini preview
-                            if is_selected {
-                                ui.separator();
-                                ui.label("Preview:");
-                                self.show_map_preview(ui, map);
-                            }
-                        });
-
-                        ui.add_space(5.0);
-                    }
-
-                    // Handle actions after iteration
-                    if let Some(idx) = to_delete {
-                        self.maps.remove(idx);
-                        if self.maps_selected == Some(idx) {
-                            self.maps_selected = None;
-                        }
-                    }
-
-                    if let Some(idx) = to_edit {
-                        if let Some(map) = self.maps.get(idx) {
-                            self.maps_selected = Some(idx);
-                            self.map_editor_state = Some(MapEditorState::new(map.clone()));
-                            self.maps_editor_mode = EditorMode::Edit;
-                        }
-                    }
-                }
-            });
-    }
-
-    /// Show map editor panel
-    fn show_map_editor_panel(&mut self, ui: &mut egui::Ui) {
-        let mut back_clicked = false;
-        let mut save_clicked = false;
-
-        if let Some(ref mut editor_state) = self.map_editor_state {
-            ui.horizontal(|ui| {
-                if ui.button("← Back to List").clicked() {
-                    back_clicked = true;
-                }
-
-                ui.separator();
-
-                if ui
-                    .button("💾 Save")
-                    .on_hover_text("Save map to file")
-                    .clicked()
-                {
-                    save_clicked = true;
-                }
-            });
-
-            ui.separator();
-
-            // Show the map editor widget
-            let mut widget = MapEditorWidget::new(editor_state);
-            widget.show(ui);
-        } else {
-            ui.label("No map editor state available");
-            if ui.button("Back").clicked() {
-                self.maps_editor_mode = EditorMode::List;
-            }
-            return;
-        }
-
-        // Handle actions after borrowing editor_state
-        if back_clicked {
-            // Extract data we need before any mutable borrows
-            let (map_to_save, has_changes, selected_idx) =
-                if let Some(ref editor_state) = self.map_editor_state {
-                    (
-                        Some(editor_state.map.clone()),
-                        editor_state.has_changes,
-                        self.maps_selected,
-                    )
-                } else {
-                    (None, false, None)
-                };
-
-            if has_changes {
-                if let Some(map) = map_to_save {
-                    // Save map before going back
-                    if let Err(e) = self.save_map(&map) {
-                        self.status_message = format!("Failed to save map: {}", e);
-                    } else {
-                        // Update the map in the list
-                        if let Some(idx) = selected_idx {
-                            if idx < self.maps.len() {
-                                self.maps[idx] = map;
-                            }
-                        }
-                        self.status_message = "Map saved".to_string();
-                    }
-                }
-            }
-
-            self.maps_editor_mode = EditorMode::List;
-            self.map_editor_state = None;
-        }
-
-        if save_clicked {
-            // Extract data we need before any mutable borrows
-            let (map_to_save, selected_idx) = if let Some(ref editor_state) = self.map_editor_state
-            {
-                (Some(editor_state.map.clone()), self.maps_selected)
-            } else {
-                (None, None)
-            };
-
-            if let Some(map) = map_to_save {
-                match self.save_map(&map) {
-                    Ok(_) => {
-                        // Update the map in the list
-                        if let Some(idx) = selected_idx {
-                            if idx < self.maps.len() {
-                                self.maps[idx] = map;
-                            }
-                        }
-
-                        // Now we can safely borrow mutably to update the state
-                        if let Some(ref mut editor_state) = self.map_editor_state {
-                            editor_state.has_changes = false;
-                        }
-
-                        self.status_message = "Map saved successfully".to_string();
-                    }
-                    Err(e) => {
-                        self.status_message = format!("Failed to save map: {}", e);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Show a small preview of a map
-    fn show_map_preview(&self, ui: &mut egui::Ui, map: &Map) {
-        let tile_size = 8.0;
-        let preview_width = (map.width.min(30) as f32 * tile_size).min(240.0);
-        let preview_height = (map.height.min(20) as f32 * tile_size).min(160.0);
-
-        let (response, painter) = ui.allocate_painter(
-            egui::Vec2::new(preview_width, preview_height),
-            egui::Sense::hover(),
-        );
-
-        let rect = response.rect;
-
-        let scale_x = preview_width / (map.width as f32 * tile_size);
-        let scale_y = preview_height / (map.height as f32 * tile_size);
-        let scale = scale_x.min(scale_y);
-
-        let actual_tile_size = tile_size * scale;
-
-        // Draw a detailed view of the map with terrain colors
-        for y in 0..map.height.min(20) {
-            for x in 0..map.width.min(30) {
-                let pos = antares::domain::types::Position::new(x as i32, y as i32);
-                if let Some(tile) = map.get_tile(pos) {
-                    use antares::domain::world::TerrainType;
-
-                    // Base color from terrain type
-                    let base_color = match tile.terrain {
-                        TerrainType::Ground => egui::Color32::from_rgb(160, 140, 120),
-                        TerrainType::Grass => egui::Color32::from_rgb(100, 180, 100),
-                        TerrainType::Water => egui::Color32::from_rgb(80, 120, 200),
-                        TerrainType::Lava => egui::Color32::from_rgb(220, 60, 30),
-                        TerrainType::Swamp => egui::Color32::from_rgb(90, 100, 70),
-                        TerrainType::Stone => egui::Color32::from_rgb(120, 120, 130),
-                        TerrainType::Dirt => egui::Color32::from_rgb(140, 110, 80),
-                        TerrainType::Forest => egui::Color32::from_rgb(60, 120, 60),
-                        TerrainType::Mountain => egui::Color32::from_rgb(100, 100, 110),
-                    };
-
-                    // Darken if blocked by wall
-                    let color = if tile.blocked {
-                        egui::Color32::from_rgb(
-                            base_color.r() / 2,
-                            base_color.g() / 2,
-                            base_color.b() / 2,
-                        )
-                    } else {
-                        base_color
-                    };
-
-                    let tile_rect = egui::Rect::from_min_size(
-                        rect.min
-                            + egui::Vec2::new(
-                                x as f32 * actual_tile_size,
-                                y as f32 * actual_tile_size,
-                            ),
-                        egui::Vec2::new(actual_tile_size, actual_tile_size),
-                    );
-
-                    painter.rect_filled(tile_rect, 0.0, color);
-
-                    // Draw event marker
-                    if map.events.contains_key(&pos) {
-                        let center = tile_rect.center();
-                        painter.circle_filled(
-                            center,
-                            actual_tile_size * 0.3,
-                            egui::Color32::from_rgb(255, 200, 0),
-                        );
-                    }
-
-                    // Draw NPC marker
-                    if map.npcs.iter().any(|npc| npc.position == pos) {
-                        let center = tile_rect.center();
-                        painter.circle_filled(
-                            center,
-                            actual_tile_size * 0.25,
-                            egui::Color32::from_rgb(255, 100, 255),
-                        );
-                    }
-
-                    // Draw grid lines
-                    painter.rect_stroke(
-                        tile_rect,
-                        0.0,
-                        egui::Stroke::new(0.5, egui::Color32::from_gray(100)),
-                        egui::StrokeKind::Outside,
-                    );
-                }
-            }
-        }
-
-        // Draw legend
-        ui.add_space(5.0);
-        ui.horizontal(|ui| {
-            ui.label("Legend:");
-            ui.colored_label(egui::Color32::from_rgb(255, 200, 0), "● Event");
-            ui.colored_label(egui::Color32::from_rgb(255, 100, 255), "● NPC");
-            ui.colored_label(egui::Color32::from_rgb(100, 100, 110), "■ Blocked");
         });
     }
 
@@ -5139,9 +4810,11 @@ mod tests {
         use antares::domain::types::DiceRoll;
 
         // Attribute modifier - empty attribute fails
-        let mut buf = EffectEditBuffer::default();
-        buf.effect_type = Some("AttributeModifier".to_string());
-        buf.attribute = "".to_string();
+        let mut buf = EffectEditBuffer {
+            effect_type: Some("AttributeModifier".to_string()),
+            attribute: "".to_string(),
+            ..Default::default()
+        };
         assert!(validate_effect_edit_buffer(&buf).is_err());
 
         // Attribute present but value out of allowed range fails
@@ -5150,22 +4823,28 @@ mod tests {
         assert!(validate_effect_edit_buffer(&buf).is_err());
 
         // Status effect - empty tag fails
-        let mut buf2 = EffectEditBuffer::default();
-        buf2.effect_type = Some("StatusEffect".to_string());
-        buf2.status_tag = "".to_string();
+        let buf2 = EffectEditBuffer {
+            effect_type: Some("StatusEffect".to_string()),
+            status_tag: "".to_string(),
+            ..Default::default()
+        };
         assert!(validate_effect_edit_buffer(&buf2).is_err());
 
         // DOT validation - invalid dice count should fail
-        let mut buf3 = EffectEditBuffer::default();
-        buf3.effect_type = Some("DamageOverTime".to_string());
-        buf3.dice = DiceRoll::new(0, 6, 0);
-        buf3.element = "fire".to_string();
+        let buf3 = EffectEditBuffer {
+            effect_type: Some("DamageOverTime".to_string()),
+            dice: DiceRoll::new(0, 6, 0),
+            element: "fire".to_string(),
+            ..Default::default()
+        };
         assert!(validate_effect_edit_buffer(&buf3).is_err());
 
         // HOT validation - invalid dice sides should fail
-        let mut buf4 = EffectEditBuffer::default();
-        buf4.effect_type = Some("HealOverTime".to_string());
-        buf4.dice = DiceRoll::new(1, 1, 0); // invalid sides
+        let buf4 = EffectEditBuffer {
+            effect_type: Some("HealOverTime".to_string()),
+            dice: DiceRoll::new(1, 1, 0), // invalid sides
+            ..Default::default()
+        };
         assert!(validate_effect_edit_buffer(&buf4).is_err());
     }
 
