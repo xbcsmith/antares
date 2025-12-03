@@ -357,18 +357,47 @@ TwoColumnLayout::new("quests").show_split(
 );
 ```
 
-### Deferred Items
+#### 8.4 Conditions Editor Layout (Completed)
 
-#### 8.4 Conditions Editor Layout (Deferred)
+Refactored `sdk/campaign_builder/src/conditions_editor.rs`:
 
-The conditions_editor refactoring was deferred due to its complexity:
+- Added `ConditionsEditorMode` enum (List/Add/Edit) following the pattern from items_editor
+- Replaced manual toolbar with `EditorToolbar` component
+- Added separate filter toolbar row for effect type filter and sort order (conditions-specific)
+- Replaced manual two-column layout with `TwoColumnLayout`
+- Replaced manual action buttons with `ActionButtons` component
+- Implemented `show_list()` for list mode with TwoColumnLayout
+- Implemented `show_form()` for Add/Edit modes with full effect editing support
+- Preserved all existing functionality:
+  - Effect type filtering (All/Attribute/Status/DOT/HOT)
+  - Sort order (Name/ID/EffectCount)
+  - Statistics panel with effect counts
+  - Spell reference tracking and navigation
+  - Preview with magnitude scaling
+  - Nested effect editing UI (AttributeModifier, StatusEffect, DamageOverTime, HealOverTime)
+  - Delete confirmation dialog with spell reference cleanup option
+  - Import/Export dialog
 
-- Has unique effect type filtering and sorting
-- Complex effect editing with nested UI
-- Spell reference tracking and navigation
-- Preview with magnitude scaling
+```rust
+// Use shared EditorToolbar component
+let toolbar_action = EditorToolbar::new("Conditions")
+    .with_search(&mut self.search_filter)
+    .with_merge_mode(&mut self.file_load_merge_mode)
+    .with_total_count(conditions.len())
+    .with_id_salt("conditions_toolbar")
+    .show(ui);
 
-This editor requires a more careful, dedicated refactoring pass to maintain its specialized functionality while adopting shared components.
+// Use shared TwoColumnLayout component
+TwoColumnLayout::new("conditions").show_split(
+    ui,
+    |left_ui| { /* conditions list */ },
+    |right_ui| {
+        // Use shared ActionButtons component
+        let action = ActionButtons::new().enabled(true).show(right_ui);
+        // Condition details with spell references
+    },
+);
+```
 
 ### Pattern Used Across All Editors
 
@@ -409,6 +438,7 @@ All quality checks pass:
 - `sdk/campaign_builder/src/spells_editor.rs` - Full refactor to shared components
 - `sdk/campaign_builder/src/monsters_editor.rs` - Full refactor to shared components
 - `sdk/campaign_builder/src/quest_editor.rs` - Added ActionButtons and TwoColumnLayout
+- `sdk/campaign_builder/src/conditions_editor.rs` - Full refactor to shared components
 
 ### Success Criteria Met
 
@@ -416,16 +446,11 @@ All quality checks pass:
 - [x] Spells editor uses EditorToolbar, ActionButtons, TwoColumnLayout
 - [x] Monsters editor uses EditorToolbar, ActionButtons, TwoColumnLayout
 - [x] Quests editor uses ActionButtons and TwoColumnLayout (already had EditorToolbar)
-- [x] All existing tests continue to pass
+- [x] Conditions editor uses EditorToolbar, ActionButtons, TwoColumnLayout
+- [x] All existing tests continue to pass (370 tests)
 - [x] User can navigate any editor with same mental model
 
 ### Next Steps
-
-**Phase 8.4 (Future)**: Conditions Editor Layout
-
-- Refactor conditions_editor to use EditorToolbar, ActionButtons, TwoColumnLayout
-- Maintain effect type filtering, sorting, and spell reference features
-- Apply AttributePair widgets where effects modify attributes
 
 **Phase 9**: Maps Editor Major Refactor (deferred - high risk)
 

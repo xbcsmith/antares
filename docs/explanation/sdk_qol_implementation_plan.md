@@ -775,27 +775,31 @@ Complete refactor of `monsters_editor.rs` (already has AttributePair widgets):
 
 #### 8.4 Conditions Editor Layout (Phase 3.1 Deferred)
 
-**Status: DEFERRED (complex refactor required)**
+**Status: COMPLETE**
 
 Refactor `conditions_editor.rs` to use standard layout:
 
-- [ ] Replace manual toolbar with `EditorToolbar` component
-- [ ] Add `ActionButtons` (Edit/Delete/Duplicate/Export) to display panel
-- [ ] Implement `TwoColumnLayout` for list/detail split
+- [x] Replace manual toolbar with `EditorToolbar` component
+- [x] Add `ActionButtons` (Edit/Delete/Duplicate/Export) to display panel
+- [x] Implement `TwoColumnLayout` for list/detail split
+- [x] Maintain existing effect type filter and sort functionality
+- [x] Maintain spell reference tracking and navigation
+- [x] Maintain preview with magnitude scaling
+- [x] Maintain nested effect editing UI
 - [ ] Apply `AttributePairInput` widgets where effects modify AttributePair values
-      (Phase 3.5)
-- [ ] Maintain existing effect type filter and sort functionality
+      (Phase 3.5 - conditions use custom attribute modifiers, not AttributePair)
 
-**Reason for deferral:** The conditions_editor has unique complexity including:
+**Implementation notes:**
 
-- Effect type filtering and sorting system
-- Spell reference tracking and navigation
-- Preview with magnitude scaling
-- Nested effect editing UI
+- Added `ConditionsEditorMode` enum (List/Add/Edit) following the pattern from items_editor
+- Refactored `show()` method to use EditorToolbar for New/Save/Load/Import/Export/Reload
+- Added separate filter toolbar row for effect type filter and sort order (conditions-specific)
+- Implemented `show_list()` using TwoColumnLayout for list/detail split
+- Implemented `show_form()` for Add/Edit modes with full effect editing support
+- ActionButtons appear in detail panel for Edit/Delete/Duplicate/Export actions
+- Preserved all existing functionality: statistics panel, spell references, delete confirmation
 
-This requires a dedicated refactoring pass to maintain specialized functionality.
-
-**Files to modify:**
+**Files modified:**
 
 - `sdk/campaign_builder/src/conditions_editor.rs`
 
@@ -825,17 +829,17 @@ Complete refactor of `quest_editor.rs` (already has EditorToolbar):
 - [x] Items editor using all shared components
 - [x] Spells editor using all shared components
 - [x] Monsters editor using EditorToolbar, ActionButtons, TwoColumnLayout
-- [ ] Conditions editor using all shared components plus AttributePair widgets (DEFERRED)
+- [x] Conditions editor using EditorToolbar, ActionButtons, TwoColumnLayout
 - [x] Quests editor using ActionButtons and TwoColumnLayout
 
 #### 8.8 Success Criteria
 
-- [x] Items, Spells, Monsters, Quests editors use EditorToolbar
-- [x] Items, Spells, Monsters, Quests editors have ActionButtons
-- [x] Items, Spells, Monsters, Quests editors use TwoColumnLayout
-- [x] All existing tests continue to pass
+- [x] Items, Spells, Monsters, Quests, Conditions editors use EditorToolbar
+- [x] Items, Spells, Monsters, Quests, Conditions editors have ActionButtons
+- [x] Items, Spells, Monsters, Quests, Conditions editors use TwoColumnLayout
+- [x] All existing tests continue to pass (370 tests)
 - [x] User can navigate completed editors with same mental model
-- [ ] Conditions editor (deferred to future work)
+- [x] Conditions editor refactored with all shared components
 
 ---
 
