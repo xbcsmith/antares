@@ -32,6 +32,7 @@ mod map_editor;
 mod monsters_editor;
 mod packager;
 mod quest_editor;
+mod races_editor;
 mod spells_editor;
 mod templates;
 mod test_play;
@@ -230,6 +231,7 @@ enum EditorTab {
     Maps,
     Quests,
     Classes,
+    Races,
     Dialogues,
     Assets,
     Validation,
@@ -254,6 +256,7 @@ impl EditorTab {
             EditorTab::Maps => "Maps",
             EditorTab::Quests => "Quests",
             EditorTab::Classes => "Classes",
+            EditorTab::Races => "Races",
             EditorTab::Dialogues => "Dialogues",
             EditorTab::Assets => "Assets",
             EditorTab::Validation => "Validation",
@@ -373,6 +376,9 @@ struct CampaignBuilderApp {
     // Classes editor state
     classes_editor_state: classes_editor::ClassesEditorState,
 
+    // Races editor state
+    races_editor_state: races_editor::RacesEditorState,
+
     // Phase 13: Distribution tools state
     export_wizard: Option<packager::ExportWizard>,
     test_play_session: Option<test_play::TestPlaySession>,
@@ -461,6 +467,8 @@ impl Default for CampaignBuilderApp {
             dialogue_editor_state: DialogueEditorState::default(),
 
             classes_editor_state: classes_editor::ClassesEditorState::default(),
+
+            races_editor_state: races_editor::RacesEditorState::default(),
 
             // Phase 13: Distribution tools
             export_wizard: None,
@@ -2496,6 +2504,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Maps,
                     EditorTab::Quests,
                     EditorTab::Classes,
+                    EditorTab::Races,
                     EditorTab::Dialogues,
                     EditorTab::Assets,
                     EditorTab::Validation,
@@ -2601,6 +2610,14 @@ impl eframe::App for CampaignBuilderApp {
                 &self.items,
                 self.campaign_dir.as_ref(),
                 &self.campaign.classes_file,
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+                &mut self.file_load_merge_mode,
+            ),
+            EditorTab::Races => self.races_editor_state.show(
+                ui,
+                self.campaign_dir.as_ref(),
+                &self.campaign.races_file,
                 &mut self.unsaved_changes,
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,

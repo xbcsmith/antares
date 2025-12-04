@@ -2,29 +2,138 @@
 //
 // This file contains race definitions for the tutorial campaign.
 // Simplified set for introductory gameplay.
+//
+// Race stat modifiers affect the base stats of characters.
+// Positive values indicate racial bonuses, negative values indicate penalties.
+//
+// Race Disablement Bits (for item restrictions):
+//   Bit 0 (0b00000001) - Human
+//   Bit 1 (0b00000010) - Elf
+//   Bit 2 (0b00000100) - Dwarf
+//   Bit 3 (0b00001000) - Gnome
 
 [
     // ===== Human - Balanced, versatile =====
     (
         id: "human",
         name: "Human",
+        description: "Versatile and adaptable, humans excel in any role.",
+        stat_modifiers: (
+            might: 0,
+            intellect: 0,
+            personality: 0,
+            endurance: 0,
+            speed: 0,
+            accuracy: 0,
+            luck: 0,
+        ),
+        resistances: (
+            magic: 0,
+            fire: 0,
+            cold: 0,
+            electricity: 0,
+            acid: 0,
+            fear: 0,
+            poison: 0,
+            psychic: 0,
+        ),
+        special_abilities: ["adaptable"],
+        size: Medium,
+        disablement_bit: 0,
+        proficiencies: [],
+        incompatible_item_tags: [],
     ),
 
     // ===== Elf - Agile and magical =====
     (
         id: "elf",
         name: "Elf",
+        description: "Graceful and long-lived, elves possess natural magical affinity.",
+        stat_modifiers: (
+            might: -1,
+            intellect: 2,
+            personality: 0,
+            endurance: -1,
+            speed: 1,
+            accuracy: 2,
+            luck: 0,
+        ),
+        resistances: (
+            magic: 5,
+            fire: 0,
+            cold: 0,
+            electricity: 0,
+            acid: 0,
+            fear: 0,
+            poison: 0,
+            psychic: 5,
+        ),
+        special_abilities: ["infravision", "resist_sleep"],
+        size: Medium,
+        disablement_bit: 1,
+        proficiencies: ["longbow"],
+        incompatible_item_tags: [],
     ),
 
     // ===== Dwarf - Sturdy and resilient =====
     (
         id: "dwarf",
         name: "Dwarf",
+        description: "Stout and hardy, dwarves are renowned for their resilience.",
+        stat_modifiers: (
+            might: 1,
+            intellect: 0,
+            personality: -1,
+            endurance: 2,
+            speed: -1,
+            accuracy: 0,
+            luck: 0,
+        ),
+        resistances: (
+            magic: 10,
+            fire: 0,
+            cold: 0,
+            electricity: 0,
+            acid: 0,
+            fear: 5,
+            poison: 15,
+            psychic: 0,
+        ),
+        special_abilities: ["infravision", "stonecunning"],
+        size: Medium,
+        disablement_bit: 2,
+        proficiencies: ["battleaxe"],
+        incompatible_item_tags: [],
     ),
 
     // ===== Gnome - Clever and lucky =====
     (
         id: "gnome",
         name: "Gnome",
+        description: "Small but clever, gnomes possess natural magical resistance.",
+        stat_modifiers: (
+            might: -2,
+            intellect: 1,
+            personality: 0,
+            endurance: 0,
+            speed: 0,
+            accuracy: 0,
+            luck: 2,
+        ),
+        resistances: (
+            magic: 10,
+            fire: 0,
+            cold: 0,
+            electricity: 0,
+            acid: 0,
+            fear: 5,
+            poison: 5,
+            psychic: 10,
+        ),
+        special_abilities: ["infravision", "small_stature"],
+        size: Small,
+        disablement_bit: 3,
+        proficiencies: ["short_sword"],
+        incompatible_item_tags: ["large_weapon"],
     ),
 ]

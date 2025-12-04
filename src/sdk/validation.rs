@@ -33,8 +33,9 @@
 //! ```
 
 use crate::domain::classes::ClassId;
+use crate::domain::races::RaceId;
 use crate::domain::types::{ItemId, MapId, MonsterId, SpellId};
-use crate::sdk::database::{ContentDatabase, RaceId};
+use crate::sdk::database::ContentDatabase;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;

@@ -385,6 +385,188 @@ Per the implementation plan:
 
 ---
 
+## Phase 4: Race System Implementation (Hard-coded Removal Plan) (2025-01-XX)
+
+### Background
+
+Per `docs/explanation/hardcoded_removal_implementation_plan.md` Phase 4, the race system needed
+to be implemented following the same data-driven pattern as the class system. This phase creates
+a complete race domain module with `RaceDefinition`, `RaceDatabase`, stat modifiers, resistances,
+size categories, and integrates with the SDK and editors.
+
+### Changes Implemented
+
+#### 4.1 Created Race Domain Module (`src/domain/races.rs`)
+
+Complete implementation including:
+
+- `RaceId` type alias (String)
+- `RaceError` enum for validation errors (RaceNotFound, LoadError, ParseError, ValidationError, DuplicateId)
+- `SizeCategory` enum (Small, Medium, Large) with Default impl
+- `StatModifiers` struct for stat bonuses/penalties (might, intellect, personality, endurance, speed, accuracy, luck)
+- `Resistances` struct for damage resistances (magic, fire, cold, electricity, acid, fear, poison, psychic)
+- `RaceDefinition` struct with all fields:
+  - `id`, `name`, `description`
+  - `stat_modifiers`, `resistances`
+  - `special_abilities`, `proficiencies`, `incompatible_item_tags`
+  - `size`, `disablement_bit_index`
+- `RaceDatabase` struct with:
+  - `new()`, `load_from_file()`, `load_from_string()`
+  - `get_race()`, `all_races()`, `all_race_ids()`
+  - `add_race()`, `remove_race()`
+  - `validate()`, `len()`, `is_empty()`
+- Helper methods on `RaceDefinition`:
+  - `disablement_mask()`, `has_ability()`, `has_proficiency()`
+  - `is_item_incompatible()`, `is_small()`, `is_medium()`, `is_large()`
+- Helper methods on `StatModifiers` and `Resistances`:
+  - `new()`, `is_empty()`, `total()`, `validate()`
+
+#### 4.2 Updated races.ron Data Files
+
+Expanded `data/races.ron` with complete race data for 6 races:
+
+- Human (balanced, no modifiers)
+- Elf (+2 INT, +2 ACC, -1 MIG, -1 END, infravision, resist_sleep, resist_charm)
+- Dwarf (+1 MIG, +2 END, -1 PER, -1 SPD, poison/magic resistance, stonecunning)
+- Gnome (-2 MIG, +1 INT, +2 LCK, Small size, magic/psychic resistance)
+- Half-Elf (+1 INT, +1 ACC, partial resistances)
+- Half-Orc (+2 MIG, +1 END, -1 INT, -2 PER, fear resistance)
+
+Updated `campaigns/tutorial/data/races.ron` with 4 races (Human, Elf, Dwarf, Gnome).
+
+#### 4.3 Updated SDK Database Integration
+
+Modified `src/sdk/database.rs`:
+
+- Removed placeholder `RaceDefinition` and `RaceDatabase` types
+- Added import: `use crate::domain::races::{RaceDatabase, RaceError}`
+- Added `From<RaceError> for DatabaseError` conversion
+- Updated `ContentDatabase` to use domain `RaceDatabase`
+- Fixed `stats()` method to use `races.len()` instead of removed `count()`
+
+#### 4.4 Updated Race Editor CLI
+
+Rewrote `src/bin/race_editor.rs` to use domain types:
+
+- Removed duplicate type definitions
+- Import domain types: `use antares::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers}`
+- Updated all fields to match domain types (u8 resistances, 8 resistance types)
+- Added size category input/display
+- Added proficiencies and incompatible_item_tags editing
+- Updated version to v0.2.0
+- Maintained backward compatibility with `#[serde(default)]` on domain types
+
+#### 4.5 Created SDK Races Editor
+
+Created `sdk/campaign_builder/src/races_editor.rs`:
+
+- `RacesEditorMode` enum (List, Creating, Editing)
+- `RacesEditorState` struct with races, selection, mode, buffer, search filter
+- `RaceEditBuffer` struct for form fields
+- Full UI following `classes_editor.rs` pattern:
+  - List view with two-column layout
+  - Race details panel with stats, resistances, abilities
+  - Create/edit form with all fields
+  - Size category dropdown
+  - Stat modifier inputs (-10 to +10)
+  - Resistance inputs (0-100%)
+  - Special abilities, proficiencies, incompatible tags (comma-separated)
+- Toolbar with New, Save, Load, Export, Reload actions
+- Context menu with Edit, Delete, Duplicate
+
+Integrated into `sdk/campaign_builder/src/main.rs`:
+
+- Added `mod races_editor` declaration
+- Added `EditorTab::Races` variant
+- Added `races_editor_state` field to `CampaignBuilderApp`
+- Added Races tab to tab array
+- Added Races tab handler calling `races_editor_state.show()`
+
+### Tests Added
+
+Domain module tests (`src/domain/races.rs`):
+
+- `test_stat_modifiers_default`, `test_stat_modifiers_is_empty`, `test_stat_modifiers_total`
+- `test_resistances_default`, `test_resistances_is_empty`, `test_resistances_validate_*`
+- `test_race_definition_disablement_mask`, `test_race_definition_has_ability`
+- `test_race_definition_has_proficiency`, `test_race_definition_is_item_incompatible`
+- `test_race_definition_size_checks`
+- `test_race_database_new`, `test_race_database_add_race`, `test_race_database_duplicate_id_error`
+- `test_race_database_remove_race`, `test_race_database_load_from_string`
+- `test_race_database_load_minimal`, `test_race_database_get_race_not_found`
+- `test_race_database_all_races`, `test_race_database_all_race_ids`
+- `test_race_database_duplicate_id_in_load`, `test_race_database_validation_*`
+- `test_size_category_default`, `test_size_category_serialization`
+- `test_load_races_from_data_file` (integration test)
+
+SDK editor tests (`sdk/campaign_builder/src/races_editor.rs`):
+
+- `test_races_editor_state_creation`, `test_start_new_race`
+- `test_save_race_creates_new`, `test_save_race_empty_id_error`, `test_save_race_empty_name_error`
+- `test_save_race_duplicate_id_error`, `test_delete_race`, `test_cancel_edit`
+- `test_filtered_races`, `test_next_available_race_id`
+- `test_start_edit_race`, `test_edit_race_saves_changes`
+- `test_race_edit_buffer_default`, `test_editor_mode_transitions`
+
+Race editor CLI tests (`src/bin/race_editor.rs`):
+
+- `test_truncate`, `test_get_next_disablement_bit_*`
+- `test_stat_modifiers_default`, `test_resistances_default`, `test_size_category_default`
+
+### Validation
+
+All quality gates pass:
+
+- `cargo fmt --all` - OK
+- `cargo check --all-targets --all-features` - OK (0 errors)
+- `cargo clippy --all-targets --all-features -- -D warnings` - OK (0 warnings)
+- `cargo test --all-features` - OK (245 doc tests passed, all unit tests pass)
+
+### Architecture Compliance
+
+- Race system matches class system pattern exactly
+- Type aliases used consistently (`RaceId`)
+- Constants extracted (resistance max 100, stat modifier range -10 to +10)
+- RON format used for data files
+- Module placed correctly in `src/domain/races.rs`
+- SDK database uses domain types (no placeholders)
+- Backward compatibility via `#[serde(default)]` attributes
+
+### Success Criteria Met
+
+- [x] Race system matches class system pattern
+- [x] Adding races requires only data file changes
+- [x] SDK and CLI editors work with domain types
+- [x] All tests pass
+- [x] Data files expanded with full race definitions
+- [x] SDK Campaign Builder has Races tab
+
+### Files Created
+
+- `src/domain/races.rs` - Complete race domain module
+- `sdk/campaign_builder/src/races_editor.rs` - SDK races editor UI
+
+### Files Modified
+
+- `src/domain/mod.rs` - Added `pub mod races` export
+- `src/sdk/database.rs` - Removed placeholders, use domain types
+- `src/sdk/validation.rs` - Fixed RaceId import
+- `src/bin/race_editor.rs` - Rewrote to use domain types
+- `sdk/campaign_builder/src/main.rs` - Added Races tab and editor state
+- `data/races.ron` - Expanded with full race data
+- `campaigns/tutorial/data/races.ron` - Expanded with full race data
+
+### Next Steps (Phase 5)
+
+Per the implementation plan:
+
+- Remove enum fields from Character struct
+- Remove Race and Class enum definitions
+- Update all references to use string IDs
+- Update serialization for ID-based approach
+
+---
+
 > NOTE: The "Engine Support for SDK Data Changes" full implementation plan has been moved to:
 > `docs/explanation/engine_sdk_support_plan.md`
 >

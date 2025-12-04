@@ -37,6 +37,7 @@ use crate::domain::dialogue::{DialogueId, DialogueTree};
 use crate::domain::items::ItemDatabase;
 use crate::domain::magic::types::Spell;
 use crate::domain::quest::{Quest, QuestId};
+use crate::domain::races::{RaceDatabase, RaceError};
 use crate::domain::types::{MapId, MonsterId, SpellId};
 use crate::domain::world::{Map, MapBlueprint};
 use serde::{Deserialize, Serialize};
@@ -89,58 +90,15 @@ pub enum DatabaseError {
     ValidationError(String),
 }
 
-// ===== Race System (Placeholder) =====
-
-/// Race identifier
-pub type RaceId = String;
-
-/// Race definition structure (Phase 2 implementation pending)
-///
-/// This is a placeholder that will be fully implemented in Phase 2
-/// of the SDK implementation plan.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RaceDefinition {
-    /// Unique identifier (e.g., "human", "elf")
-    pub id: RaceId,
-    /// Display name
-    pub name: String,
-}
-
-/// Race database (Phase 2 implementation pending)
-#[derive(Debug, Clone, Default)]
-pub struct RaceDatabase {
-    races: HashMap<RaceId, RaceDefinition>,
-}
-
-impl RaceDatabase {
-    /// Creates an empty race database
-    pub fn new() -> Self {
-        Self {
-            races: HashMap::new(),
-        }
-    }
-
-    /// Loads races from a RON file
-    pub fn load_from_file<P: AsRef<Path>>(_path: P) -> Result<Self, DatabaseError> {
-        // Placeholder implementation
-        Ok(Self::new())
-    }
-
-    /// Gets a race by ID
-    pub fn get_race(&self, id: &RaceId) -> Option<&RaceDefinition> {
-        self.races.get(id)
-    }
-
-    /// Returns all race IDs
-    pub fn all_races(&self) -> Vec<&RaceId> {
-        self.races.keys().collect()
-    }
-
-    /// Returns the number of races
-    pub fn count(&self) -> usize {
-        self.races.len()
+impl From<RaceError> for DatabaseError {
+    fn from(err: RaceError) -> Self {
+        DatabaseError::RaceLoadError(err.to_string())
     }
 }
+
+// ===== Race System =====
+// Race types are now imported from crate::domain::races module.
+// See docs/explanation/hardcoded_removal_implementation_plan.md Phase 4.
 
 // ===== Spell System =====
 
@@ -1189,7 +1147,7 @@ impl ContentDatabase {
     pub fn stats(&self) -> ContentStats {
         ContentStats {
             class_count: self.classes.all_classes().count(),
-            race_count: self.races.count(),
+            race_count: self.races.len(),
             item_count: self.items.len(),
             monster_count: self.monsters.count(),
             spell_count: self.spells.count(),
@@ -1325,8 +1283,8 @@ mod tests {
     #[test]
     fn test_race_database_new() {
         let db = RaceDatabase::new();
-        assert_eq!(db.count(), 0);
-        assert!(db.all_races().is_empty());
+        assert_eq!(db.len(), 0);
+        assert_eq!(db.all_races().count(), 0);
     }
 
     #[test]

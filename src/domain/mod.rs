@@ -24,6 +24,7 @@ pub mod items;
 pub mod magic;
 pub mod progression;
 pub mod quest;
+pub mod races;
 pub mod resources;
 pub mod types;
 pub mod world;
