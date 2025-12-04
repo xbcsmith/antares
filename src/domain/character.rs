@@ -11,7 +11,7 @@
 //! See `docs/reference/architecture.md` Section 4.3 for complete specifications.
 //! See `docs/reference/stat_ranges.md` for detailed stat range documentation.
 
-use crate::domain::classes::ClassId;
+use crate::domain::classes::{ClassDatabase, ClassId, SpellSchool as ClassSpellSchool};
 use crate::domain::types::{ItemId, RaceId, SpellId, TownId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -812,6 +812,100 @@ impl SpellBook {
             Class::Cleric | Class::Paladin => &mut self.cleric_spells,
             Class::Sorcerer | Class::Archer => &mut self.sorcerer_spells,
             _ => &mut self.sorcerer_spells,
+        }
+    }
+
+    /// Returns the appropriate spell list for a class using ClassDatabase
+    ///
+    /// This is the data-driven version that looks up class definitions from the database.
+    /// Use this when working with campaign-specific or modded classes.
+    ///
+    /// # Arguments
+    ///
+    /// * `class_id` - The class ID to look up
+    /// * `class_db` - Reference to the class database
+    ///
+    /// # Returns
+    ///
+    /// Returns the appropriate spell list based on the class's spell school.
+    /// Returns the sorcerer spell list as default if the class is not found.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::SpellBook;
+    /// use antares::domain::classes::ClassDatabase;
+    ///
+    /// let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+    /// let spellbook = SpellBook::new();
+    ///
+    /// // Cleric gets cleric spells
+    /// let cleric_spells = spellbook.get_spell_list_by_id("cleric", &db);
+    /// // Sorcerer gets sorcerer spells
+    /// let sorcerer_spells = spellbook.get_spell_list_by_id("sorcerer", &db);
+    /// ```
+    pub fn get_spell_list_by_id(
+        &self,
+        class_id: &str,
+        class_db: &ClassDatabase,
+    ) -> &[Vec<SpellId>; 7] {
+        let Some(class_def) = class_db.get_class(class_id) else {
+            return &self.sorcerer_spells; // Default fallback
+        };
+
+        match &class_def.spell_school {
+            Some(ClassSpellSchool::Cleric) => &self.cleric_spells,
+            Some(ClassSpellSchool::Sorcerer) => &self.sorcerer_spells,
+            None => &self.sorcerer_spells, // Non-casters default to empty sorcerer list
+        }
+    }
+
+    /// Returns the mutable spell list for a class using ClassDatabase
+    ///
+    /// This is the data-driven version that looks up class definitions from the database.
+    /// Use this when working with campaign-specific or modded classes.
+    ///
+    /// # Arguments
+    ///
+    /// * `class_id` - The class ID to look up
+    /// * `class_db` - Reference to the class database
+    ///
+    /// # Returns
+    ///
+    /// Returns the appropriate mutable spell list based on the class's spell school.
+    /// Returns the sorcerer spell list as default if the class is not found.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::SpellBook;
+    /// use antares::domain::classes::ClassDatabase;
+    ///
+    /// let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+    /// let mut spellbook = SpellBook::new();
+    ///
+    /// // Add a spell to cleric's list
+    /// let cleric_spells = spellbook.get_spell_list_mut_by_id("cleric", &db);
+    /// cleric_spells[0].push(0x0101); // Add level 1 spell
+    /// ```
+    pub fn get_spell_list_mut_by_id(
+        &mut self,
+        class_id: &str,
+        class_db: &ClassDatabase,
+    ) -> &mut [Vec<SpellId>; 7] {
+        // Need to look up class first, then match
+        // Since we can't hold a reference across the mutable borrow,
+        // we determine the school type first
+        let uses_cleric_school = class_db
+            .get_class(class_id)
+            .and_then(|c| c.spell_school.as_ref())
+            .map(|s| matches!(s, ClassSpellSchool::Cleric))
+            .unwrap_or(false);
+
+        if uses_cleric_school {
+            &mut self.cleric_spells
+        } else {
+            &mut self.sorcerer_spells
         }
     }
 }
@@ -1788,5 +1882,188 @@ mod tests {
         assert_eq!(char1.level, char2.level);
         assert_eq!(char1.hp.base, char2.hp.base);
         assert_eq!(char1.sp.base, char2.sp.base);
+    }
+
+    // ===== Phase 2: SpellBook Data-Driven Tests =====
+
+    #[test]
+    fn test_spellbook_get_spell_list_by_id_cleric() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut spellbook = SpellBook::new();
+
+        // Add a spell to cleric list
+        spellbook.cleric_spells[0].push(0x0101);
+
+        // Cleric should get cleric spells
+        let spell_list = spellbook.get_spell_list_by_id("cleric", &db);
+        assert_eq!(spell_list[0].len(), 1);
+        assert_eq!(spell_list[0][0], 0x0101);
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_by_id_sorcerer() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut spellbook = SpellBook::new();
+
+        // Add a spell to sorcerer list
+        spellbook.sorcerer_spells[0].push(0x0201);
+
+        // Sorcerer should get sorcerer spells
+        let spell_list = spellbook.get_spell_list_by_id("sorcerer", &db);
+        assert_eq!(spell_list[0].len(), 1);
+        assert_eq!(spell_list[0][0], 0x0201);
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_by_id_paladin() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut spellbook = SpellBook::new();
+
+        // Add a spell to cleric list
+        spellbook.cleric_spells[0].push(0x0101);
+
+        // Paladin (hybrid with cleric spells) should get cleric spells
+        let spell_list = spellbook.get_spell_list_by_id("paladin", &db);
+        assert_eq!(spell_list[0].len(), 1);
+        assert_eq!(spell_list[0][0], 0x0101);
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_by_id_knight() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let spellbook = SpellBook::new();
+
+        // Knight (non-caster) defaults to sorcerer list (which is empty)
+        let spell_list = spellbook.get_spell_list_by_id("knight", &db);
+        assert!(spell_list[0].is_empty());
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_by_id_unknown_class() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let spellbook = SpellBook::new();
+
+        // Unknown class defaults to sorcerer list
+        let spell_list = spellbook.get_spell_list_by_id("unknown", &db);
+        assert!(spell_list[0].is_empty());
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_mut_by_id_cleric() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut spellbook = SpellBook::new();
+
+        // Add a spell through the mutable accessor
+        {
+            let spell_list = spellbook.get_spell_list_mut_by_id("cleric", &db);
+            spell_list[0].push(0x0101);
+        }
+
+        // Verify it was added to cleric spells
+        assert_eq!(spellbook.cleric_spells[0].len(), 1);
+        assert_eq!(spellbook.cleric_spells[0][0], 0x0101);
+        // Sorcerer list should be unaffected
+        assert!(spellbook.sorcerer_spells[0].is_empty());
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_mut_by_id_sorcerer() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut spellbook = SpellBook::new();
+
+        // Add a spell through the mutable accessor
+        {
+            let spell_list = spellbook.get_spell_list_mut_by_id("sorcerer", &db);
+            spell_list[0].push(0x0201);
+        }
+
+        // Verify it was added to sorcerer spells
+        assert_eq!(spellbook.sorcerer_spells[0].len(), 1);
+        assert_eq!(spellbook.sorcerer_spells[0][0], 0x0201);
+        // Cleric list should be unaffected
+        assert!(spellbook.cleric_spells[0].is_empty());
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_mut_by_id_paladin() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut spellbook = SpellBook::new();
+
+        // Paladin should modify cleric spell list
+        {
+            let spell_list = spellbook.get_spell_list_mut_by_id("paladin", &db);
+            spell_list[0].push(0x0101);
+        }
+
+        // Verify it was added to cleric spells
+        assert_eq!(spellbook.cleric_spells[0].len(), 1);
+        assert_eq!(spellbook.cleric_spells[0][0], 0x0101);
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_mut_by_id_knight() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut spellbook = SpellBook::new();
+
+        // Knight (non-caster) defaults to sorcerer list
+        {
+            let spell_list = spellbook.get_spell_list_mut_by_id("knight", &db);
+            spell_list[0].push(0x0201);
+        }
+
+        // Verify it was added to sorcerer spells (default)
+        assert_eq!(spellbook.sorcerer_spells[0].len(), 1);
+    }
+
+    #[test]
+    fn test_spellbook_enum_and_db_methods_match() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut spellbook = SpellBook::new();
+
+        // Add spells to both lists
+        spellbook.cleric_spells[0].push(0x0101);
+        spellbook.sorcerer_spells[0].push(0x0201);
+
+        // Test that enum and db methods return the same lists
+        let test_cases = [
+            (Class::Cleric, "cleric"),
+            (Class::Sorcerer, "sorcerer"),
+            (Class::Paladin, "paladin"),
+            (Class::Knight, "knight"),
+        ];
+
+        for (class_enum, class_id) in test_cases {
+            let enum_list = spellbook.get_spell_list(class_enum);
+            let db_list = spellbook.get_spell_list_by_id(class_id, &db);
+            assert_eq!(
+                enum_list as *const _, db_list as *const _,
+                "Spell lists should be the same reference for {:?}",
+                class_enum
+            );
+        }
+    }
+
+    #[test]
+    fn test_spellbook_multiple_spell_levels() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut spellbook = SpellBook::new();
+
+        // Add spells to multiple levels using data-driven accessor
+        {
+            let spell_list = spellbook.get_spell_list_mut_by_id("cleric", &db);
+            spell_list[0].push(0x0101); // Level 1
+            spell_list[2].push(0x0301); // Level 3
+            spell_list[6].push(0x0701); // Level 7
+        }
+
+        // Verify all were added correctly
+        let spell_list = spellbook.get_spell_list_by_id("cleric", &db);
+        assert_eq!(spell_list[0].len(), 1);
+        assert_eq!(spell_list[1].len(), 0);
+        assert_eq!(spell_list[2].len(), 1);
+        assert_eq!(spell_list[3].len(), 0);
+        assert_eq!(spell_list[4].len(), 0);
+        assert_eq!(spell_list[5].len(), 0);
+        assert_eq!(spell_list[6].len(), 1);
     }
 }

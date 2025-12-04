@@ -9,8 +9,18 @@
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 5.3 for complete specifications.
+//!
+//! # Data-Driven Functions
+//!
+//! This module provides both enum-based (legacy) and ID-based (data-driven) functions:
+//! - `can_class_cast_school` / `can_class_cast_school_by_id`
+//! - `get_required_level_for_spell` / `get_required_level_for_spell_by_id`
+//! - `calculate_spell_points` / `calculate_spell_points_by_id`
+//!
+//! The `*_by_id` variants use `ClassDatabase` lookups for extensibility.
 
 use crate::domain::character::{Character, Class};
+use crate::domain::classes::{ClassDatabase, SpellSchool as ClassSpellSchool, SpellStat};
 use crate::domain::magic::types::{Spell, SpellError, SpellResult, SpellSchool};
 use crate::domain::types::GameMode;
 
@@ -256,6 +266,56 @@ pub fn can_class_cast_school(class: Class, school: SpellSchool) -> bool {
     )
 }
 
+/// Checks if a class can cast spells from a given school using ClassDatabase
+///
+/// This is the data-driven version that looks up class definitions from the database.
+/// Use this when working with campaign-specific or modded classes.
+///
+/// # Arguments
+///
+/// * `class_id` - The class ID to look up
+/// * `class_db` - Reference to the class database
+/// * `school` - The spell school to check
+///
+/// # Returns
+///
+/// Returns `true` if the class can cast spells from the given school.
+/// Returns `false` if the class cannot cast from that school or if the class is not found.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::magic::types::SpellSchool;
+/// use antares::domain::magic::casting::can_class_cast_school_by_id;
+/// use antares::domain::classes::ClassDatabase;
+///
+/// let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+///
+/// assert!(can_class_cast_school_by_id("cleric", &db, SpellSchool::Cleric));
+/// assert!(can_class_cast_school_by_id("sorcerer", &db, SpellSchool::Sorcerer));
+/// assert!(!can_class_cast_school_by_id("knight", &db, SpellSchool::Cleric));
+/// ```
+pub fn can_class_cast_school_by_id(
+    class_id: &str,
+    class_db: &ClassDatabase,
+    school: SpellSchool,
+) -> bool {
+    let Some(class_def) = class_db.get_class(class_id) else {
+        return false;
+    };
+
+    let Some(class_school) = &class_def.spell_school else {
+        return false;
+    };
+
+    // Convert ClassSpellSchool to magic SpellSchool for comparison
+    matches!(
+        (class_school, school),
+        (ClassSpellSchool::Cleric, SpellSchool::Cleric)
+            | (ClassSpellSchool::Sorcerer, SpellSchool::Sorcerer)
+    )
+}
+
 /// Gets the required character level to cast a spell
 ///
 /// Accounts for delayed spell access for Paladins and Archers.
@@ -306,6 +366,79 @@ pub fn get_required_level_for_spell(class: Class, spell: &Spell) -> u32 {
     }
 }
 
+/// Gets the required character level to cast a spell using ClassDatabase
+///
+/// This is the data-driven version that looks up class definitions from the database.
+/// Accounts for delayed spell access for hybrid casters (non-pure casters).
+///
+/// # Arguments
+///
+/// * `class_id` - The class ID to look up
+/// * `class_db` - Reference to the class database
+/// * `spell` - The spell to check requirements for
+///
+/// # Returns
+///
+/// Returns the minimum character level required to cast the spell.
+/// Returns `u32::MAX` if the class cannot cast spells or is not found.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::magic::types::{Spell, SpellSchool, SpellContext, SpellTarget};
+/// use antares::domain::magic::casting::get_required_level_for_spell_by_id;
+/// use antares::domain::classes::ClassDatabase;
+///
+/// let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+///
+/// let spell = Spell::new(
+///     1,
+///     "Test",
+///     SpellSchool::Cleric,
+///     1,
+///     1,
+///     0,
+///     SpellContext::Anytime,
+///     SpellTarget::Self_,
+///     "Test spell",
+///     None,
+///     0,
+///     false,
+/// );
+///
+/// // Clerics (pure casters) can cast level 1 spells at character level 1
+/// assert_eq!(get_required_level_for_spell_by_id("cleric", &db, &spell), 1);
+///
+/// // Paladins (hybrid casters) need level 3 minimum for any spell
+/// assert_eq!(get_required_level_for_spell_by_id("paladin", &db, &spell), 3);
+///
+/// // Knights (non-casters) cannot cast
+/// assert_eq!(get_required_level_for_spell_by_id("knight", &db, &spell), u32::MAX);
+/// ```
+pub fn get_required_level_for_spell_by_id(
+    class_id: &str,
+    class_db: &ClassDatabase,
+    spell: &Spell,
+) -> u32 {
+    let Some(class_def) = class_db.get_class(class_id) else {
+        return u32::MAX;
+    };
+
+    // Non-casters cannot cast
+    if class_def.spell_school.is_none() {
+        return u32::MAX;
+    }
+
+    let base_required = spell.required_level();
+
+    // Pure casters have immediate access, hybrids need at least level 3
+    if class_def.is_pure_caster {
+        base_required
+    } else {
+        base_required.max(3)
+    }
+}
+
 /// Calculates spell points for a character based on their class and stats
 ///
 /// # Formula
@@ -348,6 +481,69 @@ pub fn calculate_spell_points(character: &Character) -> u16 {
         }
         _ => 0, // Non-spellcasting classes
     }
+}
+
+/// Calculates spell points for a character using ClassDatabase
+///
+/// This is the data-driven version that looks up class definitions from the database.
+/// Use this when working with campaign-specific or modded classes.
+///
+/// # Formula
+///
+/// - Uses the class's `spell_stat` to determine which attribute to use
+/// - Personality for Cleric school, Intellect for Sorcerer school
+/// - Formula: (stat - 10) * level / 2 + (level * 2)
+///
+/// # Arguments
+///
+/// * `character` - The character to calculate SP for
+/// * `class_db` - Reference to the class database
+///
+/// # Returns
+///
+/// Returns the calculated spell points. Returns 0 if the character's class
+/// is not found or cannot cast spells.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Character, Class, Race, Sex, Alignment};
+/// use antares::domain::magic::casting::calculate_spell_points_by_id;
+/// use antares::domain::classes::ClassDatabase;
+///
+/// let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+///
+/// let mut cleric = Character::new(
+///     "Healer".to_string(),
+///     Race::Human,
+///     Class::Cleric,
+///     Sex::Female,
+///     Alignment::Good,
+/// );
+/// cleric.level = 5;
+/// cleric.stats.personality.base = 15;
+///
+/// let sp = calculate_spell_points_by_id(&cleric, &db);
+/// // (15 - 10) * 5 / 2 + (5 * 2) = 12 + 10 = 22
+/// assert_eq!(sp, 22);
+/// ```
+pub fn calculate_spell_points_by_id(character: &Character, class_db: &ClassDatabase) -> u16 {
+    let Some(class_def) = class_db.get_class(&character.class_id) else {
+        return 0;
+    };
+
+    let Some(spell_stat) = &class_def.spell_stat else {
+        return 0; // Non-spellcasting class
+    };
+
+    let level = character.level as i16;
+
+    let stat_value = match spell_stat {
+        SpellStat::Personality => character.stats.personality.base,
+        SpellStat::Intellect => character.stats.intellect.base,
+    };
+
+    calculate_sp_from_stat(stat_value, level)
 }
 
 /// Helper to calculate SP from a stat value and character level
@@ -549,5 +745,331 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.applied_conditions.len(), 1);
         assert_eq!(result.applied_conditions[0], "bless");
+    }
+
+    // ===== Data-Driven Function Tests =====
+
+    #[test]
+    fn test_can_class_cast_school_by_id_cleric() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+
+        assert!(can_class_cast_school_by_id(
+            "cleric",
+            &db,
+            SpellSchool::Cleric
+        ));
+        assert!(!can_class_cast_school_by_id(
+            "cleric",
+            &db,
+            SpellSchool::Sorcerer
+        ));
+    }
+
+    #[test]
+    fn test_can_class_cast_school_by_id_sorcerer() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+
+        assert!(can_class_cast_school_by_id(
+            "sorcerer",
+            &db,
+            SpellSchool::Sorcerer
+        ));
+        assert!(!can_class_cast_school_by_id(
+            "sorcerer",
+            &db,
+            SpellSchool::Cleric
+        ));
+    }
+
+    #[test]
+    fn test_can_class_cast_school_by_id_paladin() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+
+        // Paladin is a hybrid with Cleric spells
+        assert!(can_class_cast_school_by_id(
+            "paladin",
+            &db,
+            SpellSchool::Cleric
+        ));
+        assert!(!can_class_cast_school_by_id(
+            "paladin",
+            &db,
+            SpellSchool::Sorcerer
+        ));
+    }
+
+    #[test]
+    fn test_can_class_cast_school_by_id_non_caster() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+
+        // Knight cannot cast any spells
+        assert!(!can_class_cast_school_by_id(
+            "knight",
+            &db,
+            SpellSchool::Cleric
+        ));
+        assert!(!can_class_cast_school_by_id(
+            "knight",
+            &db,
+            SpellSchool::Sorcerer
+        ));
+
+        // Robber cannot cast any spells
+        assert!(!can_class_cast_school_by_id(
+            "robber",
+            &db,
+            SpellSchool::Cleric
+        ));
+        assert!(!can_class_cast_school_by_id(
+            "robber",
+            &db,
+            SpellSchool::Sorcerer
+        ));
+    }
+
+    #[test]
+    fn test_can_class_cast_school_by_id_unknown_class() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+
+        // Unknown class returns false
+        assert!(!can_class_cast_school_by_id(
+            "unknown",
+            &db,
+            SpellSchool::Cleric
+        ));
+        assert!(!can_class_cast_school_by_id(
+            "nonexistent",
+            &db,
+            SpellSchool::Sorcerer
+        ));
+    }
+
+    #[test]
+    fn test_get_required_level_for_spell_by_id_pure_caster() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let spell = create_test_spell(SpellSchool::Cleric, 1, 2, 0, SpellContext::Anytime);
+
+        // Cleric (pure caster) can cast level 1 spells at character level 1
+        assert_eq!(get_required_level_for_spell_by_id("cleric", &db, &spell), 1);
+
+        // Sorcerer (pure caster) can cast level 1 spells at character level 1
+        let sorcerer_spell =
+            create_test_spell(SpellSchool::Sorcerer, 1, 2, 0, SpellContext::Anytime);
+        assert_eq!(
+            get_required_level_for_spell_by_id("sorcerer", &db, &sorcerer_spell),
+            1
+        );
+    }
+
+    #[test]
+    fn test_get_required_level_for_spell_by_id_hybrid_caster() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let spell = create_test_spell(SpellSchool::Cleric, 1, 2, 0, SpellContext::Anytime);
+
+        // Paladin (hybrid) needs at least level 3 for any spell
+        assert_eq!(
+            get_required_level_for_spell_by_id("paladin", &db, &spell),
+            3
+        );
+    }
+
+    #[test]
+    fn test_get_required_level_for_spell_by_id_non_caster() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let spell = create_test_spell(SpellSchool::Cleric, 1, 2, 0, SpellContext::Anytime);
+
+        // Knight (non-caster) cannot cast
+        assert_eq!(
+            get_required_level_for_spell_by_id("knight", &db, &spell),
+            u32::MAX
+        );
+
+        // Robber (non-caster) cannot cast
+        assert_eq!(
+            get_required_level_for_spell_by_id("robber", &db, &spell),
+            u32::MAX
+        );
+    }
+
+    #[test]
+    fn test_get_required_level_for_spell_by_id_unknown_class() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let spell = create_test_spell(SpellSchool::Cleric, 1, 2, 0, SpellContext::Anytime);
+
+        // Unknown class returns MAX
+        assert_eq!(
+            get_required_level_for_spell_by_id("unknown", &db, &spell),
+            u32::MAX
+        );
+    }
+
+    #[test]
+    fn test_get_required_level_for_spell_by_id_higher_level_spells() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+
+        // Level 3 spell requires character level 5 for pure casters
+        let level3_spell = create_test_spell(SpellSchool::Cleric, 3, 5, 0, SpellContext::Anytime);
+        assert_eq!(
+            get_required_level_for_spell_by_id("cleric", &db, &level3_spell),
+            5
+        );
+
+        // Level 3 spell requires max(5, 3) = 5 for hybrid casters
+        assert_eq!(
+            get_required_level_for_spell_by_id("paladin", &db, &level3_spell),
+            5
+        );
+    }
+
+    #[test]
+    fn test_calculate_spell_points_by_id_cleric() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut cleric = create_test_character(Class::Cleric, 5, 0, 0);
+        cleric.stats.personality.base = 15;
+
+        let sp = calculate_spell_points_by_id(&cleric, &db);
+        // (15 - 10) * 5 / 2 + (5 * 2) = 12 + 10 = 22
+        assert_eq!(sp, 22);
+    }
+
+    #[test]
+    fn test_calculate_spell_points_by_id_sorcerer() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut sorcerer = create_test_character(Class::Sorcerer, 5, 0, 0);
+        sorcerer.stats.intellect.base = 15;
+
+        let sp = calculate_spell_points_by_id(&sorcerer, &db);
+        // (15 - 10) * 5 / 2 + (5 * 2) = 12 + 10 = 22
+        assert_eq!(sp, 22);
+    }
+
+    #[test]
+    fn test_calculate_spell_points_by_id_paladin() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut paladin = create_test_character(Class::Paladin, 5, 0, 0);
+        paladin.stats.personality.base = 14;
+
+        let sp = calculate_spell_points_by_id(&paladin, &db);
+        // (14 - 10) * 5 / 2 + (5 * 2) = 10 + 10 = 20
+        assert_eq!(sp, 20);
+    }
+
+    #[test]
+    fn test_calculate_spell_points_by_id_non_caster() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let knight = create_test_character(Class::Knight, 10, 0, 0);
+
+        let sp = calculate_spell_points_by_id(&knight, &db);
+        assert_eq!(sp, 0);
+    }
+
+    #[test]
+    fn test_calculate_spell_points_by_id_unknown_class() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut character = create_test_character(Class::Knight, 5, 0, 0);
+        // Override class_id to an unknown value
+        character.class_id = "unknown".to_string();
+
+        let sp = calculate_spell_points_by_id(&character, &db);
+        assert_eq!(sp, 0);
+    }
+
+    #[test]
+    fn test_calculate_spell_points_by_id_low_stat() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut sorcerer = create_test_character(Class::Sorcerer, 3, 0, 0);
+        sorcerer.stats.intellect.base = 8; // Below 10
+
+        let sp = calculate_spell_points_by_id(&sorcerer, &db);
+        // (8 - 10) clamped to 0, so just base: 3 * 2 = 6
+        assert_eq!(sp, 6);
+    }
+
+    #[test]
+    fn test_enum_and_db_spell_points_match() {
+        // Verify that both methods produce the same results
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+
+        // Test Cleric
+        let mut cleric = create_test_character(Class::Cleric, 5, 0, 0);
+        cleric.stats.personality.base = 15;
+        assert_eq!(
+            calculate_spell_points(&cleric),
+            calculate_spell_points_by_id(&cleric, &db)
+        );
+
+        // Test Sorcerer
+        let mut sorcerer = create_test_character(Class::Sorcerer, 5, 0, 0);
+        sorcerer.stats.intellect.base = 15;
+        assert_eq!(
+            calculate_spell_points(&sorcerer),
+            calculate_spell_points_by_id(&sorcerer, &db)
+        );
+
+        // Test Paladin
+        let mut paladin = create_test_character(Class::Paladin, 5, 0, 0);
+        paladin.stats.personality.base = 14;
+        assert_eq!(
+            calculate_spell_points(&paladin),
+            calculate_spell_points_by_id(&paladin, &db)
+        );
+
+        // Test Knight (non-caster)
+        let knight = create_test_character(Class::Knight, 5, 0, 0);
+        assert_eq!(
+            calculate_spell_points(&knight),
+            calculate_spell_points_by_id(&knight, &db)
+        );
+    }
+
+    #[test]
+    fn test_enum_and_db_can_cast_school_match() {
+        // Verify that both methods produce the same results for all classes
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+
+        let test_cases = [
+            (Class::Cleric, "cleric"),
+            (Class::Sorcerer, "sorcerer"),
+            (Class::Paladin, "paladin"),
+            (Class::Knight, "knight"),
+            (Class::Robber, "robber"),
+        ];
+
+        for (class_enum, class_id) in test_cases {
+            assert_eq!(
+                can_class_cast_school(class_enum, SpellSchool::Cleric),
+                can_class_cast_school_by_id(class_id, &db, SpellSchool::Cleric),
+                "Cleric school mismatch for {:?}",
+                class_enum
+            );
+            assert_eq!(
+                can_class_cast_school(class_enum, SpellSchool::Sorcerer),
+                can_class_cast_school_by_id(class_id, &db, SpellSchool::Sorcerer),
+                "Sorcerer school mismatch for {:?}",
+                class_enum
+            );
+        }
+    }
+
+    #[test]
+    fn test_enum_and_db_required_level_match() {
+        // Verify that both methods produce the same results
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let spell = create_test_spell(SpellSchool::Cleric, 1, 2, 0, SpellContext::Anytime);
+
+        let test_cases = [
+            (Class::Cleric, "cleric"),
+            (Class::Paladin, "paladin"),
+            (Class::Knight, "knight"),
+        ];
+
+        for (class_enum, class_id) in test_cases {
+            assert_eq!(
+                get_required_level_for_spell(class_enum, &spell),
+                get_required_level_for_spell_by_id(class_id, &db, &spell),
+                "Required level mismatch for {:?}",
+                class_enum
+            );
+        }
     }
 }

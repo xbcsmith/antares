@@ -67,8 +67,9 @@ pub mod types;
 
 // Re-export commonly used types
 pub use casting::{
-    calculate_spell_points, can_cast_spell, can_class_cast_school, cast_spell,
-    get_required_level_for_spell,
+    calculate_spell_points, calculate_spell_points_by_id, can_cast_spell, can_class_cast_school,
+    can_class_cast_school_by_id, cast_spell, get_required_level_for_spell,
+    get_required_level_for_spell_by_id,
 };
 pub use database::{SpellDatabase, SpellDatabaseError};
 pub use spell_effects::{

@@ -9,6 +9,15 @@
 //! # Architecture Reference
 //!
 //! See `docs/reference/architecture.md` Section 5.2 for complete specifications.
+//!
+//! # Data-Driven Functions
+//!
+//! This module provides both enum-based (legacy) and ID-based (data-driven) functions:
+//! - `roll_hp_gain` / `roll_hp_gain_from_db`
+//! - `level_up` / `level_up_from_db`
+//!
+//! The `*_from_db` variants use `ClassDatabase` lookups for extensibility.
+//! New code should prefer the data-driven variants when a ClassDatabase is available.
 
 use crate::domain::character::{Character, Class};
 use crate::domain::classes::{ClassDatabase, ClassError};
@@ -209,6 +218,11 @@ pub fn level_up(character: &mut Character, rng: &mut impl Rng) -> Result<u16, Pr
 /// - Sorcerer: 1d4
 /// - Thief: 1d6
 ///
+/// # Deprecated
+///
+/// This function uses hardcoded class logic. Prefer `roll_hp_gain_from_db`
+/// when a `ClassDatabase` is available for data-driven class definitions.
+///
 /// # Arguments
 ///
 /// * `class` - The character's class
@@ -285,6 +299,88 @@ pub fn roll_hp_gain_from_db(
 
     let hp = class_def.hp_die.roll(rng).max(1) as u16;
     Ok(hp)
+}
+
+/// Levels up a character using ClassDatabase for HP calculation
+///
+/// This is the data-driven version that uses external class definitions.
+/// Use this when working with campaign-specific or modded classes.
+///
+/// Increases the character's level by 1, rolls for HP gain based on class
+/// definition from the database, and updates spell points.
+///
+/// # Arguments
+///
+/// * `character` - The character to level up (will be modified)
+/// * `class_db` - Reference to the class database
+/// * `rng` - Random number generator for HP rolls
+///
+/// # Returns
+///
+/// Returns `Ok(hp_gained)` with the amount of HP gained, or an error if
+/// the character cannot level up or the class is not found.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Character, Class, Race, Sex, Alignment};
+/// use antares::domain::progression::{award_experience, level_up_from_db};
+/// use antares::domain::classes::ClassDatabase;
+/// use rand::rng;
+///
+/// let mut knight = Character::new(
+///     "Sir Lancelot".to_string(),
+///     Race::Human,
+///     Class::Knight,
+///     Sex::Male,
+///     Alignment::Good,
+/// );
+///
+/// // Give enough XP to level up
+/// award_experience(&mut knight, 10000).unwrap();
+///
+/// let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+/// let mut rng = rng();
+/// let hp_gained = level_up_from_db(&mut knight, &db, &mut rng).unwrap();
+///
+/// assert_eq!(knight.level, 2);
+/// assert!(hp_gained > 0);
+/// ```
+pub fn level_up_from_db(
+    character: &mut Character,
+    class_db: &ClassDatabase,
+    rng: &mut impl Rng,
+) -> Result<u16, ProgressionError> {
+    // Check if character can level up
+    if character.level >= MAX_LEVEL {
+        return Err(ProgressionError::MaxLevelReached);
+    }
+
+    let required = experience_for_level(character.level + 1);
+    if character.experience < required {
+        return Err(ProgressionError::NotEnoughExperience {
+            needed: required,
+            current: character.experience,
+        });
+    }
+
+    // Increase level
+    character.level += 1;
+
+    // Roll for HP gain using class database
+    let hp_gain = roll_hp_gain_from_db(&character.class_id, class_db, rng)?;
+    character.hp.base = character.hp.base.saturating_add(hp_gain);
+    character.hp.current = character.hp.current.saturating_add(hp_gain);
+
+    // Update spell points using data-driven calculation
+    let new_sp = crate::domain::magic::casting::calculate_spell_points_by_id(character, class_db);
+    if new_sp > 0 {
+        let sp_gain = new_sp.saturating_sub(character.sp.base);
+        character.sp.base = new_sp;
+        character.sp.current = character.sp.current.saturating_add(sp_gain);
+    }
+
+    Ok(hp_gain)
 }
 
 /// Calculates the experience required for a given level
@@ -501,5 +597,106 @@ mod tests {
             result,
             Err(ProgressionError::ClassError(ClassError::ClassNotFound(_)))
         ));
+    }
+
+    #[test]
+    fn test_level_up_from_db() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut character = create_test_character(Class::Knight);
+        let required = experience_for_level(2);
+        character.experience = required;
+
+        let mut rng = rng();
+        let hp_gained = level_up_from_db(&mut character, &db, &mut rng).unwrap();
+
+        assert_eq!(character.level, 2);
+        assert!((1..=10).contains(&hp_gained)); // Knight uses 1d10
+    }
+
+    #[test]
+    fn test_level_up_from_db_increases_hp() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut character = create_test_character(Class::Knight);
+        let initial_hp = character.hp.base;
+        let required = experience_for_level(2);
+        character.experience = required;
+
+        let mut rng = rng();
+        level_up_from_db(&mut character, &db, &mut rng).unwrap();
+
+        assert!(character.hp.base > initial_hp);
+        assert_eq!(character.hp.current, character.hp.base);
+    }
+
+    #[test]
+    fn test_level_up_from_db_not_enough_xp() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut character = create_test_character(Class::Knight);
+        character.experience = 500; // Not enough for level 2
+
+        let mut rng = rng();
+        let result = level_up_from_db(&mut character, &db, &mut rng);
+
+        assert!(matches!(
+            result,
+            Err(ProgressionError::NotEnoughExperience { .. })
+        ));
+        assert_eq!(character.level, 1);
+    }
+
+    #[test]
+    fn test_level_up_from_db_max_level() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut character = create_test_character(Class::Knight);
+        character.level = MAX_LEVEL;
+        character.experience = u64::MAX;
+
+        let mut rng = rng();
+        let result = level_up_from_db(&mut character, &db, &mut rng);
+
+        assert!(matches!(result, Err(ProgressionError::MaxLevelReached)));
+    }
+
+    #[test]
+    fn test_level_up_from_db_spellcaster_gains_sp() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut cleric = create_test_character(Class::Cleric);
+        cleric.stats.personality.base = 15;
+        cleric.experience = experience_for_level(2);
+
+        let initial_sp = cleric.sp.base;
+        let mut rng = rng();
+        level_up_from_db(&mut cleric, &db, &mut rng).unwrap();
+
+        assert!(cleric.sp.base > initial_sp);
+    }
+
+    #[test]
+    fn test_level_up_from_db_non_spellcaster_no_sp() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut knight = create_test_character(Class::Knight);
+        knight.experience = experience_for_level(2);
+
+        let initial_sp = knight.sp.base;
+        let mut rng = rng();
+        level_up_from_db(&mut knight, &db, &mut rng).unwrap();
+
+        assert_eq!(knight.sp.base, initial_sp); // Should still be 0
+    }
+
+    #[test]
+    fn test_enum_and_db_hp_rolls_same_range() {
+        // Verify that both methods produce results in the same range
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut rng = rng();
+
+        for _ in 0..20 {
+            let enum_hp = roll_hp_gain(Class::Knight, &mut rng);
+            let db_hp = roll_hp_gain_from_db("knight", &db, &mut rng).unwrap();
+
+            // Both should be in the 1-10 range for Knight
+            assert!((1..=10).contains(&enum_hp));
+            assert!((1..=10).contains(&db_hp));
+        }
     }
 }

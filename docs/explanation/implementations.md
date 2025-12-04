@@ -118,6 +118,143 @@ Per the implementation plan:
 
 ---
 
+## Phase 2: Class Logic Migration (Hard-coded Removal Plan) (2025-01-XX)
+
+**Objective**: Migrate class-dependent logic from `match Class` patterns to `ClassDatabase` lookups, enabling data-driven class behavior.
+
+### Background
+
+Per the Hard-coded Removal Implementation Plan (`docs/explanation/hardcoded_removal_implementation_plan.md`), Phase 2 migrates runtime class logic to use the ClassDatabase instead of hardcoded match patterns on the Class enum. This enables:
+
+- Adding new classes via data files without code changes
+- Campaign-specific class modifications
+- Modding support for custom classes
+
+### Changes Implemented
+
+#### 2.1 HP Progression Migration
+
+Modified `src/domain/progression.rs`:
+
+- Added `level_up_from_db()` function that uses ClassDatabase for HP calculation
+- Existing `roll_hp_gain_from_db()` already existed from prior work
+- `level_up_from_db()` uses `calculate_spell_points_by_id()` for SP updates
+- Added deprecation note to `roll_hp_gain()` recommending data-driven version
+
+#### 2.2 Spell Casting Logic Migration
+
+Modified `src/domain/magic/casting.rs`:
+
+- Added `can_class_cast_school_by_id(class_id, class_db, school)` - Uses ClassDefinition.spell_school
+- Added `get_required_level_for_spell_by_id(class_id, class_db, spell)` - Uses is_pure_caster for hybrid delay
+- Added `calculate_spell_points_by_id(character, class_db)` - Uses ClassDefinition.spell_stat
+- Handles SpellSchool type conversion between classes.rs and magic/types.rs enums
+
+#### 2.3 SpellBook Logic Migration
+
+Modified `src/domain/character.rs`:
+
+- Added `SpellBook::get_spell_list_by_id(class_id, class_db)` - Returns spell list based on class's spell_school
+- Added `SpellBook::get_spell_list_mut_by_id(class_id, class_db)` - Mutable version
+- Both methods look up ClassDefinition.spell_school to determine Cleric vs Sorcerer list
+
+#### 2.4 Module Exports
+
+Updated `src/domain/magic/mod.rs`:
+
+- Re-exported new functions: `calculate_spell_points_by_id`, `can_class_cast_school_by_id`, `get_required_level_for_spell_by_id`
+
+### Tests Added
+
+**Progression Tests (src/domain/progression.rs):**
+
+- `test_level_up_from_db` - Basic level up with database
+- `test_level_up_from_db_increases_hp` - HP gain verification
+- `test_level_up_from_db_not_enough_xp` - XP requirement check
+- `test_level_up_from_db_max_level` - Max level boundary
+- `test_level_up_from_db_spellcaster_gains_sp` - SP gain for casters
+- `test_level_up_from_db_non_spellcaster_no_sp` - No SP for non-casters
+- `test_enum_and_db_hp_rolls_same_range` - Equivalence verification
+
+**Spell Casting Tests (src/domain/magic/casting.rs):**
+
+- `test_can_class_cast_school_by_id_cleric` - Cleric school access
+- `test_can_class_cast_school_by_id_sorcerer` - Sorcerer school access
+- `test_can_class_cast_school_by_id_paladin` - Hybrid caster school access
+- `test_can_class_cast_school_by_id_non_caster` - Non-casters return false
+- `test_can_class_cast_school_by_id_unknown_class` - Unknown class handling
+- `test_get_required_level_for_spell_by_id_pure_caster` - Pure caster levels
+- `test_get_required_level_for_spell_by_id_hybrid_caster` - Hybrid caster delay
+- `test_get_required_level_for_spell_by_id_non_caster` - Non-casters return MAX
+- `test_get_required_level_for_spell_by_id_unknown_class` - Unknown class handling
+- `test_get_required_level_for_spell_by_id_higher_level_spells` - Higher spell levels
+- `test_calculate_spell_points_by_id_cleric` - Cleric SP calculation
+- `test_calculate_spell_points_by_id_sorcerer` - Sorcerer SP calculation
+- `test_calculate_spell_points_by_id_paladin` - Paladin SP calculation
+- `test_calculate_spell_points_by_id_non_caster` - Non-casters return 0
+- `test_calculate_spell_points_by_id_unknown_class` - Unknown class handling
+- `test_calculate_spell_points_by_id_low_stat` - Low stat handling
+- `test_enum_and_db_spell_points_match` - Equivalence verification
+- `test_enum_and_db_can_cast_school_match` - Equivalence verification
+- `test_enum_and_db_required_level_match` - Equivalence verification
+
+**SpellBook Tests (src/domain/character.rs):**
+
+- `test_spellbook_get_spell_list_by_id_cleric` - Cleric spell list access
+- `test_spellbook_get_spell_list_by_id_sorcerer` - Sorcerer spell list access
+- `test_spellbook_get_spell_list_by_id_paladin` - Paladin (hybrid) spell list access
+- `test_spellbook_get_spell_list_by_id_knight` - Non-caster default behavior
+- `test_spellbook_get_spell_list_by_id_unknown_class` - Unknown class handling
+- `test_spellbook_get_spell_list_mut_by_id_cleric` - Mutable cleric access
+- `test_spellbook_get_spell_list_mut_by_id_sorcerer` - Mutable sorcerer access
+- `test_spellbook_get_spell_list_mut_by_id_paladin` - Mutable paladin access
+- `test_spellbook_get_spell_list_mut_by_id_knight` - Mutable non-caster default
+- `test_spellbook_enum_and_db_methods_match` - Pointer equivalence test
+- `test_spellbook_multiple_spell_levels` - Multiple spell level handling
+
+### Validation
+
+All quality checks pass:
+
+- `cargo fmt --all` - Code formatted successfully
+- `cargo check --all-targets --all-features` - Compilation successful
+- `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- `cargo test --all-features` - 427 unit tests pass, 230 doc tests pass
+
+### Architecture Compliance
+
+- [x] Data-driven functions use ClassDatabase lookups
+- [x] Existing enum-based functions preserved for compatibility
+- [x] SpellSchool type conversion handled between modules
+- [x] Module structure follows architecture.md Section 3.2
+- [x] No circular dependencies introduced
+- [x] AttributePair pattern respected (spell_stat lookup)
+
+### Success Criteria Met
+
+- [x] All class-dependent behavior can read from ClassDefinition
+- [x] Adding a new class to classes.ron works with all systems (when using \*\_by_id functions)
+- [x] Enum-based and ID-based functions produce identical results
+- [x] All existing tests pass
+- [x] New comprehensive test coverage for data-driven functions
+
+### Files Modified
+
+- `src/domain/progression.rs` - Added `level_up_from_db()`, tests
+- `src/domain/magic/casting.rs` - Added `*_by_id()` functions, tests
+- `src/domain/magic/mod.rs` - Re-exported new functions
+- `src/domain/character.rs` - Added SpellBook `*_by_id()` methods, tests
+
+### Next Steps (Phase 3)
+
+Per the implementation plan:
+
+- Add dynamic disablement methods to ClassDefinition
+- Deprecate static disablement constants
+- Update item validation to use ClassDatabase
+
+---
+
 > NOTE: The "Engine Support for SDK Data Changes" full implementation plan has been moved to:
 > `docs/explanation/engine_sdk_support_plan.md`
 >
