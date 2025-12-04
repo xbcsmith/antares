@@ -659,6 +659,7 @@ impl ItemsEditorState {
     }
 
     /// Static disablement display that doesn't require self
+    #[allow(deprecated)]
     fn show_disablement_display_static(ui: &mut egui::Ui, disablement: Disablement) {
         ui.horizontal_wrapped(|ui| {
             let classes = [
@@ -1092,6 +1093,7 @@ impl ItemsEditorState {
         }
     }
 
+    #[allow(deprecated)]
     fn show_disablement_editor(&mut self, ui: &mut egui::Ui) {
         let disablement = &mut self.edit_buffer.disablements;
 

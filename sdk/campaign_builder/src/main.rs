@@ -5342,6 +5342,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_disablement_flags() {
         let mut item = CampaignBuilderApp::default_item();
 
@@ -5538,6 +5539,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_disablement_editor_all_classes() {
         let mut app = CampaignBuilderApp::default();
 
@@ -5577,6 +5579,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_disablement_editor_specific_classes() {
         let mut app = CampaignBuilderApp::default();
 
@@ -5602,6 +5605,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_preview_displays_all_info() {
         use antares::domain::items::types::*;
 

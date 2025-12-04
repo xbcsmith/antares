@@ -245,13 +245,143 @@ All quality checks pass:
 - `src/domain/magic/mod.rs` - Re-exported new functions
 - `src/domain/character.rs` - Added SpellBook `*_by_id()` methods, tests
 
-### Next Steps (Phase 3)
+### Next Steps (Phase 4)
 
 Per the implementation plan:
 
-- Add dynamic disablement methods to ClassDefinition
-- Deprecate static disablement constants
-- Update item validation to use ClassDatabase
+- Create Race domain module with RaceDefinition and RaceDatabase
+- Update races.ron data files
+- Update SDK database integration for races
+
+---
+
+## Phase 3: Disablement System Migration (Hard-coded Removal Plan) (2025-01-XX)
+
+### Background
+
+Phase 3 continues the hard-coded removal effort by migrating the item disablement
+system from static bit constants to dynamic lookups using `ClassDatabase`. This
+enables the game to support dynamically defined classes for item restrictions.
+
+Previously, item restrictions used hardcoded constants like `Disablement::KNIGHT`
+which required code changes to add new classes. Now the system uses
+`ClassDefinition.disablement_bit_index` for data-driven lookups.
+
+### Changes Implemented
+
+#### 3.1 Added Dynamic Disablement Methods
+
+Added to `Disablement` in `src/domain/items/types.rs`:
+
+- `can_use_class_id(&self, class_id: &str, class_db: &ClassDatabase) -> bool`
+
+  - Looks up class by ID and checks if the class's disablement bit is set
+  - Returns `false` for unknown class IDs (safe default)
+
+- `can_use_alignment(&self, alignment: Alignment) -> bool`
+
+  - Checks if the alignment restriction allows item use
+  - Handles Good-only, Evil-only, and no-restriction cases
+
+- `can_use(&self, class_id: &str, alignment: Alignment, class_db: &ClassDatabase) -> bool`
+
+  - Combined check for both class and alignment restrictions
+  - The comprehensive method for item validation
+
+- `from_class_ids<I>(class_ids: I, class_db: &ClassDatabase) -> Self`
+
+  - Builds a disablement mask from a list of class IDs
+  - Useful for constructing restrictions programmatically
+
+- `allowed_class_ids(&self, class_db: &ClassDatabase) -> Vec<String>`
+  - Returns list of class IDs that can use an item
+  - Useful for UI display and validation
+
+#### 3.2 Deprecated Static Constants
+
+Marked the following constants with `#[deprecated]`:
+
+- `Disablement::KNIGHT`
+- `Disablement::PALADIN`
+- `Disablement::ARCHER`
+- `Disablement::CLERIC`
+- `Disablement::SORCERER`
+- `Disablement::ROBBER`
+
+Deprecation message directs users to `can_use_class_id()` with `ClassDatabase`.
+
+Note: `Disablement::GOOD` and `Disablement::EVIL` are NOT deprecated as alignment
+is a fixed concept, not data-driven.
+
+#### 3.3 Updated Existing Code
+
+Added `#[allow(deprecated)]` annotations to maintain backward compatibility:
+
+- `src/bin/item_editor.rs` - CLI item editor using legacy constants
+- `sdk/campaign_builder/src/items_editor.rs` - GUI item editor
+- `sdk/campaign_builder/src/main.rs` - Campaign builder tests
+
+### Tests Added
+
+New tests in `src/domain/items/types.rs`:
+
+- `test_can_use_class_id_single_class` - Single class restriction
+- `test_can_use_class_id_multiple_classes` - Multiple class restrictions
+- `test_can_use_class_id_all_classes` - Universal item (ALL)
+- `test_can_use_class_id_none` - Quest item (NONE)
+- `test_can_use_class_id_unknown_class` - Unknown class returns false
+- `test_can_use_alignment_any` - No alignment restriction
+- `test_can_use_alignment_good_only` - Good alignment required
+- `test_can_use_alignment_evil_only` - Evil alignment required
+- `test_can_use_combined` - Combined class + alignment checks
+- `test_from_class_ids` - Building mask from class list
+- `test_from_class_ids_empty` - Empty class list
+- `test_from_class_ids_with_unknown` - Unknown classes ignored
+- `test_allowed_class_ids` - Getting allowed class list
+- `test_allowed_class_ids_all` - All classes allowed
+- `test_allowed_class_ids_none` - No classes allowed
+- `test_dynamic_matches_static_constants` - Equivalence verification
+- `test_bit_index_matches_static_constant` - Bit mask equivalence
+
+### Validation
+
+- `cargo fmt --all` - Code formatted
+- `cargo check --all-targets --all-features` - Compilation successful
+- `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- `cargo test --all-features` - 444 unit tests pass, 235 doc tests pass
+
+### Architecture Compliance
+
+- [x] Dynamic methods use ClassDatabase lookups via `get_class()`
+- [x] Uses `ClassDefinition.disablement_mask()` for bit calculations
+- [x] Static constants deprecated with clear migration path
+- [x] Alignment enum from `domain::character` module used correctly
+- [x] No circular dependencies introduced
+- [x] Backward compatibility maintained with `#[allow(deprecated)]`
+
+### Success Criteria Met
+
+- [x] Item restrictions work with dynamically loaded classes
+- [x] Static constants still work but emit deprecation warnings
+- [x] Data-driven results match static constant results (verified by tests)
+- [x] Unknown class IDs handled gracefully (return false)
+- [x] All existing tests pass
+
+### Files Modified
+
+- `src/domain/items/types.rs` - Added dynamic methods, deprecated constants, tests
+- `src/bin/item_editor.rs` - Added `#[allow(deprecated)]` annotations
+- `sdk/campaign_builder/src/items_editor.rs` - Added `#[allow(deprecated)]` annotations
+- `sdk/campaign_builder/src/main.rs` - Added `#[allow(deprecated)]` annotations
+
+### Next Steps (Phase 4)
+
+Per the implementation plan:
+
+- Create Race domain module with RaceDefinition and RaceDatabase
+- Update races.ron data files
+- Update SDK database integration for races
+- Update Race Editor CLI
 
 ---
 

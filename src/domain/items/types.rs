@@ -10,6 +10,8 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.5 for complete specifications.
 
+use crate::domain::character::Alignment;
+use crate::domain::classes::ClassDatabase;
 use crate::domain::types::{DiceRoll, ItemId, SpellId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -315,19 +317,251 @@ impl Disablement {
     /// No classes can use (quest items)
     pub const NONE: Self = Self(0x00);
 
-    // Class flags
+    // Class flags - DEPRECATED: Use can_use_class_id() with ClassDatabase instead
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
+    )]
     pub const KNIGHT: u8 = 0b0000_0001;
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
+    )]
     pub const PALADIN: u8 = 0b0000_0010;
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
+    )]
     pub const ARCHER: u8 = 0b0000_0100;
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
+    )]
     pub const CLERIC: u8 = 0b0000_1000;
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
+    )]
     pub const SORCERER: u8 = 0b0001_0000;
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
+    )]
     pub const ROBBER: u8 = 0b0010_0000;
+
+    // Alignment flags (not deprecated - these are fixed concepts)
     pub const GOOD: u8 = 0b0100_0000;
     pub const EVIL: u8 = 0b1000_0000;
 
-    /// Check if a specific class can use this item
+    /// Check if a specific class can use this item (legacy method using bit constant)
+    ///
+    /// # Deprecated
+    ///
+    /// Prefer `can_use_class_id()` for data-driven class lookups.
+    ///
+    /// # Arguments
+    ///
+    /// * `class_bit` - The class bit constant (e.g., `Disablement::KNIGHT`)
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if the class bit is set in the disablement mask.
+    #[allow(deprecated)]
     pub fn can_use_class(&self, class_bit: u8) -> bool {
         (self.0 & class_bit) != 0
+    }
+
+    /// Check if a class can use this item using data-driven lookup
+    ///
+    /// This is the preferred method for checking class restrictions as it
+    /// supports dynamically loaded classes from the ClassDatabase.
+    ///
+    /// # Arguments
+    ///
+    /// * `class_id` - The class identifier (e.g., "knight", "sorcerer")
+    /// * `class_db` - Reference to the ClassDatabase containing class definitions
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if the class can use this item, `false` otherwise.
+    /// Returns `false` if the class_id is not found in the database.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::Disablement;
+    /// use antares::domain::classes::ClassDatabase;
+    ///
+    /// let ron_data = r#"[
+    ///     (
+    ///         id: "knight",
+    ///         name: "Knight",
+    ///         description: "A brave warrior",
+    ///         hp_die: (count: 1, sides: 10, bonus: 0),
+    ///         spell_school: None,
+    ///         is_pure_caster: false,
+    ///         spell_stat: None,
+    ///         disablement_bit: 0,
+    ///         special_abilities: [],
+    ///         starting_weapon_id: None,
+    ///         starting_armor_id: None,
+    ///         starting_items: [],
+    ///     ),
+    ///     (
+    ///         id: "sorcerer",
+    ///         name: "Sorcerer",
+    ///         description: "A master of arcane magic",
+    ///         hp_die: (count: 1, sides: 4, bonus: 0),
+    ///         spell_school: Some(Sorcerer),
+    ///         is_pure_caster: true,
+    ///         spell_stat: Some(Intellect),
+    ///         disablement_bit: 4,
+    ///         special_abilities: [],
+    ///         starting_weapon_id: None,
+    ///         starting_armor_id: None,
+    ///         starting_items: [],
+    ///     ),
+    /// ]"#;
+    ///
+    /// let class_db = ClassDatabase::load_from_string(ron_data).unwrap();
+    ///
+    /// // Knight-only item (bit 0 set)
+    /// let knight_item = Disablement(0b0000_0001);
+    /// assert!(knight_item.can_use_class_id("knight", &class_db));
+    /// assert!(!knight_item.can_use_class_id("sorcerer", &class_db));
+    ///
+    /// // All classes item
+    /// let universal = Disablement::ALL;
+    /// assert!(universal.can_use_class_id("knight", &class_db));
+    /// assert!(universal.can_use_class_id("sorcerer", &class_db));
+    /// ```
+    pub fn can_use_class_id(&self, class_id: &str, class_db: &ClassDatabase) -> bool {
+        match class_db.get_class(class_id) {
+            Some(class_def) => {
+                let mask = class_def.disablement_mask();
+                (self.0 & mask) != 0
+            }
+            None => false, // Unknown class cannot use item
+        }
+    }
+
+    /// Check if a specific alignment can use this item
+    ///
+    /// # Arguments
+    ///
+    /// * `alignment` - The character's alignment
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if the alignment restriction allows use, `false` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::Disablement;
+    /// use antares::domain::character::Alignment;
+    ///
+    /// // Good-only item
+    /// let holy_sword = Disablement(0b0100_0001); // Knight + Good
+    /// assert!(holy_sword.can_use_alignment(Alignment::Good));
+    /// assert!(!holy_sword.can_use_alignment(Alignment::Evil));
+    /// assert!(!holy_sword.can_use_alignment(Alignment::Neutral));
+    ///
+    /// // Evil-only item
+    /// let dark_blade = Disablement(0b1000_0001); // Knight + Evil
+    /// assert!(!dark_blade.can_use_alignment(Alignment::Good));
+    /// assert!(dark_blade.can_use_alignment(Alignment::Evil));
+    /// assert!(!dark_blade.can_use_alignment(Alignment::Neutral));
+    ///
+    /// // No alignment restriction
+    /// let normal_sword = Disablement(0b0000_0001); // Knight only, any alignment
+    /// assert!(normal_sword.can_use_alignment(Alignment::Good));
+    /// assert!(normal_sword.can_use_alignment(Alignment::Evil));
+    /// assert!(normal_sword.can_use_alignment(Alignment::Neutral));
+    /// ```
+    pub fn can_use_alignment(&self, alignment: Alignment) -> bool {
+        let good_required = self.good_only();
+        let evil_required = self.evil_only();
+
+        // If neither restriction is set, any alignment can use
+        if !good_required && !evil_required {
+            return true;
+        }
+
+        // Check specific alignment requirements
+        match alignment {
+            Alignment::Good => good_required,
+            Alignment::Evil => evil_required,
+            Alignment::Neutral => {
+                // Neutral can only use items with no alignment restriction
+                // If we reach here, an alignment restriction exists
+                false
+            }
+        }
+    }
+
+    /// Check if a character with given class and alignment can use this item
+    ///
+    /// This is the comprehensive check combining class and alignment restrictions.
+    ///
+    /// # Arguments
+    ///
+    /// * `class_id` - The class identifier (e.g., "knight", "sorcerer")
+    /// * `alignment` - The character's alignment
+    /// * `class_db` - Reference to the ClassDatabase
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if both class and alignment restrictions are satisfied.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::Disablement;
+    /// use antares::domain::character::Alignment;
+    /// use antares::domain::classes::ClassDatabase;
+    ///
+    /// let ron_data = r#"[
+    ///     (
+    ///         id: "knight",
+    ///         name: "Knight",
+    ///         description: "A brave warrior",
+    ///         hp_die: (count: 1, sides: 10, bonus: 0),
+    ///         spell_school: None,
+    ///         is_pure_caster: false,
+    ///         spell_stat: None,
+    ///         disablement_bit: 0,
+    ///         special_abilities: [],
+    ///         starting_weapon_id: None,
+    ///         starting_armor_id: None,
+    ///         starting_items: [],
+    ///     ),
+    ///     (
+    ///         id: "sorcerer",
+    ///         name: "Sorcerer",
+    ///         description: "A master of arcane magic",
+    ///         hp_die: (count: 1, sides: 4, bonus: 0),
+    ///         spell_school: Some(Sorcerer),
+    ///         is_pure_caster: true,
+    ///         spell_stat: Some(Intellect),
+    ///         disablement_bit: 4,
+    ///         special_abilities: [],
+    ///         starting_weapon_id: None,
+    ///         starting_armor_id: None,
+    ///         starting_items: [],
+    ///     ),
+    /// ]"#;
+    ///
+    /// let class_db = ClassDatabase::load_from_string(ron_data).unwrap();
+    ///
+    /// // Holy sword: Knight only, Good alignment required
+    /// let holy_sword = Disablement(0b0100_0001);
+    /// assert!(holy_sword.can_use("knight", Alignment::Good, &class_db));
+    /// assert!(!holy_sword.can_use("knight", Alignment::Evil, &class_db));
+    /// assert!(!holy_sword.can_use("sorcerer", Alignment::Good, &class_db));
+    /// ```
+    pub fn can_use(&self, class_id: &str, alignment: Alignment, class_db: &ClassDatabase) -> bool {
+        self.can_use_class_id(class_id, class_db) && self.can_use_alignment(alignment)
     }
 
     /// Check if good alignment can use
@@ -366,6 +600,144 @@ impl Disablement {
         }
         // trailing_zeros gives position of single bit
         Some(n.trailing_zeros() as u8)
+    }
+
+    /// Build a disablement mask from an iterator of class IDs
+    ///
+    /// This is useful when constructing disablement masks programmatically
+    /// from a list of classes that CAN use an item.
+    ///
+    /// # Arguments
+    ///
+    /// * `class_ids` - Iterator of class IDs that should be able to use the item
+    /// * `class_db` - Reference to the ClassDatabase
+    ///
+    /// # Returns
+    ///
+    /// A `Disablement` with the appropriate bits set for the given classes.
+    /// Unknown class IDs are ignored.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::Disablement;
+    /// use antares::domain::classes::ClassDatabase;
+    ///
+    /// let ron_data = r#"[
+    ///     (
+    ///         id: "knight",
+    ///         name: "Knight",
+    ///         description: "A brave warrior",
+    ///         hp_die: (count: 1, sides: 10, bonus: 0),
+    ///         spell_school: None,
+    ///         is_pure_caster: false,
+    ///         spell_stat: None,
+    ///         disablement_bit: 0,
+    ///         special_abilities: [],
+    ///         starting_weapon_id: None,
+    ///         starting_armor_id: None,
+    ///         starting_items: [],
+    ///     ),
+    ///     (
+    ///         id: "paladin",
+    ///         name: "Paladin",
+    ///         description: "A holy warrior",
+    ///         hp_die: (count: 1, sides: 8, bonus: 0),
+    ///         spell_school: Some(Cleric),
+    ///         is_pure_caster: false,
+    ///         spell_stat: Some(Personality),
+    ///         disablement_bit: 1,
+    ///         special_abilities: [],
+    ///         starting_weapon_id: None,
+    ///         starting_armor_id: None,
+    ///         starting_items: [],
+    ///     ),
+    /// ]"#;
+    ///
+    /// let class_db = ClassDatabase::load_from_string(ron_data).unwrap();
+    ///
+    /// let classes = vec!["knight", "paladin"];
+    /// let dis = Disablement::from_class_ids(classes.iter().map(|s| *s), &class_db);
+    /// assert!(dis.can_use_class_id("knight", &class_db));
+    /// assert!(dis.can_use_class_id("paladin", &class_db));
+    /// ```
+    pub fn from_class_ids<'a, I>(class_ids: I, class_db: &ClassDatabase) -> Self
+    where
+        I: Iterator<Item = &'a str>,
+    {
+        let mut mask = 0u8;
+        for class_id in class_ids {
+            if let Some(class_def) = class_db.get_class(class_id) {
+                mask |= class_def.disablement_mask();
+            }
+        }
+        Self(mask)
+    }
+
+    /// Get a list of class IDs that can use this item
+    ///
+    /// # Arguments
+    ///
+    /// * `class_db` - Reference to the ClassDatabase
+    ///
+    /// # Returns
+    ///
+    /// A vector of class IDs that have their disablement bit set in this mask.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::Disablement;
+    /// use antares::domain::classes::ClassDatabase;
+    ///
+    /// let ron_data = r#"[
+    ///     (
+    ///         id: "knight",
+    ///         name: "Knight",
+    ///         description: "A brave warrior",
+    ///         hp_die: (count: 1, sides: 10, bonus: 0),
+    ///         spell_school: None,
+    ///         is_pure_caster: false,
+    ///         spell_stat: None,
+    ///         disablement_bit: 0,
+    ///         special_abilities: [],
+    ///         starting_weapon_id: None,
+    ///         starting_armor_id: None,
+    ///         starting_items: [],
+    ///     ),
+    ///     (
+    ///         id: "sorcerer",
+    ///         name: "Sorcerer",
+    ///         description: "A master of arcane magic",
+    ///         hp_die: (count: 1, sides: 4, bonus: 0),
+    ///         spell_school: Some(Sorcerer),
+    ///         is_pure_caster: true,
+    ///         spell_stat: Some(Intellect),
+    ///         disablement_bit: 4,
+    ///         special_abilities: [],
+    ///         starting_weapon_id: None,
+    ///         starting_armor_id: None,
+    ///         starting_items: [],
+    ///     ),
+    /// ]"#;
+    ///
+    /// let class_db = ClassDatabase::load_from_string(ron_data).unwrap();
+    ///
+    /// // Knight-only item
+    /// let knight_item = Disablement(0b0000_0001);
+    /// let allowed = knight_item.allowed_class_ids(&class_db);
+    /// assert!(allowed.contains(&"knight".to_string()));
+    /// assert!(!allowed.contains(&"sorcerer".to_string()));
+    /// ```
+    pub fn allowed_class_ids(&self, class_db: &ClassDatabase) -> Vec<String> {
+        class_db
+            .all_classes()
+            .filter(|class_def| {
+                let mask = class_def.disablement_mask();
+                (self.0 & mask) != 0
+            })
+            .map(|class_def| class_def.id.clone())
+            .collect()
     }
 }
 
@@ -486,6 +858,97 @@ impl fmt::Display for Item {
 mod tests {
     use super::*;
 
+    // Helper to create a test ClassDatabase with standard classes
+    fn create_test_class_db() -> ClassDatabase {
+        let ron_data = r#"[
+            (
+                id: "knight",
+                name: "Knight",
+                description: "A brave warrior",
+                hp_die: (count: 1, sides: 10, bonus: 0),
+                spell_school: None,
+                is_pure_caster: false,
+                spell_stat: None,
+                disablement_bit: 0,
+                special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
+            ),
+            (
+                id: "paladin",
+                name: "Paladin",
+                description: "A holy warrior",
+                hp_die: (count: 1, sides: 8, bonus: 0),
+                spell_school: Some(Cleric),
+                is_pure_caster: false,
+                spell_stat: Some(Personality),
+                disablement_bit: 1,
+                special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
+            ),
+            (
+                id: "archer",
+                name: "Archer",
+                description: "A skilled marksman",
+                hp_die: (count: 1, sides: 8, bonus: 0),
+                spell_school: None,
+                is_pure_caster: false,
+                spell_stat: None,
+                disablement_bit: 2,
+                special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
+            ),
+            (
+                id: "cleric",
+                name: "Cleric",
+                description: "A divine spellcaster",
+                hp_die: (count: 1, sides: 6, bonus: 0),
+                spell_school: Some(Cleric),
+                is_pure_caster: true,
+                spell_stat: Some(Personality),
+                disablement_bit: 3,
+                special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
+            ),
+            (
+                id: "sorcerer",
+                name: "Sorcerer",
+                description: "A master of arcane magic",
+                hp_die: (count: 1, sides: 4, bonus: 0),
+                spell_school: Some(Sorcerer),
+                is_pure_caster: true,
+                spell_stat: Some(Intellect),
+                disablement_bit: 4,
+                special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
+            ),
+            (
+                id: "robber",
+                name: "Robber",
+                description: "A sneaky thief",
+                hp_die: (count: 1, sides: 6, bonus: 0),
+                spell_school: None,
+                is_pure_caster: false,
+                spell_stat: None,
+                disablement_bit: 5,
+                special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
+            ),
+        ]"#;
+        ClassDatabase::load_from_string(ron_data).unwrap()
+    }
+
     #[test]
     fn test_disablement_from_index_and_mask() {
         assert_eq!(Disablement::from_index(0).0, 1_u8);
@@ -504,7 +967,8 @@ mod tests {
     }
 
     #[test]
-    fn can_use_class_and_alignment() {
+    #[allow(deprecated)]
+    fn can_use_class_and_alignment_legacy() {
         let d = Disablement::from_index(0); // mask 0b0000_0001
         assert!(d.can_use_class(Disablement::KNIGHT));
         assert!(!d.can_use_class(Disablement::ARCHER));
@@ -516,7 +980,8 @@ mod tests {
     }
 
     #[test]
-    fn test_disablement_all_classes() {
+    #[allow(deprecated)]
+    fn test_disablement_all_classes_legacy() {
         let dis = Disablement::ALL;
         assert!(dis.can_use_class(Disablement::KNIGHT));
         assert!(dis.can_use_class(Disablement::SORCERER));
@@ -524,17 +989,255 @@ mod tests {
     }
 
     #[test]
-    fn test_disablement_knight_only() {
+    #[allow(deprecated)]
+    fn test_disablement_knight_only_legacy() {
         let dis = Disablement(Disablement::KNIGHT);
         assert!(dis.can_use_class(Disablement::KNIGHT));
         assert!(!dis.can_use_class(Disablement::SORCERER));
     }
 
     #[test]
-    fn test_disablement_good_alignment() {
+    #[allow(deprecated)]
+    fn test_disablement_good_alignment_legacy() {
         let dis = Disablement(Disablement::PALADIN | Disablement::GOOD);
         assert!(dis.good_only());
         assert!(!dis.evil_only());
+    }
+
+    // ===== New Data-Driven Tests =====
+
+    #[test]
+    fn test_can_use_class_id_single_class() {
+        let class_db = create_test_class_db();
+
+        // Knight-only item (bit 0)
+        let knight_item = Disablement(0b0000_0001);
+        assert!(knight_item.can_use_class_id("knight", &class_db));
+        assert!(!knight_item.can_use_class_id("paladin", &class_db));
+        assert!(!knight_item.can_use_class_id("sorcerer", &class_db));
+    }
+
+    #[test]
+    fn test_can_use_class_id_multiple_classes() {
+        let class_db = create_test_class_db();
+
+        // Knight and Paladin only (bits 0 and 1)
+        let martial_item = Disablement(0b0000_0011);
+        assert!(martial_item.can_use_class_id("knight", &class_db));
+        assert!(martial_item.can_use_class_id("paladin", &class_db));
+        assert!(!martial_item.can_use_class_id("sorcerer", &class_db));
+        assert!(!martial_item.can_use_class_id("cleric", &class_db));
+    }
+
+    #[test]
+    fn test_can_use_class_id_all_classes() {
+        let class_db = create_test_class_db();
+
+        let universal = Disablement::ALL;
+        assert!(universal.can_use_class_id("knight", &class_db));
+        assert!(universal.can_use_class_id("paladin", &class_db));
+        assert!(universal.can_use_class_id("archer", &class_db));
+        assert!(universal.can_use_class_id("cleric", &class_db));
+        assert!(universal.can_use_class_id("sorcerer", &class_db));
+        assert!(universal.can_use_class_id("robber", &class_db));
+    }
+
+    #[test]
+    fn test_can_use_class_id_none() {
+        let class_db = create_test_class_db();
+
+        let quest_item = Disablement::NONE;
+        assert!(!quest_item.can_use_class_id("knight", &class_db));
+        assert!(!quest_item.can_use_class_id("sorcerer", &class_db));
+    }
+
+    #[test]
+    fn test_can_use_class_id_unknown_class() {
+        let class_db = create_test_class_db();
+
+        let item = Disablement::ALL;
+        // Unknown class should return false
+        assert!(!item.can_use_class_id("unknown_class", &class_db));
+        assert!(!item.can_use_class_id("", &class_db));
+    }
+
+    #[test]
+    fn test_can_use_alignment_any() {
+        // No alignment restriction
+        let normal_item = Disablement(0b0000_0001);
+        assert!(normal_item.can_use_alignment(Alignment::Good));
+        assert!(normal_item.can_use_alignment(Alignment::Evil));
+        assert!(normal_item.can_use_alignment(Alignment::Neutral));
+    }
+
+    #[test]
+    fn test_can_use_alignment_good_only() {
+        // Good alignment required
+        let holy_item = Disablement(0b0100_0001);
+        assert!(holy_item.can_use_alignment(Alignment::Good));
+        assert!(!holy_item.can_use_alignment(Alignment::Evil));
+        assert!(!holy_item.can_use_alignment(Alignment::Neutral));
+    }
+
+    #[test]
+    fn test_can_use_alignment_evil_only() {
+        // Evil alignment required
+        let dark_item = Disablement(0b1000_0001);
+        assert!(!dark_item.can_use_alignment(Alignment::Good));
+        assert!(dark_item.can_use_alignment(Alignment::Evil));
+        assert!(!dark_item.can_use_alignment(Alignment::Neutral));
+    }
+
+    #[test]
+    fn test_can_use_combined() {
+        let class_db = create_test_class_db();
+
+        // Holy sword: Knight only, Good alignment
+        let holy_sword = Disablement(0b0100_0001);
+        assert!(holy_sword.can_use("knight", Alignment::Good, &class_db));
+        assert!(!holy_sword.can_use("knight", Alignment::Evil, &class_db));
+        assert!(!holy_sword.can_use("knight", Alignment::Neutral, &class_db));
+        assert!(!holy_sword.can_use("sorcerer", Alignment::Good, &class_db));
+
+        // Dark dagger: Robber only, Evil alignment
+        let dark_dagger = Disablement(0b1010_0000);
+        assert!(dark_dagger.can_use("robber", Alignment::Evil, &class_db));
+        assert!(!dark_dagger.can_use("robber", Alignment::Good, &class_db));
+        assert!(!dark_dagger.can_use("knight", Alignment::Evil, &class_db));
+    }
+
+    #[test]
+    fn test_from_class_ids() {
+        let class_db = create_test_class_db();
+
+        // Create disablement from class list
+        let classes = ["knight", "paladin", "archer"];
+        let dis = Disablement::from_class_ids(classes.iter().copied(), &class_db);
+
+        assert!(dis.can_use_class_id("knight", &class_db));
+        assert!(dis.can_use_class_id("paladin", &class_db));
+        assert!(dis.can_use_class_id("archer", &class_db));
+        assert!(!dis.can_use_class_id("cleric", &class_db));
+        assert!(!dis.can_use_class_id("sorcerer", &class_db));
+        assert!(!dis.can_use_class_id("robber", &class_db));
+    }
+
+    #[test]
+    fn test_from_class_ids_empty() {
+        let class_db = create_test_class_db();
+
+        let classes: [&str; 0] = [];
+        let dis = Disablement::from_class_ids(classes.iter().copied(), &class_db);
+
+        assert_eq!(dis.0, 0);
+        assert!(!dis.can_use_class_id("knight", &class_db));
+    }
+
+    #[test]
+    fn test_from_class_ids_with_unknown() {
+        let class_db = create_test_class_db();
+
+        // Include an unknown class - should be ignored
+        let classes = ["knight", "unknown_class", "paladin"];
+        let dis = Disablement::from_class_ids(classes.iter().copied(), &class_db);
+
+        assert!(dis.can_use_class_id("knight", &class_db));
+        assert!(dis.can_use_class_id("paladin", &class_db));
+        // Should only have bits 0 and 1 set
+        assert_eq!(dis.0 & 0b0011_1111, 0b0000_0011);
+    }
+
+    #[test]
+    fn test_allowed_class_ids() {
+        let class_db = create_test_class_db();
+
+        // Knight and Sorcerer only
+        let item = Disablement(0b0001_0001);
+        let allowed = item.allowed_class_ids(&class_db);
+
+        assert_eq!(allowed.len(), 2);
+        assert!(allowed.contains(&"knight".to_string()));
+        assert!(allowed.contains(&"sorcerer".to_string()));
+    }
+
+    #[test]
+    fn test_allowed_class_ids_all() {
+        let class_db = create_test_class_db();
+
+        let universal = Disablement::ALL;
+        let allowed = universal.allowed_class_ids(&class_db);
+
+        // Should include all 6 classes
+        assert_eq!(allowed.len(), 6);
+    }
+
+    #[test]
+    fn test_allowed_class_ids_none() {
+        let class_db = create_test_class_db();
+
+        let quest_item = Disablement::NONE;
+        let allowed = quest_item.allowed_class_ids(&class_db);
+
+        assert!(allowed.is_empty());
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_dynamic_matches_static_constants() {
+        // Verify that the data-driven approach produces the same results
+        // as the deprecated static constants
+        let class_db = create_test_class_db();
+
+        // Check each class
+        let knight_item = Disablement(Disablement::KNIGHT);
+        assert!(knight_item.can_use_class_id("knight", &class_db));
+
+        let paladin_item = Disablement(Disablement::PALADIN);
+        assert!(paladin_item.can_use_class_id("paladin", &class_db));
+
+        let archer_item = Disablement(Disablement::ARCHER);
+        assert!(archer_item.can_use_class_id("archer", &class_db));
+
+        let cleric_item = Disablement(Disablement::CLERIC);
+        assert!(cleric_item.can_use_class_id("cleric", &class_db));
+
+        let sorcerer_item = Disablement(Disablement::SORCERER);
+        assert!(sorcerer_item.can_use_class_id("sorcerer", &class_db));
+
+        let robber_item = Disablement(Disablement::ROBBER);
+        assert!(robber_item.can_use_class_id("robber", &class_db));
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_bit_index_matches_static_constant() {
+        // Verify that ClassDefinition.disablement_bit_index produces the same mask
+        // as the deprecated static constants
+        let class_db = create_test_class_db();
+
+        // Knight: bit 0
+        let knight = class_db.get_class("knight").unwrap();
+        assert_eq!(knight.disablement_mask(), Disablement::KNIGHT);
+
+        // Paladin: bit 1
+        let paladin = class_db.get_class("paladin").unwrap();
+        assert_eq!(paladin.disablement_mask(), Disablement::PALADIN);
+
+        // Archer: bit 2
+        let archer = class_db.get_class("archer").unwrap();
+        assert_eq!(archer.disablement_mask(), Disablement::ARCHER);
+
+        // Cleric: bit 3
+        let cleric = class_db.get_class("cleric").unwrap();
+        assert_eq!(cleric.disablement_mask(), Disablement::CLERIC);
+
+        // Sorcerer: bit 4
+        let sorcerer = class_db.get_class("sorcerer").unwrap();
+        assert_eq!(sorcerer.disablement_mask(), Disablement::SORCERER);
+
+        // Robber: bit 5
+        let robber = class_db.get_class("robber").unwrap();
+        assert_eq!(robber.disablement_mask(), Disablement::ROBBER);
     }
 
     #[test]

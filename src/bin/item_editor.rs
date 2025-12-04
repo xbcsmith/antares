@@ -399,6 +399,7 @@ impl ItemEditor {
     }
 
     /// Custom class restriction selection
+    #[allow(deprecated)]
     fn custom_class_selection(&self) -> Disablement {
         println!("\n    Select classes that CAN use this item:");
 
@@ -863,6 +864,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_custom_class_selection_all_flags() {
         // This test validates the bit flags are correctly set
         let flags = Disablement::KNIGHT
