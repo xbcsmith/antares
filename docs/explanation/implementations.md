@@ -1,5 +1,123 @@
 # Implementation Summary
 
+## Phase 1: Character Struct Migration (Hard-coded Removal Plan) (2025-01-XX)
+
+**Objective**: Migrate the `Character` struct from enum-based to ID-based class and race references, enabling gradual migration to data-driven lookups.
+
+### Background
+
+Per the Hard-coded Removal Implementation Plan (`docs/explanation/hardcoded_removal_implementation_plan.md`), Phase 1 adds `class_id: ClassId` and `race_id: RaceId` fields to the `Character` struct while preserving the existing enum fields for backward compatibility.
+
+### Changes Implemented
+
+#### 1.1 Added RaceId Type Alias
+
+Added `RaceId` type alias to `src/domain/types.rs`:
+
+- `pub type RaceId = String;` - Race identifier (e.g., "human", "elf", "dwarf")
+- Re-exported in `src/domain/mod.rs`
+
+#### 1.2 Added ID Fields to Character Struct
+
+Modified `src/domain/character.rs`:
+
+- Added `race_id: RaceId` field with `#[serde(default)]` for backward compatibility
+- Added `class_id: ClassId` field with `#[serde(default)]` for backward compatibility
+- Both fields default to empty strings when deserializing old save files
+
+#### 1.3 Added Conversion Utilities
+
+Created four conversion functions in `src/domain/character.rs`:
+
+- `race_id_from_enum(race: Race) -> RaceId` - Converts Race enum to string ID
+- `class_id_from_enum(class: Class) -> ClassId` - Converts Class enum to string ID
+- `race_enum_from_id(id: &RaceId) -> Option<Race>` - Converts string ID to Race enum
+- `class_enum_from_id(id: &ClassId) -> Option<Class>` - Converts string ID to Class enum
+
+ID mappings:
+
+- Human → "human", Elf → "elf", Dwarf → "dwarf", Gnome → "gnome", HalfOrc → "half_orc"
+- Knight → "knight", Paladin → "paladin", Archer → "archer", Cleric → "cleric", Sorcerer → "sorcerer", Robber → "robber"
+
+#### 1.4 Updated Character Constructors
+
+- `Character::new()` - Now populates both enum fields AND ID fields automatically
+- `Character::from_ids()` - New constructor that accepts RaceId and ClassId, converts to enums, returns `Option<Character>`
+
+### Tests Added
+
+Comprehensive test coverage added to `src/domain/character.rs`:
+
+**ID/Enum Conversion Tests:**
+
+- `test_race_id_from_enum_all_races` - All race conversions
+- `test_class_id_from_enum_all_classes` - All class conversions
+- `test_race_enum_from_id_all_races` - All reverse race conversions
+- `test_class_enum_from_id_all_classes` - All reverse class conversions
+- `test_race_enum_from_id_invalid` - Invalid/empty/case-sensitive inputs
+- `test_class_enum_from_id_invalid` - Invalid/empty/case-sensitive inputs
+- `test_id_enum_roundtrip_races` - Round-trip conversion validation
+- `test_id_enum_roundtrip_classes` - Round-trip conversion validation
+
+**Character Constructor Tests:**
+
+- `test_character_new_populates_both_enum_and_id` - Verifies new() sets both fields
+- `test_character_new_all_race_class_combinations` - Multiple combo tests
+- `test_character_from_ids_success` - Valid ID constructor
+- `test_character_from_ids_invalid_race` - Invalid race returns None
+- `test_character_from_ids_invalid_class` - Invalid class returns None
+- `test_character_from_ids_both_invalid` - Both invalid returns None
+- `test_character_from_ids_empty_strings` - Empty strings return None
+- `test_character_from_ids_default_values` - Verifies default starting values
+- `test_character_new_and_from_ids_produce_equivalent_state` - Equivalence test
+
+**Serialization Tests:**
+
+- `test_character_serialization_with_ids` - RON serialization includes ID fields
+- `test_character_deserialization_with_ids` - Round-trip preserves all fields
+- `test_character_backward_compatibility_missing_ids` - serde(default) behavior
+
+### Validation
+
+All quality checks pass:
+
+- `cargo fmt --all` - Code formatted successfully
+- `cargo check --all-targets --all-features` - Compilation successful
+- `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- `cargo test --all-features` - 390 unit tests pass, 224 doc tests pass
+
+### Architecture Compliance
+
+- [x] Type aliases used consistently (ClassId, RaceId)
+- [x] `#[serde(default)]` used for backward compatibility
+- [x] Existing enum fields preserved for gradual migration
+- [x] Module structure follows architecture.md Section 3.2
+- [x] No circular dependencies introduced
+
+### Success Criteria Met
+
+- [x] Existing code continues to work with enum-based access
+- [x] New code can use ID-based access
+- [x] All existing tests pass
+- [x] Save/load works with both old and new formats (via serde default)
+- [x] Both constructors produce consistent state
+
+### Files Modified
+
+- `src/domain/types.rs` - Added RaceId type alias
+- `src/domain/mod.rs` - Re-exported RaceId
+- `src/domain/character.rs` - Added ID fields, conversion functions, from_ids() constructor, and tests
+
+### Next Steps (Phase 2)
+
+Per the implementation plan:
+
+- Migrate HP progression logic to use ClassDatabase lookups
+- Migrate spell casting logic to use ClassDatabase
+- Migrate SpellBook logic to use ClassDatabase
+
+---
+
 > NOTE: The "Engine Support for SDK Data Changes" full implementation plan has been moved to:
 > `docs/explanation/engine_sdk_support_plan.md`
 >

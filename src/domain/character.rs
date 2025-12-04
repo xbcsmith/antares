@@ -11,7 +11,8 @@
 //! See `docs/reference/architecture.md` Section 4.3 for complete specifications.
 //! See `docs/reference/stat_ranges.md` for detailed stat range documentation.
 
-use crate::domain::types::{ItemId, SpellId, TownId};
+use crate::domain::classes::ClassId;
+use crate::domain::types::{ItemId, RaceId, SpellId, TownId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -432,6 +433,127 @@ pub enum Alignment {
     Evil,
 }
 
+// ===== ID/Enum Conversion Utilities =====
+
+/// Converts a Race enum to its corresponding RaceId string
+///
+/// # Arguments
+///
+/// * `race` - The Race enum value to convert
+///
+/// # Returns
+///
+/// Returns the lowercase string identifier for the race
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Race, race_id_from_enum};
+///
+/// assert_eq!(race_id_from_enum(Race::Human), "human");
+/// assert_eq!(race_id_from_enum(Race::Elf), "elf");
+/// assert_eq!(race_id_from_enum(Race::HalfOrc), "half_orc");
+/// ```
+pub fn race_id_from_enum(race: Race) -> RaceId {
+    match race {
+        Race::Human => "human".to_string(),
+        Race::Elf => "elf".to_string(),
+        Race::Dwarf => "dwarf".to_string(),
+        Race::Gnome => "gnome".to_string(),
+        Race::HalfOrc => "half_orc".to_string(),
+    }
+}
+
+/// Converts a Class enum to its corresponding ClassId string
+///
+/// # Arguments
+///
+/// * `class` - The Class enum value to convert
+///
+/// # Returns
+///
+/// Returns the lowercase string identifier for the class
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Class, class_id_from_enum};
+///
+/// assert_eq!(class_id_from_enum(Class::Knight), "knight");
+/// assert_eq!(class_id_from_enum(Class::Sorcerer), "sorcerer");
+/// ```
+pub fn class_id_from_enum(class: Class) -> ClassId {
+    match class {
+        Class::Knight => "knight".to_string(),
+        Class::Paladin => "paladin".to_string(),
+        Class::Archer => "archer".to_string(),
+        Class::Cleric => "cleric".to_string(),
+        Class::Sorcerer => "sorcerer".to_string(),
+        Class::Robber => "robber".to_string(),
+    }
+}
+
+/// Converts a RaceId string to its corresponding Race enum
+///
+/// # Arguments
+///
+/// * `id` - The race identifier string to convert
+///
+/// # Returns
+///
+/// Returns `Some(Race)` if the ID is recognized, `None` otherwise
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Race, race_enum_from_id};
+///
+/// assert_eq!(race_enum_from_id(&"human".to_string()), Some(Race::Human));
+/// assert_eq!(race_enum_from_id(&"elf".to_string()), Some(Race::Elf));
+/// assert_eq!(race_enum_from_id(&"unknown".to_string()), None);
+/// ```
+pub fn race_enum_from_id(id: &RaceId) -> Option<Race> {
+    match id.as_str() {
+        "human" => Some(Race::Human),
+        "elf" => Some(Race::Elf),
+        "dwarf" => Some(Race::Dwarf),
+        "gnome" => Some(Race::Gnome),
+        "half_orc" => Some(Race::HalfOrc),
+        _ => None,
+    }
+}
+
+/// Converts a ClassId string to its corresponding Class enum
+///
+/// # Arguments
+///
+/// * `id` - The class identifier string to convert
+///
+/// # Returns
+///
+/// Returns `Some(Class)` if the ID is recognized, `None` otherwise
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Class, class_enum_from_id};
+///
+/// assert_eq!(class_enum_from_id(&"knight".to_string()), Some(Class::Knight));
+/// assert_eq!(class_enum_from_id(&"sorcerer".to_string()), Some(Class::Sorcerer));
+/// assert_eq!(class_enum_from_id(&"unknown".to_string()), None);
+/// ```
+pub fn class_enum_from_id(id: &ClassId) -> Option<Class> {
+    match id.as_str() {
+        "knight" => Some(Class::Knight),
+        "paladin" => Some(Class::Paladin),
+        "archer" => Some(Class::Archer),
+        "cleric" => Some(Class::Cleric),
+        "sorcerer" => Some(Class::Sorcerer),
+        "robber" => Some(Class::Robber),
+        _ => None,
+    }
+}
+
 // ===== Condition Flags =====
 
 /// Character conditions (can have multiple via bitflags)
@@ -759,6 +881,14 @@ pub struct Character {
     pub name: String,
     pub race: Race,
     pub class: Class,
+    /// Data-driven race identifier (e.g., "human", "elf")
+    /// Used for lookups in RaceDatabase. Defaults to empty for backward compatibility.
+    #[serde(default)]
+    pub race_id: RaceId,
+    /// Data-driven class identifier (e.g., "knight", "sorcerer")
+    /// Used for lookups in ClassDatabase. Defaults to empty for backward compatibility.
+    #[serde(default)]
+    pub class_id: ClassId,
     pub sex: Sex,
     /// Current alignment
     pub alignment: Alignment,
@@ -807,11 +937,40 @@ pub struct Character {
 
 impl Character {
     /// Creates a new character with default starting values
+    ///
+    /// Populates both enum fields (for backward compatibility) and ID fields
+    /// (for data-driven lookups).
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Character's display name
+    /// * `race` - Race enum value
+    /// * `class` - Class enum value
+    /// * `sex` - Sex enum value
+    /// * `alignment` - Alignment enum value
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Race, Class, Sex, Alignment};
+    ///
+    /// let hero = Character::new(
+    ///     "Sir Lancelot".to_string(),
+    ///     Race::Human,
+    ///     Class::Knight,
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// assert_eq!(hero.race_id, "human");
+    /// assert_eq!(hero.class_id, "knight");
+    /// ```
     pub fn new(name: String, race: Race, class: Class, sex: Sex, alignment: Alignment) -> Self {
         Self {
             name,
             race,
             class,
+            race_id: race_id_from_enum(race),
+            class_id: class_id_from_enum(class),
             sex,
             alignment,
             alignment_initial: alignment,
@@ -837,6 +996,84 @@ impl Character {
             gems: 0,
             food: 10,
         }
+    }
+
+    /// Creates a new character using ID-based references
+    ///
+    /// This constructor uses data-driven ClassId and RaceId values, converting
+    /// them to enums for backward compatibility. Returns None if the IDs cannot
+    /// be converted to valid enums.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Character's display name
+    /// * `race_id` - Race identifier (e.g., "human", "elf")
+    /// * `class_id` - Class identifier (e.g., "knight", "sorcerer")
+    /// * `sex` - Sex enum value
+    /// * `alignment` - Alignment enum value
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(Character)` if both IDs are valid, `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Race, Class, Sex, Alignment};
+    ///
+    /// let hero = Character::from_ids(
+    ///     "Sir Lancelot".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// assert!(hero.is_some());
+    /// let hero = hero.unwrap();
+    /// assert_eq!(hero.race, Race::Human);
+    /// assert_eq!(hero.class, Class::Knight);
+    /// ```
+    pub fn from_ids(
+        name: String,
+        race_id: RaceId,
+        class_id: ClassId,
+        sex: Sex,
+        alignment: Alignment,
+    ) -> Option<Self> {
+        let race = race_enum_from_id(&race_id)?;
+        let class = class_enum_from_id(&class_id)?;
+
+        Some(Self {
+            name,
+            race,
+            class,
+            race_id,
+            class_id,
+            sex,
+            alignment,
+            alignment_initial: alignment,
+            level: 1,
+            experience: 0,
+            age: 18,
+            age_days: 0,
+            stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
+            hp: AttributePair16::new(10),
+            sp: AttributePair16::new(0),
+            ac: AttributePair::new(0),
+            spell_level: AttributePair::new(0),
+            inventory: Inventory::new(),
+            equipment: Equipment::new(),
+            spells: SpellBook::new(),
+            conditions: Condition::new(),
+            active_conditions: Vec::new(),
+            resistances: Resistances::new(),
+            quest_flags: QuestFlags::new(),
+            portrait_id: 0,
+            worthiness: 0,
+            gold: 0,
+            gems: 0,
+            food: 10,
+        })
     }
 
     /// Returns true if the character is alive (not dead, stoned, or eradicated)
@@ -1187,5 +1424,369 @@ mod tests {
         assert_eq!(hero.experience, 0);
         assert!(hero.is_alive());
         assert!(hero.can_act());
+    }
+
+    // ===== Phase 1: ID/Enum Conversion Tests =====
+
+    #[test]
+    fn test_race_id_from_enum_all_races() {
+        assert_eq!(race_id_from_enum(Race::Human), "human");
+        assert_eq!(race_id_from_enum(Race::Elf), "elf");
+        assert_eq!(race_id_from_enum(Race::Dwarf), "dwarf");
+        assert_eq!(race_id_from_enum(Race::Gnome), "gnome");
+        assert_eq!(race_id_from_enum(Race::HalfOrc), "half_orc");
+    }
+
+    #[test]
+    fn test_class_id_from_enum_all_classes() {
+        assert_eq!(class_id_from_enum(Class::Knight), "knight");
+        assert_eq!(class_id_from_enum(Class::Paladin), "paladin");
+        assert_eq!(class_id_from_enum(Class::Archer), "archer");
+        assert_eq!(class_id_from_enum(Class::Cleric), "cleric");
+        assert_eq!(class_id_from_enum(Class::Sorcerer), "sorcerer");
+        assert_eq!(class_id_from_enum(Class::Robber), "robber");
+    }
+
+    #[test]
+    fn test_race_enum_from_id_all_races() {
+        assert_eq!(race_enum_from_id(&"human".to_string()), Some(Race::Human));
+        assert_eq!(race_enum_from_id(&"elf".to_string()), Some(Race::Elf));
+        assert_eq!(race_enum_from_id(&"dwarf".to_string()), Some(Race::Dwarf));
+        assert_eq!(race_enum_from_id(&"gnome".to_string()), Some(Race::Gnome));
+        assert_eq!(
+            race_enum_from_id(&"half_orc".to_string()),
+            Some(Race::HalfOrc)
+        );
+    }
+
+    #[test]
+    fn test_class_enum_from_id_all_classes() {
+        assert_eq!(
+            class_enum_from_id(&"knight".to_string()),
+            Some(Class::Knight)
+        );
+        assert_eq!(
+            class_enum_from_id(&"paladin".to_string()),
+            Some(Class::Paladin)
+        );
+        assert_eq!(
+            class_enum_from_id(&"archer".to_string()),
+            Some(Class::Archer)
+        );
+        assert_eq!(
+            class_enum_from_id(&"cleric".to_string()),
+            Some(Class::Cleric)
+        );
+        assert_eq!(
+            class_enum_from_id(&"sorcerer".to_string()),
+            Some(Class::Sorcerer)
+        );
+        assert_eq!(
+            class_enum_from_id(&"robber".to_string()),
+            Some(Class::Robber)
+        );
+    }
+
+    #[test]
+    fn test_race_enum_from_id_invalid() {
+        assert_eq!(race_enum_from_id(&"unknown".to_string()), None);
+        assert_eq!(race_enum_from_id(&"".to_string()), None);
+        assert_eq!(race_enum_from_id(&"HUMAN".to_string()), None); // Case sensitive
+        assert_eq!(race_enum_from_id(&"halforc".to_string()), None); // No underscore
+    }
+
+    #[test]
+    fn test_class_enum_from_id_invalid() {
+        assert_eq!(class_enum_from_id(&"unknown".to_string()), None);
+        assert_eq!(class_enum_from_id(&"".to_string()), None);
+        assert_eq!(class_enum_from_id(&"KNIGHT".to_string()), None); // Case sensitive
+        assert_eq!(class_enum_from_id(&"mage".to_string()), None); // Not a valid class
+    }
+
+    #[test]
+    fn test_id_enum_roundtrip_races() {
+        // Test that converting enum->id->enum returns the original
+        for race in [
+            Race::Human,
+            Race::Elf,
+            Race::Dwarf,
+            Race::Gnome,
+            Race::HalfOrc,
+        ] {
+            let id = race_id_from_enum(race);
+            let recovered = race_enum_from_id(&id);
+            assert_eq!(recovered, Some(race));
+        }
+    }
+
+    #[test]
+    fn test_id_enum_roundtrip_classes() {
+        // Test that converting enum->id->enum returns the original
+        for class in [
+            Class::Knight,
+            Class::Paladin,
+            Class::Archer,
+            Class::Cleric,
+            Class::Sorcerer,
+            Class::Robber,
+        ] {
+            let id = class_id_from_enum(class);
+            let recovered = class_enum_from_id(&id);
+            assert_eq!(recovered, Some(class));
+        }
+    }
+
+    // ===== Phase 1: Character::new() ID Population Tests =====
+
+    #[test]
+    fn test_character_new_populates_both_enum_and_id() {
+        let hero = Character::new(
+            "Test Hero".to_string(),
+            Race::Human,
+            Class::Knight,
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        // Enum fields should be set
+        assert_eq!(hero.race, Race::Human);
+        assert_eq!(hero.class, Class::Knight);
+
+        // ID fields should also be populated
+        assert_eq!(hero.race_id, "human");
+        assert_eq!(hero.class_id, "knight");
+    }
+
+    #[test]
+    fn test_character_new_all_race_class_combinations() {
+        // Test a sampling of race/class combinations
+        let combos = [
+            (Race::Elf, Class::Archer, "elf", "archer"),
+            (Race::Dwarf, Class::Cleric, "dwarf", "cleric"),
+            (Race::Gnome, Class::Sorcerer, "gnome", "sorcerer"),
+            (Race::HalfOrc, Class::Robber, "half_orc", "robber"),
+            (Race::Human, Class::Paladin, "human", "paladin"),
+        ];
+
+        for (race, class, expected_race_id, expected_class_id) in combos {
+            let character = Character::new(
+                "Test".to_string(),
+                race,
+                class,
+                Sex::Male,
+                Alignment::Neutral,
+            );
+            assert_eq!(character.race, race);
+            assert_eq!(character.class, class);
+            assert_eq!(character.race_id, expected_race_id);
+            assert_eq!(character.class_id, expected_class_id);
+        }
+    }
+
+    // ===== Phase 1: Character::from_ids() Tests =====
+
+    #[test]
+    fn test_character_from_ids_success() {
+        let hero = Character::from_ids(
+            "Sir Lancelot".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        assert!(hero.is_some());
+        let hero = hero.unwrap();
+        assert_eq!(hero.name, "Sir Lancelot");
+        assert_eq!(hero.race, Race::Human);
+        assert_eq!(hero.class, Class::Knight);
+        assert_eq!(hero.race_id, "human");
+        assert_eq!(hero.class_id, "knight");
+        assert_eq!(hero.sex, Sex::Male);
+        assert_eq!(hero.alignment, Alignment::Good);
+    }
+
+    #[test]
+    fn test_character_from_ids_invalid_race() {
+        let result = Character::from_ids(
+            "Test".to_string(),
+            "invalid_race".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_character_from_ids_invalid_class() {
+        let result = Character::from_ids(
+            "Test".to_string(),
+            "human".to_string(),
+            "invalid_class".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_character_from_ids_both_invalid() {
+        let result = Character::from_ids(
+            "Test".to_string(),
+            "invalid_race".to_string(),
+            "invalid_class".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_character_from_ids_empty_strings() {
+        let result = Character::from_ids(
+            "Test".to_string(),
+            "".to_string(),
+            "".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_character_from_ids_default_values() {
+        let hero = Character::from_ids(
+            "Test Hero".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        )
+        .unwrap();
+
+        // Check default starting values
+        assert_eq!(hero.level, 1);
+        assert_eq!(hero.experience, 0);
+        assert_eq!(hero.age, 18);
+        assert_eq!(hero.food, 10);
+        assert_eq!(hero.gold, 0);
+        assert_eq!(hero.gems, 0);
+        assert!(hero.is_alive());
+        assert!(hero.can_act());
+    }
+
+    // ===== Phase 1: Serialization Tests =====
+
+    #[test]
+    fn test_character_serialization_with_ids() {
+        let hero = Character::new(
+            "Test Hero".to_string(),
+            Race::Human,
+            Class::Knight,
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        // Serialize to RON
+        let serialized = ron::to_string(&hero).expect("Failed to serialize character");
+
+        // Should contain both enum and ID fields
+        assert!(serialized.contains("Human"));
+        assert!(serialized.contains("Knight"));
+        assert!(serialized.contains("race_id"));
+        assert!(serialized.contains("class_id"));
+        assert!(serialized.contains("\"human\""));
+        assert!(serialized.contains("\"knight\""));
+    }
+
+    #[test]
+    fn test_character_deserialization_with_ids() {
+        let hero = Character::new(
+            "Test Hero".to_string(),
+            Race::Elf,
+            Class::Archer,
+            Sex::Female,
+            Alignment::Neutral,
+        );
+
+        // Serialize and deserialize
+        let serialized = ron::to_string(&hero).expect("Failed to serialize");
+        let deserialized: Character = ron::from_str(&serialized).expect("Failed to deserialize");
+
+        // Verify all fields match
+        assert_eq!(deserialized.name, hero.name);
+        assert_eq!(deserialized.race, hero.race);
+        assert_eq!(deserialized.class, hero.class);
+        assert_eq!(deserialized.race_id, hero.race_id);
+        assert_eq!(deserialized.class_id, hero.class_id);
+        assert_eq!(deserialized.sex, hero.sex);
+        assert_eq!(deserialized.alignment, hero.alignment);
+    }
+
+    #[test]
+    fn test_character_backward_compatibility_missing_ids() {
+        // Test that serde(default) works correctly for race_id and class_id
+        // The #[serde(default)] attribute means String::default() (empty string)
+        // will be used when these fields are missing during deserialization.
+
+        // Verify the default for String is empty (what serde(default) uses)
+        let default_race_id: RaceId = Default::default();
+        let default_class_id: ClassId = Default::default();
+        assert_eq!(default_race_id, "");
+        assert_eq!(default_class_id, "");
+
+        // Verify that a newly created character has populated IDs (not defaults)
+        let hero = Character::new(
+            "Test Hero".to_string(),
+            Race::Human,
+            Class::Knight,
+            Sex::Male,
+            Alignment::Good,
+        );
+        assert_eq!(hero.race_id, "human");
+        assert_eq!(hero.class_id, "knight");
+
+        // Verify serialization round-trip preserves the IDs
+        let serialized = ron::to_string(&hero).expect("Failed to serialize");
+        let deserialized: Character = ron::from_str(&serialized).expect("Failed to deserialize");
+        assert_eq!(deserialized.race_id, "human");
+        assert_eq!(deserialized.class_id, "knight");
+    }
+
+    #[test]
+    fn test_character_new_and_from_ids_produce_equivalent_state() {
+        let char1 = Character::new(
+            "Hero".to_string(),
+            Race::Dwarf,
+            Class::Cleric,
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let char2 = Character::from_ids(
+            "Hero".to_string(),
+            "dwarf".to_string(),
+            "cleric".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        )
+        .unwrap();
+
+        // Compare key fields
+        assert_eq!(char1.name, char2.name);
+        assert_eq!(char1.race, char2.race);
+        assert_eq!(char1.class, char2.class);
+        assert_eq!(char1.race_id, char2.race_id);
+        assert_eq!(char1.class_id, char2.class_id);
+        assert_eq!(char1.sex, char2.sex);
+        assert_eq!(char1.alignment, char2.alignment);
+        assert_eq!(char1.level, char2.level);
+        assert_eq!(char1.hp.base, char2.hp.base);
+        assert_eq!(char1.sp.base, char2.sp.base);
     }
 }

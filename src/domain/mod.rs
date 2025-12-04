@@ -31,5 +31,5 @@ pub mod world;
 // Re-export commonly used types from submodules
 pub use dialogue::{DialogueId, NodeId};
 pub use quest::QuestId;
-pub use types::{CharacterId, EventId, ItemId, MapId, MonsterId, SpellId, TownId};
+pub use types::{CharacterId, EventId, ItemId, MapId, MonsterId, RaceId, SpellId, TownId};
 pub use types::{DiceRoll, Direction, GameTime, Position};
