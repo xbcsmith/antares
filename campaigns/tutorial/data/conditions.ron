@@ -24,6 +24,33 @@
         icon_id: Some("icon_sleep"),
     ),
     (
+        id: "poison",
+        name: "Poison",
+        description: "Takes damage over time from poison.",
+        effects: [
+            DamageOverTime(
+                damage: (
+                    count: 1,
+                    sides: 4,
+                    bonus: 0,
+                ),
+                element: "poison",
+            ),
+        ],
+        default_duration: Permanent,
+        icon_id: Some("icon_poison"),
+    ),
+    (
+        id: "silenced",
+        name: "Silenced",
+        description: "Cannot cast spells.",
+        effects: [
+            StatusEffect("silenced"),
+        ],
+        default_duration: Rounds(5),
+        icon_id: Some("icon_silenced"),
+    ),
+    (
         id: "bless",
         name: "Bless",
         description: "Increases accuracy and morale.",
@@ -37,20 +64,95 @@
         icon_id: Some("icon_bless"),
     ),
     (
-        id: "poison",
-        name: "Poison",
-        description: "Takes damage over time.",
+        id: "heroism",
+        name: "Heroism",
+        description: "Improved combat effectiveness.",
         effects: [
-            DamageOverTime(
-                damage: (
-                    count: 1,
-                    sides: 4,
-                    bonus: 0,
-                ),
-                element: "poison",
+            AttributeModifier(
+                attribute: "accuracy",
+                value: 3,
+            ),
+            AttributeModifier(
+                attribute: "might",
+                value: 2,
             ),
         ],
-        default_duration: Permanent,
-        icon_id: Some("icon_poison"),
+        default_duration: Rounds(10),
+        icon_id: Some("icon_heroism"),
+    ),
+    (
+        id: "giants_strength",
+        name: "Giant\'s Strength",
+        description: "Greatly increases physical might.",
+        effects: [
+            AttributeModifier(
+                attribute: "might",
+                value: 5,
+            ),
+        ],
+        default_duration: Minutes(10),
+        icon_id: Some("icon_giants_strength"),
+    ),
+    (
+        id: "haste",
+        name: "Haste",
+        description: "Increased speed and initiative.",
+        effects: [
+            AttributeModifier(
+                attribute: "speed",
+                value: 5,
+            ),
+        ],
+        default_duration: Rounds(10),
+        icon_id: Some("icon_haste"),
+    ),
+    (
+        id: "invisibility",
+        name: "Invisibility",
+        description: "Harder to detect and hit.",
+        effects: [
+            StatusEffect("invisible"),
+        ],
+        default_duration: Minutes(5),
+        icon_id: Some("icon_invisibility"),
+    ),
+    (
+        id: "fire_resistance",
+        name: "Fire Resistance",
+        description: "Resistance to fire damage.",
+        effects: [
+            AttributeModifier(
+                attribute: "resist_fire",
+                value: 50,
+            ),
+        ],
+        default_duration: Minutes(10),
+        icon_id: Some("icon_fire_resistance"),
+    ),
+    (
+        id: "cold_resistance",
+        name: "Cold Resistance",
+        description: "Resistance to cold damage.",
+        effects: [
+            AttributeModifier(
+                attribute: "resist_cold",
+                value: 50,
+            ),
+        ],
+        default_duration: Minutes(10),
+        icon_id: Some("icon_cold_resistance"),
+    ),
+    (
+        id: "poison_resistance",
+        name: "Poison Resistance",
+        description: "Resistance to poison effects.",
+        effects: [
+            AttributeModifier(
+                attribute: "resist_poison",
+                value: 50,
+            ),
+        ],
+        default_duration: Minutes(10),
+        icon_id: Some("icon_poison_resistance"),
     ),
 ]

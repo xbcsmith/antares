@@ -2825,24 +2825,23 @@
     events: {
         (
             x: 10,
-            y: 12,
-        ): Treasure(
-            name: "",
-            description: "",
-            loot: [
-                12,
-                22,
-                31,
-            ],
-        ),
-        (
-            x: 10,
             y: 6,
         ): Trap(
             name: "",
             description: "",
             damage: 5,
             effect: None,
+        ),
+        (
+            x: 3,
+            y: 2,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                1,
+                2,
+            ],
         ),
         (
             x: 13,
@@ -2853,6 +2852,18 @@
             loot: [
                 11,
                 21,
+            ],
+        ),
+        (
+            x: 6,
+            y: 2,
+        ): Treasure(
+            name: "",
+            description: "",
+            loot: [
+                10,
+                20,
+                30,
             ],
         ),
         (
@@ -2898,26 +2909,15 @@
             text: "Exit to town.",
         ),
         (
-            x: 6,
-            y: 2,
+            x: 10,
+            y: 12,
         ): Treasure(
             name: "",
             description: "",
             loot: [
-                10,
-                20,
-                30,
-            ],
-        ),
-        (
-            x: 3,
-            y: 2,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                1,
-                2,
+                12,
+                22,
+                31,
             ],
         ),
     },

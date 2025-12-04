@@ -20,6 +20,7 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 mm1/
+notes/
 
 # Map builder command history
 data/.map_builder_history

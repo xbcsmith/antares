@@ -2,10 +2,107 @@
 //!
 //! This module provides functionality for managing campaign assets including
 //! images, sounds, music, tilesets, and other external files.
+//!
+//! # Data File Status Tracking
+//!
+//! The asset manager also tracks the load status of campaign data files
+//! (items.ron, spells.ron, etc.) to display accurate status in the Assets panel.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+
+/// Status of a campaign data file (items.ron, spells.ron, etc.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataFileStatus {
+    /// File not yet loaded
+    NotLoaded,
+    /// File loaded successfully
+    Loaded,
+    /// File exists but failed to load/parse
+    Error,
+    /// File does not exist
+    Missing,
+}
+
+impl DataFileStatus {
+    /// Returns the display icon for the status.
+    pub fn icon(&self) -> &'static str {
+        match self {
+            DataFileStatus::NotLoaded => "⏳",
+            DataFileStatus::Loaded => "✅",
+            DataFileStatus::Error => "❌",
+            DataFileStatus::Missing => "⚠️",
+        }
+    }
+
+    /// Returns the display name for the status.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            DataFileStatus::NotLoaded => "Not Loaded",
+            DataFileStatus::Loaded => "Loaded",
+            DataFileStatus::Error => "Load Error",
+            DataFileStatus::Missing => "Missing",
+        }
+    }
+
+    /// Returns the color for displaying this status.
+    pub fn color(&self) -> eframe::egui::Color32 {
+        match self {
+            DataFileStatus::NotLoaded => eframe::egui::Color32::GRAY,
+            DataFileStatus::Loaded => eframe::egui::Color32::from_rgb(80, 200, 80),
+            DataFileStatus::Error => eframe::egui::Color32::from_rgb(255, 80, 80),
+            DataFileStatus::Missing => eframe::egui::Color32::from_rgb(255, 180, 0),
+        }
+    }
+}
+
+/// Information about a campaign data file
+#[derive(Debug, Clone)]
+pub struct DataFileInfo {
+    /// Relative path to the file
+    pub path: PathBuf,
+    /// Display name for the file type (e.g., "Items", "Spells")
+    pub display_name: String,
+    /// Current load status
+    pub status: DataFileStatus,
+    /// Number of entries loaded (if applicable)
+    pub entry_count: Option<usize>,
+    /// Error message if status is Error
+    pub error_message: Option<String>,
+}
+
+impl DataFileInfo {
+    /// Creates a new data file info entry.
+    pub fn new(path: impl Into<PathBuf>, display_name: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            display_name: display_name.into(),
+            status: DataFileStatus::NotLoaded,
+            entry_count: None,
+            error_message: None,
+        }
+    }
+
+    /// Marks the file as loaded with a count of entries.
+    pub fn mark_loaded(&mut self, count: usize) {
+        self.status = DataFileStatus::Loaded;
+        self.entry_count = Some(count);
+        self.error_message = None;
+    }
+
+    /// Marks the file as having an error.
+    pub fn mark_error(&mut self, message: impl Into<String>) {
+        self.status = DataFileStatus::Error;
+        self.error_message = Some(message.into());
+    }
+
+    /// Marks the file as missing.
+    pub fn mark_missing(&mut self) {
+        self.status = DataFileStatus::Missing;
+        self.error_message = None;
+    }
+}
 
 /// Reference to an asset from campaign data
 #[derive(Debug, Clone, PartialEq)]
@@ -249,6 +346,8 @@ pub struct AssetManager {
     assets: HashMap<PathBuf, Asset>,
     /// Total size of all assets
     total_size: u64,
+    /// Tracked data files and their load status
+    data_files: Vec<DataFileInfo>,
 }
 
 impl AssetManager {
@@ -262,7 +361,150 @@ impl AssetManager {
             campaign_dir,
             assets: HashMap::new(),
             total_size: 0,
+            data_files: Vec::new(),
         }
+    }
+
+    /// Initializes data file tracking with the campaign's configured file paths.
+    ///
+    /// # Arguments
+    ///
+    /// * `items_file` - Path to items data file
+    /// * `spells_file` - Path to spells data file
+    /// * `monsters_file` - Path to monsters data file
+    /// * `classes_file` - Path to classes data file
+    /// * `races_file` - Path to races data file
+    /// * `quests_file` - Path to quests data file
+    /// * `dialogue_file` - Path to dialogues data file
+    /// * `conditions_file` - Path to conditions data file (optional)
+    #[allow(clippy::too_many_arguments)]
+    pub fn init_data_files(
+        &mut self,
+        items_file: &str,
+        spells_file: &str,
+        monsters_file: &str,
+        classes_file: &str,
+        races_file: &str,
+        quests_file: &str,
+        dialogue_file: &str,
+        conditions_file: Option<&str>,
+    ) {
+        self.data_files.clear();
+        self.data_files.push(DataFileInfo::new(items_file, "Items"));
+        self.data_files
+            .push(DataFileInfo::new(spells_file, "Spells"));
+        self.data_files
+            .push(DataFileInfo::new(monsters_file, "Monsters"));
+        self.data_files
+            .push(DataFileInfo::new(classes_file, "Classes"));
+        self.data_files.push(DataFileInfo::new(races_file, "Races"));
+        self.data_files
+            .push(DataFileInfo::new(quests_file, "Quests"));
+        self.data_files
+            .push(DataFileInfo::new(dialogue_file, "Dialogues"));
+        if let Some(cond_file) = conditions_file {
+            self.data_files
+                .push(DataFileInfo::new(cond_file, "Conditions"));
+        }
+
+        // Check which files exist
+        for file_info in &mut self.data_files {
+            let full_path = self.campaign_dir.join(&file_info.path);
+            if !full_path.exists() {
+                file_info.mark_missing();
+            }
+        }
+    }
+
+    /// Updates the status of a data file.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The relative path of the data file
+    /// * `status` - The new status
+    /// * `count` - Optional entry count (for Loaded status)
+    /// * `error` - Optional error message (for Error status)
+    pub fn update_data_file_status(
+        &mut self,
+        path: &str,
+        status: DataFileStatus,
+        count: Option<usize>,
+        error: Option<String>,
+    ) {
+        if let Some(file_info) = self
+            .data_files
+            .iter_mut()
+            .find(|f| f.path.to_string_lossy() == path)
+        {
+            file_info.status = status;
+            file_info.entry_count = count;
+            file_info.error_message = error;
+        }
+    }
+
+    /// Marks a data file as successfully loaded.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The relative path of the data file
+    /// * `count` - Number of entries loaded
+    pub fn mark_data_file_loaded(&mut self, path: &str, count: usize) {
+        if let Some(file_info) = self
+            .data_files
+            .iter_mut()
+            .find(|f| f.path.to_string_lossy() == path)
+        {
+            file_info.mark_loaded(count);
+        }
+    }
+
+    /// Marks a data file as having an error.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The relative path of the data file
+    /// * `error` - The error message
+    pub fn mark_data_file_error(&mut self, path: &str, error: &str) {
+        if let Some(file_info) = self
+            .data_files
+            .iter_mut()
+            .find(|f| f.path.to_string_lossy() == path)
+        {
+            file_info.mark_error(error);
+        }
+    }
+
+    /// Returns the tracked data files.
+    pub fn data_files(&self) -> &[DataFileInfo] {
+        &self.data_files
+    }
+
+    /// Returns true if all data files are loaded successfully.
+    pub fn all_data_files_loaded(&self) -> bool {
+        self.data_files
+            .iter()
+            .all(|f| f.status == DataFileStatus::Loaded)
+    }
+
+    /// Returns the count of data files with errors.
+    pub fn data_file_error_count(&self) -> usize {
+        self.data_files
+            .iter()
+            .filter(|f| f.status == DataFileStatus::Error)
+            .count()
+    }
+
+    /// Returns the count of missing data files.
+    pub fn data_file_missing_count(&self) -> usize {
+        self.data_files
+            .iter()
+            .filter(|f| f.status == DataFileStatus::Missing)
+            .count()
+    }
+
+    /// Checks if a path is a tracked data file.
+    pub fn is_data_file(&self, path: &Path) -> bool {
+        self.data_files.iter().any(|f| f.path == path)
     }
 
     /// Scans the campaign directory for assets
@@ -455,10 +697,79 @@ impl AssetManager {
         self.assets.values().filter(|a| !a.is_referenced).collect()
     }
 
+    /// Returns truly orphaned assets (unreferenced and not data files or documentation).
+    ///
+    /// This excludes:
+    /// - Campaign data files (items.ron, spells.ron, etc.)
+    /// - Documentation files
+    /// - The campaign.ron file itself
+    pub fn orphaned_assets(&self) -> Vec<&Asset> {
+        self.assets
+            .values()
+            .filter(|a| {
+                // Must be unreferenced
+                if a.is_referenced {
+                    return false;
+                }
+
+                // Exclude data files and documentation
+                if a.asset_type == AssetType::Data || a.asset_type == AssetType::Documentation {
+                    return false;
+                }
+
+                // Exclude tracked data files
+                if self.is_data_file(&a.path) {
+                    return false;
+                }
+
+                // Exclude campaign.ron
+                if a.path
+                    .file_name()
+                    .map(|n| n == "campaign.ron")
+                    .unwrap_or(false)
+                {
+                    return false;
+                }
+
+                true
+            })
+            .collect()
+    }
+
     /// Marks an asset as referenced
     pub fn mark_referenced(&mut self, asset_path: &Path, referenced: bool) {
         if let Some(asset) = self.assets.get_mut(asset_path) {
             asset.is_referenced = referenced;
+        }
+    }
+
+    /// Marks all successfully loaded data files as referenced in the assets list.
+    ///
+    /// This should be called after data files are loaded to ensure they show
+    /// as "In Use" in the Assets panel rather than "Unused".
+    ///
+    /// Data files that are tracked and have status `Loaded` will have their
+    /// corresponding asset entry (if present) marked as referenced.
+    pub fn mark_data_files_as_referenced(&mut self) {
+        // Collect paths of loaded data files
+        let loaded_paths: Vec<PathBuf> = self
+            .data_files
+            .iter()
+            .filter(|f| f.status == DataFileStatus::Loaded)
+            .map(|f| f.path.clone())
+            .collect();
+
+        // Mark each loaded data file as referenced in the assets map
+        for path in loaded_paths {
+            if let Some(asset) = self.assets.get_mut(&path) {
+                asset.is_referenced = true;
+            }
+        }
+
+        // Also mark campaign.ron as referenced if present
+        let campaign_path = PathBuf::from("campaign.ron");
+        if let Some(asset) = self.assets.get_mut(&campaign_path) {
+            asset.is_referenced = true;
         }
     }
 
@@ -803,6 +1114,155 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_data_file_status_icon() {
+        assert_eq!(DataFileStatus::NotLoaded.icon(), "⏳");
+        assert_eq!(DataFileStatus::Loaded.icon(), "✅");
+        assert_eq!(DataFileStatus::Error.icon(), "❌");
+        assert_eq!(DataFileStatus::Missing.icon(), "⚠️");
+    }
+
+    #[test]
+    fn test_data_file_status_display_name() {
+        assert_eq!(DataFileStatus::NotLoaded.display_name(), "Not Loaded");
+        assert_eq!(DataFileStatus::Loaded.display_name(), "Loaded");
+        assert_eq!(DataFileStatus::Error.display_name(), "Load Error");
+        assert_eq!(DataFileStatus::Missing.display_name(), "Missing");
+    }
+
+    #[test]
+    fn test_data_file_info_new() {
+        let info = DataFileInfo::new("data/items.ron", "Items");
+        assert_eq!(info.path, PathBuf::from("data/items.ron"));
+        assert_eq!(info.display_name, "Items");
+        assert_eq!(info.status, DataFileStatus::NotLoaded);
+        assert!(info.entry_count.is_none());
+        assert!(info.error_message.is_none());
+    }
+
+    #[test]
+    fn test_data_file_info_mark_loaded() {
+        let mut info = DataFileInfo::new("data/items.ron", "Items");
+        info.mark_loaded(42);
+        assert_eq!(info.status, DataFileStatus::Loaded);
+        assert_eq!(info.entry_count, Some(42));
+        assert!(info.error_message.is_none());
+    }
+
+    #[test]
+    fn test_data_file_info_mark_error() {
+        let mut info = DataFileInfo::new("data/items.ron", "Items");
+        info.mark_error("Parse error at line 5");
+        assert_eq!(info.status, DataFileStatus::Error);
+        assert_eq!(
+            info.error_message,
+            Some("Parse error at line 5".to_string())
+        );
+    }
+
+    #[test]
+    fn test_data_file_info_mark_missing() {
+        let mut info = DataFileInfo::new("data/items.ron", "Items");
+        info.mark_missing();
+        assert_eq!(info.status, DataFileStatus::Missing);
+    }
+
+    #[test]
+    fn test_asset_manager_data_file_tracking() {
+        let tmp_dir = std::env::temp_dir().join("test_asset_manager_data_files");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let mut manager = AssetManager::new(tmp_dir.clone());
+        manager.init_data_files(
+            "data/items.ron",
+            "data/spells.ron",
+            "data/monsters.ron",
+            "data/classes.ron",
+            "data/races.ron",
+            "data/quests.ron",
+            "data/dialogues.ron",
+            Some("data/conditions.ron"),
+        );
+
+        // All files should be marked as missing since they don't exist
+        assert_eq!(manager.data_files().len(), 8);
+        for file_info in manager.data_files() {
+            assert_eq!(file_info.status, DataFileStatus::Missing);
+        }
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_asset_manager_mark_data_file_loaded() {
+        let tmp_dir = std::env::temp_dir().join("test_asset_manager_mark_loaded");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let mut manager = AssetManager::new(tmp_dir.clone());
+        manager.init_data_files(
+            "data/items.ron",
+            "data/spells.ron",
+            "data/monsters.ron",
+            "data/classes.ron",
+            "data/races.ron",
+            "data/quests.ron",
+            "data/dialogues.ron",
+            None,
+        );
+
+        manager.mark_data_file_loaded("data/items.ron", 25);
+
+        let items_file = manager
+            .data_files()
+            .iter()
+            .find(|f| f.display_name == "Items")
+            .unwrap();
+        assert_eq!(items_file.status, DataFileStatus::Loaded);
+        assert_eq!(items_file.entry_count, Some(25));
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_asset_manager_all_data_files_loaded() {
+        let tmp_dir = std::env::temp_dir().join("test_asset_manager_all_loaded");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let mut manager = AssetManager::new(tmp_dir.clone());
+        manager.init_data_files(
+            "data/items.ron",
+            "data/spells.ron",
+            "data/monsters.ron",
+            "data/classes.ron",
+            "data/races.ron",
+            "data/quests.ron",
+            "data/dialogues.ron",
+            None,
+        );
+
+        assert!(!manager.all_data_files_loaded());
+
+        // Mark all as loaded
+        for path in [
+            "data/items.ron",
+            "data/spells.ron",
+            "data/monsters.ron",
+            "data/classes.ron",
+            "data/races.ron",
+            "data/quests.ron",
+            "data/dialogues.ron",
+        ] {
+            manager.mark_data_file_loaded(path, 1);
+        }
+
+        assert!(manager.all_data_files_loaded());
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
     fn test_asset_type_display_names() {
         assert_eq!(AssetType::Tileset.display_name(), "Tileset");
         assert_eq!(AssetType::Portrait.display_name(), "Portrait");
@@ -1040,6 +1500,45 @@ mod tests {
             name: "Save the Kingdom".to_string(),
         };
         assert_eq!(quest_ref.category(), "Quest");
+    }
+
+    #[test]
+    fn test_mark_data_files_as_referenced_marks_assets() {
+        // Prepare a temporary campaign directory
+        let tmp_dir = std::env::temp_dir().join("test_asset_manager_mark_referenced");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let mut manager = AssetManager::new(tmp_dir.clone());
+        manager.init_data_files(
+            "data/items.ron",
+            "data/spells.ron",
+            "data/monsters.ron",
+            "data/classes.ron",
+            "data/races.ron",
+            "data/quests.ron",
+            "data/dialogues.ron",
+            Some("data/conditions.ron"),
+        );
+
+        // Insert an Asset whose path matches one of the tracked data files
+        let data_path = PathBuf::from("data/items.ron");
+        let asset = Asset::new(data_path.clone());
+        manager.assets.insert(data_path.clone(), asset);
+
+        // Initially it should not be referenced
+        assert!(!manager.assets.get(&data_path).unwrap().is_referenced);
+
+        // Mark the data file as loaded
+        manager.mark_data_file_loaded("data/items.ron", 10);
+
+        // Call the method that should mark data files as referenced
+        manager.mark_data_files_as_referenced();
+
+        // Now the asset should be marked as referenced
+        assert!(manager.assets.get(&data_path).unwrap().is_referenced);
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 
     #[test]

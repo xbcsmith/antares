@@ -4408,50 +4408,23 @@
     ],
     events: {
         (
-            x: 10,
-            y: 13,
-        ): Treasure(
-            name: "",
-            description: "",
-            loot: [
-                15,
-                25,
-                33,
-                40,
-            ],
-        ),
-        (
-            x: 5,
-            y: 3,
+            x: 14,
+            y: 4,
         ): Encounter(
             name: "",
             description: "",
             monster_group: [
-                4,
-                4,
-            ],
-        ),
-        (
-            x: 17,
-            y: 16,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                6,
-                6,
-            ],
-        ),
-        (
-            x: 3,
-            y: 11,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                6,
                 5,
+                4,
             ],
+        ),
+        (
+            x: 0,
+            y: 10,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "Exit to town.",
         ),
         (
             x: 8,
@@ -4466,6 +4439,30 @@
             ],
         ),
         (
+            x: 3,
+            y: 11,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                6,
+                5,
+            ],
+        ),
+        (
+            x: 10,
+            y: 13,
+        ): Treasure(
+            name: "",
+            description: "",
+            loot: [
+                15,
+                25,
+                33,
+                40,
+            ],
+        ),
+        (
             x: 16,
             y: 2,
         ): Treasure(
@@ -4477,13 +4474,24 @@
             ],
         ),
         (
-            x: 14,
-            y: 4,
+            x: 17,
+            y: 16,
         ): Encounter(
             name: "",
             description: "",
             monster_group: [
-                5,
+                6,
+                6,
+            ],
+        ),
+        (
+            x: 5,
+            y: 3,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                4,
                 4,
             ],
         ),
@@ -4495,14 +4503,6 @@
             description: "",
             damage: 8,
             effect: None,
-        ),
-        (
-            x: 0,
-            y: 10,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Exit to town.",
         ),
     },
     npcs: [

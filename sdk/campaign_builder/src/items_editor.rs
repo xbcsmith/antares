@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
 use antares::domain::items::types::{
     AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorData, AttributeType, Bonus,
     BonusAttribute, ConsumableData, ConsumableEffect, Disablement, Item, ItemType, QuestData,
@@ -138,51 +139,33 @@ impl ItemsEditorState {
         ui.heading("⚔️ Items Editor");
         ui.add_space(5.0);
 
-        // Top toolbar
-        ui.horizontal(|ui| {
-            ui.label("🔍 Search:");
-            if ui.text_edit_singleline(&mut self.search_query).changed() {
-                self.selected_item = None;
-            }
-            ui.separator();
+        // Use shared EditorToolbar component
+        let toolbar_action = EditorToolbar::new("Items")
+            .with_search(&mut self.search_query)
+            .with_merge_mode(file_load_merge_mode)
+            .with_total_count(items.len())
+            .with_id_salt("items_toolbar")
+            .show(ui);
 
-            if ui.button("➕ Add Item").clicked() {
+        // Handle toolbar actions
+        match toolbar_action {
+            ToolbarAction::New => {
                 self.mode = ItemsEditorMode::Add;
                 self.edit_buffer = Self::default_item();
-                // Calculate next ID
                 let next_id = items.iter().map(|i| i.id).max().unwrap_or(0) + 1;
                 self.edit_buffer.id = next_id;
+                *unsaved_changes = true;
             }
-
-            if ui.button("🔄 Reload").clicked() {
-                // Reload logic
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(items_file);
-                    if path.exists() {
-                        match std::fs::read_to_string(&path) {
-                            Ok(contents) => match ron::from_str::<Vec<Item>>(&contents) {
-                                Ok(loaded_items) => {
-                                    *items = loaded_items;
-                                    *status_message =
-                                        format!("Loaded items from: {}", path.display());
-                                }
-                                Err(e) => *status_message = format!("Failed to parse items: {}", e),
-                            },
-                            Err(e) => *status_message = format!("Failed to read items: {}", e),
-                        }
-                    }
-                }
+            ToolbarAction::Save => {
+                self.save_items(
+                    items,
+                    campaign_dir,
+                    items_file,
+                    unsaved_changes,
+                    status_message,
+                );
             }
-
-            if ui.button("📥 Import").clicked() {
-                self.show_import_dialog = true;
-                self.import_export_buffer.clear();
-            }
-
-            ui.separator();
-
-            // File I/O buttons
-            if ui.button("📂 Load from File").clicked() {
+            ToolbarAction::Load => {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("RON", &["ron"])
                     .pick_file()
@@ -195,7 +178,6 @@ impl ItemsEditorState {
                     match load_result {
                         Ok(loaded_items) => {
                             if *file_load_merge_mode {
-                                // Merge: update existing, add new
                                 for item in loaded_items {
                                     if let Some(existing) =
                                         items.iter_mut().find(|i| i.id == item.id)
@@ -206,7 +188,6 @@ impl ItemsEditorState {
                                     }
                                 }
                             } else {
-                                // Replace: clear and load
                                 *items = loaded_items;
                             }
                             *unsaved_changes = true;
@@ -218,15 +199,11 @@ impl ItemsEditorState {
                     }
                 }
             }
-
-            ui.checkbox(file_load_merge_mode, "Merge");
-            ui.label(if *file_load_merge_mode {
-                "(adds to existing)"
-            } else {
-                "(replaces all)"
-            });
-
-            if ui.button("💾 Save to File").clicked() {
+            ToolbarAction::Import => {
+                self.show_import_dialog = true;
+                self.import_export_buffer.clear();
+            }
+            ToolbarAction::Export => {
                 if let Some(path) = rfd::FileDialog::new()
                     .set_file_name("items.ron")
                     .add_filter("RON", &["ron"])
@@ -247,10 +224,28 @@ impl ItemsEditorState {
                     }
                 }
             }
-
-            ui.separator();
-            ui.label(format!("Total: {}", items.len()));
-        });
+            ToolbarAction::Reload => {
+                if let Some(dir) = campaign_dir {
+                    let path = dir.join(items_file);
+                    if path.exists() {
+                        match std::fs::read_to_string(&path) {
+                            Ok(contents) => match ron::from_str::<Vec<Item>>(&contents) {
+                                Ok(loaded_items) => {
+                                    *items = loaded_items;
+                                    *status_message =
+                                        format!("Loaded items from: {}", path.display());
+                                }
+                                Err(e) => *status_message = format!("Failed to parse items: {}", e),
+                            },
+                            Err(e) => *status_message = format!("Failed to read items: {}", e),
+                        }
+                    } else {
+                        *status_message = "Items file does not exist".to_string();
+                    }
+                }
+            }
+            ToolbarAction::None => {}
+        }
 
         // Filter toolbar
         ui.horizontal(|ui| {
@@ -365,7 +360,9 @@ impl ItemsEditorState {
         items_file: &str,
     ) {
         let search_lower = self.search_query.to_lowercase();
-        let mut filtered_items: Vec<(usize, String)> = items
+
+        // Build filtered list snapshot to avoid borrow conflicts in closures
+        let filtered_items: Vec<(usize, String, Item)> = items
             .iter()
             .enumerate()
             .filter(|(_, item)| {
@@ -405,141 +402,156 @@ impl ItemsEditorState {
                 if item.is_quest_item() {
                     label.push_str(" 📜");
                 }
-                (idx, label)
+                (idx, label, item.clone())
             })
             .collect();
 
-        filtered_items.sort_by_key(|(idx, _)| items[*idx].id);
+        // Sort by ID
+        let mut sorted_items = filtered_items;
+        sorted_items.sort_by_key(|(idx, _, _)| items[*idx].id);
 
         let selected = self.selected_item;
         let mut new_selection = selected;
-        let mut action: Option<(usize, &str)> = None;
+        let mut action_requested: Option<ItemAction> = None;
+        ui.separator();
 
-        // Compute target panel height using shared UI helper so all editors behave
-        // consistently (using a sensible minimum to avoid collapsing).
-        let panel_height = crate::ui_helpers::compute_panel_height(
-            ui,
-            crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
+        let total_width = ui.available_width();
+        let inspector_min_width = 300.0;
+        // Reserve a small margin for the separator (12.0)
+        let sep_margin = 12.0;
+        // Compute left width via the shared helper to ensure consistent clamping across editors.
+        // Preserve the Items editor fallback ratio of 0.6 for the maximum left ratio.
+        let requested_left = total_width - inspector_min_width - sep_margin;
+        let left_width = crate::ui_helpers::compute_left_column_width(
+            total_width,
+            requested_left,
+            inspector_min_width,
+            sep_margin,
+            crate::ui_helpers::MIN_SAFE_LEFT_COLUMN_WIDTH,
+            0.6,
         );
 
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.set_width(crate::ui_helpers::DEFAULT_LEFT_COLUMN_WIDTH);
-                ui.set_min_height(panel_height);
+        TwoColumnLayout::new("items")
+            .with_left_width(left_width)
+            .show_split(
+                ui,
+                |left_ui| {
+                    // Left panel: Map list
+                    left_ui.heading("Items");
+                    left_ui.separator();
 
-                ui.heading("Items");
-                ui.separator();
-
-                egui::ScrollArea::vertical()
-                    .id_salt("items_list_scroll")
-                    .auto_shrink([false, false])
-                    .max_height(panel_height)
-                    .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        for (idx, label) in &filtered_items {
-                            let is_selected = selected == Some(*idx);
-                            if ui.selectable_label(is_selected, label).clicked() {
-                                new_selection = Some(*idx);
-                            }
+                    for (idx, label, _) in &sorted_items {
+                        let is_selected = selected == Some(*idx);
+                        if left_ui.selectable_label(is_selected, label).clicked() {
+                            new_selection = Some(*idx);
                         }
-
-                        if filtered_items.is_empty() {
-                            ui.label("No items found");
-                        }
-                    });
-            });
-
-            ui.separator();
-
-            ui.vertical(|ui| {
-                // Ensure the preview column grows to the same height as the list.
-                ui.set_min_width(ui.available_width());
-                ui.set_min_height(panel_height);
-                if let Some(idx) = selected {
-                    if idx < items.len() {
-                        let item = items[idx].clone();
-
-                        ui.heading(&item.name);
-                        ui.separator();
-
-                        ui.horizontal(|ui| {
-                            if ui.button("✏️ Edit").clicked() {
-                                action = Some((idx, "edit"));
-                            }
-                            if ui.button("🗑️ Delete").clicked() {
-                                action = Some((idx, "delete"));
-                            }
-                            if ui.button("📋 Duplicate").clicked() {
-                                action = Some((idx, "duplicate"));
-                            }
-                            if ui.button("📤 Export").clicked() {
-                                action = Some((idx, "export"));
-                            }
-                        });
-
-                        ui.separator();
-                        self.show_preview(ui, &item);
                     }
-                } else {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(100.0);
-                        ui.label("Select an item to view details");
-                    });
-                }
-            });
-        });
 
+                    if sorted_items.is_empty() {
+                        left_ui.label("No items found");
+                    }
+                },
+                |right_ui| {
+                    // Right panel: Detail view
+                    if let Some(idx) = selected {
+                        if let Some((_, _, item)) = sorted_items.iter().find(|(i, _, _)| *i == idx)
+                        {
+                            right_ui.heading(&item.name);
+                            right_ui.separator();
+
+                            // Use shared ActionButtons component
+                            let action = ActionButtons::new().enabled(true).show(right_ui);
+                            if action != ItemAction::None {
+                                action_requested = Some(action);
+                            }
+
+                            right_ui.separator();
+                            Self::show_preview_static(right_ui, item);
+                        } else {
+                            right_ui.vertical_centered(|ui| {
+                                ui.add_space(100.0);
+                                ui.label("Select an item to view details");
+                            });
+                        }
+                    } else {
+                        right_ui.vertical_centered(|ui| {
+                            ui.add_space(100.0);
+                            ui.label("Select an item to view details");
+                        });
+                    }
+                },
+            );
+
+        // Apply selection change after closures
         self.selected_item = new_selection;
 
-        if let Some((idx, cmd)) = action {
-            match cmd {
-                "edit" => {
-                    self.mode = ItemsEditorMode::Edit;
-                    self.edit_buffer = items[idx].clone();
-                }
-                "delete" => {
-                    items.remove(idx);
-                    self.selected_item = None;
-                    self.save_items(
-                        items,
-                        campaign_dir,
-                        items_file,
-                        unsaved_changes,
-                        status_message,
-                    );
-                }
-                "duplicate" => {
-                    let mut new_item = items[idx].clone();
-                    let next_id = items.iter().map(|i| i.id).max().unwrap_or(0) + 1;
-                    new_item.id = next_id;
-                    new_item.name = format!("{} (Copy)", new_item.name);
-                    items.push(new_item);
-                    self.save_items(
-                        items,
-                        campaign_dir,
-                        items_file,
-                        unsaved_changes,
-                        status_message,
-                    );
-                }
-                "export" => {
-                    if let Ok(ron_str) =
-                        ron::ser::to_string_pretty(&items[idx], ron::ser::PrettyConfig::default())
-                    {
-                        self.import_export_buffer = ron_str;
-                        self.show_import_dialog = true;
-                        *status_message = "Item exported to clipboard dialog".to_string();
-                    } else {
-                        *status_message = "Failed to export item".to_string();
+        // Handle action button clicks after closures
+        if let Some(action) = action_requested {
+            match action {
+                ItemAction::Edit => {
+                    if let Some(idx) = self.selected_item {
+                        if idx < items.len() {
+                            self.mode = ItemsEditorMode::Edit;
+                            self.edit_buffer = items[idx].clone();
+                        }
                     }
                 }
-                _ => {}
+                ItemAction::Delete => {
+                    if let Some(idx) = self.selected_item {
+                        if idx < items.len() {
+                            items.remove(idx);
+                            self.selected_item = None;
+                            self.save_items(
+                                items,
+                                campaign_dir,
+                                items_file,
+                                unsaved_changes,
+                                status_message,
+                            );
+                        }
+                    }
+                }
+                ItemAction::Duplicate => {
+                    if let Some(idx) = self.selected_item {
+                        if idx < items.len() {
+                            let mut new_item = items[idx].clone();
+                            let next_id = items.iter().map(|i| i.id).max().unwrap_or(0) + 1;
+                            new_item.id = next_id;
+                            new_item.name = format!("{} (Copy)", new_item.name);
+                            items.push(new_item);
+                            self.save_items(
+                                items,
+                                campaign_dir,
+                                items_file,
+                                unsaved_changes,
+                                status_message,
+                            );
+                        }
+                    }
+                }
+                ItemAction::Export => {
+                    if let Some(idx) = self.selected_item {
+                        if idx < items.len() {
+                            if let Ok(ron_str) = ron::ser::to_string_pretty(
+                                &items[idx],
+                                ron::ser::PrettyConfig::default(),
+                            ) {
+                                self.import_export_buffer = ron_str;
+                                self.show_import_dialog = true;
+                                *status_message = "Item exported to clipboard dialog".to_string();
+                            } else {
+                                *status_message = "Failed to export item".to_string();
+                            }
+                        }
+                    }
+                }
+                ItemAction::None => {}
             }
         }
     }
 
-    fn show_preview(&self, ui: &mut egui::Ui, item: &Item) {
-        // Compute panel height using shared UI helper so preview pane expands with window.
+    /// Static preview method that doesn't require self
+    fn show_preview_static(ui: &mut egui::Ui, item: &Item) {
         let panel_height = crate::ui_helpers::compute_panel_height(
             ui,
             crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
@@ -612,7 +624,7 @@ impl ItemsEditorState {
 
                 ui.group(|ui| {
                     ui.heading("Class Restrictions");
-                    self.show_disablement_display(ui, item.disablements);
+                    Self::show_disablement_display_static(ui, item.disablements);
                 });
 
                 if item.constant_bonus.is_some()
@@ -646,7 +658,8 @@ impl ItemsEditorState {
             });
     }
 
-    fn show_disablement_display(&self, ui: &mut egui::Ui, disablement: Disablement) {
+    /// Static disablement display that doesn't require self
+    fn show_disablement_display_static(ui: &mut egui::Ui, disablement: Disablement) {
         ui.horizontal_wrapped(|ui| {
             let classes = [
                 (Disablement::KNIGHT, "Knight"),
@@ -871,6 +884,10 @@ impl ItemsEditorState {
                 ui.separator();
 
                 ui.horizontal(|ui| {
+                    if ui.button("⬅ Back to List").clicked() {
+                        self.mode = ItemsEditorMode::List;
+                    }
+
                     if ui.button("💾 Save").clicked() {
                         if is_add {
                             items.push(self.edit_buffer.clone());
@@ -900,60 +917,39 @@ impl ItemsEditorState {
     fn show_type_editor(&mut self, ui: &mut egui::Ui) {
         match &mut self.edit_buffer.item_type {
             ItemType::Weapon(data) => {
-                ui.label("⚔️ Weapon Properties");
-                ui.separator();
-
+                ui.label("Weapon Properties:");
                 ui.horizontal(|ui| {
                     ui.label("Damage Dice:");
-                    ui.add(
-                        egui::DragValue::new(&mut data.damage.count)
-                            .range(1..=10)
-                            .prefix("Count: "),
-                    );
+                    ui.add(egui::DragValue::new(&mut data.damage.count).range(1..=10));
                     ui.label("d");
-                    ui.add(
-                        egui::DragValue::new(&mut data.damage.sides)
-                            .range(1..=100)
-                            .prefix("Sides: "),
-                    );
+                    ui.add(egui::DragValue::new(&mut data.damage.sides).range(1..=20));
                     ui.label("+");
-                    ui.add(
-                        egui::DragValue::new(&mut data.damage.bonus)
-                            .range(-100..=100)
-                            .prefix("Bonus: "),
-                    );
+                    ui.add(egui::DragValue::new(&mut data.damage.bonus).range(-10..=20));
                 });
-
                 ui.horizontal(|ui| {
-                    ui.label("To-Hit/Damage Bonus:");
-                    ui.add(egui::DragValue::new(&mut data.bonus).range(-10..=10));
+                    ui.label("Attack Bonus:");
+                    ui.add(egui::DragValue::new(&mut data.bonus).range(-5..=10));
                 });
-
                 ui.horizontal(|ui| {
                     ui.label("Hands Required:");
                     ui.add(egui::DragValue::new(&mut data.hands_required).range(1..=2));
                 });
             }
             ItemType::Armor(data) => {
-                ui.label("🛡️ Armor Properties");
-                ui.separator();
-
+                ui.label("Armor Properties:");
                 ui.horizontal(|ui| {
                     ui.label("AC Bonus:");
                     ui.add(egui::DragValue::new(&mut data.ac_bonus).range(0..=20));
                 });
-
                 ui.horizontal(|ui| {
-                    ui.label("Weight (lbs):");
-                    ui.add(egui::DragValue::new(&mut data.weight).range(0..=255));
+                    ui.label("Weight:");
+                    ui.add(egui::DragValue::new(&mut data.weight).range(0..=100));
                 });
             }
             ItemType::Accessory(data) => {
-                ui.label("💍 Accessory Properties");
-                ui.separator();
-
+                ui.label("Accessory Properties:");
                 ui.horizontal(|ui| {
-                    ui.label("Equipment Slot:");
+                    ui.label("Slot:");
                     egui::ComboBox::from_id_salt("accessory_slot")
                         .selected_text(format!("{:?}", data.slot))
                         .show_ui(ui, |ui| {
@@ -965,52 +961,41 @@ impl ItemsEditorState {
                 });
             }
             ItemType::Consumable(data) => {
-                ui.label("🧪 Consumable Properties");
-                ui.separator();
+                ui.label("Consumable Properties:");
+                ui.checkbox(&mut data.is_combat_usable, "Usable in Combat");
 
                 ui.horizontal(|ui| {
-                    ui.label("Effect Type:");
-
-                    let effect_str = match &data.effect {
+                    ui.label("Effect:");
+                    let effect_type = match &data.effect {
                         ConsumableEffect::HealHp(_) => "Heal HP",
                         ConsumableEffect::RestoreSp(_) => "Restore SP",
                         ConsumableEffect::CureCondition(_) => "Cure Condition",
                         ConsumableEffect::BoostAttribute(_, _) => "Boost Attribute",
                     };
-
                     egui::ComboBox::from_id_salt("consumable_effect")
-                        .selected_text(effect_str)
+                        .selected_text(effect_type)
                         .show_ui(ui, |ui| {
                             if ui
-                                .selectable_label(
-                                    matches!(data.effect, ConsumableEffect::HealHp(_)),
-                                    "Heal HP",
-                                )
+                                .selectable_label(effect_type == "Heal HP", "Heal HP")
                                 .clicked()
                             {
                                 data.effect = ConsumableEffect::HealHp(10);
                             }
                             if ui
-                                .selectable_label(
-                                    matches!(data.effect, ConsumableEffect::RestoreSp(_)),
-                                    "Restore SP",
-                                )
+                                .selectable_label(effect_type == "Restore SP", "Restore SP")
                                 .clicked()
                             {
                                 data.effect = ConsumableEffect::RestoreSp(10);
                             }
                             if ui
-                                .selectable_label(
-                                    matches!(data.effect, ConsumableEffect::CureCondition(_)),
-                                    "Cure Condition",
-                                )
+                                .selectable_label(effect_type == "Cure Condition", "Cure Condition")
                                 .clicked()
                             {
-                                data.effect = ConsumableEffect::CureCondition(0);
+                                data.effect = ConsumableEffect::CureCondition(0xFF);
                             }
                             if ui
                                 .selectable_label(
-                                    matches!(data.effect, ConsumableEffect::BoostAttribute(_, _)),
+                                    effect_type == "Boost Attribute",
                                     "Boost Attribute",
                                 )
                                 .clicked()
@@ -1021,11 +1006,18 @@ impl ItemsEditorState {
                         });
                 });
 
+                // Edit effect value
                 match &mut data.effect {
-                    ConsumableEffect::HealHp(amount) | ConsumableEffect::RestoreSp(amount) => {
+                    ConsumableEffect::HealHp(amount) => {
                         ui.horizontal(|ui| {
                             ui.label("Amount:");
-                            ui.add(egui::DragValue::new(amount).range(1..=1000));
+                            ui.add(egui::DragValue::new(amount).range(1..=999));
+                        });
+                    }
+                    ConsumableEffect::RestoreSp(amount) => {
+                        ui.horizontal(|ui| {
+                            ui.label("Amount:");
+                            ui.add(egui::DragValue::new(amount).range(1..=999));
                         });
                     }
                     ConsumableEffect::CureCondition(flags) => {
@@ -1034,10 +1026,10 @@ impl ItemsEditorState {
                             ui.add(egui::DragValue::new(flags).range(0..=255));
                         });
                     }
-                    ConsumableEffect::BoostAttribute(attr_type, value) => {
+                    ConsumableEffect::BoostAttribute(attr_type, amount) => {
                         ui.horizontal(|ui| {
                             ui.label("Attribute:");
-                            egui::ComboBox::from_id_salt("boost_attribute")
+                            egui::ComboBox::from_id_salt("boost_attr_type")
                                 .selected_text(format!("{:?}", attr_type))
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(attr_type, AttributeType::Might, "Might");
@@ -1066,20 +1058,16 @@ impl ItemsEditorState {
                                 });
                         });
                         ui.horizontal(|ui| {
-                            ui.label("Boost Amount:");
-                            ui.add(egui::DragValue::new(value).range(-10..=10));
+                            ui.label("Amount:");
+                            ui.add(egui::DragValue::new(amount).range(-128..=127));
                         });
                     }
                 }
-
-                ui.checkbox(&mut data.is_combat_usable, "Usable in Combat");
             }
             ItemType::Ammo(data) => {
-                ui.label("🏹 Ammunition Properties");
-                ui.separator();
-
+                ui.label("Ammunition Properties:");
                 ui.horizontal(|ui| {
-                    ui.label("Ammo Type:");
+                    ui.label("Type:");
                     egui::ComboBox::from_id_salt("ammo_type")
                         .selected_text(format!("{:?}", data.ammo_type))
                         .show_ui(ui, |ui| {
@@ -1088,31 +1076,27 @@ impl ItemsEditorState {
                             ui.selectable_value(&mut data.ammo_type, AmmoType::Stone, "Stone");
                         });
                 });
-
                 ui.horizontal(|ui| {
                     ui.label("Quantity:");
-                    ui.add(egui::DragValue::new(&mut data.quantity).range(1..=1000));
+                    ui.add(egui::DragValue::new(&mut data.quantity).range(1..=99));
                 });
             }
             ItemType::Quest(data) => {
-                ui.label("📜 Quest Item Properties");
-                ui.separator();
-
+                ui.label("Quest Item Properties:");
                 ui.horizontal(|ui| {
                     ui.label("Quest ID:");
                     ui.text_edit_singleline(&mut data.quest_id);
                 });
-
-                ui.checkbox(&mut data.is_key_item, "Key Item (Cannot drop/sell)");
+                ui.checkbox(&mut data.is_key_item, "Key Item");
             }
         }
     }
 
     fn show_disablement_editor(&mut self, ui: &mut egui::Ui) {
-        let mut flags = self.edit_buffer.disablements.0;
+        let disablement = &mut self.edit_buffer.disablements;
 
-        ui.label("Usable by:");
-        ui.horizontal_wrapped(|ui| {
+        ui.label("Classes that CAN use this item:");
+        ui.horizontal(|ui| {
             let classes = [
                 (Disablement::KNIGHT, "Knight"),
                 (Disablement::PALADIN, "Paladin"),
@@ -1123,58 +1107,43 @@ impl ItemsEditorState {
             ];
 
             for (flag, name) in &classes {
-                let mut enabled = (flags & flag) != 0;
-                if ui.checkbox(&mut enabled, *name).changed() {
-                    if enabled {
-                        flags |= flag;
+                let mut can_use = disablement.can_use_class(*flag);
+                if ui.checkbox(&mut can_use, *name).changed() {
+                    if can_use {
+                        disablement.0 |= *flag;
                     } else {
-                        flags &= !flag;
+                        disablement.0 &= !*flag;
                     }
                 }
             }
         });
 
         ui.separator();
-        ui.label("Alignment:");
+        ui.label("Alignment Restriction:");
         ui.horizontal(|ui| {
-            let mut good = (flags & Disablement::GOOD) != 0;
-            let mut evil = (flags & Disablement::EVIL) != 0;
+            let mut good_only = disablement.good_only();
+            let mut evil_only = disablement.evil_only();
 
-            if ui.checkbox(&mut good, "☀️ Good Only").changed() {
-                if good {
-                    flags |= Disablement::GOOD;
-                    flags &= !Disablement::EVIL;
-                } else {
-                    flags &= !Disablement::GOOD;
-                }
+            if ui
+                .radio_value(&mut good_only, false, "Any Alignment")
+                .changed()
+            {
+                disablement.0 &= !(Disablement::GOOD | Disablement::EVIL);
             }
-
-            if ui.checkbox(&mut evil, "🌙 Evil Only").changed() {
-                if evil {
-                    flags |= Disablement::EVIL;
-                    flags &= !Disablement::GOOD;
-                } else {
-                    flags &= !Disablement::EVIL;
-                }
+            if ui.radio_value(&mut good_only, true, "Good Only").changed() {
+                disablement.0 |= Disablement::GOOD;
+                disablement.0 &= !Disablement::EVIL;
             }
-        });
-
-        self.edit_buffer.disablements.0 = flags;
-
-        ui.separator();
-        ui.horizontal(|ui| {
-            if ui.button("✓ All Classes").clicked() {
-                self.edit_buffer.disablements.0 = 0b0011_1111;
-            }
-            if ui.button("✗ None").clicked() {
-                self.edit_buffer.disablements.0 = 0;
+            if ui.radio_value(&mut evil_only, true, "Evil Only").changed() {
+                disablement.0 &= !Disablement::GOOD;
+                disablement.0 |= Disablement::EVIL;
             }
         });
     }
 
     fn save_items(
         &self,
-        items: &Vec<Item>,
+        items: &[Item],
         campaign_dir: Option<&PathBuf>,
         items_file: &str,
         unsaved_changes: &mut bool,
@@ -1183,23 +1152,22 @@ impl ItemsEditorState {
         if let Some(dir) = campaign_dir {
             let items_path = dir.join(items_file);
 
+            // Create parent directories if necessary
             if let Some(parent) = items_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    *status_message = format!("Failed to create directory: {}", e);
+                    return;
+                }
             }
 
-            let ron_config = ron::ser::PrettyConfig::new()
-                .struct_names(false)
-                .enumerate_arrays(false);
-
-            match ron::ser::to_string_pretty(items, ron_config) {
+            match ron::ser::to_string_pretty(items, Default::default()) {
                 Ok(contents) => match std::fs::write(&items_path, contents) {
                     Ok(_) => {
                         *unsaved_changes = true;
-                        // *status_message = format!("Saved items to: {}", items_path.display());
-                        // Note: We don't necessarily want to set status message here as it might be an autosave
+                        *status_message = format!("Auto-saved items to: {}", items_path.display());
                     }
                     Err(e) => {
-                        *status_message = format!("Failed to write items file: {}", e);
+                        *status_message = format!("Failed to save items: {}", e);
                     }
                 },
                 Err(e) => {
@@ -1207,5 +1175,207 @@ impl ItemsEditorState {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // ItemsEditorState Tests
+    // =========================================================================
+
+    #[test]
+    fn test_items_editor_state_new() {
+        let state = ItemsEditorState::new();
+        assert_eq!(state.mode, ItemsEditorMode::List);
+        assert!(state.search_query.is_empty());
+        assert!(state.selected_item.is_none());
+        assert!(!state.show_import_dialog);
+        assert!(state.import_export_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_items_editor_state_default() {
+        let state = ItemsEditorState::default();
+        assert_eq!(state.mode, ItemsEditorMode::List);
+        assert!(state.filter_type.is_none());
+        assert!(state.filter_magical.is_none());
+        assert!(state.filter_cursed.is_none());
+        assert!(state.filter_quest.is_none());
+    }
+
+    #[test]
+    fn test_default_item_creation() {
+        let item = ItemsEditorState::default_item();
+        assert_eq!(item.id, 0);
+        assert_eq!(item.name, "New Item");
+        assert_eq!(item.base_cost, 10);
+        assert_eq!(item.sell_cost, 5);
+        assert!(!item.is_cursed);
+        assert_eq!(item.max_charges, 0);
+        assert!(matches!(item.item_type, ItemType::Weapon(_)));
+    }
+
+    // =========================================================================
+    // ItemsEditorMode Tests
+    // =========================================================================
+
+    #[test]
+    fn test_items_editor_mode_variants() {
+        assert_eq!(ItemsEditorMode::List, ItemsEditorMode::List);
+        assert_eq!(ItemsEditorMode::Add, ItemsEditorMode::Add);
+        assert_eq!(ItemsEditorMode::Edit, ItemsEditorMode::Edit);
+        assert_ne!(ItemsEditorMode::List, ItemsEditorMode::Add);
+    }
+
+    // =========================================================================
+    // ItemTypeFilter Tests
+    // =========================================================================
+
+    #[test]
+    fn test_item_type_filter_as_str() {
+        assert_eq!(ItemTypeFilter::Weapon.as_str(), "Weapon");
+        assert_eq!(ItemTypeFilter::Armor.as_str(), "Armor");
+        assert_eq!(ItemTypeFilter::Accessory.as_str(), "Accessory");
+        assert_eq!(ItemTypeFilter::Consumable.as_str(), "Consumable");
+        assert_eq!(ItemTypeFilter::Ammo.as_str(), "Ammo");
+        assert_eq!(ItemTypeFilter::Quest.as_str(), "Quest");
+    }
+
+    #[test]
+    fn test_item_type_filter_all() {
+        let filters = ItemTypeFilter::all();
+        assert_eq!(filters.len(), 6);
+        assert!(filters.contains(&ItemTypeFilter::Weapon));
+        assert!(filters.contains(&ItemTypeFilter::Armor));
+        assert!(filters.contains(&ItemTypeFilter::Accessory));
+        assert!(filters.contains(&ItemTypeFilter::Consumable));
+        assert!(filters.contains(&ItemTypeFilter::Ammo));
+        assert!(filters.contains(&ItemTypeFilter::Quest));
+    }
+
+    #[test]
+    fn test_item_type_filter_matches_weapon() {
+        let weapon_item = Item {
+            id: 1,
+            name: "Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 6, 0),
+                bonus: 0,
+                hands_required: 1,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            is_cursed: false,
+            disablements: Disablement(0),
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            icon_path: None,
+        };
+
+        assert!(ItemTypeFilter::Weapon.matches(&weapon_item));
+        assert!(!ItemTypeFilter::Armor.matches(&weapon_item));
+        assert!(!ItemTypeFilter::Quest.matches(&weapon_item));
+    }
+
+    #[test]
+    fn test_item_type_filter_matches_armor() {
+        let armor_item = Item {
+            id: 2,
+            name: "Plate".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 5,
+                weight: 50,
+            }),
+            base_cost: 100,
+            sell_cost: 50,
+            is_cursed: false,
+            disablements: Disablement(0),
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            icon_path: None,
+        };
+
+        assert!(ItemTypeFilter::Armor.matches(&armor_item));
+        assert!(!ItemTypeFilter::Weapon.matches(&armor_item));
+    }
+
+    #[test]
+    fn test_item_type_filter_matches_quest() {
+        let quest_item = Item {
+            id: 3,
+            name: "Magic Key".to_string(),
+            item_type: ItemType::Quest(QuestData {
+                quest_id: "quest_1".to_string(),
+                is_key_item: true,
+            }),
+            base_cost: 0,
+            sell_cost: 0,
+            is_cursed: false,
+            disablements: Disablement(0),
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            icon_path: None,
+        };
+
+        assert!(ItemTypeFilter::Quest.matches(&quest_item));
+        assert!(!ItemTypeFilter::Weapon.matches(&quest_item));
+    }
+
+    // =========================================================================
+    // Editor State Transitions Tests
+    // =========================================================================
+
+    #[test]
+    fn test_editor_mode_transitions() {
+        let mut state = ItemsEditorState::new();
+        assert_eq!(state.mode, ItemsEditorMode::List);
+
+        state.mode = ItemsEditorMode::Add;
+        assert_eq!(state.mode, ItemsEditorMode::Add);
+
+        state.mode = ItemsEditorMode::Edit;
+        assert_eq!(state.mode, ItemsEditorMode::Edit);
+
+        state.mode = ItemsEditorMode::List;
+        assert_eq!(state.mode, ItemsEditorMode::List);
+    }
+
+    #[test]
+    fn test_selected_item_handling() {
+        let mut state = ItemsEditorState::new();
+        assert!(state.selected_item.is_none());
+
+        state.selected_item = Some(0);
+        assert_eq!(state.selected_item, Some(0));
+
+        state.selected_item = Some(5);
+        assert_eq!(state.selected_item, Some(5));
+
+        state.selected_item = None;
+        assert!(state.selected_item.is_none());
+    }
+
+    #[test]
+    fn test_filter_combinations() {
+        let mut state = ItemsEditorState::new();
+
+        // Set multiple filters
+        state.filter_type = Some(ItemTypeFilter::Weapon);
+        state.filter_magical = Some(true);
+        state.filter_cursed = Some(false);
+
+        assert_eq!(state.filter_type, Some(ItemTypeFilter::Weapon));
+        assert_eq!(state.filter_magical, Some(true));
+        assert_eq!(state.filter_cursed, Some(false));
+        assert!(state.filter_quest.is_none());
     }
 }

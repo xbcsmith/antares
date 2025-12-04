@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::ui_helpers::{
+    ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout,
+    DEFAULT_PANEL_MIN_HEIGHT,
+};
+use antares::domain::character::{ATTRIBUTE_MODIFIER_MAX, ATTRIBUTE_MODIFIER_MIN};
 use antares::domain::conditions::{
     ConditionDefinition, ConditionDuration, ConditionEffect, ConditionId,
 };
@@ -105,9 +110,20 @@ impl ConditionSortOrder {
     }
 }
 
+/// Editor mode for the conditions editor
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConditionsEditorMode {
+    /// List view - showing condition list and detail preview
+    List,
+    /// Add mode - creating a new condition
+    Add,
+    /// Edit mode - editing an existing condition
+    Edit,
+}
+
 pub struct ConditionsEditorState {
     pub search_filter: String,
-    pub selected_condition_id: Option<ConditionId>,
+    pub selected_condition_idx: Option<usize>,
     pub edit_buffer: Option<ConditionDefinition>,
     pub show_preview: bool,
     /// Preview magnitude slider value (non-persistent UI-only preview for ActiveCondition.magnitude)
@@ -118,7 +134,6 @@ pub struct ConditionsEditorState {
     // Phase 1 additions
     pub show_import_dialog: bool,
     pub import_export_buffer: String,
-    pub duplicate_dialog_open: bool,
     pub delete_confirmation_open: bool,
     pub selected_for_delete: Option<ConditionId>,
     pub editing_original_id: Option<ConditionId>,
@@ -133,6 +148,10 @@ pub struct ConditionsEditorState {
     pub show_statistics: bool,
     /// Navigation request - when set, the parent app should navigate to the specified spell
     pub navigate_to_spell: Option<String>,
+    /// File load merge mode
+    pub file_load_merge_mode: bool,
+    /// Current editor mode
+    pub mode: ConditionsEditorMode,
 }
 
 /// Temporary typed buffer used to edit a single `ConditionEffect` variant in the UI.
@@ -190,7 +209,7 @@ impl Default for ConditionsEditorState {
     fn default() -> Self {
         Self {
             search_filter: String::new(),
-            selected_condition_id: None,
+            selected_condition_idx: None,
             edit_buffer: None,
             show_preview: true,
             preview_magnitude: 1.0,
@@ -199,7 +218,6 @@ impl Default for ConditionsEditorState {
             // new fields
             show_import_dialog: false,
             import_export_buffer: String::new(),
-            duplicate_dialog_open: false,
             delete_confirmation_open: false,
             selected_for_delete: None,
             editing_original_id: None,
@@ -210,6 +228,8 @@ impl Default for ConditionsEditorState {
             sort_order: ConditionSortOrder::NameAsc,
             show_statistics: false,
             navigate_to_spell: None,
+            file_load_merge_mode: false,
+            mode: ConditionsEditorMode::List,
         }
     }
 }
@@ -238,81 +258,106 @@ impl ConditionsEditorState {
     ///
     /// This follows the toolbar, import/load/save patterns used across other
     /// editors (items, monsters, spells).
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         conditions: &mut Vec<ConditionDefinition>,
-        spells: &mut Vec<Spell>,
+        spells: &mut [Spell],
         campaign_dir: Option<&PathBuf>,
         conditions_file: &str,
         unsaved_changes: &mut bool,
         status_message: &mut String,
-        file_load_merge_mode: &mut bool,
+        _file_load_merge_mode: &mut bool,
     ) {
-        let panel_height = crate::ui_helpers::compute_panel_height(
-            ui,
-            crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
-        );
-
         ui.heading("⚕️ Conditions Editor");
         ui.add_space(5.0);
 
-        // Top toolbar
-        ui.horizontal(|ui| {
-            ui.label("🔍 Search:");
-            if ui.text_edit_singleline(&mut self.search_filter).changed() {
-                self.selected_condition_id = None;
-            }
+        // Use shared EditorToolbar component
+        let toolbar_action = EditorToolbar::new("Conditions")
+            .with_search(&mut self.search_filter)
+            .with_merge_mode(&mut self.file_load_merge_mode)
+            .with_total_count(conditions.len())
+            .with_id_salt("conditions_toolbar")
+            .show(ui);
 
-            // Effect type filter
-            ui.separator();
-            ui.label("Filter:")
-                .on_hover_text("Filter conditions by effect type");
-            egui::ComboBox::from_id_salt("condition_effect_filter")
-                .selected_text(self.filter_effect_type.as_str())
-                .show_ui(ui, |ui| {
-                    for filter in EffectTypeFilter::all() {
-                        if ui
-                            .selectable_label(self.filter_effect_type == filter, filter.as_str())
-                            .clicked()
-                        {
-                            self.filter_effect_type = filter;
-                            self.selected_condition_id = None;
-                        }
-                    }
-                });
-
-            // Sort order
-            ui.label("Sort:")
-                .on_hover_text("Sort order for conditions list");
-            egui::ComboBox::from_id_salt("condition_sort_order")
-                .selected_text(self.sort_order.as_str())
-                .show_ui(ui, |ui| {
-                    for order in [
-                        ConditionSortOrder::NameAsc,
-                        ConditionSortOrder::NameDesc,
-                        ConditionSortOrder::IdAsc,
-                        ConditionSortOrder::IdDesc,
-                        ConditionSortOrder::EffectCount,
-                    ] {
-                        if ui
-                            .selectable_label(self.sort_order == order, order.as_str())
-                            .clicked()
-                        {
-                            self.sort_order = order;
-                        }
-                    }
-                });
-
-            ui.separator();
-
-            if ui.button("➕ New Condition").clicked() {
+        // Handle toolbar actions
+        match toolbar_action {
+            ToolbarAction::New => {
                 self.edit_buffer = Some(Self::default_condition());
-                self.selected_condition_id = None;
                 self.editing_original_id = None;
+                self.mode = ConditionsEditorMode::Add;
             }
+            ToolbarAction::Save => {
+                self.save_conditions(
+                    conditions,
+                    campaign_dir,
+                    conditions_file,
+                    unsaved_changes,
+                    status_message,
+                );
+            }
+            ToolbarAction::Load => {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("RON", &["ron"])
+                    .pick_file()
+                {
+                    let load_result = fs::read_to_string(&path).and_then(|contents| {
+                        ron::from_str::<Vec<ConditionDefinition>>(&contents)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    });
 
-            if ui.button("🔄 Reload").clicked() {
+                    match load_result {
+                        Ok(loaded_conditions) => {
+                            if self.file_load_merge_mode {
+                                for cond in loaded_conditions {
+                                    if let Some(existing) =
+                                        conditions.iter_mut().find(|c| c.id == cond.id)
+                                    {
+                                        *existing = cond;
+                                    } else {
+                                        conditions.push(cond);
+                                    }
+                                }
+                            } else {
+                                *conditions = loaded_conditions;
+                            }
+                            *unsaved_changes = true;
+                            *status_message = format!("Loaded conditions from: {}", path.display());
+                        }
+                        Err(e) => {
+                            *status_message = format!("Failed to load conditions: {}", e);
+                        }
+                    }
+                }
+            }
+            ToolbarAction::Import => {
+                self.show_import_dialog = true;
+                self.import_export_buffer.clear();
+            }
+            ToolbarAction::Export => {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("conditions.ron")
+                    .add_filter("RON", &["ron"])
+                    .save_file()
+                {
+                    match ron::ser::to_string_pretty(conditions, Default::default()) {
+                        Ok(contents) => match fs::write(&path, contents) {
+                            Ok(_) => {
+                                *status_message =
+                                    format!("Saved conditions to: {}", path.display());
+                            }
+                            Err(e) => {
+                                *status_message = format!("Failed to save conditions: {}", e);
+                            }
+                        },
+                        Err(e) => {
+                            *status_message = format!("Failed to serialize conditions: {}", e);
+                        }
+                    }
+                }
+            }
+            ToolbarAction::Reload => {
                 if let Some(dir) = campaign_dir {
                     let path = dir.join(conditions_file);
                     if path.exists() {
@@ -342,122 +387,52 @@ impl ConditionsEditorState {
                     *status_message = "No campaign directory set".to_string();
                 }
             }
+            ToolbarAction::None => {}
+        }
 
-            if ui.button("📥 Import").clicked() {
-                self.show_import_dialog = true;
-                self.import_export_buffer.clear();
-            }
+        // Filter toolbar (conditions-specific)
+        ui.horizontal(|ui| {
+            ui.label("Filters:");
+
+            // Effect type filter
+            egui::ComboBox::from_id_salt("condition_effect_filter")
+                .selected_text(self.filter_effect_type.as_str())
+                .show_ui(ui, |ui| {
+                    for filter in EffectTypeFilter::all() {
+                        if ui
+                            .selectable_label(self.filter_effect_type == filter, filter.as_str())
+                            .clicked()
+                        {
+                            self.filter_effect_type = filter;
+                            self.selected_condition_idx = None;
+                        }
+                    }
+                });
 
             ui.separator();
 
-            if ui.button("📂 Load from File").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<ConditionDefinition>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_conditions) => {
-                            if *file_load_merge_mode {
-                                for cond in loaded_conditions {
-                                    if let Some(existing) =
-                                        conditions.iter_mut().find(|c| c.id == cond.id)
-                                    {
-                                        *existing = cond;
-                                    } else {
-                                        conditions.push(cond);
-                                    }
-                                }
-                            } else {
-                                *conditions = loaded_conditions;
-                            }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded conditions from: {}", path.display());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to load conditions: {}", e);
+            // Sort order
+            ui.label("Sort:");
+            egui::ComboBox::from_id_salt("condition_sort_order")
+                .selected_text(self.sort_order.as_str())
+                .show_ui(ui, |ui| {
+                    for order in [
+                        ConditionSortOrder::NameAsc,
+                        ConditionSortOrder::NameDesc,
+                        ConditionSortOrder::IdAsc,
+                        ConditionSortOrder::IdDesc,
+                        ConditionSortOrder::EffectCount,
+                    ] {
+                        if ui
+                            .selectable_label(self.sort_order == order, order.as_str())
+                            .clicked()
+                        {
+                            self.sort_order = order;
                         }
                     }
-                }
-            }
-
-            ui.checkbox(file_load_merge_mode, "Merge");
-            ui.label(if *file_load_merge_mode {
-                "(adds to existing)"
-            } else {
-                "(replaces all)"
-            });
-
-            if ui.button("💾 Save to File").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("conditions.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(conditions, Default::default()) {
-                        Ok(contents) => match fs::write(&path, contents) {
-                            Ok(_) => {
-                                *status_message =
-                                    format!("Saved conditions to: {}", path.display());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to save conditions: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            *status_message = format!("Failed to serialize conditions: {}", e);
-                        }
-                    }
-                }
-            }
-
-            if ui.button("📋 Export Selected").clicked() {
-                if let Some(selected_id) = &self.selected_condition_id {
-                    if let Some(cond) = conditions.iter().find(|c| &c.id == selected_id) {
-                        match ron::ser::to_string_pretty(cond, Default::default()) {
-                            Ok(contents) => {
-                                ui.ctx().copy_text(contents);
-                                *status_message =
-                                    "Copied selected condition to clipboard".to_string();
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to serialize condition: {}", e);
-                            }
-                        }
-                    } else {
-                        *status_message = "Selected condition not found".to_string();
-                    }
-                } else {
-                    // Copy all
-                    match ron::ser::to_string_pretty(conditions, Default::default()) {
-                        Ok(contents) => {
-                            ui.ctx().copy_text(contents);
-                            *status_message = "Copied all conditions to clipboard".to_string();
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to serialize conditions: {}", e);
-                        }
-                    }
-                }
-            }
+                });
 
             ui.separator();
-
-            // Statistics summary
-            let stats = compute_condition_statistics(conditions);
-            ui.label(format!("Total: {}", stats.total))
-                .on_hover_text(format!(
-                    "Attribute: {}, Status: {}, DOT: {}, HOT: {}, Empty: {}",
-                    stats.attribute_count,
-                    stats.status_count,
-                    stats.dot_count,
-                    stats.hot_count,
-                    stats.empty_count
-                ));
 
             ui.checkbox(&mut self.show_preview, "Preview")
                 .on_hover_text("Show effect preview with magnitude scaling");
@@ -477,885 +452,35 @@ impl ConditionsEditorState {
                 ui.label(format!("Empty: {}", stats.empty_count));
                 ui.label(format!("Multi-effect: {}", stats.multi_effect_count));
             });
-            ui.separator();
         }
 
-        // Filter / list + editor layout (copied from prior render function, extended with duplicate/delete)
-        ui.horizontal(|ui| {
-            // Left panel: List
-            ui.vertical(|ui| {
-                ui.set_width(crate::ui_helpers::DEFAULT_LEFT_COLUMN_WIDTH);
-                ui.set_min_height(panel_height);
-                ui.heading("Conditions");
-                ui.separator();
+        ui.separator();
 
-                ui.horizontal(|ui| {
-                    ui.text_edit_singleline(&mut self.search_filter);
-                    if ui.button("❌").clicked() {
-                        self.search_filter.clear();
-                    }
-                });
+        // Show appropriate view based on mode
+        match self.mode {
+            ConditionsEditorMode::List => self.show_list(
+                ui,
+                conditions,
+                spells,
+                unsaved_changes,
+                status_message,
+                campaign_dir,
+                conditions_file,
+            ),
+            ConditionsEditorMode::Add | ConditionsEditorMode::Edit => self.show_form(
+                ui,
+                conditions,
+                spells,
+                unsaved_changes,
+                status_message,
+                campaign_dir,
+                conditions_file,
+            ),
+        }
 
-                ui.separator();
-
-                egui::ScrollArea::vertical()
-                    .id_salt("conditions_list_scroll")
-                    .auto_shrink([false, false])
-                    .max_height(panel_height)
-                    .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        let mut filtered: Vec<(usize, &ConditionDefinition)> = conditions
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, c)| {
-                                // Text filter
-                                let text_match = self.search_filter.is_empty()
-                                    || c.name
-                                        .to_lowercase()
-                                        .contains(&self.search_filter.to_lowercase())
-                                    || c.id
-                                        .to_lowercase()
-                                        .contains(&self.search_filter.to_lowercase());
-                                // Effect type filter
-                                let type_match = self.filter_effect_type.matches(c);
-                                text_match && type_match
-                            })
-                            .collect();
-
-                        // Apply sorting
-                        match self.sort_order {
-                            ConditionSortOrder::NameAsc => {
-                                filtered.sort_by(|a, b| a.1.name.to_lowercase().cmp(&b.1.name.to_lowercase()));
-                            }
-                            ConditionSortOrder::NameDesc => {
-                                filtered.sort_by(|a, b| b.1.name.to_lowercase().cmp(&a.1.name.to_lowercase()));
-                            }
-                            ConditionSortOrder::IdAsc => {
-                                filtered.sort_by(|a, b| a.1.id.to_lowercase().cmp(&b.1.id.to_lowercase()));
-                            }
-                            ConditionSortOrder::IdDesc => {
-                                filtered.sort_by(|a, b| b.1.id.to_lowercase().cmp(&a.1.id.to_lowercase()));
-                            }
-                            ConditionSortOrder::EffectCount => {
-                                filtered.sort_by(|a, b| b.1.effects.len().cmp(&a.1.effects.len()));
-                            }
-                        }
-
-                        for (_idx, condition) in filtered {
-                            let is_selected =
-                                self.selected_condition_id.as_ref() == Some(&condition.id);
-                            // Show effect type indicator in list
-                            let effect_indicator = get_effect_type_indicator(condition);
-                            let label = format!("{} {}", effect_indicator, condition.name);
-                            if ui.selectable_label(is_selected, label).clicked() {
-                                self.selected_condition_id = Some(condition.id.clone());
-                            }
-                        }
-                    });
-
-                ui.separator();
-                if ui.button("➕ New Condition").clicked() {
-                    let new_condition = ConditionDefinition {
-                        id: "new_condition".to_string(),
-                        name: "New Condition".to_string(),
-                        description: "".to_string(),
-                        effects: Vec::new(),
-                        default_duration: ConditionDuration::Rounds(3),
-                        icon_id: None,
-                    };
-                    self.edit_buffer = Some(new_condition);
-                    self.selected_condition_id = None;
-                }
-
-                ui.separator();
-
-                // Edit request capture - if Edit is clicked we will set edit buffer below to avoid borrow issues
-                let mut edit_requested: Option<ConditionId> = None;
-
-                ui.horizontal(|ui| {
-                    // Edit selected - open edit buffer for the selected condition
-                    if ui.button("✏️ Edit").clicked() {
-                        edit_requested = self.selected_condition_id.clone();
-                    }
-
-                    // Duplicate selected
-                    if ui.button("📄 Duplicate").clicked() {
-                        if let Some(selected_id) = &self.selected_condition_id {
-                            if let Some(original) = conditions.iter().find(|c| &c.id == selected_id)
-                            {
-                                // Create a copy with a unique id
-                                let mut dup = original.clone();
-                                let base = dup.id.clone();
-                                let mut suffix = 1;
-                                while conditions.iter().any(|c| c.id == dup.id) {
-                                    dup.id = format!("{}_copy{}", base, suffix);
-                                    suffix += 1;
-                                }
-                                conditions.push(dup);
-                                *unsaved_changes = true;
-                                *status_message = "Condition duplicated".to_string();
-                            }
-                        } else {
-                            *status_message = "No condition selected to duplicate".to_string();
-                        }
-                    }
-
-                    // Delete selected
-                    if ui.button("🗑️ Delete").clicked() {
-                        self.selected_for_delete = self.selected_condition_id.clone();
-                        self.delete_confirmation_open = true;
-                    }
-                });
-
-                // If Edit was requested, set the edit buffer after the UI closure to avoid borrow conflicts
-                if let Some(edit_id) = edit_requested {
-                    if let Some(cond) = conditions.iter().find(|c| c.id == edit_id) {
-                        self.edit_buffer = Some(cond.clone());
-                        self.editing_original_id = Some(edit_id);
-                        // Clear selection so the full editor panel shows instead of read-only view
-                        self.selected_condition_id = None;
-                    }
-                }
-            });
-
-            ui.separator();
-
-            // Right panel: Editor
-            ui.vertical(|ui| {
-                ui.set_min_height(panel_height);
-                ui.set_min_width(ui.available_width());
-
-                if let Some(condition_id) = &self.selected_condition_id.clone() {
-                    if let Some(condition) = conditions.iter_mut().find(|c| &c.id == condition_id) {
-                        egui::ScrollArea::vertical()
-                            .id_salt("condition_editor_scroll")
-                            .auto_shrink([false, false])
-                            .max_height(panel_height)
-                            .show(ui, |ui| {
-                                ui.heading("Edit Condition");
-                                ui.separator();
-
-                                // Used-by hint (shows spells referencing this condition)
-                                let used_spells = spells_referencing_condition(spells, &condition.id);
-                                if !used_spells.is_empty() {
-                                    ui.colored_label(
-                                        egui::Color32::YELLOW,
-                                        format!("Used by {} spell(s):", used_spells.len()),
-                                    );
-                                    for s in used_spells {
-                                        ui.horizontal(|ui| {
-                                            ui.label(format!("- {}", s));
-                                            if ui.small_button("📋").on_hover_text("Copy spell name").clicked() {
-                                                ui.ctx().copy_text(s.clone());
-                                                *status_message = format!("Copied spell name to clipboard: {}", s);
-                                            }
-                                            if ui.small_button("→").on_hover_text("Jump to spell in Spells Editor").clicked() {
-                                                self.navigate_to_spell = Some(s.clone());
-                                            }
-                                        });
-                                    }
-                                    ui.separator();
-                                }
-
-                                egui::Grid::new("condition_editor_grid")
-                                    .num_columns(2)
-                                    .spacing([10.0, 10.0])
-                                    .show(ui, |ui| {
-                                        ui.label("ID:");
-                                        ui.label(&condition.id);
-                                        ui.end_row();
-
-                                        ui.label("Name:");
-                                        ui.text_edit_singleline(&mut condition.name);
-                                        ui.end_row();
-
-                                        ui.label("Description:");
-                                        ui.text_edit_multiline(&mut condition.description);
-                                        ui.end_row();
-                                    });
-
-                                ui.separator();
-                                ui.label("Effects:");
-                                for (idx, effect) in condition.effects.iter().enumerate() {
-                                    ui.label(format!(
-                                        "Effect #{}: {}",
-                                        idx + 1,
-                                        render_condition_effect_summary(effect)
-                                    ));
-                                }
-
-                                // Preview for selected condition (non-edit mode)
-                                if self.show_preview {
-                                    ui.separator();
-                                    ui.label("Preview:");
-                                    ui.horizontal(|ui| {
-                                        ui.label("Magnitude:");
-                                        ui.add(egui::Slider::new(&mut self.preview_magnitude, 0.1..=3.0).text("x"));
-                                    });
-                                    for (idx, effect) in condition.effects.iter().enumerate() {
-                                        ui.label(format!(
-                                            "Effect #{}: {}",
-                                            idx + 1,
-                                            render_condition_effect_preview(effect, self.preview_magnitude)
-                                        ));
-                                    }
-                                    ui.separator();
-                                }
-                            });
-                    }
-                } else if self.edit_buffer.is_some() {
-                    // New condition block (Add mode)
-                    if let Some(new_cond) = &mut self.edit_buffer {
-                        let mut should_save = false;
-                        let mut should_cancel = false;
-
-                        egui::ScrollArea::vertical()
-                            .id_salt("condition_new_scroll")
-                            .auto_shrink([false, false])
-                            .max_height(panel_height)
-                            .show(ui, |ui| {
-                                ui.heading("New Condition");
-                                ui.separator();
-
-                                // If we're editing an existing condition being renamed, warn about spells
-                                // that reference the original ID.
-                                if let Some(orig_id) = &self.editing_original_id {
-                                    let used_spells = spells_referencing_condition(spells, orig_id);
-                                    if !used_spells.is_empty() {
-                                        ui.colored_label(
-                                            egui::Color32::YELLOW,
-                                            format!(
-                                                "Note: This condition is used by {} spell(s). Renaming may break references.",
-                                                used_spells.len()
-                                            ),
-                                        );
-                                        for s in used_spells {
-                                            ui.horizontal(|ui| {
-                                                ui.label(format!("- {}", s));
-                                                if ui.small_button("📋").on_hover_text("Copy spell name").clicked() {
-                                                    ui.ctx().copy_text(s.clone());
-                                                    *status_message = format!("Copied spell name to clipboard: {}", s);
-                                                }
-                                                if ui.small_button("→").on_hover_text("Jump to spell in Spells Editor").clicked() {
-                                                    self.navigate_to_spell = Some(s.clone());
-                                                }
-                                            });
-                                        }
-                                        ui.separator();
-                                    }
-                                }
-
-                                egui::Grid::new("condition_editor_grid")
-                                    .num_columns(2)
-                                    .spacing([10.0, 10.0])
-                                    .show(ui, |ui| {
-                                        ui.label("ID:");
-                                        ui.text_edit_singleline(&mut new_cond.id);
-                                        ui.end_row();
-
-                                        ui.label("Name:");
-                                        ui.text_edit_singleline(&mut new_cond.name);
-                                        ui.end_row();
-
-                                        ui.label("Description:");
-                                        ui.text_edit_multiline(&mut new_cond.description);
-                                        ui.end_row();
-
-                                        // Default duration selector (Instant / Rounds(n) / Minutes(n) / Permanent)
-                                        ui.label("Default Duration:")
-                                            .on_hover_text("How long the condition lasts by default:\n• Instant: Applied once immediately\n• Rounds: Lasts N combat rounds\n• Minutes: Lasts N exploration minutes\n• Permanent: Never expires");
-                                        ui.horizontal(|ui| {
-                                            egui::ComboBox::from_id_salt(
-                                                "condition_default_duration",
-                                            )
-                                            .selected_text(match &new_cond.default_duration {
-                                                ConditionDuration::Instant => "Instant".to_owned(),
-                                                ConditionDuration::Rounds(n) => {
-                                                    format!("Rounds({})", n)
-                                                }
-                                                ConditionDuration::Minutes(n) => {
-                                                    format!("Minutes({})", n)
-                                                }
-                                                ConditionDuration::Permanent => {
-                                                    "Permanent".to_owned()
-                                                }
-                                            })
-                                            .show_ui(
-                                                ui,
-                                                |ui| {
-                                                    if ui
-                                                        .selectable_label(
-                                                            matches!(
-                                                                new_cond.default_duration,
-                                                                ConditionDuration::Instant
-                                                            ),
-                                                            "Instant",
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        new_cond.default_duration =
-                                                            ConditionDuration::Instant;
-                                                    }
-                                                    if ui
-                                                        .selectable_label(
-                                                            matches!(
-                                                                new_cond.default_duration,
-                                                                ConditionDuration::Permanent
-                                                            ),
-                                                            "Permanent",
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        new_cond.default_duration =
-                                                            ConditionDuration::Permanent;
-                                                    }
-                                                    if ui
-                                                        .selectable_label(
-                                                            matches!(
-                                                                new_cond.default_duration,
-                                                                ConditionDuration::Rounds(_)
-                                                            ),
-                                                            "Rounds",
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        if let ConditionDuration::Rounds(_) =
-                                                            new_cond.default_duration
-                                                        {
-                                                            // keep value
-                                                        } else {
-                                                            new_cond.default_duration =
-                                                                ConditionDuration::Rounds(1);
-                                                        }
-                                                    }
-                                                    if ui
-                                                        .selectable_label(
-                                                            matches!(
-                                                                new_cond.default_duration,
-                                                                ConditionDuration::Minutes(_)
-                                                            ),
-                                                            "Minutes",
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        if let ConditionDuration::Minutes(_) =
-                                                            new_cond.default_duration
-                                                        {
-                                                            // keep value
-                                                        } else {
-                                                            new_cond.default_duration =
-                                                                ConditionDuration::Minutes(1);
-                                                        }
-                                                    }
-                                                },
-                                            );
-                                            // If Rounds or Minutes selected, show a numeric editor
-                                            match &mut new_cond.default_duration {
-                                                ConditionDuration::Rounds(n) => {
-                                                    ui.add(egui::DragValue::new(n));
-                                                }
-                                                ConditionDuration::Minutes(n) => {
-                                                    ui.add(egui::DragValue::new(n));
-                                                }
-                                                _ => {
-                                                    // nothing to show for Instant or Permanent
-                                                }
-                                            }
-                                        });
-                                        ui.end_row();
-
-                                        // Icon ID field (optional)
-                                        ui.label("Icon ID:")
-                                            .on_hover_text("Optional icon identifier for UI display");
-                                        {
-                                            let mut icon_buf =
-                                                new_cond.icon_id.clone().unwrap_or_default();
-                                            let text = ui.text_edit_singleline(&mut icon_buf);
-                                            if text.changed() {
-                                                new_cond.icon_id = if icon_buf.trim().is_empty() {
-                                                    None
-                                                } else {
-                                                    Some(icon_buf.clone())
-                                                };
-                                            }
-                                            if ui.button("Clear").clicked() {
-                                                new_cond.icon_id = None;
-                                            }
-                                        }
-                                        ui.end_row();
-                                    });
-
-                                // Basic ID uniqueness check (account for editing an existing condition)
-                                let id_in_use = conditions.iter().any(|c| {
-                                    // When editing an existing condition, the original id shouldn't be
-                                    // considered a collision with itself.
-                                    if let Some(orig_id) = &self.editing_original_id {
-                                        if &c.id == orig_id {
-                                            return false;
-                                        }
-                                    }
-                                    c.id == new_cond.id
-                                });
-                                if id_in_use {
-                                    ui.colored_label(egui::Color32::RED, "ID already in use");
-                                }
-
-                                ui.separator();
-
-                                // Effects list & basic per-effect editing
-                                ui.horizontal(|ui| {
-                                    ui.label("Effects:");
-                                    if !new_cond.effects.is_empty() {
-                                        if ui.small_button("🗑️ Clear All")
-                                            .on_hover_text("Remove all effects from this condition")
-                                            .clicked()
-                                        {
-                                            new_cond.effects.clear();
-                                        }
-                                    }
-                                });
-                                let mut effect_action: Option<(String, usize)> = None;
-                                for (idx, effect) in new_cond.effects.iter().enumerate() {
-                                    ui.horizontal(|ui| {
-                                        ui.label(format!(
-                                            "Effect #{}: {}",
-                                            idx + 1,
-                                            render_condition_effect_summary(effect)
-                                        ));
-                                        if ui.button("⬆️").clicked() {
-                                            effect_action = Some(("up".to_string(), idx));
-                                        }
-                                        if ui.button("⬇️").clicked() {
-                                            effect_action = Some(("down".to_string(), idx));
-                                        }
-                                        if ui.button("✏️").clicked() {
-                                            effect_action = Some(("edit".to_string(), idx));
-                                        }
-                                        if ui.button("📄 Duplicate").clicked() {
-                                            effect_action = Some(("duplicate".to_string(), idx));
-                                        }
-                                        if ui.button("🗑️ Delete").clicked() {
-                                            effect_action = Some(("delete".to_string(), idx));
-                                        }
-                                    });
-                                }
-
-                                // Small preview to help designers understand the condition
-                                if self.show_preview {
-                                    ui.separator();
-                                    ui.label("Preview:")
-                                        .on_hover_text("Preview shows approximate effect values scaled by magnitude.\nThis is for design visualization only and is not saved.");
-                                    ui.horizontal(|ui| {
-                                        ui.label("Magnitude:")
-                                            .on_hover_text("Scale factor for preview (simulates spell power bonuses)");
-                                        ui.add(
-                                            egui::Slider::new(&mut self.preview_magnitude, 0.1..=3.0)
-                                                .text("x"),
-                                        );
-                                    });
-                                    for (idx, effect) in new_cond.effects.iter().enumerate() {
-                                        ui.label(format!(
-                                            "Effect #{}: {}",
-                                            idx + 1,
-                                            render_condition_effect_preview(effect, self.preview_magnitude)
-                                        ));
-                                    }
-                                    ui.separator();
-                                }
-
-                                // Add new effect (defaults to StatusEffect)
-                                if ui.button("➕ Add Effect").clicked() {
-                                    self.effect_edit_buffer = Some(EffectEditBuffer::default());
-                                    if let Some(buf) = &mut self.effect_edit_buffer {
-                                        buf.effect_type = Some("StatusEffect".to_string());
-                                        buf.editing_index = None;
-                                    }
-                                }
-
-                                // Apply captured action after the list render
-                                if let Some((action, idx)) = effect_action {
-                                    match action.as_str() {
-                                        "up" => {
-                                            if idx > 0 {
-                                                new_cond.effects.swap(idx, idx - 1);
-                                            }
-                                        }
-                                        "down" => {
-                                            if idx + 1 < new_cond.effects.len() {
-                                                new_cond.effects.swap(idx, idx + 1);
-                                            }
-                                        }
-                                        "duplicate" => {
-                                            let dup = new_cond.effects[idx].clone();
-                                            new_cond.effects.insert(idx + 1, dup);
-                                        }
-                                        "delete" => {
-                                            new_cond.effects.remove(idx);
-                                        }
-                                        "edit" => {
-                                            if idx < new_cond.effects.len() {
-                                                let eff = new_cond.effects[idx].clone();
-                                                let mut buf = EffectEditBuffer::default();
-                                                buf.editing_index = Some(idx);
-                                                buf.effect_type = Some(match &eff {
-                                                    ConditionEffect::AttributeModifier {
-                                                        ..
-                                                    } => "AttributeModifier".to_string(),
-                                                    ConditionEffect::StatusEffect(_) => {
-                                                        "StatusEffect".to_string()
-                                                    }
-                                                    ConditionEffect::DamageOverTime { .. } => {
-                                                        "DamageOverTime".to_string()
-                                                    }
-                                                    ConditionEffect::HealOverTime { .. } => {
-                                                        "HealOverTime".to_string()
-                                                    }
-                                                });
-
-                                                match eff {
-                                                    ConditionEffect::AttributeModifier {
-                                                        attribute,
-                                                        value,
-                                                    } => {
-                                                        buf.attribute = attribute.clone();
-                                                        buf.attribute_value = value;
-                                                    }
-                                                    ConditionEffect::StatusEffect(tag) => {
-                                                        buf.status_tag = tag.clone();
-                                                    }
-                                                    ConditionEffect::DamageOverTime {
-                                                        damage,
-                                                        element,
-                                                    } => {
-                                                        buf.dice = damage.clone();
-                                                        buf.element = element.clone();
-                                                    }
-                                                    ConditionEffect::HealOverTime { amount } => {
-                                                        buf.dice = amount.clone();
-                                                    }
-                                                }
-
-                                                self.effect_edit_buffer = Some(buf);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-
-                                // Effect editor UI (for the edit/add panel)
-                                if self.effect_edit_buffer.is_some() {
-                                    // Take the edit buffer for this frame to avoid nested mutable borrows
-                                    let mut buf = self.effect_edit_buffer.take().unwrap();
-                                    let mut keep_buf = true;
-
-                                    ui.separator();
-                                    ui.label("Edit Effect");
-                                    // Effect type selector
-                                    let mut effect_type = buf
-                                        .effect_type
-                                        .clone()
-                                        .unwrap_or_else(|| "StatusEffect".to_string());
-                                    egui::ComboBox::from_id_salt("effect_type_select")
-                                        .selected_text(effect_type.clone())
-                                        .show_ui(ui, |ui| {
-                                            if ui
-                                                .selectable_label(
-                                                    effect_type == "AttributeModifier",
-                                                    "AttributeModifier",
-                                                )
-                                                .clicked()
-                                            {
-                                                effect_type = "AttributeModifier".to_string();
-                                            }
-                                            if ui
-                                                .selectable_label(
-                                                    effect_type == "StatusEffect",
-                                                    "StatusEffect",
-                                                )
-                                                .clicked()
-                                            {
-                                                effect_type = "StatusEffect".to_string();
-                                            }
-                                            if ui
-                                                .selectable_label(
-                                                    effect_type == "DamageOverTime",
-                                                    "DamageOverTime",
-                                                )
-                                                .clicked()
-                                            {
-                                                effect_type = "DamageOverTime".to_string();
-                                            }
-                                            if ui
-                                                .selectable_label(
-                                                    effect_type == "HealOverTime",
-                                                    "HealOverTime",
-                                                )
-                                                .clicked()
-                                            {
-                                                effect_type = "HealOverTime".to_string();
-                                            }
-                                        });
-                                    buf.effect_type = Some(effect_type.clone());
-
-                                    match effect_type.as_str() {
-                                        "AttributeModifier" => {
-                                            ui.horizontal(|ui| {
-                                                ui.label("Attribute:").on_hover_text("Primary attributes: might, intellect, personality, endurance, speed, accuracy, luck. Select 'Custom' to enter a custom attribute name.");
-                                                let attributes = [
-                                                    "might",
-                                                    "intellect",
-                                                    "personality",
-                                                    "endurance",
-                                                    "speed",
-                                                    "accuracy",
-                                                    "luck",
-                                                ];
-                                                egui::ComboBox::from_id_salt("attribute_select")
-                                                    .selected_text(buf.attribute.clone())
-                                                    .show_ui(ui, |ui| {
-                                                        for a in attributes {
-                                                            if ui
-                                                                .selectable_value(
-                                                                    &mut buf.attribute,
-                                                                    a.to_string(),
-                                                                    a,
-                                                                )
-                                                                .clicked()
-                                                            {
-                                                            }
-                                                        }
-                                                        if ui
-                                                            .selectable_label(
-                                                                buf.attribute == "custom",
-                                                                "Custom",
-                                                            )
-                                                            .clicked()
-                                                        {
-                                                            buf.attribute = "custom".to_string();
-                                                        }
-                                                    });
-                                                if buf.attribute == "custom" {
-                                                    ui.text_edit_singleline(&mut buf.attribute);
-                                                }
-                                                ui.label("Value:");
-                                                ui.add(
-                                                    egui::DragValue::new(&mut buf.attribute_value)
-                                                        .speed(1.0),
-                                                );
-                                            });
-                                        }
-                                        "StatusEffect" => {
-                                            ui.horizontal(|ui| {
-                                                ui.label("Status Tag:");
-                                                ui.text_edit_singleline(&mut buf.status_tag);
-                                            });
-                                        }
-                                        "DamageOverTime" => {
-                                            ui.horizontal(|ui| {
-                                                ui.label("Damage:");
-                                                ui.add(
-                                                    egui::DragValue::new(&mut buf.dice.count)
-                                                        .speed(1.0)
-                                                        .range(1..=100),
-                                                );
-                                                ui.label("d");
-                                                ui.add(
-                                                    egui::DragValue::new(&mut buf.dice.sides)
-                                                        .speed(1.0)
-                                                        .range(2..=100),
-                                                );
-                                                ui.label("+");
-                                                ui.add(
-                                                    egui::DragValue::new(&mut buf.dice.bonus)
-                                                        .speed(1.0),
-                                                );
-                                                ui.label("Element:").on_hover_text("Choose an element for DOT effects (fire, cold, electricity, poison, acid, psychic, energy, physical). Select 'Custom' to enter a custom element name.");
-                                                let elements = [
-                                                    "fire",
-                                                    "cold",
-                                                    "electricity",
-                                                    "poison",
-                                                    "acid",
-                                                    "psychic",
-                                                    "energy",
-                                                    "physical",
-                                                ];
-                                                egui::ComboBox::from_id_salt("dot_element_select")
-                                                    .selected_text(buf.element.clone())
-                                                    .show_ui(ui, |ui| {
-                                                        for e in elements {
-                                                            if ui
-                                                                .selectable_value(
-                                                                    &mut buf.element,
-                                                                    e.to_string(),
-                                                                    e,
-                                                                )
-                                                                .clicked()
-                                                            {
-                                                            }
-                                                        }
-                                                        if ui
-                                                            .selectable_label(
-                                                                buf.element == "custom",
-                                                                "Custom",
-                                                            )
-                                                            .clicked()
-                                                        {
-                                                            buf.element = "custom".to_string();
-                                                        }
-                                                    });
-                                                if buf.element == "custom" {
-                                                    ui.text_edit_singleline(&mut buf.element);
-                                                }
-                                            });
-                                        }
-                                        "HealOverTime" => {
-                                            ui.horizontal(|ui| {
-                                                ui.label("Amount:");
-                                                ui.add(
-                                                    egui::DragValue::new(&mut buf.dice.count)
-                                                        .speed(1.0)
-                                                        .range(1..=100),
-                                                );
-                                                ui.label("d");
-                                                ui.add(
-                                                    egui::DragValue::new(&mut buf.dice.sides)
-                                                        .speed(1.0)
-                                                        .range(2..=100),
-                                                );
-                                                ui.label("+");
-                                                ui.add(
-                                                    egui::DragValue::new(&mut buf.dice.bonus)
-                                                        .speed(1.0),
-                                                );
-                                            });
-                                        }
-                                        _ => {}
-                                    }
-
-                                    ui.horizontal(|ui| {
-                                        let effect_validation = validate_effect_edit_buffer(&buf);
-                                        if effect_validation.is_ok() {
-                                            if ui.button("💾 Save Effect").clicked() {
-                                                // Convert buffer into a ConditionEffect and store on the
-                                                // in-flight edit buffer (this is saved to the campaign
-                                                // when the parent condition is saved).
-                                                let new_effect = match buf.effect_type.as_deref() {
-                                                    Some("AttributeModifier") => {
-                                                        ConditionEffect::AttributeModifier {
-                                                            attribute: buf.attribute.clone(),
-                                                            value: buf.attribute_value,
-                                                        }
-                                                    }
-                                                    Some("StatusEffect") => {
-                                                        ConditionEffect::StatusEffect(
-                                                            buf.status_tag.clone(),
-                                                        )
-                                                    }
-                                                    Some("DamageOverTime") => {
-                                                        ConditionEffect::DamageOverTime {
-                                                            damage: buf.dice.clone(),
-                                                            element: buf.element.clone(),
-                                                        }
-                                                    }
-                                                    Some("HealOverTime") => {
-                                                        ConditionEffect::HealOverTime {
-                                                            amount: buf.dice.clone(),
-                                                        }
-                                                    }
-                                                    _ => ConditionEffect::StatusEffect(
-                                                        buf.status_tag.clone(),
-                                                    ),
-                                                };
-
-                                                if let Some(idx) = buf.editing_index {
-                                                    if idx < new_cond.effects.len() {
-                                                        new_cond.effects[idx] = new_effect;
-                                                    } else {
-                                                        new_cond.effects.push(new_effect);
-                                                    }
-                                                } else {
-                                                    new_cond.effects.push(new_effect);
-                                                }
-
-                                                // We've saved the edit into the edit_buffer->effects,
-                                                // we can drop the UI edit buffer now.
-                                                keep_buf = false;
-                                            }
-                                        } else {
-                                            // Show validation error and render disabled save button
-                                            ui.colored_label(egui::Color32::RED, effect_validation.unwrap_err());
-                                            ui.add_enabled(false, egui::Button::new("💾 Save Effect"));
-                                        }
-                                        if ui.button("❌ Cancel").clicked() {
-                                            // Cancel editing; drop the buffer
-                                            keep_buf = false;
-                                        }
-                                    });
-
-                                    if keep_buf {
-                                        // Return the buffer to the editor state so the user can continue editing
-                                        self.effect_edit_buffer = Some(buf);
-                                    } else {
-                                        // Bail out without re-presenting the buffer
-                                        self.effect_edit_buffer = None;
-                                    }
-                                }
-
-                                ui.separator();
-
-                                ui.horizontal(|ui| {
-                                    if ui.button("💾 Save").clicked() {
-                                        should_save = true;
-                                    }
-                                    if ui.button("❌ Cancel").clicked() {
-                                        should_cancel = true;
-                                    }
-                                });
-                            });
-
-                        if should_save {
-                            // Attempt to apply the edits using the shared helper. This
-                            // handles both creating a new condition and updating an
-                            // existing one (via `editing_original_id`).
-                            match apply_condition_edits(
-                                conditions,
-                                self.editing_original_id.as_deref(),
-                                new_cond,
-                            ) {
-                                Ok(()) => {
-                                    *unsaved_changes = true;
-                                    *status_message = if self.editing_original_id.is_some() {
-                                        "Condition updated".to_string()
-                                    } else {
-                                        "Condition added".to_string()
-                                    };
-                                    self.selected_condition_id = Some(new_cond.id.clone());
-                                    self.edit_buffer = None;
-                                    self.editing_original_id = None;
-                                }
-                                Err(e) => {
-                                    *status_message = format!("Failed to save condition: {}", e);
-                                }
-                            }
-                        }
-
-                        if should_cancel {
-                            self.edit_buffer = None;
-                            self.editing_original_id = None;
-                        }
-                    }
-                } else {
-                    ui.label(
-                        "Select a condition to edit or click '➕ New Condition' to create one.",
-                    );
-                }
-            });
-        });
-
-        // Import dialog window handling (separate)
+        // Import dialog window handling
         if self.show_import_dialog {
-            self.show_import_dialog(
+            self.show_import_dialog_window(
                 ui.ctx(),
                 conditions,
                 unsaved_changes,
@@ -1367,55 +492,1078 @@ impl ConditionsEditorState {
 
         // Delete confirmation dialog
         if self.delete_confirmation_open {
-            let mut open = self.delete_confirmation_open;
-            egui::Window::new("Delete Condition")
-                .open(&mut open)
-                .resizable(false)
-                .show(ui.ctx(), |ui| {
-                    ui.label("Are you sure you want to delete this condition?");
-                    if let Some(del_id) = &self.selected_for_delete {
-                        let used_spells = spells_referencing_condition(spells, del_id);
-                        if !used_spells.is_empty() {
-                            ui.colored_label(
+            self.show_delete_confirmation(
+                ui.ctx(),
+                conditions,
+                spells,
+                unsaved_changes,
+                status_message,
+                campaign_dir,
+                conditions_file,
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn show_list(
+        &mut self,
+        ui: &mut egui::Ui,
+        conditions: &mut Vec<ConditionDefinition>,
+        spells: &mut [Spell],
+        unsaved_changes: &mut bool,
+        status_message: &mut String,
+        campaign_dir: Option<&PathBuf>,
+        conditions_file: &str,
+    ) {
+        let search_lower = self.search_filter.to_lowercase();
+
+        // Build filtered list snapshot to avoid borrow conflicts in closures
+        let mut filtered_conditions: Vec<(usize, String, ConditionDefinition)> = conditions
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                // Text filter
+                let text_match = search_lower.is_empty()
+                    || c.name.to_lowercase().contains(&search_lower)
+                    || c.id.to_lowercase().contains(&search_lower);
+                // Effect type filter
+                let type_match = self.filter_effect_type.matches(c);
+                text_match && type_match
+            })
+            .map(|(idx, c)| {
+                let effect_indicator = get_effect_type_indicator(c);
+                let label = format!("{} {}", effect_indicator, c.name);
+                (idx, label, c.clone())
+            })
+            .collect();
+
+        // Apply sorting
+        match self.sort_order {
+            ConditionSortOrder::NameAsc => {
+                filtered_conditions
+                    .sort_by(|a, b| a.2.name.to_lowercase().cmp(&b.2.name.to_lowercase()));
+            }
+            ConditionSortOrder::NameDesc => {
+                filtered_conditions
+                    .sort_by(|a, b| b.2.name.to_lowercase().cmp(&a.2.name.to_lowercase()));
+            }
+            ConditionSortOrder::IdAsc => {
+                filtered_conditions
+                    .sort_by(|a, b| a.2.id.to_lowercase().cmp(&b.2.id.to_lowercase()));
+            }
+            ConditionSortOrder::IdDesc => {
+                filtered_conditions
+                    .sort_by(|a, b| b.2.id.to_lowercase().cmp(&a.2.id.to_lowercase()));
+            }
+            ConditionSortOrder::EffectCount => {
+                filtered_conditions.sort_by(|a, b| b.2.effects.len().cmp(&a.2.effects.len()));
+            }
+        }
+
+        let selected = self.selected_condition_idx;
+        let mut new_selection = selected;
+        let mut action_requested: Option<ItemAction> = None;
+        let show_preview = self.show_preview;
+        let preview_magnitude = self.preview_magnitude;
+
+        // Capture spell references for selected condition (if any)
+        let selected_spell_refs: Vec<String> = if let Some(idx) = selected {
+            if idx < conditions.len() {
+                spells_referencing_condition(spells, &conditions[idx].id)
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        let mut navigate_spell: Option<String> = None;
+
+        // Use shared TwoColumnLayout component
+        TwoColumnLayout::new("conditions").show_split(
+            ui,
+            |left_ui| {
+                // Left panel: Conditions list
+                left_ui.heading("Conditions");
+                left_ui.separator();
+
+                for (idx, label, _) in &filtered_conditions {
+                    let is_selected = selected == Some(*idx);
+                    if left_ui.selectable_label(is_selected, label).clicked() {
+                        new_selection = Some(*idx);
+                    }
+                }
+
+                if filtered_conditions.is_empty() {
+                    left_ui.label("No conditions found");
+                }
+            },
+            |right_ui| {
+                // Right panel: Detail view
+                if let Some(idx) = selected {
+                    if let Some((_, _, condition)) =
+                        filtered_conditions.iter().find(|(i, _, _)| *i == idx)
+                    {
+                        right_ui.heading(&condition.name);
+                        right_ui.separator();
+
+                        // Use shared ActionButtons component
+                        let action = ActionButtons::new().enabled(true).show(right_ui);
+                        if action != ItemAction::None {
+                            action_requested = Some(action);
+                        }
+
+                        right_ui.separator();
+
+                        // Show spell references
+                        if !selected_spell_refs.is_empty() {
+                            right_ui.colored_label(
                                 egui::Color32::YELLOW,
-                                format!(
-                                    "Warning: {} spell(s) reference this condition:",
-                                    used_spells.len()
-                                ),
+                                format!("Used by {} spell(s):", selected_spell_refs.len()),
                             );
-                            for s in used_spells {
-                                ui.horizontal(|ui| {
+                            for s in &selected_spell_refs {
+                                right_ui.horizontal(|ui| {
                                     ui.label(format!("- {}", s));
-                                    if ui.small_button("📋").on_hover_text("Copy spell name").clicked() {
+                                    if ui
+                                        .small_button("📋")
+                                        .on_hover_text("Copy spell name")
+                                        .clicked()
+                                    {
                                         ui.ctx().copy_text(s.clone());
-                                        *status_message =
-                                            format!("Copied spell name to clipboard: {}", s);
                                     }
-                                    if ui.small_button("→").on_hover_text("Jump to spell in Spells Editor").clicked() {
-                                        self.navigate_to_spell = Some(s.clone());
+                                    if ui
+                                        .small_button("→")
+                                        .on_hover_text("Jump to spell in Spells Editor")
+                                        .clicked()
+                                    {
+                                        navigate_spell = Some(s.clone());
                                     }
                                 });
                             }
-                            ui.checkbox(
-                                &mut self.remove_refs_on_delete,
-                                "Remove references from spells when deleting",
-                            ).on_hover_text("If checked, spells that use this condition will have the reference automatically removed");
+                            right_ui.separator();
+                        }
+
+                        // Show condition details
+                        Self::show_preview_static(
+                            right_ui,
+                            condition,
+                            show_preview,
+                            preview_magnitude,
+                        );
+                    } else {
+                        right_ui.vertical_centered(|ui| {
+                            ui.add_space(100.0);
+                            ui.label("Select a condition to view details");
+                        });
+                    }
+                } else {
+                    right_ui.vertical_centered(|ui| {
+                        ui.add_space(100.0);
+                        ui.label("Select a condition to view details");
+                    });
+                }
+            },
+        );
+
+        // Apply selection change after closures
+        self.selected_condition_idx = new_selection;
+
+        // Handle navigation request
+        if navigate_spell.is_some() {
+            self.navigate_to_spell = navigate_spell;
+        }
+
+        // Handle action button clicks after closures
+        if let Some(action) = action_requested {
+            match action {
+                ItemAction::Edit => {
+                    if let Some(idx) = self.selected_condition_idx {
+                        if idx < conditions.len() {
+                            self.mode = ConditionsEditorMode::Edit;
+                            self.edit_buffer = Some(conditions[idx].clone());
+                            self.editing_original_id = Some(conditions[idx].id.clone());
+                        }
+                    }
+                }
+                ItemAction::Delete => {
+                    if let Some(idx) = self.selected_condition_idx {
+                        if idx < conditions.len() {
+                            self.selected_for_delete = Some(conditions[idx].id.clone());
+                            self.delete_confirmation_open = true;
+                        }
+                    }
+                }
+                ItemAction::Duplicate => {
+                    if let Some(idx) = self.selected_condition_idx {
+                        if idx < conditions.len() {
+                            let mut dup = conditions[idx].clone();
+                            let base = dup.id.clone();
+                            let mut suffix = 1;
+                            while conditions.iter().any(|c| c.id == dup.id) {
+                                dup.id = format!("{}_copy{}", base, suffix);
+                                suffix += 1;
+                            }
+                            dup.name = format!("{} (Copy)", dup.name);
+                            conditions.push(dup);
+                            self.save_conditions(
+                                conditions,
+                                campaign_dir,
+                                conditions_file,
+                                unsaved_changes,
+                                status_message,
+                            );
+                        }
+                    }
+                }
+                ItemAction::Export => {
+                    if let Some(idx) = self.selected_condition_idx {
+                        if idx < conditions.len() {
+                            if let Ok(ron_str) = ron::ser::to_string_pretty(
+                                &conditions[idx],
+                                ron::ser::PrettyConfig::default(),
+                            ) {
+                                self.import_export_buffer = ron_str;
+                                self.show_import_dialog = true;
+                                *status_message =
+                                    "Condition exported to clipboard dialog".to_string();
+                            } else {
+                                *status_message = "Failed to export condition".to_string();
+                            }
+                        }
+                    }
+                }
+                ItemAction::None => {}
+            }
+        }
+    }
+
+    /// Static preview method that doesn't require self
+    fn show_preview_static(
+        ui: &mut egui::Ui,
+        condition: &ConditionDefinition,
+        show_preview: bool,
+        _preview_magnitude: f32,
+    ) {
+        let panel_height = crate::ui_helpers::compute_panel_height(ui, DEFAULT_PANEL_MIN_HEIGHT);
+
+        egui::ScrollArea::vertical()
+            .max_height(panel_height)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.heading("Basic Info");
+                    ui.label(format!("ID: {}", condition.id));
+                    ui.label(format!("Description: {}", condition.description));
+
+                    ui.separator();
+
+                    ui.label("Duration:");
+                    match &condition.default_duration {
+                        ConditionDuration::Instant => ui.label("Instant"),
+                        ConditionDuration::Rounds(n) => ui.label(format!("{} rounds", n)),
+                        ConditionDuration::Minutes(n) => ui.label(format!("{} minutes", n)),
+                        ConditionDuration::Permanent => ui.label("Permanent"),
+                    };
+
+                    if let Some(icon) = &condition.icon_id {
+                        ui.label(format!("Icon: {}", icon));
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                ui.group(|ui| {
+                    ui.heading("Effects");
+                    if condition.effects.is_empty() {
+                        ui.label("No effects defined");
+                    } else {
+                        for (idx, effect) in condition.effects.iter().enumerate() {
+                            ui.label(format!(
+                                "Effect #{}: {}",
+                                idx + 1,
+                                render_condition_effect_summary(effect)
+                            ));
                         }
                     }
 
+                    if show_preview && !condition.effects.is_empty() {
+                        ui.separator();
+                        ui.label("Preview (with magnitude):");
+                        for (idx, effect) in condition.effects.iter().enumerate() {
+                            ui.label(format!(
+                                "Effect #{}: {}",
+                                idx + 1,
+                                render_condition_effect_preview(effect, _preview_magnitude)
+                            ));
+                        }
+                    }
+                });
+            });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn show_form(
+        &mut self,
+        ui: &mut egui::Ui,
+        conditions: &mut Vec<ConditionDefinition>,
+        spells: &mut [Spell],
+        unsaved_changes: &mut bool,
+        status_message: &mut String,
+        campaign_dir: Option<&PathBuf>,
+        conditions_file: &str,
+    ) {
+        let is_edit = self.mode == ConditionsEditorMode::Edit;
+        let title = if is_edit {
+            "Edit Condition"
+        } else {
+            "New Condition"
+        };
+
+        ui.heading(title);
+        ui.separator();
+
+        if let Some(new_cond) = &mut self.edit_buffer {
+            let mut should_save = false;
+            let mut should_cancel = false;
+
+            // If we're editing an existing condition, warn about spells that reference it
+            if let Some(orig_id) = &self.editing_original_id {
+                let used_spells = spells_referencing_condition(spells, orig_id);
+                if !used_spells.is_empty() {
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        format!(
+                            "Note: This condition is used by {} spell(s). Renaming may break references.",
+                            used_spells.len()
+                        ),
+                    );
+                    for s in used_spells {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("- {}", s));
+                            if ui
+                                .small_button("📋")
+                                .on_hover_text("Copy spell name")
+                                .clicked()
+                            {
+                                ui.ctx().copy_text(s.clone());
+                                *status_message = format!("Copied spell name to clipboard: {}", s);
+                            }
+                            if ui
+                                .small_button("→")
+                                .on_hover_text("Jump to spell in Spells Editor")
+                                .clicked()
+                            {
+                                self.navigate_to_spell = Some(s.clone());
+                            }
+                        });
+                    }
+                    ui.separator();
+                }
+            }
+
+            egui::Grid::new("condition_editor_grid")
+                .num_columns(2)
+                .spacing([10.0, 10.0])
+                .show(ui, |ui| {
+                    ui.label("ID:");
+                    ui.text_edit_singleline(&mut new_cond.id);
+                    ui.end_row();
+
+                    ui.label("Name:");
+                    ui.text_edit_singleline(&mut new_cond.name);
+                    ui.end_row();
+
+                    ui.label("Description:");
+                    ui.text_edit_multiline(&mut new_cond.description);
+                    ui.end_row();
+
+                    // Default duration selector
+                    ui.label("Default Duration:")
+                        .on_hover_text("How long the condition lasts by default");
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt("condition_default_duration")
+                            .selected_text(match &new_cond.default_duration {
+                                ConditionDuration::Instant => "Instant".to_owned(),
+                                ConditionDuration::Rounds(n) => format!("Rounds({})", n),
+                                ConditionDuration::Minutes(n) => format!("Minutes({})", n),
+                                ConditionDuration::Permanent => "Permanent".to_owned(),
+                            })
+                            .show_ui(ui, |ui| {
+                                if ui
+                                    .selectable_label(
+                                        matches!(
+                                            new_cond.default_duration,
+                                            ConditionDuration::Instant
+                                        ),
+                                        "Instant",
+                                    )
+                                    .clicked()
+                                {
+                                    new_cond.default_duration = ConditionDuration::Instant;
+                                }
+                                if ui
+                                    .selectable_label(
+                                        matches!(
+                                            new_cond.default_duration,
+                                            ConditionDuration::Permanent
+                                        ),
+                                        "Permanent",
+                                    )
+                                    .clicked()
+                                {
+                                    new_cond.default_duration = ConditionDuration::Permanent;
+                                }
+                                if ui
+                                    .selectable_label(
+                                        matches!(
+                                            new_cond.default_duration,
+                                            ConditionDuration::Rounds(_)
+                                        ),
+                                        "Rounds",
+                                    )
+                                    .clicked()
+                                {
+                                    if !matches!(
+                                        new_cond.default_duration,
+                                        ConditionDuration::Rounds(_)
+                                    ) {
+                                        new_cond.default_duration = ConditionDuration::Rounds(1);
+                                    }
+                                }
+                                if ui
+                                    .selectable_label(
+                                        matches!(
+                                            new_cond.default_duration,
+                                            ConditionDuration::Minutes(_)
+                                        ),
+                                        "Minutes",
+                                    )
+                                    .clicked()
+                                {
+                                    if !matches!(
+                                        new_cond.default_duration,
+                                        ConditionDuration::Minutes(_)
+                                    ) {
+                                        new_cond.default_duration = ConditionDuration::Minutes(1);
+                                    }
+                                }
+                            });
+                        // If Rounds or Minutes selected, show a numeric editor
+                        match &mut new_cond.default_duration {
+                            ConditionDuration::Rounds(n) => {
+                                ui.add(egui::DragValue::new(n));
+                            }
+                            ConditionDuration::Minutes(n) => {
+                                ui.add(egui::DragValue::new(n));
+                            }
+                            _ => {}
+                        }
+                    });
+                    ui.end_row();
+
+                    // Icon ID field (optional)
+                    ui.label("Icon ID:")
+                        .on_hover_text("Optional icon identifier for UI display");
+                    ui.horizontal(|ui| {
+                        let mut icon_buf = new_cond.icon_id.clone().unwrap_or_default();
+                        let text = ui.text_edit_singleline(&mut icon_buf);
+                        if text.changed() {
+                            new_cond.icon_id = if icon_buf.trim().is_empty() {
+                                None
+                            } else {
+                                Some(icon_buf)
+                            };
+                        }
+                        if ui.button("Clear").clicked() {
+                            new_cond.icon_id = None;
+                        }
+                    });
+                    ui.end_row();
+                });
+
+            // Basic ID uniqueness check
+            let id_in_use = conditions.iter().any(|c| {
+                if let Some(orig_id) = &self.editing_original_id {
+                    if &c.id == orig_id {
+                        return false;
+                    }
+                }
+                c.id == new_cond.id
+            });
+            if id_in_use {
+                ui.colored_label(egui::Color32::RED, "ID already in use");
+            }
+
+            ui.separator();
+
+            // Effects list & editing
+            ui.horizontal(|ui| {
+                ui.label("Effects:");
+                if !new_cond.effects.is_empty() {
+                    if ui
+                        .small_button("🗑️ Clear All")
+                        .on_hover_text("Remove all effects from this condition")
+                        .clicked()
+                    {
+                        new_cond.effects.clear();
+                    }
+                }
+            });
+
+            let mut effect_action: Option<(String, usize)> = None;
+            for (idx, effect) in new_cond.effects.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(format!(
+                        "Effect #{}: {}",
+                        idx + 1,
+                        render_condition_effect_summary(effect)
+                    ));
+                    if ui.button("⬆️").clicked() {
+                        effect_action = Some(("up".to_string(), idx));
+                    }
+                    if ui.button("⬇️").clicked() {
+                        effect_action = Some(("down".to_string(), idx));
+                    }
+                    if ui.button("✏️").clicked() {
+                        effect_action = Some(("edit".to_string(), idx));
+                    }
+                    if ui.button("📄 Duplicate").clicked() {
+                        effect_action = Some(("duplicate".to_string(), idx));
+                    }
+                    if ui.button("🗑️ Delete").clicked() {
+                        effect_action = Some(("delete".to_string(), idx));
+                    }
+                });
+            }
+
+            // Preview for current edit buffer
+            if self.show_preview && !new_cond.effects.is_empty() {
+                ui.separator();
+                ui.label("Preview:")
+                    .on_hover_text("Preview shows approximate effect values scaled by magnitude.");
+                ui.horizontal(|ui| {
+                    ui.label("Magnitude:");
+                    ui.add(egui::Slider::new(&mut self.preview_magnitude, 0.1..=3.0).text("x"));
+                });
+                for (idx, effect) in new_cond.effects.iter().enumerate() {
+                    ui.label(format!(
+                        "Effect #{}: {}",
+                        idx + 1,
+                        render_condition_effect_preview(effect, self.preview_magnitude)
+                    ));
+                }
+                ui.separator();
+            }
+
+            // Add new effect button
+            if ui.button("➕ Add Effect").clicked() {
+                self.effect_edit_buffer = Some(EffectEditBuffer::default());
+                if let Some(buf) = &mut self.effect_edit_buffer {
+                    buf.effect_type = Some("StatusEffect".to_string());
+                    buf.editing_index = None;
+                }
+            }
+
+            // Apply captured action after the list render
+            if let Some((action, idx)) = effect_action {
+                match action.as_str() {
+                    "up" => {
+                        if idx > 0 {
+                            new_cond.effects.swap(idx, idx - 1);
+                        }
+                    }
+                    "down" => {
+                        if idx + 1 < new_cond.effects.len() {
+                            new_cond.effects.swap(idx, idx + 1);
+                        }
+                    }
+                    "duplicate" => {
+                        let dup = new_cond.effects[idx].clone();
+                        new_cond.effects.insert(idx + 1, dup);
+                    }
+                    "delete" => {
+                        new_cond.effects.remove(idx);
+                    }
+                    "edit" => {
+                        if idx < new_cond.effects.len() {
+                            let eff = new_cond.effects[idx].clone();
+                            let effect_type = Some(match &eff {
+                                ConditionEffect::AttributeModifier { .. } => {
+                                    "AttributeModifier".to_string()
+                                }
+                                ConditionEffect::StatusEffect(_) => "StatusEffect".to_string(),
+                                ConditionEffect::DamageOverTime { .. } => {
+                                    "DamageOverTime".to_string()
+                                }
+                                ConditionEffect::HealOverTime { .. } => "HealOverTime".to_string(),
+                            });
+                            let mut buf = EffectEditBuffer {
+                                editing_index: Some(idx),
+                                effect_type,
+                                ..Default::default()
+                            };
+
+                            match eff {
+                                ConditionEffect::AttributeModifier { attribute, value } => {
+                                    buf.attribute = attribute;
+                                    buf.attribute_value = value;
+                                }
+                                ConditionEffect::StatusEffect(tag) => {
+                                    buf.status_tag = tag;
+                                }
+                                ConditionEffect::DamageOverTime { damage, element } => {
+                                    buf.dice = damage;
+                                    buf.element = element;
+                                }
+                                ConditionEffect::HealOverTime { amount } => {
+                                    buf.dice = amount;
+                                }
+                            }
+
+                            self.effect_edit_buffer = Some(buf);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Effect editor UI (for the edit/add panel)
+            if self.effect_edit_buffer.is_some() {
+                let mut buf = self.effect_edit_buffer.take().unwrap();
+                let mut keep_buf = true;
+
+                ui.separator();
+                ui.label("Edit Effect");
+
+                // Effect type selector
+                let mut effect_type = buf
+                    .effect_type
+                    .clone()
+                    .unwrap_or_else(|| "StatusEffect".to_string());
+                egui::ComboBox::from_id_salt("effect_type_select")
+                    .selected_text(effect_type.clone())
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_label(
+                                effect_type == "AttributeModifier",
+                                "AttributeModifier",
+                            )
+                            .clicked()
+                        {
+                            effect_type = "AttributeModifier".to_string();
+                        }
+                        if ui
+                            .selectable_label(effect_type == "StatusEffect", "StatusEffect")
+                            .clicked()
+                        {
+                            effect_type = "StatusEffect".to_string();
+                        }
+                        if ui
+                            .selectable_label(effect_type == "DamageOverTime", "DamageOverTime")
+                            .clicked()
+                        {
+                            effect_type = "DamageOverTime".to_string();
+                        }
+                        if ui
+                            .selectable_label(effect_type == "HealOverTime", "HealOverTime")
+                            .clicked()
+                        {
+                            effect_type = "HealOverTime".to_string();
+                        }
+                    });
+                buf.effect_type = Some(effect_type.clone());
+
+                match effect_type.as_str() {
+                    "AttributeModifier" => {
+                        ui.horizontal(|ui| {
+                            ui.label("Attribute:");
+                            let attributes = [
+                                "might",
+                                "intellect",
+                                "personality",
+                                "endurance",
+                                "speed",
+                                "accuracy",
+                                "luck",
+                            ];
+                            egui::ComboBox::from_id_salt("attribute_select")
+                                .selected_text(buf.attribute.clone())
+                                .show_ui(ui, |ui| {
+                                    for a in attributes {
+                                        if ui
+                                            .selectable_value(&mut buf.attribute, a.to_string(), a)
+                                            .clicked()
+                                        {}
+                                    }
+                                    if ui
+                                        .selectable_label(buf.attribute == "custom", "Custom")
+                                        .clicked()
+                                    {
+                                        buf.attribute = "custom".to_string();
+                                    }
+                                });
+                            if buf.attribute == "custom" {
+                                ui.text_edit_singleline(&mut buf.attribute);
+                            }
+                            ui.label("Value:");
+                            ui.add(egui::DragValue::new(&mut buf.attribute_value).speed(1.0));
+                        });
+                    }
+                    "StatusEffect" => {
+                        ui.horizontal(|ui| {
+                            ui.label("Status Tag:");
+                            ui.text_edit_singleline(&mut buf.status_tag);
+                        });
+                    }
+                    "DamageOverTime" => {
+                        ui.horizontal(|ui| {
+                            ui.label("Damage:");
+                            ui.add(
+                                egui::DragValue::new(&mut buf.dice.count)
+                                    .speed(1.0)
+                                    .range(1..=100),
+                            );
+                            ui.label("d");
+                            ui.add(
+                                egui::DragValue::new(&mut buf.dice.sides)
+                                    .speed(1.0)
+                                    .range(2..=100),
+                            );
+                            ui.label("+");
+                            ui.add(egui::DragValue::new(&mut buf.dice.bonus).speed(1.0));
+                            ui.label("Element:");
+                            let elements = [
+                                "fire",
+                                "cold",
+                                "electricity",
+                                "poison",
+                                "acid",
+                                "psychic",
+                                "energy",
+                                "physical",
+                            ];
+                            egui::ComboBox::from_id_salt("dot_element_select")
+                                .selected_text(buf.element.clone())
+                                .show_ui(ui, |ui| {
+                                    for e in elements {
+                                        if ui
+                                            .selectable_value(&mut buf.element, e.to_string(), e)
+                                            .clicked()
+                                        {}
+                                    }
+                                    if ui
+                                        .selectable_label(buf.element == "custom", "Custom")
+                                        .clicked()
+                                    {
+                                        buf.element = "custom".to_string();
+                                    }
+                                });
+                            if buf.element == "custom" {
+                                ui.text_edit_singleline(&mut buf.element);
+                            }
+                        });
+                    }
+                    "HealOverTime" => {
+                        ui.horizontal(|ui| {
+                            ui.label("Amount:");
+                            ui.add(
+                                egui::DragValue::new(&mut buf.dice.count)
+                                    .speed(1.0)
+                                    .range(1..=100),
+                            );
+                            ui.label("d");
+                            ui.add(
+                                egui::DragValue::new(&mut buf.dice.sides)
+                                    .speed(1.0)
+                                    .range(2..=100),
+                            );
+                            ui.label("+");
+                            ui.add(egui::DragValue::new(&mut buf.dice.bonus).speed(1.0));
+                        });
+                    }
+                    _ => {}
+                }
+
+                ui.horizontal(|ui| {
+                    let effect_validation = validate_effect_edit_buffer(&buf);
+                    if let Err(ref validation_error) = effect_validation {
+                        ui.colored_label(egui::Color32::RED, validation_error);
+                        ui.add_enabled(false, egui::Button::new("💾 Save Effect"));
+                    } else if ui.button("💾 Save Effect").clicked() {
+                        let new_effect = match buf.effect_type.as_deref() {
+                            Some("AttributeModifier") => ConditionEffect::AttributeModifier {
+                                attribute: buf.attribute.clone(),
+                                value: buf.attribute_value,
+                            },
+                            Some("StatusEffect") => {
+                                ConditionEffect::StatusEffect(buf.status_tag.clone())
+                            }
+                            Some("DamageOverTime") => ConditionEffect::DamageOverTime {
+                                damage: buf.dice,
+                                element: buf.element.clone(),
+                            },
+                            Some("HealOverTime") => {
+                                ConditionEffect::HealOverTime { amount: buf.dice }
+                            }
+                            _ => ConditionEffect::StatusEffect(buf.status_tag.clone()),
+                        };
+
+                        if let Some(idx) = buf.editing_index {
+                            if idx < new_cond.effects.len() {
+                                new_cond.effects[idx] = new_effect;
+                            } else {
+                                new_cond.effects.push(new_effect);
+                            }
+                        } else {
+                            new_cond.effects.push(new_effect);
+                        }
+
+                        keep_buf = false;
+                    }
+                    if ui.button("❌ Cancel").clicked() {
+                        keep_buf = false;
+                    }
+                });
+
+                if keep_buf {
+                    self.effect_edit_buffer = Some(buf);
+                } else {
+                    self.effect_edit_buffer = None;
+                }
+            }
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                if ui.button("⬅ Back to List").clicked() {
+                    should_cancel = true;
+                }
+
+                if ui.button("💾 Save").clicked() {
+                    should_save = true;
+                }
+                if ui.button("❌ Cancel").clicked() {
+                    should_cancel = true;
+                }
+            });
+
+            if should_save {
+                match apply_condition_edits(
+                    conditions,
+                    self.editing_original_id.as_deref(),
+                    new_cond,
+                ) {
+                    Ok(()) => {
+                        *unsaved_changes = true;
+                        *status_message = if self.editing_original_id.is_some() {
+                            "Condition updated".to_string()
+                        } else {
+                            "Condition added".to_string()
+                        };
+                        // Find the index of the saved condition
+                        self.selected_condition_idx =
+                            conditions.iter().position(|c| c.id == new_cond.id);
+                        self.edit_buffer = None;
+                        self.editing_original_id = None;
+                        self.mode = ConditionsEditorMode::List;
+                        self.save_conditions(
+                            conditions,
+                            campaign_dir,
+                            conditions_file,
+                            unsaved_changes,
+                            status_message,
+                        );
+                    }
+                    Err(e) => {
+                        *status_message = format!("Failed to save condition: {}", e);
+                    }
+                }
+            }
+
+            if should_cancel {
+                self.edit_buffer = None;
+                self.editing_original_id = None;
+                self.mode = ConditionsEditorMode::List;
+            }
+        }
+    }
+
+    fn show_import_dialog_window(
+        &mut self,
+        ctx: &egui::Context,
+        conditions: &mut Vec<ConditionDefinition>,
+        unsaved_changes: &mut bool,
+        status_message: &mut String,
+        campaign_dir: Option<&PathBuf>,
+        conditions_file: &str,
+    ) {
+        let mut open = self.show_import_dialog;
+        egui::Window::new("Import/Export Conditions")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(600.0)
+            .show(ctx, |ui| {
+                ui.label("Paste RON data below to import, or copy from here to export:");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.import_export_buffer)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(15)
+                        .font(egui::TextStyle::Monospace),
+                );
+
+                ui.horizontal(|ui| {
+                    if ui.button("📋 Copy to Clipboard").clicked() {
+                        ui.ctx().copy_text(self.import_export_buffer.clone());
+                        *status_message = "Copied to clipboard".to_string();
+                    }
+
+                    if ui.button("📥 Import").clicked() {
+                        match ron::from_str::<Vec<ConditionDefinition>>(&self.import_export_buffer)
+                        {
+                            Ok(imported) => {
+                                if self.file_load_merge_mode {
+                                    for cond in imported {
+                                        if let Some(existing) =
+                                            conditions.iter_mut().find(|c| c.id == cond.id)
+                                        {
+                                            *existing = cond;
+                                        } else {
+                                            conditions.push(cond);
+                                        }
+                                    }
+                                } else {
+                                    *conditions = imported;
+                                }
+                                *unsaved_changes = true;
+                                *status_message = "Conditions imported successfully".to_string();
+                                self.save_conditions(
+                                    conditions,
+                                    campaign_dir,
+                                    conditions_file,
+                                    unsaved_changes,
+                                    status_message,
+                                );
+                                self.show_import_dialog = false;
+                            }
+                            Err(e) => {
+                                // Try importing a single condition
+                                match ron::from_str::<ConditionDefinition>(
+                                    &self.import_export_buffer,
+                                ) {
+                                    Ok(cond) => {
+                                        if let Some(existing) =
+                                            conditions.iter_mut().find(|c| c.id == cond.id)
+                                        {
+                                            *existing = cond;
+                                        } else {
+                                            conditions.push(cond);
+                                        }
+                                        *unsaved_changes = true;
+                                        *status_message =
+                                            "Single condition imported successfully".to_string();
+                                        self.save_conditions(
+                                            conditions,
+                                            campaign_dir,
+                                            conditions_file,
+                                            unsaved_changes,
+                                            status_message,
+                                        );
+                                        self.show_import_dialog = false;
+                                    }
+                                    Err(_) => {
+                                        *status_message = format!("Failed to parse RON: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if ui.button("❌ Close").clicked() {
+                        self.show_import_dialog = false;
+                    }
+                });
+            });
+        self.show_import_dialog = open;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn show_delete_confirmation(
+        &mut self,
+        ctx: &egui::Context,
+        conditions: &mut Vec<ConditionDefinition>,
+        spells: &mut [Spell],
+        unsaved_changes: &mut bool,
+        status_message: &mut String,
+        campaign_dir: Option<&PathBuf>,
+        conditions_file: &str,
+    ) {
+        let mut open = self.delete_confirmation_open;
+        egui::Window::new("Delete Condition")
+            .open(&mut open)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label("Are you sure you want to delete this condition?");
+                if let Some(del_id) = &self.selected_for_delete {
+                    let used_spells = spells_referencing_condition(spells, del_id);
+                    if !used_spells.is_empty() {
+                        ui.colored_label(
+                            egui::Color32::YELLOW,
+                            format!(
+                                "Warning: {} spell(s) reference this condition:",
+                                used_spells.len()
+                            ),
+                        );
+                        for s in used_spells {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("- {}", s));
+                                if ui
+                                    .small_button("📋")
+                                    .on_hover_text("Copy spell name")
+                                    .clicked()
+                                {
+                                    ui.ctx().copy_text(s.clone());
+                                    *status_message =
+                                        format!("Copied spell name to clipboard: {}", s);
+                                }
+                                if ui
+                                    .small_button("→")
+                                    .on_hover_text("Jump to spell in Spells Editor")
+                                    .clicked()
+                                {
+                                    self.navigate_to_spell = Some(s.clone());
+                                }
+                            });
+                        }
+                        ui.checkbox(
+                            &mut self.remove_refs_on_delete,
+                            "Remove references from spells when deleting",
+                        )
+                        .on_hover_text(
+                            "If checked, spells that use this condition will have the reference automatically removed",
+                        );
+                    }
+                }
+
+                ui.horizontal(|ui| {
                     if ui.button("Yes, delete").clicked() {
                         if let Some(del_id) = &self.selected_for_delete {
                             if let Some(pos) = conditions.iter().position(|c| &c.id == del_id) {
                                 conditions.remove(pos);
                                 if self.remove_refs_on_delete {
-                                    let cnt =
-                                        remove_condition_references_from_spells(spells, del_id);
+                                    let cnt = remove_condition_references_from_spells(spells, del_id);
                                     *status_message =
                                         format!("Removed references from {} spell(s).", cnt);
                                 }
                                 *unsaved_changes = true;
                                 *status_message = "Condition deleted".to_string();
-                                self.selected_condition_id = None;
+                                self.selected_condition_idx = None;
+                                self.save_conditions(
+                                    conditions,
+                                    campaign_dir,
+                                    conditions_file,
+                                    unsaved_changes,
+                                    status_message,
+                                );
                             }
                         }
                         self.delete_confirmation_open = false;
@@ -1428,85 +1576,10 @@ impl ConditionsEditorState {
                         self.remove_refs_on_delete = false;
                     }
                 });
-            self.delete_confirmation_open = open;
-        }
-    }
-
-    /// Shows the import dialog allowing RON paste/copy of a single ConditionDefinition.
-    fn show_import_dialog(
-        &mut self,
-        ctx: &egui::Context,
-        conditions: &mut Vec<ConditionDefinition>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        conditions_file: &str,
-    ) {
-        let mut open = self.show_import_dialog;
-
-        egui::Window::new("Import/Export Condition")
-            .open(&mut open)
-            .resizable(true)
-            .default_width(500.0)
-            .show(ctx, |ui| {
-                ui.heading("Condition RON Data");
-                ui.separator();
-
-                ui.label("Paste RON data to import, or copy exported data:");
-                let text_edit = egui::TextEdit::multiline(&mut self.import_export_buffer)
-                    .desired_rows(15)
-                    .code_editor();
-                ui.add(text_edit);
-
-                ui.separator();
-
-                ui.horizontal(|ui| {
-                    if ui.button("📥 Import").clicked() {
-                        // Try to parse a single ConditionDefinition
-                        match ron::from_str::<ConditionDefinition>(&self.import_export_buffer) {
-                            Ok(mut cond) => {
-                                // Ensure unique ID
-                                let base_id = cond.id.clone();
-                                let mut new_id = base_id.clone();
-                                let mut suffix = 1;
-                                while conditions.iter().any(|c| c.id == new_id) {
-                                    new_id = format!("{}_copy{}", base_id, suffix);
-                                    suffix += 1;
-                                }
-                                cond.id = new_id;
-                                conditions.push(cond);
-                                // Optionally save to default campaign location
-                                self.save_conditions(
-                                    conditions,
-                                    campaign_dir,
-                                    conditions_file,
-                                    unsaved_changes,
-                                    status_message,
-                                );
-                                *status_message = "Condition imported successfully".to_string();
-                                self.show_import_dialog = false;
-                            }
-                            Err(e) => {
-                                *status_message = format!("Import failed: {}", e);
-                            }
-                        }
-                    }
-
-                    if ui.button("📋 Copy to Clipboard").clicked() {
-                        ui.ctx().copy_text(self.import_export_buffer.clone());
-                        *status_message = "Copied to clipboard".to_string();
-                    }
-
-                    if ui.button("❌ Close").clicked() {
-                        self.show_import_dialog = false;
-                    }
-                });
             });
-
-        self.show_import_dialog = open;
+        self.delete_confirmation_open = open;
     }
 
-    /// Saves conditions to the default campaign path (if provided).
     fn save_conditions(
         &self,
         conditions: &Vec<ConditionDefinition>,
@@ -1516,103 +1589,143 @@ impl ConditionsEditorState {
         status_message: &mut String,
     ) {
         if let Some(dir) = campaign_dir {
-            let conditions_path = dir.join(conditions_file);
-
-            if let Some(parent) = conditions_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-
-            let ron_config = ron::ser::PrettyConfig::new()
-                .struct_names(false)
-                .enumerate_arrays(false);
-
-            match ron::ser::to_string_pretty(conditions, ron_config) {
-                Ok(contents) => match std::fs::write(&conditions_path, contents) {
+            let path = dir.join(conditions_file);
+            match ron::ser::to_string_pretty(conditions, Default::default()) {
+                Ok(contents) => match fs::write(&path, contents) {
                     Ok(_) => {
-                        *unsaved_changes = true;
-                        // Do not always set status_message here (could be used by autosave)
+                        *unsaved_changes = false;
+                        *status_message = format!("Saved conditions to: {}", path.display());
                     }
                     Err(e) => {
-                        *status_message = format!("Failed to write conditions file: {}", e);
+                        *status_message = format!("Failed to save conditions: {}", e);
                     }
                 },
                 Err(e) => {
                     *status_message = format!("Failed to serialize conditions: {}", e);
                 }
             }
+        } else {
+            *status_message = "No campaign directory set".to_string();
         }
     }
 }
 
-/// Applies an edited condition buffer to a list of conditions, covering both
-/// new condition creation and updating existing ones.
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Apply condition edits to the conditions list.
 ///
-/// * `conditions` - Mutable vector of conditions to apply changes to.
-/// * `original_id` - If `Some(id)` this will update the existing entry identified
-///   by `id`; if `None` this will attempt to insert the `edited` condition as a
-///   new entry.
-/// * `edited` - The edited `ConditionDefinition` to apply.
+/// This function handles both creating a new condition and updating an existing one.
+/// If `original_id` is `Some`, it updates the condition with that ID. Otherwise,
+/// it adds a new condition.
 ///
-/// Returns:
-/// * `Ok(())` on success
-/// * `Err(String)` with a descriptive message on validation error
+/// # Arguments
 ///
-/// Validation rules:
-/// * ID cannot be empty
-/// * When updating, if the ID changed it must not collide with another existing condition
-/// * When inserting, the ID must not collide with an existing one
+/// * `conditions` - The list of conditions to modify
+/// * `original_id` - The original ID of the condition being edited (if editing)
+/// * `new_cond` - The new condition data
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error message on failure.
 pub(crate) fn apply_condition_edits(
     conditions: &mut Vec<ConditionDefinition>,
     original_id: Option<&str>,
-    edited: &ConditionDefinition,
+    new_cond: &ConditionDefinition,
 ) -> Result<(), String> {
-    // Ensure ID present
-    if edited.id.trim().is_empty() {
+    // Validate the condition
+    if new_cond.id.trim().is_empty() {
         return Err("ID cannot be empty".to_string());
     }
-
-    // Validate effect fields in the definition before applying (dice, ranges, etc).
-    if let Err(e) = validate_condition_definition(edited) {
-        return Err(e);
+    if new_cond.name.trim().is_empty() {
+        return Err("Name cannot be empty".to_string());
     }
 
-    // If original_id provided -> update path
-    if let Some(orig_id) = original_id {
-        if let Some(idx) = conditions.iter().position(|c| c.id == orig_id) {
-            // If the new ID differs and is in use, it's a duplicate
-            if edited.id != orig_id && conditions.iter().any(|c| c.id == edited.id) {
-                return Err(format!("Duplicate condition ID: {}", edited.id));
+    // Validate each effect
+    for effect in &new_cond.effects {
+        match effect {
+            ConditionEffect::AttributeModifier { attribute, value } => {
+                if attribute.trim().is_empty() {
+                    return Err("Attribute modifier must have a non-empty attribute".to_string());
+                }
+                // Check value is in reasonable range using defined constants
+                if *value < ATTRIBUTE_MODIFIER_MIN || *value > ATTRIBUTE_MODIFIER_MAX {
+                    return Err(format!(
+                        "Attribute modifier value {} is out of range ({} to {})",
+                        value, ATTRIBUTE_MODIFIER_MIN, ATTRIBUTE_MODIFIER_MAX
+                    ));
+                }
             }
-            // Replace in-place
-            conditions[idx] = edited.clone();
-            Ok(())
+            ConditionEffect::StatusEffect(tag) => {
+                if tag.trim().is_empty() {
+                    return Err("Status effect must have a non-empty tag".to_string());
+                }
+            }
+            ConditionEffect::DamageOverTime { damage, element } => {
+                if damage.count < 1 {
+                    return Err("Damage over time dice count must be >= 1".to_string());
+                }
+                if damage.sides < 2 {
+                    return Err("Damage over time dice sides must be >= 2".to_string());
+                }
+                if element.trim().is_empty() {
+                    return Err("Damage over time must have a non-empty element".to_string());
+                }
+            }
+            ConditionEffect::HealOverTime { amount } => {
+                if amount.count < 1 {
+                    return Err("Heal over time dice count must be >= 1".to_string());
+                }
+                if amount.sides < 2 {
+                    return Err("Heal over time dice sides must be >= 2".to_string());
+                }
+            }
+        }
+    }
+
+    // Check for ID collision (excluding the original)
+    let id_collision = conditions.iter().any(|c| {
+        if let Some(orig) = original_id {
+            if c.id == orig {
+                return false;
+            }
+        }
+        c.id == new_cond.id
+    });
+
+    if id_collision {
+        return Err("ID already in use".to_string());
+    }
+
+    if let Some(orig_id) = original_id {
+        // Update existing condition
+        if let Some(existing) = conditions.iter_mut().find(|c| c.id == orig_id) {
+            *existing = new_cond.clone();
         } else {
-            Err(format!("Original condition '{}' not found", orig_id))
+            return Err("Original condition not found".to_string());
         }
     } else {
-        // New condition path: ensure ID is unique
-        if conditions.iter().any(|c| c.id == edited.id) {
-            return Err(format!("Duplicate condition ID: {}", edited.id));
-        }
-        conditions.push(edited.clone());
-        Ok(())
+        // Add new condition
+        conditions.push(new_cond.clone());
     }
+
+    Ok(())
 }
 
-// Helper rendering & effect utilities
-
-/// Formats a concise, human readable summary for display in the editor UI.
-///
-/// This is intentionally UI-side only (used for previews and lists).
+/// Render a summary of a condition effect.
 pub(crate) fn render_condition_effect_summary(effect: &ConditionEffect) -> String {
     match effect {
         ConditionEffect::AttributeModifier { attribute, value } => {
-            format!("Attribute: {} ({:+})", attribute, value)
+            let sign = if *value >= 0 { "+" } else { "" };
+            format!("Attribute: {} {}{}", attribute, sign, value)
         }
-        ConditionEffect::StatusEffect(tag) => format!("Status: {}", tag),
+        ConditionEffect::StatusEffect(tag) => {
+            format!("Status: {}", tag)
+        }
         ConditionEffect::DamageOverTime { damage, element } => {
             format!(
-                "DOT: {}d{}+{} ({})",
+                "DOT: {}d{}+{} {}",
                 damage.count, damage.sides, damage.bonus, element
             )
         }
@@ -1622,11 +1735,7 @@ pub(crate) fn render_condition_effect_summary(effect: &ConditionEffect) -> Strin
     }
 }
 
-/// Computes a preview string for the given effect adjusted by `magnitude`.
-///
-/// This function produces an approximate, human-readable preview rather than a
-/// strict simulation — it's intended to help designers understand the relative
-/// impact of a `ConditionDefinition` while editing.
+/// Computes a preview string for the given effect adjusted by magnitude.
 pub(crate) fn render_condition_effect_preview(effect: &ConditionEffect, magnitude: f32) -> String {
     match effect {
         ConditionEffect::AttributeModifier { attribute, value } => {
@@ -1649,124 +1758,7 @@ pub(crate) fn render_condition_effect_preview(effect: &ConditionEffect, magnitud
     }
 }
 
-/// Add a new effect to a condition.
-pub(crate) fn add_effect_to_condition(
-    condition: &mut ConditionDefinition,
-    effect: ConditionEffect,
-) {
-    condition.effects.push(effect);
-}
-
-/// Update an existing effect in a condition by index.
-/// Updates an existing effect at a specific `index` for the given condition.
-///
-/// # Arguments
-///
-/// * `condition` - The `ConditionDefinition` that contains the effects vector.
-/// * `index` - The index of the effect to update.
-/// * `effect` - The new `ConditionEffect` value to replace the existing one.
-///
-/// # Errors
-///
-/// Returns an `Err(String)` if `index` is out of range.
-pub(crate) fn update_effect_in_condition(
-    condition: &mut ConditionDefinition,
-    index: usize,
-    effect: ConditionEffect,
-) -> Result<(), String> {
-    if index >= condition.effects.len() {
-        return Err(format!("Effect index {} out of range", index));
-    }
-    condition.effects[index] = effect;
-    Ok(())
-}
-
-/// Delete an effect from a condition by index.
-/// Deletes the effect at `index` from the condition's effect list.
-///
-/// # Arguments
-///
-/// * `condition` - The `ConditionDefinition` whose effect will be removed.
-/// * `index` - The index of the effect to remove.
-///
-/// # Errors
-///
-/// Returns `Err(String)` if `index` is out of range.
-pub(crate) fn delete_effect_from_condition(
-    condition: &mut ConditionDefinition,
-    index: usize,
-) -> Result<(), String> {
-    if index >= condition.effects.len() {
-        return Err(format!("Effect index {} out of range", index));
-    }
-    condition.effects.remove(index);
-    Ok(())
-}
-
-/// Duplicate an effect in a condition at `index` (insert copy after the index).
-/// Duplicates the effect at `index` and inserts the copy directly after it.
-///
-/// # Arguments
-///
-/// * `condition` - Target `ConditionDefinition` containing the effect list.
-/// * `index` - Index of the effect to duplicate.
-///
-/// # Errors
-///
-/// Returns `Err(String)` if `index` is out of range.
-pub(crate) fn duplicate_effect_in_condition(
-    condition: &mut ConditionDefinition,
-    index: usize,
-) -> Result<(), String> {
-    if index >= condition.effects.len() {
-        return Err(format!("Effect index {} out of range", index));
-    }
-    let dup = condition.effects[index].clone();
-    condition.effects.insert(index + 1, dup);
-    Ok(())
-}
-
-/// Move an effect within the effect list by direction (dir = -1 up, dir = 1 down).
-/// Moves an effect at `index` by the specified `dir`.
-///
-/// * `dir < 0` moves the effect up (towards the start of the list).
-/// * `dir >= 0` moves the effect down (towards the end of the list).
-///
-/// # Arguments
-///
-/// * `condition` - The `ConditionDefinition` to modify.
-/// * `index` - The index of the effect to move.
-/// * `dir` - Direction: negative for up; non-negative for down.
-///
-/// # Errors
-///
-/// Returns `Err(String)` if:
-/// * `index` is out of range, or
-/// * attempting to move 'up' at the top or 'down' at the bottom of the list.
-pub(crate) fn move_effect_in_condition(
-    condition: &mut ConditionDefinition,
-    index: usize,
-    dir: i8,
-) -> Result<(), String> {
-    if index >= condition.effects.len() {
-        return Err("Index out of range".to_string());
-    }
-    if dir < 0 {
-        if index == 0 {
-            return Err("Cannot move up".to_string());
-        }
-        condition.effects.swap(index - 1, index);
-    } else {
-        if index + 1 >= condition.effects.len() {
-            return Err("Cannot move down".to_string());
-        }
-        condition.effects.swap(index, index + 1);
-    }
-    Ok(())
-}
-
-/// Validate the UI-side effect edit buffer. This mirrors the checks done on
-/// `ConditionEffect` fields and is used to provide immediate UI feedback.
+/// Validate the UI-side effect edit buffer.
 pub(crate) fn validate_effect_edit_buffer(buf: &EffectEditBuffer) -> Result<(), String> {
     match buf.effect_type.as_deref() {
         Some("AttributeModifier") => {
@@ -1809,67 +1801,100 @@ pub(crate) fn validate_effect_edit_buffer(buf: &EffectEditBuffer) -> Result<(), 
     }
 }
 
-/// Perform broader validation on an entire `ConditionDefinition`. This ensures
-/// IDs and effect contents are sensible prior to saving.
-pub(crate) fn validate_condition_definition(cond: &ConditionDefinition) -> Result<(), String> {
-    if cond.id.trim().is_empty() {
-        return Err("Condition ID cannot be empty".to_string());
-    }
+// ===== Effect Helper Functions (for tests and external use) =====
 
-    for (idx, eff) in cond.effects.iter().enumerate() {
-        match eff {
-            ConditionEffect::AttributeModifier { attribute, value } => {
-                if attribute.trim().is_empty() {
-                    return Err(format!("Effect #{}: attribute must be set", idx + 1));
-                }
-                if value.abs() > 255 {
-                    return Err(format!(
-                        "Effect #{}: attribute value must be in range [-255..255]",
-                        idx + 1
-                    ));
-                }
-            }
-            ConditionEffect::StatusEffect(tag) => {
-                if tag.trim().is_empty() {
-                    return Err(format!("Effect #{}: status tag cannot be empty", idx + 1));
-                }
-            }
-            ConditionEffect::DamageOverTime { damage, element } => {
-                if damage.count < 1 {
-                    return Err(format!(
-                        "Effect #{}: damage dice count must be >= 1",
-                        idx + 1
-                    ));
-                }
-                if damage.sides < 2 {
-                    return Err(format!(
-                        "Effect #{}: damage dice sides must be >= 2",
-                        idx + 1
-                    ));
-                }
-                if element.trim().is_empty() {
-                    return Err(format!(
-                        "Effect #{}: damage element cannot be empty",
-                        idx + 1
-                    ));
-                }
-            }
-            ConditionEffect::HealOverTime { amount } => {
-                if amount.count < 1 {
-                    return Err(format!("Effect #{}: heal dice count must be >= 1", idx + 1));
-                }
-                if amount.sides < 2 {
-                    return Err(format!("Effect #{}: heal dice sides must be >= 2", idx + 1));
-                }
-            }
-        }
-    }
+/// Add an effect to a condition's effects list.
+pub fn add_effect_to_condition(
+    condition: &mut antares::domain::conditions::ConditionDefinition,
+    effect: antares::domain::conditions::ConditionEffect,
+) {
+    condition.effects.push(effect);
+}
 
+/// Delete an effect from a condition's effects list by index.
+/// Returns an error if the index is out of bounds.
+pub fn delete_effect_from_condition(
+    condition: &mut antares::domain::conditions::ConditionDefinition,
+    index: usize,
+) -> Result<(), String> {
+    if index >= condition.effects.len() {
+        return Err(format!(
+            "Index {} out of bounds (effects count: {})",
+            index,
+            condition.effects.len()
+        ));
+    }
+    condition.effects.remove(index);
     Ok(())
 }
 
-/// Returns a vector of spell names that reference `condition_id`.
-pub(crate) fn spells_referencing_condition(spells: &Vec<Spell>, condition_id: &str) -> Vec<String> {
+/// Duplicate an effect in a condition's effects list.
+/// The duplicated effect is inserted right after the original.
+/// Returns an error if the index is out of bounds.
+pub fn duplicate_effect_in_condition(
+    condition: &mut antares::domain::conditions::ConditionDefinition,
+    index: usize,
+) -> Result<(), String> {
+    if index >= condition.effects.len() {
+        return Err(format!(
+            "Index {} out of bounds (effects count: {})",
+            index,
+            condition.effects.len()
+        ));
+    }
+    let effect = condition.effects[index].clone();
+    condition.effects.insert(index + 1, effect);
+    Ok(())
+}
+
+/// Move an effect in a condition's effects list by a relative offset.
+/// Positive offset moves down, negative offset moves up.
+/// Returns an error if the index or resulting position is out of bounds.
+pub fn move_effect_in_condition(
+    condition: &mut antares::domain::conditions::ConditionDefinition,
+    index: usize,
+    offset: i32,
+) -> Result<(), String> {
+    if index >= condition.effects.len() {
+        return Err(format!(
+            "Index {} out of bounds (effects count: {})",
+            index,
+            condition.effects.len()
+        ));
+    }
+    let new_index = (index as i32 + offset) as usize;
+    if new_index >= condition.effects.len() {
+        return Err(format!(
+            "New index {} out of bounds (effects count: {})",
+            new_index,
+            condition.effects.len()
+        ));
+    }
+    let effect = condition.effects.remove(index);
+    condition.effects.insert(new_index, effect);
+    Ok(())
+}
+
+/// Update an effect at a given index with a new effect.
+/// Returns an error if the index is out of bounds.
+pub fn update_effect_in_condition(
+    condition: &mut antares::domain::conditions::ConditionDefinition,
+    index: usize,
+    new_effect: antares::domain::conditions::ConditionEffect,
+) -> Result<(), String> {
+    if index >= condition.effects.len() {
+        return Err(format!(
+            "Index {} out of bounds (effects count: {})",
+            index,
+            condition.effects.len()
+        ));
+    }
+    condition.effects[index] = new_effect;
+    Ok(())
+}
+
+/// Returns a vector of spell names that reference condition_id.
+pub(crate) fn spells_referencing_condition(spells: &[Spell], condition_id: &str) -> Vec<String> {
     let mut result = Vec::new();
     for spell in spells.iter() {
         if spell.applied_conditions.iter().any(|c| c == condition_id) {
@@ -1879,9 +1904,9 @@ pub(crate) fn spells_referencing_condition(spells: &Vec<Spell>, condition_id: &s
     result
 }
 
-/// Remove references of `condition_id` from spells and return the number of spells modified.
+/// Remove references of condition_id from spells and return the number of spells modified.
 pub(crate) fn remove_condition_references_from_spells(
-    spells: &mut Vec<Spell>,
+    spells: &mut [Spell],
     condition_id: &str,
 ) -> usize {
     let mut modified = 0usize;
@@ -1939,7 +1964,6 @@ fn get_effect_type_indicator(condition: &ConditionDefinition) -> &'static str {
     if condition.effects.is_empty() {
         return "○"; // Empty
     }
-    // Check for the "primary" effect type (first effect determines icon)
     match &condition.effects[0] {
         ConditionEffect::AttributeModifier { value, .. } => {
             if *value >= 0 {
@@ -1954,14 +1978,12 @@ fn get_effect_type_indicator(condition: &ConditionDefinition) -> &'static str {
     }
 }
 
+/// Render the conditions editor (compatibility wrapper).
 pub fn render_conditions_editor(
     ui: &mut egui::Ui,
     state: &mut ConditionsEditorState,
     conditions: &mut Vec<ConditionDefinition>,
 ) {
-    // For compatibility we provide local placeholders if the app does not yet use
-    // the newer `show(...)` signature. Editor features will be limited without
-    // actual `campaign_dir` and `status_message` passed.
     let mut unsaved_changes = false;
     let mut status_message = String::new();
     let mut file_load_merge_mode = false;
@@ -1976,4 +1998,313 @@ pub fn render_conditions_editor(
         &mut status_message,
         &mut file_load_merge_mode,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // ConditionsEditorState Tests
+    // =========================================================================
+
+    #[test]
+    fn test_conditions_editor_state_new() {
+        let state = ConditionsEditorState::new();
+        assert_eq!(state.mode, ConditionsEditorMode::List);
+        assert!(state.search_filter.is_empty());
+        assert!(state.selected_condition_idx.is_none());
+        assert!(!state.show_import_dialog);
+        assert!(state.import_export_buffer.is_empty());
+        assert!(state.show_preview); // Default is true
+    }
+
+    #[test]
+    fn test_conditions_editor_state_default() {
+        let state = ConditionsEditorState::default();
+        assert_eq!(state.mode, ConditionsEditorMode::List);
+        assert_eq!(state.filter_effect_type, EffectTypeFilter::All);
+        assert_eq!(state.sort_order, ConditionSortOrder::NameAsc);
+        assert!(!state.show_statistics);
+        assert!(state.navigate_to_spell.is_none());
+    }
+
+    #[test]
+    fn test_default_condition_creation() {
+        let condition = ConditionsEditorState::default_condition();
+        assert_eq!(condition.id, "new_condition");
+        assert_eq!(condition.name, "New Condition");
+        assert!(condition.description.is_empty());
+        assert!(condition.effects.is_empty());
+        assert_eq!(condition.default_duration, ConditionDuration::Rounds(3));
+        assert!(condition.icon_id.is_none());
+    }
+
+    // =========================================================================
+    // ConditionsEditorMode Tests
+    // =========================================================================
+
+    #[test]
+    fn test_conditions_editor_mode_variants() {
+        assert_eq!(ConditionsEditorMode::List, ConditionsEditorMode::List);
+        assert_eq!(ConditionsEditorMode::Add, ConditionsEditorMode::Add);
+        assert_eq!(ConditionsEditorMode::Edit, ConditionsEditorMode::Edit);
+        assert_ne!(ConditionsEditorMode::List, ConditionsEditorMode::Add);
+    }
+
+    // =========================================================================
+    // EffectTypeFilter Tests
+    // =========================================================================
+
+    #[test]
+    fn test_effect_type_filter_as_str() {
+        assert_eq!(EffectTypeFilter::All.as_str(), "All");
+        assert_eq!(EffectTypeFilter::AttributeModifier.as_str(), "Attribute");
+        assert_eq!(EffectTypeFilter::StatusEffect.as_str(), "Status");
+        assert_eq!(EffectTypeFilter::DamageOverTime.as_str(), "DOT");
+        assert_eq!(EffectTypeFilter::HealOverTime.as_str(), "HOT");
+    }
+
+    #[test]
+    fn test_effect_type_filter_all() {
+        let filters = EffectTypeFilter::all();
+        assert_eq!(filters.len(), 5);
+        assert!(filters.contains(&EffectTypeFilter::All));
+        assert!(filters.contains(&EffectTypeFilter::AttributeModifier));
+        assert!(filters.contains(&EffectTypeFilter::StatusEffect));
+        assert!(filters.contains(&EffectTypeFilter::DamageOverTime));
+        assert!(filters.contains(&EffectTypeFilter::HealOverTime));
+    }
+
+    #[test]
+    fn test_effect_type_filter_matches_all() {
+        let condition = ConditionsEditorState::default_condition();
+        assert!(EffectTypeFilter::All.matches(&condition));
+    }
+
+    // =========================================================================
+    // ConditionSortOrder Tests
+    // =========================================================================
+
+    #[test]
+    fn test_condition_sort_order_as_str() {
+        assert_eq!(ConditionSortOrder::NameAsc.as_str(), "Name (A-Z)");
+        assert_eq!(ConditionSortOrder::NameDesc.as_str(), "Name (Z-A)");
+        assert_eq!(ConditionSortOrder::IdAsc.as_str(), "ID (A-Z)");
+        assert_eq!(ConditionSortOrder::IdDesc.as_str(), "ID (Z-A)");
+        assert_eq!(ConditionSortOrder::EffectCount.as_str(), "Effect Count");
+    }
+
+    // =========================================================================
+    // EffectEditBuffer Tests
+    // =========================================================================
+
+    #[test]
+    fn test_effect_edit_buffer_default() {
+        let buffer = EffectEditBuffer::default();
+        assert!(buffer.effect_type.is_none());
+        assert!(buffer.editing_index.is_none());
+        assert_eq!(buffer.attribute, "might"); // Default is "might"
+        assert_eq!(buffer.attribute_value, 0);
+        assert!(buffer.status_tag.is_empty());
+        assert_eq!(buffer.element, "physical"); // Default is "physical"
+    }
+
+    // =========================================================================
+    // Editor State Transitions Tests
+    // =========================================================================
+
+    #[test]
+    fn test_editor_mode_transitions() {
+        let mut state = ConditionsEditorState::new();
+        assert_eq!(state.mode, ConditionsEditorMode::List);
+
+        state.mode = ConditionsEditorMode::Add;
+        assert_eq!(state.mode, ConditionsEditorMode::Add);
+
+        state.mode = ConditionsEditorMode::Edit;
+        assert_eq!(state.mode, ConditionsEditorMode::Edit);
+
+        state.mode = ConditionsEditorMode::List;
+        assert_eq!(state.mode, ConditionsEditorMode::List);
+    }
+
+    #[test]
+    fn test_selected_condition_handling() {
+        let mut state = ConditionsEditorState::new();
+        assert!(state.selected_condition_idx.is_none());
+
+        state.selected_condition_idx = Some(0);
+        assert_eq!(state.selected_condition_idx, Some(0));
+
+        state.selected_condition_idx = Some(5);
+        assert_eq!(state.selected_condition_idx, Some(5));
+
+        state.selected_condition_idx = None;
+        assert!(state.selected_condition_idx.is_none());
+    }
+
+    #[test]
+    fn test_filter_and_sort_changes() {
+        let mut state = ConditionsEditorState::new();
+
+        // Change filter
+        state.filter_effect_type = EffectTypeFilter::DamageOverTime;
+        assert_eq!(state.filter_effect_type, EffectTypeFilter::DamageOverTime);
+
+        // Change sort order
+        state.sort_order = ConditionSortOrder::IdDesc;
+        assert_eq!(state.sort_order, ConditionSortOrder::IdDesc);
+    }
+
+    // =========================================================================
+    // Condition Statistics Tests
+    // =========================================================================
+
+    #[test]
+    fn test_compute_condition_statistics_empty() {
+        let conditions: Vec<ConditionDefinition> = Vec::new();
+        let stats = compute_condition_statistics(&conditions);
+        assert_eq!(stats.total, 0);
+        assert_eq!(stats.attribute_count, 0);
+        assert_eq!(stats.status_count, 0);
+        assert_eq!(stats.dot_count, 0);
+        assert_eq!(stats.hot_count, 0);
+        assert_eq!(stats.empty_count, 0);
+        assert_eq!(stats.multi_effect_count, 0);
+    }
+
+    #[test]
+    fn test_compute_condition_statistics_with_conditions() {
+        let conditions = vec![
+            ConditionDefinition {
+                id: "empty".to_string(),
+                name: "Empty".to_string(),
+                description: String::new(),
+                effects: vec![],
+                default_duration: ConditionDuration::Permanent,
+                icon_id: None,
+            },
+            ConditionDefinition {
+                id: "strength_buff".to_string(),
+                name: "Strength Buff".to_string(),
+                description: String::new(),
+                effects: vec![ConditionEffect::AttributeModifier {
+                    attribute: "might".to_string(),
+                    value: 5,
+                }],
+                default_duration: ConditionDuration::Permanent,
+                icon_id: None,
+            },
+        ];
+        let stats = compute_condition_statistics(&conditions);
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.attribute_count, 1);
+        assert_eq!(stats.empty_count, 1);
+    }
+
+    // =========================================================================
+    // Validation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_validate_effect_edit_buffer_attribute_modifier() {
+        let mut buffer = EffectEditBuffer::default();
+        buffer.effect_type = Some("AttributeModifier".to_string());
+        buffer.attribute = "might".to_string();
+        buffer.attribute_value = 5;
+
+        let result = validate_effect_edit_buffer(&buffer);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_effect_edit_buffer_empty_attribute() {
+        let mut buffer = EffectEditBuffer::default();
+        buffer.effect_type = Some("AttributeModifier".to_string());
+        buffer.attribute = "".to_string();
+        buffer.attribute_value = 5;
+
+        let result = validate_effect_edit_buffer(&buffer);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_effect_edit_buffer_status_effect() {
+        let mut buffer = EffectEditBuffer::default();
+        buffer.effect_type = Some("StatusEffect".to_string());
+        buffer.status_tag = "poisoned".to_string();
+
+        let result = validate_effect_edit_buffer(&buffer);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_effect_edit_buffer_empty_status() {
+        let mut buffer = EffectEditBuffer::default();
+        buffer.effect_type = Some("StatusEffect".to_string());
+        buffer.status_tag = "".to_string();
+
+        let result = validate_effect_edit_buffer(&buffer);
+        assert!(result.is_err());
+    }
+
+    // =========================================================================
+    // Effect Rendering Tests
+    // =========================================================================
+
+    #[test]
+    fn test_render_condition_effect_summary_attribute() {
+        let effect = ConditionEffect::AttributeModifier {
+            attribute: "might".to_string(),
+            value: 5,
+        };
+        let summary = render_condition_effect_summary(&effect);
+        assert!(summary.contains("Attribute"));
+        assert!(summary.contains("might"));
+        assert!(summary.contains("+5"));
+    }
+
+    #[test]
+    fn test_render_condition_effect_summary_negative() {
+        let effect = ConditionEffect::AttributeModifier {
+            attribute: "speed".to_string(),
+            value: -3,
+        };
+        let summary = render_condition_effect_summary(&effect);
+        assert!(summary.contains("speed"));
+        assert!(summary.contains("-3"));
+    }
+
+    #[test]
+    fn test_render_condition_effect_summary_status() {
+        let effect = ConditionEffect::StatusEffect("poisoned".to_string());
+        let summary = render_condition_effect_summary(&effect);
+        assert!(summary.contains("Status"));
+        assert!(summary.contains("poisoned"));
+    }
+
+    #[test]
+    fn test_preview_toggle() {
+        let mut state = ConditionsEditorState::new();
+        assert!(state.show_preview); // Default is true
+
+        state.show_preview = false;
+        assert!(!state.show_preview);
+
+        state.show_preview = true;
+        assert!(state.show_preview);
+    }
+
+    #[test]
+    fn test_statistics_toggle() {
+        let mut state = ConditionsEditorState::new();
+        assert!(!state.show_statistics);
+
+        state.show_statistics = true;
+        assert!(state.show_statistics);
+
+        state.show_statistics = false;
+        assert!(!state.show_statistics);
+    }
 }
