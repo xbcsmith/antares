@@ -39,6 +39,7 @@
 use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
 use antares::domain::types::{MapId, Position};
 use antares::domain::world::{Map, MapEvent, Npc, TerrainType, Tile, WallType};
+use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
 use std::fs;
 use std::path::PathBuf;
@@ -111,6 +112,14 @@ impl EditorTool {
             EditorTool::Erase,
         ]
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZoomAction {
+    In,
+    Out,
+    Fit,
+    Reset,
 }
 
 // ===== Undo/Redo System =====
@@ -270,6 +279,8 @@ pub struct MapEditorState {
     pub show_events: bool,
     /// NPC markers visibility
     pub show_npcs: bool,
+    /// Auto fit the map to the available area on window resize
+    pub auto_fit_on_resize: bool,
     /// Event editor state
     pub event_editor: Option<EventEditorState>,
     /// NPC editor state
@@ -301,6 +312,7 @@ impl MapEditorState {
             show_grid: true,
             show_events: true,
             show_npcs: true,
+            auto_fit_on_resize: true,
             event_editor: None,
             npc_editor: None,
             show_metadata_editor: false,
@@ -880,13 +892,41 @@ impl<'a> MapGridWidget<'a> {
 
 impl<'a> Widget for MapGridWidget<'a> {
     fn ui(self, ui: &mut Ui) -> Response {
-        let width = self.state.map.width as f32 * self.tile_size;
-        let height = self.state.map.height as f32 * self.tile_size;
+        // Compute the nominal map pixel size
+        let map_width_px = self.state.map.width as f32 * self.tile_size;
+        let map_height_px = self.state.map.height as f32 * self.tile_size;
+
+        // Obtain the UI available size so we can ensure the painter covers the full panel area
+        // and avoid the grid being cut off if the UI provides more space than the grid requires.
+        let avail = ui.available_size();
+
+        // The allocated painter size should be at least the map size but also at least
+        // the available UI size so the canvas won't be narrower/taller than the available
+        // area and nothing gets clipped in the layout.
+        let width = map_width_px.max(avail.x).max(1.0);
+        let height = map_height_px.max(avail.y).max(1.0);
+
         let (response, painter) =
             ui.allocate_painter(Vec2::new(width, height), Sense::click_and_drag());
 
+        if crate::logging::Logger::debug_enabled() {
+            eprintln!("MapGridWidget: map {}x{} map_px {}x{} avail {:?} tile_size {} computed width {} height {}",
+                      self.state.map.width, self.state.map.height, map_width_px, map_height_px, avail, self.tile_size, width, height);
+        }
+
+        // Draw a visible debug border around the allocated grid area so we can see whether the widget's area
+        // is being allocated (if the plot is blank, this border will still render).
+        // Removed temporary debug red border to avoid distracting visual noise.
+
+        let grid_offset = Vec2::new(
+            ((width - map_width_px) / 2.0).max(0.0),
+            ((height - map_height_px) / 2.0).max(0.0),
+        );
+
         let to_screen = |x: i32, y: i32| -> Pos2 {
-            response.rect.min + Vec2::new(x as f32 * self.tile_size, y as f32 * self.tile_size)
+            response.rect.min
+                + grid_offset
+                + Vec2::new(x as f32 * self.tile_size, y as f32 * self.tile_size)
         };
 
         // Draw tiles
@@ -894,8 +934,10 @@ impl<'a> Widget for MapGridWidget<'a> {
             for x in 0..self.state.map.width as i32 {
                 let pos = Position::new(x, y);
                 if let Some(tile) = self.state.map.get_tile(pos) {
-                    let has_event = self.state.map.events.contains_key(&pos);
-                    let has_npc = self.state.map.npcs.iter().any(|npc| npc.position == pos);
+                    let has_event =
+                        self.state.show_events && self.state.map.events.contains_key(&pos);
+                    let has_npc = self.state.show_npcs
+                        && self.state.map.npcs.iter().any(|npc| npc.position == pos);
 
                     let color = Self::tile_color(tile, has_event, has_npc);
 
@@ -911,7 +953,8 @@ impl<'a> Widget for MapGridWidget<'a> {
                         painter.rect_stroke(
                             rect,
                             0.0,
-                            Stroke::new(1.0, Color32::from_gray(100)),
+                            // Make the grid color white for better visibility on dark themes
+                            Stroke::new(1.0, Color32::WHITE),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -932,7 +975,9 @@ impl<'a> Widget for MapGridWidget<'a> {
         // Handle clicks
         if response.clicked() {
             if let Some(click_pos) = response.interact_pointer_pos() {
-                let local_pos = click_pos - response.rect.min;
+                // Transform the click point into the map-local coordinates by subtracting the painter min and the
+                // grid offset to account for centering. This ensures we calculate the correct tile indices.
+                let local_pos = click_pos - response.rect.min - grid_offset;
                 let x = (local_pos.x / self.tile_size) as i32;
                 let y = (local_pos.y / self.tile_size) as i32;
                 let pos = Position::new(x, y);
@@ -1023,7 +1068,22 @@ pub struct MapsEditorState {
     pub new_map_height: u32,
     /// New map name (for create dialog)
     pub new_map_name: String,
+    /// Global zoom level for map grid (1.0 = 100%)
+    pub zoom_level: f32,
 }
+
+/// Minimum zoom level (25%)
+const MIN_ZOOM: f32 = 0.25;
+/// Maximum zoom level (400%)
+const MAX_ZOOM: f32 = 4.0;
+/// Default zoom level (100%)
+const DEFAULT_ZOOM: f32 = 1.0;
+/// Zoom step for in/out buttons
+const ZOOM_STEP: f32 = 0.25;
+/// Base tile size in pixels (before zoom)
+const BASE_TILE_SIZE: f32 = 24.0;
+/// Minimum tile size in pixels (for usability)
+const MIN_TILE_SIZE: f32 = 8.0;
 
 impl Default for MapsEditorState {
     fn default() -> Self {
@@ -1038,6 +1098,7 @@ impl Default for MapsEditorState {
             new_map_width: 20,
             new_map_height: 20,
             new_map_name: "New Map".to_string(),
+            zoom_level: DEFAULT_ZOOM,
         }
     }
 }
@@ -1064,6 +1125,7 @@ impl MapsEditorState {
         maps: &mut Vec<Map>,
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
+        display_config: &DisplayConfig,
         unsaved_changes: &mut bool,
         status_message: &mut String,
     ) {
@@ -1187,6 +1249,7 @@ impl MapsEditorState {
                     maps,
                     campaign_dir,
                     maps_dir,
+                    display_config,
                     unsaved_changes,
                     status_message,
                 );
@@ -1414,6 +1477,7 @@ impl MapsEditorState {
         maps: &mut [Map],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
+        display_config: &DisplayConfig,
         unsaved_changes: &mut bool,
         status_message: &mut String,
     ) {
@@ -1475,35 +1539,156 @@ impl MapsEditorState {
 
         // Show the map editor content using two-column layout
         if let Some(ref mut editor) = self.active_editor {
+            // Use a raw pointer to the editor to avoid simultaneous mutable borrows in the left/right closures
+            let editor_ptr: *mut MapEditorState = editor as *mut _;
             // Tool palette row
-            Self::show_tool_palette(ui, editor);
+            let zoom_action = Self::show_tool_palette(ui, editor, self.zoom_level);
+
+            // Apply immediate zoom in/out/reset changes
+            if let Some(action) = zoom_action {
+                match action {
+                    ZoomAction::In => {
+                        self.zoom_level = (self.zoom_level + ZOOM_STEP).min(MAX_ZOOM);
+                    }
+                    ZoomAction::Out => {
+                        self.zoom_level = (self.zoom_level - ZOOM_STEP).max(MIN_ZOOM);
+                    }
+                    ZoomAction::Reset => {
+                        self.zoom_level = DEFAULT_ZOOM;
+                    }
+                    ZoomAction::Fit => {
+                        // Fit will be handled while drawing the grid where available size/context is known
+                    }
+                }
+            }
+
+            let fit_requested = matches!(zoom_action, Some(ZoomAction::Fit));
+            let mut new_zoom: Option<f32> = None;
 
             ui.separator();
 
             // Main content: grid on left, inspector on right
-            ui.horizontal(|ui| {
-                // Map grid (takes most of the space)
-                ui.vertical(|ui| {
-                    egui::ScrollArea::both()
-                        .id_salt("map_editor_grid_scroll")
-                        .show(ui, |ui| {
-                            ui.add(MapGridWidget::new(editor).tile_size(24.0));
-                        });
-                });
+            {
+                // Compute overall panel height and left column width for TwoColumnLayout
+                let panel_height = crate::ui_helpers::compute_panel_height(
+                    ui,
+                    crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
+                );
 
-                ui.separator();
+                let total_width = ui.available_width();
+                let sep_margin = 12.0;
+                // Use configured inspector minimum width (fallback to default helper constant if needed).
+                let inspector_min_width = display_config
+                    .inspector_min_width
+                    .max(crate::ui_helpers::DEFAULT_INSPECTOR_MIN_WIDTH);
 
-                // Right panel: Inspector and tool-specific editors
-                ui.vertical(|ui| {
-                    ui.set_min_width(300.0);
+                let default_requested_left = total_width - inspector_min_width - sep_margin;
+                let left_width = crate::ui_helpers::compute_left_column_width(
+                    total_width,
+                    default_requested_left,
+                    inspector_min_width,
+                    sep_margin,
+                    crate::ui_helpers::MIN_SAFE_LEFT_COLUMN_WIDTH,
+                    display_config.left_column_max_ratio,
+                );
 
-                    egui::ScrollArea::vertical()
-                        .id_salt("map_editor_inspector_scroll")
-                        .show(ui, |ui| {
-                            Self::show_inspector_panel(ui, editor);
-                        });
-                });
-            });
+                // Debug prints removed: layout diagnostics no longer logged to stderr.
+
+                // Use the shared TwoColumnLayout to split the editor area cleanly
+                TwoColumnLayout::new("maps")
+                    .with_left_width(left_width)
+                    .with_min_height(panel_height)
+                    .with_inspector_min_width(display_config.inspector_min_width)
+                    .with_max_left_ratio(display_config.left_column_max_ratio)
+                    .show_split(
+                        ui,
+                        |left_ui| {
+                            // Re-acquire the editor reference via raw pointer to avoid simultaneous borrows
+                            let editor_ref: &mut MapEditorState = unsafe { &mut *editor_ptr };
+
+                            // Compute draw_zoom using left_ui available size to ensure Fit uses the actual left column
+                            // Honor "Auto Fit" when it's enabled (editor_auto_fit_on_resize).
+                            let draw_zoom = if fit_requested
+                                || (self.zoom_level == DEFAULT_ZOOM)
+                                || editor_ref.auto_fit_on_resize
+                            {
+                                let avail = left_ui.available_size();
+                                let map_width = editor_ref.map.width as f32 * BASE_TILE_SIZE;
+                                let map_height = editor_ref.map.height as f32 * BASE_TILE_SIZE;
+
+                                // Avoid division by zero
+                                let zoom_x = if map_width > 0.0 {
+                                    avail.x / map_width
+                                } else {
+                                    self.zoom_level
+                                };
+                                let zoom_y = if map_height > 0.0 {
+                                    avail.y / map_height
+                                } else {
+                                    self.zoom_level
+                                };
+
+                                let fit_zoom = zoom_x.min(zoom_y);
+
+                                let min_zoom_for_tiles = MIN_TILE_SIZE / BASE_TILE_SIZE;
+
+                                let result =
+                                    fit_zoom.clamp(min_zoom_for_tiles.max(MIN_ZOOM), MAX_ZOOM);
+
+                                // Persist the computed zoom so it becomes the new global zoom when opening the editor
+                                new_zoom = Some(result);
+
+                                // Debug prints removed: fit calculation logging suppressed.
+
+                                result
+                            } else {
+                                self.zoom_level
+                            };
+
+                            let effective_tile_size = BASE_TILE_SIZE * draw_zoom;
+
+                            // Debug info: show map dims, zoom and left column width
+                            // Removed temporary UI debug label.
+
+                            // Removed temporary debug print.
+
+                            egui::ScrollArea::both()
+                                .id_salt("map_editor_grid_scroll")
+                                .max_height(panel_height)
+                                .auto_shrink([false, false])
+                                .show(left_ui, |ui| {
+                                    // Debug logging removed: no additional stderr logs.
+
+                                    let map_response = ui.add(
+                                        MapGridWidget::new(editor_ref)
+                                            .tile_size(effective_tile_size),
+                                    );
+
+                                    // Debug logging removed for map widget response rect.
+
+                                    // Small debug label removed.
+                                });
+                        },
+                        |right_ui| {
+                            // Re-acquire the editor reference via raw pointer to avoid simultaneous borrows
+                            let editor_ref: &mut MapEditorState = unsafe { &mut *editor_ptr };
+
+                            // Right panel: Inspector and tool-specific editors
+                            right_ui.set_min_width(display_config.inspector_min_width);
+
+                            egui::ScrollArea::vertical()
+                                .id_salt("map_editor_inspector_scroll")
+                                .show(right_ui, |ui| {
+                                    Self::show_inspector_panel(ui, editor_ref);
+                                });
+                        },
+                    );
+            }
+
+            // If a fit was requested, update the global zoom to persist the change
+            if let Some(z) = new_zoom {
+                self.zoom_level = z;
+            }
         }
 
         // Handle back action
@@ -1553,8 +1738,14 @@ impl MapsEditorState {
         }
     }
 
-    /// Show tool palette
-    fn show_tool_palette(ui: &mut egui::Ui, editor: &mut MapEditorState) {
+    /// Show tool palette with zoom controls
+    fn show_tool_palette(
+        ui: &mut egui::Ui,
+        editor: &mut MapEditorState,
+        current_zoom: f32,
+    ) -> Option<ZoomAction> {
+        let mut action: Option<ZoomAction> = None;
+
         ui.horizontal(|ui| {
             ui.label("Tools:");
 
@@ -1585,8 +1776,8 @@ impl MapsEditorState {
                         TerrainType::Dirt,
                         TerrainType::Forest,
                         TerrainType::Mountain,
-                        TerrainType::Swamp,
                         TerrainType::Lava,
+                        TerrainType::Swamp,
                     ] {
                         ui.selectable_value(
                             &mut editor.selected_terrain,
@@ -1620,7 +1811,40 @@ impl MapsEditorState {
             ui.checkbox(&mut editor.show_grid, "Grid");
             ui.checkbox(&mut editor.show_events, "Events");
             ui.checkbox(&mut editor.show_npcs, "NPCs");
+
+            // Auto-fit to available area on window resize
+            ui.checkbox(&mut editor.auto_fit_on_resize, "Auto Fit").on_hover_text("When enabled, the map will automatically scale to fit the left column when the window is resized. Manual zoom (Zoom In/Out/Reset) will persist until Fit is clicked to recompute scaling.");
+
+            // Debug prints removed: toggle state logging no longer emitted to stderr.
+
+            ui.separator();
+
+            // Zoom controls
+            ui.label("Zoom:");
+
+            if ui.button("➖").on_hover_text("Zoom Out").clicked() {
+                action = Some(ZoomAction::Out);
+            }
+
+            ui.label(format!("{}%", (current_zoom * 100.0) as i32));
+
+            if ui.button("➕").on_hover_text("Zoom In").clicked() {
+                action = Some(ZoomAction::In);
+            }
+
+            if ui
+                .button("⊡ Fit")
+                .on_hover_text("Fit map to available space")
+                .clicked()
+            {
+                action = Some(ZoomAction::Fit);
+            }
+
+            if ui.button("100%").on_hover_text("Reset to 100%").clicked() {
+                action = Some(ZoomAction::Reset);
+            }
         });
+        action
     }
 
     /// Show inspector panel

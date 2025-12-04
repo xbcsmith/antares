@@ -187,6 +187,34 @@ impl Logger {
         Self::new(level)
     }
 
+    /// Indicates whether debug logging has been enabled by either an environment
+    /// variable or CLI flag check. This is intended for code paths where a
+    /// Logger instance may not be available/constructed yet and a quick check
+    /// (bool) is desired.
+    ///
+    /// Environment variable:
+    /// - ANTARES_DEBUG=1 | true | on | yes (case-insensitive) => enables debug
+    /// - ANTARES_DEBUG=0 | false | off | no => disables debug
+    ///
+    /// CLI flags:
+    /// - `--debug` / `-d` or `--verbose` / `-v` are accepted as well.
+    pub fn debug_enabled() -> bool {
+        // First, check explicit environment variable
+        if let Ok(val) = std::env::var("ANTARES_DEBUG") {
+            let v = val.trim().to_ascii_lowercase();
+            match v.as_str() {
+                "1" | "true" | "on" | "yes" => return true,
+                "0" | "false" | "off" | "no" => return false,
+                _ => {}
+            }
+        }
+
+        // Next fallback: check CLI args for debug/verbose flags
+        // Note: In tests or other contexts std::env::args() may include the test harness args.
+        let mut args_iter = std::env::args();
+        args_iter.any(|a| a == "--debug" || a == "-d" || a == "--verbose" || a == "-v")
+    }
+
     /// Sets the log level
     pub fn set_level(&mut self, level: LogLevel) {
         self.level = level;

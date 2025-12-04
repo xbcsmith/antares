@@ -413,55 +413,74 @@ impl ItemsEditorState {
         let selected = self.selected_item;
         let mut new_selection = selected;
         let mut action_requested: Option<ItemAction> = None;
+        ui.separator();
 
-        // Use shared TwoColumnLayout component
-        TwoColumnLayout::new("items").show_split(
-            ui,
-            |left_ui| {
-                // Left panel: Items list
-                left_ui.heading("Items");
-                left_ui.separator();
+        let total_width = ui.available_width();
+        let inspector_min_width = 300.0;
+        // Reserve a small margin for the separator (12.0)
+        let sep_margin = 12.0;
+        // Compute left width via the shared helper to ensure consistent clamping across editors.
+        // Preserve the Items editor fallback ratio of 0.6 for the maximum left ratio.
+        let requested_left = total_width - inspector_min_width - sep_margin;
+        let left_width = crate::ui_helpers::compute_left_column_width(
+            total_width,
+            requested_left,
+            inspector_min_width,
+            sep_margin,
+            crate::ui_helpers::MIN_SAFE_LEFT_COLUMN_WIDTH,
+            0.6,
+        );
 
-                for (idx, label, _) in &sorted_items {
-                    let is_selected = selected == Some(*idx);
-                    if left_ui.selectable_label(is_selected, label).clicked() {
-                        new_selection = Some(*idx);
-                    }
-                }
+        TwoColumnLayout::new("items")
+            .with_left_width(left_width)
+            .show_split(
+                ui,
+                |left_ui| {
+                    // Left panel: Map list
+                    left_ui.heading("Items");
+                    left_ui.separator();
 
-                if sorted_items.is_empty() {
-                    left_ui.label("No items found");
-                }
-            },
-            |right_ui| {
-                // Right panel: Detail view
-                if let Some(idx) = selected {
-                    if let Some((_, _, item)) = sorted_items.iter().find(|(i, _, _)| *i == idx) {
-                        right_ui.heading(&item.name);
-                        right_ui.separator();
-
-                        // Use shared ActionButtons component
-                        let action = ActionButtons::new().enabled(true).show(right_ui);
-                        if action != ItemAction::None {
-                            action_requested = Some(action);
+                    for (idx, label, _) in &sorted_items {
+                        let is_selected = selected == Some(*idx);
+                        if left_ui.selectable_label(is_selected, label).clicked() {
+                            new_selection = Some(*idx);
                         }
+                    }
 
-                        right_ui.separator();
-                        Self::show_preview_static(right_ui, item);
+                    if sorted_items.is_empty() {
+                        left_ui.label("No items found");
+                    }
+                },
+                |right_ui| {
+                    // Right panel: Detail view
+                    if let Some(idx) = selected {
+                        if let Some((_, _, item)) = sorted_items.iter().find(|(i, _, _)| *i == idx)
+                        {
+                            right_ui.heading(&item.name);
+                            right_ui.separator();
+
+                            // Use shared ActionButtons component
+                            let action = ActionButtons::new().enabled(true).show(right_ui);
+                            if action != ItemAction::None {
+                                action_requested = Some(action);
+                            }
+
+                            right_ui.separator();
+                            Self::show_preview_static(right_ui, item);
+                        } else {
+                            right_ui.vertical_centered(|ui| {
+                                ui.add_space(100.0);
+                                ui.label("Select an item to view details");
+                            });
+                        }
                     } else {
                         right_ui.vertical_centered(|ui| {
                             ui.add_space(100.0);
                             ui.label("Select an item to view details");
                         });
                     }
-                } else {
-                    right_ui.vertical_centered(|ui| {
-                        ui.add_space(100.0);
-                        ui.label("Select an item to view details");
-                    });
-                }
-            },
-        );
+                },
+            );
 
         // Apply selection change after closures
         self.selected_item = new_selection;
@@ -865,6 +884,10 @@ impl ItemsEditorState {
                 ui.separator();
 
                 ui.horizontal(|ui| {
+                    if ui.button("⬅ Back to List").clicked() {
+                        self.mode = ItemsEditorMode::List;
+                    }
+
                     if ui.button("💾 Save").clicked() {
                         if is_add {
                             items.push(self.edit_buffer.clone());

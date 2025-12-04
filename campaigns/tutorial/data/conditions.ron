@@ -1,11 +1,4 @@
-// conditions.ron - Condition definitions for Tutorial Campaign
-//
-// This file contains condition definitions for the tutorial campaign.
-// Includes conditions referenced by spells for editor consistency.
-
 [
-    // ===== Negative Conditions =====
-
     (
         id: "blind",
         name: "Blind",
@@ -20,7 +13,6 @@
         default_duration: Rounds(5),
         icon_id: Some("icon_blind"),
     ),
-
     (
         id: "sleep",
         name: "Sleep",
@@ -31,7 +23,6 @@
         default_duration: Rounds(3),
         icon_id: Some("icon_sleep"),
     ),
-
     (
         id: "poison",
         name: "Poison",
@@ -49,7 +40,6 @@
         default_duration: Permanent,
         icon_id: Some("icon_poison"),
     ),
-
     (
         id: "silenced",
         name: "Silenced",
@@ -60,9 +50,6 @@
         default_duration: Rounds(5),
         icon_id: Some("icon_silenced"),
     ),
-
-    // ===== Positive Conditions =====
-
     (
         id: "bless",
         name: "Bless",
@@ -76,7 +63,6 @@
         default_duration: Rounds(10),
         icon_id: Some("icon_bless"),
     ),
-
     (
         id: "heroism",
         name: "Heroism",
@@ -94,10 +80,9 @@
         default_duration: Rounds(10),
         icon_id: Some("icon_heroism"),
     ),
-
     (
         id: "giants_strength",
-        name: "Giant's Strength",
+        name: "Giant\'s Strength",
         description: "Greatly increases physical might.",
         effects: [
             AttributeModifier(
@@ -108,7 +93,6 @@
         default_duration: Minutes(10),
         icon_id: Some("icon_giants_strength"),
     ),
-
     (
         id: "haste",
         name: "Haste",
@@ -122,7 +106,6 @@
         default_duration: Rounds(10),
         icon_id: Some("icon_haste"),
     ),
-
     (
         id: "invisibility",
         name: "Invisibility",
@@ -133,9 +116,6 @@
         default_duration: Minutes(5),
         icon_id: Some("icon_invisibility"),
     ),
-
-    // ===== Resistance Conditions =====
-
     (
         id: "fire_resistance",
         name: "Fire Resistance",
@@ -149,7 +129,6 @@
         default_duration: Minutes(10),
         icon_id: Some("icon_fire_resistance"),
     ),
-
     (
         id: "cold_resistance",
         name: "Cold Resistance",
@@ -163,7 +142,6 @@
         default_duration: Minutes(10),
         icon_id: Some("icon_cold_resistance"),
     ),
-
     (
         id: "poison_resistance",
         name: "Poison Resistance",

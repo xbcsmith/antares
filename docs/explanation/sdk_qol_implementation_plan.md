@@ -999,3 +999,213 @@ After all UI changes are complete:
 - Automated tests verify pattern compliance
 - All data files updated and parseable
 - Documentation reflects final state
+
+---
+
+### Phase 11: UI Bug Fixes and Missing Deliverables (Post-Verification)
+
+This phase addresses issues identified during final verification:
+
+1. Validation tab behavior does not match specification
+2. Maps editor grid does not scale to fill available area
+3. Assets panel incorrectly reports loaded data files as "unused"
+4. Inconsistent "Back to List" / "Cancel" button patterns across editors
+
+#### 11.1 Fix Validation Panel Behavior
+
+The validation panel should show individual validation checks with pass/fail status,
+not just errors and warnings. Currently it only displays results when there ARE errors.
+
+**Current Behavior:**
+
+- Shows "All Checks Passed" when no errors exist
+- Only displays error/warning results, no "passed" checks shown
+- Missing individual category validation pass indicators
+
+**Required Behavior:**
+
+- Always show validation results for each category
+- Display ✅ passed checks alongside ❌ errors and ⚠️ warnings
+- Show category-by-category breakdown even when all pass
+- Include "Run Full Validation" that checks ALL categories and reports status
+
+**Changes Required:**
+
+- Modify `validate_campaign()` to add passed checks for each category
+- Add validation checks that explicitly report success:
+  - "Items: All X items have valid IDs" → ✅
+  - "Spells: All X spells have valid targets" → ✅
+  - "Maps: All X maps have valid dimensions" → ✅
+- **Categories with no data should report "ℹ️ No data loaded"** (Info severity)
+- Update `show_validation_panel()` to always show category breakdown
+- Add collapsible sections per category showing individual check results
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/main.rs` - `validate_campaign()` and `show_validation_panel()`
+- `sdk/campaign_builder/src/validation.rs` - Add helper functions for category validation
+
+#### 11.2 Fix Maps Editor Grid Scaling
+
+The map editor grid should scale to fill the available editing area, with zoom controls.
+
+**Current Behavior:**
+
+- Fixed tile size of 24.0 pixels
+- Grid size determined by map.width \* tile_size
+- Small maps appear tiny in large windows
+- Large maps extend beyond visible area without indication
+
+**Required Behavior:**
+
+- Add zoom controls (zoom in/out buttons, zoom slider)
+- Add "Fit to Window" option that scales map to fill available space
+- Show current zoom level percentage
+- Maintain minimum tile size for usability (e.g., 8px minimum)
+- Remember zoom level per-map or globally
+
+**Changes Required:**
+
+- Add `zoom_level: f32` field to `MapsEditorState` (default 1.0) - **global setting** (simpler than per-map)
+- Add zoom controls in the tool palette row
+- Modify `MapGridWidget` to use `tile_size * zoom_level`
+- Add "Fit" button that calculates optimal zoom for available space
+- Update ScrollArea to properly handle zoomed content
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/map_editor.rs` - `MapsEditorState`, `MapGridWidget`, `show_tool_palette()`
+
+#### 11.3 Fix Assets Panel File Status Reporting
+
+Data files loaded by the campaign should show as "In Use" not "Unused".
+
+**Current Behavior:**
+
+- Data files (items.ron, spells.ron, etc.) are tracked in `data_files` HashMap
+- Asset listing shows `is_referenced = false` for most files
+- "Unused" warning appears even for successfully loaded campaign files
+- `scan_references()` only marks assets referenced if items/quests/etc. explicitly reference them
+
+**Required Behavior:**
+
+- Data files that are successfully loaded should show as "In Use"
+- Campaign.ron itself should always be marked as referenced
+- Files in the `data/` directory that are part of the campaign should be marked
+- Only truly orphaned assets (images, sounds not referenced) show as "Unused"
+
+**Changes Required:**
+
+- Modify `AssetManager::scan_references()` to mark all successfully loaded data files as referenced
+- Add method `mark_data_files_as_referenced()` that sets `is_referenced = true` for tracked data files
+- Call this method after data files are loaded successfully
+- Update `show_assets_editor()` to call `scan_references()` after loading completes
+- Ensure `orphaned_assets()` correctly excludes loaded data files
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/asset_manager.rs` - Add `mark_data_files_as_referenced()`
+- `sdk/campaign_builder/src/main.rs` - Call reference scanning after loading data
+
+#### 11.4 Standardize Editor Navigation Buttons
+
+All editors should use consistent button text for returning to list view.
+
+**Current State:**
+
+| Editor            | Button Text      | Pattern                     |
+| ----------------- | ---------------- | --------------------------- |
+| dialogue_editor   | "⬅ Back to List" | ✓ Correct                   |
+| map_editor        | "← Back to List" | ✓ Correct (different arrow) |
+| classes_editor    | "❌ Cancel"      | ✗ Inconsistent              |
+| quest_editor      | "❌ Cancel"      | ✗ Inconsistent              |
+| spells_editor     | "❌ Cancel"      | ✗ Inconsistent              |
+| items_editor      | "❌ Cancel"      | ✗ Inconsistent              |
+| monsters_editor   | "❌ Cancel"      | ✗ Inconsistent              |
+| conditions_editor | "❌ Cancel"      | ✗ Inconsistent              |
+
+**Required Pattern:**
+
+All editors should have consistent buttons when in edit/create mode:
+
+- "⬅ Back to List" - Returns to list view **without prompting** (just navigates away)
+- "💾 Save" - Saves current item and stays in edit mode
+- "❌ Cancel" - Discards changes and returns to list
+
+**Changes Required:**
+
+- Add "⬅ Back to List" button to: items_editor, spells_editor, monsters_editor,
+  conditions_editor, quest_editor, classes_editor
+- Standardize arrow character: use "⬅" consistently (not "←")
+- Position buttons consistently: Back to List on left, Save in middle, Cancel on right
+- Map editor already has correct pattern, use as reference
+
+**Files to modify:**
+
+- `sdk/campaign_builder/src/items_editor.rs` - `show_form()`
+- `sdk/campaign_builder/src/spells_editor.rs` - `show_form()`
+- `sdk/campaign_builder/src/monsters_editor.rs` - `show_form()`
+- `sdk/campaign_builder/src/conditions_editor.rs` - `show_form()`
+- `sdk/campaign_builder/src/quest_editor.rs` - `show_quest_form()`
+- `sdk/campaign_builder/src/classes_editor.rs` - `show_class_form()`
+
+#### 11.5 Testing Requirements
+
+- Test validation panel shows passed checks for each category
+- Test validation panel shows category breakdown when all pass
+- Test map editor zoom controls work correctly
+- Test map editor "Fit to Window" calculates correct zoom
+- Test assets panel marks loaded data files as "In Use"
+- Test assets panel only shows truly orphaned files as "Unused"
+- Test all editors have "Back to List" button in edit mode
+- Test button placement is consistent across all editors
+
+#### 11.6 Deliverables
+
+- Fixed validation panel with pass/fail per category
+- Maps editor with zoom controls and fit-to-window
+- Assets panel correctly reporting file usage status
+- Standardized navigation buttons across all 8 editors
+
+#### 11.7 Success Criteria
+
+- Validation panel shows ✅/❌/⚠️ for each validation category
+- Validation panel shows results even when all checks pass
+- Maps editor grid can zoom in/out with controls
+- Maps editor has "Fit" button to auto-scale to available space
+- Data files loaded in campaign show "✓ In Use" status
+- Only truly orphaned assets show "⚠ Unused" warning
+- All 8 editors have "⬅ Back to List" button in edit/create mode
+- Button placement matches across all editors (left: Back, center: Save, right: Cancel)
+
+---
+
+## Implementation Order Summary (Updated)
+
+| Phase        | Priority | Risk    | Effort     | Dependencies           |
+| ------------ | -------- | ------- | ---------- | ---------------------- |
+| Phase 1      | High     | Low     | Medium     | None                   |
+| Phase 2      | High     | Low     | Low        | Phase 1                |
+| Phase 3      | High     | Medium  | High       | Phase 1, 2             |
+| Phase 4      | Medium   | Low     | Medium     | Phase 1                |
+| Phase 5      | Medium   | Low     | Medium     | Phase 1-4              |
+| Phase 6      | Low      | Low     | Low        | All editors complete   |
+| Phase 7      | Low      | Low     | Medium     | Core features complete |
+| Phase 8      | High     | Medium  | High       | Phase 1-4              |
+| Phase 9      | High     | High    | High       | Phase 1, 8             |
+| Phase 10     | Medium   | Low     | Medium     | Phase 8, 9             |
+| **Phase 11** | **High** | **Low** | **Medium** | **Phase 10**           |
+
+**Recommended Implementation Order:**
+
+1. Phase 1 (Foundation) - COMPLETE
+2. Phase 2 (Extract Editors) - COMPLETE
+3. Phase 4 (Validation/Assets) - PARTIAL
+4. Phase 8 (Skipped Items) - COMPLETE
+5. Phase 9 (Maps Editor) - COMPLETE
+6. Phase 3 (Layout Continuity) - COMPLETE
+7. Phase 10 (Final Polish) - COMPLETE
+8. **Phase 11 (Bug Fixes)** - PENDING
+9. Phase 5 (Testing Infrastructure)
+10. Phase 6 (Data Files)
+11. Phase 7 (Logging/DX)

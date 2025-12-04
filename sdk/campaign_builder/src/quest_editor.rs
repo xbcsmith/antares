@@ -1684,6 +1684,10 @@ impl QuestEditorState {
 
                 // Action buttons
                 ui.horizontal(|ui| {
+                    if ui.button("⬅ Back to List").clicked() {
+                        self.cancel_edit();
+                    }
+
                     let _ = ui.button("✅ Save Quest");
 
                     if ui.button("❌ Cancel").clicked() {

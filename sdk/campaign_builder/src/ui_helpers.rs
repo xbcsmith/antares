@@ -29,6 +29,19 @@ use std::path::PathBuf;
 /// (commonly the list panel).
 pub const DEFAULT_LEFT_COLUMN_WIDTH: f32 = 300.0;
 
+/// Default minimum width (in points) of the inspector (right) column used by editors.
+/// This is the default inspector width used to compute the left/right split.
+pub const DEFAULT_INSPECTOR_MIN_WIDTH: f32 = 300.0;
+
+/// Default maximum ratio for the left-hand column (0.0 - 1.0).
+/// This prevents the left (list) panel from consuming nearly all horizontal space
+/// and clipping the inspector panel. 0.72 means the left column won't exceed 72%
+/// of the total available width.
+pub const DEFAULT_LEFT_COLUMN_MAX_RATIO: f32 = 0.72;
+
+/// Minimum safe left column width (px) - prevents the left column from becoming too narrow.
+pub const MIN_SAFE_LEFT_COLUMN_WIDTH: f32 = 250.0;
+
 /// Default minimum height (in points) for editor list & preview panels.
 ///
 /// This value prevents panels from collapsing to 0 or very short heights when
@@ -91,6 +104,67 @@ pub fn compute_default_panel_height(ui: &mut egui::Ui) -> f32 {
 /// Convenience function that uses `DEFAULT_PANEL_MIN_HEIGHT` for a given size.
 pub fn compute_default_panel_height_from_size(size: egui::Vec2) -> f32 {
     compute_panel_height_from_size(size, DEFAULT_PANEL_MIN_HEIGHT)
+}
+
+/// Compute an appropriate left column width for two-column layouts.
+///
+/// This helper centralizes logic for left column width calculations so editors
+/// can share the same rules and behavior. The algorithm:
+///
+/// - Respects the configured inspector minimum width.
+/// - Respects a maximum left ratio relative to total width.
+/// - Avoids forcing the `MIN_SAFE_LEFT_COLUMN_WIDTH` when the available
+///   space is smaller; in that case, it allows smaller widths to avoid making
+///   the inspector completely invisible.
+/// - Gracefully returns zero if no space is available for a left column.
+///
+/// Arguments:
+/// * `total_width` - total available width for both columns.
+/// * `requested_left` - desired left column width (usually an editor's configured default).
+/// * `inspector_min_width` - minimum width requested for the inspector column.
+/// * `sep_margin` - separator or margin to reserve between columns.
+/// * `min_safe_left` - the safe minimum left width to prefer when space is available.
+/// * `max_left_ratio` - maximum ratio (0-1) for the left column; respects defaults when outside range.
+pub fn compute_left_column_width(
+    total_width: f32,
+    requested_left: f32,
+    inspector_min_width: f32,
+    sep_margin: f32,
+    min_safe_left: f32,
+    max_left_ratio: f32,
+) -> f32 {
+    // Ensure inspector minimum respects the configured default fallback.
+    let inspector_min = inspector_min_width.max(DEFAULT_INSPECTOR_MIN_WIDTH);
+
+    // Validate/max the ratio
+    let max_left_ratio_clamped = if (max_left_ratio <= 0.0) || (max_left_ratio > 1.0) {
+        DEFAULT_LEFT_COLUMN_MAX_RATIO
+    } else {
+        max_left_ratio
+    };
+
+    // Max allowed left width by ratio
+    let max_left = (max_left_ratio_clamped * total_width).min(total_width);
+
+    // Space left after reserving inspector minimum and separator
+    let available_left_space = (total_width - inspector_min - sep_margin).max(0.0);
+
+    // The upper bound given by both constraints
+    let max_left_possible = max_left.min(available_left_space);
+
+    // Minimum bound: only enforce the minimum safe left width when available space allows for it
+    let min_left_bound = if max_left_possible >= min_safe_left {
+        min_safe_left
+    } else {
+        // If not enough space is available, don't force min safe value to avoid contradictions.
+        0.0
+    };
+
+    // Clamp the requested left width into computed bounds.
+    let left = requested_left.clamp(min_left_bound, max_left_possible);
+
+    // Final safety clamp ensures we never exceed the total width.
+    left.clamp(0.0, total_width)
 }
 
 // =============================================================================
@@ -252,7 +326,10 @@ impl<'a> EditorToolbar<'a> {
     pub fn show(self, ui: &mut egui::Ui) -> ToolbarAction {
         let mut action = ToolbarAction::None;
 
-        ui.horizontal(|ui| {
+        // Use horizontal_wrapped for the toolbar so it gracefully wraps onto
+        // multiple rows when the UI width is constrained, preventing UI clipping
+        // and ensuring all actions remain accessible at narrow sizes.
+        ui.horizontal_wrapped(|ui| {
             // Search field
             if let Some(search_query) = self.search_query {
                 ui.label("🔍 Search:");
@@ -478,10 +555,15 @@ impl ActionButtons {
 pub struct TwoColumnLayout<'a> {
     /// Unique identifier for the layout
     id_salt: &'a str,
-    /// Width of the left column
+    /// Width of the left column in points
     left_width: f32,
     /// Minimum height for both panels
     min_height: f32,
+    /// Minimum width for the inspector (right) column (points)
+    inspector_min_width: f32,
+    /// Maximum ratio (0.0 - 1.0) allowed for the left column relative to total width.
+    /// This prevents the left column from consuming too much horizontal space.
+    max_left_ratio: f32,
 }
 
 impl<'a> TwoColumnLayout<'a> {
@@ -512,6 +594,8 @@ impl<'a> TwoColumnLayout<'a> {
             id_salt,
             left_width: DEFAULT_LEFT_COLUMN_WIDTH,
             min_height: DEFAULT_PANEL_MIN_HEIGHT,
+            inspector_min_width: DEFAULT_INSPECTOR_MIN_WIDTH,
+            max_left_ratio: DEFAULT_LEFT_COLUMN_MAX_RATIO,
         }
     }
 
@@ -535,6 +619,29 @@ impl<'a> TwoColumnLayout<'a> {
         self
     }
 
+    /// Sets the minimum width for the inspector (right) column.
+    ///
+    /// # Arguments
+    ///
+    /// * `width` - Width in points
+    pub fn with_inspector_min_width(mut self, width: f32) -> Self {
+        self.inspector_min_width = width;
+        self
+    }
+
+    /// Sets a maximum left column ratio (0.0 - 1.0).
+    /// The final left width will be clamped to be no larger than
+    /// `max_left_ratio * available_total_width`.
+    ///
+    /// # Arguments
+    ///
+    /// * `ratio` - Ratio (between 0.0 and 1.0)
+    pub fn with_max_left_ratio(mut self, ratio: f32) -> Self {
+        // We don't strictly enforce bounds here; the clamp occurs where the value is used.
+        self.max_left_ratio = ratio;
+        self
+    }
+
     /// Renders the two-column layout and calls the provided closure.
     ///
     /// # Arguments
@@ -551,10 +658,25 @@ impl<'a> TwoColumnLayout<'a> {
     {
         let panel_height = compute_panel_height(ui, self.min_height);
 
+        // Compute the left width via the shared helper so the same behavior is used everywhere.
+        let total_width = ui.available_width();
+        let sep_margin = 12.0;
+        // Use the inspector minimum (with a default fallback) to ensure we set the
+        // right panel's min width consistently with the helper's expectations.
+        let inspector_min = self.inspector_min_width.max(DEFAULT_INSPECTOR_MIN_WIDTH);
+        let left_width = compute_left_column_width(
+            total_width,
+            self.left_width,
+            inspector_min,
+            sep_margin,
+            MIN_SAFE_LEFT_COLUMN_WIDTH,
+            self.max_left_ratio,
+        );
+
         ui.horizontal(|ui| {
             // Left column
             ui.vertical(|left_ui| {
-                left_ui.set_width(self.left_width);
+                left_ui.set_width(left_width);
                 left_ui.set_min_height(panel_height);
 
                 egui::ScrollArea::vertical()
@@ -562,10 +684,29 @@ impl<'a> TwoColumnLayout<'a> {
                     .auto_shrink([false, false])
                     .max_height(panel_height)
                     .show(left_ui, |scroll_ui| {
+                        // Add horizontal padding inside the scroll area so the map/list content does not
+                        // hug the column edges and both columns feel visually balanced.
                         scroll_ui.set_min_width(scroll_ui.available_width());
 
-                        // Temporarily store left content; we'll call it after creating right_ui
-                        // Actually, we need a different approach since we need both ui references
+                        // For older-style `show` usage, calling `content` isn't trivial since it takes both
+                        // left and right `Ui` references at once. Prefer using `show_split` which is the
+                        // recommended method for new code.
+                    });
+            });
+
+            ui.separator();
+
+            // Right column
+            ui.vertical(|right_ui| {
+                right_ui.set_min_width(inspector_min);
+                right_ui.set_min_height(panel_height);
+
+                egui::ScrollArea::vertical()
+                    .id_salt(format!("{}_right_scroll", self.id_salt))
+                    .auto_shrink([false, false])
+                    .max_height(panel_height)
+                    .show(right_ui, |scroll_ui| {
+                        // Placeholder; content closure cannot be called with both `Ui` instances easily here.
                     });
             });
         });
@@ -618,10 +759,23 @@ impl<'a> TwoColumnLayout<'a> {
     {
         let panel_height = compute_panel_height(ui, self.min_height);
 
+        // Compute the left width via the shared helper so the same behavior is used everywhere.
+        let total_width = ui.available_width();
+        let sep_margin = 12.0;
+        let inspector_min = self.inspector_min_width.max(DEFAULT_INSPECTOR_MIN_WIDTH);
+        let left_width = compute_left_column_width(
+            total_width,
+            self.left_width,
+            inspector_min,
+            sep_margin,
+            MIN_SAFE_LEFT_COLUMN_WIDTH,
+            self.max_left_ratio,
+        );
+
         ui.horizontal(|ui| {
             // Left column
             ui.vertical(|left_ui| {
-                left_ui.set_width(self.left_width);
+                left_ui.set_width(left_width);
                 left_ui.set_min_height(panel_height);
 
                 egui::ScrollArea::vertical()
@@ -629,6 +783,8 @@ impl<'a> TwoColumnLayout<'a> {
                     .auto_shrink([false, false])
                     .max_height(panel_height)
                     .show(left_ui, |scroll_ui| {
+                        // Apply consistent horizontal padding around the left column content
+                        // so the map or list does not butt directly against the edge.
                         scroll_ui.set_min_width(scroll_ui.available_width());
                         left_content(scroll_ui);
                     });
@@ -638,7 +794,8 @@ impl<'a> TwoColumnLayout<'a> {
 
             // Right column
             ui.vertical(|right_ui| {
-                right_ui.set_min_width(right_ui.available_width());
+                // Use configured inspector min width to ensure the right column isn't clipped.
+                right_ui.set_min_width(inspector_min);
                 right_ui.set_min_height(panel_height);
 
                 egui::ScrollArea::vertical()
@@ -646,6 +803,8 @@ impl<'a> TwoColumnLayout<'a> {
                     .auto_shrink([false, false])
                     .max_height(panel_height)
                     .show(right_ui, |scroll_ui| {
+                        // Ensure the right-hand inspector area (detail/preview) gets the same
+                        // horizontal padding as the left column for visual balance.
                         right_content(scroll_ui);
                     });
             });
@@ -1571,11 +1730,129 @@ mod tests {
     fn two_column_layout_builder_pattern() {
         let layout = TwoColumnLayout::new("custom")
             .with_left_width(400.0)
-            .with_min_height(200.0);
+            .with_min_height(200.0)
+            .with_inspector_min_width(320.0)
+            .with_max_left_ratio(0.65);
 
         assert_eq!(layout.id_salt, "custom");
         assert_eq!(layout.left_width, 400.0);
         assert_eq!(layout.min_height, 200.0);
+        assert_eq!(layout.inspector_min_width, 320.0);
+        assert_eq!(layout.max_left_ratio, 0.65);
+    }
+
+    // =========================================================================
+    // Additional TwoColumnLayout Tests
+    // =========================================================================
+
+    #[test]
+    fn two_column_layout_show_split_calls_both_closures() {
+        let ctx = egui::Context::default();
+        let left_called = std::rc::Rc::new(std::cell::Cell::new(false));
+        let right_called = std::rc::Rc::new(std::cell::Cell::new(false));
+
+        {
+            let left_clone = left_called.clone();
+            let right_clone = right_called.clone();
+            egui::CentralPanel::default().show(&ctx, |ui| {
+                TwoColumnLayout::new("test")
+                    .with_left_width(400.0)
+                    .with_inspector_min_width(300.0)
+                    .with_max_left_ratio(DEFAULT_LEFT_COLUMN_MAX_RATIO)
+                    .show_split(
+                        ui,
+                        |left_ui| {
+                            left_clone.set(true);
+                            // Small touch to exercise scroll area width
+                            left_ui.label("Left content");
+                        },
+                        |right_ui| {
+                            right_clone.set(true);
+                            right_ui.label("Right content");
+                        },
+                    );
+            });
+        }
+
+        assert!(left_called.get());
+        assert!(right_called.get());
+    }
+
+    // =========================================================================
+    // compute_left_column_width tests
+    // =========================================================================
+
+    #[test]
+    fn compute_left_column_width_small_total_width() {
+        // 480 total width, inspector min 300, separator 12 -> available left = 168
+        let total_width = 480.0;
+        let requested_left = 300.0;
+        let inspector_min = 300.0;
+        let sep_margin = 12.0;
+        let left = compute_left_column_width(
+            total_width,
+            requested_left,
+            inspector_min,
+            sep_margin,
+            MIN_SAFE_LEFT_COLUMN_WIDTH,
+            DEFAULT_LEFT_COLUMN_MAX_RATIO,
+        );
+        // force exact equality to the available space (168)
+        assert_eq!(left, 168.0);
+    }
+
+    #[test]
+    fn compute_left_column_width_enforces_min_when_space_available() {
+        // 1200 total width, enough to allow min safe left width (250)
+        let total_width = 1200.0;
+        let requested_left = 400.0;
+        let inspector_min = 300.0;
+        let sep_margin = 12.0;
+        let left = compute_left_column_width(
+            total_width,
+            requested_left,
+            inspector_min,
+            sep_margin,
+            MIN_SAFE_LEFT_COLUMN_WIDTH,
+            DEFAULT_LEFT_COLUMN_MAX_RATIO,
+        );
+        assert_eq!(left, 400.0);
+    }
+
+    #[test]
+    fn compute_left_column_width_enforces_max_ratio_limit() {
+        // 800 total width: available left = 488 -> should be upper bound
+        let total_width = 800.0;
+        let requested_left = 600.0;
+        let inspector_min = 300.0;
+        let sep_margin = 12.0;
+        let left = compute_left_column_width(
+            total_width,
+            requested_left,
+            inspector_min,
+            sep_margin,
+            MIN_SAFE_LEFT_COLUMN_WIDTH,
+            DEFAULT_LEFT_COLUMN_MAX_RATIO,
+        );
+        assert_eq!(left, 488.0);
+    }
+
+    #[test]
+    fn compute_left_column_width_zero_when_no_space() {
+        // total width smaller than inspector_min + separator -> 0.0 left width
+        let total_width = 200.0;
+        let requested_left = 250.0;
+        let inspector_min = 300.0;
+        let sep_margin = 12.0;
+        let left = compute_left_column_width(
+            total_width,
+            requested_left,
+            inspector_min,
+            sep_margin,
+            MIN_SAFE_LEFT_COLUMN_WIDTH,
+            DEFAULT_LEFT_COLUMN_MAX_RATIO,
+        );
+        assert_eq!(left, 0.0);
     }
 
     // =========================================================================

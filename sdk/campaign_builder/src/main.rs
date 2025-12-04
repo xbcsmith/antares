@@ -40,6 +40,7 @@ mod ui_helpers;
 mod undo_redo;
 mod validation;
 
+use antares::sdk::tool_config::ToolConfig;
 use logging::{category, LogLevel, Logger};
 
 use antares::domain::character::Stats;
@@ -104,6 +105,13 @@ fn main() -> Result<(), eframe::Error> {
                 logger: logger.clone(),
                 ..Default::default()
             };
+
+            // Load persisted ToolConfig if available; otherwise fall back to defaults.
+            // This makes display/editor preferences persistent across sessions.
+            if let Ok(cfg) = ToolConfig::load_or_default() {
+                app.tool_config = cfg;
+            }
+
             app.logger.info(category::APP, "Application initialized");
             Ok(Box::new(app))
         }),
@@ -389,6 +397,8 @@ struct CampaignBuilderApp {
 
     // Phase 7: Logging and developer experience
     logger: Logger,
+    tool_config: ToolConfig,
+    show_preferences: bool,
     show_debug_panel: bool,
     debug_panel_filter_level: LogLevel,
     debug_panel_auto_scroll: bool,
@@ -475,6 +485,8 @@ impl Default for CampaignBuilderApp {
 
             // Phase 7: Logging and developer experience
             logger: Logger::default(),
+            tool_config: ToolConfig::default(),
+            show_preferences: false,
             show_debug_panel: false,
             debug_panel_filter_level: LogLevel::Info,
             debug_panel_auto_scroll: true,
@@ -648,6 +660,131 @@ impl CampaignBuilderApp {
             }
         }
         errors
+    }
+
+    /// Generate category status checks (passed or no data info messages)
+    ///
+    /// This function checks each data category and adds:
+    /// - ✅ Passed check if data exists and has no errors
+    /// - ℹ️ Info message if no data is loaded for the category
+    fn generate_category_status_checks(&self) -> Vec<validation::ValidationResult> {
+        let mut results = Vec::new();
+
+        // Items category
+        if self.items.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Items,
+                "No items loaded - add items or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Items,
+                format!("{} items validated", self.items.len()),
+            ));
+        }
+
+        // Spells category
+        if self.spells.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Spells,
+                "No spells loaded - add spells or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Spells,
+                format!("{} spells validated", self.spells.len()),
+            ));
+        }
+
+        // Monsters category
+        if self.monsters.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Monsters,
+                "No monsters loaded - add monsters or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Monsters,
+                format!("{} monsters validated", self.monsters.len()),
+            ));
+        }
+
+        // Maps category
+        if self.maps.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Maps,
+                "No maps loaded - create maps in the Maps editor",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Maps,
+                format!("{} maps validated", self.maps.len()),
+            ));
+        }
+
+        // Conditions category
+        if self.conditions.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Conditions,
+                "No conditions loaded - add conditions or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Conditions,
+                format!("{} conditions validated", self.conditions.len()),
+            ));
+        }
+
+        // Quests category
+        if self.quests.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Quests,
+                "No quests loaded - add quests or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Quests,
+                format!("{} quests validated", self.quests.len()),
+            ));
+        }
+
+        // Dialogues category
+        if self.dialogues.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Dialogues,
+                "No dialogues loaded - add dialogues or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Dialogues,
+                format!("{} dialogues validated", self.dialogues.len()),
+            ));
+        }
+
+        // Classes category
+        if self.classes_editor_state.classes.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Classes,
+                "No classes loaded - add classes or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Classes,
+                format!(
+                    "{} classes validated",
+                    self.classes_editor_state.classes.len()
+                ),
+            ));
+        }
+
+        // Races category - races are configured via file path but not loaded into app state
+        // Show info message indicating races are managed via external file
+        results.push(validation::ValidationResult::info(
+            validation::ValidationCategory::Races,
+            "Races configured via races_file - use Race Editor CLI to manage",
+        ));
+
+        results
     }
 
     /// Get next available item ID
@@ -1213,6 +1350,10 @@ impl CampaignBuilderApp {
         self.validation_errors.extend(self.validate_map_ids());
         self.validation_errors.extend(self.validate_condition_ids());
 
+        // Add category status checks (passed or no data info)
+        self.validation_errors
+            .extend(self.generate_category_status_checks());
+
         // Required fields - Metadata category
         if self.campaign.id.is_empty() {
             self.validation_errors
@@ -1548,6 +1689,18 @@ impl CampaignBuilderApp {
                             category::FILE_IO,
                             &format!("Failed to load dialogues: {}", e),
                         );
+                    }
+
+                    // Scan asset references and mark loaded data files
+                    if let Some(ref mut manager) = self.asset_manager {
+                        manager.scan_references(
+                            &self.items,
+                            &self.quests,
+                            &self.dialogues,
+                            &self.maps,
+                            &self.classes_editor_state.classes,
+                        );
+                        manager.mark_data_files_as_referenced();
                     }
 
                     self.unsaved_changes = false;
@@ -2234,6 +2387,12 @@ impl eframe::App for CampaignBuilderApp {
                             "Export would create .zip archive here...".to_string();
                         ui.close();
                     }
+                    ui.separator();
+                    // Preferences dialog toggle
+                    if ui.button("⚙️ Preferences...").clicked() {
+                        self.show_preferences = true;
+                        ui.close();
+                    }
                 });
 
                 ui.menu_button("Help", |ui| {
@@ -2432,6 +2591,7 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.maps,
                 self.campaign_dir.as_ref(),
                 &self.campaign.maps_dir,
+                &self.tool_config.display,
                 &mut self.unsaved_changes,
                 &mut self.status_message,
             ),
@@ -2458,6 +2618,76 @@ impl eframe::App for CampaignBuilderApp {
             EditorTab::Validation => self.show_validation_panel(ui),
         });
 
+        // Preferences dialog using a local temporary variable to avoid borrow conflicts
+        // Use local flags and avoid mutably borrowing `self.show_preferences` inside the `show` closure.
+        let mut show_preferences_local = self.show_preferences;
+        let mut prefs_save_clicked = false;
+        let mut prefs_close_clicked = false;
+
+        if show_preferences_local {
+            egui::Window::new("Preferences")
+                .open(&mut show_preferences_local)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.heading("Preferences");
+                    ui.separator();
+
+                    // Inspector min width slider
+                    ui.label("Inspector minimum width (px):");
+                    ui.add(egui::Slider::new(
+                        &mut self.tool_config.display.inspector_min_width,
+                        150.0..=800.0,
+                    )
+                    .text("inspector_min_width"));
+
+                    ui.add_space(6.0);
+
+                    // Left column max ratio slider
+                    ui.label("Max left column ratio (0.4 - 0.9):");
+                    ui.add(egui::Slider::new(
+                        &mut self.tool_config.display.left_column_max_ratio,
+                        0.4..=0.9,
+                    )
+                    .text("left_column_max_ratio"));
+
+                    ui.add_space(10.0);
+
+                    ui.horizontal(|ui| {
+                        if ui.button("Save Preferences").clicked() {
+                            // Toggle a local flag, we'll save outside the closure to avoid borrows on self here.
+                            prefs_save_clicked = true;
+                        }
+
+                        if ui.button("Close").clicked() {
+                            // Toggle a local flag instead of mutating the show flag directly.
+                            prefs_close_clicked = true;
+                        }
+                    });
+
+                    ui.add_space(6.0);
+                    ui.separator();
+                    ui.label("Inspector min width will be respected by editors that use TwoColumnLayout. Left column ratio is a conservative clamp to avoid list panel clipping the detail/inspector panel.");
+                });
+        }
+
+        // Persist any actions that happened in the preferences UI.
+        if prefs_save_clicked {
+            match self.tool_config.save() {
+                Ok(_) => {
+                    self.status_message = "Preferences saved".to_string();
+                }
+                Err(e) => {
+                    self.status_message = format!("Failed to save preferences: {}", e);
+                }
+            }
+        }
+
+        if prefs_close_clicked {
+            show_preferences_local = false;
+        }
+
+        // Finally, update the app state.
+        self.show_preferences = show_preferences_local;
         // About dialog
         if self.show_about_dialog {
             egui::Window::new("About Antares Campaign Builder")
@@ -3076,102 +3306,97 @@ impl CampaignBuilderApp {
         // Calculate summary using the validation module
         let summary = validation::ValidationSummary::from_results(&self.validation_errors);
 
-        if self.validation_errors.is_empty() {
-            ui.vertical_centered(|ui| {
-                ui.add_space(50.0);
-                ui.heading("✅ All Checks Passed!");
-                ui.label("Your campaign configuration is valid.");
-                ui.add_space(20.0);
-                ui.label("You can now:");
-                ui.label("• Save your campaign");
-                ui.label("• Add data (items, spells, monsters)");
-                ui.label("• Create maps");
-                ui.label("• Test play your campaign");
-            });
-        } else {
-            // Summary counts at the top
-            ui.horizontal(|ui| {
-                if summary.error_count > 0 {
-                    ui.colored_label(
-                        validation::ValidationSeverity::Error.color(),
-                        format!("❌ {} Error(s)", summary.error_count),
-                    );
-                }
-                if summary.warning_count > 0 {
-                    ui.colored_label(
-                        validation::ValidationSeverity::Warning.color(),
-                        format!("⚠️ {} Warning(s)", summary.warning_count),
-                    );
-                }
-                if summary.info_count > 0 {
-                    ui.colored_label(
-                        validation::ValidationSeverity::Info.color(),
-                        format!("ℹ️ {} Info", summary.info_count),
-                    );
-                }
-                if summary.passed_count > 0 {
-                    ui.colored_label(
-                        validation::ValidationSeverity::Passed.color(),
-                        format!("✅ {} Passed", summary.passed_count),
-                    );
-                }
-            });
+        // Always show summary counts at the top
+        ui.horizontal(|ui| {
+            if summary.error_count > 0 {
+                ui.colored_label(
+                    validation::ValidationSeverity::Error.color(),
+                    format!("❌ {} Error(s)", summary.error_count),
+                );
+            }
+            if summary.warning_count > 0 {
+                ui.colored_label(
+                    validation::ValidationSeverity::Warning.color(),
+                    format!("⚠️ {} Warning(s)", summary.warning_count),
+                );
+            }
+            if summary.info_count > 0 {
+                ui.colored_label(
+                    validation::ValidationSeverity::Info.color(),
+                    format!("ℹ️ {} Info", summary.info_count),
+                );
+            }
+            if summary.passed_count > 0 {
+                ui.colored_label(
+                    validation::ValidationSeverity::Passed.color(),
+                    format!("✅ {} Passed", summary.passed_count),
+                );
+            }
+            // Show "All Passed" indicator when no errors or warnings
+            if summary.error_count == 0 && summary.warning_count == 0 {
+                ui.label("  ");
+                ui.colored_label(
+                    egui::Color32::from_rgb(80, 200, 80),
+                    "✅ All checks passed!",
+                );
+            }
+        });
 
-            ui.separator();
+        ui.separator();
 
-            // Group results by category and display in table format
-            let grouped = validation::group_results_by_category(&self.validation_errors);
+        // Always show category breakdown - group results by category and display in table format
+        let grouped = validation::group_results_by_category(&self.validation_errors);
 
-            egui::ScrollArea::vertical()
-                .id_salt("validation_panel_scroll")
-                .show(ui, |ui| {
-                    for (category, results) in grouped {
-                        // Category header with icon
-                        ui.horizontal(|ui| {
-                            ui.label(category.icon());
-                            ui.heading(category.display_name());
-                            ui.label(format!("({})", results.len()));
+        egui::ScrollArea::vertical()
+            .id_salt("validation_panel_scroll")
+            .show(ui, |ui| {
+                for (category, results) in grouped {
+                    // Category header with icon
+                    ui.horizontal(|ui| {
+                        ui.label(category.icon());
+                        ui.heading(category.display_name());
+                        ui.label(format!("({})", results.len()));
+                    });
+
+                    // Table-like display for results in this category
+                    egui::Grid::new(format!("validation_grid_{:?}", category))
+                        .num_columns(3)
+                        .spacing([10.0, 4.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            // Header row
+                            ui.label(egui::RichText::new("Status").strong());
+                            ui.label(egui::RichText::new("Message").strong());
+                            ui.label(egui::RichText::new("File").strong());
+                            ui.end_row();
+
+                            // Result rows
+                            for result in results {
+                                // Status icon with color
+                                ui.colored_label(result.severity.color(), result.severity.icon());
+
+                                // Message
+                                ui.label(&result.message);
+
+                                // File path (if any)
+                                if let Some(ref path) = result.file_path {
+                                    ui.label(path.display().to_string());
+                                } else {
+                                    ui.label("-");
+                                }
+                                ui.end_row();
+                            }
                         });
 
-                        // Table-like display for results in this category
-                        egui::Grid::new(format!("validation_grid_{:?}", category))
-                            .num_columns(3)
-                            .spacing([10.0, 4.0])
-                            .striped(true)
-                            .show(ui, |ui| {
-                                // Header row
-                                ui.label(egui::RichText::new("Status").strong());
-                                ui.label(egui::RichText::new("Message").strong());
-                                ui.label(egui::RichText::new("File").strong());
-                                ui.end_row();
+                    ui.add_space(10.0);
+                }
+            });
 
-                                // Result rows
-                                for result in results {
-                                    // Status icon with color
-                                    ui.colored_label(
-                                        result.severity.color(),
-                                        result.severity.icon(),
-                                    );
-
-                                    // Message
-                                    ui.label(&result.message);
-
-                                    // File path (if any)
-                                    if let Some(ref path) = result.file_path {
-                                        ui.label(path.display().to_string());
-                                    } else {
-                                        ui.label("-");
-                                    }
-                                    ui.end_row();
-                                }
-                            });
-
-                        ui.add_space(10.0);
-                    }
-                });
-
-            ui.separator();
+        ui.separator();
+        if summary.error_count > 0 || summary.warning_count > 0 {
             ui.label("💡 Tip: Fix errors in the Metadata and Config tabs");
+        } else {
+            ui.label("💡 Tip: Run validation after making changes to verify your campaign");
         }
     }
 
@@ -3262,6 +3487,8 @@ impl CampaignBuilderApp {
                         &self.maps,
                         &self.classes_editor_state.classes,
                     );
+                    // Mark successfully loaded data files as referenced
+                    manager.mark_data_files_as_referenced();
                     self.status_message = "Asset references scanned".to_string();
                 }
             });

@@ -744,6 +744,10 @@ impl MonstersEditorState {
                 ui.separator();
 
                 ui.horizontal(|ui| {
+                    if ui.button("⬅ Back to List").clicked() {
+                        self.mode = MonstersEditorMode::List;
+                    }
+
                     if ui.button("💾 Save").clicked() {
                         if is_add {
                             monsters.push(self.edit_buffer.clone());

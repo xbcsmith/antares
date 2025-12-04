@@ -718,6 +718,10 @@ impl SpellsEditorState {
                 ui.separator();
 
                 ui.horizontal(|ui| {
+                    if ui.button("⬅ Back to List").clicked() {
+                        self.mode = SpellsEditorMode::List;
+                    }
+
                     if ui.button("💾 Save").clicked() {
                         if is_add {
                             spells.push(self.edit_buffer.clone());

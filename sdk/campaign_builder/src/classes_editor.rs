@@ -833,6 +833,10 @@ impl ClassesEditorState {
                 ui.add_space(20.0);
 
                 ui.horizontal(|ui| {
+                    if ui.button("⬅ Back to List").clicked() {
+                        self.cancel_edit();
+                    }
+
                     if ui.button("✅ Save").clicked() {
                         if let Err(e) = self.save_class() {
                             eprintln!("Error saving class: {}", e);

@@ -743,6 +743,36 @@ impl AssetManager {
         }
     }
 
+    /// Marks all successfully loaded data files as referenced in the assets list.
+    ///
+    /// This should be called after data files are loaded to ensure they show
+    /// as "In Use" in the Assets panel rather than "Unused".
+    ///
+    /// Data files that are tracked and have status `Loaded` will have their
+    /// corresponding asset entry (if present) marked as referenced.
+    pub fn mark_data_files_as_referenced(&mut self) {
+        // Collect paths of loaded data files
+        let loaded_paths: Vec<PathBuf> = self
+            .data_files
+            .iter()
+            .filter(|f| f.status == DataFileStatus::Loaded)
+            .map(|f| f.path.clone())
+            .collect();
+
+        // Mark each loaded data file as referenced in the assets map
+        for path in loaded_paths {
+            if let Some(asset) = self.assets.get_mut(&path) {
+                asset.is_referenced = true;
+            }
+        }
+
+        // Also mark campaign.ron as referenced if present
+        let campaign_path = PathBuf::from("campaign.ron");
+        if let Some(asset) = self.assets.get_mut(&campaign_path) {
+            asset.is_referenced = true;
+        }
+    }
+
     /// Gets asset count
     pub fn asset_count(&self) -> usize {
         self.assets.len()
@@ -1470,6 +1500,45 @@ mod tests {
             name: "Save the Kingdom".to_string(),
         };
         assert_eq!(quest_ref.category(), "Quest");
+    }
+
+    #[test]
+    fn test_mark_data_files_as_referenced_marks_assets() {
+        // Prepare a temporary campaign directory
+        let tmp_dir = std::env::temp_dir().join("test_asset_manager_mark_referenced");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let mut manager = AssetManager::new(tmp_dir.clone());
+        manager.init_data_files(
+            "data/items.ron",
+            "data/spells.ron",
+            "data/monsters.ron",
+            "data/classes.ron",
+            "data/races.ron",
+            "data/quests.ron",
+            "data/dialogues.ron",
+            Some("data/conditions.ron"),
+        );
+
+        // Insert an Asset whose path matches one of the tracked data files
+        let data_path = PathBuf::from("data/items.ron");
+        let asset = Asset::new(data_path.clone());
+        manager.assets.insert(data_path.clone(), asset);
+
+        // Initially it should not be referenced
+        assert!(!manager.assets.get(&data_path).unwrap().is_referenced);
+
+        // Mark the data file as loaded
+        manager.mark_data_file_loaded("data/items.ron", 10);
+
+        // Call the method that should mark data files as referenced
+        manager.mark_data_files_as_referenced();
+
+        // Now the asset should be marked as referenced
+        assert!(manager.assets.get(&data_path).unwrap().is_referenced);
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 
     #[test]

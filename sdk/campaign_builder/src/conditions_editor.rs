@@ -1335,6 +1335,10 @@ impl ConditionsEditorState {
             ui.separator();
 
             ui.horizontal(|ui| {
+                if ui.button("⬅ Back to List").clicked() {
+                    should_cancel = true;
+                }
+
                 if ui.button("💾 Save").clicked() {
                     should_save = true;
                 }
