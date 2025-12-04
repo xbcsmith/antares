@@ -3,7 +3,10 @@
 
 //! Integration tests for ContentDatabase loading and validation
 
+use antares::domain::dialogue::DialogueTree;
+use antares::domain::quest::Quest;
 use antares::sdk::database::ContentDatabase;
+use std::fs;
 use std::path::Path;
 
 #[test]
@@ -39,11 +42,53 @@ fn test_load_full_campaign() {
     assert!(stats.quest_count > 0, "Should have quests");
     assert!(stats.dialogue_count > 0, "Should have dialogues");
 
-    // Verify specific counts based on known tutorial content
-    // Note: These numbers might change if tutorial content is updated,
-    // but they should match what we saw in the files (4 quests, 1 dialogue)
-    assert_eq!(stats.quest_count, 4, "Should have 4 quests");
-    assert_eq!(stats.dialogue_count, 1, "Should have 1 dialogue");
+    // Verify specific counts based on actual data files in the tutorial campaign.
+    // Instead of asserting hard-coded values, parse the RON data files and
+    // assert the database counts match the file counts. This makes the test
+    // robust against content updates in the tutorial campaign.
+    let data_dir = campaign_dir.join("data");
+
+    // Quests: compare DB count to file count if quests.ron exists
+    let quests_path = data_dir.join("quests.ron");
+    if quests_path.exists() {
+        let quests_contents = fs::read_to_string(&quests_path).expect("Failed to read quests.ron");
+        let quests_file: Vec<Quest> =
+            ron::from_str(&quests_contents).expect("Failed to parse quests.ron");
+        assert_eq!(
+            stats.quest_count,
+            quests_file.len(),
+            "Database quest count ({}) should match quests.ron file count ({})",
+            stats.quest_count,
+            quests_file.len()
+        );
+    } else {
+        // If the file is missing, we expect the DB to be empty for that type
+        assert_eq!(
+            stats.quest_count, 0,
+            "No quests.ron file found and DB should have no quests"
+        );
+    }
+
+    // Dialogues: compare DB count to file count if dialogues.ron exists
+    let dialogues_path = data_dir.join("dialogues.ron");
+    if dialogues_path.exists() {
+        let dialogues_contents =
+            fs::read_to_string(&dialogues_path).expect("Failed to read dialogues.ron");
+        let dialogues_file: Vec<DialogueTree> =
+            ron::from_str(&dialogues_contents).expect("Failed to parse dialogues.ron");
+        assert_eq!(
+            stats.dialogue_count,
+            dialogues_file.len(),
+            "Database dialogue count ({}) should match dialogues.ron file count ({})",
+            stats.dialogue_count,
+            dialogues_file.len()
+        );
+    } else {
+        assert_eq!(
+            stats.dialogue_count, 0,
+            "No dialogues.ron file found and DB should have no dialogues"
+        );
+    }
 
     // Validate the loaded content
     // Note: We expect validation to pass for the tutorial campaign

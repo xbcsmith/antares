@@ -22,6 +22,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -40,6 +41,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -58,6 +60,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -76,6 +79,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -94,6 +98,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -112,6 +117,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -130,6 +136,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     // ===== Magical Weapons =====
@@ -150,6 +157,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -171,6 +179,7 @@
         spell_effect: Some(260), // 0x0104 = Sorcerer L1 #4
         max_charges: 30,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -195,6 +204,7 @@
         spell_effect: None,
         max_charges: 10,
         is_cursed: false,
+        icon_path: None,
     ),
 
     // ===== Basic Armor =====
@@ -214,6 +224,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -231,6 +242,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -248,6 +260,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     // ===== Magical Armor =====
@@ -270,6 +283,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -290,6 +304,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     // ===== Accessories =====
@@ -311,6 +326,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -330,6 +346,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -349,6 +366,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     // ===== Consumables =====
@@ -368,6 +386,7 @@
         spell_effect: None,
         max_charges: 1,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -385,6 +404,7 @@
         spell_effect: None,
         max_charges: 1,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -402,6 +422,7 @@
         spell_effect: None,
         max_charges: 1,
         is_cursed: false,
+        icon_path: None,
     ),
 
     // ===== Ammunition =====
@@ -421,6 +442,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     (
@@ -438,6 +460,7 @@
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
+        icon_path: None,
     ),
 
     // ===== Quest Items =====
@@ -460,6 +483,7 @@
         spell_effect: Some(257), // 0x0101 = Cleric L1 #1
         max_charges: 200,
         is_cursed: false,
+        icon_path: None,
     ),
 
     // ===== Cursed Items =====
@@ -480,5 +504,6 @@
         spell_effect: Some(261), // 0x0105 = Cleric L1 #5
         max_charges: 10,
         is_cursed: true,
+        icon_path: None,
     ),
 ]

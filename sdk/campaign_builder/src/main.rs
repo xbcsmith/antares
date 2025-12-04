@@ -27,6 +27,7 @@ mod classes_editor;
 mod conditions_editor;
 mod dialogue_editor;
 mod items_editor;
+mod logging;
 mod map_editor;
 mod monsters_editor;
 mod packager;
@@ -34,8 +35,13 @@ mod quest_editor;
 mod spells_editor;
 mod templates;
 mod test_play;
+mod test_utils;
 mod ui_helpers;
 mod undo_redo;
+mod validation;
+
+use antares::sdk::tool_config::ToolConfig;
+use logging::{category, LogLevel, Logger};
 
 use antares::domain::character::Stats;
 use antares::domain::combat::database::MonsterDefinition;
@@ -56,7 +62,7 @@ use conditions_editor::ConditionsEditorState;
 use dialogue_editor::DialogueEditorState;
 use eframe::egui;
 use items_editor::ItemsEditorState;
-use map_editor::{MapEditorState, MapEditorWidget};
+use map_editor::MapsEditorState;
 use monsters_editor::MonstersEditorState;
 use quest_editor::QuestEditorState;
 use serde::{Deserialize, Serialize};
@@ -66,6 +72,21 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 fn main() -> Result<(), eframe::Error> {
+    // Initialize logger from command-line arguments
+    let logger = Logger::from_args();
+    let log_level = logger.level();
+
+    // Print startup message based on log level
+    if log_level >= LogLevel::Info {
+        eprintln!(
+            "[INFO] Antares Campaign Builder starting (log level: {})",
+            log_level
+        );
+    }
+    if log_level >= LogLevel::Verbose {
+        eprintln!("[VERBOSE] Verbose logging enabled - showing detailed trace information");
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 720.0])
@@ -79,7 +100,21 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "Antares Campaign Builder",
         options,
-        Box::new(|_cc| Ok(Box::<CampaignBuilderApp>::default())),
+        Box::new(move |_cc| {
+            let mut app = CampaignBuilderApp {
+                logger: logger.clone(),
+                ..Default::default()
+            };
+
+            // Load persisted ToolConfig if available; otherwise fall back to defaults.
+            // This makes display/editor preferences persistent across sessions.
+            if let Ok(cfg) = ToolConfig::load_or_default() {
+                app.tool_config = cfg;
+            }
+
+            app.logger.info(category::APP, "Application initialized");
+            Ok(Box::new(app))
+        }),
     )
 }
 
@@ -226,27 +261,8 @@ impl EditorTab {
     }
 }
 
-/// Validation error with severity
-#[derive(Debug, Clone)]
-struct ValidationError {
-    severity: Severity,
-    message: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Severity {
-    Error,
-    Warning,
-}
-
-impl Severity {
-    fn icon(&self) -> &str {
-        match self {
-            Severity::Error => "❌",
-            Severity::Warning => "⚠️",
-        }
-    }
-}
+// NOTE: ValidationError and Severity types have been replaced by the validation module.
+// Use validation::ValidationResult and validation::ValidationSeverity instead.
 
 /// Item type filter for search
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -318,7 +334,7 @@ struct CampaignBuilderApp {
     campaign_dir: Option<PathBuf>,
     status_message: String,
     unsaved_changes: bool,
-    validation_errors: Vec<ValidationError>,
+    validation_errors: Vec<validation::ValidationResult>,
     show_about_dialog: bool,
     show_unsaved_warning: bool,
     pending_action: Option<PendingAction>,
@@ -339,10 +355,7 @@ struct CampaignBuilderApp {
 
     // Map editor state
     maps: Vec<Map>,
-    maps_search: String,
-    maps_selected: Option<usize>,
-    maps_editor_mode: EditorMode,
-    map_editor_state: Option<MapEditorState>,
+    maps_editor_state: MapsEditorState,
 
     // Quest editor state
     quests: Vec<Quest>,
@@ -356,10 +369,6 @@ struct CampaignBuilderApp {
     // Dialogue editor state
     dialogues: Vec<DialogueTree>,
     dialogue_editor_state: DialogueEditorState,
-    dialogues_search_filter: String,
-    dialogues_show_preview: bool,
-    dialogues_import_buffer: String,
-    dialogues_show_import_dialog: bool,
 
     // Classes editor state
     classes_editor_state: classes_editor::ClassesEditorState,
@@ -385,6 +394,14 @@ struct CampaignBuilderApp {
 
     // File I/O pattern state
     file_load_merge_mode: bool,
+
+    // Phase 7: Logging and developer experience
+    logger: Logger,
+    tool_config: ToolConfig,
+    show_preferences: bool,
+    show_debug_panel: bool,
+    debug_panel_filter_level: LogLevel,
+    debug_panel_auto_scroll: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -431,10 +448,7 @@ impl Default for CampaignBuilderApp {
             conditions_editor_state: ConditionsEditorState::new(),
 
             maps: Vec::new(),
-            maps_search: String::new(),
-            maps_selected: None,
-            maps_editor_mode: EditorMode::List,
-            map_editor_state: None,
+            maps_editor_state: MapsEditorState::new(),
 
             quests: Vec::new(),
             quest_editor_state: QuestEditorState::default(),
@@ -445,10 +459,6 @@ impl Default for CampaignBuilderApp {
 
             dialogues: Vec::new(),
             dialogue_editor_state: DialogueEditorState::default(),
-            dialogues_search_filter: String::new(),
-            dialogues_show_preview: false,
-            dialogues_import_buffer: String::new(),
-            dialogues_show_import_dialog: false,
 
             classes_editor_state: classes_editor::ClassesEditorState::default(),
 
@@ -472,6 +482,14 @@ impl Default for CampaignBuilderApp {
             show_balance_stats: false,
 
             file_load_merge_mode: true, // Default to merge mode
+
+            // Phase 7: Logging and developer experience
+            logger: Logger::default(),
+            tool_config: ToolConfig::default(),
+            show_preferences: false,
+            show_debug_panel: false,
+            debug_panel_filter_level: LogLevel::Info,
+            debug_panel_auto_scroll: true,
         }
     }
 }
@@ -557,16 +575,16 @@ impl CampaignBuilderApp {
     /// Validate item IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    fn validate_item_ids(&self) -> Vec<ValidationError> {
+    fn validate_item_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
         for item in &self.items {
             if !seen_ids.insert(item.id) {
-                errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("Duplicate item ID: {}", item.id),
-                });
+                errors.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Items,
+                    format!("Duplicate item ID: {}", item.id),
+                ));
             }
         }
         errors
@@ -575,16 +593,16 @@ impl CampaignBuilderApp {
     /// Validate spell IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    fn validate_spell_ids(&self) -> Vec<ValidationError> {
+    fn validate_spell_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
         for spell in &self.spells {
             if !seen_ids.insert(spell.id) {
-                errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("Duplicate spell ID: {}", spell.id),
-                });
+                errors.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Spells,
+                    format!("Duplicate spell ID: {}", spell.id),
+                ));
             }
         }
         errors
@@ -593,16 +611,16 @@ impl CampaignBuilderApp {
     /// Validate monster IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    fn validate_monster_ids(&self) -> Vec<ValidationError> {
+    fn validate_monster_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
         for monster in &self.monsters {
             if !seen_ids.insert(monster.id) {
-                errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("Duplicate monster ID: {}", monster.id),
-                });
+                errors.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Monsters,
+                    format!("Duplicate monster ID: {}", monster.id),
+                ));
             }
         }
         errors
@@ -611,16 +629,16 @@ impl CampaignBuilderApp {
     /// Validate map IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    fn validate_map_ids(&self) -> Vec<ValidationError> {
+    fn validate_map_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
         for map in &self.maps {
             if !seen_ids.insert(map.id) {
-                errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("Duplicate map ID: {}", map.id),
-                });
+                errors.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Maps,
+                    format!("Duplicate map ID: {}", map.id),
+                ));
             }
         }
         errors
@@ -629,19 +647,144 @@ impl CampaignBuilderApp {
     /// Validate condition IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    fn validate_condition_ids(&self) -> Vec<ValidationError> {
+    fn validate_condition_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
         for cond in &self.conditions {
             if !seen_ids.insert(cond.id.clone()) {
-                errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("Duplicate condition ID: {}", cond.id),
-                });
+                errors.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Conditions,
+                    format!("Duplicate condition ID: {}", cond.id),
+                ));
             }
         }
         errors
+    }
+
+    /// Generate category status checks (passed or no data info messages)
+    ///
+    /// This function checks each data category and adds:
+    /// - ✅ Passed check if data exists and has no errors
+    /// - ℹ️ Info message if no data is loaded for the category
+    fn generate_category_status_checks(&self) -> Vec<validation::ValidationResult> {
+        let mut results = Vec::new();
+
+        // Items category
+        if self.items.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Items,
+                "No items loaded - add items or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Items,
+                format!("{} items validated", self.items.len()),
+            ));
+        }
+
+        // Spells category
+        if self.spells.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Spells,
+                "No spells loaded - add spells or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Spells,
+                format!("{} spells validated", self.spells.len()),
+            ));
+        }
+
+        // Monsters category
+        if self.monsters.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Monsters,
+                "No monsters loaded - add monsters or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Monsters,
+                format!("{} monsters validated", self.monsters.len()),
+            ));
+        }
+
+        // Maps category
+        if self.maps.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Maps,
+                "No maps loaded - create maps in the Maps editor",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Maps,
+                format!("{} maps validated", self.maps.len()),
+            ));
+        }
+
+        // Conditions category
+        if self.conditions.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Conditions,
+                "No conditions loaded - add conditions or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Conditions,
+                format!("{} conditions validated", self.conditions.len()),
+            ));
+        }
+
+        // Quests category
+        if self.quests.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Quests,
+                "No quests loaded - add quests or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Quests,
+                format!("{} quests validated", self.quests.len()),
+            ));
+        }
+
+        // Dialogues category
+        if self.dialogues.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Dialogues,
+                "No dialogues loaded - add dialogues or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Dialogues,
+                format!("{} dialogues validated", self.dialogues.len()),
+            ));
+        }
+
+        // Classes category
+        if self.classes_editor_state.classes.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Classes,
+                "No classes loaded - add classes or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Classes,
+                format!(
+                    "{} classes validated",
+                    self.classes_editor_state.classes.len()
+                ),
+            ));
+        }
+
+        // Races category - races are configured via file path but not loaded into app state
+        // Show info message indicating races are managed via external file
+        results.push(validation::ValidationResult::info(
+            validation::ValidationCategory::Races,
+            "Races configured via races_file - use Race Editor CLI to manage",
+        ));
+
+        results
     }
 
     /// Get next available item ID
@@ -706,49 +849,109 @@ impl CampaignBuilderApp {
 
     /// Load items from RON file
     fn load_items(&mut self) {
-        eprintln!("DEBUG: load_items() called");
+        self.logger.debug(category::FILE_IO, "load_items() called");
+        let items_file = self.campaign.items_file.clone();
         if let Some(ref dir) = self.campaign_dir {
-            let items_path = dir.join(&self.campaign.items_file);
+            let items_path = dir.join(&items_file);
+            self.logger.verbose(
+                category::FILE_IO,
+                &format!("Loading items from: {}", items_path.display()),
+            );
             if items_path.exists() {
                 match fs::read_to_string(&items_path) {
-                    Ok(contents) => match ron::from_str::<Vec<Item>>(&contents) {
-                        Ok(items) => {
-                            self.items = items;
+                    Ok(contents) => {
+                        self.logger.verbose(
+                            category::FILE_IO,
+                            &format!("Read {} bytes from items file", contents.len()),
+                        );
+                        match ron::from_str::<Vec<Item>>(&contents) {
+                            Ok(items) => {
+                                let count = items.len();
+                                self.items = items;
 
-                            // Validate IDs after loading
-                            let id_errors = self.validate_item_ids();
-                            if !id_errors.is_empty() {
-                                self.validation_errors.extend(id_errors.clone());
-                                self.status_message = format!(
-                                    "⚠️ Loaded {} items with {} ID conflicts",
-                                    self.items.len(),
-                                    id_errors.len()
+                                // Mark data file as loaded in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager.mark_data_file_loaded(&items_file, count);
+                                }
+
+                                // Validate IDs after loading
+                                let id_errors = self.validate_item_ids();
+                                if !id_errors.is_empty() {
+                                    self.validation_errors.extend(id_errors.clone());
+                                    self.logger.warn(
+                                        category::DATA,
+                                        &format!(
+                                            "Loaded {} items with {} ID conflicts",
+                                            self.items.len(),
+                                            id_errors.len()
+                                        ),
+                                    );
+                                    self.status_message = format!(
+                                        "⚠️ Loaded {} items with {} ID conflicts",
+                                        self.items.len(),
+                                        id_errors.len()
+                                    );
+                                } else {
+                                    self.logger.info(
+                                        category::FILE_IO,
+                                        &format!("Loaded {} items", self.items.len()),
+                                    );
+                                    self.status_message =
+                                        format!("Loaded {} items", self.items.len());
+                                }
+                            }
+                            Err(e) => {
+                                // Mark data file as error in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager.mark_data_file_error(&items_file, &e.to_string());
+                                }
+                                self.logger.error(
+                                    category::FILE_IO,
+                                    &format!("Failed to parse items: {}", e),
                                 );
-                            } else {
-                                self.status_message = format!("Loaded {} items", self.items.len());
+                                self.status_message = format!("Failed to parse items: {}", e);
                             }
                         }
-                        Err(e) => {
-                            self.status_message = format!("Failed to parse items: {}", e);
-                        }
-                    },
+                    }
                     Err(e) => {
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(&items_file, &e.to_string());
+                        }
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!("Failed to read items file: {}", e),
+                        );
                         self.status_message = format!("Failed to read items file: {}", e);
-                        eprintln!("Failed to read items file {:?}: {}", items_path, e);
                     }
                 }
             } else {
-                eprintln!("Items file does not exist: {:?}", items_path);
+                self.logger.warn(
+                    category::FILE_IO,
+                    &format!("Items file does not exist: {}", items_path.display()),
+                );
             }
         } else {
-            eprintln!("No campaign directory set when trying to load items");
+            self.logger.warn(
+                category::FILE_IO,
+                "No campaign directory set when trying to load items",
+            );
         }
     }
 
     /// Save items to RON file
     fn save_items(&mut self) -> Result<(), String> {
+        self.logger.debug(category::FILE_IO, "save_items() called");
         if let Some(ref dir) = self.campaign_dir {
             let items_path = dir.join(&self.campaign.items_file);
+            self.logger.verbose(
+                category::FILE_IO,
+                &format!(
+                    "Saving {} items to: {}",
+                    self.items.len(),
+                    items_path.display()
+                ),
+            );
 
             // Create items directory if it doesn't exist
             if let Some(parent) = items_path.parent() {
@@ -763,25 +966,44 @@ impl CampaignBuilderApp {
             let contents = ron::ser::to_string_pretty(&self.items, ron_config)
                 .map_err(|e| format!("Failed to serialize items: {}", e))?;
 
-            fs::write(&items_path, contents)
+            fs::write(&items_path, &contents)
                 .map_err(|e| format!("Failed to write items file: {}", e))?;
 
+            self.logger.info(
+                category::FILE_IO,
+                &format!(
+                    "Saved {} items ({} bytes)",
+                    self.items.len(),
+                    contents.len()
+                ),
+            );
             self.unsaved_changes = true;
             Ok(())
         } else {
+            self.logger.error(
+                category::FILE_IO,
+                "No campaign directory set when trying to save items",
+            );
             Err("No campaign directory set".to_string())
         }
     }
 
     /// Load spells from RON file
     fn load_spells(&mut self) {
+        let spells_file = self.campaign.spells_file.clone();
         if let Some(ref dir) = self.campaign_dir {
-            let spells_path = dir.join(&self.campaign.spells_file);
+            let spells_path = dir.join(&spells_file);
             if spells_path.exists() {
                 match fs::read_to_string(&spells_path) {
                     Ok(contents) => match ron::from_str::<Vec<Spell>>(&contents) {
                         Ok(spells) => {
+                            let count = spells.len();
                             self.spells = spells;
+
+                            // Mark data file as loaded in asset manager
+                            if let Some(ref mut manager) = self.asset_manager {
+                                manager.mark_data_file_loaded(&spells_file, count);
+                            }
 
                             // Validate IDs after loading
                             let id_errors = self.validate_spell_ids();
@@ -798,20 +1020,23 @@ impl CampaignBuilderApp {
                             }
                         }
                         Err(e) => {
+                            // Mark data file as error in asset manager
+                            if let Some(ref mut manager) = self.asset_manager {
+                                manager.mark_data_file_error(&spells_file, &e.to_string());
+                            }
                             self.status_message = format!("Failed to parse spells: {}", e);
-                            eprintln!("Failed to parse spells from {:?}: {}", spells_path, e);
                         }
                     },
                     Err(e) => {
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(&spells_file, &e.to_string());
+                        }
                         self.status_message = format!("Failed to read spells file: {}", e);
                         eprintln!("Failed to read spells file {:?}: {}", spells_path, e);
                     }
                 }
-            } else {
-                eprintln!("Spells file does not exist: {:?}", spells_path);
             }
-        } else {
-            eprintln!("No campaign directory set when trying to load spells");
         }
     }
 
@@ -919,15 +1144,51 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Save dialogues to a file path
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to save dialogues to
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if save was successful
+    fn save_dialogues_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+        // Create directory if it doesn't exist
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create dialogues directory: {}", e))?;
+        }
+
+        let ron_config = ron::ser::PrettyConfig::new()
+            .struct_names(false)
+            .enumerate_arrays(false);
+
+        let contents = ron::ser::to_string_pretty(&self.dialogues, ron_config)
+            .map_err(|e| format!("Failed to serialize dialogues: {}", e))?;
+
+        std::fs::write(path, contents)
+            .map_err(|e| format!("Failed to write dialogues file: {}", e))?;
+
+        Ok(())
+    }
+
     /// Load monsters from RON file
     fn load_monsters(&mut self) {
+        let monsters_file = self.campaign.monsters_file.clone();
         if let Some(ref dir) = self.campaign_dir {
-            let monsters_path = dir.join(&self.campaign.monsters_file);
+            let monsters_path = dir.join(&monsters_file);
             if monsters_path.exists() {
                 match fs::read_to_string(&monsters_path) {
                     Ok(contents) => match ron::from_str::<Vec<MonsterDefinition>>(&contents) {
                         Ok(monsters) => {
+                            let count = monsters.len();
                             self.monsters = monsters;
+
+                            // Mark data file as loaded in asset manager
+                            if let Some(ref mut manager) = self.asset_manager {
+                                manager.mark_data_file_loaded(&monsters_file, count);
+                            }
 
                             // Validate IDs after loading
                             let id_errors = self.validate_monster_ids();
@@ -944,11 +1205,18 @@ impl CampaignBuilderApp {
                             }
                         }
                         Err(e) => {
+                            // Mark data file as error in asset manager
+                            if let Some(ref mut manager) = self.asset_manager {
+                                manager.mark_data_file_error(&monsters_file, &e.to_string());
+                            }
                             self.status_message = format!("Failed to parse monsters: {}", e);
-                            eprintln!("Failed to parse monsters from {:?}: {}", monsters_path, e);
                         }
                     },
                     Err(e) => {
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(&monsters_file, &e.to_string());
+                        }
                         self.status_message = format!("Failed to read monsters file: {}", e);
                         eprintln!("Failed to read monsters file {:?}: {}", monsters_path, e);
                     }
@@ -1071,6 +1339,8 @@ impl CampaignBuilderApp {
 
     /// Validate the campaign metadata
     fn validate_campaign(&mut self) {
+        self.logger
+            .debug(category::VALIDATION, "validate_campaign() called");
         self.validation_errors.clear();
 
         // Validate data IDs for uniqueness
@@ -1080,84 +1350,97 @@ impl CampaignBuilderApp {
         self.validation_errors.extend(self.validate_map_ids());
         self.validation_errors.extend(self.validate_condition_ids());
 
-        // Required fields
+        // Add category status checks (passed or no data info)
+        self.validation_errors
+            .extend(self.generate_category_status_checks());
+
+        // Required fields - Metadata category
         if self.campaign.id.is_empty() {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Campaign ID is required".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Metadata,
+                    "Campaign ID is required",
+                ));
         } else if !self
             .campaign
             .id
             .chars()
             .all(|c| c.is_alphanumeric() || c == '_')
         {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Campaign ID must contain only alphanumeric characters and underscores"
-                    .to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Metadata,
+                    "Campaign ID must contain only alphanumeric characters and underscores",
+                ));
         }
 
         if self.campaign.name.is_empty() {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Campaign name is required".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Metadata,
+                    "Campaign name is required",
+                ));
         }
 
         if self.campaign.author.is_empty() {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Warning,
-                message: "Author name is recommended".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Metadata,
+                    "Author name is recommended",
+                ));
         }
 
-        // Version validation
+        // Version validation - Metadata category
         if !self.campaign.version.contains('.') {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Version should follow semantic versioning (e.g., 1.0.0)".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Metadata,
+                    "Version should follow semantic versioning (e.g., 1.0.0)",
+                ));
         }
 
-        // Engine version validation
+        // Engine version validation - Metadata category
         if !self.campaign.engine_version.contains('.') {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Warning,
-                message: "Engine version should follow semantic versioning".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Metadata,
+                    "Engine version should follow semantic versioning",
+                ));
         }
 
         // Configuration validation
         if self.campaign.starting_map.is_empty() {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Starting map is required".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Configuration,
+                    "Starting map is required",
+                ));
         }
 
         if self.campaign.max_party_size == 0 || self.campaign.max_party_size > 10 {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Warning,
-                message: "Max party size should be between 1 and 10".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Configuration,
+                    "Max party size should be between 1 and 10",
+                ));
         }
 
         if self.campaign.max_roster_size < self.campaign.max_party_size {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Max roster size must be >= max party size".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Configuration,
+                    "Max roster size must be >= max party size",
+                ));
         }
 
         if self.campaign.starting_level == 0
             || self.campaign.starting_level > self.campaign.max_level
         {
-            self.validation_errors.push(ValidationError {
-                severity: Severity::Error,
-                message: "Starting level must be between 1 and max level".to_string(),
-            });
+            self.validation_errors
+                .push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Configuration,
+                    "Starting level must be between 1 and max level",
+                ));
         }
 
         // File path validation
@@ -1171,36 +1454,51 @@ impl CampaignBuilderApp {
             ("Dialogue file", &self.campaign.dialogue_file),
         ] {
             if path.is_empty() {
-                self.validation_errors.push(ValidationError {
-                    severity: Severity::Error,
-                    message: format!("{} path is required", field),
-                });
+                self.validation_errors
+                    .push(validation::ValidationResult::error(
+                        validation::ValidationCategory::FilePaths,
+                        format!("{} path is required", field),
+                    ));
             } else if !path.ends_with(".ron") {
-                self.validation_errors.push(ValidationError {
-                    severity: Severity::Warning,
-                    message: format!("{} should use .ron extension", field),
-                });
+                self.validation_errors
+                    .push(validation::ValidationResult::warning(
+                        validation::ValidationCategory::FilePaths,
+                        format!("{} should use .ron extension", field),
+                    ));
             }
         }
 
-        // Update status
-        let error_count = self
-            .validation_errors
-            .iter()
-            .filter(|e| e.severity == Severity::Error)
-            .count();
-        let warning_count = self
-            .validation_errors
-            .iter()
-            .filter(|e| e.severity == Severity::Warning)
-            .count();
+        // Update status using ValidationSummary
+        let summary = validation::ValidationSummary::from_results(&self.validation_errors);
 
         if self.validation_errors.is_empty() {
+            self.logger
+                .info(category::VALIDATION, "Validation passed with no issues");
             self.status_message = "✅ Validation passed!".to_string();
         } else {
+            self.logger.info(
+                category::VALIDATION,
+                &format!(
+                    "Validation complete: {} error(s), {} warning(s)",
+                    summary.error_count, summary.warning_count
+                ),
+            );
+            // Log individual errors at debug level
+            for result in &self.validation_errors {
+                let level_str = match result.severity {
+                    validation::ValidationSeverity::Error => "ERROR",
+                    validation::ValidationSeverity::Warning => "WARN",
+                    validation::ValidationSeverity::Info => "INFO",
+                    validation::ValidationSeverity::Passed => "PASS",
+                };
+                self.logger.debug(
+                    category::VALIDATION,
+                    &format!("[{}] {}: {}", level_str, result.category, result.message),
+                );
+            }
             self.status_message = format!(
                 "Validation: {} error(s), {} warning(s)",
-                error_count, warning_count
+                summary.error_count, summary.warning_count
             );
         }
     }
@@ -1345,10 +1643,16 @@ impl CampaignBuilderApp {
     }
 
     fn do_open_campaign(&mut self) {
+        self.logger
+            .debug(category::FILE_IO, "do_open_campaign() called");
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("RON Files", &["ron"])
             .pick_file()
         {
+            self.logger.info(
+                category::FILE_IO,
+                &format!("Opening campaign: {}", path.display()),
+            );
             match self.load_campaign_file(&path) {
                 Ok(()) => {
                     self.campaign_path = Some(path.clone());
@@ -1357,32 +1661,60 @@ impl CampaignBuilderApp {
                     if let Some(parent) = path.parent() {
                         let parent_buf = parent.to_path_buf();
                         self.campaign_dir = Some(parent_buf.clone());
+                        self.logger.verbose(
+                            category::FILE_IO,
+                            &format!("Campaign directory: {}", parent_buf.display()),
+                        );
                         self.update_file_tree(&parent_buf);
                     }
 
                     // Load data files
-                    eprintln!("DEBUG: About to load data files...");
-                    eprintln!("DEBUG: campaign_dir = {:?}", self.campaign_dir);
+                    self.logger
+                        .debug(category::FILE_IO, "Loading data files...");
                     self.load_items();
                     self.load_spells();
                     self.load_monsters();
-                    self.load_classes();
+                    self.load_classes_from_campaign();
                     self.load_maps();
                     self.load_conditions();
 
                     // Load quests and dialogues
                     if let Err(e) = self.load_quests() {
-                        eprintln!("Warning: Failed to load quests: {}", e);
+                        self.logger
+                            .warn(category::FILE_IO, &format!("Failed to load quests: {}", e));
                     }
 
                     if let Err(e) = self.load_dialogues() {
-                        eprintln!("Warning: Failed to load dialogues: {}", e);
+                        self.logger.warn(
+                            category::FILE_IO,
+                            &format!("Failed to load dialogues: {}", e),
+                        );
+                    }
+
+                    // Scan asset references and mark loaded data files
+                    if let Some(ref mut manager) = self.asset_manager {
+                        manager.scan_references(
+                            &self.items,
+                            &self.quests,
+                            &self.dialogues,
+                            &self.maps,
+                            &self.classes_editor_state.classes,
+                        );
+                        manager.mark_data_files_as_referenced();
                     }
 
                     self.unsaved_changes = false;
+                    self.logger.info(
+                        category::FILE_IO,
+                        &format!("Campaign opened successfully: {}", self.campaign.name),
+                    );
                     self.status_message = format!("Opened campaign from: {}", path.display());
                 }
                 Err(e) => {
+                    self.logger.error(
+                        category::FILE_IO,
+                        &format!("Failed to load campaign: {}", e),
+                    );
                     self.status_message = format!("Failed to load campaign: {}", e);
                 }
             }
@@ -1658,6 +1990,196 @@ impl CampaignBuilderApp {
         self.show_validation_report = open;
     }
 
+    /// Show the debug panel window
+    ///
+    /// Displays:
+    /// - Current editor state
+    /// - Loaded data counts
+    /// - Recent log messages with filtering
+    fn show_debug_panel_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_debug_panel;
+        egui::Window::new("🐛 Debug Panel")
+            .open(&mut open)
+            .resizable(true)
+            .default_size([500.0, 400.0])
+            .show(ctx, |ui| {
+                // Current state section
+                ui.collapsing("📊 Current State", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Active Tab:");
+                        ui.strong(self.active_tab.name());
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Campaign Path:");
+                        if let Some(ref path) = self.campaign_path {
+                            ui.monospace(path.display().to_string());
+                        } else {
+                            ui.weak("(none)");
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Unsaved Changes:");
+                        if self.unsaved_changes {
+                            ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "Yes");
+                        } else {
+                            ui.label("No");
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Log Level:");
+                        ui.strong(self.logger.level().name());
+                    });
+                    let uptime = self.logger.uptime();
+                    ui.horizontal(|ui| {
+                        ui.label("Uptime:");
+                        ui.monospace(format!("{:.1}s", uptime.as_secs_f64()));
+                    });
+                });
+
+                ui.add_space(5.0);
+
+                // Data counts section
+                ui.collapsing("📦 Loaded Data", |ui| {
+                    egui::Grid::new("debug_data_counts")
+                        .num_columns(2)
+                        .spacing([20.0, 4.0])
+                        .show(ui, |ui| {
+                            ui.label("Items:");
+                            ui.strong(self.items.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Spells:");
+                            ui.strong(self.spells.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Monsters:");
+                            ui.strong(self.monsters.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Maps:");
+                            ui.strong(self.maps.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Quests:");
+                            ui.strong(self.quests.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Dialogues:");
+                            ui.strong(self.dialogues.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Conditions:");
+                            ui.strong(self.conditions.len().to_string());
+                            ui.end_row();
+
+                            ui.label("Classes:");
+                            ui.strong(self.classes_editor_state.classes.len().to_string());
+                            ui.end_row();
+                        });
+                });
+
+                ui.add_space(5.0);
+
+                // Log messages section
+                ui.collapsing("📝 Log Messages", |ui| {
+                    // Controls
+                    ui.horizontal(|ui| {
+                        ui.label("Filter:");
+                        egui::ComboBox::from_id_salt("debug_log_filter")
+                            .selected_text(self.debug_panel_filter_level.name())
+                            .show_ui(ui, |ui| {
+                                for level in [
+                                    LogLevel::Error,
+                                    LogLevel::Warn,
+                                    LogLevel::Info,
+                                    LogLevel::Debug,
+                                    LogLevel::Verbose,
+                                ] {
+                                    ui.selectable_value(
+                                        &mut self.debug_panel_filter_level,
+                                        level,
+                                        level.name(),
+                                    );
+                                }
+                            });
+
+                        ui.checkbox(&mut self.debug_panel_auto_scroll, "Auto-scroll");
+
+                        if ui.button("Clear").clicked() {
+                            self.logger.clear();
+                        }
+                    });
+
+                    // Message counts
+                    let counts = self.logger.message_counts();
+                    ui.horizontal(|ui| {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(255, 100, 100),
+                            format!("E:{}", counts.error),
+                        );
+                        ui.colored_label(
+                            egui::Color32::from_rgb(255, 200, 100),
+                            format!("W:{}", counts.warn),
+                        );
+                        ui.colored_label(
+                            egui::Color32::from_rgb(200, 200, 200),
+                            format!("I:{}", counts.info),
+                        );
+                        ui.colored_label(
+                            egui::Color32::from_rgb(150, 200, 255),
+                            format!("D:{}", counts.debug),
+                        );
+                        ui.colored_label(
+                            egui::Color32::from_rgb(150, 150, 150),
+                            format!("V:{}", counts.verbose),
+                        );
+                        ui.label(format!("Total: {}", counts.total()));
+                    });
+
+                    ui.separator();
+
+                    // Log messages list
+                    let scroll_area = egui::ScrollArea::vertical()
+                        .max_height(200.0)
+                        .auto_shrink([false, false]);
+
+                    scroll_area.show(ui, |ui| {
+                        let filter_level = self.debug_panel_filter_level;
+                        for msg in self.logger.messages_at_level(filter_level) {
+                            let color = msg.level.color();
+                            ui.horizontal(|ui| {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(color[0], color[1], color[2]),
+                                    format!("[{}]", msg.level.prefix()),
+                                );
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(150, 150, 200),
+                                    format!("[{}]", msg.category),
+                                );
+                                ui.label(&msg.message);
+                            });
+                        }
+
+                        // Auto-scroll to bottom
+                        if self.debug_panel_auto_scroll {
+                            ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
+                        }
+                    });
+                });
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Press F12 to toggle this panel");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Close").clicked() {
+                            self.show_debug_panel = false;
+                        }
+                    });
+                });
+            });
+        self.show_debug_panel = open;
+    }
+
     /// Show balance statistics dialog
     fn show_balance_stats_dialog(&mut self, ctx: &egui::Context) {
         let mut open = self.show_balance_stats;
@@ -1780,6 +2302,53 @@ impl eframe::App for CampaignBuilderApp {
                     }
                 });
 
+                ui.menu_button("View", |ui| {
+                    // Debug panel toggle
+                    let debug_label = if self.show_debug_panel {
+                        "🐛 Hide Debug Panel"
+                    } else {
+                        "🐛 Show Debug Panel"
+                    };
+                    if ui.button(debug_label).clicked() {
+                        self.show_debug_panel = !self.show_debug_panel;
+                        self.logger.info(
+                            category::UI,
+                            &format!(
+                                "Debug panel {}",
+                                if self.show_debug_panel {
+                                    "opened"
+                                } else {
+                                    "closed"
+                                }
+                            ),
+                        );
+                        ui.close();
+                    }
+
+                    ui.separator();
+                    ui.label("Log Level:");
+
+                    for level in [
+                        LogLevel::Error,
+                        LogLevel::Warn,
+                        LogLevel::Info,
+                        LogLevel::Debug,
+                        LogLevel::Verbose,
+                    ] {
+                        if ui
+                            .selectable_label(self.logger.level() == level, level.name())
+                            .clicked()
+                        {
+                            self.logger.set_level(level);
+                            self.logger.info(
+                                category::APP,
+                                &format!("Log level changed to {}", level.name()),
+                            );
+                            ui.close();
+                        }
+                    }
+                });
+
                 ui.menu_button("Tools", |ui| {
                     if ui.button("📋 Template Browser...").clicked() {
                         self.show_template_browser = true;
@@ -1816,6 +2385,12 @@ impl eframe::App for CampaignBuilderApp {
                     if ui.button("📦 Export Campaign...").clicked() {
                         self.status_message =
                             "Export would create .zip archive here...".to_string();
+                        ui.close();
+                    }
+                    ui.separator();
+                    // Preferences dialog toggle
+                    if ui.button("⚙️ Preferences...").clicked() {
+                        self.show_preferences = true;
                         ui.close();
                     }
                 });
@@ -1888,6 +2463,22 @@ impl eframe::App for CampaignBuilderApp {
             }
         }
 
+        // F12 = Toggle Debug Panel
+        if ctx.input(|i| i.key_pressed(egui::Key::F12)) {
+            self.show_debug_panel = !self.show_debug_panel;
+            self.logger.info(
+                category::UI,
+                &format!(
+                    "Debug panel {} (F12)",
+                    if self.show_debug_panel {
+                        "opened"
+                    } else {
+                        "closed"
+                    }
+                ),
+            );
+        }
+
         // Left sidebar with tabs
         egui::SidePanel::left("tab_panel")
             .resizable(false)
@@ -1913,7 +2504,12 @@ impl eframe::App for CampaignBuilderApp {
                 for tab in &tabs {
                     let is_selected = self.active_tab == *tab;
                     if ui.selectable_label(is_selected, tab.name()).clicked() {
+                        let previous_tab = self.active_tab;
                         self.active_tab = *tab;
+                        self.logger.debug(
+                            category::EDITOR,
+                            &format!("Tab changed: {} -> {}", previous_tab.name(), tab.name()),
+                        );
                     }
                 }
 
@@ -1990,14 +2586,108 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,
             ),
-            EditorTab::Maps => self.show_maps_editor(ui),
+            EditorTab::Maps => self.maps_editor_state.show(
+                ui,
+                &mut self.maps,
+                self.campaign_dir.as_ref(),
+                &self.campaign.maps_dir,
+                &self.tool_config.display,
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+            ),
             EditorTab::Quests => self.show_quests_editor(ui),
-            EditorTab::Classes => self.show_classes_editor(ui),
-            EditorTab::Dialogues => self.show_dialogues_editor(ui),
+            EditorTab::Classes => self.classes_editor_state.show(
+                ui,
+                &self.items,
+                self.campaign_dir.as_ref(),
+                &self.campaign.classes_file,
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+                &mut self.file_load_merge_mode,
+            ),
+            EditorTab::Dialogues => self.dialogue_editor_state.show(
+                ui,
+                &mut self.dialogues,
+                self.campaign_dir.as_ref(),
+                &self.campaign.dialogue_file,
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+                &mut self.file_load_merge_mode,
+            ),
             EditorTab::Assets => self.show_assets_editor(ui),
             EditorTab::Validation => self.show_validation_panel(ui),
         });
 
+        // Preferences dialog using a local temporary variable to avoid borrow conflicts
+        // Use local flags and avoid mutably borrowing `self.show_preferences` inside the `show` closure.
+        let mut show_preferences_local = self.show_preferences;
+        let mut prefs_save_clicked = false;
+        let mut prefs_close_clicked = false;
+
+        if show_preferences_local {
+            egui::Window::new("Preferences")
+                .open(&mut show_preferences_local)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.heading("Preferences");
+                    ui.separator();
+
+                    // Inspector min width slider
+                    ui.label("Inspector minimum width (px):");
+                    ui.add(egui::Slider::new(
+                        &mut self.tool_config.display.inspector_min_width,
+                        150.0..=800.0,
+                    )
+                    .text("inspector_min_width"));
+
+                    ui.add_space(6.0);
+
+                    // Left column max ratio slider
+                    ui.label("Max left column ratio (0.4 - 0.9):");
+                    ui.add(egui::Slider::new(
+                        &mut self.tool_config.display.left_column_max_ratio,
+                        0.4..=0.9,
+                    )
+                    .text("left_column_max_ratio"));
+
+                    ui.add_space(10.0);
+
+                    ui.horizontal(|ui| {
+                        if ui.button("Save Preferences").clicked() {
+                            // Toggle a local flag, we'll save outside the closure to avoid borrows on self here.
+                            prefs_save_clicked = true;
+                        }
+
+                        if ui.button("Close").clicked() {
+                            // Toggle a local flag instead of mutating the show flag directly.
+                            prefs_close_clicked = true;
+                        }
+                    });
+
+                    ui.add_space(6.0);
+                    ui.separator();
+                    ui.label("Inspector min width will be respected by editors that use TwoColumnLayout. Left column ratio is a conservative clamp to avoid list panel clipping the detail/inspector panel.");
+                });
+        }
+
+        // Persist any actions that happened in the preferences UI.
+        if prefs_save_clicked {
+            match self.tool_config.save() {
+                Ok(_) => {
+                    self.status_message = "Preferences saved".to_string();
+                }
+                Err(e) => {
+                    self.status_message = format!("Failed to save preferences: {}", e);
+                }
+            }
+        }
+
+        if prefs_close_clicked {
+            show_preferences_local = false;
+        }
+
+        // Finally, update the app state.
+        self.show_preferences = show_preferences_local;
         // About dialog
         if self.show_about_dialog {
             egui::Window::new("About Antares Campaign Builder")
@@ -2083,6 +2773,11 @@ impl eframe::App for CampaignBuilderApp {
         // Phase 15: Balance statistics dialog
         if self.show_balance_stats {
             self.show_balance_stats_dialog(ctx);
+        }
+
+        // Phase 7: Debug panel
+        if self.show_debug_panel {
+            self.show_debug_panel_window(ctx);
         }
     }
 }
@@ -2452,338 +3147,6 @@ impl CampaignBuilderApp {
         });
     }
 
-    /// Show maps editor with integrated map editor
-    fn show_maps_editor(&mut self, ui: &mut egui::Ui) {
-        match self.maps_editor_mode {
-            EditorMode::List => self.show_maps_list(ui),
-            EditorMode::Add | EditorMode::Edit => self.show_map_editor_panel(ui),
-        }
-    }
-
-    /// Show maps list view
-    fn show_maps_list(&mut self, ui: &mut egui::Ui) {
-        ui.heading("🗺️ Maps Editor");
-        ui.add_space(5.0);
-        ui.label("Manage world maps and dungeons");
-        ui.separator();
-
-        ui.horizontal(|ui| {
-            ui.label("🔍 Search:");
-            ui.text_edit_singleline(&mut self.maps_search);
-            ui.separator();
-
-            if ui.button("➕ New Map").clicked() {
-                // Create a new empty map
-                let new_id = self.next_available_map_id();
-                let new_map = Map::new(
-                    new_id,
-                    "New Map".to_string(),
-                    "Description".to_string(),
-                    20,
-                    20,
-                );
-                self.maps.push(new_map.clone());
-                self.maps_selected = Some(self.maps.len() - 1);
-                self.map_editor_state = Some(MapEditorState::new(new_map));
-                self.maps_editor_mode = EditorMode::Add;
-            }
-
-            if ui.button("🔄 Reload").clicked() {
-                self.load_maps();
-            }
-        });
-
-        // Sort maps by ID for consistent display
-        let mut sorted_maps: Vec<_> = self.maps.iter().enumerate().collect();
-        sorted_maps.sort_by_key(|(_, map)| map.id);
-
-        ui.separator();
-
-        // Map list with previews
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if self.maps.is_empty() {
-                    ui.group(|ui| {
-                        ui.label("No maps found");
-                        ui.label("Create a new map or load maps from:");
-                        ui.monospace(&self.campaign.maps_dir);
-                    });
-                } else {
-                    let mut to_delete = None;
-                    let mut to_edit = None;
-
-                    for (idx, map) in self.maps.iter().enumerate() {
-                        let filter_match = self.maps_search.is_empty()
-                            || map.id.to_string().contains(&self.maps_search);
-
-                        if !filter_match {
-                            continue;
-                        }
-
-                        let is_selected = self.maps_selected == Some(idx);
-
-                        ui.group(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.set_min_width(ui.available_width());
-
-                                ui.vertical(|ui| {
-                                    ui.strong(format!("Map ID: {}", map.id));
-                                    ui.label(format!("Size: {}x{}", map.width, map.height));
-                                    ui.label(format!("Events: {}", map.events.len()));
-                                    ui.label(format!("NPCs: {}", map.npcs.len()));
-                                });
-
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if ui.button("🗑").on_hover_text("Delete map").clicked() {
-                                            to_delete = Some(idx);
-                                        }
-
-                                        if ui.button("✏️").on_hover_text("Edit map").clicked() {
-                                            to_edit = Some(idx);
-                                        }
-                                    },
-                                );
-                            });
-
-                            // Show mini preview
-                            if is_selected {
-                                ui.separator();
-                                ui.label("Preview:");
-                                self.show_map_preview(ui, map);
-                            }
-                        });
-
-                        ui.add_space(5.0);
-                    }
-
-                    // Handle actions after iteration
-                    if let Some(idx) = to_delete {
-                        self.maps.remove(idx);
-                        if self.maps_selected == Some(idx) {
-                            self.maps_selected = None;
-                        }
-                    }
-
-                    if let Some(idx) = to_edit {
-                        if let Some(map) = self.maps.get(idx) {
-                            self.maps_selected = Some(idx);
-                            self.map_editor_state = Some(MapEditorState::new(map.clone()));
-                            self.maps_editor_mode = EditorMode::Edit;
-                        }
-                    }
-                }
-            });
-    }
-
-    /// Show map editor panel
-    fn show_map_editor_panel(&mut self, ui: &mut egui::Ui) {
-        let mut back_clicked = false;
-        let mut save_clicked = false;
-
-        if let Some(ref mut editor_state) = self.map_editor_state {
-            ui.horizontal(|ui| {
-                if ui.button("← Back to List").clicked() {
-                    back_clicked = true;
-                }
-
-                ui.separator();
-
-                if ui
-                    .button("💾 Save")
-                    .on_hover_text("Save map to file")
-                    .clicked()
-                {
-                    save_clicked = true;
-                }
-            });
-
-            ui.separator();
-
-            // Show the map editor widget
-            let mut widget = MapEditorWidget::new(editor_state);
-            widget.show(ui);
-        } else {
-            ui.label("No map editor state available");
-            if ui.button("Back").clicked() {
-                self.maps_editor_mode = EditorMode::List;
-            }
-            return;
-        }
-
-        // Handle actions after borrowing editor_state
-        if back_clicked {
-            // Extract data we need before any mutable borrows
-            let (map_to_save, has_changes, selected_idx) =
-                if let Some(ref editor_state) = self.map_editor_state {
-                    (
-                        Some(editor_state.map.clone()),
-                        editor_state.has_changes,
-                        self.maps_selected,
-                    )
-                } else {
-                    (None, false, None)
-                };
-
-            if has_changes {
-                if let Some(map) = map_to_save {
-                    // Save map before going back
-                    if let Err(e) = self.save_map(&map) {
-                        self.status_message = format!("Failed to save map: {}", e);
-                    } else {
-                        // Update the map in the list
-                        if let Some(idx) = selected_idx {
-                            if idx < self.maps.len() {
-                                self.maps[idx] = map;
-                            }
-                        }
-                        self.status_message = "Map saved".to_string();
-                    }
-                }
-            }
-
-            self.maps_editor_mode = EditorMode::List;
-            self.map_editor_state = None;
-        }
-
-        if save_clicked {
-            // Extract data we need before any mutable borrows
-            let (map_to_save, selected_idx) = if let Some(ref editor_state) = self.map_editor_state
-            {
-                (Some(editor_state.map.clone()), self.maps_selected)
-            } else {
-                (None, None)
-            };
-
-            if let Some(map) = map_to_save {
-                match self.save_map(&map) {
-                    Ok(_) => {
-                        // Update the map in the list
-                        if let Some(idx) = selected_idx {
-                            if idx < self.maps.len() {
-                                self.maps[idx] = map;
-                            }
-                        }
-
-                        // Now we can safely borrow mutably to update the state
-                        if let Some(ref mut editor_state) = self.map_editor_state {
-                            editor_state.has_changes = false;
-                        }
-
-                        self.status_message = "Map saved successfully".to_string();
-                    }
-                    Err(e) => {
-                        self.status_message = format!("Failed to save map: {}", e);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Show a small preview of a map
-    fn show_map_preview(&self, ui: &mut egui::Ui, map: &Map) {
-        let tile_size = 8.0;
-        let preview_width = (map.width.min(30) as f32 * tile_size).min(240.0);
-        let preview_height = (map.height.min(20) as f32 * tile_size).min(160.0);
-
-        let (response, painter) = ui.allocate_painter(
-            egui::Vec2::new(preview_width, preview_height),
-            egui::Sense::hover(),
-        );
-
-        let rect = response.rect;
-
-        let scale_x = preview_width / (map.width as f32 * tile_size);
-        let scale_y = preview_height / (map.height as f32 * tile_size);
-        let scale = scale_x.min(scale_y);
-
-        let actual_tile_size = tile_size * scale;
-
-        // Draw a detailed view of the map with terrain colors
-        for y in 0..map.height.min(20) {
-            for x in 0..map.width.min(30) {
-                let pos = antares::domain::types::Position::new(x as i32, y as i32);
-                if let Some(tile) = map.get_tile(pos) {
-                    use antares::domain::world::TerrainType;
-
-                    // Base color from terrain type
-                    let base_color = match tile.terrain {
-                        TerrainType::Ground => egui::Color32::from_rgb(160, 140, 120),
-                        TerrainType::Grass => egui::Color32::from_rgb(100, 180, 100),
-                        TerrainType::Water => egui::Color32::from_rgb(80, 120, 200),
-                        TerrainType::Lava => egui::Color32::from_rgb(220, 60, 30),
-                        TerrainType::Swamp => egui::Color32::from_rgb(90, 100, 70),
-                        TerrainType::Stone => egui::Color32::from_rgb(120, 120, 130),
-                        TerrainType::Dirt => egui::Color32::from_rgb(140, 110, 80),
-                        TerrainType::Forest => egui::Color32::from_rgb(60, 120, 60),
-                        TerrainType::Mountain => egui::Color32::from_rgb(100, 100, 110),
-                    };
-
-                    // Darken if blocked by wall
-                    let color = if tile.blocked {
-                        egui::Color32::from_rgb(
-                            base_color.r() / 2,
-                            base_color.g() / 2,
-                            base_color.b() / 2,
-                        )
-                    } else {
-                        base_color
-                    };
-
-                    let tile_rect = egui::Rect::from_min_size(
-                        rect.min
-                            + egui::Vec2::new(
-                                x as f32 * actual_tile_size,
-                                y as f32 * actual_tile_size,
-                            ),
-                        egui::Vec2::new(actual_tile_size, actual_tile_size),
-                    );
-
-                    painter.rect_filled(tile_rect, 0.0, color);
-
-                    // Draw event marker
-                    if map.events.contains_key(&pos) {
-                        let center = tile_rect.center();
-                        painter.circle_filled(
-                            center,
-                            actual_tile_size * 0.3,
-                            egui::Color32::from_rgb(255, 200, 0),
-                        );
-                    }
-
-                    // Draw NPC marker
-                    if map.npcs.iter().any(|npc| npc.position == pos) {
-                        let center = tile_rect.center();
-                        painter.circle_filled(
-                            center,
-                            actual_tile_size * 0.25,
-                            egui::Color32::from_rgb(255, 100, 255),
-                        );
-                    }
-
-                    // Draw grid lines
-                    painter.rect_stroke(
-                        tile_rect,
-                        0.0,
-                        egui::Stroke::new(0.5, egui::Color32::from_gray(100)),
-                        egui::StrokeKind::Outside,
-                    );
-                }
-            }
-        }
-
-        // Draw legend
-        ui.add_space(5.0);
-        ui.horizontal(|ui| {
-            ui.label("Legend:");
-            ui.colored_label(egui::Color32::from_rgb(255, 200, 0), "● Event");
-            ui.colored_label(egui::Color32::from_rgb(255, 100, 255), "● NPC");
-            ui.colored_label(egui::Color32::from_rgb(100, 100, 110), "■ Blocked");
-        });
-    }
-
     /// Show quests editor (Phase 4A: Full Quest Editor Integration)
     fn show_quests_editor(&mut self, ui: &mut egui::Ui) {
         self.quest_editor_state.show(
@@ -2854,432 +3217,19 @@ impl CampaignBuilderApp {
         self.quests.iter().map(|q| q.id).max().unwrap_or(0) + 1
     }
 
-    /// Show classes editor
-    fn show_classes_editor(&mut self, ui: &mut egui::Ui) {
-        ui.heading("🛡️ Classes Editor");
-        ui.add_space(5.0);
-
-        // Toolbar
-        ui.horizontal(|ui| {
-            if ui.button("➕ New Class").clicked() {
-                self.classes_editor_state.start_new_class();
-                self.classes_editor_state.buffer.id = self.next_available_class_id();
-                self.unsaved_changes = true;
-            }
-
-            ui.separator();
-
-            // File I/O buttons
-            if ui.button("📂 Load from File").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<antares::domain::classes::ClassDefinition>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_classes) => {
-                            if self.file_load_merge_mode {
-                                for class in loaded_classes {
-                                    if let Some(existing) = self
-                                        .classes_editor_state
-                                        .classes
-                                        .iter_mut()
-                                        .find(|c| c.id == class.id)
-                                    {
-                                        *existing = class;
-                                    } else {
-                                        self.classes_editor_state.classes.push(class);
-                                    }
-                                }
-                            } else {
-                                self.classes_editor_state.classes = loaded_classes;
-                            }
-                            self.unsaved_changes = true;
-                            self.status_message =
-                                format!("Loaded classes from: {}", path.display());
-                        }
-                        Err(e) => {
-                            self.status_message = format!("Failed to load classes: {}", e);
-                        }
-                    }
-                }
-            }
-
-            ui.checkbox(&mut self.file_load_merge_mode, "Merge");
-            ui.label(if self.file_load_merge_mode {
-                "(adds to existing)"
-            } else {
-                "(replaces all)"
-            });
-
-            if ui.button("💾 Save to File").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("classes.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(
-                        &self.classes_editor_state.classes,
-                        Default::default(),
-                    ) {
-                        Ok(contents) => match std::fs::write(&path, contents) {
-                            Ok(_) => {
-                                self.status_message =
-                                    format!("Saved classes to: {}", path.display());
-                            }
-                            Err(e) => {
-                                self.status_message = format!("Failed to save classes: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            self.status_message = format!("Failed to serialize classes: {}", e);
-                        }
-                    }
-                }
-            }
-
-            ui.separator();
-
-            if ui.button("💾 Save Classes").clicked() {
-                if let Err(e) = self.save_classes() {
-                    eprintln!("Failed to save classes: {}", e);
-                }
-            }
-
-            if ui.button("📂 Load Classes").clicked() {
-                self.load_classes();
-            }
-        });
-
-        ui.separator();
-
-        // Search
-        ui.horizontal(|ui| {
-            ui.label("🔍 Search:");
-            ui.text_edit_singleline(&mut self.classes_editor_state.search_filter);
-        });
-
-        ui.separator();
-
-        // Main content
-        match self.classes_editor_state.mode {
-            classes_editor::ClassesEditorMode::List => {
-                egui::SidePanel::left("classes_list_panel")
-                    .resizable(true)
-                    .default_width(300.0)
-                    .show_inside(ui, |ui| {
-                        self.show_classes_list(ui);
-                    });
-
-                egui::CentralPanel::default().show_inside(ui, |ui| {
-                    ui.centered_and_justified(|ui| {
-                        ui.label("Select a class to edit or create a new one");
-                    });
-                });
-            }
-            classes_editor::ClassesEditorMode::Creating
-            | classes_editor::ClassesEditorMode::Editing => {
-                self.show_class_form(ui);
-            }
-        }
-    }
-
-    fn show_classes_list(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Classes List");
-        ui.separator();
-
-        // Clone to avoid borrow checker issues
-        let filtered: Vec<(usize, antares::domain::classes::ClassDefinition)> = self
-            .classes_editor_state
-            .filtered_classes()
-            .into_iter()
-            .map(|(i, c)| (i, c.clone()))
-            .collect();
-
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for (idx, class) in filtered {
-                    let is_selected = self.classes_editor_state.selected_class == Some(idx);
-                    if ui.selectable_label(is_selected, &class.name).clicked() {
-                        self.classes_editor_state.start_edit_class(idx);
-                    }
-
-                    if is_selected {
-                        ui.horizontal(|ui| {
-                            if ui.button("🗑️ Delete").clicked() {
-                                self.classes_editor_state.delete_class(idx);
-                                self.unsaved_changes = true;
-                            }
-                        });
-                    }
-                }
-            });
-    }
-
-    fn show_class_form(&mut self, ui: &mut egui::Ui) {
-        let is_creating =
-            self.classes_editor_state.mode == classes_editor::ClassesEditorMode::Creating;
-        ui.heading(if is_creating {
-            "Create New Class"
-        } else {
-            "Edit Class"
-        });
-        ui.separator();
-
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-            ui.group(|ui| {
-                ui.label("Basic Info");
-                ui.horizontal(|ui| {
-                    ui.label("ID:");
-                    ui.text_edit_singleline(&mut self.classes_editor_state.buffer.id);
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Name:");
-                    ui.text_edit_singleline(&mut self.classes_editor_state.buffer.name);
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Description:");
-                    ui.text_edit_multiline(&mut self.classes_editor_state.buffer.description);
-                });
-            });
-
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.label("Hit Points");
-                ui.horizontal(|ui| {
-                    ui.label("Count:");
-                    ui.text_edit_singleline(&mut self.classes_editor_state.buffer.hp_die_count);
-                    ui.label("Sides:");
-                    ui.text_edit_singleline(&mut self.classes_editor_state.buffer.hp_die_sides);
-                    ui.label("Bonus:");
-                    ui.text_edit_singleline(&mut self.classes_editor_state.buffer.hp_die_modifier);
-                });
-            });
-
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.label("Magic");
-                ui.checkbox(
-                    &mut self.classes_editor_state.buffer.is_pure_caster,
-                    "Pure Caster",
-                );
-
-                ui.horizontal(|ui| {
-                    ui.label("Spell School:");
-                    egui::ComboBox::from_id_salt("spell_school")
-                        .selected_text(format!(
-                            "{:?}",
-                            self.classes_editor_state.buffer.spell_school
-                        ))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.classes_editor_state.buffer.spell_school,
-                                None,
-                                "None",
-                            );
-                            ui.selectable_value(
-                                &mut self.classes_editor_state.buffer.spell_school,
-                                Some(antares::domain::classes::SpellSchool::Cleric),
-                                "Cleric",
-                            );
-                            ui.selectable_value(
-                                &mut self.classes_editor_state.buffer.spell_school,
-                                Some(antares::domain::classes::SpellSchool::Sorcerer),
-                                "Sorcerer",
-                            );
-                        });
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Spell Stat:");
-                    egui::ComboBox::from_id_salt("spell_stat")
-                        .selected_text(format!("{:?}", self.classes_editor_state.buffer.spell_stat))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.classes_editor_state.buffer.spell_stat,
-                                None,
-                                "None",
-                            );
-                            ui.selectable_value(
-                                &mut self.classes_editor_state.buffer.spell_stat,
-                                Some(antares::domain::classes::SpellStat::Intellect),
-                                "Intellect",
-                            );
-                            ui.selectable_value(
-                                &mut self.classes_editor_state.buffer.spell_stat,
-                                Some(antares::domain::classes::SpellStat::Personality),
-                                "Personality",
-                            );
-                        });
-                });
-            });
-
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.label("Item Restrictions");
-                ui.horizontal(|ui| {
-                    ui.label("Disablement Bit:");
-                    ui.text_edit_singleline(&mut self.classes_editor_state.buffer.disablement_bit_index);
-                    ui.label("ℹ️").on_hover_text(
-                        "This bit flag (0-7) determines item restrictions.\n\
-                         Items can be flagged to disable usage by specific classes.\n\
-                         Bit 0 = Knight, Bit 1 = Paladin, Bit 2 = Archer, etc.\n\
-                         Example: A class with bit 2 cannot use items with disablement flag bit 2 set."
-                    );
-                });
-                if let Ok(bit) = self.classes_editor_state.buffer.disablement_bit_index.parse::<u8>() {
-                    if bit <= 7 {
-                        ui.label(format!("This class uses restriction bit position: {}", bit));
-                    }
-                }
-            });
-
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.label("Starting Equipment");
-
-                // Starting Weapon
-                ui.horizontal(|ui| {
-                    ui.label("Starting Weapon:");
-                    let current_weapon = if self.classes_editor_state.buffer.starting_weapon_id.is_empty() {
-                        "None".to_string()
-                    } else {
-                        self.items.iter()
-                            .find(|item| item.id.to_string() == self.classes_editor_state.buffer.starting_weapon_id)
-                            .map(|item| format!("{} (ID: {})", item.name, item.id))
-                            .unwrap_or_else(|| format!("ID: {}", self.classes_editor_state.buffer.starting_weapon_id))
-                    };
-
-                    egui::ComboBox::from_id_salt("starting_weapon")
-                        .selected_text(current_weapon)
-                        .show_ui(ui, |ui| {
-                            if ui.selectable_label(self.classes_editor_state.buffer.starting_weapon_id.is_empty(), "None").clicked() {
-                                self.classes_editor_state.buffer.starting_weapon_id = String::new();
-                            }
-                            for item in &self.items {
-                                if item.is_weapon() {
-                                    let is_selected = item.id.to_string() == self.classes_editor_state.buffer.starting_weapon_id;
-                                    if ui.selectable_label(is_selected, format!("{} (ID: {})", item.name, item.id)).clicked() {
-                                        self.classes_editor_state.buffer.starting_weapon_id = item.id.to_string();
-                                    }
-                                }
-                            }
-                        });
-                });
-
-                // Starting Armor
-                ui.horizontal(|ui| {
-                    ui.label("Starting Armor:");
-                    let current_armor = if self.classes_editor_state.buffer.starting_armor_id.is_empty() {
-                        "None".to_string()
-                    } else {
-                        self.items.iter()
-                            .find(|item| item.id.to_string() == self.classes_editor_state.buffer.starting_armor_id)
-                            .map(|item| format!("{} (ID: {})", item.name, item.id))
-                            .unwrap_or_else(|| format!("ID: {}", self.classes_editor_state.buffer.starting_armor_id))
-                    };
-
-                    egui::ComboBox::from_id_salt("starting_armor")
-                        .selected_text(current_armor)
-                        .show_ui(ui, |ui| {
-                            if ui.selectable_label(self.classes_editor_state.buffer.starting_armor_id.is_empty(), "None").clicked() {
-                                self.classes_editor_state.buffer.starting_armor_id = String::new();
-                            }
-                            for item in &self.items {
-                                if item.is_armor() {
-                                    let is_selected = item.id.to_string() == self.classes_editor_state.buffer.starting_armor_id;
-                                    if ui.selectable_label(is_selected, format!("{} (ID: {})", item.name, item.id)).clicked() {
-                                        self.classes_editor_state.buffer.starting_armor_id = item.id.to_string();
-                                    }
-                                }
-                            }
-                        });
-                });
-
-                // Starting Items List
-                ui.label("Starting Items:");
-                let mut items_to_remove = Vec::new();
-                for (idx, item_id) in self.classes_editor_state.buffer.starting_items.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        let item_name = self.items.iter()
-                            .find(|item| item.id.to_string() == *item_id)
-                            .map(|item| item.name.clone())
-                            .unwrap_or_else(|| format!("Unknown (ID: {})", item_id));
-                        ui.label(item_name);
-                        if ui.small_button("🗑️").clicked() {
-                            items_to_remove.push(idx);
-                        }
-                    });
-                }
-                for idx in items_to_remove.into_iter().rev() {
-                    self.classes_editor_state.buffer.starting_items.remove(idx);
-                }
-
-                if ui.button("➕ Add Starting Item").clicked() {
-                    self.classes_editor_state.buffer.starting_items.push(String::new());
-                }
-            });
-
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.label("Special Abilities (comma separated):");
-                ui.text_edit_multiline(&mut self.classes_editor_state.buffer.special_abilities);
-            });
-
-            ui.add_space(20.0);
-
-            ui.horizontal(|ui| {
-                if ui.button("✅ Save").clicked() {
-                    if let Err(e) = self.classes_editor_state.save_class() {
-                        eprintln!("Error saving class: {}", e);
-                    } else {
-                        self.unsaved_changes = true;
-                    }
-                }
-                if ui.button("❌ Cancel").clicked() {
-                    self.classes_editor_state.cancel_edit();
-                }
-            });
-        });
-    }
-
-    fn load_classes(&mut self) {
+    /// Load classes from campaign directory
+    fn load_classes_from_campaign(&mut self) {
         if let Some(dir) = &self.campaign_dir {
             let path = dir.join(&self.campaign.classes_file);
             if path.exists() {
-                match fs::read_to_string(&path) {
-                    Ok(content) => {
-                        match ron::from_str::<Vec<antares::domain::classes::ClassDefinition>>(
-                            &content,
-                        ) {
-                            Ok(classes) => {
-                                self.classes_editor_state.classes = classes;
-                                self.status_message = format!(
-                                    "Loaded {} classes",
-                                    self.classes_editor_state.classes.len()
-                                );
-                            }
-                            Err(e) => {
-                                self.status_message = format!("Failed to parse classes: {}", e);
-                                eprintln!("Failed to parse classes from {:?}: {}", path, e);
-                            }
-                        }
+                match self.classes_editor_state.load_from_file(&path) {
+                    Ok(_) => {
+                        self.status_message =
+                            format!("Loaded {} classes", self.classes_editor_state.classes.len());
                     }
                     Err(e) => {
-                        self.status_message = format!("Failed to read classes file: {}", e);
-                        eprintln!("Failed to read classes file {:?}: {}", path, e);
+                        self.status_message = format!("Failed to load classes: {}", e);
+                        eprintln!("Failed to load classes from {:?}: {}", path, e);
                     }
                 }
             } else {
@@ -3288,19 +3238,6 @@ impl CampaignBuilderApp {
         } else {
             eprintln!("No campaign directory set when trying to load classes");
         }
-    }
-
-    fn save_classes(&self) -> Result<(), CampaignError> {
-        if let Some(dir) = &self.campaign_dir {
-            let path = dir.join(&self.campaign.classes_file);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).map_err(CampaignError::Io)?;
-            }
-            let content =
-                ron::ser::to_string_pretty(&self.classes_editor_state.classes, Default::default())?;
-            fs::write(path, content).map_err(CampaignError::Io)?;
-        }
-        Ok(())
     }
 
     /// Show file browser
@@ -3350,6 +3287,9 @@ impl CampaignBuilderApp {
     }
 
     /// Show validation results panel
+    ///
+    /// Displays validation results in a table-based layout grouped by category.
+    /// Uses icons to indicate severity: ✅ passed, ❌ error, ⚠️ warning, ℹ️ info.
     fn show_validation_panel(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("✅ Campaign Validation");
@@ -3363,64 +3303,100 @@ impl CampaignBuilderApp {
         ui.label("Check your campaign for errors and warnings");
         ui.separator();
 
-        let error_count = self
-            .validation_errors
-            .iter()
-            .filter(|e| e.severity == Severity::Error)
-            .count();
-        let warning_count = self
-            .validation_errors
-            .iter()
-            .filter(|e| e.severity == Severity::Warning)
-            .count();
+        // Calculate summary using the validation module
+        let summary = validation::ValidationSummary::from_results(&self.validation_errors);
 
-        if self.validation_errors.is_empty() {
-            ui.vertical_centered(|ui| {
-                ui.add_space(50.0);
-                ui.heading("✅ All Checks Passed!");
-                ui.label("Your campaign configuration is valid.");
-                ui.add_space(20.0);
-                ui.label("You can now:");
-                ui.label("• Save your campaign");
-                ui.label("• Add data (items, spells, monsters)");
-                ui.label("• Create maps");
-                ui.label("• Test play your campaign");
-            });
-        } else {
-            ui.horizontal(|ui| {
-                if error_count > 0 {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(255, 0, 0),
-                        format!("❌ {} Error(s)", error_count),
-                    );
-                }
-                if warning_count > 0 {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(255, 165, 0),
-                        format!("⚠️ {} Warning(s)", warning_count),
-                    );
-                }
-            });
+        // Always show summary counts at the top
+        ui.horizontal(|ui| {
+            if summary.error_count > 0 {
+                ui.colored_label(
+                    validation::ValidationSeverity::Error.color(),
+                    format!("❌ {} Error(s)", summary.error_count),
+                );
+            }
+            if summary.warning_count > 0 {
+                ui.colored_label(
+                    validation::ValidationSeverity::Warning.color(),
+                    format!("⚠️ {} Warning(s)", summary.warning_count),
+                );
+            }
+            if summary.info_count > 0 {
+                ui.colored_label(
+                    validation::ValidationSeverity::Info.color(),
+                    format!("ℹ️ {} Info", summary.info_count),
+                );
+            }
+            if summary.passed_count > 0 {
+                ui.colored_label(
+                    validation::ValidationSeverity::Passed.color(),
+                    format!("✅ {} Passed", summary.passed_count),
+                );
+            }
+            // Show "All Passed" indicator when no errors or warnings
+            if summary.error_count == 0 && summary.warning_count == 0 {
+                ui.label("  ");
+                ui.colored_label(
+                    egui::Color32::from_rgb(80, 200, 80),
+                    "✅ All checks passed!",
+                );
+            }
+        });
 
-            ui.separator();
+        ui.separator();
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for error in &self.validation_errors {
+        // Always show category breakdown - group results by category and display in table format
+        let grouped = validation::group_results_by_category(&self.validation_errors);
+
+        egui::ScrollArea::vertical()
+            .id_salt("validation_panel_scroll")
+            .show(ui, |ui| {
+                for (category, results) in grouped {
+                    // Category header with icon
                     ui.horizontal(|ui| {
-                        let color = match error.severity {
-                            Severity::Error => egui::Color32::from_rgb(255, 0, 0),
-                            Severity::Warning => egui::Color32::from_rgb(255, 165, 0),
-                        };
-
-                        ui.colored_label(color, error.severity.icon());
-                        ui.label(&error.message);
+                        ui.label(category.icon());
+                        ui.heading(category.display_name());
+                        ui.label(format!("({})", results.len()));
                     });
-                    ui.add_space(5.0);
+
+                    // Table-like display for results in this category
+                    egui::Grid::new(format!("validation_grid_{:?}", category))
+                        .num_columns(3)
+                        .spacing([10.0, 4.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            // Header row
+                            ui.label(egui::RichText::new("Status").strong());
+                            ui.label(egui::RichText::new("Message").strong());
+                            ui.label(egui::RichText::new("File").strong());
+                            ui.end_row();
+
+                            // Result rows
+                            for result in results {
+                                // Status icon with color
+                                ui.colored_label(result.severity.color(), result.severity.icon());
+
+                                // Message
+                                ui.label(&result.message);
+
+                                // File path (if any)
+                                if let Some(ref path) = result.file_path {
+                                    ui.label(path.display().to_string());
+                                } else {
+                                    ui.label("-");
+                                }
+                                ui.end_row();
+                            }
+                        });
+
+                    ui.add_space(10.0);
                 }
             });
 
-            ui.separator();
+        ui.separator();
+        if summary.error_count > 0 || summary.warning_count > 0 {
             ui.label("💡 Tip: Fix errors in the Metadata and Config tabs");
+        } else {
+            ui.label("💡 Tip: Run validation after making changes to verify your campaign");
         }
     }
 
@@ -3429,519 +3405,34 @@ impl CampaignBuilderApp {
         if let Some(dir) = &self.campaign_dir {
             let dialogue_path = dir.join(&self.campaign.dialogue_file);
             if dialogue_path.exists() {
-                self.load_dialogues_from_file(&dialogue_path)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Load dialogues from file
-    fn load_dialogues_from_file(&mut self, path: &std::path::Path) -> Result<(), CampaignError> {
-        match std::fs::read_to_string(path) {
-            Ok(contents) => match ron::from_str::<Vec<DialogueTree>>(&contents) {
-                Ok(dialogues) => {
-                    self.dialogues = dialogues;
-                    // Update editor state
-                    self.dialogue_editor_state
-                        .load_dialogues(self.dialogues.clone());
-                    self.status_message = format!("Loaded {} dialogues", self.dialogues.len());
-                    Ok(())
-                }
-                Err(e) => {
-                    eprintln!("Failed to parse dialogues from {:?}: {}", path, e);
-                    Err(CampaignError::Deserialization(e))
-                }
-            },
-            Err(e) => {
-                eprintln!("Failed to read dialogues file {:?}: {}", path, e);
-                Err(CampaignError::Io(e))
-            }
-        }
-    }
-
-    /// Show dialogues editor
-    fn show_dialogues_editor(&mut self, ui: &mut egui::Ui) {
-        ui.heading("💬 Dialogues Editor");
-        ui.add_space(5.0);
-
-        // Toolbar
-        ui.horizontal(|ui| {
-            if ui.button("➕ New Dialogue").clicked() {
-                self.dialogue_editor_state.start_new_dialogue();
-            }
-
-            if ui.button("💾 Save to Campaign").clicked() {
-                // Sync dialogue_editor_state.dialogues to self.dialogues
-                self.dialogues = self.dialogue_editor_state.dialogues.clone();
-                self.status_message = "Dialogues saved to campaign".to_string();
-            }
-
-            if ui.button("📂 Load from File").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    match self.load_dialogues_from_file(&path) {
-                        Ok(()) => {
+                match std::fs::read_to_string(&dialogue_path) {
+                    Ok(contents) => match ron::from_str::<Vec<DialogueTree>>(&contents) {
+                        Ok(dialogues) => {
+                            self.dialogues = dialogues;
                             self.dialogue_editor_state
                                 .load_dialogues(self.dialogues.clone());
                             self.status_message =
                                 format!("Loaded {} dialogues", self.dialogues.len());
                         }
                         Err(e) => {
-                            self.status_message = format!("Failed to load dialogues: {:?}", e);
+                            eprintln!("Failed to parse dialogues from {:?}: {}", dialogue_path, e);
+                            return Err(CampaignError::Deserialization(e));
                         }
-                    }
-                }
-            }
-
-            if ui.button("📤 Import RON").clicked() {
-                self.dialogues_show_import_dialog = true;
-                self.dialogues_import_buffer.clear();
-            }
-
-            if ui.button("📋 Export to Clipboard").clicked() {
-                match ron::ser::to_string_pretty(&self.dialogues, Default::default()) {
-                    Ok(ron_str) => {
-                        ui.ctx().copy_text(ron_str.clone());
-                        self.status_message = "Dialogues exported to clipboard".to_string();
-                    }
+                    },
                     Err(e) => {
-                        self.status_message = format!("Export failed: {:?}", e);
-                    }
-                }
-            }
-
-            ui.checkbox(&mut self.dialogues_show_preview, "Show Preview");
-        });
-
-        ui.separator();
-
-        // Import dialog (handled outside main UI to avoid borrow conflicts)
-        let mut import_complete = false;
-        let mut import_result: Option<Result<DialogueTree, String>> = None;
-        let mut cancel_import = false;
-
-        if self.dialogues_show_import_dialog {
-            let mut show_dialog = self.dialogues_show_import_dialog;
-            egui::Window::new("Import Dialogue RON")
-                .open(&mut show_dialog)
-                .show(ui.ctx(), |ui| {
-                    ui.label("Paste RON dialogue data:");
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.dialogues_import_buffer)
-                            .desired_width(500.0)
-                            .desired_rows(15),
-                    );
-
-                    ui.horizontal(|ui| {
-                        if ui.button("Import").clicked() {
-                            match ron::from_str::<DialogueTree>(&self.dialogues_import_buffer) {
-                                Ok(dialogue) => {
-                                    import_result = Some(Ok(dialogue));
-                                    import_complete = true;
-                                }
-                                Err(e) => {
-                                    import_result = Some(Err(format!("{:?}", e)));
-                                    import_complete = true;
-                                }
-                            }
-                        }
-                        if ui.button("Cancel").clicked() {
-                            cancel_import = true;
-                        }
-                    });
-                });
-            self.dialogues_show_import_dialog = show_dialog;
-        }
-
-        // Process import result outside window closure
-        if cancel_import {
-            self.dialogues_show_import_dialog = false;
-        }
-        if import_complete {
-            if let Some(result) = import_result {
-                match result {
-                    Ok(mut dialogue) => {
-                        let new_id = self.next_available_dialogue_id();
-                        dialogue.id = new_id;
-                        self.dialogues.push(dialogue);
-                        self.dialogue_editor_state
-                            .load_dialogues(self.dialogues.clone());
-                        self.status_message = format!("Imported dialogue {}", new_id);
-                        self.dialogues_show_import_dialog = false;
-                    }
-                    Err(e) => {
-                        self.status_message = format!("Import failed: {}", e);
+                        eprintln!("Failed to read dialogues file {:?}: {}", dialogue_path, e);
+                        return Err(CampaignError::Io(e));
                     }
                 }
             }
         }
-
-        ui.horizontal(|ui| {
-            ui.label("Search:");
-            ui.text_edit_singleline(&mut self.dialogue_editor_state.search_filter);
-        });
-
-        ui.separator();
-
-        // Main content area
-        match self.dialogue_editor_state.mode {
-            dialogue_editor::DialogueEditorMode::List => {
-                self.show_dialogue_list(ui);
-            }
-            dialogue_editor::DialogueEditorMode::Creating
-            | dialogue_editor::DialogueEditorMode::Editing => {
-                self.show_dialogue_form(ui);
-            }
-        }
-    }
-
-    /// Show dialogue list view
-    fn show_dialogue_list(&mut self, ui: &mut egui::Ui) {
-        ui.label(format!(
-            "Total Dialogues: {}",
-            self.dialogue_editor_state.dialogues.len()
-        ));
-
-        // Collect actions to avoid borrow conflicts
-        let mut delete_idx: Option<usize> = None;
-        let mut edit_idx: Option<usize> = None;
-        let mut duplicate_idx: Option<usize> = None;
-
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let filtered = self.dialogue_editor_state.filtered_dialogues();
-
-                for (idx, dialogue) in filtered {
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("ID: {}", dialogue.id));
-                            ui.separator();
-                            ui.strong(&dialogue.name);
-                            if let Some(speaker) = &dialogue.speaker_name {
-                                ui.label(format!("(Speaker: {})", speaker));
-                            }
-                            ui.label(format!("({} nodes)", dialogue.nodes.len()));
-
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.button("🗑 Delete").clicked() {
-                                        delete_idx = Some(idx);
-                                    }
-                                    if ui.button("✏ Edit").clicked() {
-                                        edit_idx = Some(idx);
-                                    }
-                                    if ui.button("📋 Duplicate").clicked() {
-                                        duplicate_idx = Some(idx);
-                                    }
-                                },
-                            );
-                        });
-
-                        // Preview details
-                        if self.dialogues_show_preview {
-                            ui.separator();
-                            ui.label(format!("Root Node: {}", dialogue.root_node));
-                            ui.label(format!("Repeatable: {}", dialogue.repeatable));
-                            if let Some(quest_id) = dialogue.associated_quest {
-                                ui.label(format!("Associated Quest: {}", quest_id));
-                            }
-                        }
-                    });
-                }
-            });
-
-        // Process actions after scroll area
-        if let Some(idx) = delete_idx {
-            self.dialogue_editor_state.delete_dialogue(idx);
-            self.dialogues = self.dialogue_editor_state.dialogues.clone();
-        }
-        if let Some(idx) = edit_idx {
-            self.dialogue_editor_state.start_edit_dialogue(idx);
-        }
-        if let Some(idx) = duplicate_idx {
-            if let Some(dialogue) = self.dialogue_editor_state.dialogues.get(idx) {
-                let mut new_dialogue = dialogue.clone();
-                new_dialogue.id = self.next_available_dialogue_id();
-                new_dialogue.name = format!("{} (Copy)", new_dialogue.name);
-                self.dialogue_editor_state.dialogues.push(new_dialogue);
-                self.dialogues = self.dialogue_editor_state.dialogues.clone();
-            }
-        }
-    }
-
-    /// Show dialogue form editor
-    fn show_dialogue_form(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            if ui.button("⬅ Back to List").clicked() {
-                self.dialogue_editor_state.cancel_edit();
-            }
-
-            if ui.button("💾 Save Dialogue").clicked() {
-                match self.dialogue_editor_state.save_dialogue() {
-                    Ok(()) => {
-                        self.dialogues = self.dialogue_editor_state.dialogues.clone();
-                        self.status_message = "Dialogue saved".to_string();
-                    }
-                    Err(e) => {
-                        self.status_message = format!("Save failed: {}", e);
-                    }
-                }
-            }
-        });
-
-        ui.separator();
-
-        // Dialogue form
-        egui::Grid::new("dialogue_form_grid")
-            .num_columns(2)
-            .spacing([10.0, 8.0])
-            .show(ui, |ui| {
-                ui.label("Dialogue ID:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.dialogue_editor_state.dialogue_buffer.id)
-                        .desired_width(200.0),
-                );
-                ui.end_row();
-
-                ui.label("Name:");
-                ui.add(
-                    egui::TextEdit::singleline(
-                        &mut self.dialogue_editor_state.dialogue_buffer.name,
-                    )
-                    .desired_width(300.0),
-                );
-                ui.end_row();
-
-                ui.label("Speaker Name:");
-                ui.add(
-                    egui::TextEdit::singleline(
-                        &mut self.dialogue_editor_state.dialogue_buffer.speaker_name,
-                    )
-                    .desired_width(200.0),
-                );
-                ui.end_row();
-
-                ui.label("Repeatable:");
-                ui.checkbox(
-                    &mut self.dialogue_editor_state.dialogue_buffer.repeatable,
-                    "",
-                );
-                ui.end_row();
-
-                ui.label("Associated Quest ID:");
-                ui.add(
-                    egui::TextEdit::singleline(
-                        &mut self.dialogue_editor_state.dialogue_buffer.associated_quest,
-                    )
-                    .desired_width(150.0),
-                );
-                ui.end_row();
-            });
-
-        ui.separator();
-
-        // Node tree editor
-        if let Some(dialogue_idx) = self.dialogue_editor_state.selected_dialogue {
-            if dialogue_idx < self.dialogue_editor_state.dialogues.len() {
-                ui.heading("Dialogue Nodes");
-                self.show_dialogue_nodes_editor(ui, dialogue_idx);
-            }
-        } else {
-            ui.label("Save dialogue to add nodes");
-        }
-    }
-
-    /// Show dialogue node tree editor
-    fn show_dialogue_nodes_editor(&mut self, ui: &mut egui::Ui, dialogue_idx: usize) {
-        // Add node form
-        let mut add_node_clicked = false;
-        ui.horizontal(|ui| {
-            ui.label("Add New Node:");
-            ui.add(
-                egui::TextEdit::singleline(&mut self.dialogue_editor_state.node_buffer.id)
-                    .hint_text("Node ID")
-                    .desired_width(80.0),
-            );
-            ui.add(
-                egui::TextEdit::singleline(&mut self.dialogue_editor_state.node_buffer.text)
-                    .hint_text("Node text")
-                    .desired_width(250.0),
-            );
-            ui.checkbox(
-                &mut self.dialogue_editor_state.node_buffer.is_terminal,
-                "Terminal",
-            );
-
-            if ui.button("➕ Add Node").clicked() {
-                add_node_clicked = true;
-            }
-        });
-
-        if add_node_clicked {
-            match self.dialogue_editor_state.add_node() {
-                Ok(()) => {
-                    self.status_message = "Node added".to_string();
-                }
-                Err(e) => {
-                    self.status_message = format!("Failed to add node: {}", e);
-                }
-            }
-        }
-
-        ui.separator();
-
-        // Clone dialogue data to avoid borrow conflicts
-        let dialogue = self.dialogue_editor_state.dialogues[dialogue_idx].clone();
-        let mut select_node: Option<NodeId> = None;
-
-        // Display nodes
-        egui::ScrollArea::vertical()
-            .max_height(400.0)
-            .show(ui, |ui| {
-                for (node_id, node) in &dialogue.nodes {
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.strong(format!("Node {}", node_id));
-                            if *node_id == dialogue.root_node {
-                                ui.label("(ROOT)");
-                            }
-                            if node.is_terminal {
-                                ui.label("(TERMINAL)");
-                            }
-                        });
-
-                        ui.label(&node.text);
-
-                        if let Some(speaker) = &node.speaker_override {
-                            ui.label(format!("Speaker: {}", speaker));
-                        }
-
-                        // Show choices
-                        if !node.choices.is_empty() {
-                            ui.separator();
-                            ui.label("Choices:");
-                            for (choice_idx, choice) in node.choices.iter().enumerate() {
-                                ui.horizontal(|ui| {
-                                    ui.label(format!("  {}. {}", choice_idx + 1, choice.text));
-                                    if let Some(target) = choice.target_node {
-                                        ui.label(format!("→ Node {}", target));
-                                    }
-                                    if choice.ends_dialogue {
-                                        ui.label("(Ends)");
-                                    }
-                                });
-                            }
-                        }
-
-                        // Show conditions
-                        if !node.conditions.is_empty() {
-                            ui.separator();
-                            ui.label(format!("Conditions: {}", node.conditions.len()));
-                        }
-
-                        // Show actions
-                        if !node.actions.is_empty() {
-                            ui.separator();
-                            ui.label(format!("Actions: {}", node.actions.len()));
-                        }
-
-                        // Add choice to this node
-                        if ui.button("➕ Add Choice").clicked() {
-                            select_node = Some(*node_id);
-                        }
-                    });
-                }
-            });
-
-        // Process node selection outside scroll area
-        if let Some(node_id) = select_node {
-            self.dialogue_editor_state.selected_node = Some(node_id);
-        }
-
-        // Choice editor panel
-        let mut add_choice_clicked = false;
-        let mut cancel_choice_clicked = false;
-
-        if let Some(selected_node_id) = self.dialogue_editor_state.selected_node {
-            ui.separator();
-            ui.heading(format!("Add Choice to Node {}", selected_node_id));
-
-            ui.horizontal(|ui| {
-                ui.label("Choice Text:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.dialogue_editor_state.choice_buffer.text)
-                        .desired_width(250.0),
-                );
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Target Node ID:");
-                ui.add(
-                    egui::TextEdit::singleline(
-                        &mut self.dialogue_editor_state.choice_buffer.target_node,
-                    )
-                    .desired_width(80.0),
-                );
-                ui.checkbox(
-                    &mut self.dialogue_editor_state.choice_buffer.ends_dialogue,
-                    "Ends Dialogue",
-                );
-            });
-
-            ui.horizontal(|ui| {
-                if ui.button("✓ Add Choice").clicked() {
-                    add_choice_clicked = true;
-                }
-                if ui.button("✗ Cancel").clicked() {
-                    cancel_choice_clicked = true;
-                }
-            });
-        }
-
-        // Process choice actions outside choice panel
-        if add_choice_clicked {
-            match self.dialogue_editor_state.add_choice() {
-                Ok(()) => {
-                    self.status_message = "Choice added".to_string();
-                }
-                Err(e) => {
-                    self.status_message = format!("Failed to add choice: {}", e);
-                }
-            }
-        }
-        if cancel_choice_clicked {
-            self.dialogue_editor_state.selected_node = None;
-        }
-    }
-
-    /// Generate next available dialogue ID
-    fn next_available_dialogue_id(&self) -> u16 {
-        self.dialogues
-            .iter()
-            .map(|d| d.id)
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1)
-    }
-
-    /// Save dialogues to file
-    fn save_dialogues_to_file(&self, path: &std::path::Path) -> Result<(), CampaignError> {
-        // Create dialogues directory if it doesn't exist
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(CampaignError::Io)?;
-        }
-
-        let ron = ron::ser::to_string_pretty(&self.dialogues, Default::default())
-            .map_err(CampaignError::Serialization)?;
-        std::fs::write(path, ron).map_err(CampaignError::Io)?;
         Ok(())
     }
 
     /// Show assets editor
+    ///
+    /// Displays campaign data file status and asset management tools.
+    /// Data files show Loaded/Error/Missing status; orphaned assets can be cleaned up.
     fn show_assets_editor(&mut self, ui: &mut egui::Ui) {
         ui.heading("📦 Asset Manager");
         ui.add_space(5.0);
@@ -3955,6 +3446,17 @@ impl CampaignBuilderApp {
                 if let Err(e) = manager.scan_directory() {
                     self.status_message = format!("Failed to scan assets: {}", e);
                 } else {
+                    // Initialize data file tracking
+                    manager.init_data_files(
+                        &self.campaign.items_file,
+                        &self.campaign.spells_file,
+                        &self.campaign.monsters_file,
+                        &self.campaign.classes_file,
+                        &self.campaign.races_file,
+                        &self.campaign.quests_file,
+                        &self.campaign.dialogue_file,
+                        Some("data/conditions.ron"),
+                    );
                     self.asset_manager = Some(manager);
                 }
             }
@@ -3985,6 +3487,8 @@ impl CampaignBuilderApp {
                         &self.maps,
                         &self.classes_editor_state.classes,
                     );
+                    // Mark successfully loaded data files as referenced
+                    manager.mark_data_files_as_referenced();
                     self.status_message = "Asset references scanned".to_string();
                 }
             });
@@ -4007,15 +3511,105 @@ impl CampaignBuilderApp {
 
             ui.separator();
 
-            // Unreferenced assets warning and cleanup
-            let unreferenced_count = manager.unreferenced_assets().len();
+            // Data Files Status Section
+            ui.collapsing("📁 Campaign Data Files", |ui| {
+                let data_files = manager.data_files();
+                if data_files.is_empty() {
+                    ui.label("No data files tracked");
+                } else {
+                    egui::Grid::new("data_files_grid")
+                        .num_columns(4)
+                        .spacing([10.0, 4.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            // Header row
+                            ui.label(egui::RichText::new("Status").strong());
+                            ui.label(egui::RichText::new("Type").strong());
+                            ui.label(egui::RichText::new("Path").strong());
+                            ui.label(egui::RichText::new("Entries").strong());
+                            ui.end_row();
+
+                            // Data file rows
+                            for file_info in data_files {
+                                // Status icon with color
+                                ui.colored_label(file_info.status.color(), file_info.status.icon());
+
+                                // Display name
+                                ui.label(&file_info.display_name);
+
+                                // Path
+                                ui.label(file_info.path.display().to_string());
+
+                                // Entry count or error
+                                match file_info.status {
+                                    asset_manager::DataFileStatus::Loaded => {
+                                        if let Some(count) = file_info.entry_count {
+                                            ui.label(format!("{}", count));
+                                        } else {
+                                            ui.label("-");
+                                        }
+                                    }
+                                    asset_manager::DataFileStatus::Error => {
+                                        if let Some(ref msg) = file_info.error_message {
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(255, 80, 80),
+                                                msg.chars().take(30).collect::<String>(),
+                                            );
+                                        } else {
+                                            ui.label("Error");
+                                        }
+                                    }
+                                    _ => {
+                                        ui.label("-");
+                                    }
+                                }
+                                ui.end_row();
+                            }
+                        });
+
+                    // Summary
+                    ui.add_space(5.0);
+                    let loaded_count = data_files
+                        .iter()
+                        .filter(|f| f.status == asset_manager::DataFileStatus::Loaded)
+                        .count();
+                    let error_count = manager.data_file_error_count();
+                    let missing_count = manager.data_file_missing_count();
+
+                    ui.horizontal(|ui| {
+                        if loaded_count > 0 {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(80, 200, 80),
+                                format!("✅ {} loaded", loaded_count),
+                            );
+                        }
+                        if error_count > 0 {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(255, 80, 80),
+                                format!("❌ {} errors", error_count),
+                            );
+                        }
+                        if missing_count > 0 {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(255, 180, 0),
+                                format!("⚠️ {} missing", missing_count),
+                            );
+                        }
+                    });
+                }
+            });
+
+            ui.separator();
+
+            // Orphaned assets warning and cleanup (only truly orphaned, not data files)
+            let orphaned_count = manager.orphaned_assets().len();
             let cleanup_candidates_count = manager.get_cleanup_candidates().len();
 
-            if unreferenced_count > 0 {
+            if orphaned_count > 0 {
                 ui.horizontal(|ui| {
                     ui.colored_label(
                         egui::Color32::YELLOW,
-                        format!("⚠ {} unreferenced assets found", unreferenced_count),
+                        format!("⚠ {} orphaned asset files found", orphaned_count),
                     );
 
                     if cleanup_candidates_count > 0 {
@@ -4169,7 +3763,7 @@ mod tests {
         let has_id_error = app
             .validation_errors
             .iter()
-            .filter(|e| e.severity == Severity::Error)
+            .filter(|e| e.is_error())
             .any(|e| e.message.contains("Campaign ID"));
         assert!(!has_id_error);
     }
@@ -4266,7 +3860,7 @@ mod tests {
         let error_count = app
             .validation_errors
             .iter()
-            .filter(|e| e.severity == Severity::Error)
+            .filter(|e| e.is_error())
             .count();
         assert_eq!(error_count, 0);
     }
@@ -4360,18 +3954,21 @@ mod tests {
 
     #[test]
     fn test_severity_icons() {
-        assert_eq!(Severity::Error.icon(), "❌");
-        assert_eq!(Severity::Warning.icon(), "⚠️");
+        assert_eq!(validation::ValidationSeverity::Error.icon(), "❌");
+        assert_eq!(validation::ValidationSeverity::Warning.icon(), "⚠️");
+        assert_eq!(validation::ValidationSeverity::Passed.icon(), "✅");
+        assert_eq!(validation::ValidationSeverity::Info.icon(), "ℹ️");
     }
 
     #[test]
-    fn test_validation_error_creation() {
-        let error = ValidationError {
-            severity: Severity::Error,
-            message: "Test error".to_string(),
-        };
-        assert_eq!(error.severity, Severity::Error);
+    fn test_validation_result_creation() {
+        let error = validation::ValidationResult::error(
+            validation::ValidationCategory::Metadata,
+            "Test error",
+        );
+        assert!(error.is_error());
         assert_eq!(error.message, "Test error");
+        assert_eq!(error.category, validation::ValidationCategory::Metadata);
     }
 
     #[test]
@@ -4945,7 +4542,8 @@ mod tests {
         // Validate
         let errors = app.validate_item_ids();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].is_error());
+        assert_eq!(errors[0].category, validation::ValidationCategory::Items);
         assert!(errors[0].message.contains("Duplicate item ID: 1"));
     }
 
@@ -4967,7 +4565,8 @@ mod tests {
         // Validate
         let errors = app.validate_spell_ids();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].is_error());
+        assert_eq!(errors[0].category, validation::ValidationCategory::Spells);
         assert!(errors[0].message.contains("Duplicate spell ID: 100"));
     }
 
@@ -4989,7 +4588,8 @@ mod tests {
         // Validate
         let errors = app.validate_monster_ids();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].is_error());
+        assert_eq!(errors[0].category, validation::ValidationCategory::Monsters);
         assert!(errors[0].message.contains("Duplicate monster ID: 5"));
     }
 
@@ -5007,7 +4607,8 @@ mod tests {
         // Validate
         let errors = app.validate_map_ids();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].is_error());
+        assert_eq!(errors[0].category, validation::ValidationCategory::Maps);
         assert!(errors[0].message.contains("Duplicate map ID: 10"));
     }
 
@@ -5032,7 +4633,11 @@ mod tests {
         // Validate
         let errors = app.validate_condition_ids();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].severity, Severity::Error);
+        assert!(errors[0].is_error());
+        assert_eq!(
+            errors[0].category,
+            validation::ValidationCategory::Conditions
+        );
         assert!(errors[0]
             .message
             .contains("Duplicate condition ID: dup_test"));
@@ -5432,9 +5037,11 @@ mod tests {
         use antares::domain::types::DiceRoll;
 
         // Attribute modifier - empty attribute fails
-        let mut buf = EffectEditBuffer::default();
-        buf.effect_type = Some("AttributeModifier".to_string());
-        buf.attribute = "".to_string();
+        let mut buf = EffectEditBuffer {
+            effect_type: Some("AttributeModifier".to_string()),
+            attribute: "".to_string(),
+            ..Default::default()
+        };
         assert!(validate_effect_edit_buffer(&buf).is_err());
 
         // Attribute present but value out of allowed range fails
@@ -5443,22 +5050,28 @@ mod tests {
         assert!(validate_effect_edit_buffer(&buf).is_err());
 
         // Status effect - empty tag fails
-        let mut buf2 = EffectEditBuffer::default();
-        buf2.effect_type = Some("StatusEffect".to_string());
-        buf2.status_tag = "".to_string();
+        let buf2 = EffectEditBuffer {
+            effect_type: Some("StatusEffect".to_string()),
+            status_tag: "".to_string(),
+            ..Default::default()
+        };
         assert!(validate_effect_edit_buffer(&buf2).is_err());
 
         // DOT validation - invalid dice count should fail
-        let mut buf3 = EffectEditBuffer::default();
-        buf3.effect_type = Some("DamageOverTime".to_string());
-        buf3.dice = DiceRoll::new(0, 6, 0);
-        buf3.element = "fire".to_string();
+        let buf3 = EffectEditBuffer {
+            effect_type: Some("DamageOverTime".to_string()),
+            dice: DiceRoll::new(0, 6, 0),
+            element: "fire".to_string(),
+            ..Default::default()
+        };
         assert!(validate_effect_edit_buffer(&buf3).is_err());
 
         // HOT validation - invalid dice sides should fail
-        let mut buf4 = EffectEditBuffer::default();
-        buf4.effect_type = Some("HealOverTime".to_string());
-        buf4.dice = DiceRoll::new(1, 1, 0); // invalid sides
+        let buf4 = EffectEditBuffer {
+            effect_type: Some("HealOverTime".to_string()),
+            dice: DiceRoll::new(1, 1, 0), // invalid sides
+            ..Default::default()
+        };
         assert!(validate_effect_edit_buffer(&buf4).is_err());
     }
 
@@ -6944,10 +6557,11 @@ mod tests {
             app.dialogue_editor_state.mode,
             dialogue_editor::DialogueEditorMode::List
         );
-        assert!(app.dialogues_search_filter.is_empty());
-        assert!(!app.dialogues_show_preview);
-        assert!(app.dialogues_import_buffer.is_empty());
-        assert!(!app.dialogues_show_import_dialog);
+        // Search filter and import state are managed by DialogueEditorState
+        assert!(app.dialogue_editor_state.search_filter.is_empty());
+        assert!(!app.dialogue_editor_state.show_preview);
+        assert!(app.dialogue_editor_state.import_buffer.is_empty());
+        assert!(!app.dialogue_editor_state.show_import_dialog);
     }
 
     #[test]
@@ -7170,14 +6784,16 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
 
         // Empty list - should return 1
-        assert_eq!(app.next_available_dialogue_id(), 1);
+        assert_eq!(app.dialogue_editor_state.next_available_dialogue_id(), 1);
 
         // With dialogues - should return max + 1
         app.dialogues.push(DialogueTree::new(1, "D1", 1));
         app.dialogues.push(DialogueTree::new(5, "D2", 1));
         app.dialogues.push(DialogueTree::new(3, "D3", 1));
+        app.dialogue_editor_state
+            .load_dialogues(app.dialogues.clone());
 
-        assert_eq!(app.next_available_dialogue_id(), 6);
+        assert_eq!(app.dialogue_editor_state.next_available_dialogue_id(), 6);
     }
 
     #[test]
@@ -7307,8 +6923,9 @@ mod tests {
     #[test]
     fn test_dialogue_import_buffer() {
         let app = CampaignBuilderApp::default();
-        assert!(app.dialogues_import_buffer.is_empty());
-        assert!(!app.dialogues_show_import_dialog);
+        // Import buffer and dialog state are managed by DialogueEditorState
+        assert!(app.dialogue_editor_state.import_buffer.is_empty());
+        assert!(!app.dialogue_editor_state.show_import_dialog);
     }
 
     #[test]
@@ -7532,5 +7149,447 @@ mod tests {
         assert_eq!(EffectTypeFilter::StatusEffect.as_str(), "Status");
         assert_eq!(EffectTypeFilter::DamageOverTime.as_str(), "DOT");
         assert_eq!(EffectTypeFilter::HealOverTime.as_str(), "HOT");
+    }
+
+    // =========================================================================
+    // Phase 5: Testing Infrastructure Improvements
+    // Pattern Matching and Compliance Tests
+    // =========================================================================
+
+    #[test]
+    fn test_pattern_matcher_combobox_id_salt_detection() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::combobox_id_salt();
+
+        // Valid patterns
+        assert!(matcher.matches(r#"ComboBox::from_id_salt("test_combo")"#));
+        assert!(matcher.matches(r#"egui::ComboBox::from_id_salt("another_combo")"#));
+        assert!(matcher.matches(r#"ComboBox::from_id_salt('single_quotes')"#));
+
+        // Invalid patterns (should not match)
+        assert!(!matcher.matches("ComboBox::new()"));
+        assert!(!matcher.matches("from_id_salt without ComboBox"));
+    }
+
+    #[test]
+    fn test_pattern_matcher_combobox_from_label_detection() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::combobox_from_label();
+
+        // Should detect from_label usage
+        assert!(matcher.matches(r#"ComboBox::from_label("bad_pattern")"#));
+        assert!(matcher.matches(r#"egui::ComboBox::from_label("also_bad")"#));
+
+        // Should not match from_id_salt
+        assert!(!matcher.matches(r#"ComboBox::from_id_salt("good")"#));
+    }
+
+    #[test]
+    fn test_pattern_matcher_pub_fn_show_detection() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::pub_fn_show();
+
+        // Valid patterns
+        assert!(matcher.matches("pub fn show(&mut self, ui: &mut Ui)"));
+        assert!(matcher.matches("    pub fn show("));
+        assert!(matcher.matches("pub fn show(&self)"));
+
+        // Invalid patterns
+        assert!(!matcher.matches("fn show(")); // not public
+        assert!(!matcher.matches("pub fn show_items(")); // different function name
+        assert!(!matcher.matches("pub fn showing(")); // partial match
+    }
+
+    #[test]
+    fn test_pattern_matcher_editor_state_struct_detection() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::editor_state_struct();
+
+        // Valid patterns
+        assert!(matcher.matches("pub struct ItemsEditorState {"));
+        assert!(matcher.matches("pub struct SpellsEditorState {"));
+        assert!(matcher.matches("pub struct MonstersEditorState {"));
+
+        // Invalid patterns
+        assert!(!matcher.matches("struct ItemsEditorState {")); // not pub
+        assert!(!matcher.matches("pub struct SomeOtherState {")); // not *EditorState
+    }
+
+    #[test]
+    fn test_source_file_creation_and_analysis() {
+        use crate::test_utils::SourceFile;
+
+        let content = r#"
+pub struct TestEditorState {
+    items: Vec<String>,
+}
+
+impl TestEditorState {
+    pub fn new() -> Self {
+        Self { items: vec![] }
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui) {
+        // editor content
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_something() {}
+}
+"#;
+
+        let file = SourceFile::new("test_editor.rs", content);
+
+        assert_eq!(file.name, "test_editor");
+        assert!(file.line_count() > 10);
+        assert!(file.contains_pattern("pub struct"));
+        assert!(file.contains_pattern("pub fn show"));
+    }
+
+    #[test]
+    fn test_editor_compliance_check_detects_issues() {
+        use crate::test_utils::{check_editor_compliance, SourceFile};
+
+        // Editor with from_label violation
+        let bad_content = r#"
+impl BadEditor {
+    pub fn show(&mut self, ui: &mut egui::Ui) {
+        egui::ComboBox::from_label("Bad ID")
+            .show_ui(ui, |ui| {});
+    }
+}
+"#;
+
+        let file = SourceFile::new("bad_editor.rs", bad_content);
+        let result = check_editor_compliance(&file);
+
+        assert_eq!(result.combobox_from_label_count, 1);
+        assert!(!result.is_compliant());
+        assert!(result.issues.iter().any(|i| i.contains("from_label")));
+    }
+
+    #[test]
+    fn test_editor_compliance_check_passes_good_editor() {
+        use crate::test_utils::{check_editor_compliance, SourceFile};
+
+        let good_content = r#"
+pub struct GoodEditorState {
+    data: Vec<String>,
+}
+
+impl GoodEditorState {
+    pub fn new() -> Self {
+        Self { data: vec![] }
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui) {
+        egui::ComboBox::from_id_salt("good_combo")
+            .show_ui(ui, |ui| {});
+        EditorToolbar::new("Good").show(ui);
+        ActionButtons::new().show(ui);
+        TwoColumnLayout::new("good").show(ui, |ui| {});
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_good_editor() {}
+}
+"#;
+
+        let file = SourceFile::new("good_editor.rs", good_content);
+        let result = check_editor_compliance(&file);
+
+        assert!(result.has_show_method);
+        assert!(result.has_new_method);
+        assert!(result.has_state_struct);
+        assert!(result.has_tests);
+        assert_eq!(result.combobox_from_label_count, 0);
+        assert_eq!(result.combobox_id_salt_count, 1);
+    }
+
+    #[test]
+    fn test_compliance_score_calculation() {
+        use crate::test_utils::EditorComplianceResult;
+
+        // Full compliance = 100 points
+        let full = EditorComplianceResult {
+            editor_name: "full".to_string(),
+            has_show_method: true,        // 20
+            has_new_method: true,         // 10
+            has_state_struct: true,       // 15
+            uses_toolbar: true,           // 15
+            uses_action_buttons: true,    // 10
+            uses_two_column_layout: true, // 10
+            has_tests: true,              // 10
+            combobox_id_salt_count: 5,
+            combobox_from_label_count: 0, // 10
+            issues: vec![],
+        };
+        assert_eq!(full.compliance_score(), 100);
+
+        // Partial compliance
+        let partial = EditorComplianceResult {
+            editor_name: "partial".to_string(),
+            has_show_method: true,         // 20
+            has_new_method: false,         // 0
+            has_state_struct: false,       // 0
+            uses_toolbar: true,            // 15
+            uses_action_buttons: false,    // 0
+            uses_two_column_layout: false, // 0
+            has_tests: true,               // 10
+            combobox_id_salt_count: 0,
+            combobox_from_label_count: 0, // 10
+            issues: vec![],
+        };
+        assert_eq!(partial.compliance_score(), 55);
+    }
+
+    #[test]
+    fn test_collect_combobox_id_salts() {
+        use crate::test_utils::{collect_combobox_id_salts, SourceFile};
+
+        let content = r#"
+egui::ComboBox::from_id_salt("difficulty_combo")
+    .show_ui(ui, |ui| {});
+egui::ComboBox::from_id_salt("terrain_combo")
+    .show_ui(ui, |ui| {});
+egui::ComboBox::from_id_salt("wall_combo")
+    .show_ui(ui, |ui| {});
+"#;
+
+        let file = SourceFile::new("test.rs", content);
+        let salts = collect_combobox_id_salts(&file);
+
+        assert_eq!(salts.len(), 3);
+        assert!(salts.contains(&"difficulty_combo".to_string()));
+        assert!(salts.contains(&"terrain_combo".to_string()));
+        assert!(salts.contains(&"wall_combo".to_string()));
+    }
+
+    #[test]
+    fn test_find_duplicate_combobox_ids_detects_conflicts() {
+        use crate::test_utils::{find_duplicate_combobox_ids, SourceFile};
+
+        let file1 = SourceFile::new(
+            "editor1.rs",
+            r#"egui::ComboBox::from_id_salt("duplicate_id")"#,
+        );
+        let file2 = SourceFile::new(
+            "editor2.rs",
+            r#"egui::ComboBox::from_id_salt("duplicate_id")"#,
+        );
+        let file3 = SourceFile::new("editor3.rs", r#"egui::ComboBox::from_id_salt("unique_id")"#);
+
+        let files = vec![file1, file2, file3];
+        let duplicates = find_duplicate_combobox_ids(&files);
+
+        // Only "duplicate_id" should be reported as duplicate
+        assert_eq!(duplicates.len(), 1);
+        assert!(duplicates.contains_key("duplicate_id"));
+        assert_eq!(duplicates["duplicate_id"].len(), 2);
+        assert!(!duplicates.contains_key("unique_id"));
+    }
+
+    #[test]
+    fn test_compliance_summary_calculation() {
+        use crate::test_utils::{ComplianceSummary, EditorComplianceResult};
+        use std::collections::HashMap;
+
+        let mut results = HashMap::new();
+
+        results.insert(
+            "compliant_editor".to_string(),
+            EditorComplianceResult {
+                editor_name: "compliant_editor".to_string(),
+                has_show_method: true,
+                has_new_method: true,
+                has_state_struct: true,
+                uses_toolbar: true,
+                uses_action_buttons: true,
+                uses_two_column_layout: true,
+                has_tests: true,
+                combobox_id_salt_count: 2,
+                combobox_from_label_count: 0,
+                issues: vec![],
+            },
+        );
+
+        results.insert(
+            "noncompliant_editor".to_string(),
+            EditorComplianceResult {
+                editor_name: "noncompliant_editor".to_string(),
+                has_show_method: true,
+                has_new_method: false,
+                has_state_struct: false,
+                uses_toolbar: false,
+                uses_action_buttons: false,
+                uses_two_column_layout: false,
+                has_tests: false,
+                combobox_id_salt_count: 0,
+                combobox_from_label_count: 2,
+                issues: vec!["Missing tests".to_string(), "Uses from_label".to_string()],
+            },
+        );
+
+        let summary = ComplianceSummary::from_results(&results);
+
+        assert_eq!(summary.total_editors, 2);
+        assert_eq!(summary.compliant_editors, 1);
+        assert_eq!(summary.total_issues, 2);
+        assert_eq!(summary.from_label_violations, 2);
+        assert!(summary.average_score > 0.0);
+    }
+
+    #[test]
+    fn test_pattern_match_line_numbers() {
+        use crate::test_utils::PatternMatcher;
+
+        let content = r#"line 1
+line 2
+ComboBox::from_id_salt("test")
+line 4
+line 5
+ComboBox::from_id_salt("another")
+line 7"#;
+
+        let matcher = PatternMatcher::combobox_id_salt();
+        let matches = matcher.find_matches(content);
+
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].line_number, 3);
+        assert_eq!(matches[1].line_number, 6);
+    }
+
+    #[test]
+    fn test_pattern_matcher_test_annotation() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::test_annotation();
+        let content = r#"
+#[test]
+fn test_something() {}
+
+#[test]
+fn test_another() {}
+"#;
+
+        assert_eq!(matcher.count_matches(content), 2);
+    }
+
+    #[test]
+    fn test_pattern_matcher_toolbar_usage() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::editor_toolbar_usage();
+
+        assert!(matcher.matches("EditorToolbar::new(\"Items\")"));
+        assert!(matcher.matches("    EditorToolbar::new("));
+        assert!(!matcher.matches("Toolbar::new(")); // different struct
+    }
+
+    #[test]
+    fn test_pattern_matcher_action_buttons_usage() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::action_buttons_usage();
+
+        assert!(matcher.matches("ActionButtons::new()"));
+        assert!(matcher.matches("    ActionButtons::new("));
+        assert!(!matcher.matches("Buttons::new(")); // different struct
+    }
+
+    #[test]
+    fn test_pattern_matcher_two_column_layout_usage() {
+        use crate::test_utils::PatternMatcher;
+
+        let matcher = PatternMatcher::two_column_layout_usage();
+
+        assert!(matcher.matches("TwoColumnLayout::new(\"items\")"));
+        assert!(matcher.matches("    TwoColumnLayout::new("));
+        assert!(!matcher.matches("ColumnLayout::new(")); // different struct
+    }
+
+    #[test]
+    fn test_editor_compliance_result_is_compliant() {
+        use crate::test_utils::EditorComplianceResult;
+
+        // Compliant: no issues and no from_label
+        let compliant = EditorComplianceResult {
+            editor_name: "test".to_string(),
+            has_show_method: true,
+            has_new_method: true,
+            has_state_struct: true,
+            uses_toolbar: true,
+            uses_action_buttons: true,
+            uses_two_column_layout: true,
+            has_tests: true,
+            combobox_id_salt_count: 1,
+            combobox_from_label_count: 0,
+            issues: vec![],
+        };
+        assert!(compliant.is_compliant());
+
+        // Not compliant: has from_label usage
+        let with_from_label = EditorComplianceResult {
+            editor_name: "test".to_string(),
+            has_show_method: true,
+            has_new_method: true,
+            has_state_struct: true,
+            uses_toolbar: true,
+            uses_action_buttons: true,
+            uses_two_column_layout: true,
+            has_tests: true,
+            combobox_id_salt_count: 1,
+            combobox_from_label_count: 1,
+            issues: vec![],
+        };
+        assert!(!with_from_label.is_compliant());
+
+        // Not compliant: has issues
+        let with_issues = EditorComplianceResult {
+            editor_name: "test".to_string(),
+            has_show_method: true,
+            has_new_method: true,
+            has_state_struct: true,
+            uses_toolbar: true,
+            uses_action_buttons: true,
+            uses_two_column_layout: true,
+            has_tests: true,
+            combobox_id_salt_count: 1,
+            combobox_from_label_count: 0,
+            issues: vec!["Some issue".to_string()],
+        };
+        assert!(!with_issues.is_compliant());
+    }
+
+    #[test]
+    fn test_compliance_summary_to_string_format() {
+        use crate::test_utils::ComplianceSummary;
+
+        let summary = ComplianceSummary {
+            total_editors: 5,
+            compliant_editors: 4,
+            total_issues: 2,
+            from_label_violations: 1,
+            average_score: 90.5,
+            all_issues: vec!["issue1".to_string(), "issue2".to_string()],
+        };
+
+        let output = summary.to_string();
+
+        assert!(output.contains("Total Editors: 5"));
+        assert!(output.contains("Compliant: 4"));
+        assert!(output.contains("Total Issues: 2"));
+        assert!(output.contains("from_label Violations: 1"));
+        assert!(output.contains("Average Score: 90.5"));
     }
 }

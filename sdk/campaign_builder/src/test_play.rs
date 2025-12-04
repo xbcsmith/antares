@@ -238,10 +238,7 @@ impl CampaignBuilderApp {
         // Validate if enabled
         if config.validate_first {
             self.validate_campaign();
-            let has_errors = self
-                .validation_errors
-                .iter()
-                .any(|e| matches!(e.severity, crate::Severity::Error));
+            let has_errors = self.validation_errors.iter().any(|e| e.is_error());
 
             if has_errors {
                 return Err(CampaignError::Io(std::io::Error::new(

@@ -106,7 +106,7 @@ fn test_empty_effects_and_max_value() {
     );
     assert_eq!(
         found_val.unwrap(),
-        32767,
-        "Expected attribute modifier value to be 32767"
+        255,
+        "Expected attribute modifier value to be 255 (ATTRIBUTE_MODIFIER_MAX)"
     );
 }

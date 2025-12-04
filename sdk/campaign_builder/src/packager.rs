@@ -286,10 +286,7 @@ impl CampaignBuilderApp {
         }
 
         // Must have no critical validation errors
-        let has_critical_errors = self
-            .validation_errors
-            .iter()
-            .any(|e| matches!(e.severity, crate::Severity::Error));
+        let has_critical_errors = self.validation_errors.iter().any(|e| e.is_error());
 
         !has_critical_errors
     }

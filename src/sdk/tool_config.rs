@@ -144,6 +144,16 @@ pub struct DisplayConfig {
 
     /// Show hints and tips
     pub show_hints: bool,
+
+    /// Minimum width (points) for inspector (right) panels in two-column editors.
+    /// This is used by editors to ensure the inspector column isn't clipped by the
+    /// list/detail split layout.
+    pub inspector_min_width: f32,
+
+    /// Maximum width ratio for the left column in two-column editors. This is a
+    /// fraction in the range 0.0..=1.0 (e.g., 0.72 means left column should not
+    /// exceed 72% of the available width).
+    pub left_column_max_ratio: f32,
 }
 
 /// Validation settings
@@ -192,6 +202,8 @@ impl Default for DisplayConfig {
             verbose: false,
             page_size: 20,
             show_hints: true,
+            inspector_min_width: 300.0,
+            left_column_max_ratio: 0.72,
         }
     }
 }
@@ -243,7 +255,11 @@ impl ToolConfig {
     pub fn load_or_default() -> Result<Self, ConfigError> {
         match Self::load() {
             Ok(config) => Ok(config),
+            // If the file is missing or invalid/unparseable, fall back to a default
+            // configuration instead of failing — this ensures older configs or
+            // partial configs do not break the application at startup.
             Err(ConfigError::ReadError(_)) => Ok(Self::default()),
+            Err(ConfigError::ParseError(_)) => Ok(Self::default()),
             Err(e) => Err(e),
         }
     }

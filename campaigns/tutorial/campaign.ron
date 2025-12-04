@@ -24,6 +24,6 @@ CampaignMetadata(
     races_file: "data/races.ron",
     maps_dir: "data/maps/",
     quests_file: "data/quests.ron",
-    dialogue_file: "data/dialogue.ron",
+    dialogue_file: "data/dialogues.ron",
     conditions_file: "data/conditions.ron",
 )

@@ -273,11 +273,19 @@ fn test_no_ui_id_clashes() {
     let map_editor_src =
         fs::read_to_string("src/map_editor.rs").expect("Failed to read src/map_editor.rs");
 
-    // Check main.rs for ComboBox::from_label (should use from_id_salt instead)
-    let from_label_in_main = main_src.matches("ComboBox::from_label").count();
+    // Extract only production code (before #[cfg(test)] module)
+    // This avoids false positives from test string literals that contain "from_label"
+    let main_production = if let Some(test_start) = main_src.find("#[cfg(test)]") {
+        &main_src[..test_start]
+    } else {
+        &main_src[..]
+    };
+
+    // Check main.rs production code for ComboBox::from_label (should use from_id_salt instead)
+    let from_label_in_main = main_production.matches("ComboBox::from_label").count();
     assert_eq!(
         from_label_in_main, 0,
-        "Found {} uses of ComboBox::from_label in main.rs. Should use from_id_salt for unique IDs.",
+        "Found {} uses of ComboBox::from_label in main.rs production code. Should use from_id_salt for unique IDs.",
         from_label_in_main
     );
 
@@ -303,8 +311,8 @@ fn test_no_ui_id_clashes() {
     ];
 
     for (pattern, description) in expected_unique_ids {
-        // Count occurrences - each should appear at most once in main.rs
-        let count = main_src.matches(pattern).count();
+        // Count occurrences - each should appear at most once in main.rs production code
+        let count = main_production.matches(pattern).count();
         assert!(
             count <= 1,
             "{} pattern '{}' appears {} times (expected 0 or 1)",

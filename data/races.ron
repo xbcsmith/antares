@@ -1,0 +1,45 @@
+// races.ron - Race definitions for Antares RPG
+//
+// This file contains all race definitions in RON (Rusty Object Notation) format.
+// See docs/reference/architecture.md for format specifications.
+//
+// Race stat modifiers affect the base stats of characters.
+// Positive values indicate racial bonuses, negative values indicate penalties.
+
+[
+    // ===== Human - Balanced, no modifiers =====
+    (
+        id: "human",
+        name: "Human",
+    ),
+
+    // ===== Elf - Agile and intelligent, but less sturdy =====
+    (
+        id: "elf",
+        name: "Elf",
+    ),
+
+    // ===== Dwarf - Tough and strong, but slower =====
+    (
+        id: "dwarf",
+        name: "Dwarf",
+    ),
+
+    // ===== Gnome - Clever and lucky, but weaker =====
+    (
+        id: "gnome",
+        name: "Gnome",
+    ),
+
+    // ===== Half-Elf - Blend of human and elf traits =====
+    (
+        id: "half_elf",
+        name: "Half-Elf",
+    ),
+
+    // ===== Half-Orc - Strong and tough, but less charismatic =====
+    (
+        id: "half_orc",
+        name: "Half-Orc",
+    ),
+]

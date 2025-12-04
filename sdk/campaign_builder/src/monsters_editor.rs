@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::ui_helpers::{
+    ActionButtons, AttributePair16Input, AttributePairInput, EditorToolbar, ItemAction,
+    ToolbarAction, TwoColumnLayout,
+};
 use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
@@ -95,52 +99,33 @@ impl MonstersEditorState {
         ui.heading("👹 Monsters Editor");
         ui.add_space(5.0);
 
-        // Top toolbar
-        ui.horizontal(|ui| {
-            ui.label("🔍 Search:");
-            if ui.text_edit_singleline(&mut self.search_query).changed() {
-                self.selected_monster = None;
-            }
-            ui.separator();
+        // Use shared EditorToolbar component
+        let toolbar_action = EditorToolbar::new("Monsters")
+            .with_search(&mut self.search_query)
+            .with_merge_mode(file_load_merge_mode)
+            .with_total_count(monsters.len())
+            .with_id_salt("monsters_toolbar")
+            .show(ui);
 
-            if ui.button("➕ Add Monster").clicked() {
+        // Handle toolbar actions
+        match toolbar_action {
+            ToolbarAction::New => {
                 self.mode = MonstersEditorMode::Add;
                 self.edit_buffer = Self::default_monster();
                 let next_id = monsters.iter().map(|m| m.id).max().unwrap_or(0) + 1;
                 self.edit_buffer.id = next_id;
+                *unsaved_changes = true;
             }
-
-            if ui.button("🔄 Reload").clicked() {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(monsters_file);
-                    if path.exists() {
-                        match std::fs::read_to_string(&path) {
-                            Ok(contents) => {
-                                match ron::from_str::<Vec<MonsterDefinition>>(&contents) {
-                                    Ok(loaded_monsters) => {
-                                        *monsters = loaded_monsters;
-                                        *status_message =
-                                            format!("Loaded monsters from: {}", path.display());
-                                    }
-                                    Err(e) => {
-                                        *status_message = format!("Failed to parse monsters: {}", e)
-                                    }
-                                }
-                            }
-                            Err(e) => *status_message = format!("Failed to read monsters: {}", e),
-                        }
-                    }
-                }
+            ToolbarAction::Save => {
+                self.save_monsters(
+                    monsters,
+                    campaign_dir,
+                    monsters_file,
+                    unsaved_changes,
+                    status_message,
+                );
             }
-
-            if ui.button("📥 Import").clicked() {
-                self.show_import_dialog = true;
-            }
-
-            ui.separator();
-
-            // File I/O buttons
-            if ui.button("📂 Load from File").clicked() {
+            ToolbarAction::Load => {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("RON", &["ron"])
                     .pick_file()
@@ -174,15 +159,11 @@ impl MonstersEditorState {
                     }
                 }
             }
-
-            ui.checkbox(file_load_merge_mode, "Merge");
-            ui.label(if *file_load_merge_mode {
-                "(adds to existing)"
-            } else {
-                "(replaces all)"
-            });
-
-            if ui.button("💾 Save to File").clicked() {
+            ToolbarAction::Import => {
+                self.show_import_dialog = true;
+                self.import_export_buffer.clear();
+            }
+            ToolbarAction::Export => {
                 if let Some(path) = rfd::FileDialog::new()
                     .set_file_name("monsters.ron")
                     .add_filter("RON", &["ron"])
@@ -203,10 +184,35 @@ impl MonstersEditorState {
                     }
                 }
             }
+            ToolbarAction::Reload => {
+                if let Some(dir) = campaign_dir {
+                    let path = dir.join(monsters_file);
+                    if path.exists() {
+                        match std::fs::read_to_string(&path) {
+                            Ok(contents) => {
+                                match ron::from_str::<Vec<MonsterDefinition>>(&contents) {
+                                    Ok(loaded_monsters) => {
+                                        *monsters = loaded_monsters;
+                                        *status_message =
+                                            format!("Loaded monsters from: {}", path.display());
+                                    }
+                                    Err(e) => {
+                                        *status_message = format!("Failed to parse monsters: {}", e)
+                                    }
+                                }
+                            }
+                            Err(e) => *status_message = format!("Failed to read monsters: {}", e),
+                        }
+                    } else {
+                        *status_message = "Monsters file does not exist".to_string();
+                    }
+                }
+            }
+            ToolbarAction::None => {}
+        }
 
-            ui.separator();
-            ui.label(format!("Total: {}", monsters.len()));
-
+        // Filter toolbar
+        ui.horizontal(|ui| {
             ui.checkbox(&mut self.show_preview, "Preview");
         });
 
@@ -253,7 +259,9 @@ impl MonstersEditorState {
         monsters_file: &str,
     ) {
         let search_lower = self.search_query.to_lowercase();
-        let mut filtered_monsters: Vec<(usize, String)> = monsters
+
+        // Build filtered list snapshot to avoid borrow conflicts in closures
+        let filtered_monsters: Vec<(usize, String, MonsterDefinition)> = monsters
             .iter()
             .enumerate()
             .filter(|(_, monster)| {
@@ -264,173 +272,190 @@ impl MonstersEditorState {
                 (
                     idx,
                     format!("{} {} (HP:{})", undead_icon, monster.name, monster.hp.base),
+                    monster.clone(),
                 )
             })
             .collect();
 
-        filtered_monsters.sort_by_key(|(idx, _)| monsters[*idx].id);
+        // Sort by ID
+        let mut sorted_monsters = filtered_monsters;
+        sorted_monsters.sort_by_key(|(idx, _, _)| monsters[*idx].id);
 
         let selected = self.selected_monster;
         let mut new_selection = selected;
-        let mut action: Option<(usize, &str)> = None;
+        let mut action_requested: Option<ItemAction> = None;
+        let show_preview = self.show_preview;
 
-        // Compute panel height using shared helper to keep consistent across editors.
+        // Use shared TwoColumnLayout component
+        TwoColumnLayout::new("monsters").show_split(
+            ui,
+            |left_ui| {
+                // Left panel: Monsters list
+                left_ui.heading("Monsters");
+                left_ui.separator();
+
+                for (idx, label, _) in &sorted_monsters {
+                    let is_selected = selected == Some(*idx);
+                    if left_ui.selectable_label(is_selected, label).clicked() {
+                        new_selection = Some(*idx);
+                    }
+                }
+
+                if sorted_monsters.is_empty() {
+                    left_ui.label("No monsters found");
+                }
+            },
+            |right_ui| {
+                // Right panel: Detail view
+                if let Some(idx) = selected {
+                    if let Some((_, _, monster)) =
+                        sorted_monsters.iter().find(|(i, _, _)| *i == idx)
+                    {
+                        right_ui.heading(&monster.name);
+                        right_ui.separator();
+
+                        // Use shared ActionButtons component
+                        let action = ActionButtons::new().enabled(true).show(right_ui);
+                        if action != ItemAction::None {
+                            action_requested = Some(action);
+                        }
+
+                        right_ui.separator();
+
+                        if show_preview {
+                            Self::show_preview_static(right_ui, monster);
+                        } else {
+                            Self::show_monster_details(right_ui, monster);
+                        }
+                    } else {
+                        right_ui.vertical_centered(|ui| {
+                            ui.add_space(100.0);
+                            ui.label("Select a monster to view details");
+                        });
+                    }
+                } else {
+                    right_ui.vertical_centered(|ui| {
+                        ui.add_space(100.0);
+                        ui.label("Select a monster to view details");
+                    });
+                }
+            },
+        );
+
+        // Apply selection change after closures
+        self.selected_monster = new_selection;
+
+        // Handle action button clicks after closures
+        if let Some(action) = action_requested {
+            match action {
+                ItemAction::Edit => {
+                    if let Some(idx) = self.selected_monster {
+                        if idx < monsters.len() {
+                            self.mode = MonstersEditorMode::Edit;
+                            self.edit_buffer = monsters[idx].clone();
+                        }
+                    }
+                }
+                ItemAction::Delete => {
+                    if let Some(idx) = self.selected_monster {
+                        if idx < monsters.len() {
+                            monsters.remove(idx);
+                            self.selected_monster = None;
+                            self.save_monsters(
+                                monsters,
+                                campaign_dir,
+                                monsters_file,
+                                unsaved_changes,
+                                status_message,
+                            );
+                        }
+                    }
+                }
+                ItemAction::Duplicate => {
+                    if let Some(idx) = self.selected_monster {
+                        if idx < monsters.len() {
+                            let mut new_monster = monsters[idx].clone();
+                            let next_id = monsters.iter().map(|m| m.id).max().unwrap_or(0) + 1;
+                            new_monster.id = next_id;
+                            new_monster.name = format!("{} (Copy)", new_monster.name);
+                            monsters.push(new_monster);
+                            self.save_monsters(
+                                monsters,
+                                campaign_dir,
+                                monsters_file,
+                                unsaved_changes,
+                                status_message,
+                            );
+                        }
+                    }
+                }
+                ItemAction::Export => {
+                    if let Some(idx) = self.selected_monster {
+                        if idx < monsters.len() {
+                            if let Ok(ron_str) = ron::ser::to_string_pretty(
+                                &monsters[idx],
+                                ron::ser::PrettyConfig::default(),
+                            ) {
+                                self.import_export_buffer = ron_str;
+                                self.show_import_dialog = true;
+                                *status_message =
+                                    "Monster exported to clipboard dialog".to_string();
+                            } else {
+                                *status_message = "Failed to export monster".to_string();
+                            }
+                        }
+                    }
+                }
+                ItemAction::None => {}
+            }
+        }
+    }
+
+    /// Static monster details view that doesn't require self
+    fn show_monster_details(ui: &mut egui::Ui, monster: &MonsterDefinition) {
         let panel_height = crate::ui_helpers::compute_panel_height(
             ui,
             crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
         );
 
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.set_width(crate::ui_helpers::DEFAULT_LEFT_COLUMN_WIDTH);
-                ui.set_min_height(panel_height);
-
-                ui.heading("Monsters");
-                ui.separator();
-
-                egui::ScrollArea::vertical()
-                    .id_salt("monsters_list_scroll")
-                    .auto_shrink([false, false])
-                    .max_height(panel_height)
-                    .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        for (idx, label) in &filtered_monsters {
-                            let is_selected = selected == Some(*idx);
-                            if ui.selectable_label(is_selected, label).clicked() {
-                                new_selection = Some(*idx);
-                            }
-                        }
-
-                        if filtered_monsters.is_empty() {
-                            ui.label("No monsters found");
-                        }
-                    });
+        egui::ScrollArea::vertical()
+            .id_salt("monster_details_scroll")
+            .max_height(panel_height)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.label(format!("ID: {}", monster.id));
+                    ui.label(format!("HP: {}", monster.hp.base));
+                    ui.label(format!("AC: {}", monster.ac.base));
+                    ui.label(format!("Attacks: {}", monster.attacks.len()));
+                    ui.label(format!("Undead: {}", monster.is_undead));
+                    ui.label(format!("Can Regenerate: {}", monster.can_regenerate));
+                    ui.label(format!("Can Advance: {}", monster.can_advance));
+                    ui.label(format!("Magic Resistance: {}%", monster.magic_resistance));
+                    ui.separator();
+                    ui.label("Loot:");
+                    ui.label(format!(
+                        "  Gold: {}-{} gp",
+                        monster.loot.gold_min, monster.loot.gold_max
+                    ));
+                    ui.label(format!(
+                        "  Gems: {}-{}",
+                        monster.loot.gems_min, monster.loot.gems_max
+                    ));
+                    ui.label(format!("  Experience: {} XP", monster.loot.experience));
+                });
             });
-
-            ui.separator();
-
-            ui.vertical(|ui| {
-                ui.set_min_height(panel_height);
-                ui.set_min_width(ui.available_width());
-                if let Some(idx) = selected {
-                    if idx < monsters.len() {
-                        let monster = monsters[idx].clone();
-
-                        ui.heading(&monster.name);
-                        ui.separator();
-
-                        ui.horizontal(|ui| {
-                            if ui.button("✏️ Edit").clicked() {
-                                action = Some((idx, "edit"));
-                            }
-                            if ui.button("🗑️ Delete").clicked() {
-                                action = Some((idx, "delete"));
-                            }
-                            if ui.button("📋 Duplicate").clicked() {
-                                action = Some((idx, "duplicate"));
-                            }
-                            if ui.button("📤 Export").clicked() {
-                                action = Some((idx, "export"));
-                            }
-                        });
-
-                        ui.separator();
-
-                        if self.show_preview {
-                            self.show_preview(ui, &monster);
-                        } else {
-                            egui::ScrollArea::vertical()
-                                .id_salt("monster_details_scroll")
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    ui.group(|ui| {
-                                        ui.label(format!("ID: {}", monster.id));
-                                        ui.label(format!("HP: {}", monster.hp.base));
-                                        ui.label(format!("AC: {}", monster.ac.base));
-                                        ui.label(format!("Attacks: {}", monster.attacks.len()));
-                                        ui.label(format!("Undead: {}", monster.is_undead));
-                                        ui.label(format!(
-                                            "Can Regenerate: {}!",
-                                            monster.can_regenerate
-                                        ));
-                                        ui.label(format!("Can Advance: {}!", monster.can_advance));
-                                        ui.label(format!(
-                                            "Magic Resistance: {}%!",
-                                            monster.magic_resistance,
-                                        ));
-                                        ui.separator();
-                                        ui.label("Loot:");
-                                        ui.label(format!(
-                                            "  Gold: {}-{} gp",
-                                            monster.loot.gold_min, monster.loot.gold_max
-                                        ));
-                                        ui.label(format!(
-                                            "  Gems: {}-{}",
-                                            monster.loot.gems_min, monster.loot.gems_max
-                                        ));
-                                        ui.label(format!(
-                                            "  Experience: {} XP",
-                                            monster.loot.experience
-                                        ));
-                                    });
-                                });
-                        }
-                    }
-                } else {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(100.0);
-                        ui.label("Select a monster to view details");
-                    });
-                }
-            });
-        });
-
-        self.selected_monster = new_selection;
-
-        if let Some((idx, cmd)) = action {
-            match cmd {
-                "edit" => {
-                    self.mode = MonstersEditorMode::Edit;
-                    self.edit_buffer = monsters[idx].clone();
-                }
-                "delete" => {
-                    monsters.remove(idx);
-                    self.selected_monster = None;
-                    self.save_monsters(
-                        monsters,
-                        campaign_dir,
-                        monsters_file,
-                        unsaved_changes,
-                        status_message,
-                    );
-                }
-                "duplicate" => {
-                    let mut new_monster = monsters[idx].clone();
-                    let next_id = monsters.iter().map(|m| m.id).max().unwrap_or(0) + 1;
-                    new_monster.id = next_id;
-                    new_monster.name = format!("{} (Copy)", new_monster.name);
-                    monsters.push(new_monster);
-                    self.save_monsters(
-                        monsters,
-                        campaign_dir,
-                        monsters_file,
-                        unsaved_changes,
-                        status_message,
-                    );
-                }
-                "export" => {
-                    if let Ok(ron) = ron::to_string(&monsters[idx]) {
-                        self.import_export_buffer = ron;
-                        *status_message = "Monster exported to buffer".to_string();
-                    }
-                }
-                _ => {}
-            }
-        }
     }
 
-    fn show_preview(&self, ui: &mut egui::Ui, monster: &MonsterDefinition) {
+    /// Static preview method that doesn't require self
+    fn show_preview_static(ui: &mut egui::Ui, monster: &MonsterDefinition) {
+        let panel_height = crate::ui_helpers::compute_panel_height(
+            ui,
+            crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
+        );
+
         egui::ScrollArea::vertical()
+            .max_height(panel_height)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.group(|ui| {
@@ -484,6 +509,9 @@ impl MonstersEditorState {
                     if monster.can_advance {
                         ui.label("  🏃 Can Advance");
                     }
+                    if !monster.can_regenerate && !monster.can_advance {
+                        ui.label("  None");
+                    }
 
                     ui.separator();
 
@@ -500,436 +528,11 @@ impl MonstersEditorState {
                             monster.loot.gems_min, monster.loot.gems_max
                         ));
                     }
-                    ui.label(format!("  Experience: {} XP", monster.loot.experience));
-                });
-            });
-    }
-
-    fn show_form(
-        &mut self,
-        ui: &mut egui::Ui,
-        monsters: &mut Vec<MonsterDefinition>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        monsters_file: &str,
-    ) {
-        let is_add = self.mode == MonstersEditorMode::Add;
-        ui.heading(if is_add {
-            "Add New Monster"
-        } else {
-            "Edit Monster"
-        });
-        ui.separator();
-
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("ID:");
-                    ui.add_enabled(
-                        false,
-                        egui::TextEdit::singleline(&mut self.edit_buffer.id.to_string()),
-                    );
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Name:");
-                    ui.text_edit_singleline(&mut self.edit_buffer.name);
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("HP:");
-                    ui.add(egui::DragValue::new(&mut self.edit_buffer.hp.base).speed(1.0));
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("AC:");
-                    ui.add(egui::DragValue::new(&mut self.edit_buffer.ac.base).speed(1.0));
-                });
-
-                ui.checkbox(&mut self.edit_buffer.is_undead, "Undead");
-                ui.checkbox(&mut self.edit_buffer.can_advance, "Can Advance");
-
-                ui.horizontal(|ui| {
-                    ui.label("Magic Resistance:");
-                    ui.add(egui::Slider::new(
-                        &mut self.edit_buffer.magic_resistance,
-                        0..=100,
-                    ));
-                });
-
-                ui.separator();
-                if ui
-                    .button(if self.show_stats_editor {
-                        "▼ Stats"
-                    } else {
-                        "▶ Stats"
-                    })
-                    .clicked()
-                {
-                    self.show_stats_editor = !self.show_stats_editor;
-                }
-
-                if self.show_stats_editor {
-                    ui.group(|ui| {
-                        self.show_stats_editor(ui);
-                    });
-                }
-
-                ui.separator();
-                if ui
-                    .button(if self.show_attacks_editor {
-                        "▼ Attacks"
-                    } else {
-                        "▶ Attacks"
-                    })
-                    .clicked()
-                {
-                    self.show_attacks_editor = !self.show_attacks_editor;
-                }
-
-                if self.show_attacks_editor {
-                    ui.group(|ui| {
-                        self.show_attacks_editor(ui);
-                    });
-                }
-
-                ui.separator();
-                if ui
-                    .button(if self.show_loot_editor {
-                        "▼ Loot Table"
-                    } else {
-                        "▶ Loot Table"
-                    })
-                    .clicked()
-                {
-                    self.show_loot_editor = !self.show_loot_editor;
-                }
-
-                if self.show_loot_editor {
-                    ui.group(|ui| {
-                        self.show_loot_editor(ui);
-                    });
-                }
-
-                ui.separator();
-
-                ui.horizontal(|ui| {
-                    if ui.button("💾 Save").clicked() {
-                        // Sync current with base for hp and ac before saving
-                        self.edit_buffer.hp.current = self.edit_buffer.hp.base;
-                        self.edit_buffer.ac.current = self.edit_buffer.ac.base;
-
-                        if is_add {
-                            monsters.push(self.edit_buffer.clone());
-                        } else if let Some(idx) = self.selected_monster {
-                            if idx < monsters.len() {
-                                monsters[idx] = self.edit_buffer.clone();
-                            }
-                        }
-                        self.save_monsters(
-                            monsters,
-                            campaign_dir,
-                            monsters_file,
-                            unsaved_changes,
-                            status_message,
-                        );
-                        self.mode = MonstersEditorMode::List;
-                        *status_message = "Monster saved".to_string();
-                    }
-
-                    if ui.button("❌ Cancel").clicked() {
-                        self.mode = MonstersEditorMode::List;
+                    if monster.loot.experience > 0 {
+                        ui.label(format!("  Experience: {} XP", monster.loot.experience));
                     }
                 });
             });
-    }
-
-    fn show_stats_editor(&mut self, ui: &mut egui::Ui) {
-        ui.label("Attributes:");
-
-        ui.horizontal(|ui| {
-            ui.label("Might:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.might.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Intellect:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.intellect.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Personality:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.personality.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Endurance:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.endurance.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Speed:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.speed.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Accuracy:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.accuracy.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Luck:");
-            ui.add(
-                egui::DragValue::new(&mut self.edit_buffer.stats.luck.base)
-                    .speed(1.0)
-                    .range(0..=255),
-            );
-        });
-
-        ui.separator();
-
-        ui.horizontal(|ui| {
-            ui.label("Flee Threshold:");
-            ui.add(egui::DragValue::new(&mut self.edit_buffer.flee_threshold).speed(1.0));
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Special Attack %:");
-            ui.add(egui::Slider::new(
-                &mut self.edit_buffer.special_attack_threshold,
-                0..=100,
-            ));
-        });
-    }
-
-    fn show_attacks_editor(&mut self, ui: &mut egui::Ui) {
-        ui.label(format!("Attacks ({})", self.edit_buffer.attacks.len()));
-
-        if ui.button("➕ Add Attack").clicked() {
-            self.edit_buffer.attacks.push(Attack {
-                damage: DiceRoll::new(1, 6, 0),
-                attack_type: AttackType::Physical,
-                special_effect: None,
-            });
-        }
-
-        ui.separator();
-
-        let mut to_remove: Option<usize> = None;
-
-        for (idx, attack) in self.edit_buffer.attacks.iter_mut().enumerate() {
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label(format!("Attack {}", idx + 1));
-                    if ui.button("🗑️").clicked() {
-                        to_remove = Some(idx);
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Damage:");
-                    ui.add(
-                        egui::DragValue::new(&mut attack.damage.count)
-                            .speed(1.0)
-                            .range(1..=10)
-                            .prefix("d"),
-                    );
-                    ui.label("d");
-                    ui.add(
-                        egui::DragValue::new(&mut attack.damage.sides)
-                            .speed(1.0)
-                            .range(2..=100),
-                    );
-                    ui.label("+");
-                    ui.add(
-                        egui::DragValue::new(&mut attack.damage.bonus)
-                            .speed(1.0)
-                            .range(-10..=100),
-                    );
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Type:");
-                    egui::ComboBox::from_id_salt(format!("attack_type_{}", idx))
-                        .selected_text(format!("{:?}", attack.attack_type))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut attack.attack_type,
-                                AttackType::Physical,
-                                "Physical",
-                            );
-                            ui.selectable_value(&mut attack.attack_type, AttackType::Fire, "Fire");
-                            ui.selectable_value(&mut attack.attack_type, AttackType::Cold, "Cold");
-                            ui.selectable_value(
-                                &mut attack.attack_type,
-                                AttackType::Electricity,
-                                "Electricity",
-                            );
-                            ui.selectable_value(&mut attack.attack_type, AttackType::Acid, "Acid");
-                            ui.selectable_value(
-                                &mut attack.attack_type,
-                                AttackType::Poison,
-                                "Poison",
-                            );
-                            ui.selectable_value(
-                                &mut attack.attack_type,
-                                AttackType::Energy,
-                                "Energy",
-                            );
-                        });
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Special Effect:");
-                    egui::ComboBox::from_id_salt(format!("special_effect_{}", idx))
-                        .selected_text(match attack.special_effect {
-                            None => "None",
-                            Some(SpecialEffect::Poison) => "Poison",
-                            Some(SpecialEffect::Disease) => "Disease",
-                            Some(SpecialEffect::Paralysis) => "Paralysis",
-                            Some(SpecialEffect::Sleep) => "Sleep",
-                            Some(SpecialEffect::Drain) => "Drain",
-                            Some(SpecialEffect::Stone) => "Stone",
-                            Some(SpecialEffect::Death) => "Death",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut attack.special_effect, None, "None");
-                            ui.selectable_value(
-                                &mut attack.special_effect,
-                                Some(SpecialEffect::Poison),
-                                "Poison",
-                            );
-                            ui.selectable_value(
-                                &mut attack.special_effect,
-                                Some(SpecialEffect::Disease),
-                                "Disease",
-                            );
-                            ui.selectable_value(
-                                &mut attack.special_effect,
-                                Some(SpecialEffect::Paralysis),
-                                "Paralysis",
-                            );
-                            ui.selectable_value(
-                                &mut attack.special_effect,
-                                Some(SpecialEffect::Sleep),
-                                "Sleep",
-                            );
-                            ui.selectable_value(
-                                &mut attack.special_effect,
-                                Some(SpecialEffect::Drain),
-                                "Drain",
-                            );
-                            ui.selectable_value(
-                                &mut attack.special_effect,
-                                Some(SpecialEffect::Stone),
-                                "Stone",
-                            );
-                            ui.selectable_value(
-                                &mut attack.special_effect,
-                                Some(SpecialEffect::Death),
-                                "Death",
-                            );
-                        });
-                });
-            });
-        }
-
-        if let Some(idx) = to_remove {
-            self.edit_buffer.attacks.remove(idx);
-        }
-    }
-
-    fn show_loot_editor(&mut self, ui: &mut egui::Ui) {
-        ui.label("Loot Table:");
-
-        ui.horizontal(|ui| {
-            ui.label("Gold Min:");
-            ui.add(egui::DragValue::new(&mut self.edit_buffer.loot.gold_min).speed(1.0));
-            ui.label("Max:");
-            ui.add(egui::DragValue::new(&mut self.edit_buffer.loot.gold_max).speed(1.0));
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Gems Min:");
-            ui.add(egui::DragValue::new(&mut self.edit_buffer.loot.gems_min).speed(1.0));
-            ui.label("Max:");
-            ui.add(egui::DragValue::new(&mut self.edit_buffer.loot.gems_max).speed(1.0));
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Experience:");
-            ui.add(egui::DragValue::new(&mut self.edit_buffer.loot.experience).speed(10.0));
-        });
-
-        ui.separator();
-
-        let calculated_xp = self.calculate_monster_xp(&self.edit_buffer);
-        ui.label(format!(
-            "💡 Suggested XP: {} (based on stats)",
-            calculated_xp
-        ));
-
-        if ui.button("Use Suggested XP").clicked() {
-            self.edit_buffer.loot.experience = calculated_xp;
-        }
-    }
-
-    pub fn calculate_monster_xp(&self, monster: &MonsterDefinition) -> u32 {
-        let mut xp = monster.hp.base as u32 * 10;
-
-        if monster.ac.base < 10 {
-            xp += (10 - monster.ac.base as u32) * 50;
-        }
-
-        xp += monster.attacks.len() as u32 * 20;
-
-        for attack in &monster.attacks {
-            let avg_damage = (attack.damage.count as f32 * (attack.damage.sides as f32 / 2.0))
-                + attack.damage.bonus as f32;
-            xp += (avg_damage * 5.0) as u32;
-
-            if attack.special_effect.is_some() {
-                xp += 50;
-            }
-        }
-
-        if monster.can_regenerate {
-            xp += 100;
-        }
-        if monster.is_undead {
-            xp += 50;
-        }
-        if monster.magic_resistance > 0 {
-            xp += monster.magic_resistance as u32 * 2;
-        }
-
-        xp
     }
 
     fn show_import_dialog(
@@ -943,7 +546,7 @@ impl MonstersEditorState {
     ) {
         let mut open = self.show_import_dialog;
 
-        egui::Window::new("Import Monster")
+        egui::Window::new("Import/Export Monster")
             .open(&mut open)
             .resizable(true)
             .default_width(500.0)
@@ -996,9 +599,341 @@ impl MonstersEditorState {
         self.show_import_dialog = open;
     }
 
+    fn show_form(
+        &mut self,
+        ui: &mut egui::Ui,
+        monsters: &mut Vec<MonsterDefinition>,
+        unsaved_changes: &mut bool,
+        status_message: &mut String,
+        campaign_dir: Option<&PathBuf>,
+        monsters_file: &str,
+    ) {
+        let is_add = self.mode == MonstersEditorMode::Add;
+        ui.heading(if is_add {
+            "Add New Monster"
+        } else {
+            "Edit Monster"
+        });
+        ui.separator();
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.heading("Basic Properties");
+
+                    ui.horizontal(|ui| {
+                        ui.label("ID:");
+                        ui.add_enabled(
+                            false,
+                            egui::TextEdit::singleline(&mut self.edit_buffer.id.to_string()),
+                        );
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.text_edit_singleline(&mut self.edit_buffer.name);
+                    });
+
+                    ui.checkbox(&mut self.edit_buffer.is_undead, "💀 Undead");
+                });
+
+                ui.add_space(10.0);
+
+                ui.group(|ui| {
+                    ui.heading("Combat Stats");
+
+                    // Use AttributePair widgets for HP and AC
+                    AttributePair16Input::new("HP", &mut self.edit_buffer.hp)
+                        .with_id_salt("monster_hp")
+                        .with_reset_button(true)
+                        .show(ui);
+
+                    AttributePairInput::new("AC", &mut self.edit_buffer.ac)
+                        .with_id_salt("monster_ac")
+                        .with_reset_button(true)
+                        .show(ui);
+
+                    ui.horizontal(|ui| {
+                        ui.label("Magic Resistance:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.edit_buffer.magic_resistance)
+                                .range(0..=100)
+                                .suffix("%"),
+                        );
+                    });
+                });
+
+                ui.add_space(10.0);
+
+                ui.group(|ui| {
+                    ui.heading("Attributes");
+
+                    // Use AttributePair widgets for all stats
+                    AttributePairInput::new("Might", &mut self.edit_buffer.stats.might)
+                        .with_id_salt("monster_might")
+                        .show(ui);
+
+                    AttributePairInput::new("Intellect", &mut self.edit_buffer.stats.intellect)
+                        .with_id_salt("monster_intellect")
+                        .show(ui);
+
+                    AttributePairInput::new("Personality", &mut self.edit_buffer.stats.personality)
+                        .with_id_salt("monster_personality")
+                        .show(ui);
+
+                    AttributePairInput::new("Endurance", &mut self.edit_buffer.stats.endurance)
+                        .with_id_salt("monster_endurance")
+                        .show(ui);
+
+                    AttributePairInput::new("Speed", &mut self.edit_buffer.stats.speed)
+                        .with_id_salt("monster_speed")
+                        .show(ui);
+
+                    AttributePairInput::new("Accuracy", &mut self.edit_buffer.stats.accuracy)
+                        .with_id_salt("monster_accuracy")
+                        .show(ui);
+
+                    AttributePairInput::new("Luck", &mut self.edit_buffer.stats.luck)
+                        .with_id_salt("monster_luck")
+                        .show(ui);
+                });
+
+                ui.add_space(10.0);
+
+                ui.group(|ui| {
+                    ui.heading("Special Abilities");
+
+                    ui.checkbox(&mut self.edit_buffer.can_regenerate, "♻️ Can Regenerate");
+                    ui.checkbox(&mut self.edit_buffer.can_advance, "🏃 Can Advance");
+
+                    ui.horizontal(|ui| {
+                        ui.label("Flee Threshold:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.edit_buffer.flee_threshold)
+                                .range(0..=100)
+                                .suffix("%"),
+                        );
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Special Attack Threshold:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.edit_buffer.special_attack_threshold)
+                                .range(0..=100)
+                                .suffix("%"),
+                        );
+                    });
+                });
+
+                ui.add_space(10.0);
+
+                // Attacks editor
+                ui.collapsing("⚔️ Attacks", |ui| {
+                    self.show_attacks_editor(ui);
+                });
+
+                ui.add_space(10.0);
+
+                // Loot editor
+                ui.collapsing("💰 Loot", |ui| {
+                    self.show_loot_editor(ui);
+                });
+
+                ui.add_space(10.0);
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("⬅ Back to List").clicked() {
+                        self.mode = MonstersEditorMode::List;
+                    }
+
+                    if ui.button("💾 Save").clicked() {
+                        if is_add {
+                            monsters.push(self.edit_buffer.clone());
+                        } else if let Some(idx) = self.selected_monster {
+                            if idx < monsters.len() {
+                                monsters[idx] = self.edit_buffer.clone();
+                            }
+                        }
+                        self.save_monsters(
+                            monsters,
+                            campaign_dir,
+                            monsters_file,
+                            unsaved_changes,
+                            status_message,
+                        );
+                        self.mode = MonstersEditorMode::List;
+                        *status_message = "Monster saved".to_string();
+                    }
+
+                    if ui.button("❌ Cancel").clicked() {
+                        self.mode = MonstersEditorMode::List;
+                    }
+                });
+            });
+    }
+
+    fn show_attacks_editor(&mut self, ui: &mut egui::Ui) {
+        let mut attacks_to_remove: Vec<usize> = Vec::new();
+
+        for (i, attack) in self.edit_buffer.attacks.iter_mut().enumerate() {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(format!("Attack {}:", i + 1));
+                    if ui.button("🗑️").clicked() {
+                        attacks_to_remove.push(i);
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Damage:");
+                    ui.add(egui::DragValue::new(&mut attack.damage.count).range(1..=10));
+                    ui.label("d");
+                    ui.add(egui::DragValue::new(&mut attack.damage.sides).range(1..=20));
+                    ui.label("+");
+                    ui.add(egui::DragValue::new(&mut attack.damage.bonus).range(-10..=20));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Type:");
+                    egui::ComboBox::from_id_salt(format!("attack_type_{}", i))
+                        .selected_text(format!("{:?}", attack.attack_type))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut attack.attack_type,
+                                AttackType::Physical,
+                                "Physical",
+                            );
+                            ui.selectable_value(&mut attack.attack_type, AttackType::Fire, "Fire");
+                            ui.selectable_value(&mut attack.attack_type, AttackType::Cold, "Cold");
+                            ui.selectable_value(
+                                &mut attack.attack_type,
+                                AttackType::Electricity,
+                                "Electricity",
+                            );
+                            ui.selectable_value(&mut attack.attack_type, AttackType::Acid, "Acid");
+                            ui.selectable_value(
+                                &mut attack.attack_type,
+                                AttackType::Poison,
+                                "Poison",
+                            );
+                            ui.selectable_value(
+                                &mut attack.attack_type,
+                                AttackType::Energy,
+                                "Energy",
+                            );
+                        });
+                });
+
+                ui.horizontal(|ui| {
+                    let mut has_special = attack.special_effect.is_some();
+                    if ui.checkbox(&mut has_special, "Special Effect").changed() {
+                        if has_special {
+                            attack.special_effect = Some(SpecialEffect::Poison);
+                        } else {
+                            attack.special_effect = None;
+                        }
+                    }
+
+                    if let Some(ref mut effect) = attack.special_effect {
+                        egui::ComboBox::from_id_salt(format!("special_effect_{}", i))
+                            .selected_text(format!("{:?}", effect))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(effect, SpecialEffect::Poison, "Poison");
+                                ui.selectable_value(effect, SpecialEffect::Disease, "Disease");
+                                ui.selectable_value(effect, SpecialEffect::Paralysis, "Paralysis");
+                                ui.selectable_value(effect, SpecialEffect::Sleep, "Sleep");
+                                ui.selectable_value(effect, SpecialEffect::Drain, "Drain");
+                                ui.selectable_value(effect, SpecialEffect::Stone, "Stone");
+                                ui.selectable_value(effect, SpecialEffect::Death, "Death");
+                            });
+                    }
+                });
+            });
+        }
+
+        // Remove marked attacks
+        for idx in attacks_to_remove.into_iter().rev() {
+            self.edit_buffer.attacks.remove(idx);
+        }
+
+        if ui.button("➕ Add Attack").clicked() {
+            self.edit_buffer.attacks.push(Attack {
+                damage: DiceRoll::new(1, 6, 0),
+                attack_type: AttackType::Physical,
+                special_effect: None,
+            });
+        }
+    }
+
+    fn show_loot_editor(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Gold:");
+            ui.add(
+                egui::DragValue::new(&mut self.edit_buffer.loot.gold_min)
+                    .range(0..=65535)
+                    .prefix("Min: "),
+            );
+            ui.add(
+                egui::DragValue::new(&mut self.edit_buffer.loot.gold_max)
+                    .range(0..=65535)
+                    .prefix("Max: "),
+            );
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Gems:");
+            ui.add(
+                egui::DragValue::new(&mut self.edit_buffer.loot.gems_min)
+                    .range(0..=255)
+                    .prefix("Min: "),
+            );
+            ui.add(
+                egui::DragValue::new(&mut self.edit_buffer.loot.gems_max)
+                    .range(0..=255)
+                    .prefix("Max: "),
+            );
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Experience:");
+            ui.add(egui::DragValue::new(&mut self.edit_buffer.loot.experience).range(0..=65535));
+        });
+
+        // Item drops
+        ui.separator();
+        ui.label("Item Drops:");
+
+        let mut items_to_remove: Vec<usize> = Vec::new();
+        for (i, (chance, item_id)) in self.edit_buffer.loot.items.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(format!("Item {}:", i + 1));
+                ui.add(egui::DragValue::new(item_id).prefix("ID: "));
+                ui.add(
+                    egui::DragValue::new(chance)
+                        .range(0..=100)
+                        .suffix("%")
+                        .prefix("Chance: "),
+                );
+                if ui.button("🗑️").clicked() {
+                    items_to_remove.push(i);
+                }
+            });
+        }
+
+        for idx in items_to_remove.into_iter().rev() {
+            self.edit_buffer.loot.items.remove(idx);
+        }
+
+        if ui.button("➕ Add Item Drop").clicked() {
+            self.edit_buffer.loot.items.push((0.1, 0));
+        }
+    }
+
     fn save_monsters(
         &self,
-        monsters: &Vec<MonsterDefinition>,
+        monsters: &[MonsterDefinition],
         campaign_dir: Option<&PathBuf>,
         monsters_file: &str,
         unsaved_changes: &mut bool,
@@ -1007,21 +942,23 @@ impl MonstersEditorState {
         if let Some(dir) = campaign_dir {
             let monsters_path = dir.join(monsters_file);
 
+            // Create parent directories if necessary
             if let Some(parent) = monsters_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    *status_message = format!("Failed to create directory: {}", e);
+                    return;
+                }
             }
 
-            let ron_config = ron::ser::PrettyConfig::new()
-                .struct_names(false)
-                .enumerate_arrays(false);
-
-            match ron::ser::to_string_pretty(monsters, ron_config) {
+            match ron::ser::to_string_pretty(monsters, Default::default()) {
                 Ok(contents) => match std::fs::write(&monsters_path, contents) {
                     Ok(_) => {
                         *unsaved_changes = true;
+                        *status_message =
+                            format!("Auto-saved monsters to: {}", monsters_path.display());
                     }
                     Err(e) => {
-                        *status_message = format!("Failed to write monsters file: {}", e);
+                        *status_message = format!("Failed to save monsters: {}", e);
                     }
                 },
                 Err(e) => {
@@ -1029,5 +966,255 @@ impl MonstersEditorState {
                 }
             }
         }
+    }
+
+    /// Calculate experience points for a monster based on its stats and abilities.
+    ///
+    /// The formula considers:
+    /// - Base HP (HP * 10)
+    /// - Armor Class bonus ((10 - AC) * 50, if AC < 10)
+    /// - Number of attacks (attacks * 20)
+    /// - Average damage per attack (avg_damage * 5)
+    /// - Special effects (+50 per attack with special)
+    /// - Regeneration ability (+100)
+    /// - Undead status (+50)
+    /// - Magic resistance (resistance * 2)
+    pub fn calculate_monster_xp(&self, monster: &MonsterDefinition) -> u32 {
+        let mut xp: u32 = 0;
+
+        // Base XP from HP
+        xp += monster.hp.current as u32 * 10;
+
+        // AC bonus (lower AC = harder to hit = more XP)
+        if monster.ac.current < 10 {
+            xp += (10 - monster.ac.current) as u32 * 50;
+        }
+
+        // Attack bonuses
+        xp += monster.attacks.len() as u32 * 20;
+
+        // Damage contribution
+        for attack in &monster.attacks {
+            // Average damage = (count * (sides + 1) / 2) + bonus
+            let avg_damage = (attack.damage.count as f32 * (attack.damage.sides as f32 + 1.0)
+                / 2.0)
+                + attack.damage.bonus as f32;
+            xp += (avg_damage * 5.0) as u32;
+
+            // Special effect bonus
+            if attack.special_effect.is_some() {
+                xp += 50;
+            }
+        }
+
+        // Ability bonuses
+        if monster.can_regenerate {
+            xp += 100;
+        }
+        if monster.is_undead {
+            xp += 50;
+        }
+
+        // Magic resistance bonus
+        xp += monster.magic_resistance as u32 * 2;
+
+        xp
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // MonstersEditorState Tests
+    // =========================================================================
+
+    #[test]
+    fn test_monsters_editor_state_new() {
+        let state = MonstersEditorState::new();
+        assert_eq!(state.mode, MonstersEditorMode::List);
+        assert!(state.search_query.is_empty());
+        assert!(state.selected_monster.is_none());
+        assert!(!state.show_import_dialog);
+        assert!(state.import_export_buffer.is_empty());
+        assert!(!state.show_preview);
+    }
+
+    #[test]
+    fn test_monsters_editor_state_default() {
+        let state = MonstersEditorState::default();
+        assert_eq!(state.mode, MonstersEditorMode::List);
+        assert!(!state.show_stats_editor);
+        assert!(!state.show_attacks_editor);
+        assert!(!state.show_loot_editor);
+    }
+
+    #[test]
+    fn test_default_monster_creation() {
+        let monster = MonstersEditorState::default_monster();
+        assert_eq!(monster.id, 0);
+        assert_eq!(monster.name, "New Monster");
+        assert_eq!(monster.hp.base, 10);
+        assert_eq!(monster.hp.current, 10);
+        assert_eq!(monster.ac.base, 10);
+        assert_eq!(monster.ac.current, 10);
+        assert!(!monster.is_undead);
+        assert!(!monster.can_regenerate);
+        assert!(!monster.can_advance);
+        assert_eq!(monster.magic_resistance, 0);
+        assert_eq!(monster.flee_threshold, 0);
+        assert_eq!(monster.attacks.len(), 1);
+    }
+
+    // =========================================================================
+    // MonstersEditorMode Tests
+    // =========================================================================
+
+    #[test]
+    fn test_monsters_editor_mode_variants() {
+        assert_eq!(MonstersEditorMode::List, MonstersEditorMode::List);
+        assert_eq!(MonstersEditorMode::Add, MonstersEditorMode::Add);
+        assert_eq!(MonstersEditorMode::Edit, MonstersEditorMode::Edit);
+        assert_ne!(MonstersEditorMode::List, MonstersEditorMode::Add);
+    }
+
+    // =========================================================================
+    // Editor State Transitions Tests
+    // =========================================================================
+
+    #[test]
+    fn test_editor_mode_transitions() {
+        let mut state = MonstersEditorState::new();
+        assert_eq!(state.mode, MonstersEditorMode::List);
+
+        state.mode = MonstersEditorMode::Add;
+        assert_eq!(state.mode, MonstersEditorMode::Add);
+
+        state.mode = MonstersEditorMode::Edit;
+        assert_eq!(state.mode, MonstersEditorMode::Edit);
+
+        state.mode = MonstersEditorMode::List;
+        assert_eq!(state.mode, MonstersEditorMode::List);
+    }
+
+    #[test]
+    fn test_selected_monster_handling() {
+        let mut state = MonstersEditorState::new();
+        assert!(state.selected_monster.is_none());
+
+        state.selected_monster = Some(0);
+        assert_eq!(state.selected_monster, Some(0));
+
+        state.selected_monster = Some(5);
+        assert_eq!(state.selected_monster, Some(5));
+
+        state.selected_monster = None;
+        assert!(state.selected_monster.is_none());
+    }
+
+    #[test]
+    fn test_editor_toggle_states() {
+        let mut state = MonstersEditorState::new();
+
+        // Toggle stats editor
+        state.show_stats_editor = true;
+        assert!(state.show_stats_editor);
+
+        // Toggle attacks editor
+        state.show_attacks_editor = true;
+        assert!(state.show_attacks_editor);
+
+        // Toggle loot editor
+        state.show_loot_editor = true;
+        assert!(state.show_loot_editor);
+    }
+
+    // =========================================================================
+    // Monster XP Calculation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_calculate_monster_xp_basic() {
+        let state = MonstersEditorState::new();
+        let monster = MonstersEditorState::default_monster();
+        let xp = state.calculate_monster_xp(&monster);
+        // Base XP for a level 1 monster with default stats
+        assert!(xp > 0);
+    }
+
+    #[test]
+    fn test_calculate_monster_xp_with_abilities() {
+        let state = MonstersEditorState::new();
+        let mut monster = MonstersEditorState::default_monster();
+        let base_xp = state.calculate_monster_xp(&monster);
+
+        // Add regeneration
+        monster.can_regenerate = true;
+        let regen_xp = state.calculate_monster_xp(&monster);
+        assert!(regen_xp > base_xp, "Regeneration should increase XP");
+
+        // Add undead
+        monster.is_undead = true;
+        let undead_xp = state.calculate_monster_xp(&monster);
+        assert!(undead_xp > regen_xp, "Undead should increase XP");
+    }
+
+    #[test]
+    fn test_calculate_monster_xp_with_magic_resistance() {
+        let state = MonstersEditorState::new();
+        let mut monster = MonstersEditorState::default_monster();
+        let base_xp = state.calculate_monster_xp(&monster);
+
+        monster.magic_resistance = 50;
+        let resistant_xp = state.calculate_monster_xp(&monster);
+        assert!(
+            resistant_xp > base_xp,
+            "Magic resistance should increase XP"
+        );
+    }
+
+    #[test]
+    fn test_edit_buffer_modification() {
+        let mut state = MonstersEditorState::new();
+
+        // Modify the edit buffer
+        state.edit_buffer.name = "Dragon".to_string();
+        state.edit_buffer.hp.base = 100;
+        state.edit_buffer.hp.current = 100;
+        state.edit_buffer.ac.base = 20;
+        state.edit_buffer.is_undead = false;
+        state.edit_buffer.can_regenerate = true;
+
+        assert_eq!(state.edit_buffer.name, "Dragon");
+        assert_eq!(state.edit_buffer.hp.base, 100);
+        assert_eq!(state.edit_buffer.ac.base, 20);
+        assert!(state.edit_buffer.can_regenerate);
+    }
+
+    #[test]
+    fn test_monster_stats_initialization() {
+        let monster = MonstersEditorState::default_monster();
+
+        // Check all stats are initialized
+        assert_eq!(monster.stats.might.base, 10);
+        assert_eq!(monster.stats.intellect.base, 10);
+        assert_eq!(monster.stats.personality.base, 10);
+        assert_eq!(monster.stats.endurance.base, 10);
+        assert_eq!(monster.stats.speed.base, 10);
+        assert_eq!(monster.stats.accuracy.base, 10);
+        assert_eq!(monster.stats.luck.base, 10);
+    }
+
+    #[test]
+    fn test_preview_toggle() {
+        let mut state = MonstersEditorState::new();
+        assert!(!state.show_preview);
+
+        state.show_preview = true;
+        assert!(state.show_preview);
+
+        state.show_preview = false;
+        assert!(!state.show_preview);
     }
 }

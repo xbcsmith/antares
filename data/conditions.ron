@@ -1,4 +1,14 @@
+// conditions.ron - Condition definitions for Antares RPG
+//
+// This file contains all condition definitions in RON (Rusty Object Notation) format.
+// See docs/reference/architecture.md for format specifications.
+//
+// Conditions represent temporary or permanent status effects that can be applied
+// to characters and monsters during gameplay.
+
 [
+    // ===== Negative Conditions =====
+
     (
         id: "blind",
         name: "Blind",
@@ -13,6 +23,7 @@
         default_duration: Rounds(5),
         icon_id: Some("icon_blind"),
     ),
+
     (
         id: "sleep",
         name: "Sleep",
@@ -23,19 +34,7 @@
         default_duration: Rounds(3),
         icon_id: Some("icon_sleep"),
     ),
-    (
-        id: "bless",
-        name: "Bless",
-        description: "Increases accuracy and morale.",
-        effects: [
-            AttributeModifier(
-                attribute: "accuracy",
-                value: 2,
-            ),
-        ],
-        default_duration: Rounds(10),
-        icon_id: Some("icon_bless"),
-    ),
+
     (
         id: "poison",
         name: "Poison",
@@ -53,10 +52,111 @@
         default_duration: Permanent,
         icon_id: Some("icon_poison"),
     ),
+
+    (
+        id: "paralyzed",
+        name: "Paralyzed",
+        description: "Cannot move or act.",
+        effects: [
+            StatusEffect("paralyzed"),
+        ],
+        default_duration: Rounds(3),
+        icon_id: Some("icon_paralyzed"),
+    ),
+
+    (
+        id: "silenced",
+        name: "Silenced",
+        description: "Cannot cast spells.",
+        effects: [
+            StatusEffect("silenced"),
+        ],
+        default_duration: Rounds(5),
+        icon_id: Some("icon_silenced"),
+    ),
+
+    (
+        id: "feared",
+        name: "Feared",
+        description: "May flee from combat.",
+        effects: [
+            StatusEffect("feared"),
+        ],
+        default_duration: Rounds(3),
+        icon_id: Some("icon_feared"),
+    ),
+
+    (
+        id: "disease",
+        name: "Disease",
+        description: "Reduces all stats and takes damage over time.",
+        effects: [
+            StatusEffect("diseased"),
+            AttributeModifier(
+                attribute: "endurance",
+                value: -3,
+            ),
+            DamageOverTime(
+                damage: (
+                    count: 1,
+                    sides: 2,
+                    bonus: 0,
+                ),
+                element: "disease",
+            ),
+        ],
+        default_duration: Permanent,
+        icon_id: Some("icon_disease"),
+    ),
+
+    (
+        id: "weakness",
+        name: "Weakness",
+        description: "Reduced physical strength.",
+        effects: [
+            AttributeModifier(
+                attribute: "might",
+                value: -4,
+            ),
+        ],
+        default_duration: Rounds(10),
+        icon_id: Some("icon_weakness"),
+    ),
+
+    (
+        id: "slowed",
+        name: "Slowed",
+        description: "Movement and attack speed reduced.",
+        effects: [
+            AttributeModifier(
+                attribute: "speed",
+                value: -5,
+            ),
+        ],
+        default_duration: Rounds(5),
+        icon_id: Some("icon_slowed"),
+    ),
+
+    // ===== Positive Conditions =====
+
+    (
+        id: "bless",
+        name: "Bless",
+        description: "Increases accuracy and morale.",
+        effects: [
+            AttributeModifier(
+                attribute: "accuracy",
+                value: 2,
+            ),
+        ],
+        default_duration: Rounds(10),
+        icon_id: Some("icon_bless"),
+    ),
+
     (
         id: "regeneration",
         name: "Regeneration",
-        description: "Heals each round.",
+        description: "Heals hit points each round.",
         effects: [
             HealOverTime(
                 amount: (
@@ -66,13 +166,14 @@
                 ),
             ),
         ],
-        default_duration: Rounds(3),
+        default_duration: Rounds(5),
         icon_id: Some("icon_regeneration"),
     ),
+
     (
         id: "giants_strength",
         name: "Giant's Strength",
-        description: "Increases might temporarily.",
+        description: "Greatly increases physical might.",
         effects: [
             AttributeModifier(
                 attribute: "might",
@@ -82,79 +183,153 @@
         default_duration: Minutes(10),
         icon_id: Some("icon_giants_strength"),
     ),
+
     (
-        id: "poisoned_weakness",
-        name: "Poisoned Weakness",
-        description: "Suffers poison damage and reduced strength.",
+        id: "haste",
+        name: "Haste",
+        description: "Increased speed and initiative.",
         effects: [
-            DamageOverTime(
-                damage: (
-                    count: 1,
-                    sides: 4,
-                    bonus: 0,
-                ),
-                element: "poison",
+            AttributeModifier(
+                attribute: "speed",
+                value: 5,
+            ),
+        ],
+        default_duration: Rounds(10),
+        icon_id: Some("icon_haste"),
+    ),
+
+    (
+        id: "protection",
+        name: "Protection",
+        description: "Improved armor class.",
+        effects: [
+            AttributeModifier(
+                attribute: "armor_class",
+                value: 3,
+            ),
+        ],
+        default_duration: Minutes(10),
+        icon_id: Some("icon_protection"),
+    ),
+
+    (
+        id: "heroism",
+        name: "Heroism",
+        description: "Improved combat effectiveness.",
+        effects: [
+            AttributeModifier(
+                attribute: "accuracy",
+                value: 3,
             ),
             AttributeModifier(
                 attribute: "might",
-                value: -2,
+                value: 2,
             ),
         ],
-        default_duration: Rounds(4),
-        icon_id: Some("icon_poisoned_weakness"),
+        default_duration: Rounds(10),
+        icon_id: Some("icon_heroism"),
     ),
+
+    (
+        id: "invisibility",
+        name: "Invisibility",
+        description: "Harder to detect and hit.",
+        effects: [
+            StatusEffect("invisible"),
+        ],
+        default_duration: Minutes(5),
+        icon_id: Some("icon_invisibility"),
+    ),
+
+    // ===== Resistance Conditions =====
+
+    (
+        id: "fire_resistance",
+        name: "Fire Resistance",
+        description: "Resistance to fire damage.",
+        effects: [
+            AttributeModifier(
+                attribute: "resist_fire",
+                value: 50,
+            ),
+        ],
+        default_duration: Minutes(10),
+        icon_id: Some("icon_fire_resistance"),
+    ),
+
+    (
+        id: "cold_resistance",
+        name: "Cold Resistance",
+        description: "Resistance to cold damage.",
+        effects: [
+            AttributeModifier(
+                attribute: "resist_cold",
+                value: 50,
+            ),
+        ],
+        default_duration: Minutes(10),
+        icon_id: Some("icon_cold_resistance"),
+    ),
+
+    (
+        id: "poison_resistance",
+        name: "Poison Resistance",
+        description: "Resistance to poison effects.",
+        effects: [
+            AttributeModifier(
+                attribute: "resist_poison",
+                value: 50,
+            ),
+        ],
+        default_duration: Minutes(10),
+        icon_id: Some("icon_poison_resistance"),
+    ),
+
+    // ===== Test Conditions =====
+    // These conditions are used by integration tests
+
     (
         id: "empty_effects",
-        name: "Empty Effects",
-        description: "A condition with no effects to test editor behavior.",
+        name: "Empty Effects Test",
+        description: "A condition with no effects for testing.",
         effects: [],
         default_duration: Rounds(1),
         icon_id: None,
     ),
+
+    (
+        id: "dup1",
+        name: "Duplicate Test 1",
+        description: "First duplicate for testing duplicate detection.",
+        effects: [
+            StatusEffect("test"),
+        ],
+        default_duration: Rounds(1),
+        icon_id: None,
+    ),
+
+    (
+        id: "dup1",
+        name: "Duplicate Test 1 Copy",
+        description: "Second duplicate for testing duplicate detection.",
+        effects: [
+            StatusEffect("test"),
+        ],
+        default_duration: Rounds(1),
+        icon_id: None,
+    ),
+
     (
         id: "max_strength_value",
-        name: "Max Strength Value",
-        description: "A condition with a large attribute modifier value to test bounds.",
+        name: "Max Strength Value Test",
+        description: "A condition with maximum attribute modifier value.",
         effects: [
             AttributeModifier(
                 attribute: "might",
-                value: 32767,
+                value: 255,
             ),
         ],
         default_duration: Rounds(1),
-        icon_id: Some("icon_max"),
-    ),
-    (
-        id: "weird id 1",
-        name: "Weird ID Test",
-        description: "ID contains spaces and special characters.",
-        effects: [
-            StatusEffect("weird"),
-        ],
-        default_duration: Permanent,
-        icon_id: None,
-    ),
-    (
-        id: "dup1",
-        name: "Duplicate Example 1",
-        description: "First entry with duplicate ID to test validation.",
-        effects: [
-            StatusEffect("duplicate"),
-        ],
-        default_duration: Rounds(2),
-        icon_id: None,
-    ),
-    (
-        id: "dup1",
-        name: "Duplicate Example 2",
-        description: "Second entry with duplicate ID to test validation errors.",
-        effects: [
-            AttributeModifier(
-                attribute: "accuracy",
-                value: -1,
-            ),
-        ],
-        default_duration: Rounds(2),
         icon_id: None,
     ),
 ]

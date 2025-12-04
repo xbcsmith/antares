@@ -5,6 +5,7 @@
 //!
 //! This module provides a visual quest designer with support for creating,
 //! editing, and managing quests with multiple stages, objectives, and rewards.
+//! Uses shared UI components for consistent layout.
 //!
 //! # Features
 //!
@@ -15,6 +16,7 @@
 //! - Prerequisite chain management
 //! - Quest validation and preview
 
+use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
 use antares::domain::quest::{Quest, QuestId, QuestObjective, QuestReward, QuestStage};
@@ -360,7 +362,7 @@ impl QuestEditorState {
     /// Save edited reward
     pub fn save_reward(
         &mut self,
-        quests: &mut Vec<Quest>,
+        quests: &mut [Quest],
         quest_idx: usize,
         reward_idx: usize,
     ) -> Result<(), String> {
@@ -436,7 +438,7 @@ impl QuestEditorState {
     /// Delete a reward from quest
     pub fn delete_reward(
         &mut self,
-        quests: &mut Vec<Quest>,
+        quests: &mut [Quest],
         quest_idx: usize,
         reward_idx: usize,
     ) -> Result<(), String> {
@@ -459,7 +461,7 @@ impl QuestEditorState {
     }
 
     /// Add a default reward to current quest
-    pub fn add_default_reward(&mut self, quests: &mut Vec<Quest>) -> Result<usize, String> {
+    pub fn add_default_reward(&mut self, quests: &mut [Quest]) -> Result<usize, String> {
         if let Some(quest_idx) = self.selected_quest {
             if quest_idx >= quests.len() {
                 return Err("Invalid quest index".to_string());
@@ -1036,6 +1038,7 @@ impl QuestEditorState {
     /// editor.start_new_quest("1".to_string());
     /// assert_eq!(editor.mode, QuestEditorMode::Creating);
     /// ```
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -1055,17 +1058,22 @@ impl QuestEditorState {
         ui.heading("📜 Quests Editor");
         ui.add_space(5.0);
 
-        // Toolbar
-        ui.horizontal(|ui| {
-            if ui.button("➕ New Quest").clicked() {
+        // Use shared EditorToolbar component
+        let toolbar_action = EditorToolbar::new("Quests")
+            .with_search(&mut self.search_filter)
+            .with_merge_mode(file_load_merge_mode)
+            .with_total_count(quests.len())
+            .with_id_salt("quests_toolbar")
+            .show(ui);
+
+        // Handle toolbar actions
+        match toolbar_action {
+            ToolbarAction::New => {
                 let next_id = quests.iter().map(|q| q.id).max().unwrap_or(0) + 1;
                 self.start_new_quest(next_id.to_string());
                 *unsaved_changes = true;
             }
-
-            ui.separator();
-
-            if ui.button("💾 Save Quests").clicked() {
+            ToolbarAction::Save => {
                 if let Some(dir) = campaign_dir {
                     let quests_path = dir.join(quests_file);
                     if let Some(parent) = quests_path.parent() {
@@ -1088,35 +1096,7 @@ impl QuestEditorState {
                     }
                 }
             }
-
-            if ui.button("📂 Load Quests").clicked() {
-                if let Some(dir) = campaign_dir {
-                    let quests_path = dir.join(quests_file);
-                    if quests_path.exists() {
-                        match std::fs::read_to_string(&quests_path) {
-                            Ok(contents) => match ron::from_str::<Vec<Quest>>(&contents) {
-                                Ok(loaded_quests) => {
-                                    *quests = loaded_quests;
-                                    *status_message = format!("Loaded {} quests", quests.len());
-                                }
-                                Err(e) => {
-                                    *status_message = format!("Failed to parse quests: {}", e);
-                                }
-                            },
-                            Err(e) => {
-                                *status_message = format!("Failed to read quests file: {}", e);
-                            }
-                        }
-                    } else {
-                        *status_message = "Quests file does not exist".to_string();
-                    }
-                }
-            }
-
-            ui.separator();
-
-            // File I/O buttons
-            if ui.button("📂 Load from File").clicked() {
+            ToolbarAction::Load => {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("RON", &["ron"])
                     .pick_file()
@@ -1150,15 +1130,11 @@ impl QuestEditorState {
                     }
                 }
             }
-
-            ui.checkbox(file_load_merge_mode, "Merge");
-            ui.label(if *file_load_merge_mode {
-                "(adds to existing)"
-            } else {
-                "(replaces all)"
-            });
-
-            if ui.button("💾 Save to File").clicked() {
+            ToolbarAction::Import => {
+                // Import not yet implemented for quests
+                *status_message = "Import not yet implemented for quests".to_string();
+            }
+            ToolbarAction::Export => {
                 if let Some(path) = rfd::FileDialog::new()
                     .set_file_name("quests.ron")
                     .add_filter("RON", &["ron"])
@@ -1179,65 +1155,166 @@ impl QuestEditorState {
                     }
                 }
             }
-
-            ui.separator();
-
-            if let Some(selected_idx) = self.selected_quest {
-                if selected_idx < quests.len() {
-                    if ui.button("📤 Export Quest").clicked() {
-                        let quest = &quests[selected_idx];
-                        match ron::ser::to_string_pretty(quest, Default::default()) {
-                            Ok(ron_string) => {
-                                ui.ctx().copy_text(ron_string);
-                                *status_message = "Quest copied to clipboard".to_string();
+            ToolbarAction::Reload => {
+                if let Some(dir) = campaign_dir {
+                    let quests_path = dir.join(quests_file);
+                    if quests_path.exists() {
+                        match std::fs::read_to_string(&quests_path) {
+                            Ok(contents) => match ron::from_str::<Vec<Quest>>(&contents) {
+                                Ok(loaded_quests) => {
+                                    *quests = loaded_quests;
+                                    self.quests = quests.clone();
+                                    *status_message = format!("Reloaded {} quests", quests.len());
+                                }
+                                Err(e) => {
+                                    *status_message = format!("Failed to parse quests: {}", e);
+                                }
+                            },
+                            Err(e) => {
+                                *status_message = format!("Failed to read quests file: {}", e);
                             }
-                            Err(e) => eprintln!("Failed to export quest: {}", e),
                         }
+                    } else {
+                        *status_message = "Quests file does not exist".to_string();
                     }
                 }
             }
-        });
-
-        ui.separator();
-
-        // Search filter
-        ui.horizontal(|ui| {
-            ui.label("🔍 Search:");
-            ui.text_edit_singleline(&mut self.search_filter);
-        });
+            ToolbarAction::None => {}
+        }
 
         ui.separator();
 
         // Main content - split view or form editor
         match self.mode {
             QuestEditorMode::List => {
-                // Split view: list on left, preview on right
-                egui::SidePanel::left("quest_list_panel")
-                    .resizable(true)
-                    .default_width(300.0)
-                    .show_inside(ui, |ui| {
-                        // Use the passed `quests` parameter instead of `self.quests` to avoid
-                        // overlapping borrows between `self` and `quests` in closures.
-                        self.show_quest_list(ui, quests, unsaved_changes);
-                    });
+                // Build filtered list snapshot to avoid borrow conflicts in closures
+                let search_filter = self.search_filter.to_lowercase();
+                let filtered_quests: Vec<(usize, Quest)> = quests
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, q)| {
+                        search_filter.is_empty()
+                            || q.name.to_lowercase().contains(&search_filter)
+                            || q.description.to_lowercase().contains(&search_filter)
+                    })
+                    .map(|(idx, q)| (idx, q.clone()))
+                    .collect();
 
-                egui::CentralPanel::default().show_inside(ui, |ui| {
-                    if let Some(selected_idx) = self.selected_quest {
-                        // Use the passed `quests` parameter to avoid borrowing `self.quests`
-                        // and `self` (mutably) at the same time.
-                        if selected_idx < quests.len() {
-                            self.show_quest_preview(ui, &quests[selected_idx]);
+                let selected_idx = self.selected_quest;
+                let mut new_selection: Option<usize> = None;
+                let mut action_requested: Option<ItemAction> = None;
+
+                // Use shared TwoColumnLayout component
+                TwoColumnLayout::new("quests").show_split(
+                    ui,
+                    |left_ui| {
+                        // Left panel: Quest list
+                        left_ui.heading("Quests");
+                        left_ui.separator();
+
+                        for (idx, quest) in &filtered_quests {
+                            let is_selected = selected_idx == Some(*idx);
+                            let label = format!(
+                                "{} - {} {}",
+                                quest.id,
+                                quest.name,
+                                if quest.is_main_quest { "⭐" } else { "" }
+                            );
+                            if left_ui.selectable_label(is_selected, label).clicked() {
+                                new_selection = Some(*idx);
+                            }
+                        }
+
+                        if filtered_quests.is_empty() {
+                            left_ui.label("No quests found");
+                        }
+                    },
+                    |right_ui| {
+                        // Right panel: Detail view
+                        if let Some(idx) = selected_idx {
+                            if let Some((_, quest)) =
+                                filtered_quests.iter().find(|(i, _)| *i == idx)
+                            {
+                                right_ui.heading(&quest.name);
+                                right_ui.separator();
+
+                                // Use shared ActionButtons component
+                                let action = ActionButtons::new().enabled(true).show(right_ui);
+                                if action != ItemAction::None {
+                                    action_requested = Some(action);
+                                }
+
+                                right_ui.separator();
+
+                                // Show quest preview
+                                Self::show_quest_preview_static(right_ui, quest);
+                            } else {
+                                right_ui.vertical_centered(|ui| {
+                                    ui.add_space(100.0);
+                                    ui.label("Select a quest to view details");
+                                });
+                            }
                         } else {
-                            ui.centered_and_justified(|ui| {
-                                ui.label("Quest not found");
+                            right_ui.vertical_centered(|ui| {
+                                ui.add_space(100.0);
+                                ui.label("Select a quest to view details or create a new quest");
                             });
                         }
-                    } else {
-                        ui.centered_and_justified(|ui| {
-                            ui.label("Select a quest to view details or create a new quest");
-                        });
+                    },
+                );
+
+                // Apply selection change after closures
+                if let Some(idx) = new_selection {
+                    self.selected_quest = Some(idx);
+                }
+
+                // Handle action button clicks after closures
+                if let Some(action) = action_requested {
+                    match action {
+                        ItemAction::Edit => {
+                            if let Some(idx) = self.selected_quest {
+                                self.start_edit_quest(idx);
+                            }
+                        }
+                        ItemAction::Delete => {
+                            if let Some(idx) = self.selected_quest {
+                                self.delete_quest(idx);
+                                self.selected_quest = None;
+                                *unsaved_changes = true;
+                            }
+                        }
+                        ItemAction::Duplicate => {
+                            if let Some(idx) = self.selected_quest {
+                                if idx < quests.len() {
+                                    let next_id =
+                                        quests.iter().map(|q| q.id).max().unwrap_or(0) + 1;
+                                    let mut new_quest = quests[idx].clone();
+                                    new_quest.id = next_id;
+                                    new_quest.name = format!("{} (Copy)", new_quest.name);
+                                    quests.push(new_quest);
+                                    *unsaved_changes = true;
+                                    *status_message = "Quest duplicated".to_string();
+                                }
+                            }
+                        }
+                        ItemAction::Export => {
+                            if let Some(idx) = self.selected_quest {
+                                if idx < quests.len() {
+                                    if let Ok(ron_str) = ron::ser::to_string_pretty(
+                                        &quests[idx],
+                                        ron::ser::PrettyConfig::default(),
+                                    ) {
+                                        ui.ctx().copy_text(ron_str);
+                                        *status_message = "Quest copied to clipboard".to_string();
+                                    } else {
+                                        *status_message = "Failed to export quest".to_string();
+                                    }
+                                }
+                            }
+                        }
+                        ItemAction::None => {}
                     }
-                });
+                }
             }
             QuestEditorMode::Creating | QuestEditorMode::Editing => {
                 // Full-screen quest form editor - use the external `quests` buffer to
@@ -1409,98 +1486,9 @@ impl QuestEditorState {
 
         preview
     }
-    /// Show quest list view
-    fn show_quest_list(
-        &mut self,
-        ui: &mut egui::Ui,
-        quests: &mut Vec<Quest>,
-        unsaved_changes: &mut bool,
-    ) {
-        ui.heading("Quest List");
-        ui.separator();
 
-        // Filter quests
-        let search_filter = self.search_filter.to_lowercase();
-        let filtered_quests: Vec<(usize, Quest)> = quests
-            .iter()
-            .enumerate()
-            .filter(|(_, q)| {
-                search_filter.is_empty()
-                    || q.name.to_lowercase().contains(&search_filter)
-                    || q.description.to_lowercase().contains(&search_filter)
-            })
-            .map(|(idx, q)| (idx, q.clone()))
-            .collect();
-
-        ui.label(format!("Total: {} quest(s)", filtered_quests.len()));
-        ui.separator();
-
-        // Pre-calculate next ID to avoid borrowing issues
-        let next_id = quests.iter().map(|q| q.id).max().unwrap_or(0) + 1;
-
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for quest in filtered_quests.iter() {
-                    let original_idx = quest.0;
-                    let is_selected = self.selected_quest == Some(original_idx);
-
-                    let response = ui.selectable_label(
-                        is_selected,
-                        format!(
-                            "{} - {} {}",
-                            quest.1.id,
-                            quest.1.name,
-                            if quest.1.is_main_quest { "⭐" } else { "" }
-                        ),
-                    );
-
-                    if response.clicked() {
-                        self.selected_quest = Some(original_idx);
-                    }
-
-                    if response.double_clicked() {
-                        self.start_edit_quest(original_idx);
-                    }
-
-                    // Context menu
-                    response.context_menu(|ui| {
-                        if ui.button("✏️ Edit").clicked() {
-                            self.start_edit_quest(original_idx);
-                            ui.close();
-                        }
-
-                        if ui.button("🗑️ Delete").clicked() {
-                            let _ = self.delete_quest(original_idx);
-                            *unsaved_changes = true;
-                            ui.close();
-                        }
-
-                        if ui.button("📋 Duplicate").clicked() {
-                            if original_idx < quests.len() {
-                                let mut new_quest = quests[original_idx].clone();
-                                new_quest.id = next_id;
-                                new_quest.name = format!("{} (Copy)", new_quest.name);
-                                quests.push(new_quest);
-                                *unsaved_changes = true;
-                            }
-                            ui.close();
-                        }
-                    });
-                }
-
-                if filtered_quests.is_empty() {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(20.0);
-                        ui.label("No quests found");
-                        ui.label("Click 'New Quest' to create one");
-                    });
-                }
-            });
-    }
-
-    /// Show quest preview panel
-    fn show_quest_preview(&self, ui: &mut egui::Ui, quest: &Quest) {
+    /// Static quest preview method that doesn't require self
+    fn show_quest_preview_static(ui: &mut egui::Ui, quest: &Quest) {
         ui.heading(&quest.name);
         ui.separator();
 
@@ -1696,7 +1684,11 @@ impl QuestEditorState {
 
                 // Action buttons
                 ui.horizontal(|ui| {
-                    if ui.button("✅ Save Quest").clicked() {}
+                    if ui.button("⬅ Back to List").clicked() {
+                        self.cancel_edit();
+                    }
+
+                    let _ = ui.button("✅ Save Quest");
 
                     if ui.button("❌ Cancel").clicked() {
                         self.cancel_edit();
@@ -1709,7 +1701,7 @@ impl QuestEditorState {
     fn show_quest_stages_editor(
         &mut self,
         ui: &mut egui::Ui,
-        quests: &mut Vec<Quest>,
+        quests: &mut [Quest],
         items: &[Item],
         monsters: &[MonsterDefinition],
         maps: &[Map],
@@ -1851,13 +1843,14 @@ impl QuestEditorState {
     }
 
     /// Show quest objectives editor
+    #[allow(clippy::too_many_arguments)]
     fn show_quest_objectives_editor(
         &mut self,
         ui: &mut egui::Ui,
         quest_idx: usize,
         stage_idx: usize,
         objectives: &[QuestObjective],
-        quests: &mut Vec<Quest>,
+        quests: &mut [Quest],
         items: &[Item],
         monsters: &[MonsterDefinition],
         maps: &[Map],
