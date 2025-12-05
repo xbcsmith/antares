@@ -2200,3 +2200,210 @@ For developers updating code to use the new API:
 5. **Data-Driven**: All behavior comes from database definitions
 
 ---
+
+## Phase 6: SDK and Editor Updates (Hard-coded Removal Plan) (2025-01-XX)
+
+### Background
+
+Phase 6 updates the SDK editors to be fully dynamic, removing any remaining
+hard-coded class/race references. This ensures editors display class/race names
+from loaded data files and validation catches invalid references.
+
+### Changes Implemented
+
+#### 6.1 Updated Items Editor Class References
+
+Updated `sdk/campaign_builder/src/items_editor.rs`:
+
+- Added `ClassDefinition` import from `antares::domain::classes`
+- Updated `show()` method to accept `classes: &[ClassDefinition]` parameter
+- Updated `show_list()` method to pass classes to preview
+- Updated `show_form()` method to pass classes to disablement editor
+- Updated `show_preview_static()` to accept and use classes parameter
+- Updated `show_disablement_display_static()` to use dynamic class definitions:
+
+  ```rust
+  fn show_disablement_display_static(
+      ui: &mut egui::Ui,
+      disablement: Disablement,
+      classes: &[ClassDefinition],
+  ) {
+      ui.horizontal_wrapped(|ui| {
+          if classes.is_empty() {
+              ui.label("(No classes loaded)");
+          } else {
+              for class_def in classes {
+                  let mask = class_def.disablement_mask();
+                  let can_use = (disablement.0 & mask) != 0;
+                  if can_use {
+                      ui.label(format!("✓ {}", class_def.name));
+                  } else {
+                      ui.label(format!("✗ {}", class_def.name));
+                  }
+              }
+          }
+      });
+  }
+  ```
+
+- Updated `show_disablement_editor()` to use dynamic class definitions:
+
+  ```rust
+  fn show_disablement_editor(&mut self, ui: &mut egui::Ui, classes: &[ClassDefinition]) {
+      let disablement = &mut self.edit_buffer.disablements;
+      ui.label("Classes that CAN use this item:");
+      ui.horizontal_wrapped(|ui| {
+          if classes.is_empty() {
+              ui.label("(No classes loaded - load classes.ron first)");
+          } else {
+              for class_def in classes {
+                  let mask = class_def.disablement_mask();
+                  let mut can_use = (disablement.0 & mask) != 0;
+                  if ui.checkbox(&mut can_use, &class_def.name).changed() {
+                      if can_use {
+                          disablement.0 |= mask;
+                      } else {
+                          disablement.0 &= !mask;
+                      }
+                  }
+              }
+          }
+      });
+  }
+  ```
+
+#### 6.2 Updated Main App to Pass Classes
+
+Updated `sdk/campaign_builder/src/main.rs`:
+
+- Updated `items_editor_state.show()` call to pass `&self.classes_editor_state.classes`
+
+#### 6.3 Added Validation Functions
+
+Updated `sdk/campaign_builder/src/validation.rs`:
+
+- Added `validate_class_id_reference()` function:
+
+  - Validates class_id exists in available classes
+  - Returns error with helpful message listing available classes
+
+- Added `validate_race_id_reference()` function:
+
+  - Validates race_id exists in available races
+  - Returns error with helpful message listing available races
+
+- Added `validate_character_references()` function:
+  - Validates all class and race references in characters
+  - Returns vector of validation errors
+
+#### 6.4 Preserved Templates and Examples
+
+Templates in `sdk/campaign_builder/src/templates.rs` remain unchanged:
+
+- Default item templates preserved for user convenience
+- Example configurations work with any class/race data
+- No hardcoded class-specific logic in templates
+
+### Tests Added
+
+```rust
+// validation.rs tests
+#[test]
+fn test_validate_class_id_reference_valid() {
+    let classes = vec!["knight".to_string(), "sorcerer".to_string()];
+    let result = validate_class_id_reference("knight", &classes, "test character");
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_validate_class_id_reference_invalid() {
+    let classes = vec!["knight".to_string(), "sorcerer".to_string()];
+    let result = validate_class_id_reference("invalid", &classes, "test character");
+    assert!(result.is_some());
+}
+
+#[test]
+fn test_validate_class_id_reference_empty() {
+    let classes = vec!["knight".to_string()];
+    let result = validate_class_id_reference("", &classes, "test character");
+    assert!(result.is_some());
+}
+
+#[test]
+fn test_validate_race_id_reference_valid() { ... }
+
+#[test]
+fn test_validate_race_id_reference_invalid() { ... }
+
+#[test]
+fn test_validate_race_id_reference_empty() { ... }
+
+#[test]
+fn test_validate_character_references_all_valid() { ... }
+
+#[test]
+fn test_validate_character_references_invalid_class() { ... }
+
+#[test]
+fn test_validate_character_references_invalid_race() { ... }
+
+#[test]
+fn test_validate_character_references_both_invalid() { ... }
+```
+
+### Validation
+
+```bash
+cargo fmt --all                                    # ✅ Passed
+cargo check --all-targets --all-features           # ✅ Passed
+cargo clippy --all-targets --all-features -- -D warnings  # ✅ Passed
+cargo test --all-features                          # ✅ 274 tests passed
+```
+
+### Architecture Compliance
+
+- [x] No enum references remain in SDK editors
+- [x] Class/race data comes from loaded databases
+- [x] Validation uses database lookups
+- [x] Templates remain useful without hardcoded class data
+
+### Success Criteria Met
+
+- [x] Items editor shows class names from loaded data files
+- [x] Disablement checkboxes populated dynamically from ClassDatabase
+- [x] Validation catches invalid class_id/race_id references
+- [x] Templates remain useful for users
+- [x] All SDK tests pass
+
+### Files Modified
+
+- `sdk/campaign_builder/src/items_editor.rs`
+
+  - Added ClassDefinition import
+  - Updated show() signature to accept classes
+  - Updated show_list(), show_form() to propagate classes
+  - Updated show_preview_static() to use classes
+  - Updated show_disablement_display_static() for dynamic classes
+  - Updated show_disablement_editor() for dynamic classes
+
+- `sdk/campaign_builder/src/main.rs`
+
+  - Updated items_editor.show() call to pass classes
+
+- `sdk/campaign_builder/src/validation.rs`
+  - Added validate_class_id_reference() function
+  - Added validate_race_id_reference() function
+  - Added validate_character_references() function
+  - Added 10 new unit tests
+
+### Next Steps (Phase 7)
+
+Phase 7 will complete documentation and cleanup:
+
+1. Remove deprecated Disablement constants
+2. Update architecture documentation
+3. Update implementation documentation
+4. Create migration guide for content creators
+5. Archive superseded plans
+
+---

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
     AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorData, AttributeType, Bonus,
     BonusAttribute, ConsumableData, ConsumableEffect, Disablement, Item, ItemType, QuestData,
@@ -130,6 +131,7 @@ impl ItemsEditorState {
         &mut self,
         ui: &mut egui::Ui,
         items: &mut Vec<Item>,
+        classes: &[ClassDefinition],
         campaign_dir: Option<&PathBuf>,
         items_file: &str,
         unsaved_changes: &mut bool,
@@ -323,6 +325,7 @@ impl ItemsEditorState {
             ItemsEditorMode::List => self.show_list(
                 ui,
                 items,
+                classes,
                 unsaved_changes,
                 status_message,
                 campaign_dir,
@@ -331,6 +334,7 @@ impl ItemsEditorState {
             ItemsEditorMode::Add | ItemsEditorMode::Edit => self.show_form(
                 ui,
                 items,
+                classes,
                 unsaved_changes,
                 status_message,
                 campaign_dir,
@@ -354,6 +358,7 @@ impl ItemsEditorState {
         &mut self,
         ui: &mut egui::Ui,
         items: &mut Vec<Item>,
+        classes: &[ClassDefinition],
         unsaved_changes: &mut bool,
         status_message: &mut String,
         campaign_dir: Option<&PathBuf>,
@@ -466,7 +471,7 @@ impl ItemsEditorState {
                             }
 
                             right_ui.separator();
-                            Self::show_preview_static(right_ui, item);
+                            Self::show_preview_static(right_ui, item, classes);
                         } else {
                             right_ui.vertical_centered(|ui| {
                                 ui.add_space(100.0);
@@ -551,7 +556,7 @@ impl ItemsEditorState {
     }
 
     /// Static preview method that doesn't require self
-    fn show_preview_static(ui: &mut egui::Ui, item: &Item) {
+    fn show_preview_static(ui: &mut egui::Ui, item: &Item, classes: &[ClassDefinition]) {
         let panel_height = crate::ui_helpers::compute_panel_height(
             ui,
             crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
@@ -624,7 +629,7 @@ impl ItemsEditorState {
 
                 ui.group(|ui| {
                     ui.heading("Class Restrictions");
-                    Self::show_disablement_display_static(ui, item.disablements);
+                    Self::show_disablement_display_static(ui, item.disablements, classes);
                 });
 
                 if item.constant_bonus.is_some()
@@ -660,23 +665,24 @@ impl ItemsEditorState {
 
     /// Static disablement display that doesn't require self
     #[allow(deprecated)]
-    fn show_disablement_display_static(ui: &mut egui::Ui, disablement: Disablement) {
+    fn show_disablement_display_static(
+        ui: &mut egui::Ui,
+        disablement: Disablement,
+        classes: &[ClassDefinition],
+    ) {
         ui.horizontal_wrapped(|ui| {
-            let classes = [
-                (Disablement::KNIGHT, "Knight"),
-                (Disablement::PALADIN, "Paladin"),
-                (Disablement::ARCHER, "Archer"),
-                (Disablement::CLERIC, "Cleric"),
-                (Disablement::SORCERER, "Sorcerer"),
-                (Disablement::ROBBER, "Robber"),
-            ];
-
-            for (flag, name) in &classes {
-                let can_use = disablement.can_use_class(*flag);
-                if can_use {
-                    ui.label(format!("✓ {}", name));
-                } else {
-                    ui.label(format!("✗ {}", name));
+            // Use dynamic class definitions from database
+            if classes.is_empty() {
+                ui.label("(No classes loaded)");
+            } else {
+                for class_def in classes {
+                    let mask = class_def.disablement_mask();
+                    let can_use = (disablement.0 & mask) != 0;
+                    if can_use {
+                        ui.label(format!("✓ {}", class_def.name));
+                    } else {
+                        ui.label(format!("✗ {}", class_def.name));
+                    }
                 }
             }
         });
@@ -762,6 +768,7 @@ impl ItemsEditorState {
         &mut self,
         ui: &mut egui::Ui,
         items: &mut Vec<Item>,
+        classes: &[ClassDefinition],
         unsaved_changes: &mut bool,
         status_message: &mut String,
         campaign_dir: Option<&PathBuf>,
@@ -878,7 +885,7 @@ impl ItemsEditorState {
 
                 ui.group(|ui| {
                     ui.heading("Class Restrictions");
-                    self.show_disablement_editor(ui);
+                    self.show_disablement_editor(ui, classes);
                 });
 
                 ui.add_space(10.0);
@@ -1094,27 +1101,24 @@ impl ItemsEditorState {
     }
 
     #[allow(deprecated)]
-    fn show_disablement_editor(&mut self, ui: &mut egui::Ui) {
+    fn show_disablement_editor(&mut self, ui: &mut egui::Ui, classes: &[ClassDefinition]) {
         let disablement = &mut self.edit_buffer.disablements;
 
         ui.label("Classes that CAN use this item:");
-        ui.horizontal(|ui| {
-            let classes = [
-                (Disablement::KNIGHT, "Knight"),
-                (Disablement::PALADIN, "Paladin"),
-                (Disablement::ARCHER, "Archer"),
-                (Disablement::CLERIC, "Cleric"),
-                (Disablement::SORCERER, "Sorcerer"),
-                (Disablement::ROBBER, "Robber"),
-            ];
-
-            for (flag, name) in &classes {
-                let mut can_use = disablement.can_use_class(*flag);
-                if ui.checkbox(&mut can_use, *name).changed() {
-                    if can_use {
-                        disablement.0 |= *flag;
-                    } else {
-                        disablement.0 &= !*flag;
+        ui.horizontal_wrapped(|ui| {
+            // Use dynamic class definitions from database
+            if classes.is_empty() {
+                ui.label("(No classes loaded - load classes.ron first)");
+            } else {
+                for class_def in classes {
+                    let mask = class_def.disablement_mask();
+                    let mut can_use = (disablement.0 & mask) != 0;
+                    if ui.checkbox(&mut can_use, &class_def.name).changed() {
+                        if can_use {
+                            disablement.0 |= mask;
+                        } else {
+                            disablement.0 &= !mask;
+                        }
                     }
                 }
             }

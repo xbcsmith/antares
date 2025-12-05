@@ -456,9 +456,266 @@ pub fn count_errors_by_category(
         .count()
 }
 
+/// Validates that a class_id reference exists in the available classes.
+///
+/// # Arguments
+///
+/// * `class_id` - The class ID to validate
+/// * `available_classes` - Slice of valid class IDs
+/// * `context` - Description of where the reference is used (e.g., "character 'Hero'")
+///
+/// # Returns
+///
+/// Returns `Some(ValidationResult)` with an error if the class_id is invalid,
+/// or `None` if the reference is valid.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::campaign_builder::validation::validate_class_id_reference;
+///
+/// let classes = vec!["knight".to_string(), "sorcerer".to_string()];
+/// let result = validate_class_id_reference("knight", &classes, "character 'Hero'");
+/// assert!(result.is_none()); // Valid reference
+///
+/// let result = validate_class_id_reference("invalid_class", &classes, "character 'Hero'");
+/// assert!(result.is_some()); // Invalid reference
+/// ```
+pub fn validate_class_id_reference(
+    class_id: &str,
+    available_classes: &[String],
+    context: &str,
+) -> Option<ValidationResult> {
+    if class_id.is_empty() {
+        return Some(ValidationResult::error(
+            ValidationCategory::Characters,
+            format!("Empty class_id in {}", context),
+        ));
+    }
+
+    if !available_classes.iter().any(|c| c == class_id) {
+        Some(ValidationResult::error(
+            ValidationCategory::Characters,
+            format!(
+                "Invalid class_id '{}' in {} (available: {})",
+                class_id,
+                context,
+                if available_classes.is_empty() {
+                    "none loaded".to_string()
+                } else {
+                    available_classes.join(", ")
+                }
+            ),
+        ))
+    } else {
+        None
+    }
+}
+
+/// Validates that a race_id reference exists in the available races.
+///
+/// # Arguments
+///
+/// * `race_id` - The race ID to validate
+/// * `available_races` - Slice of valid race IDs
+/// * `context` - Description of where the reference is used (e.g., "character 'Hero'")
+///
+/// # Returns
+///
+/// Returns `Some(ValidationResult)` with an error if the race_id is invalid,
+/// or `None` if the reference is valid.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::campaign_builder::validation::validate_race_id_reference;
+///
+/// let races = vec!["human".to_string(), "elf".to_string()];
+/// let result = validate_race_id_reference("human", &races, "character 'Hero'");
+/// assert!(result.is_none()); // Valid reference
+///
+/// let result = validate_race_id_reference("invalid_race", &races, "character 'Hero'");
+/// assert!(result.is_some()); // Invalid reference
+/// ```
+pub fn validate_race_id_reference(
+    race_id: &str,
+    available_races: &[String],
+    context: &str,
+) -> Option<ValidationResult> {
+    if race_id.is_empty() {
+        return Some(ValidationResult::error(
+            ValidationCategory::Characters,
+            format!("Empty race_id in {}", context),
+        ));
+    }
+
+    if !available_races.iter().any(|r| r == race_id) {
+        Some(ValidationResult::error(
+            ValidationCategory::Characters,
+            format!(
+                "Invalid race_id '{}' in {} (available: {})",
+                race_id,
+                context,
+                if available_races.is_empty() {
+                    "none loaded".to_string()
+                } else {
+                    available_races.join(", ")
+                }
+            ),
+        ))
+    } else {
+        None
+    }
+}
+
+/// Validates all class and race references in a collection of characters.
+///
+/// # Arguments
+///
+/// * `characters` - Iterator of (character_name, class_id, race_id) tuples
+/// * `available_classes` - Slice of valid class IDs
+/// * `available_races` - Slice of valid race IDs
+///
+/// # Returns
+///
+/// A vector of validation results for any invalid references found.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::campaign_builder::validation::validate_character_references;
+///
+/// let characters = vec![
+///     ("Hero".to_string(), "knight".to_string(), "human".to_string()),
+///     ("Mage".to_string(), "sorcerer".to_string(), "elf".to_string()),
+/// ];
+/// let classes = vec!["knight".to_string(), "sorcerer".to_string()];
+/// let races = vec!["human".to_string(), "elf".to_string()];
+///
+/// let results = validate_character_references(
+///     characters.iter().map(|(n, c, r)| (n.as_str(), c.as_str(), r.as_str())),
+///     &classes,
+///     &races,
+/// );
+/// assert!(results.is_empty()); // All valid
+/// ```
+pub fn validate_character_references<'a>(
+    characters: impl Iterator<Item = (&'a str, &'a str, &'a str)>,
+    available_classes: &[String],
+    available_races: &[String],
+) -> Vec<ValidationResult> {
+    let mut results = Vec::new();
+
+    for (name, class_id, race_id) in characters {
+        let context = format!("character '{}'", name);
+
+        if let Some(result) = validate_class_id_reference(class_id, available_classes, &context) {
+            results.push(result);
+        }
+
+        if let Some(result) = validate_race_id_reference(race_id, available_races, &context) {
+            results.push(result);
+        }
+    }
+
+    results
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_validate_class_id_reference_valid() {
+        let classes = vec!["knight".to_string(), "sorcerer".to_string()];
+        let result = validate_class_id_reference("knight", &classes, "test character");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_validate_class_id_reference_invalid() {
+        let classes = vec!["knight".to_string(), "sorcerer".to_string()];
+        let result = validate_class_id_reference("invalid", &classes, "test character");
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(result.is_error());
+        assert!(result.message.contains("invalid"));
+    }
+
+    #[test]
+    fn test_validate_class_id_reference_empty() {
+        let classes = vec!["knight".to_string()];
+        let result = validate_class_id_reference("", &classes, "test character");
+        assert!(result.is_some());
+        assert!(result.unwrap().message.contains("Empty class_id"));
+    }
+
+    #[test]
+    fn test_validate_race_id_reference_valid() {
+        let races = vec!["human".to_string(), "elf".to_string()];
+        let result = validate_race_id_reference("human", &races, "test character");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_validate_race_id_reference_invalid() {
+        let races = vec!["human".to_string(), "elf".to_string()];
+        let result = validate_race_id_reference("invalid", &races, "test character");
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(result.is_error());
+        assert!(result.message.contains("invalid"));
+    }
+
+    #[test]
+    fn test_validate_race_id_reference_empty() {
+        let races = vec!["human".to_string()];
+        let result = validate_race_id_reference("", &races, "test character");
+        assert!(result.is_some());
+        assert!(result.unwrap().message.contains("Empty race_id"));
+    }
+
+    #[test]
+    fn test_validate_character_references_all_valid() {
+        let characters = vec![("Hero", "knight", "human"), ("Mage", "sorcerer", "elf")];
+        let classes = vec!["knight".to_string(), "sorcerer".to_string()];
+        let races = vec!["human".to_string(), "elf".to_string()];
+
+        let results = validate_character_references(characters.into_iter(), &classes, &races);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_validate_character_references_invalid_class() {
+        let characters = vec![("Hero", "invalid_class", "human")];
+        let classes = vec!["knight".to_string()];
+        let races = vec!["human".to_string()];
+
+        let results = validate_character_references(characters.into_iter(), &classes, &races);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].message.contains("invalid_class"));
+    }
+
+    #[test]
+    fn test_validate_character_references_invalid_race() {
+        let characters = vec![("Hero", "knight", "invalid_race")];
+        let classes = vec!["knight".to_string()];
+        let races = vec!["human".to_string()];
+
+        let results = validate_character_references(characters.into_iter(), &classes, &races);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].message.contains("invalid_race"));
+    }
+
+    #[test]
+    fn test_validate_character_references_both_invalid() {
+        let characters = vec![("Hero", "bad_class", "bad_race")];
+        let classes = vec!["knight".to_string()];
+        let races = vec!["human".to_string()];
+
+        let results = validate_character_references(characters.into_iter(), &classes, &races);
+        assert_eq!(results.len(), 2); // One for class, one for race
+    }
 
     #[test]
     fn test_validation_category_display_name() {

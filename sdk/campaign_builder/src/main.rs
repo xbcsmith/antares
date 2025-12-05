@@ -2559,6 +2559,7 @@ impl eframe::App for CampaignBuilderApp {
             EditorTab::Items => self.items_editor_state.show(
                 ui,
                 &mut self.items,
+                &self.classes_editor_state.classes,
                 self.campaign_dir.as_ref(),
                 &self.campaign.items_file,
                 &mut self.unsaved_changes,
