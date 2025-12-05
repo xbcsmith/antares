@@ -403,6 +403,7 @@ pub enum Race {
     Elf,
     Dwarf,
     Gnome,
+    HalfElf,
     HalfOrc,
 }
 
@@ -460,6 +461,7 @@ pub fn race_id_from_enum(race: Race) -> RaceId {
         Race::Elf => "elf".to_string(),
         Race::Dwarf => "dwarf".to_string(),
         Race::Gnome => "gnome".to_string(),
+        Race::HalfElf => "half_elf".to_string(),
         Race::HalfOrc => "half_orc".to_string(),
     }
 }
@@ -518,6 +520,7 @@ pub fn race_enum_from_id(id: &RaceId) -> Option<Race> {
         "elf" => Some(Race::Elf),
         "dwarf" => Some(Race::Dwarf),
         "gnome" => Some(Race::Gnome),
+        "half_elf" => Some(Race::HalfElf),
         "half_orc" => Some(Race::HalfOrc),
         _ => None,
     }

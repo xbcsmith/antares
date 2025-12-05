@@ -21,8 +21,13 @@
 //! Character definitions are separate from runtime `Character` instances.
 //! Definitions are loaded from RON files; instances are created at runtime.
 
-use crate::domain::character::{Alignment, Sex, Stats};
-use crate::domain::classes::ClassId;
+use crate::domain::character::{
+    Alignment, AttributePair, AttributePair16, Character, Class, Condition, Equipment, Inventory,
+    InventorySlot, QuestFlags, Race, Resistances as CharacterResistances, Sex, SpellBook, Stats,
+};
+use crate::domain::classes::{ClassDatabase, ClassDefinition, ClassId, SpellStat};
+use crate::domain::items::ItemDatabase;
+use crate::domain::races::{RaceDatabase, RaceDefinition};
 use crate::domain::types::{ItemId, RaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -71,6 +76,20 @@ pub enum CharacterDefinitionError {
     /// Invalid item reference
     #[error("Invalid item_id {item_id} in character '{character_id}'")]
     InvalidItemId {
+        character_id: String,
+        item_id: ItemId,
+    },
+
+    /// Error during character instantiation
+    #[error("Instantiation error for character '{character_id}': {message}")]
+    InstantiationError {
+        character_id: String,
+        message: String,
+    },
+
+    /// Inventory is full, cannot add more items
+    #[error("Inventory full for character '{character_id}': cannot add item {item_id}")]
+    InventoryFull {
         character_id: String,
         item_id: ItemId,
     },
@@ -599,6 +618,405 @@ impl CharacterDefinition {
         }
 
         Ok(())
+    }
+
+    /// Instantiates a runtime Character from this definition
+    ///
+    /// Creates a fully populated Character instance using the definition's
+    /// template data. Applies race stat modifiers, calculates starting HP/SP,
+    /// populates inventory, and equips starting equipment.
+    ///
+    /// # Arguments
+    ///
+    /// * `races` - RaceDatabase for race lookups and modifier application
+    /// * `classes` - ClassDatabase for class lookups and HP/SP calculation
+    /// * `items` - ItemDatabase for validating item references
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Character)` on success, or an error if:
+    /// - race_id doesn't exist in RaceDatabase
+    /// - class_id doesn't exist in ClassDatabase
+    /// - Any starting item ID doesn't exist in ItemDatabase
+    /// - Inventory becomes full during population
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::domain::character_definition::{CharacterDefinition, BaseStats};
+    /// use antares::domain::character::{Sex, Alignment};
+    /// use antares::domain::races::RaceDatabase;
+    /// use antares::domain::classes::ClassDatabase;
+    /// use antares::domain::items::ItemDatabase;
+    ///
+    /// let definition = CharacterDefinition::new(
+    ///     "test_knight".to_string(),
+    ///     "Sir Test".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    ///
+    /// let races = RaceDatabase::load_from_file("data/races.ron").unwrap();
+    /// let classes = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+    /// let items = ItemDatabase::load_from_file("data/items.ron").unwrap();
+    ///
+    /// let character = definition.instantiate(&races, &classes, &items).unwrap();
+    /// assert_eq!(character.name, "Sir Test");
+    /// ```
+    pub fn instantiate(
+        &self,
+        races: &RaceDatabase,
+        classes: &ClassDatabase,
+        items: &ItemDatabase,
+    ) -> Result<Character, CharacterDefinitionError> {
+        // Validate race exists
+        let race_def = races.get_race(&self.race_id).ok_or_else(|| {
+            CharacterDefinitionError::InvalidRaceId {
+                character_id: self.id.clone(),
+                race_id: self.race_id.clone(),
+            }
+        })?;
+
+        // Validate class exists
+        let class_def = classes.get_class(&self.class_id).ok_or_else(|| {
+            CharacterDefinitionError::InvalidClassId {
+                character_id: self.id.clone(),
+                class_id: self.class_id.clone(),
+            }
+        })?;
+
+        // Validate all item IDs exist
+        for item_id in self.all_item_ids() {
+            if items.get_item(item_id).is_none() {
+                return Err(CharacterDefinitionError::InvalidItemId {
+                    character_id: self.id.clone(),
+                    item_id,
+                });
+            }
+        }
+
+        // Convert race_id to Race enum
+        let race = race_enum_from_id(&self.race_id).ok_or_else(|| {
+            CharacterDefinitionError::InstantiationError {
+                character_id: self.id.clone(),
+                message: format!("Cannot convert race_id '{}' to Race enum", self.race_id),
+            }
+        })?;
+
+        // Convert class_id to Class enum
+        let class = class_enum_from_id(&self.class_id).ok_or_else(|| {
+            CharacterDefinitionError::InstantiationError {
+                character_id: self.id.clone(),
+                message: format!("Cannot convert class_id '{}' to Class enum", self.class_id),
+            }
+        })?;
+
+        // Apply race stat modifiers to base stats
+        let stats = apply_race_modifiers(&self.base_stats, race_def);
+
+        // Calculate starting HP based on class and endurance
+        let hp = calculate_starting_hp(class_def, stats.endurance.base);
+
+        // Calculate starting SP based on class and relevant stat
+        let sp = calculate_starting_sp(class_def, &stats);
+
+        // Create resistances from race definition
+        let resistances = apply_race_resistances(race_def);
+
+        // Create inventory with starting items
+        let inventory = populate_starting_inventory(&self.id, &self.starting_items)?;
+
+        // Create equipment from starting equipment
+        let equipment = create_starting_equipment(&self.starting_equipment);
+
+        // Build the Character
+        let character = Character {
+            name: self.name.clone(),
+            race,
+            class,
+            race_id: self.race_id.clone(),
+            class_id: self.class_id.clone(),
+            sex: self.sex,
+            alignment: self.alignment,
+            alignment_initial: self.alignment,
+            level: 1,
+            experience: 0,
+            age: 18,
+            age_days: 0,
+            stats,
+            hp,
+            sp,
+            ac: AttributePair::new(0), // AC calculated from equipment separately
+            spell_level: AttributePair::new(calculate_starting_spell_level(class_def)),
+            inventory,
+            equipment,
+            spells: SpellBook::new(),
+            conditions: Condition::new(),
+            active_conditions: Vec::new(),
+            resistances,
+            quest_flags: QuestFlags::new(),
+            portrait_id: self.portrait_id,
+            worthiness: 0,
+            gold: self.starting_gold,
+            gems: self.starting_gems,
+            food: self.starting_food,
+        };
+
+        Ok(character)
+    }
+}
+
+// ===== Instantiation Helper Functions =====
+
+/// Converts a race_id string to a Race enum value
+///
+/// # Arguments
+///
+/// * `race_id` - The race identifier string
+///
+/// # Returns
+///
+/// Returns `Some(Race)` if the id is recognized, `None` otherwise.
+fn race_enum_from_id(race_id: &str) -> Option<Race> {
+    match race_id.to_lowercase().as_str() {
+        "human" => Some(Race::Human),
+        "elf" => Some(Race::Elf),
+        "dwarf" => Some(Race::Dwarf),
+        "gnome" => Some(Race::Gnome),
+        "half_elf" | "halfelf" | "half-elf" => Some(Race::HalfElf),
+        "half_orc" | "halforc" | "half-orc" => Some(Race::HalfOrc),
+        _ => None,
+    }
+}
+
+/// Converts a class_id string to a Class enum value
+///
+/// # Arguments
+///
+/// * `class_id` - The class identifier string
+///
+/// # Returns
+///
+/// Returns `Some(Class)` if the id is recognized, `None` otherwise.
+fn class_enum_from_id(class_id: &str) -> Option<Class> {
+    match class_id.to_lowercase().as_str() {
+        "knight" => Some(Class::Knight),
+        "paladin" => Some(Class::Paladin),
+        "archer" => Some(Class::Archer),
+        "cleric" => Some(Class::Cleric),
+        "sorcerer" => Some(Class::Sorcerer),
+        "robber" => Some(Class::Robber),
+        _ => None,
+    }
+}
+
+/// Applies race stat modifiers to base stats
+///
+/// Creates a Stats struct from BaseStats with race modifiers applied.
+/// Modifiers are clamped to valid stat ranges (3-25).
+///
+/// # Arguments
+///
+/// * `base_stats` - The base stat values from the character definition
+/// * `race_def` - The race definition containing stat modifiers
+///
+/// # Returns
+///
+/// Returns a Stats struct with modifiers applied.
+fn apply_race_modifiers(base_stats: &BaseStats, race_def: &RaceDefinition) -> Stats {
+    let mods = &race_def.stat_modifiers;
+
+    // Apply modifiers with clamping to valid range (3-25 for modified stats)
+    let apply_mod = |base: u8, modifier: i8| -> u8 {
+        let result = base as i16 + modifier as i16;
+        result.clamp(3, 25) as u8
+    };
+
+    Stats::new(
+        apply_mod(base_stats.might, mods.might),
+        apply_mod(base_stats.intellect, mods.intellect),
+        apply_mod(base_stats.personality, mods.personality),
+        apply_mod(base_stats.endurance, mods.endurance),
+        apply_mod(base_stats.speed, mods.speed),
+        apply_mod(base_stats.accuracy, mods.accuracy),
+        apply_mod(base_stats.luck, mods.luck),
+    )
+}
+
+/// Calculates starting HP based on class and endurance
+///
+/// For level 1 characters, HP is calculated as:
+/// - Maximum roll of the class HP die + endurance modifier
+///
+/// This provides consistent starting HP for premade characters.
+///
+/// # Arguments
+///
+/// * `class_def` - The class definition with HP die info
+/// * `endurance` - The character's endurance stat (after race modifiers)
+///
+/// # Returns
+///
+/// Returns an AttributePair16 with the calculated HP as both base and current.
+fn calculate_starting_hp(class_def: &ClassDefinition, endurance: u8) -> AttributePair16 {
+    // Endurance modifier: (endurance - 10) / 2, rounded down
+    let endurance_mod = (endurance as i16 - 10) / 2;
+
+    // For level 1: max die roll + endurance modifier
+    // Use max roll (sides) for consistent premade characters
+    let base_hp = class_def.hp_die.sides as i16 + endurance_mod;
+
+    // Minimum 1 HP
+    let hp = base_hp.max(1) as u16;
+
+    AttributePair16::new(hp)
+}
+
+/// Calculates starting SP based on class and relevant stat
+///
+/// SP calculation depends on the class's spell_stat:
+/// - Sorcerers use Intellect
+/// - Clerics/Paladins use Personality
+/// - Non-casters get 0 SP
+///
+/// For level 1 pure casters: SP = max(0, stat - 10)
+/// For level 1 hybrids (Paladin): SP = max(0, (stat - 10) / 2)
+///
+/// # Arguments
+///
+/// * `class_def` - The class definition with spell info
+/// * `stats` - The character's stats (after race modifiers)
+///
+/// # Returns
+///
+/// Returns an AttributePair16 with the calculated SP as both base and current.
+fn calculate_starting_sp(class_def: &ClassDefinition, stats: &Stats) -> AttributePair16 {
+    // Non-casters get 0 SP
+    if !class_def.can_cast_spells() {
+        return AttributePair16::new(0);
+    }
+
+    // Get the relevant stat for SP calculation
+    let spell_stat = match class_def.spell_stat {
+        Some(SpellStat::Intellect) => stats.intellect.base,
+        Some(SpellStat::Personality) => stats.personality.base,
+        None => return AttributePair16::new(0),
+    };
+
+    // Calculate SP based on caster type
+    let sp = if class_def.is_pure_caster {
+        // Pure casters: (stat - 10), minimum 0
+        (spell_stat as i16 - 10).max(0) as u16
+    } else {
+        // Hybrid casters (Paladin): (stat - 10) / 2, minimum 0
+        ((spell_stat as i16 - 10) / 2).max(0) as u16
+    };
+
+    AttributePair16::new(sp)
+}
+
+/// Calculates starting spell level based on class
+///
+/// Pure casters start at spell level 1.
+/// Hybrid casters (Paladin) start at spell level 0.
+/// Non-casters have spell level 0.
+///
+/// # Arguments
+///
+/// * `class_def` - The class definition
+///
+/// # Returns
+///
+/// Returns the starting spell level (0 or 1).
+fn calculate_starting_spell_level(class_def: &ClassDefinition) -> u8 {
+    if class_def.is_pure_caster {
+        1
+    } else {
+        0
+    }
+}
+
+/// Applies race resistances to create character resistances
+///
+/// Converts RaceDefinition resistances (plain u8 values) to Character
+/// Resistances struct (AttributePair values for base/current tracking).
+///
+/// # Arguments
+///
+/// * `race_def` - The race definition containing resistances
+///
+/// # Returns
+///
+/// Returns a Resistances struct for the character with race resistance values.
+fn apply_race_resistances(race_def: &RaceDefinition) -> CharacterResistances {
+    let race_res = &race_def.resistances;
+    CharacterResistances {
+        magic: AttributePair::new(race_res.magic),
+        fire: AttributePair::new(race_res.fire),
+        cold: AttributePair::new(race_res.cold),
+        electricity: AttributePair::new(race_res.electricity),
+        acid: AttributePair::new(race_res.acid),
+        fear: AttributePair::new(race_res.fear),
+        poison: AttributePair::new(race_res.poison),
+        psychic: AttributePair::new(race_res.psychic),
+    }
+}
+
+/// Populates the starting inventory with items
+///
+/// # Arguments
+///
+/// * `character_id` - The character ID for error reporting
+/// * `starting_items` - List of item IDs to add to inventory
+///
+/// # Returns
+///
+/// Returns `Ok(Inventory)` on success, or error if inventory becomes full.
+fn populate_starting_inventory(
+    character_id: &str,
+    starting_items: &[ItemId],
+) -> Result<Inventory, CharacterDefinitionError> {
+    let mut inventory = Inventory::new();
+
+    for &item_id in starting_items {
+        if inventory.is_full() {
+            return Err(CharacterDefinitionError::InventoryFull {
+                character_id: character_id.to_string(),
+                item_id,
+            });
+        }
+
+        // Add item with 0 charges (charges are set based on item type later)
+        let slot = InventorySlot {
+            item_id,
+            charges: 0,
+        };
+        inventory.items.push(slot);
+    }
+
+    Ok(inventory)
+}
+
+/// Creates equipment from starting equipment definition
+///
+/// # Arguments
+///
+/// * `starting_equipment` - The starting equipment configuration
+///
+/// # Returns
+///
+/// Returns an Equipment struct with the specified items equipped.
+fn create_starting_equipment(starting_equipment: &StartingEquipment) -> Equipment {
+    Equipment {
+        weapon: starting_equipment.weapon,
+        armor: starting_equipment.armor,
+        shield: starting_equipment.shield,
+        helmet: starting_equipment.helmet,
+        boots: starting_equipment.boots,
+        accessory1: starting_equipment.accessory1,
+        accessory2: starting_equipment.accessory2,
     }
 }
 
@@ -1944,5 +2362,731 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ===== Instantiation Tests =====
+
+    #[test]
+    fn test_race_enum_from_id_valid() {
+        assert_eq!(race_enum_from_id("human"), Some(Race::Human));
+        assert_eq!(race_enum_from_id("Human"), Some(Race::Human));
+        assert_eq!(race_enum_from_id("HUMAN"), Some(Race::Human));
+        assert_eq!(race_enum_from_id("elf"), Some(Race::Elf));
+        assert_eq!(race_enum_from_id("dwarf"), Some(Race::Dwarf));
+        assert_eq!(race_enum_from_id("gnome"), Some(Race::Gnome));
+        assert_eq!(race_enum_from_id("half_elf"), Some(Race::HalfElf));
+        assert_eq!(race_enum_from_id("halfelf"), Some(Race::HalfElf));
+        assert_eq!(race_enum_from_id("half-elf"), Some(Race::HalfElf));
+        assert_eq!(race_enum_from_id("half_orc"), Some(Race::HalfOrc));
+        assert_eq!(race_enum_from_id("halforc"), Some(Race::HalfOrc));
+        assert_eq!(race_enum_from_id("half-orc"), Some(Race::HalfOrc));
+    }
+
+    #[test]
+    fn test_race_enum_from_id_invalid() {
+        assert_eq!(race_enum_from_id("invalid"), None);
+        assert_eq!(race_enum_from_id(""), None);
+        assert_eq!(race_enum_from_id("orc"), None);
+    }
+
+    #[test]
+    fn test_class_enum_from_id_valid() {
+        assert_eq!(class_enum_from_id("knight"), Some(Class::Knight));
+        assert_eq!(class_enum_from_id("Knight"), Some(Class::Knight));
+        assert_eq!(class_enum_from_id("KNIGHT"), Some(Class::Knight));
+        assert_eq!(class_enum_from_id("paladin"), Some(Class::Paladin));
+        assert_eq!(class_enum_from_id("archer"), Some(Class::Archer));
+        assert_eq!(class_enum_from_id("cleric"), Some(Class::Cleric));
+        assert_eq!(class_enum_from_id("sorcerer"), Some(Class::Sorcerer));
+        assert_eq!(class_enum_from_id("robber"), Some(Class::Robber));
+    }
+
+    #[test]
+    fn test_class_enum_from_id_invalid() {
+        assert_eq!(class_enum_from_id("invalid"), None);
+        assert_eq!(class_enum_from_id(""), None);
+        assert_eq!(class_enum_from_id("warrior"), None);
+    }
+
+    #[test]
+    fn test_apply_race_modifiers_no_modifiers() {
+        use crate::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
+
+        let base_stats = BaseStats::new(10, 10, 10, 10, 10, 10, 10);
+        let race_def = RaceDefinition {
+            id: "human".to_string(),
+            name: "Human".to_string(),
+            description: "Test race".to_string(),
+            stat_modifiers: StatModifiers::default(),
+            resistances: Resistances::default(),
+            special_abilities: vec![],
+            size: SizeCategory::Medium,
+            disablement_bit_index: 0,
+            proficiencies: vec![],
+            incompatible_item_tags: vec![],
+        };
+
+        let stats = apply_race_modifiers(&base_stats, &race_def);
+        assert_eq!(stats.might.base, 10);
+        assert_eq!(stats.intellect.base, 10);
+        assert_eq!(stats.personality.base, 10);
+        assert_eq!(stats.endurance.base, 10);
+        assert_eq!(stats.speed.base, 10);
+        assert_eq!(stats.accuracy.base, 10);
+        assert_eq!(stats.luck.base, 10);
+    }
+
+    #[test]
+    fn test_apply_race_modifiers_with_bonuses() {
+        use crate::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
+
+        let base_stats = BaseStats::new(10, 10, 10, 10, 10, 10, 10);
+        let race_def = RaceDefinition {
+            id: "elf".to_string(),
+            name: "Elf".to_string(),
+            description: "Test race".to_string(),
+            stat_modifiers: StatModifiers {
+                might: 0,
+                intellect: 2,
+                personality: 0,
+                endurance: -1,
+                speed: 1,
+                accuracy: 1,
+                luck: 0,
+            },
+            resistances: Resistances::default(),
+            special_abilities: vec![],
+            size: SizeCategory::Medium,
+            disablement_bit_index: 0,
+            proficiencies: vec![],
+            incompatible_item_tags: vec![],
+        };
+
+        let stats = apply_race_modifiers(&base_stats, &race_def);
+        assert_eq!(stats.might.base, 10);
+        assert_eq!(stats.intellect.base, 12);
+        assert_eq!(stats.personality.base, 10);
+        assert_eq!(stats.endurance.base, 9);
+        assert_eq!(stats.speed.base, 11);
+        assert_eq!(stats.accuracy.base, 11);
+        assert_eq!(stats.luck.base, 10);
+    }
+
+    #[test]
+    fn test_apply_race_modifiers_clamping() {
+        use crate::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
+
+        // Test clamping at lower bound
+        let low_stats = BaseStats::new(3, 3, 3, 3, 3, 3, 3);
+        let race_def = RaceDefinition {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            description: "Test".to_string(),
+            stat_modifiers: StatModifiers {
+                might: -5,
+                intellect: 0,
+                personality: 0,
+                endurance: 0,
+                speed: 0,
+                accuracy: 0,
+                luck: 0,
+            },
+            resistances: Resistances::default(),
+            special_abilities: vec![],
+            size: SizeCategory::Medium,
+            disablement_bit_index: 0,
+            proficiencies: vec![],
+            incompatible_item_tags: vec![],
+        };
+
+        let stats = apply_race_modifiers(&low_stats, &race_def);
+        assert_eq!(stats.might.base, 3); // Clamped to minimum
+
+        // Test clamping at upper bound
+        let high_stats = BaseStats::new(18, 18, 18, 18, 18, 18, 18);
+        let race_def_bonus = RaceDefinition {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            description: "Test".to_string(),
+            stat_modifiers: StatModifiers {
+                might: 10,
+                intellect: 0,
+                personality: 0,
+                endurance: 0,
+                speed: 0,
+                accuracy: 0,
+                luck: 0,
+            },
+            resistances: Resistances::default(),
+            special_abilities: vec![],
+            size: SizeCategory::Medium,
+            disablement_bit_index: 0,
+            proficiencies: vec![],
+            incompatible_item_tags: vec![],
+        };
+
+        let stats = apply_race_modifiers(&high_stats, &race_def_bonus);
+        assert_eq!(stats.might.base, 25); // Clamped to maximum
+    }
+
+    #[test]
+    fn test_calculate_starting_hp_knight() {
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::types::DiceRoll;
+
+        // Knight has d10 HP die
+        let knight = ClassDefinition {
+            id: "knight".to_string(),
+            name: "Knight".to_string(),
+            description: "".to_string(),
+            hp_die: DiceRoll::new(1, 10, 0),
+            spell_school: None,
+            is_pure_caster: false,
+            spell_stat: None,
+            disablement_bit_index: 0,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+        };
+
+        // Endurance 10 = 0 modifier, HP = 10 + 0 = 10
+        let hp = calculate_starting_hp(&knight, 10);
+        assert_eq!(hp.base, 10);
+        assert_eq!(hp.current, 10);
+
+        // Endurance 14 = +2 modifier, HP = 10 + 2 = 12
+        let hp = calculate_starting_hp(&knight, 14);
+        assert_eq!(hp.base, 12);
+
+        // Endurance 8 = -1 modifier, HP = 10 - 1 = 9
+        let hp = calculate_starting_hp(&knight, 8);
+        assert_eq!(hp.base, 9);
+    }
+
+    #[test]
+    fn test_calculate_starting_hp_minimum() {
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::types::DiceRoll;
+
+        // Sorcerer has d4 HP die
+        let sorcerer = ClassDefinition {
+            id: "sorcerer".to_string(),
+            name: "Sorcerer".to_string(),
+            description: "".to_string(),
+            hp_die: DiceRoll::new(1, 4, 0),
+            spell_school: None,
+            is_pure_caster: true,
+            spell_stat: None,
+            disablement_bit_index: 0,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+        };
+
+        // Very low endurance should still give minimum 1 HP
+        let hp = calculate_starting_hp(&sorcerer, 3);
+        assert!(hp.base >= 1, "HP should be at least 1");
+    }
+
+    #[test]
+    fn test_calculate_starting_sp_non_caster() {
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::types::DiceRoll;
+
+        let knight = ClassDefinition {
+            id: "knight".to_string(),
+            name: "Knight".to_string(),
+            description: "".to_string(),
+            hp_die: DiceRoll::new(1, 10, 0),
+            spell_school: None,
+            is_pure_caster: false,
+            spell_stat: None,
+            disablement_bit_index: 0,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+        };
+
+        let stats = Stats::new(10, 16, 10, 10, 10, 10, 10);
+        let sp = calculate_starting_sp(&knight, &stats);
+        assert_eq!(sp.base, 0);
+        assert_eq!(sp.current, 0);
+    }
+
+    #[test]
+    fn test_calculate_starting_sp_pure_caster() {
+        use crate::domain::classes::{ClassDefinition, SpellSchool};
+        use crate::domain::types::DiceRoll;
+
+        let sorcerer = ClassDefinition {
+            id: "sorcerer".to_string(),
+            name: "Sorcerer".to_string(),
+            description: "".to_string(),
+            hp_die: DiceRoll::new(1, 4, 0),
+            spell_school: Some(SpellSchool::Sorcerer),
+            is_pure_caster: true,
+            spell_stat: Some(SpellStat::Intellect),
+            disablement_bit_index: 0,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+        };
+
+        // Intellect 16 = SP = 16 - 10 = 6
+        let stats = Stats::new(10, 16, 10, 10, 10, 10, 10);
+        let sp = calculate_starting_sp(&sorcerer, &stats);
+        assert_eq!(sp.base, 6);
+        assert_eq!(sp.current, 6);
+
+        // Intellect 10 = SP = 10 - 10 = 0
+        let stats = Stats::new(10, 10, 10, 10, 10, 10, 10);
+        let sp = calculate_starting_sp(&sorcerer, &stats);
+        assert_eq!(sp.base, 0);
+    }
+
+    #[test]
+    fn test_calculate_starting_sp_hybrid_caster() {
+        use crate::domain::classes::{ClassDefinition, SpellSchool};
+        use crate::domain::types::DiceRoll;
+
+        let paladin = ClassDefinition {
+            id: "paladin".to_string(),
+            name: "Paladin".to_string(),
+            description: "".to_string(),
+            hp_die: DiceRoll::new(1, 8, 0),
+            spell_school: Some(SpellSchool::Cleric),
+            is_pure_caster: false, // Hybrid
+            spell_stat: Some(SpellStat::Personality),
+            disablement_bit_index: 0,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+        };
+
+        // Personality 16 = SP = (16 - 10) / 2 = 3
+        let stats = Stats::new(10, 10, 16, 10, 10, 10, 10);
+        let sp = calculate_starting_sp(&paladin, &stats);
+        assert_eq!(sp.base, 3);
+    }
+
+    #[test]
+    fn test_calculate_starting_spell_level() {
+        use crate::domain::classes::{ClassDefinition, SpellSchool};
+        use crate::domain::types::DiceRoll;
+
+        let sorcerer = ClassDefinition {
+            id: "sorcerer".to_string(),
+            name: "Sorcerer".to_string(),
+            description: "".to_string(),
+            hp_die: DiceRoll::new(1, 4, 0),
+            spell_school: Some(SpellSchool::Sorcerer),
+            is_pure_caster: true,
+            spell_stat: Some(SpellStat::Intellect),
+            disablement_bit_index: 0,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+        };
+
+        let paladin = ClassDefinition {
+            id: "paladin".to_string(),
+            name: "Paladin".to_string(),
+            description: "".to_string(),
+            hp_die: DiceRoll::new(1, 8, 0),
+            spell_school: Some(SpellSchool::Cleric),
+            is_pure_caster: false,
+            spell_stat: Some(SpellStat::Personality),
+            disablement_bit_index: 0,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+        };
+
+        let knight = ClassDefinition {
+            id: "knight".to_string(),
+            name: "Knight".to_string(),
+            description: "".to_string(),
+            hp_die: DiceRoll::new(1, 10, 0),
+            spell_school: None,
+            is_pure_caster: false,
+            spell_stat: None,
+            disablement_bit_index: 0,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+        };
+
+        assert_eq!(calculate_starting_spell_level(&sorcerer), 1);
+        assert_eq!(calculate_starting_spell_level(&paladin), 0);
+        assert_eq!(calculate_starting_spell_level(&knight), 0);
+    }
+
+    #[test]
+    fn test_apply_race_resistances() {
+        use crate::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
+
+        let race_def = RaceDefinition {
+            id: "dwarf".to_string(),
+            name: "Dwarf".to_string(),
+            description: "Test".to_string(),
+            stat_modifiers: StatModifiers::default(),
+            resistances: Resistances {
+                magic: 5,
+                fire: 0,
+                cold: 0,
+                electricity: 0,
+                acid: 0,
+                fear: 0,
+                poison: 10,
+                psychic: 0,
+            },
+            special_abilities: vec![],
+            size: SizeCategory::Medium,
+            disablement_bit_index: 0,
+            proficiencies: vec![],
+            incompatible_item_tags: vec![],
+        };
+
+        let resistances = apply_race_resistances(&race_def);
+        assert_eq!(resistances.magic.base, 5);
+        assert_eq!(resistances.poison.base, 10);
+        assert_eq!(resistances.fire.base, 0);
+    }
+
+    #[test]
+    fn test_populate_starting_inventory_empty() {
+        let inventory = populate_starting_inventory("test", &[]).unwrap();
+        assert!(inventory.items.is_empty());
+        assert!(inventory.has_space());
+    }
+
+    #[test]
+    fn test_populate_starting_inventory_with_items() {
+        let items = vec![1, 2, 3];
+        let inventory = populate_starting_inventory("test", &items).unwrap();
+        assert_eq!(inventory.items.len(), 3);
+        assert_eq!(inventory.items[0].item_id, 1);
+        assert_eq!(inventory.items[1].item_id, 2);
+        assert_eq!(inventory.items[2].item_id, 3);
+    }
+
+    #[test]
+    fn test_populate_starting_inventory_full() {
+        // Try to add more items than inventory can hold
+        let items: Vec<ItemId> = (0..=Inventory::MAX_ITEMS as u8).collect();
+        let result = populate_starting_inventory("test", &items);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            CharacterDefinitionError::InventoryFull { .. }
+        ));
+    }
+
+    #[test]
+    fn test_create_starting_equipment_empty() {
+        let starting = StartingEquipment::new();
+        let equipment = create_starting_equipment(&starting);
+        assert!(equipment.weapon.is_none());
+        assert!(equipment.armor.is_none());
+        assert!(equipment.shield.is_none());
+        assert!(equipment.helmet.is_none());
+        assert!(equipment.boots.is_none());
+        assert!(equipment.accessory1.is_none());
+        assert!(equipment.accessory2.is_none());
+    }
+
+    #[test]
+    fn test_create_starting_equipment_with_items() {
+        let starting = StartingEquipment {
+            weapon: Some(1),
+            armor: Some(20),
+            shield: Some(30),
+            helmet: None,
+            boots: None,
+            accessory1: Some(40),
+            accessory2: None,
+        };
+
+        let equipment = create_starting_equipment(&starting);
+        assert_eq!(equipment.weapon, Some(1));
+        assert_eq!(equipment.armor, Some(20));
+        assert_eq!(equipment.shield, Some(30));
+        assert!(equipment.helmet.is_none());
+        assert!(equipment.boots.is_none());
+        assert_eq!(equipment.accessory1, Some(40));
+        assert!(equipment.accessory2.is_none());
+    }
+
+    #[test]
+    fn test_instantiate_with_real_databases() {
+        // Load real databases for integration test
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        // Create a simple character definition
+        let definition = CharacterDefinition {
+            id: "test_knight".to_string(),
+            name: "Test Knight".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Good,
+            base_stats: BaseStats::new(14, 10, 10, 12, 10, 12, 10),
+            portrait_id: 1,
+            starting_gold: 100,
+            starting_gems: 5,
+            starting_food: 15,
+            starting_items: vec![50], // A consumable
+            starting_equipment: StartingEquipment {
+                weapon: Some(1), // Basic weapon
+                armor: Some(20), // Basic armor
+                ..Default::default()
+            },
+            description: "A test knight".to_string(),
+            is_premade: true,
+        };
+
+        let character = definition
+            .instantiate(&races, &classes, &items)
+            .expect("Failed to instantiate character");
+
+        // Verify basic fields
+        assert_eq!(character.name, "Test Knight");
+        assert_eq!(character.race, Race::Human);
+        assert_eq!(character.class, Class::Knight);
+        assert_eq!(character.race_id, "human");
+        assert_eq!(character.class_id, "knight");
+        assert_eq!(character.sex, Sex::Male);
+        assert_eq!(character.alignment, Alignment::Good);
+        assert_eq!(character.alignment_initial, Alignment::Good);
+        assert_eq!(character.level, 1);
+        assert_eq!(character.experience, 0);
+        assert_eq!(character.age, 18);
+        assert_eq!(character.portrait_id, 1);
+        assert_eq!(character.gold, 100);
+        assert_eq!(character.gems, 5);
+        assert_eq!(character.food, 15);
+
+        // Verify stats were set
+        assert!(character.stats.might.base >= 3);
+        assert!(character.stats.endurance.base >= 3);
+
+        // Verify HP was calculated (should be > 0)
+        assert!(character.hp.base > 0);
+
+        // Verify inventory has starting item
+        assert_eq!(character.inventory.items.len(), 1);
+        assert_eq!(character.inventory.items[0].item_id, 50);
+
+        // Verify equipment was set
+        assert_eq!(character.equipment.weapon, Some(1));
+        assert_eq!(character.equipment.armor, Some(20));
+        assert!(character.equipment.shield.is_none());
+    }
+
+    #[test]
+    fn test_instantiate_invalid_race() {
+        let races = RaceDatabase::new();
+        let classes = ClassDatabase::new();
+        let items = ItemDatabase::new();
+
+        let definition = CharacterDefinition::new(
+            "test".to_string(),
+            "Test".to_string(),
+            "invalid_race".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let result = definition.instantiate(&races, &classes, &items);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            CharacterDefinitionError::InvalidRaceId { .. }
+        ));
+    }
+
+    #[test]
+    fn test_instantiate_invalid_class() {
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes = ClassDatabase::new(); // Empty - no classes
+        let items = ItemDatabase::new();
+
+        let definition = CharacterDefinition::new(
+            "test".to_string(),
+            "Test".to_string(),
+            "human".to_string(),
+            "invalid_class".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let result = definition.instantiate(&races, &classes, &items);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            CharacterDefinitionError::InvalidClassId { .. }
+        ));
+    }
+
+    #[test]
+    fn test_instantiate_invalid_item() {
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items = ItemDatabase::new(); // Empty - no items
+
+        let mut definition = CharacterDefinition::new(
+            "test".to_string(),
+            "Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        definition.starting_items = vec![255]; // Invalid item ID (not in empty database)
+
+        let result = definition.instantiate(&races, &classes, &items);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            CharacterDefinitionError::InvalidItemId { .. }
+        ));
+    }
+
+    #[test]
+    fn test_instantiate_all_core_characters() {
+        // Integration test: instantiate all core characters
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+        let char_db = CharacterDatabase::load_from_file("data/characters.ron")
+            .expect("Failed to load characters.ron");
+
+        for char_def in char_db.all_characters() {
+            let result = char_def.instantiate(&races, &classes, &items);
+            assert!(
+                result.is_ok(),
+                "Failed to instantiate character '{}': {:?}",
+                char_def.id,
+                result.err()
+            );
+
+            let character = result.unwrap();
+            assert_eq!(character.name, char_def.name);
+            assert_eq!(character.gold, char_def.starting_gold);
+            assert_eq!(character.gems, char_def.starting_gems);
+            assert_eq!(character.food, char_def.starting_food);
+            assert!(
+                character.hp.base > 0,
+                "Character '{}' should have HP > 0",
+                char_def.id
+            );
+            assert!(
+                character.is_alive(),
+                "Character '{}' should be alive",
+                char_def.id
+            );
+        }
+    }
+
+    #[test]
+    fn test_instantiate_sorcerer_has_sp() {
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        // Create a sorcerer with high intellect
+        let definition = CharacterDefinition {
+            id: "test_sorcerer".to_string(),
+            name: "Test Sorcerer".to_string(),
+            race_id: "gnome".to_string(),
+            class_id: "sorcerer".to_string(),
+            sex: Sex::Female,
+            alignment: Alignment::Neutral,
+            base_stats: BaseStats::new(8, 16, 10, 8, 10, 10, 12),
+            portrait_id: 2,
+            starting_gold: 50,
+            starting_gems: 10,
+            starting_food: 10,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment::default(),
+            description: "A test sorcerer".to_string(),
+            is_premade: true,
+        };
+
+        let character = definition
+            .instantiate(&races, &classes, &items)
+            .expect("Failed to instantiate sorcerer");
+
+        assert_eq!(character.class, Class::Sorcerer);
+        // Sorcerer with 16+ intellect should have SP > 0
+        // With base 16 intellect + possible gnome bonus, SP = (int - 10) should be > 0
+        assert!(
+            character.sp.base > 0,
+            "Sorcerer with high intellect should have SP, got {}",
+            character.sp.base
+        );
+        // Pure caster should start with spell level 1
+        assert_eq!(character.spell_level.base, 1);
+    }
+
+    #[test]
+    fn test_instantiate_knight_has_no_sp() {
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let definition = CharacterDefinition {
+            id: "test_knight".to_string(),
+            name: "Test Knight".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Good,
+            base_stats: BaseStats::new(16, 16, 10, 14, 10, 14, 10),
+            portrait_id: 1,
+            starting_gold: 100,
+            starting_gems: 0,
+            starting_food: 10,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment::default(),
+            description: "Test".to_string(),
+            is_premade: true,
+        };
+
+        let character = definition
+            .instantiate(&races, &classes, &items)
+            .expect("Failed to instantiate knight");
+
+        assert_eq!(character.class, Class::Knight);
+        // Knight should have 0 SP even with high intellect
+        assert_eq!(character.sp.base, 0);
+        // Non-caster should have spell level 0
+        assert_eq!(character.spell_level.base, 0);
     }
 }
