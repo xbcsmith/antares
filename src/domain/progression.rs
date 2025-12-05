@@ -12,14 +12,13 @@
 //!
 //! # Data-Driven Functions
 //!
-//! This module provides both enum-based (legacy) and ID-based (data-driven) functions:
-//! - `roll_hp_gain` / `roll_hp_gain_from_db`
-//! - `level_up` / `level_up_from_db`
+//! This module provides ID-based (data-driven) functions for character progression:
+//! - `roll_hp_gain` - Roll HP gain based on class_id
+//! - `level_up` - Level up a character using class_id
 //!
-//! The `*_from_db` variants use `ClassDatabase` lookups for extensibility.
-//! New code should prefer the data-driven variants when a ClassDatabase is available.
+//! Database variants (`*_from_db`) use `ClassDatabase` lookups for full extensibility.
 
-use crate::domain::character::{Character, Class};
+use crate::domain::character::Character;
 use crate::domain::classes::{ClassDatabase, ClassError};
 use crate::domain::types::DiceRoll;
 use rand::Rng;
@@ -73,13 +72,13 @@ const XP_MULTIPLIER: f64 = 1.5;
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::{Character, Class, Race, Sex, Alignment};
+/// use antares::domain::character::{Character, Sex, Alignment};
 /// use antares::domain::progression::award_experience;
 ///
 /// let mut knight = Character::new(
 ///     "Sir Lancelot".to_string(),
-///     Race::Human,
-///     Class::Knight,
+///     "human".to_string(),
+///     "knight".to_string(),
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
@@ -111,13 +110,13 @@ pub fn award_experience(character: &mut Character, amount: u64) -> Result<(), Pr
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::{Character, Class, Race, Sex, Alignment};
+/// use antares::domain::character::{Character, Sex, Alignment};
 /// use antares::domain::progression::{award_experience, check_level_up};
 ///
 /// let mut character = Character::new(
 ///     "Hero".to_string(),
-///     Race::Human,
-///     Class::Knight,
+///     "human".to_string(),
+///     "knight".to_string(),
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
@@ -154,14 +153,14 @@ pub fn check_level_up(character: &Character) -> bool {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::{Character, Class, Race, Sex, Alignment};
+/// use antares::domain::character::{Character, Sex, Alignment};
 /// use antares::domain::progression::{award_experience, level_up};
 /// use rand::rng;
 ///
 /// let mut knight = Character::new(
 ///     "Sir Lancelot".to_string(),
-///     Race::Human,
-///     Class::Knight,
+///     "human".to_string(),
+///     "knight".to_string(),
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
@@ -193,7 +192,7 @@ pub fn level_up(character: &mut Character, rng: &mut impl Rng) -> Result<u16, Pr
     character.level += 1;
 
     // Roll for HP gain
-    let hp_gain = roll_hp_gain(character.class, rng);
+    let hp_gain = roll_hp_gain(&character.class_id, rng);
     character.hp.base = character.hp.base.saturating_add(hp_gain);
     character.hp.current = character.hp.current.saturating_add(hp_gain);
 
@@ -208,7 +207,7 @@ pub fn level_up(character: &mut Character, rng: &mut impl Rng) -> Result<u16, Pr
     Ok(hp_gain)
 }
 
-/// Rolls HP gain for a character based on their class
+/// Rolls HP gain for a character based on their class_id
 ///
 /// Each class has different HP dice:
 /// - Knight: 1d10
@@ -216,16 +215,11 @@ pub fn level_up(character: &mut Character, rng: &mut impl Rng) -> Result<u16, Pr
 /// - Archer: 1d8
 /// - Cleric: 1d6
 /// - Sorcerer: 1d4
-/// - Thief: 1d6
-///
-/// # Deprecated
-///
-/// This function uses hardcoded class logic. Prefer `roll_hp_gain_from_db`
-/// when a `ClassDatabase` is available for data-driven class definitions.
+/// - Robber: 1d6
 ///
 /// # Arguments
 ///
-/// * `class` - The character's class
+/// * `class_id` - The character's class identifier
 /// * `rng` - Random number generator
 ///
 /// # Returns
@@ -235,26 +229,26 @@ pub fn level_up(character: &mut Character, rng: &mut impl Rng) -> Result<u16, Pr
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::Class;
 /// use antares::domain::progression::roll_hp_gain;
 /// use rand::rng;
 ///
 /// let mut rng = rng();
 ///
-/// let knight_hp = roll_hp_gain(Class::Knight, &mut rng);
+/// let knight_hp = roll_hp_gain("knight", &mut rng);
 /// assert!(knight_hp >= 1 && knight_hp <= 10);
 ///
-/// let sorcerer_hp = roll_hp_gain(Class::Sorcerer, &mut rng);
+/// let sorcerer_hp = roll_hp_gain("sorcerer", &mut rng);
 /// assert!(sorcerer_hp >= 1 && sorcerer_hp <= 4);
 /// ```
-pub fn roll_hp_gain(class: Class, rng: &mut impl Rng) -> u16 {
-    let dice = match class {
-        Class::Knight => DiceRoll::new(1, 10, 0),  // 1d10
-        Class::Paladin => DiceRoll::new(1, 8, 0),  // 1d8
-        Class::Archer => DiceRoll::new(1, 8, 0),   // 1d8
-        Class::Cleric => DiceRoll::new(1, 6, 0),   // 1d6
-        Class::Sorcerer => DiceRoll::new(1, 4, 0), // 1d4
-        Class::Robber => DiceRoll::new(1, 6, 0),   // 1d6
+pub fn roll_hp_gain(class_id: &str, rng: &mut impl Rng) -> u16 {
+    let dice = match class_id {
+        "knight" => DiceRoll::new(1, 10, 0),  // 1d10
+        "paladin" => DiceRoll::new(1, 8, 0),  // 1d8
+        "archer" => DiceRoll::new(1, 8, 0),   // 1d8
+        "cleric" => DiceRoll::new(1, 6, 0),   // 1d6
+        "sorcerer" => DiceRoll::new(1, 4, 0), // 1d4
+        "robber" => DiceRoll::new(1, 6, 0),   // 1d6
+        _ => DiceRoll::new(1, 6, 0),          // Default: 1d6
     };
 
     dice.roll(rng).max(1) as u16
@@ -323,15 +317,15 @@ pub fn roll_hp_gain_from_db(
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::{Character, Class, Race, Sex, Alignment};
+/// use antares::domain::character::{Character, Sex, Alignment};
 /// use antares::domain::progression::{award_experience, level_up_from_db};
 /// use antares::domain::classes::ClassDatabase;
 /// use rand::rng;
 ///
 /// let mut knight = Character::new(
 ///     "Sir Lancelot".to_string(),
-///     Race::Human,
-///     Class::Knight,
+///     "human".to_string(),
+///     "knight".to_string(),
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
@@ -408,14 +402,14 @@ pub fn experience_for_level(level: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Alignment, Race, Sex};
+    use crate::domain::character::{Alignment, Sex};
     use rand::rng;
 
-    fn create_test_character(class: Class) -> Character {
+    fn create_test_character(class_id: &str) -> Character {
         Character::new(
             "Test".to_string(),
-            Race::Human,
-            class,
+            "human".to_string(),
+            class_id.to_string(),
             Sex::Male,
             Alignment::Good,
         )
@@ -423,7 +417,7 @@ mod tests {
 
     #[test]
     fn test_award_experience() {
-        let mut character = create_test_character(Class::Knight);
+        let mut character = create_test_character("knight");
         assert_eq!(character.experience, 0);
 
         award_experience(&mut character, 500).unwrap();
@@ -446,7 +440,7 @@ mod tests {
 
     #[test]
     fn test_check_level_up() {
-        let mut character = create_test_character(Class::Knight);
+        let mut character = create_test_character("knight");
         assert_eq!(character.level, 1);
         assert!(!check_level_up(&character));
 
@@ -462,7 +456,7 @@ mod tests {
 
     #[test]
     fn test_level_up_increases_level() {
-        let mut character = create_test_character(Class::Knight);
+        let mut character = create_test_character("knight");
         let required = experience_for_level(2);
         character.experience = required;
 
@@ -475,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_level_up_increases_hp() {
-        let mut character = create_test_character(Class::Knight);
+        let mut character = create_test_character("knight");
         let initial_hp = character.hp.base;
         let required = experience_for_level(2);
         character.experience = required;
@@ -489,7 +483,7 @@ mod tests {
 
     #[test]
     fn test_level_up_not_enough_xp() {
-        let mut character = create_test_character(Class::Knight);
+        let mut character = create_test_character("knight");
         character.experience = 500; // Not enough for level 2
 
         let mut rng = rng();
@@ -504,7 +498,7 @@ mod tests {
 
     #[test]
     fn test_level_up_max_level() {
-        let mut character = create_test_character(Class::Knight);
+        let mut character = create_test_character("knight");
         character.level = MAX_LEVEL;
         character.experience = u64::MAX;
 
@@ -520,20 +514,20 @@ mod tests {
 
         // Test multiple rolls to ensure ranges are correct
         for _ in 0..20 {
-            let knight_hp = roll_hp_gain(Class::Knight, &mut rng);
+            let knight_hp = roll_hp_gain("knight", &mut rng);
             assert!((1..=10).contains(&knight_hp));
 
-            let sorcerer_hp = roll_hp_gain(Class::Sorcerer, &mut rng);
+            let sorcerer_hp = roll_hp_gain("sorcerer", &mut rng);
             assert!((1..=4).contains(&sorcerer_hp));
 
-            let cleric_hp = roll_hp_gain(Class::Cleric, &mut rng);
+            let cleric_hp = roll_hp_gain("cleric", &mut rng);
             assert!((1..=6).contains(&cleric_hp));
         }
     }
 
     #[test]
     fn test_dead_character_cannot_gain_xp() {
-        let mut character = create_test_character(Class::Knight);
+        let mut character = create_test_character("knight");
         character
             .conditions
             .add(crate::domain::character::Condition::DEAD);
@@ -545,7 +539,7 @@ mod tests {
 
     #[test]
     fn test_spellcaster_gains_sp_on_level() {
-        let mut cleric = create_test_character(Class::Cleric);
+        let mut cleric = create_test_character("cleric");
         cleric.stats.personality.base = 15;
         cleric.experience = experience_for_level(2);
 
@@ -558,7 +552,7 @@ mod tests {
 
     #[test]
     fn test_non_spellcaster_no_sp_gain() {
-        let mut knight = create_test_character(Class::Knight);
+        let mut knight = create_test_character("knight");
         knight.experience = experience_for_level(2);
 
         let initial_sp = knight.sp.base;
@@ -602,7 +596,7 @@ mod tests {
     #[test]
     fn test_level_up_from_db() {
         let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
-        let mut character = create_test_character(Class::Knight);
+        let mut character = create_test_character("knight");
         let required = experience_for_level(2);
         character.experience = required;
 
@@ -616,7 +610,7 @@ mod tests {
     #[test]
     fn test_level_up_from_db_increases_hp() {
         let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
-        let mut character = create_test_character(Class::Knight);
+        let mut character = create_test_character("knight");
         let initial_hp = character.hp.base;
         let required = experience_for_level(2);
         character.experience = required;
@@ -631,7 +625,7 @@ mod tests {
     #[test]
     fn test_level_up_from_db_not_enough_xp() {
         let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
-        let mut character = create_test_character(Class::Knight);
+        let mut character = create_test_character("knight");
         character.experience = 500; // Not enough for level 2
 
         let mut rng = rng();
@@ -647,7 +641,7 @@ mod tests {
     #[test]
     fn test_level_up_from_db_max_level() {
         let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
-        let mut character = create_test_character(Class::Knight);
+        let mut character = create_test_character("knight");
         character.level = MAX_LEVEL;
         character.experience = u64::MAX;
 
@@ -660,7 +654,7 @@ mod tests {
     #[test]
     fn test_level_up_from_db_spellcaster_gains_sp() {
         let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
-        let mut cleric = create_test_character(Class::Cleric);
+        let mut cleric = create_test_character("cleric");
         cleric.stats.personality.base = 15;
         cleric.experience = experience_for_level(2);
 
@@ -674,7 +668,7 @@ mod tests {
     #[test]
     fn test_level_up_from_db_non_spellcaster_no_sp() {
         let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
-        let mut knight = create_test_character(Class::Knight);
+        let mut knight = create_test_character("knight");
         knight.experience = experience_for_level(2);
 
         let initial_sp = knight.sp.base;
@@ -685,17 +679,17 @@ mod tests {
     }
 
     #[test]
-    fn test_enum_and_db_hp_rolls_same_range() {
+    fn test_id_and_db_hp_rolls_same_range() {
         // Verify that both methods produce results in the same range
         let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
         let mut rng = rng();
 
         for _ in 0..20 {
-            let enum_hp = roll_hp_gain(Class::Knight, &mut rng);
+            let id_hp = roll_hp_gain("knight", &mut rng);
             let db_hp = roll_hp_gain_from_db("knight", &db, &mut rng).unwrap();
 
             // Both should be in the 1-10 range for Knight
-            assert!((1..=10).contains(&enum_hp));
+            assert!((1..=10).contains(&id_hp));
             assert!((1..=10).contains(&db_hp));
         }
     }

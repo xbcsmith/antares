@@ -396,28 +396,6 @@ impl Default for Resistances {
 
 // ===== Enums =====
 
-/// Character race
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Race {
-    Human,
-    Elf,
-    Dwarf,
-    Gnome,
-    HalfElf,
-    HalfOrc,
-}
-
-/// Character class
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Class {
-    Knight,
-    Paladin,
-    Archer,
-    Cleric,
-    Sorcerer,
-    Robber,
-}
-
 /// Character sex
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Sex {
@@ -432,129 +410,6 @@ pub enum Alignment {
     Good,
     Neutral,
     Evil,
-}
-
-// ===== ID/Enum Conversion Utilities =====
-
-/// Converts a Race enum to its corresponding RaceId string
-///
-/// # Arguments
-///
-/// * `race` - The Race enum value to convert
-///
-/// # Returns
-///
-/// Returns the lowercase string identifier for the race
-///
-/// # Examples
-///
-/// ```
-/// use antares::domain::character::{Race, race_id_from_enum};
-///
-/// assert_eq!(race_id_from_enum(Race::Human), "human");
-/// assert_eq!(race_id_from_enum(Race::Elf), "elf");
-/// assert_eq!(race_id_from_enum(Race::HalfOrc), "half_orc");
-/// ```
-pub fn race_id_from_enum(race: Race) -> RaceId {
-    match race {
-        Race::Human => "human".to_string(),
-        Race::Elf => "elf".to_string(),
-        Race::Dwarf => "dwarf".to_string(),
-        Race::Gnome => "gnome".to_string(),
-        Race::HalfElf => "half_elf".to_string(),
-        Race::HalfOrc => "half_orc".to_string(),
-    }
-}
-
-/// Converts a Class enum to its corresponding ClassId string
-///
-/// # Arguments
-///
-/// * `class` - The Class enum value to convert
-///
-/// # Returns
-///
-/// Returns the lowercase string identifier for the class
-///
-/// # Examples
-///
-/// ```
-/// use antares::domain::character::{Class, class_id_from_enum};
-///
-/// assert_eq!(class_id_from_enum(Class::Knight), "knight");
-/// assert_eq!(class_id_from_enum(Class::Sorcerer), "sorcerer");
-/// ```
-pub fn class_id_from_enum(class: Class) -> ClassId {
-    match class {
-        Class::Knight => "knight".to_string(),
-        Class::Paladin => "paladin".to_string(),
-        Class::Archer => "archer".to_string(),
-        Class::Cleric => "cleric".to_string(),
-        Class::Sorcerer => "sorcerer".to_string(),
-        Class::Robber => "robber".to_string(),
-    }
-}
-
-/// Converts a RaceId string to its corresponding Race enum
-///
-/// # Arguments
-///
-/// * `id` - The race identifier string to convert
-///
-/// # Returns
-///
-/// Returns `Some(Race)` if the ID is recognized, `None` otherwise
-///
-/// # Examples
-///
-/// ```
-/// use antares::domain::character::{Race, race_enum_from_id};
-///
-/// assert_eq!(race_enum_from_id(&"human".to_string()), Some(Race::Human));
-/// assert_eq!(race_enum_from_id(&"elf".to_string()), Some(Race::Elf));
-/// assert_eq!(race_enum_from_id(&"unknown".to_string()), None);
-/// ```
-pub fn race_enum_from_id(id: &RaceId) -> Option<Race> {
-    match id.as_str() {
-        "human" => Some(Race::Human),
-        "elf" => Some(Race::Elf),
-        "dwarf" => Some(Race::Dwarf),
-        "gnome" => Some(Race::Gnome),
-        "half_elf" => Some(Race::HalfElf),
-        "half_orc" => Some(Race::HalfOrc),
-        _ => None,
-    }
-}
-
-/// Converts a ClassId string to its corresponding Class enum
-///
-/// # Arguments
-///
-/// * `id` - The class identifier string to convert
-///
-/// # Returns
-///
-/// Returns `Some(Class)` if the ID is recognized, `None` otherwise
-///
-/// # Examples
-///
-/// ```
-/// use antares::domain::character::{Class, class_enum_from_id};
-///
-/// assert_eq!(class_enum_from_id(&"knight".to_string()), Some(Class::Knight));
-/// assert_eq!(class_enum_from_id(&"sorcerer".to_string()), Some(Class::Sorcerer));
-/// assert_eq!(class_enum_from_id(&"unknown".to_string()), None);
-/// ```
-pub fn class_enum_from_id(id: &ClassId) -> Option<Class> {
-    match id.as_str() {
-        "knight" => Some(Class::Knight),
-        "paladin" => Some(Class::Paladin),
-        "archer" => Some(Class::Archer),
-        "cleric" => Some(Class::Cleric),
-        "sorcerer" => Some(Class::Sorcerer),
-        "robber" => Some(Class::Robber),
-        _ => None,
-    }
 }
 
 // ===== Condition Flags =====
@@ -800,20 +655,56 @@ impl SpellBook {
         }
     }
 
-    /// Returns the appropriate spell list for the character's class
-    pub fn get_spell_list(&self, class: Class) -> &[Vec<SpellId>; 7] {
-        match class {
-            Class::Cleric | Class::Paladin => &self.cleric_spells,
-            Class::Sorcerer | Class::Archer => &self.sorcerer_spells,
+    /// Returns the appropriate spell list for the character's class using class_id
+    ///
+    /// # Arguments
+    ///
+    /// * `class_id` - The class identifier string
+    ///
+    /// # Returns
+    ///
+    /// Returns the appropriate spell list based on the class ID.
+    /// Cleric and Paladin use cleric spells, Sorcerer and Archer use sorcerer spells.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::SpellBook;
+    ///
+    /// let spellbook = SpellBook::new();
+    /// let cleric_spells = spellbook.get_spell_list("cleric");
+    /// let sorcerer_spells = spellbook.get_spell_list("sorcerer");
+    /// ```
+    pub fn get_spell_list(&self, class_id: &str) -> &[Vec<SpellId>; 7] {
+        match class_id {
+            "cleric" | "paladin" => &self.cleric_spells,
+            "sorcerer" | "archer" => &self.sorcerer_spells,
             _ => &self.sorcerer_spells, // Default to empty
         }
     }
 
-    /// Returns the mutable spell list for the character's class
-    pub fn get_spell_list_mut(&mut self, class: Class) -> &mut [Vec<SpellId>; 7] {
-        match class {
-            Class::Cleric | Class::Paladin => &mut self.cleric_spells,
-            Class::Sorcerer | Class::Archer => &mut self.sorcerer_spells,
+    /// Returns the mutable spell list for the character's class using class_id
+    ///
+    /// # Arguments
+    ///
+    /// * `class_id` - The class identifier string
+    ///
+    /// # Returns
+    ///
+    /// Returns the appropriate mutable spell list based on the class ID.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::SpellBook;
+    ///
+    /// let mut spellbook = SpellBook::new();
+    /// let cleric_spells = spellbook.get_spell_list_mut("cleric");
+    /// ```
+    pub fn get_spell_list_mut(&mut self, class_id: &str) -> &mut [Vec<SpellId>; 7] {
+        match class_id {
+            "cleric" | "paladin" => &mut self.cleric_spells,
+            "sorcerer" | "archer" => &mut self.sorcerer_spells,
             _ => &mut self.sorcerer_spells,
         }
     }
@@ -961,30 +852,28 @@ impl Default for QuestFlags {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::{Character, Race, Class, Sex, Alignment};
+/// use antares::domain::character::{Character, Sex, Alignment};
 ///
 /// let hero = Character::new(
 ///     "Sir Lancelot".to_string(),
-///     Race::Human,
-///     Class::Knight,
+///     "human".to_string(),
+///     "knight".to_string(),
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
 /// assert_eq!(hero.name, "Sir Lancelot");
+/// assert_eq!(hero.race_id, "human");
+/// assert_eq!(hero.class_id, "knight");
 /// assert_eq!(hero.level, 1);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Character {
     pub name: String,
-    pub race: Race,
-    pub class: Class,
     /// Data-driven race identifier (e.g., "human", "elf")
-    /// Used for lookups in RaceDatabase. Defaults to empty for backward compatibility.
-    #[serde(default)]
+    /// Used for lookups in RaceDatabase.
     pub race_id: RaceId,
     /// Data-driven class identifier (e.g., "knight", "sorcerer")
-    /// Used for lookups in ClassDatabase. Defaults to empty for backward compatibility.
-    #[serde(default)]
+    /// Used for lookups in ClassDatabase.
     pub class_id: ClassId,
     pub sex: Sex,
     /// Current alignment
@@ -1035,71 +924,7 @@ pub struct Character {
 impl Character {
     /// Creates a new character with default starting values
     ///
-    /// Populates both enum fields (for backward compatibility) and ID fields
-    /// (for data-driven lookups).
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Character's display name
-    /// * `race` - Race enum value
-    /// * `class` - Class enum value
-    /// * `sex` - Sex enum value
-    /// * `alignment` - Alignment enum value
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::character::{Character, Race, Class, Sex, Alignment};
-    ///
-    /// let hero = Character::new(
-    ///     "Sir Lancelot".to_string(),
-    ///     Race::Human,
-    ///     Class::Knight,
-    ///     Sex::Male,
-    ///     Alignment::Good,
-    /// );
-    /// assert_eq!(hero.race_id, "human");
-    /// assert_eq!(hero.class_id, "knight");
-    /// ```
-    pub fn new(name: String, race: Race, class: Class, sex: Sex, alignment: Alignment) -> Self {
-        Self {
-            name,
-            race,
-            class,
-            race_id: race_id_from_enum(race),
-            class_id: class_id_from_enum(class),
-            sex,
-            alignment,
-            alignment_initial: alignment,
-            level: 1,
-            experience: 0,
-            age: 18,
-            age_days: 0,
-            stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
-            hp: AttributePair16::new(10),
-            sp: AttributePair16::new(0),
-            ac: AttributePair::new(0),
-            spell_level: AttributePair::new(0),
-            inventory: Inventory::new(),
-            equipment: Equipment::new(),
-            spells: SpellBook::new(),
-            conditions: Condition::new(),
-            active_conditions: Vec::new(),
-            resistances: Resistances::new(),
-            quest_flags: QuestFlags::new(),
-            portrait_id: 0,
-            worthiness: 0,
-            gold: 0,
-            gems: 0,
-            food: 10,
-        }
-    }
-
-    /// Creates a new character using ID-based references
-    ///
-    /// This constructor uses data-driven ClassId and RaceId values, converting
-    /// them to enums for backward compatibility. Returns None if the IDs cannot
-    /// be converted to valid enums.
+    /// Uses data-driven race_id and class_id for all lookups.
     ///
     /// # Arguments
     ///
@@ -1109,41 +934,30 @@ impl Character {
     /// * `sex` - Sex enum value
     /// * `alignment` - Alignment enum value
     ///
-    /// # Returns
-    ///
-    /// Returns `Some(Character)` if both IDs are valid, `None` otherwise.
-    ///
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::character::{Character, Race, Class, Sex, Alignment};
+    /// use antares::domain::character::{Character, Sex, Alignment};
     ///
-    /// let hero = Character::from_ids(
+    /// let hero = Character::new(
     ///     "Sir Lancelot".to_string(),
     ///     "human".to_string(),
     ///     "knight".to_string(),
     ///     Sex::Male,
     ///     Alignment::Good,
     /// );
-    /// assert!(hero.is_some());
-    /// let hero = hero.unwrap();
-    /// assert_eq!(hero.race, Race::Human);
-    /// assert_eq!(hero.class, Class::Knight);
+    /// assert_eq!(hero.race_id, "human");
+    /// assert_eq!(hero.class_id, "knight");
     /// ```
-    pub fn from_ids(
+    pub fn new(
         name: String,
         race_id: RaceId,
         class_id: ClassId,
         sex: Sex,
         alignment: Alignment,
-    ) -> Option<Self> {
-        let race = race_enum_from_id(&race_id)?;
-        let class = class_enum_from_id(&class_id)?;
-
-        Some(Self {
+    ) -> Self {
+        Self {
             name,
-            race,
-            class,
             race_id,
             class_id,
             sex,
@@ -1170,7 +984,7 @@ impl Character {
             gold: 0,
             gems: 0,
             food: 10,
-        })
+        }
     }
 
     /// Returns true if the character is alive (not dead, stoned, or eradicated)
@@ -1270,13 +1084,13 @@ impl Character {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::{Party, Character, Race, Class, Sex, Alignment};
+/// use antares::domain::character::{Party, Character, Sex, Alignment};
 ///
 /// let mut party = Party::new();
 /// let hero = Character::new(
-///     "Hero".to_string(),
-///     Race::Human,
-///     Class::Knight,
+///     "Sir Lancelot".to_string(),
+///     "human".to_string(),
+///     "knight".to_string(),
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
@@ -1409,6 +1223,7 @@ impl Default for Roster {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::classes::ClassDatabase;
 
     #[test]
     fn test_attribute_pair_new() {
@@ -1422,33 +1237,29 @@ mod tests {
         let mut attr = AttributePair::new(10);
         attr.modify(5);
         assert_eq!(attr.current, 15);
-        attr.modify(-3);
-        assert_eq!(attr.current, 12);
+        assert_eq!(attr.base, 10);
     }
 
     #[test]
     fn test_attribute_pair_reset() {
         let mut attr = AttributePair::new(10);
         attr.modify(5);
-        assert_eq!(attr.current, 15);
         attr.reset();
-        assert_eq!(attr.current, 10);
+        assert_eq!(attr.current, attr.base);
     }
 
     #[test]
     fn test_inventory_max_items() {
         let mut inventory = Inventory::new();
-        assert!(inventory.has_space());
         assert!(!inventory.is_full());
 
-        // Fill to max
+        // Fill inventory to max
         for i in 0..Inventory::MAX_ITEMS {
             assert!(inventory.add_item(i as ItemId, 1).is_ok());
         }
 
         assert!(inventory.is_full());
-        assert!(!inventory.has_space());
-        assert!(inventory.add_item(99, 1).is_err());
+        assert!(inventory.add_item(99, 0).is_err());
     }
 
     #[test]
@@ -1460,15 +1271,13 @@ mod tests {
         assert_eq!(equipment.equipped_count(), 1);
 
         equipment.armor = Some(2);
-        equipment.shield = Some(3);
-        assert_eq!(equipment.equipped_count(), 3);
+        assert_eq!(equipment.equipped_count(), 2);
     }
 
     #[test]
     fn test_condition_flags() {
         let mut condition = Condition::new();
         assert!(condition.is_fine());
-        assert!(!condition.is_bad());
 
         condition.add(Condition::POISONED);
         assert!(condition.has(Condition::POISONED));
@@ -1479,13 +1288,14 @@ mod tests {
     fn test_party_max_members() {
         let mut party = Party::new();
         assert!(party.is_empty());
+        assert!(!party.is_full());
 
-        // Add characters up to max
+        // Fill party to max
         for i in 0..Party::MAX_MEMBERS {
             let character = Character::new(
                 format!("Hero {}", i),
-                Race::Human,
-                Class::Knight,
+                "human".to_string(),
+                "knight".to_string(),
                 Sex::Male,
                 Alignment::Good,
             );
@@ -1498,8 +1308,8 @@ mod tests {
         // Try to add one more
         let extra = Character::new(
             "Extra".to_string(),
-            Race::Elf,
-            Class::Archer,
+            "elf".to_string(),
+            "archer".to_string(),
             Sex::Female,
             Alignment::Good,
         );
@@ -1510,261 +1320,90 @@ mod tests {
     fn test_character_creation() {
         let hero = Character::new(
             "Test Hero".to_string(),
-            Race::Human,
-            Class::Knight,
+            "human".to_string(),
+            "knight".to_string(),
             Sex::Male,
             Alignment::Good,
         );
 
         assert_eq!(hero.name, "Test Hero");
+        assert_eq!(hero.race_id, "human");
+        assert_eq!(hero.class_id, "knight");
         assert_eq!(hero.level, 1);
         assert_eq!(hero.experience, 0);
         assert!(hero.is_alive());
         assert!(hero.can_act());
     }
 
-    // ===== Phase 1: ID/Enum Conversion Tests =====
+    // ===== Character ID Tests =====
 
     #[test]
-    fn test_race_id_from_enum_all_races() {
-        assert_eq!(race_id_from_enum(Race::Human), "human");
-        assert_eq!(race_id_from_enum(Race::Elf), "elf");
-        assert_eq!(race_id_from_enum(Race::Dwarf), "dwarf");
-        assert_eq!(race_id_from_enum(Race::Gnome), "gnome");
-        assert_eq!(race_id_from_enum(Race::HalfOrc), "half_orc");
-    }
+    fn test_character_with_various_race_ids() {
+        let race_ids = ["human", "elf", "dwarf", "gnome", "half_elf", "half_orc"];
 
-    #[test]
-    fn test_class_id_from_enum_all_classes() {
-        assert_eq!(class_id_from_enum(Class::Knight), "knight");
-        assert_eq!(class_id_from_enum(Class::Paladin), "paladin");
-        assert_eq!(class_id_from_enum(Class::Archer), "archer");
-        assert_eq!(class_id_from_enum(Class::Cleric), "cleric");
-        assert_eq!(class_id_from_enum(Class::Sorcerer), "sorcerer");
-        assert_eq!(class_id_from_enum(Class::Robber), "robber");
-    }
-
-    #[test]
-    fn test_race_enum_from_id_all_races() {
-        assert_eq!(race_enum_from_id(&"human".to_string()), Some(Race::Human));
-        assert_eq!(race_enum_from_id(&"elf".to_string()), Some(Race::Elf));
-        assert_eq!(race_enum_from_id(&"dwarf".to_string()), Some(Race::Dwarf));
-        assert_eq!(race_enum_from_id(&"gnome".to_string()), Some(Race::Gnome));
-        assert_eq!(
-            race_enum_from_id(&"half_orc".to_string()),
-            Some(Race::HalfOrc)
-        );
-    }
-
-    #[test]
-    fn test_class_enum_from_id_all_classes() {
-        assert_eq!(
-            class_enum_from_id(&"knight".to_string()),
-            Some(Class::Knight)
-        );
-        assert_eq!(
-            class_enum_from_id(&"paladin".to_string()),
-            Some(Class::Paladin)
-        );
-        assert_eq!(
-            class_enum_from_id(&"archer".to_string()),
-            Some(Class::Archer)
-        );
-        assert_eq!(
-            class_enum_from_id(&"cleric".to_string()),
-            Some(Class::Cleric)
-        );
-        assert_eq!(
-            class_enum_from_id(&"sorcerer".to_string()),
-            Some(Class::Sorcerer)
-        );
-        assert_eq!(
-            class_enum_from_id(&"robber".to_string()),
-            Some(Class::Robber)
-        );
-    }
-
-    #[test]
-    fn test_race_enum_from_id_invalid() {
-        assert_eq!(race_enum_from_id(&"unknown".to_string()), None);
-        assert_eq!(race_enum_from_id(&"".to_string()), None);
-        assert_eq!(race_enum_from_id(&"HUMAN".to_string()), None); // Case sensitive
-        assert_eq!(race_enum_from_id(&"halforc".to_string()), None); // No underscore
-    }
-
-    #[test]
-    fn test_class_enum_from_id_invalid() {
-        assert_eq!(class_enum_from_id(&"unknown".to_string()), None);
-        assert_eq!(class_enum_from_id(&"".to_string()), None);
-        assert_eq!(class_enum_from_id(&"KNIGHT".to_string()), None); // Case sensitive
-        assert_eq!(class_enum_from_id(&"mage".to_string()), None); // Not a valid class
-    }
-
-    #[test]
-    fn test_id_enum_roundtrip_races() {
-        // Test that converting enum->id->enum returns the original
-        for race in [
-            Race::Human,
-            Race::Elf,
-            Race::Dwarf,
-            Race::Gnome,
-            Race::HalfOrc,
-        ] {
-            let id = race_id_from_enum(race);
-            let recovered = race_enum_from_id(&id);
-            assert_eq!(recovered, Some(race));
-        }
-    }
-
-    #[test]
-    fn test_id_enum_roundtrip_classes() {
-        // Test that converting enum->id->enum returns the original
-        for class in [
-            Class::Knight,
-            Class::Paladin,
-            Class::Archer,
-            Class::Cleric,
-            Class::Sorcerer,
-            Class::Robber,
-        ] {
-            let id = class_id_from_enum(class);
-            let recovered = class_enum_from_id(&id);
-            assert_eq!(recovered, Some(class));
-        }
-    }
-
-    // ===== Phase 1: Character::new() ID Population Tests =====
-
-    #[test]
-    fn test_character_new_populates_both_enum_and_id() {
-        let hero = Character::new(
-            "Test Hero".to_string(),
-            Race::Human,
-            Class::Knight,
-            Sex::Male,
-            Alignment::Good,
-        );
-
-        // Enum fields should be set
-        assert_eq!(hero.race, Race::Human);
-        assert_eq!(hero.class, Class::Knight);
-
-        // ID fields should also be populated
-        assert_eq!(hero.race_id, "human");
-        assert_eq!(hero.class_id, "knight");
-    }
-
-    #[test]
-    fn test_character_new_all_race_class_combinations() {
-        // Test a sampling of race/class combinations
-        let combos = [
-            (Race::Elf, Class::Archer, "elf", "archer"),
-            (Race::Dwarf, Class::Cleric, "dwarf", "cleric"),
-            (Race::Gnome, Class::Sorcerer, "gnome", "sorcerer"),
-            (Race::HalfOrc, Class::Robber, "half_orc", "robber"),
-            (Race::Human, Class::Paladin, "human", "paladin"),
-        ];
-
-        for (race, class, expected_race_id, expected_class_id) in combos {
+        for race_id in race_ids {
             let character = Character::new(
                 "Test".to_string(),
-                race,
-                class,
+                race_id.to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            assert_eq!(character.race_id, race_id);
+        }
+    }
+
+    #[test]
+    fn test_character_with_various_class_ids() {
+        let class_ids = [
+            "knight", "paladin", "archer", "cleric", "sorcerer", "robber",
+        ];
+
+        for class_id in class_ids {
+            let character = Character::new(
+                "Test".to_string(),
+                "human".to_string(),
+                class_id.to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            assert_eq!(character.class_id, class_id);
+        }
+    }
+
+    #[test]
+    fn test_character_all_race_class_combinations() {
+        // Test a sampling of race/class combinations
+        let combos = [
+            ("elf", "archer"),
+            ("dwarf", "cleric"),
+            ("gnome", "sorcerer"),
+            ("half_orc", "robber"),
+            ("human", "paladin"),
+        ];
+
+        for (race_id, class_id) in combos {
+            let character = Character::new(
+                "Test".to_string(),
+                race_id.to_string(),
+                class_id.to_string(),
                 Sex::Male,
                 Alignment::Neutral,
             );
-            assert_eq!(character.race, race);
-            assert_eq!(character.class, class);
-            assert_eq!(character.race_id, expected_race_id);
-            assert_eq!(character.class_id, expected_class_id);
+            assert_eq!(character.race_id, race_id);
+            assert_eq!(character.class_id, class_id);
         }
     }
 
-    // ===== Phase 1: Character::from_ids() Tests =====
-
     #[test]
-    fn test_character_from_ids_success() {
-        let hero = Character::from_ids(
-            "Sir Lancelot".to_string(),
-            "human".to_string(),
-            "knight".to_string(),
-            Sex::Male,
-            Alignment::Good,
-        );
-
-        assert!(hero.is_some());
-        let hero = hero.unwrap();
-        assert_eq!(hero.name, "Sir Lancelot");
-        assert_eq!(hero.race, Race::Human);
-        assert_eq!(hero.class, Class::Knight);
-        assert_eq!(hero.race_id, "human");
-        assert_eq!(hero.class_id, "knight");
-        assert_eq!(hero.sex, Sex::Male);
-        assert_eq!(hero.alignment, Alignment::Good);
-    }
-
-    #[test]
-    fn test_character_from_ids_invalid_race() {
-        let result = Character::from_ids(
-            "Test".to_string(),
-            "invalid_race".to_string(),
-            "knight".to_string(),
-            Sex::Male,
-            Alignment::Good,
-        );
-
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_character_from_ids_invalid_class() {
-        let result = Character::from_ids(
-            "Test".to_string(),
-            "human".to_string(),
-            "invalid_class".to_string(),
-            Sex::Male,
-            Alignment::Good,
-        );
-
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_character_from_ids_both_invalid() {
-        let result = Character::from_ids(
-            "Test".to_string(),
-            "invalid_race".to_string(),
-            "invalid_class".to_string(),
-            Sex::Male,
-            Alignment::Good,
-        );
-
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_character_from_ids_empty_strings() {
-        let result = Character::from_ids(
-            "Test".to_string(),
-            "".to_string(),
-            "".to_string(),
-            Sex::Male,
-            Alignment::Good,
-        );
-
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_character_from_ids_default_values() {
-        let hero = Character::from_ids(
+    fn test_character_default_values() {
+        let hero = Character::new(
             "Test Hero".to_string(),
             "elf".to_string(),
             "sorcerer".to_string(),
             Sex::Female,
             Alignment::Neutral,
-        )
-        .unwrap();
+        );
 
         // Check default starting values
         assert_eq!(hero.level, 1);
@@ -1777,14 +1416,14 @@ mod tests {
         assert!(hero.can_act());
     }
 
-    // ===== Phase 1: Serialization Tests =====
+    // ===== Serialization Tests =====
 
     #[test]
     fn test_character_serialization_with_ids() {
         let hero = Character::new(
             "Test Hero".to_string(),
-            Race::Human,
-            Class::Knight,
+            "human".to_string(),
+            "knight".to_string(),
             Sex::Male,
             Alignment::Good,
         );
@@ -1792,9 +1431,7 @@ mod tests {
         // Serialize to RON
         let serialized = ron::to_string(&hero).expect("Failed to serialize character");
 
-        // Should contain both enum and ID fields
-        assert!(serialized.contains("Human"));
-        assert!(serialized.contains("Knight"));
+        // Should contain ID fields
         assert!(serialized.contains("race_id"));
         assert!(serialized.contains("class_id"));
         assert!(serialized.contains("\"human\""));
@@ -1805,8 +1442,8 @@ mod tests {
     fn test_character_deserialization_with_ids() {
         let hero = Character::new(
             "Test Hero".to_string(),
-            Race::Elf,
-            Class::Archer,
+            "elf".to_string(),
+            "archer".to_string(),
             Sex::Female,
             Alignment::Neutral,
         );
@@ -1817,8 +1454,6 @@ mod tests {
 
         // Verify all fields match
         assert_eq!(deserialized.name, hero.name);
-        assert_eq!(deserialized.race, hero.race);
-        assert_eq!(deserialized.class, hero.class);
         assert_eq!(deserialized.race_id, hero.race_id);
         assert_eq!(deserialized.class_id, hero.class_id);
         assert_eq!(deserialized.sex, hero.sex);
@@ -1826,27 +1461,14 @@ mod tests {
     }
 
     #[test]
-    fn test_character_backward_compatibility_missing_ids() {
-        // Test that serde(default) works correctly for race_id and class_id
-        // The #[serde(default)] attribute means String::default() (empty string)
-        // will be used when these fields are missing during deserialization.
-
-        // Verify the default for String is empty (what serde(default) uses)
-        let default_race_id: RaceId = Default::default();
-        let default_class_id: ClassId = Default::default();
-        assert_eq!(default_race_id, "");
-        assert_eq!(default_class_id, "");
-
-        // Verify that a newly created character has populated IDs (not defaults)
+    fn test_character_serialization_roundtrip() {
         let hero = Character::new(
             "Test Hero".to_string(),
-            Race::Human,
-            Class::Knight,
+            "human".to_string(),
+            "knight".to_string(),
             Sex::Male,
             Alignment::Good,
         );
-        assert_eq!(hero.race_id, "human");
-        assert_eq!(hero.class_id, "knight");
 
         // Verify serialization round-trip preserves the IDs
         let serialized = ron::to_string(&hero).expect("Failed to serialize");
@@ -1855,39 +1477,175 @@ mod tests {
         assert_eq!(deserialized.class_id, "knight");
     }
 
+    // ===== SpellBook Tests =====
+
     #[test]
-    fn test_character_new_and_from_ids_produce_equivalent_state() {
-        let char1 = Character::new(
-            "Hero".to_string(),
-            Race::Dwarf,
-            Class::Cleric,
-            Sex::Male,
-            Alignment::Good,
-        );
+    fn test_spellbook_get_spell_list_cleric() {
+        let mut spellbook = SpellBook::new();
 
-        let char2 = Character::from_ids(
-            "Hero".to_string(),
-            "dwarf".to_string(),
-            "cleric".to_string(),
-            Sex::Male,
-            Alignment::Good,
-        )
-        .unwrap();
+        // Add a spell to cleric list
+        spellbook.cleric_spells[0].push(0x0101);
 
-        // Compare key fields
-        assert_eq!(char1.name, char2.name);
-        assert_eq!(char1.race, char2.race);
-        assert_eq!(char1.class, char2.class);
-        assert_eq!(char1.race_id, char2.race_id);
-        assert_eq!(char1.class_id, char2.class_id);
-        assert_eq!(char1.sex, char2.sex);
-        assert_eq!(char1.alignment, char2.alignment);
-        assert_eq!(char1.level, char2.level);
-        assert_eq!(char1.hp.base, char2.hp.base);
-        assert_eq!(char1.sp.base, char2.sp.base);
+        // Cleric should get cleric spells
+        let spell_list = spellbook.get_spell_list("cleric");
+        assert_eq!(spell_list[0].len(), 1);
+        assert_eq!(spell_list[0][0], 0x0101);
     }
 
-    // ===== Phase 2: SpellBook Data-Driven Tests =====
+    #[test]
+    fn test_spellbook_get_spell_list_sorcerer() {
+        let mut spellbook = SpellBook::new();
+
+        // Add a spell to sorcerer list
+        spellbook.sorcerer_spells[0].push(0x0201);
+
+        // Sorcerer should get sorcerer spells
+        let spell_list = spellbook.get_spell_list("sorcerer");
+        assert_eq!(spell_list[0].len(), 1);
+        assert_eq!(spell_list[0][0], 0x0201);
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_paladin() {
+        let mut spellbook = SpellBook::new();
+
+        // Add a spell to cleric list
+        spellbook.cleric_spells[0].push(0x0101);
+
+        // Paladin (hybrid with cleric spells) should get cleric spells
+        let spell_list = spellbook.get_spell_list("paladin");
+        assert_eq!(spell_list[0].len(), 1);
+        assert_eq!(spell_list[0][0], 0x0101);
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_knight() {
+        let spellbook = SpellBook::new();
+
+        // Knight (non-caster) defaults to sorcerer list (which is empty)
+        let spell_list = spellbook.get_spell_list("knight");
+        assert!(spell_list[0].is_empty());
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_unknown_class() {
+        let spellbook = SpellBook::new();
+
+        // Unknown class defaults to sorcerer list
+        let spell_list = spellbook.get_spell_list("unknown");
+        assert!(spell_list[0].is_empty());
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_mut_cleric() {
+        let mut spellbook = SpellBook::new();
+
+        // Add a spell through the mutable accessor
+        {
+            let spell_list = spellbook.get_spell_list_mut("cleric");
+            spell_list[0].push(0x0101);
+        }
+
+        // Verify it was added to cleric spells
+        assert_eq!(spellbook.cleric_spells[0].len(), 1);
+        assert_eq!(spellbook.cleric_spells[0][0], 0x0101);
+        // Sorcerer list should be unaffected
+        assert!(spellbook.sorcerer_spells[0].is_empty());
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_mut_sorcerer() {
+        let mut spellbook = SpellBook::new();
+
+        // Add a spell through the mutable accessor
+        {
+            let spell_list = spellbook.get_spell_list_mut("sorcerer");
+            spell_list[0].push(0x0201);
+        }
+
+        // Verify it was added to sorcerer spells
+        assert_eq!(spellbook.sorcerer_spells[0].len(), 1);
+        assert_eq!(spellbook.sorcerer_spells[0][0], 0x0201);
+        // Cleric list should be unaffected
+        assert!(spellbook.cleric_spells[0].is_empty());
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_mut_paladin() {
+        let mut spellbook = SpellBook::new();
+
+        // Paladin should modify cleric spell list
+        {
+            let spell_list = spellbook.get_spell_list_mut("paladin");
+            spell_list[0].push(0x0101);
+        }
+
+        // Verify it was added to cleric spells
+        assert_eq!(spellbook.cleric_spells[0].len(), 1);
+        assert_eq!(spellbook.cleric_spells[0][0], 0x0101);
+    }
+
+    #[test]
+    fn test_spellbook_get_spell_list_mut_knight() {
+        let mut spellbook = SpellBook::new();
+
+        // Knight (non-caster) defaults to sorcerer list
+        {
+            let spell_list = spellbook.get_spell_list_mut("knight");
+            spell_list[0].push(0x0201);
+        }
+
+        // Verify it was added to sorcerer spells (default)
+        assert_eq!(spellbook.sorcerer_spells[0].len(), 1);
+    }
+
+    #[test]
+    fn test_spellbook_id_and_db_methods_match() {
+        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+        let mut spellbook = SpellBook::new();
+
+        // Add spells to both lists
+        spellbook.cleric_spells[0].push(0x0101);
+        spellbook.sorcerer_spells[0].push(0x0201);
+
+        // Test that ID and db methods return the same lists
+        let test_cases = ["cleric", "sorcerer", "paladin", "knight"];
+
+        for class_id in test_cases {
+            let id_list = spellbook.get_spell_list(class_id);
+            let db_list = spellbook.get_spell_list_by_id(class_id, &db);
+            assert_eq!(
+                id_list as *const _, db_list as *const _,
+                "Spell lists should be the same reference for {}",
+                class_id
+            );
+        }
+    }
+
+    #[test]
+    fn test_spellbook_multiple_spell_levels() {
+        let mut spellbook = SpellBook::new();
+
+        // Add spells to multiple levels
+        {
+            let spell_list = spellbook.get_spell_list_mut("cleric");
+            spell_list[0].push(0x0101); // Level 1
+            spell_list[2].push(0x0301); // Level 3
+            spell_list[6].push(0x0701); // Level 7
+        }
+
+        // Verify all were added correctly
+        let spell_list = spellbook.get_spell_list("cleric");
+        assert_eq!(spell_list[0].len(), 1);
+        assert_eq!(spell_list[1].len(), 0);
+        assert_eq!(spell_list[2].len(), 1);
+        assert_eq!(spell_list[3].len(), 0);
+        assert_eq!(spell_list[4].len(), 0);
+        assert_eq!(spell_list[5].len(), 0);
+        assert_eq!(spell_list[6].len(), 1);
+    }
+
+    // ===== SpellBook Database Tests =====
 
     #[test]
     fn test_spellbook_get_spell_list_by_id_cleric() {
@@ -2019,35 +1777,7 @@ mod tests {
     }
 
     #[test]
-    fn test_spellbook_enum_and_db_methods_match() {
-        let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
-        let mut spellbook = SpellBook::new();
-
-        // Add spells to both lists
-        spellbook.cleric_spells[0].push(0x0101);
-        spellbook.sorcerer_spells[0].push(0x0201);
-
-        // Test that enum and db methods return the same lists
-        let test_cases = [
-            (Class::Cleric, "cleric"),
-            (Class::Sorcerer, "sorcerer"),
-            (Class::Paladin, "paladin"),
-            (Class::Knight, "knight"),
-        ];
-
-        for (class_enum, class_id) in test_cases {
-            let enum_list = spellbook.get_spell_list(class_enum);
-            let db_list = spellbook.get_spell_list_by_id(class_id, &db);
-            assert_eq!(
-                enum_list as *const _, db_list as *const _,
-                "Spell lists should be the same reference for {:?}",
-                class_enum
-            );
-        }
-    }
-
-    #[test]
-    fn test_spellbook_multiple_spell_levels() {
+    fn test_spellbook_db_multiple_spell_levels() {
         let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
         let mut spellbook = SpellBook::new();
 

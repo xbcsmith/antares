@@ -22,8 +22,8 @@
 //! Definitions are loaded from RON files; instances are created at runtime.
 
 use crate::domain::character::{
-    Alignment, AttributePair, AttributePair16, Character, Class, Condition, Equipment, Inventory,
-    InventorySlot, QuestFlags, Race, Resistances as CharacterResistances, Sex, SpellBook, Stats,
+    Alignment, AttributePair, AttributePair16, Character, Condition, Equipment, Inventory,
+    InventorySlot, QuestFlags, Resistances as CharacterResistances, Sex, SpellBook, Stats,
 };
 use crate::domain::classes::{ClassDatabase, ClassDefinition, ClassId, SpellStat};
 use crate::domain::items::ItemDatabase;
@@ -697,22 +697,6 @@ impl CharacterDefinition {
             }
         }
 
-        // Convert race_id to Race enum
-        let race = race_enum_from_id(&self.race_id).ok_or_else(|| {
-            CharacterDefinitionError::InstantiationError {
-                character_id: self.id.clone(),
-                message: format!("Cannot convert race_id '{}' to Race enum", self.race_id),
-            }
-        })?;
-
-        // Convert class_id to Class enum
-        let class = class_enum_from_id(&self.class_id).ok_or_else(|| {
-            CharacterDefinitionError::InstantiationError {
-                character_id: self.id.clone(),
-                message: format!("Cannot convert class_id '{}' to Class enum", self.class_id),
-            }
-        })?;
-
         // Apply race stat modifiers to base stats
         let stats = apply_race_modifiers(&self.base_stats, race_def);
 
@@ -734,8 +718,6 @@ impl CharacterDefinition {
         // Build the Character
         let character = Character {
             name: self.name.clone(),
-            race,
-            class,
             race_id: self.race_id.clone(),
             class_id: self.class_id.clone(),
             sex: self.sex,
@@ -769,48 +751,6 @@ impl CharacterDefinition {
 }
 
 // ===== Instantiation Helper Functions =====
-
-/// Converts a race_id string to a Race enum value
-///
-/// # Arguments
-///
-/// * `race_id` - The race identifier string
-///
-/// # Returns
-///
-/// Returns `Some(Race)` if the id is recognized, `None` otherwise.
-fn race_enum_from_id(race_id: &str) -> Option<Race> {
-    match race_id.to_lowercase().as_str() {
-        "human" => Some(Race::Human),
-        "elf" => Some(Race::Elf),
-        "dwarf" => Some(Race::Dwarf),
-        "gnome" => Some(Race::Gnome),
-        "half_elf" | "halfelf" | "half-elf" => Some(Race::HalfElf),
-        "half_orc" | "halforc" | "half-orc" => Some(Race::HalfOrc),
-        _ => None,
-    }
-}
-
-/// Converts a class_id string to a Class enum value
-///
-/// # Arguments
-///
-/// * `class_id` - The class identifier string
-///
-/// # Returns
-///
-/// Returns `Some(Class)` if the id is recognized, `None` otherwise.
-fn class_enum_from_id(class_id: &str) -> Option<Class> {
-    match class_id.to_lowercase().as_str() {
-        "knight" => Some(Class::Knight),
-        "paladin" => Some(Class::Paladin),
-        "archer" => Some(Class::Archer),
-        "cleric" => Some(Class::Cleric),
-        "sorcerer" => Some(Class::Sorcerer),
-        "robber" => Some(Class::Robber),
-        _ => None,
-    }
-}
 
 /// Applies race stat modifiers to base stats
 ///
@@ -2367,48 +2307,6 @@ mod tests {
     // ===== Instantiation Tests =====
 
     #[test]
-    fn test_race_enum_from_id_valid() {
-        assert_eq!(race_enum_from_id("human"), Some(Race::Human));
-        assert_eq!(race_enum_from_id("Human"), Some(Race::Human));
-        assert_eq!(race_enum_from_id("HUMAN"), Some(Race::Human));
-        assert_eq!(race_enum_from_id("elf"), Some(Race::Elf));
-        assert_eq!(race_enum_from_id("dwarf"), Some(Race::Dwarf));
-        assert_eq!(race_enum_from_id("gnome"), Some(Race::Gnome));
-        assert_eq!(race_enum_from_id("half_elf"), Some(Race::HalfElf));
-        assert_eq!(race_enum_from_id("halfelf"), Some(Race::HalfElf));
-        assert_eq!(race_enum_from_id("half-elf"), Some(Race::HalfElf));
-        assert_eq!(race_enum_from_id("half_orc"), Some(Race::HalfOrc));
-        assert_eq!(race_enum_from_id("halforc"), Some(Race::HalfOrc));
-        assert_eq!(race_enum_from_id("half-orc"), Some(Race::HalfOrc));
-    }
-
-    #[test]
-    fn test_race_enum_from_id_invalid() {
-        assert_eq!(race_enum_from_id("invalid"), None);
-        assert_eq!(race_enum_from_id(""), None);
-        assert_eq!(race_enum_from_id("orc"), None);
-    }
-
-    #[test]
-    fn test_class_enum_from_id_valid() {
-        assert_eq!(class_enum_from_id("knight"), Some(Class::Knight));
-        assert_eq!(class_enum_from_id("Knight"), Some(Class::Knight));
-        assert_eq!(class_enum_from_id("KNIGHT"), Some(Class::Knight));
-        assert_eq!(class_enum_from_id("paladin"), Some(Class::Paladin));
-        assert_eq!(class_enum_from_id("archer"), Some(Class::Archer));
-        assert_eq!(class_enum_from_id("cleric"), Some(Class::Cleric));
-        assert_eq!(class_enum_from_id("sorcerer"), Some(Class::Sorcerer));
-        assert_eq!(class_enum_from_id("robber"), Some(Class::Robber));
-    }
-
-    #[test]
-    fn test_class_enum_from_id_invalid() {
-        assert_eq!(class_enum_from_id("invalid"), None);
-        assert_eq!(class_enum_from_id(""), None);
-        assert_eq!(class_enum_from_id("warrior"), None);
-    }
-
-    #[test]
     fn test_apply_race_modifiers_no_modifiers() {
         use crate::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
 
@@ -2864,8 +2762,6 @@ mod tests {
 
         // Verify basic fields
         assert_eq!(character.name, "Test Knight");
-        assert_eq!(character.race, Race::Human);
-        assert_eq!(character.class, Class::Knight);
         assert_eq!(character.race_id, "human");
         assert_eq!(character.class_id, "knight");
         assert_eq!(character.sex, Sex::Male);
@@ -3040,7 +2936,7 @@ mod tests {
             .instantiate(&races, &classes, &items)
             .expect("Failed to instantiate sorcerer");
 
-        assert_eq!(character.class, Class::Sorcerer);
+        assert_eq!(character.class_id, "sorcerer");
         // Sorcerer with 16+ intellect should have SP > 0
         // With base 16 intellect + possible gnome bonus, SP = (int - 10) should be > 0
         assert!(
@@ -3083,7 +2979,7 @@ mod tests {
             .instantiate(&races, &classes, &items)
             .expect("Failed to instantiate knight");
 
-        assert_eq!(character.class, Class::Knight);
+        assert_eq!(character.class_id, "knight");
         // Knight should have 0 SP even with high intellect
         assert_eq!(character.sp.base, 0);
         // Non-caster should have spell level 0

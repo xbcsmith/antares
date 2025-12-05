@@ -45,12 +45,12 @@ pub enum CombatError {
 ///
 /// ```
 /// use antares::domain::combat::engine::Combatant;
-/// use antares::domain::character::{Character, Race, Class, Sex, Alignment};
+/// use antares::domain::character::{Character, Sex, Alignment};
 ///
-/// let character = Character::new(
+/// let mut character = Character::new(
 ///     "Hero".to_string(),
-///     Race::Human,
-///     Class::Knight,
+///     "human".to_string(),
+///     "knight".to_string(),
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
@@ -345,14 +345,14 @@ impl CombatState {
 /// ```
 /// use antares::domain::combat::engine::{CombatState, start_combat};
 /// use antares::domain::combat::types::Handicap;
-/// use antares::domain::character::{Character, Race, Class, Sex, Alignment};
+/// use antares::domain::character::{Character, Sex, Alignment};
 /// use antares::domain::combat::monster::{Monster, LootTable};
 /// use antares::domain::character::Stats;
 /// use antares::domain::types::DiceRoll;
 /// use antares::domain::combat::types::Attack;
 ///
 /// let mut combat = CombatState::new(Handicap::Even);
-/// let character = Character::new("Hero".to_string(), Race::Human, Class::Knight, Sex::Male, Alignment::Good);
+/// let character = Character::new("Hero".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
 /// combat.add_player(character);
 ///
 /// let stats = Stats::new(10, 8, 6, 10, 8, 7, 5);
@@ -377,11 +377,11 @@ pub fn start_combat(combat: &mut CombatState) {
 /// ```
 /// use antares::domain::combat::engine::{CombatState, calculate_turn_order};
 /// use antares::domain::combat::types::Handicap;
-/// use antares::domain::character::{Character, Race, Class, Sex, Alignment};
+/// use antares::domain::character::{Character, Sex, Alignment};
 ///
 /// let mut combat = CombatState::new(Handicap::PartyAdvantage);
-/// let character = Character::new("Hero".to_string(), Race::Human, Class::Knight, Sex::Male, Alignment::Good);
-/// combat.add_player(character);
+/// let knight = Character::new("Knight".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
+/// combat.add_player(knight);
 ///
 /// let order = calculate_turn_order(&combat);
 /// assert_eq!(order.len(), 1);
@@ -450,12 +450,12 @@ pub fn calculate_turn_order(combat: &CombatState) -> Vec<CombatantId> {
 /// ```
 /// use antares::domain::combat::engine::{CombatState, resolve_attack};
 /// use antares::domain::combat::types::{Handicap, CombatantId, Attack};
-/// use antares::domain::character::{Character, Race, Class, Sex, Alignment};
+/// use antares::domain::character::{Character, Sex, Alignment};
 /// use antares::domain::types::DiceRoll;
 /// use rand::rng;
 ///
 /// let mut combat = CombatState::new(Handicap::Even);
-/// let mut character = Character::new("Hero".to_string(), Race::Human, Class::Knight, Sex::Male, Alignment::Good);
+/// let mut character = Character::new("Knight".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
 /// character.stats.might.current = 15;
 /// combat.add_player(character);
 ///
@@ -538,11 +538,11 @@ pub fn resolve_attack<R: Rng>(
 /// ```
 /// use antares::domain::combat::engine::{CombatState, apply_damage};
 /// use antares::domain::combat::types::{Handicap, CombatantId};
-/// use antares::domain::character::{Character, Race, Class, Sex, Alignment};
+/// use antares::domain::character::{Character, Sex, Alignment};
 ///
 /// let mut combat = CombatState::new(Handicap::Even);
-/// let character = Character::new("Hero".to_string(), Race::Human, Class::Knight, Sex::Male, Alignment::Good);
-/// combat.add_player(character);
+/// let knight = Character::new("Knight".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
+/// combat.add_player(knight);
 ///
 /// let target = CombatantId::Player(0);
 /// let result = apply_damage(&mut combat, target, 10);
@@ -572,7 +572,7 @@ pub fn apply_damage(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Alignment, Class, Race, Sex, Stats};
+    use crate::domain::character::{Alignment, Sex, Stats};
     use crate::domain::combat::monster::LootTable;
     use crate::domain::types::DiceRoll;
     use rand::rng;
@@ -580,8 +580,8 @@ mod tests {
     fn create_test_character(name: &str, speed: u8) -> Character {
         let mut character = Character::new(
             name.to_string(),
-            Race::Human,
-            Class::Knight,
+            "human".to_string(),
+            "knight".to_string(),
             Sex::Male,
             Alignment::Good,
         );

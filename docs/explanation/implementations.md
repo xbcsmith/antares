@@ -1968,3 +1968,235 @@ The character definition system is complete. Potential future enhancements:
 5. **Import/Export**: Add character definition import/export in Campaign Builder
 
 ---
+
+## Phase 5: Enum Removal (Hard-coded Removal Plan) (2025-01-XX)
+
+**Objective**: Remove the static `Race` and `Class` enums, completing the migration
+to fully data-driven race and class systems using ID-based lookups.
+
+### Background
+
+Per the Hard-coded Removal Implementation Plan (`docs/explanation/hardcoded_removal_implementation_plan.md`),
+Phase 5 removes the `Race` and `Class` enum definitions and all code that depends
+on them. This is the culmination of Phases 1-4 which added ID-based alternatives.
+
+After this phase, all race and class behavior is data-driven through `RaceDatabase`
+and `ClassDatabase` lookups using string IDs (`race_id` and `class_id`).
+
+### Changes Implemented
+
+#### 5.1 Removed Enum Definitions
+
+Removed from `src/domain/character.rs`:
+
+- `pub enum Race { Human, Elf, Dwarf, Gnome, HalfElf, HalfOrc }` - Removed
+- `pub enum Class { Knight, Paladin, Archer, Cleric, Sorcerer, Robber }` - Removed
+
+#### 5.2 Removed Enum Fields from Character Struct
+
+Modified `Character` struct in `src/domain/character.rs`:
+
+- Removed `pub race: Race` field
+- Removed `pub class: Class` field
+- Kept `pub race_id: RaceId` as the sole race identifier
+- Kept `pub class_id: ClassId` as the sole class identifier
+- Removed `#[serde(default)]` from ID fields (no longer needed)
+
+#### 5.3 Removed Conversion Utilities
+
+Removed from `src/domain/character.rs`:
+
+- `race_id_from_enum()` - No longer needed
+- `class_id_from_enum()` - No longer needed
+- `race_enum_from_id()` - No longer needed
+- `class_enum_from_id()` - No longer needed
+
+#### 5.4 Updated Character Constructor
+
+Modified `Character::new()` in `src/domain/character.rs`:
+
+- Now takes `race_id: RaceId` and `class_id: ClassId` as parameters
+- Removed `race: Race` and `class: Class` parameters
+- Removed `Character::from_ids()` (merged into `new()`)
+
+```rust
+pub fn new(
+    name: String,
+    race_id: RaceId,
+    class_id: ClassId,
+    sex: Sex,
+    alignment: Alignment,
+) -> Self
+```
+
+#### 5.5 Updated SpellBook Methods
+
+Modified `SpellBook` methods to use `class_id` strings:
+
+- `get_spell_list(&self, class_id: &str)` - Uses string matching
+- `get_spell_list_mut(&mut self, class_id: &str)` - Uses string matching
+- Kept `get_spell_list_by_id()` and `get_spell_list_mut_by_id()` for database lookups
+
+#### 5.6 Updated Magic Casting Functions
+
+Modified `src/domain/magic/casting.rs`:
+
+- `can_class_cast_school(class_id: &str, school)` - Now takes class_id string
+- `get_required_level_for_spell(class_id: &str, spell)` - Now takes class_id string
+- `calculate_spell_points(character)` - Uses `character.class_id`
+- Kept `*_by_id()` variants for ClassDatabase lookups
+
+#### 5.7 Updated Progression Functions
+
+Modified `src/domain/progression.rs`:
+
+- `roll_hp_gain(class_id: &str, rng)` - Now takes class_id string
+- `level_up(character, rng)` - Uses `character.class_id`
+- Kept `*_from_db()` variants for ClassDatabase lookups
+
+#### 5.8 Updated Character Definition Instantiation
+
+Modified `CharacterDefinition::instantiate()` in `src/domain/character_definition.rs`:
+
+- No longer converts to Race/Class enums
+- Directly uses `race_id` and `class_id` strings
+
+### Files Modified
+
+**Core Domain Files:**
+
+- `src/domain/character.rs` - Removed enums, updated struct and methods
+- `src/domain/magic/casting.rs` - Updated to use class_id strings
+- `src/domain/progression.rs` - Updated to use class_id strings
+- `src/domain/character_definition.rs` - Removed enum conversion
+
+**Application and Game Files:**
+
+- `src/application/mod.rs` - Updated tests
+- `src/game/systems/ui.rs` - Display class_id/race_id instead of enums
+
+**Test Files:**
+
+- `tests/combat_integration.rs` - Updated to use ID strings
+- `tests/magic_integration.rs` - Updated to use ID strings
+- `tests/game_flow_integration.rs` - Updated to use ID strings
+
+**Documentation Files:**
+
+- `src/domain/magic/mod.rs` - Updated doc examples
+- `src/domain/magic/spell_effects.rs` - Updated doc examples
+- `src/domain/resources.rs` - Updated doc examples
+- `src/domain/combat/engine.rs` - Updated doc examples
+
+### Tests Updated
+
+All tests updated to use ID-based character creation:
+
+```rust
+// Before (enum-based)
+let hero = Character::new(
+    "Hero".to_string(),
+    Race::Human,
+    Class::Knight,
+    Sex::Male,
+    Alignment::Good,
+);
+
+// After (ID-based)
+let hero = Character::new(
+    "Hero".to_string(),
+    "human".to_string(),
+    "knight".to_string(),
+    Sex::Male,
+    Alignment::Good,
+);
+```
+
+**Removed Tests:**
+
+- `test_race_id_from_enum_all_races` - Function removed
+- `test_class_id_from_enum_all_classes` - Function removed
+- `test_race_enum_from_id_all_races` - Function removed
+- `test_class_enum_from_id_all_classes` - Function removed
+- `test_id_enum_roundtrip_*` - No longer applicable
+- `test_character_new_populates_both_enum_and_id` - Only IDs now
+- `test_character_from_ids_*` - Merged into `new()`
+
+**Updated Tests:**
+
+- `test_character_creation` - Uses ID strings
+- `test_character_with_various_race_ids` - Tests all race IDs
+- `test_character_with_various_class_ids` - Tests all class IDs
+- `test_character_all_race_class_combinations` - Uses ID pairs
+- `test_spellbook_get_spell_list_*` - Uses class_id strings
+- `test_can_class_cast_school` - Uses class_id strings
+- `test_hp_gain_by_class` - Uses class_id strings
+- Many more integration and unit tests
+
+### Validation
+
+All quality checks pass:
+
+- `cargo fmt --all` - Code formatted successfully
+- `cargo check --all-targets --all-features` - Compilation successful
+- `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- `cargo test --all-features` - 274 tests pass (unit + doc tests)
+
+### Architecture Compliance
+
+- [x] No static Race or Class enums exist
+- [x] All class/race behavior is data-driven via IDs
+- [x] Character struct uses only ID fields
+- [x] Serialization works with ID-only format
+- [x] SDK functions correctly with new structure
+- [x] Full test suite passes
+
+### Success Criteria Met
+
+- [x] `pub enum Race` removed from codebase
+- [x] `pub enum Class` removed from codebase
+- [x] Character struct has no enum fields
+- [x] All functions use `class_id` and `race_id` strings
+- [x] Save/load works with ID-only format
+- [x] All tests updated and passing
+
+### Migration Notes
+
+For developers updating code to use the new API:
+
+1. **Character Creation**: Use string IDs instead of enum values
+
+   ```rust
+   // Old: Character::new("Name", Race::Human, Class::Knight, ...)
+   // New: Character::new("Name", "human", "knight", ...)
+   ```
+
+2. **Class Checks**: Use string matching or database lookups
+
+   ```rust
+   // Old: character.class == Class::Knight
+   // New: character.class_id == "knight"
+   ```
+
+3. **Race Checks**: Use string matching or database lookups
+
+   ```rust
+   // Old: character.race == Race::Elf
+   // New: character.race_id == "elf"
+   ```
+
+4. **SpellBook Access**: Use class_id strings
+   ```rust
+   // Old: spellbook.get_spell_list(character.class)
+   // New: spellbook.get_spell_list(&character.class_id)
+   ```
+
+### Benefits of Enum Removal
+
+1. **Extensibility**: New races/classes can be added via RON files without code changes
+2. **Moddability**: Campaigns can define custom races and classes
+3. **Consistency**: Single source of truth for race/class data
+4. **Simplicity**: No dual enum+ID maintenance
+5. **Data-Driven**: All behavior comes from database definitions
+
+---

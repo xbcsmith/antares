@@ -18,7 +18,7 @@
 //! # Examples
 //!
 //! ```
-//! use antares::domain::character::{Character, Class, Race, Sex, Alignment};
+//! use antares::domain::character::{Character, Sex, Alignment};
 //! use antares::domain::magic::types::{Spell, SpellSchool, SpellContext, SpellTarget};
 //! use antares::domain::magic::casting::{can_cast_spell, cast_spell};
 //! use antares::domain::types::GameMode;
@@ -26,8 +26,8 @@
 //! // Create a cleric character
 //! let mut cleric = Character::new(
 //!     "Healer".to_string(),
-//!     Race::Human,
-//!     Class::Cleric,
+//!     "human".to_string(),
+//!     "cleric".to_string(),
 //!     Sex::Female,
 //!     Alignment::Good,
 //! );

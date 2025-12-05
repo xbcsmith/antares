@@ -7,18 +7,18 @@
 //! verifying that all systems work together correctly.
 
 use antares::application::GameState;
-use antares::domain::character::{Alignment, Character, Class, Race, Sex};
+use antares::domain::character::{Alignment, Character, Sex};
 use antares::domain::combat::database::MonsterDatabase;
 use antares::domain::combat::engine::{start_combat, CombatState, Combatant};
 use antares::domain::combat::types::{CombatStatus, Handicap};
 use antares::domain::types::MonsterId;
 
 /// Helper function to create a test character with specific stats
-fn create_test_character(name: &str, class: Class, hp: u16) -> Character {
+fn create_test_character(name: &str, class_id: &str, hp: u16) -> Character {
     let mut character = Character::new(
         name.to_string(),
-        Race::Human,
-        class,
+        "human".to_string(),
+        class_id.to_string(),
         Sex::Male,
         Alignment::Good,
     );
@@ -33,8 +33,8 @@ fn test_complete_combat_flow() {
     let mut combat = CombatState::new(Handicap::Even);
 
     // Add party members
-    let knight = create_test_character("Sir Lancelot", Class::Knight, 20);
-    let cleric = create_test_character("Friar Tuck", Class::Cleric, 15);
+    let knight = create_test_character("Sir Lancelot", "knight", 20);
+    let cleric = create_test_character("Friar Tuck", "cleric", 15);
     combat.add_player(knight);
     combat.add_player(cleric);
 
@@ -86,7 +86,7 @@ fn test_exploration_to_combat_to_exploration() {
     assert_eq!(game_state.mode, antares::application::GameMode::Exploration);
 
     // Add a character to the party
-    let hero = create_test_character("Hero", Class::Knight, 25);
+    let hero = create_test_character("Hero", "knight", 25);
     game_state
         .party
         .add_member(hero)
@@ -135,8 +135,8 @@ fn test_character_creation_to_first_combat() {
     // Act: Create a new character
     let warrior = Character::new(
         "Conan".to_string(),
-        Race::Human,
-        Class::Knight,
+        "human".to_string(),
+        "knight".to_string(),
         Sex::Male,
         Alignment::Neutral,
     );
@@ -188,7 +188,7 @@ fn test_character_creation_to_first_combat() {
 fn test_combat_end_conditions() {
     // Test 1: Party victory
     let mut combat = CombatState::new(Handicap::Even);
-    let knight = create_test_character("Knight", Class::Knight, 20);
+    let knight = create_test_character("Knight", "knight", 20);
     combat.add_player(knight);
 
     let monster_db = MonsterDatabase::load_from_file("data/monsters.ron")
@@ -210,7 +210,7 @@ fn test_combat_end_conditions() {
 
     // Test 2: Party defeat
     let mut combat2 = CombatState::new(Handicap::Even);
-    let mut dead_knight = create_test_character("Dead Knight", Class::Knight, 0);
+    let mut dead_knight = create_test_character("Dead Knight", "knight", 0);
     dead_knight.hp.current = 0;
     dead_knight
         .conditions
@@ -235,8 +235,8 @@ fn test_combat_with_multiple_rounds() {
     // Arrange: Create combat state
     let mut combat = CombatState::new(Handicap::Even);
 
-    let knight = create_test_character("Knight", Class::Knight, 30);
-    let cleric = create_test_character("Cleric", Class::Cleric, 25);
+    let knight = create_test_character("Knight", "knight", 30);
+    let cleric = create_test_character("Cleric", "cleric", 25);
     combat.add_player(knight);
     combat.add_player(cleric);
 
@@ -280,9 +280,9 @@ fn test_combat_participants_management() {
     let mut combat = CombatState::new(Handicap::Even);
 
     // Add various participants
-    let knight = create_test_character("Knight", Class::Knight, 30);
-    let paladin = create_test_character("Paladin", Class::Paladin, 28);
-    let archer = create_test_character("Archer", Class::Archer, 22);
+    let knight = create_test_character("Knight", "knight", 30);
+    let paladin = create_test_character("Paladin", "paladin", 28);
+    let archer = create_test_character("Archer", "archer", 22);
 
     combat.add_player(knight);
     combat.add_player(paladin);
