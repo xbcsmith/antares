@@ -2407,3 +2407,197 @@ Phase 7 will complete documentation and cleanup:
 5. Archive superseded plans
 
 ---
+
+## Phase 7: Documentation and Cleanup (Hard-coded Removal Plan) (2025-01-XX)
+
+### Background
+
+Phase 7 completes the hard-coded removal migration by removing deprecated code,
+updating documentation to reflect the new data-driven architecture, and creating
+guides for content creators.
+
+### Changes Implemented
+
+#### 7.1 Removed Deprecated Disablement Constants
+
+Removed the deprecated class constants from `src/domain/items/types.rs`:
+
+- `Disablement::KNIGHT` (was 0b0000_0001)
+- `Disablement::PALADIN` (was 0b0000_0010)
+- `Disablement::ARCHER` (was 0b0000_0100)
+- `Disablement::CLERIC` (was 0b0000_1000)
+- `Disablement::SORCERER` (was 0b0001_0000)
+- `Disablement::ROBBER` (was 0b0010_0000)
+
+The `can_use_class()` method remains but now documents the bit mapping for users
+who need to use raw bit values. The preferred method is `can_use_class_id()` which
+uses the ClassDatabase for data-driven lookups.
+
+Updated documentation in `can_use_class()` now shows:
+
+```rust
+/// Check if a specific class can use this item using a raw bit value
+///
+/// For data-driven class lookups, prefer `can_use_class_id()` instead.
+///
+/// # Class Bit Mapping
+///
+/// The standard class bit positions are:
+/// - Bit 0 (0b0000_0001): Knight
+/// - Bit 1 (0b0000_0010): Paladin
+/// - Bit 2 (0b0000_0100): Archer
+/// - Bit 3 (0b0000_1000): Cleric
+/// - Bit 4 (0b0001_0000): Sorcerer
+/// - Bit 5 (0b0010_0000): Robber
+```
+
+#### 7.2 Updated Architecture Documentation
+
+Updated `docs/reference/architecture.md`:
+
+1. **Character struct**: Now shows `race_id: RaceId` and `class_id: ClassId` instead
+   of the old `race: Race` and `class: Class` enum fields.
+
+2. **Removed Race and Class enums**: Replaced with a note explaining data-driven
+   system:
+
+   ```rust
+   // Note: Race and Class are now data-driven using RaceId and ClassId strings.
+   // See RaceDatabase and ClassDatabase for loading race/class definitions from RON files.
+   // Standard races: "human", "elf", "dwarf", "gnome", "half_orc", "half_elf"
+   // Standard classes: "knight", "paladin", "archer", "cleric", "sorcerer", "robber"
+   ```
+
+3. **SpellBook methods**: Updated to show data-driven class lookups using ClassDatabase.
+
+#### 7.3 Updated Implementation Documentation
+
+This section (Phase 7) documents:
+
+- Complete migration history from enums to data-driven IDs
+- Explanation of the data-driven architecture benefits
+- Code changes and their rationale
+
+#### 7.4 Created Migration Guide
+
+Created `docs/how-to/add_classes_races.md` with:
+
+- Step-by-step guide for adding new classes via RON files
+- Step-by-step guide for adding new races via RON files
+- ClassDefinition and RaceDefinition field explanations
+- Disablement bit index table for item restrictions
+- Examples of custom class (Berserker, Monk) and race (Halfling, Lizardfolk)
+- SDK Campaign Builder usage instructions
+- Validation commands and troubleshooting tips
+- Migration notes for users upgrading from enum-based versions
+
+#### 7.5 Archived Superseded Plans
+
+Marked `docs/explanation/race_system_implementation_plan.md` as superseded with:
+
+```markdown
+> **SUPERSEDED**: This plan has been merged into and superseded by
+> [hardcoded_removal_implementation_plan.md](hardcoded_removal_implementation_plan.md).
+> The race system was implemented as Phase 4 of that plan.
+> This document is preserved for historical reference only.
+```
+
+### Tests Updated
+
+Updated all tests that used deprecated constants to use local bit constants:
+
+**src/domain/items/types.rs**:
+
+- `can_use_class_and_alignment()` - renamed from `can_use_class_and_alignment_legacy()`
+- `test_disablement_all_classes()` - renamed from `test_disablement_all_classes_legacy()`
+- `test_disablement_knight_only()` - renamed from `test_disablement_knight_only_legacy()`
+- `test_disablement_good_alignment()` - renamed from `test_disablement_good_alignment_legacy()`
+- `test_dynamic_class_lookup()` - renamed from `test_dynamic_matches_static_constants()`
+- `test_bit_index_produces_correct_mask()` - renamed from `test_bit_index_matches_static_constant()`
+
+**src/bin/item_editor.rs**:
+
+- `custom_class_selection()` - now uses local BIT\_\* constants
+- `test_custom_class_selection_all_flags()` - uses local BIT\_\* constants
+
+**sdk/campaign_builder/src/main.rs**:
+
+- `test_disablement_flags()` - uses local BIT\_\* constants
+- `test_disablement_editor_all_classes()` - uses local BIT\_\* constants
+- `test_disablement_editor_specific_classes()` - uses local BIT\_\* constants
+- `test_item_preview_displays_all_info()` - uses local BIT\_\* constants
+
+### Validation
+
+All quality checks pass:
+
+```bash
+cargo fmt --all                                          # OK
+cargo check --all-targets --all-features                 # OK
+cargo clippy --all-targets --all-features -- -D warnings # OK
+cargo test --all-features                                # 275 tests passed
+```
+
+### Architecture Compliance
+
+- [x] No deprecated code remains in the codebase
+- [x] Architecture documentation accurately reflects current system
+- [x] Character struct shows data-driven race_id/class_id fields
+- [x] Race and Class enums removed from architecture docs
+- [x] How-to guide enables content creators to add classes/races without code changes
+
+### Success Criteria Met
+
+- [x] **No deprecated code remains**: All `#[deprecated]` Disablement constants removed
+- [x] **Documentation accurate**: Architecture docs reflect ID-based Character struct
+- [x] **Content creator guide**: `docs/how-to/add_classes_races.md` provides complete instructions
+- [x] **Superseded plans archived**: Race system plan marked as superseded
+- [x] **All quality checks pass**: fmt, check, clippy, and test all pass
+
+### Files Modified
+
+**Code Files**:
+
+- `src/domain/items/types.rs` - Removed deprecated constants, updated tests
+- `src/bin/item_editor.rs` - Updated to use raw bit values
+- `sdk/campaign_builder/src/main.rs` - Updated tests to use raw bit values
+
+**Documentation Files**:
+
+- `docs/reference/architecture.md` - Updated Character struct, removed enums
+- `docs/how-to/add_classes_races.md` - New migration guide (created)
+- `docs/explanation/race_system_implementation_plan.md` - Marked as superseded
+- `docs/explanation/implementations.md` - This Phase 7 documentation
+
+### Hard-coded Removal Plan Summary
+
+All phases of the hard-coded removal plan are now complete:
+
+| Phase   | Description                  | Status   |
+| ------- | ---------------------------- | -------- |
+| Phase 1 | Character Struct Migration   | Complete |
+| Phase 2 | Class Logic Migration        | Complete |
+| Phase 3 | Disablement System Migration | Complete |
+| Phase 4 | Race System Implementation   | Complete |
+| Phase 5 | Enum Removal                 | Complete |
+| Phase 6 | SDK and Editor Updates       | Complete |
+| Phase 7 | Documentation and Cleanup    | Complete |
+
+### Benefits of Data-Driven Architecture
+
+1. **No Code Changes for New Content**: Content creators can add classes and races
+   by editing RON files alone.
+
+2. **Campaign Customization**: Each campaign can define its own class/race variants
+   without affecting the core game.
+
+3. **Type Safety**: ClassId and RaceId type aliases provide compile-time documentation
+   while allowing runtime flexibility.
+
+4. **Centralized Definitions**: Single source of truth for class/race properties
+   in ClassDatabase and RaceDatabase.
+
+5. **SDK Integration**: Campaign Builder can load, edit, and validate custom
+   classes/races through the same data-driven interfaces.
+
+---

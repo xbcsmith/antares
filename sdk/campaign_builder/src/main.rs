@@ -5437,23 +5437,27 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_disablement_flags() {
+        // Standard class bit positions
+        const BIT_KNIGHT: u8 = 0b0000_0001;
+        const BIT_PALADIN: u8 = 0b0000_0010;
+        const BIT_SORCERER: u8 = 0b0001_0000;
+
         let mut item = CampaignBuilderApp::default_item();
 
         // Test all classes enabled
         item.disablements = Disablement(0xFF);
-        assert!(item.disablements.can_use_class(Disablement::KNIGHT));
-        assert!(item.disablements.can_use_class(Disablement::SORCERER));
+        assert!(item.disablements.can_use_class(BIT_KNIGHT));
+        assert!(item.disablements.can_use_class(BIT_SORCERER));
 
         // Test specific class restriction
-        item.disablements = Disablement(Disablement::KNIGHT | Disablement::PALADIN);
-        assert!(item.disablements.can_use_class(Disablement::KNIGHT));
-        assert!(item.disablements.can_use_class(Disablement::PALADIN));
-        assert!(!item.disablements.can_use_class(Disablement::SORCERER));
+        item.disablements = Disablement(BIT_KNIGHT | BIT_PALADIN);
+        assert!(item.disablements.can_use_class(BIT_KNIGHT));
+        assert!(item.disablements.can_use_class(BIT_PALADIN));
+        assert!(!item.disablements.can_use_class(BIT_SORCERER));
 
         // Test alignment flags
-        item.disablements = Disablement(Disablement::KNIGHT | Disablement::GOOD);
+        item.disablements = Disablement(BIT_KNIGHT | Disablement::GOOD);
         assert!(item.disablements.good_only());
         assert!(!item.disablements.evil_only());
     }
@@ -5634,8 +5638,15 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_disablement_editor_all_classes() {
+        // Standard class bit positions
+        const BIT_KNIGHT: u8 = 0b0000_0001;
+        const BIT_PALADIN: u8 = 0b0000_0010;
+        const BIT_ARCHER: u8 = 0b0000_0100;
+        const BIT_CLERIC: u8 = 0b0000_1000;
+        const BIT_SORCERER: u8 = 0b0001_0000;
+        const BIT_ROBBER: u8 = 0b0010_0000;
+
         let mut app = CampaignBuilderApp::default();
 
         // Set all classes enabled
@@ -5645,64 +5656,70 @@ mod tests {
             .items_editor_state
             .edit_buffer
             .disablements
-            .can_use_class(Disablement::KNIGHT));
+            .can_use_class(BIT_KNIGHT));
         assert!(app
             .items_editor_state
             .edit_buffer
             .disablements
-            .can_use_class(Disablement::PALADIN));
+            .can_use_class(BIT_PALADIN));
         assert!(app
             .items_editor_state
             .edit_buffer
             .disablements
-            .can_use_class(Disablement::ARCHER));
+            .can_use_class(BIT_ARCHER));
         assert!(app
             .items_editor_state
             .edit_buffer
             .disablements
-            .can_use_class(Disablement::CLERIC));
+            .can_use_class(BIT_CLERIC));
         assert!(app
             .items_editor_state
             .edit_buffer
             .disablements
-            .can_use_class(Disablement::SORCERER));
+            .can_use_class(BIT_SORCERER));
         assert!(app
             .items_editor_state
             .edit_buffer
             .disablements
-            .can_use_class(Disablement::ROBBER));
+            .can_use_class(BIT_ROBBER));
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_disablement_editor_specific_classes() {
+        // Standard class bit positions
+        const BIT_KNIGHT: u8 = 0b0000_0001;
+        const BIT_PALADIN: u8 = 0b0000_0010;
+        const BIT_SORCERER: u8 = 0b0001_0000;
+
         let mut app = CampaignBuilderApp::default();
 
         // Only knight and paladin
-        app.items_editor_state.edit_buffer.disablements =
-            Disablement(Disablement::KNIGHT | Disablement::PALADIN);
+        app.items_editor_state.edit_buffer.disablements = Disablement(BIT_KNIGHT | BIT_PALADIN);
 
         assert!(app
             .items_editor_state
             .edit_buffer
             .disablements
-            .can_use_class(Disablement::KNIGHT));
+            .can_use_class(BIT_KNIGHT));
         assert!(app
             .items_editor_state
             .edit_buffer
             .disablements
-            .can_use_class(Disablement::PALADIN));
+            .can_use_class(BIT_PALADIN));
         assert!(!app
             .items_editor_state
             .edit_buffer
             .disablements
-            .can_use_class(Disablement::SORCERER));
+            .can_use_class(BIT_SORCERER));
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_item_preview_displays_all_info() {
         use antares::domain::items::types::*;
+
+        // Standard class bit positions
+        const BIT_KNIGHT: u8 = 0b0000_0001;
+        const BIT_PALADIN: u8 = 0b0000_0010;
 
         let item = Item {
             id: 10,
@@ -5714,9 +5731,7 @@ mod tests {
             }),
             base_cost: 500,
             sell_cost: 250,
-            disablements: Disablement(
-                Disablement::KNIGHT | Disablement::PALADIN | Disablement::GOOD,
-            ),
+            disablements: Disablement(BIT_KNIGHT | BIT_PALADIN | Disablement::GOOD),
             constant_bonus: Some(Bonus {
                 attribute: BonusAttribute::Might,
                 value: 2,

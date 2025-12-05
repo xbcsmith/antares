@@ -317,56 +317,50 @@ impl Disablement {
     /// No classes can use (quest items)
     pub const NONE: Self = Self(0x00);
 
-    // Class flags - DEPRECATED: Use can_use_class_id() with ClassDatabase instead
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
-    )]
-    pub const KNIGHT: u8 = 0b0000_0001;
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
-    )]
-    pub const PALADIN: u8 = 0b0000_0010;
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
-    )]
-    pub const ARCHER: u8 = 0b0000_0100;
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
-    )]
-    pub const CLERIC: u8 = 0b0000_1000;
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
-    )]
-    pub const SORCERER: u8 = 0b0001_0000;
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use can_use_class_id() with ClassDatabase for data-driven class lookups"
-    )]
-    pub const ROBBER: u8 = 0b0010_0000;
-
-    // Alignment flags (not deprecated - these are fixed concepts)
+    // Alignment flags - these are fixed concepts and remain as constants
     pub const GOOD: u8 = 0b0100_0000;
     pub const EVIL: u8 = 0b1000_0000;
 
-    /// Check if a specific class can use this item (legacy method using bit constant)
+    /// Check if a specific class can use this item using a raw bit value
     ///
-    /// # Deprecated
+    /// For data-driven class lookups, prefer `can_use_class_id()` instead.
     ///
-    /// Prefer `can_use_class_id()` for data-driven class lookups.
+    /// # Class Bit Mapping
+    ///
+    /// The standard class bit positions are:
+    /// - Bit 0 (0b0000_0001): Knight
+    /// - Bit 1 (0b0000_0010): Paladin
+    /// - Bit 2 (0b0000_0100): Archer
+    /// - Bit 3 (0b0000_1000): Cleric
+    /// - Bit 4 (0b0001_0000): Sorcerer
+    /// - Bit 5 (0b0010_0000): Robber
+    ///
+    /// Custom classes should use `ClassDefinition.disablement_bit_index` to
+    /// determine their bit position, then calculate the mask as `1 << bit_index`.
     ///
     /// # Arguments
     ///
-    /// * `class_bit` - The class bit constant (e.g., `Disablement::KNIGHT`)
+    /// * `class_bit` - The class bit mask (e.g., `0b0000_0001` for knight)
     ///
     /// # Returns
     ///
     /// Returns `true` if the class bit is set in the disablement mask.
-    #[allow(deprecated)]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::Disablement;
+    ///
+    /// // Knight-only item
+    /// let knight_item = Disablement(0b0000_0001);
+    /// assert!(knight_item.can_use_class(0b0000_0001)); // Knight can use
+    /// assert!(!knight_item.can_use_class(0b0001_0000)); // Sorcerer cannot
+    ///
+    /// // All classes item
+    /// let universal = Disablement::ALL;
+    /// assert!(universal.can_use_class(0b0000_0001)); // Knight can use
+    /// assert!(universal.can_use_class(0b0001_0000)); // Sorcerer can use
+    /// ```
     pub fn can_use_class(&self, class_bit: u8) -> bool {
         (self.0 & class_bit) != 0
     }
@@ -966,40 +960,44 @@ mod tests {
         assert_eq!(Disablement(0b1111_1111).to_index(), None);
     }
 
+    // Class bit constants for testing (standard bit positions)
+    const BIT_KNIGHT: u8 = 0b0000_0001;
+    const BIT_PALADIN: u8 = 0b0000_0010;
+    const BIT_ARCHER: u8 = 0b0000_0100;
+    const BIT_CLERIC: u8 = 0b0000_1000;
+    const BIT_SORCERER: u8 = 0b0001_0000;
+    const BIT_ROBBER: u8 = 0b0010_0000;
+
     #[test]
-    #[allow(deprecated)]
-    fn can_use_class_and_alignment_legacy() {
+    fn can_use_class_and_alignment() {
         let d = Disablement::from_index(0); // mask 0b0000_0001
-        assert!(d.can_use_class(Disablement::KNIGHT));
-        assert!(!d.can_use_class(Disablement::ARCHER));
+        assert!(d.can_use_class(BIT_KNIGHT));
+        assert!(!d.can_use_class(BIT_ARCHER));
         let d = Disablement::ALL;
-        assert!(d.can_use_class(Disablement::KNIGHT));
+        assert!(d.can_use_class(BIT_KNIGHT));
         // presence tested for compile/coverage only
         assert!(d.good_only());
         assert!(d.evil_only());
     }
 
     #[test]
-    #[allow(deprecated)]
-    fn test_disablement_all_classes_legacy() {
+    fn test_disablement_all_classes() {
         let dis = Disablement::ALL;
-        assert!(dis.can_use_class(Disablement::KNIGHT));
-        assert!(dis.can_use_class(Disablement::SORCERER));
-        assert!(dis.can_use_class(Disablement::ROBBER));
+        assert!(dis.can_use_class(BIT_KNIGHT));
+        assert!(dis.can_use_class(BIT_SORCERER));
+        assert!(dis.can_use_class(BIT_ROBBER));
     }
 
     #[test]
-    #[allow(deprecated)]
-    fn test_disablement_knight_only_legacy() {
-        let dis = Disablement(Disablement::KNIGHT);
-        assert!(dis.can_use_class(Disablement::KNIGHT));
-        assert!(!dis.can_use_class(Disablement::SORCERER));
+    fn test_disablement_knight_only() {
+        let dis = Disablement(BIT_KNIGHT);
+        assert!(dis.can_use_class(BIT_KNIGHT));
+        assert!(!dis.can_use_class(BIT_SORCERER));
     }
 
     #[test]
-    #[allow(deprecated)]
-    fn test_disablement_good_alignment_legacy() {
-        let dis = Disablement(Disablement::PALADIN | Disablement::GOOD);
+    fn test_disablement_good_alignment() {
+        let dis = Disablement(BIT_PALADIN | Disablement::GOOD);
         assert!(dis.good_only());
         assert!(!dis.evil_only());
     }
@@ -1182,62 +1180,58 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
-    fn test_dynamic_matches_static_constants() {
-        // Verify that the data-driven approach produces the same results
-        // as the deprecated static constants
+    fn test_dynamic_class_lookup() {
+        // Verify that the data-driven approach works correctly
         let class_db = create_test_class_db();
 
-        // Check each class
-        let knight_item = Disablement(Disablement::KNIGHT);
+        // Check each class using raw bit values
+        let knight_item = Disablement(BIT_KNIGHT);
         assert!(knight_item.can_use_class_id("knight", &class_db));
 
-        let paladin_item = Disablement(Disablement::PALADIN);
+        let paladin_item = Disablement(BIT_PALADIN);
         assert!(paladin_item.can_use_class_id("paladin", &class_db));
 
-        let archer_item = Disablement(Disablement::ARCHER);
+        let archer_item = Disablement(BIT_ARCHER);
         assert!(archer_item.can_use_class_id("archer", &class_db));
 
-        let cleric_item = Disablement(Disablement::CLERIC);
+        let cleric_item = Disablement(BIT_CLERIC);
         assert!(cleric_item.can_use_class_id("cleric", &class_db));
 
-        let sorcerer_item = Disablement(Disablement::SORCERER);
+        let sorcerer_item = Disablement(BIT_SORCERER);
         assert!(sorcerer_item.can_use_class_id("sorcerer", &class_db));
 
-        let robber_item = Disablement(Disablement::ROBBER);
+        let robber_item = Disablement(BIT_ROBBER);
         assert!(robber_item.can_use_class_id("robber", &class_db));
     }
 
     #[test]
-    #[allow(deprecated)]
-    fn test_bit_index_matches_static_constant() {
-        // Verify that ClassDefinition.disablement_bit_index produces the same mask
-        // as the deprecated static constants
+    fn test_bit_index_produces_correct_mask() {
+        // Verify that ClassDefinition.disablement_bit_index produces the correct mask
         let class_db = create_test_class_db();
 
-        // Knight: bit 0
+        // Knight: bit 0 -> mask 0b0000_0001
         let knight = class_db.get_class("knight").unwrap();
-        assert_eq!(knight.disablement_mask(), Disablement::KNIGHT);
+        assert_eq!(knight.disablement_mask(), BIT_KNIGHT);
 
-        // Paladin: bit 1
+        // Paladin: bit 1 -> mask 0b0000_0010
         let paladin = class_db.get_class("paladin").unwrap();
-        assert_eq!(paladin.disablement_mask(), Disablement::PALADIN);
+        assert_eq!(paladin.disablement_mask(), BIT_PALADIN);
 
-        // Archer: bit 2
+        // Archer: bit 2 -> mask 0b0000_0100
         let archer = class_db.get_class("archer").unwrap();
-        assert_eq!(archer.disablement_mask(), Disablement::ARCHER);
+        assert_eq!(archer.disablement_mask(), BIT_ARCHER);
 
-        // Cleric: bit 3
+        // Cleric: bit 3 -> mask 0b0000_1000
         let cleric = class_db.get_class("cleric").unwrap();
-        assert_eq!(cleric.disablement_mask(), Disablement::CLERIC);
+        assert_eq!(cleric.disablement_mask(), BIT_CLERIC);
 
-        // Sorcerer: bit 4
+        // Sorcerer: bit 4 -> mask 0b0001_0000
         let sorcerer = class_db.get_class("sorcerer").unwrap();
-        assert_eq!(sorcerer.disablement_mask(), Disablement::SORCERER);
+        assert_eq!(sorcerer.disablement_mask(), BIT_SORCERER);
 
-        // Robber: bit 5
+        // Robber: bit 5 -> mask 0b0010_0000
         let robber = class_db.get_class("robber").unwrap();
-        assert_eq!(robber.disablement_mask(), Disablement::ROBBER);
+        assert_eq!(robber.disablement_mask(), BIT_ROBBER);
     }
 
     #[test]

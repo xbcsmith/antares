@@ -1,5 +1,10 @@
 # Race System Implementation Plan
 
+> **SUPERSEDED**: This plan has been merged into and superseded by
+> [hardcoded_removal_implementation_plan.md](hardcoded_removal_implementation_plan.md).
+> The race system was implemented as Phase 4 of that plan.
+> This document is preserved for historical reference only.
+
 ## Overview
 
 This document outlines a phased approach to implement a complete, data-driven race system for Antares. The goal is to create a `src/domain/races.rs` module following the established pattern in `classes.rs`, consolidate the three existing race definitions into a single source of truth, and integrate race mechanics into character creation, the SDK UI, and campaign data files.
@@ -13,15 +18,18 @@ The implementation will be forward-compatible with the proficiency migration pla
 Race is currently implemented in three separate locations with inconsistent definitions:
 
 1. **Domain Layer** (`src/domain/character.rs` L400-406): A simple enum with no mechanical properties
+
    - `pub enum Race { Human, Elf, Dwarf, Gnome, HalfOrc }`
    - No stat modifiers, resistances, or special abilities
 
 2. **SDK Database** (`src/sdk/database.rs` L102-145): A placeholder stub
+
    - `RaceDefinition` with only `id` and `name` fields
    - `RaceDatabase::load_from_file()` returns an empty database
    - Marked as "Phase 2 implementation pending"
 
 3. **Race Editor CLI** (`src/bin/race_editor.rs` L44-86): Complete standalone implementation
+
    - Full `RaceDefinition` with `stat_modifiers`, `resistances`, `special_abilities`
    - Supporting types: `StatModifiers`, `Resistances`
    - Not shared with the game engine
@@ -377,23 +385,23 @@ Add validation for race-based restrictions:
 
 ### New Files
 
-| File | Description |
-|------|-------------|
-| `src/domain/races.rs` | Core race module with types and database |
+| File                                       | Description                              |
+| ------------------------------------------ | ---------------------------------------- |
+| `src/domain/races.rs`                      | Core race module with types and database |
 | `sdk/campaign_builder/src/races_editor.rs` | Visual races editor for Campaign Builder |
 
 ### Modified Files
 
-| File | Changes |
-|------|---------|
-| `src/domain/mod.rs` | Export races module |
-| `src/domain/character.rs` | Add race_id field and modifier application |
-| `src/sdk/database.rs` | Replace placeholder with domain imports |
-| `src/bin/race_editor.rs` | Use domain types instead of local definitions |
-| `sdk/campaign_builder/src/main.rs` | Integrate races editor |
-| `sdk/campaign_builder/src/validation.rs` | Add race validation |
-| `data/races.ron` | Full race definitions |
-| `campaigns/tutorial/data/races.ron` | Full race definitions |
+| File                                     | Changes                                       |
+| ---------------------------------------- | --------------------------------------------- |
+| `src/domain/mod.rs`                      | Export races module                           |
+| `src/domain/character.rs`                | Add race_id field and modifier application    |
+| `src/sdk/database.rs`                    | Replace placeholder with domain imports       |
+| `src/bin/race_editor.rs`                 | Use domain types instead of local definitions |
+| `sdk/campaign_builder/src/main.rs`       | Integrate races editor                        |
+| `sdk/campaign_builder/src/validation.rs` | Add race validation                           |
+| `data/races.ron`                         | Full race definitions                         |
+| `campaigns/tutorial/data/races.ron`      | Full race definitions                         |
 
 ### Files to Remove/Consolidate
 
@@ -409,27 +417,27 @@ None - we preserve backward compatibility by keeping the `Race` enum and adding 
 
 ## Timeline Estimate
 
-| Phase | Estimated Duration | Dependencies |
-|-------|-------------------|--------------|
-| Phase 1: Core Domain Module | 2-3 days | None |
-| Phase 2: Data File Updates | 0.5 days | Phase 1 |
-| Phase 3: SDK Database Integration | 1 day | Phase 1 |
-| Phase 4: Race Editor CLI | 1 day | Phase 1 |
-| Phase 5: SDK UI Races Editor | 2-3 days | Phase 3 |
-| Phase 6: Character Integration | 2 days | Phase 1, Phase 2 |
-| **Total** | **8-11 days** | |
+| Phase                             | Estimated Duration | Dependencies     |
+| --------------------------------- | ------------------ | ---------------- |
+| Phase 1: Core Domain Module       | 2-3 days           | None             |
+| Phase 2: Data File Updates        | 0.5 days           | Phase 1          |
+| Phase 3: SDK Database Integration | 1 day              | Phase 1          |
+| Phase 4: Race Editor CLI          | 1 day              | Phase 1          |
+| Phase 5: SDK UI Races Editor      | 2-3 days           | Phase 3          |
+| Phase 6: Character Integration    | 2 days             | Phase 1, Phase 2 |
+| **Total**                         | **8-11 days**      |                  |
 
 Phases 2, 3, and 4 can be done in parallel after Phase 1 completes.
 
 ## Risk Mitigation
 
-| Risk | Mitigation |
-|------|------------|
-| Breaking existing save files | Keep `Race` enum, add `race_id` as optional field |
-| RON format changes | Use `#[serde(default)]` for all new fields |
-| SDK type conflicts | Remove SDK placeholders before adding domain imports |
-| Data file incompatibility | Test loading old format files, ensure backward compatibility |
-| Scope creep into proficiency system | Only add proficiency fields as `Vec<String>` placeholders |
+| Risk                                | Mitigation                                                   |
+| ----------------------------------- | ------------------------------------------------------------ |
+| Breaking existing save files        | Keep `Race` enum, add `race_id` as optional field            |
+| RON format changes                  | Use `#[serde(default)]` for all new fields                   |
+| SDK type conflicts                  | Remove SDK placeholders before adding domain imports         |
+| Data file incompatibility           | Test loading old format files, ensure backward compatibility |
+| Scope creep into proficiency system | Only add proficiency fields as `Vec<String>` placeholders    |
 
 ## Relationship to Proficiency Migration
 

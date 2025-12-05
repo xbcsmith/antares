@@ -180,11 +180,21 @@ pub enum WallType {
 > **Note:** For comprehensive stat range documentation, see [stat_ranges.md](stat_ranges.md).
 
 ```rust
+/// Type alias for race identifiers (data-driven)
+pub type RaceId = String;
+
+/// Type alias for class identifiers (data-driven)
+pub type ClassId = String;
+
 /// Represents a single character (party member or roster character)
+///
+/// Characters use data-driven race_id and class_id for lookups in
+/// RaceDatabase and ClassDatabase respectively. This allows custom
+/// races and classes to be defined in RON data files without code changes.
 pub struct Character {
     pub name: String,
-    pub race: Race,
-    pub class: Class,
+    pub race_id: RaceId,                // Data-driven race identifier (e.g., "human", "elf")
+    pub class_id: ClassId,              // Data-driven class identifier (e.g., "knight", "sorcerer")
     pub sex: Sex,
     pub alignment: Alignment,           // Current alignment
     pub alignment_initial: Alignment,   // Starting alignment (for tracking changes)
@@ -201,6 +211,7 @@ pub struct Character {
     pub equipment: Equipment,           // Equipped items (max 6)
     pub spells: SpellBook,              // Known spells
     pub conditions: Condition,          // Active status conditions (bitflags)
+    pub active_conditions: Vec<ActiveCondition>, // Data-driven conditions
     pub resistances: Resistances,       // Damage resistances
     pub quest_flags: QuestFlags,        // Per-character quest/event tracking
     pub portrait_id: u8,                // Portrait/avatar ID
@@ -360,24 +371,10 @@ pub struct QuestFlags {
 
 // ===== Enums =====
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Race {
-    Human,
-    Elf,
-    Dwarf,
-    Gnome,
-    HalfOrc,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Class {
-    Knight,
-    Paladin,
-    Archer,
-    Cleric,
-    Sorcerer,
-    Robber,
-}
+// Note: Race and Class are now data-driven using RaceId and ClassId strings.
+// See RaceDatabase and ClassDatabase for loading race/class definitions from RON files.
+// Standard races: "human", "elf", "dwarf", "gnome", "half_orc", "half_elf"
+// Standard classes: "knight", "paladin", "archer", "cleric", "sorcerer", "robber"
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sex {
@@ -449,22 +446,26 @@ pub struct SpellBook {
 
 impl SpellBook {
     /// Returns the appropriate spell list for the character's class
-    pub fn get_spell_list(&self, class: Class) -> &[Vec<SpellId>; 7] {
-        match class {
-            Class::Cleric | Class::Paladin => &self.cleric_spells,
-            Class::Sorcerer | Class::Archer => &self.sorcerer_spells,
-            _ => &self.sorcerer_spells, // Default to empty or handle error
+    ///
+    /// Uses class_id to look up spell school in ClassDatabase.
+    pub fn get_spell_list_for_class(&self, class_id: &str, class_db: &ClassDatabase) -> &[Vec<SpellId>; 7] {
+        if let Some(class_def) = class_db.get_class(class_id) {
+            match class_def.spell_school {
+                Some(SpellSchool::Cleric) => &self.cleric_spells,
+                Some(SpellSchool::Sorcerer) => &self.sorcerer_spells,
+                None => &self.sorcerer_spells, // Non-casters default
+            }
+        } else {
+            &self.sorcerer_spells // Unknown class defaults
         }
     }
 
-    /// Check if character can cast spells of this school
-    pub fn can_cast_school(class: Class, school: SpellSchool) -> bool {
-        match (class, school) {
-            (Class::Cleric, SpellSchool::Cleric) => true,
-            (Class::Paladin, SpellSchool::Cleric) => true, // At higher levels
-            (Class::Sorcerer, SpellSchool::Sorcerer) => true,
-            (Class::Archer, SpellSchool::Sorcerer) => true, // At higher levels
-            _ => false,
+    /// Check if class can cast spells of this school
+    pub fn can_cast_school(class_id: &str, school: SpellSchool, class_db: &ClassDatabase) -> bool {
+        if let Some(class_def) = class_db.get_class(class_id) {
+            class_def.spell_school == Some(school)
+        } else {
+            false
         }
     }
 }

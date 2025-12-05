@@ -399,8 +399,23 @@ impl ItemEditor {
     }
 
     /// Custom class restriction selection
-    #[allow(deprecated)]
+    ///
+    /// Uses standard class bit positions:
+    /// - Bit 0 (0b0000_0001): Knight
+    /// - Bit 1 (0b0000_0010): Paladin
+    /// - Bit 2 (0b0000_0100): Archer
+    /// - Bit 3 (0b0000_1000): Cleric
+    /// - Bit 4 (0b0001_0000): Sorcerer
+    /// - Bit 5 (0b0010_0000): Robber
     fn custom_class_selection(&self) -> Disablement {
+        // Standard class bit positions
+        const BIT_KNIGHT: u8 = 0b0000_0001;
+        const BIT_PALADIN: u8 = 0b0000_0010;
+        const BIT_ARCHER: u8 = 0b0000_0100;
+        const BIT_CLERIC: u8 = 0b0000_1000;
+        const BIT_SORCERER: u8 = 0b0001_0000;
+        const BIT_ROBBER: u8 = 0b0010_0000;
+
         println!("\n    Select classes that CAN use this item:");
 
         let knight = self.read_bool("    Knight? (y/n): ");
@@ -414,22 +429,22 @@ impl ItemEditor {
 
         let mut flags = 0u8;
         if knight {
-            flags |= Disablement::KNIGHT;
+            flags |= BIT_KNIGHT;
         }
         if paladin {
-            flags |= Disablement::PALADIN;
+            flags |= BIT_PALADIN;
         }
         if archer {
-            flags |= Disablement::ARCHER;
+            flags |= BIT_ARCHER;
         }
         if cleric {
-            flags |= Disablement::CLERIC;
+            flags |= BIT_CLERIC;
         }
         if sorcerer {
-            flags |= Disablement::SORCERER;
+            flags |= BIT_SORCERER;
         }
         if robber {
-            flags |= Disablement::ROBBER;
+            flags |= BIT_ROBBER;
         }
         if good {
             flags |= Disablement::GOOD;
@@ -864,23 +879,25 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_custom_class_selection_all_flags() {
+        // Standard class bit positions
+        const BIT_KNIGHT: u8 = 0b0000_0001;
+        const BIT_PALADIN: u8 = 0b0000_0010;
+        const BIT_ARCHER: u8 = 0b0000_0100;
+        const BIT_CLERIC: u8 = 0b0000_1000;
+        const BIT_SORCERER: u8 = 0b0001_0000;
+        const BIT_ROBBER: u8 = 0b0010_0000;
+
         // This test validates the bit flags are correctly set
-        let flags = Disablement::KNIGHT
-            | Disablement::PALADIN
-            | Disablement::ARCHER
-            | Disablement::CLERIC
-            | Disablement::SORCERER
-            | Disablement::ROBBER;
+        let flags = BIT_KNIGHT | BIT_PALADIN | BIT_ARCHER | BIT_CLERIC | BIT_SORCERER | BIT_ROBBER;
 
         let dis = Disablement(flags);
-        assert!(dis.can_use_class(Disablement::KNIGHT));
-        assert!(dis.can_use_class(Disablement::PALADIN));
-        assert!(dis.can_use_class(Disablement::ARCHER));
-        assert!(dis.can_use_class(Disablement::CLERIC));
-        assert!(dis.can_use_class(Disablement::SORCERER));
-        assert!(dis.can_use_class(Disablement::ROBBER));
+        assert!(dis.can_use_class(BIT_KNIGHT));
+        assert!(dis.can_use_class(BIT_PALADIN));
+        assert!(dis.can_use_class(BIT_ARCHER));
+        assert!(dis.can_use_class(BIT_CLERIC));
+        assert!(dis.can_use_class(BIT_SORCERER));
+        assert!(dis.can_use_class(BIT_ROBBER));
         assert!(!dis.good_only());
         assert!(!dis.evil_only());
     }
