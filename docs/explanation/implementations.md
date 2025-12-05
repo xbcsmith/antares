@@ -1132,3 +1132,132 @@ All quality gates pass:
 - Integration tests for data file loading
 
 ---
+
+## Phase 2: Character Definition Data Files (Character Definition Implementation Plan) (2025-01-XX)
+
+**Objective**: Create RON data files with character definitions for core data and the tutorial campaign.
+
+### Background
+
+Per the Character Definition Implementation Plan (`docs/explanation/character_definition_implementation_plan.md`), Phase 2 creates the actual data files that define pre-made characters, NPCs, and character templates. These files follow the RON format established by other domain types (classes.ron, items.ron, races.ron).
+
+### Changes Implemented
+
+#### 2.1 Core Characters Data File
+
+Created `data/characters.ron` with 6 pre-made characters (one per class):
+
+| Character ID            | Name             | Race     | Class    | Alignment | Role                  |
+| ----------------------- | ---------------- | -------- | -------- | --------- | --------------------- |
+| `pregen_human_knight`   | Sir Aldric       | Human    | Knight   | Good      | Tank/Melee            |
+| `pregen_elf_paladin`    | Sister Elara     | Elf      | Paladin  | Good      | Hybrid Fighter/Healer |
+| `pregen_halfelf_archer` | Finn Swiftarrow  | Half-Elf | Archer   | Neutral   | Ranged DPS            |
+| `pregen_dwarf_cleric`   | Brother Marcus   | Dwarf    | Cleric   | Good      | Healer/Support        |
+| `pregen_gnome_sorcerer` | Lyria Starweaver | Gnome    | Sorcerer | Neutral   | Arcane Caster         |
+| `pregen_halforc_robber` | Shadow           | Half-Orc | Robber   | Neutral   | Utility/Stealth       |
+
+All characters:
+
+- Have balanced stats appropriate for level 1 (3-18 range)
+- Include starting equipment referencing valid `items.ron` IDs
+- Have descriptive backstories
+- Are marked as `is_premade: true`
+
+#### 2.2 Tutorial Campaign Characters Data File
+
+Created `campaigns/tutorial/data/characters.ron` with 9 characters in three categories:
+
+**Tutorial Pre-Made Characters (3):**
+| Character ID | Name | Race | Class | Purpose |
+|--------------|------|------|-------|---------|
+| `tutorial_human_knight` | Kira | Human | Knight | Learning combat basics |
+| `tutorial_elf_sorcerer` | Sage | Elf | Sorcerer | Learning magic basics |
+| `tutorial_human_cleric` | Mira | Human | Cleric | Learning support mechanics |
+
+**Recruitable NPCs (3):**
+| Character ID | Name | Race | Class | Description |
+|--------------|------|------|-------|-------------|
+| `npc_old_gareth` | Old Gareth | Dwarf | Knight | Retired adventurer at smithy |
+| `npc_whisper` | Whisper | Half-Elf | Robber | Thief/locksmith NPC |
+| `npc_apprentice_zara` | Apprentice Zara | Gnome | Sorcerer | Quest reward recruit |
+
+**Character Templates (3):**
+| Template ID | Name | Race | Class | Purpose |
+|-------------|------|------|-------|---------|
+| `template_human_fighter` | Human Fighter | Human | Knight | Character generation |
+| `template_elf_mage` | Elf Mage | Elf | Sorcerer | Character generation |
+| `template_dwarf_cleric` | Dwarf Cleric | Dwarf | Cleric | Character generation |
+
+#### 2.3 Data File Format
+
+Both files follow the established RON patterns:
+
+- Header comments explaining the format and references
+- Consistent field ordering matching `CharacterDefinition` struct
+- Comments for each character section
+- All `race_id` values reference valid IDs from `races.ron`
+- All `class_id` values reference valid IDs from `classes.ron`
+- All item IDs reference valid IDs from `items.ron`
+
+### Tests Added
+
+Added 6 integration tests to `src/domain/character_definition.rs`:
+
+**Core Data File Tests:**
+
+- `test_load_core_characters_data_file` - Verifies `data/characters.ron` loads successfully, contains 6 characters, all have expected IDs, and all are pre-made
+- `test_core_characters_have_valid_references` - Validates race_id and class_id against known valid values, checks stat ranges (3-18), verifies descriptions exist
+
+**Tutorial Campaign Tests:**
+
+- `test_load_tutorial_campaign_characters` - Verifies tutorial characters.ron loads, has 9+ characters, pre-made/NPC/template categorization
+- `test_tutorial_campaign_characters_valid_references` - Validates all race_id and class_id values
+
+**Cross-Validation Tests:**
+
+- `test_premade_vs_template_characters` - Verifies core data has only pre-made characters, tutorial has both pre-made and templates/NPCs
+- `test_character_starting_equipment_items_exist` - Validates all starting_items and starting_equipment IDs reference valid item IDs from `items.ron`
+
+### Validation
+
+All quality checks pass:
+
+- `cargo fmt --all` - Code formatted successfully
+- `cargo check --all-targets --all-features` - Compilation successful
+- `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- `cargo test --all-features` - 512 unit tests pass, 272 doc tests pass
+
+### Architecture Compliance
+
+- [x] RON format used for data files (not JSON/YAML)
+- [x] Data files follow patterns from `classes.ron` and `items.ron`
+- [x] All referenced IDs exist in corresponding data files
+- [x] Comments explain format and references
+- [x] Character stats use standard RPG range (3-18)
+- [x] Pre-made characters have backstory descriptions
+
+### Success Criteria Met
+
+- [x] `data/characters.ron` with 6 pre-made characters (one per class)
+- [x] `campaigns/tutorial/data/characters.ron` with 9 characters
+- [x] Both files parse via `CharacterDatabase::load_from_file()`
+- [x] All referenced IDs validated against source files
+- [x] Data file comments clear and follow existing patterns
+- [x] Integration tests for both data files
+
+### Files Created
+
+- `data/characters.ron` - Core pre-made characters (240 lines)
+- `campaigns/tutorial/data/characters.ron` - Tutorial campaign characters (349 lines)
+
+### Files Modified
+
+- `src/domain/character_definition.rs` - Added 6 integration tests (297 lines)
+
+### Next Steps (Phase 3)
+
+- Add `CharacterDatabase` to `ContentDatabase` in SDK
+- Update campaign loader to load `characters.ron`
+- Add validation rules for character references
+
+---

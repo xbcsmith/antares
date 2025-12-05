@@ -1643,4 +1643,306 @@ mod tests {
             CharacterDefinitionError::ValidationError(_)
         ));
     }
+
+    // ===== Integration Tests for Data Files =====
+
+    #[test]
+    fn test_load_core_characters_data_file() {
+        // This test verifies that the actual data/characters.ron file is valid
+        let result = CharacterDatabase::load_from_file("data/characters.ron");
+        assert!(
+            result.is_ok(),
+            "Failed to load data/characters.ron: {:?}",
+            result.err()
+        );
+
+        let db = result.unwrap();
+
+        // We expect 6 pre-made characters (one per class)
+        assert_eq!(db.len(), 6, "Expected 6 characters in data/characters.ron");
+
+        // Verify all expected characters exist
+        let expected_ids = [
+            "pregen_human_knight",
+            "pregen_elf_paladin",
+            "pregen_halfelf_archer",
+            "pregen_dwarf_cleric",
+            "pregen_gnome_sorcerer",
+            "pregen_halforc_robber",
+        ];
+
+        for id in &expected_ids {
+            assert!(
+                db.get_character(id).is_some(),
+                "Expected character '{}' not found in data/characters.ron",
+                id
+            );
+        }
+
+        // Verify all are pre-made characters
+        for char_def in db.all_characters() {
+            assert!(
+                char_def.is_premade,
+                "Character '{}' should be a pre-made character",
+                char_def.id
+            );
+        }
+
+        // Verify premade_characters returns all of them
+        let premade: Vec<_> = db.premade_characters().collect();
+        assert_eq!(
+            premade.len(),
+            6,
+            "All 6 characters should be pre-made in core data"
+        );
+    }
+
+    #[test]
+    fn test_core_characters_have_valid_references() {
+        let db = CharacterDatabase::load_from_file("data/characters.ron")
+            .expect("Failed to load data/characters.ron");
+
+        // Valid race IDs from data/races.ron
+        let valid_races = ["human", "elf", "dwarf", "gnome", "half_elf", "half_orc"];
+
+        // Valid class IDs from data/classes.ron
+        let valid_classes = [
+            "knight", "paladin", "archer", "cleric", "sorcerer", "robber",
+        ];
+
+        for char_def in db.all_characters() {
+            // Check race_id is valid
+            assert!(
+                valid_races.contains(&char_def.race_id.as_str()),
+                "Character '{}' has invalid race_id: '{}'",
+                char_def.id,
+                char_def.race_id
+            );
+
+            // Check class_id is valid
+            assert!(
+                valid_classes.contains(&char_def.class_id.as_str()),
+                "Character '{}' has invalid class_id: '{}'",
+                char_def.id,
+                char_def.class_id
+            );
+
+            // Verify starting stats are reasonable (3-18 range)
+            assert!(
+                char_def.base_stats.might >= 3 && char_def.base_stats.might <= 18,
+                "Character '{}' has out-of-range might: {}",
+                char_def.id,
+                char_def.base_stats.might
+            );
+            assert!(
+                char_def.base_stats.intellect >= 3 && char_def.base_stats.intellect <= 18,
+                "Character '{}' has out-of-range intellect: {}",
+                char_def.id,
+                char_def.base_stats.intellect
+            );
+
+            // Verify description is not empty for pre-made characters
+            if char_def.is_premade {
+                assert!(
+                    !char_def.description.is_empty(),
+                    "Pre-made character '{}' should have a description",
+                    char_def.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_load_tutorial_campaign_characters() {
+        // This test verifies that the tutorial campaign characters.ron file is valid
+        let result = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron");
+        assert!(
+            result.is_ok(),
+            "Failed to load campaigns/tutorial/data/characters.ron: {:?}",
+            result.err()
+        );
+
+        let db = result.unwrap();
+
+        // We expect at least 9 characters (3 tutorial premade + 3 NPCs + 3 templates)
+        assert!(
+            db.len() >= 9,
+            "Expected at least 9 characters in tutorial campaign, got {}",
+            db.len()
+        );
+
+        // Verify tutorial pre-made characters exist
+        let premade_ids = [
+            "tutorial_human_knight",
+            "tutorial_elf_sorcerer",
+            "tutorial_human_cleric",
+        ];
+
+        for id in &premade_ids {
+            let char_def = db.get_character(id);
+            assert!(
+                char_def.is_some(),
+                "Expected tutorial pre-made character '{}' not found",
+                id
+            );
+            assert!(
+                char_def.unwrap().is_premade,
+                "Character '{}' should be pre-made",
+                id
+            );
+        }
+
+        // Verify NPC characters exist and are not pre-made
+        let npc_ids = ["npc_old_gareth", "npc_whisper", "npc_apprentice_zara"];
+
+        for id in &npc_ids {
+            let char_def = db.get_character(id);
+            assert!(
+                char_def.is_some(),
+                "Expected NPC character '{}' not found",
+                id
+            );
+            assert!(
+                !char_def.unwrap().is_premade,
+                "NPC '{}' should not be pre-made",
+                id
+            );
+        }
+
+        // Verify template characters exist and are not pre-made
+        let template_ids = [
+            "template_human_fighter",
+            "template_elf_mage",
+            "template_dwarf_cleric",
+        ];
+
+        for id in &template_ids {
+            let char_def = db.get_character(id);
+            assert!(
+                char_def.is_some(),
+                "Expected template character '{}' not found",
+                id
+            );
+            assert!(
+                !char_def.unwrap().is_premade,
+                "Template '{}' should not be pre-made",
+                id
+            );
+        }
+    }
+
+    #[test]
+    fn test_tutorial_campaign_characters_valid_references() {
+        let db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+            .expect("Failed to load campaigns/tutorial/data/characters.ron");
+
+        // Valid race IDs from races.ron
+        let valid_races = ["human", "elf", "dwarf", "gnome", "half_elf", "half_orc"];
+
+        // Valid class IDs from classes.ron
+        let valid_classes = [
+            "knight", "paladin", "archer", "cleric", "sorcerer", "robber",
+        ];
+
+        for char_def in db.all_characters() {
+            // Check race_id is valid
+            assert!(
+                valid_races.contains(&char_def.race_id.as_str()),
+                "Character '{}' has invalid race_id: '{}'",
+                char_def.id,
+                char_def.race_id
+            );
+
+            // Check class_id is valid
+            assert!(
+                valid_classes.contains(&char_def.class_id.as_str()),
+                "Character '{}' has invalid class_id: '{}'",
+                char_def.id,
+                char_def.class_id
+            );
+        }
+    }
+
+    #[test]
+    fn test_premade_vs_template_characters() {
+        let core_db = CharacterDatabase::load_from_file("data/characters.ron")
+            .expect("Failed to load core characters");
+
+        let tutorial_db =
+            CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+                .expect("Failed to load tutorial characters");
+
+        // Core data should only have pre-made characters
+        let core_templates: Vec<_> = core_db.template_characters().collect();
+        let core_premade: Vec<_> = core_db.premade_characters().collect();
+        assert_eq!(
+            core_templates.len(),
+            0,
+            "Core characters.ron should not have template characters"
+        );
+        assert_eq!(
+            core_premade.len(),
+            core_db.len(),
+            "All core characters should be pre-made"
+        );
+
+        // Tutorial data should have both pre-made and templates/NPCs
+        let tutorial_premade: Vec<_> = tutorial_db.premade_characters().collect();
+        let tutorial_templates: Vec<_> = tutorial_db.template_characters().collect();
+
+        assert!(
+            !tutorial_premade.is_empty(),
+            "Tutorial campaign should have some pre-made characters"
+        );
+        assert!(
+            !tutorial_templates.is_empty(),
+            "Tutorial campaign should have some template/NPC characters"
+        );
+        assert_eq!(
+            tutorial_premade.len() + tutorial_templates.len(),
+            tutorial_db.len(),
+            "Pre-made + template counts should equal total"
+        );
+    }
+
+    #[test]
+    fn test_character_starting_equipment_items_exist() {
+        // This test verifies that starting equipment item IDs reference valid items
+        // We check against known valid item IDs from data/items.ron
+        let valid_item_ids: Vec<ItemId> = vec![
+            1, 2, 3, 4, 5, 6, 7, // Basic weapons
+            10, 11, 12, // Magical weapons
+            20, 21, 22, // Basic armor
+            30, 31, // Magical armor
+            40, 41, 42, // Accessories
+            50, 51, 52, // Consumables
+            60, 61, // Ammunition
+            100, 101, // Quest/cursed items
+        ];
+
+        let db = CharacterDatabase::load_from_file("data/characters.ron")
+            .expect("Failed to load core characters");
+
+        for char_def in db.all_characters() {
+            // Check starting items
+            for item_id in &char_def.starting_items {
+                assert!(
+                    valid_item_ids.contains(item_id),
+                    "Character '{}' has invalid starting item ID: {}",
+                    char_def.id,
+                    item_id
+                );
+            }
+
+            // Check equipped items
+            for item_id in char_def.starting_equipment.all_item_ids() {
+                assert!(
+                    valid_item_ids.contains(&item_id),
+                    "Character '{}' has invalid equipped item ID: {}",
+                    char_def.id,
+                    item_id
+                );
+            }
+        }
+    }
 }
