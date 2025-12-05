@@ -1220,6 +1220,260 @@ mod tests {
         assert!(is_item_compatible_with_race(&item_tags, &incompatible_tags));
     }
 
+    // ===== Phase 2: Combined proficiency and tag tests =====
+
+    /// Helper function to simulate checking if a character can use an item
+    /// This combines proficiency checking (class OR race) with tag compatibility
+    fn can_character_use_item_test(
+        required_proficiency: Option<&ProficiencyId>,
+        class_proficiencies: &[ProficiencyId],
+        race_proficiencies: &[ProficiencyId],
+        item_tags: &[String],
+        race_incompatible_tags: &[String],
+    ) -> bool {
+        // First check: proficiency requirement (UNION: class OR race)
+        let has_prof = has_proficiency_union(
+            required_proficiency,
+            class_proficiencies,
+            race_proficiencies,
+        );
+
+        // Second check: item tags must be compatible with race
+        let tags_ok = is_item_compatible_with_race(item_tags, race_incompatible_tags);
+
+        // Both must pass
+        has_prof && tags_ok
+    }
+
+    #[test]
+    fn test_elf_sorcerer_can_use_longbow() {
+        // Scenario: Elf Sorcerer CAN use Long Bow because race grants martial_ranged
+        // Even though Sorcerer class doesn't have martial_ranged proficiency
+
+        let sorcerer_proficiencies = vec!["simple_weapon".to_string(), "arcane_item".to_string()];
+        let elf_proficiencies = vec![
+            "martial_ranged".to_string(), // Elves get bow proficiency
+            "longsword".to_string(),
+        ];
+        let longbow_required = Some("martial_ranged".to_string());
+        let longbow_tags: Vec<String> = vec!["large_weapon".to_string()]; // Longbow is large
+        let elf_incompatible_tags: Vec<String> = vec![]; // Elves have no size restrictions
+
+        let can_use = can_character_use_item_test(
+            longbow_required.as_ref(),
+            &sorcerer_proficiencies,
+            &elf_proficiencies,
+            &longbow_tags,
+            &elf_incompatible_tags,
+        );
+
+        assert!(
+            can_use,
+            "Elf Sorcerer should be able to use Long Bow (race grants martial_ranged)"
+        );
+    }
+
+    #[test]
+    fn test_gnome_archer_cannot_use_longbow() {
+        // Scenario: Gnome Archer CANNOT use Long Bow because of large_weapon tag
+        // Even though Archer class has martial_ranged proficiency
+
+        let archer_proficiencies = vec![
+            "simple_weapon".to_string(),
+            "martial_ranged".to_string(),
+            "light_armor".to_string(),
+            "medium_armor".to_string(),
+        ];
+        let gnome_proficiencies = vec!["short_sword".to_string(), "crossbow".to_string()];
+        let longbow_required = Some("martial_ranged".to_string());
+        let longbow_tags = vec!["large_weapon".to_string()]; // Longbow is large
+        let gnome_incompatible_tags = vec!["large_weapon".to_string(), "heavy_armor".to_string()];
+
+        let can_use = can_character_use_item_test(
+            longbow_required.as_ref(),
+            &archer_proficiencies,
+            &gnome_proficiencies,
+            &longbow_tags,
+            &gnome_incompatible_tags,
+        );
+
+        assert!(
+            !can_use,
+            "Gnome Archer should NOT be able to use Long Bow (large_weapon tag)"
+        );
+    }
+
+    #[test]
+    fn test_gnome_archer_can_use_shortbow() {
+        // Scenario: Gnome Archer CAN use Short Bow
+        // Archer has martial_ranged, and short bow doesn't have large_weapon tag
+
+        let archer_proficiencies = vec![
+            "simple_weapon".to_string(),
+            "martial_ranged".to_string(),
+            "light_armor".to_string(),
+            "medium_armor".to_string(),
+        ];
+        let gnome_proficiencies = vec!["short_sword".to_string(), "crossbow".to_string()];
+        let shortbow_required = Some("martial_ranged".to_string());
+        let shortbow_tags: Vec<String> = vec![]; // Short bow has no large_weapon tag
+        let gnome_incompatible_tags = vec!["large_weapon".to_string(), "heavy_armor".to_string()];
+
+        let can_use = can_character_use_item_test(
+            shortbow_required.as_ref(),
+            &archer_proficiencies,
+            &gnome_proficiencies,
+            &shortbow_tags,
+            &gnome_incompatible_tags,
+        );
+
+        assert!(
+            can_use,
+            "Gnome Archer should be able to use Short Bow (no large_weapon tag)"
+        );
+    }
+
+    #[test]
+    fn test_human_knight_can_use_plate_armor() {
+        // Scenario: Human Knight CAN use Plate Armor
+        // Knight has heavy_armor proficiency, humans have no restrictions
+
+        let knight_proficiencies = vec![
+            "simple_weapon".to_string(),
+            "martial_melee".to_string(),
+            "light_armor".to_string(),
+            "medium_armor".to_string(),
+            "heavy_armor".to_string(),
+            "shield".to_string(),
+        ];
+        let human_proficiencies: Vec<String> = vec![]; // Humans get no racial proficiencies
+        let plate_required = Some("heavy_armor".to_string());
+        let plate_tags = vec!["heavy_armor".to_string()];
+        let human_incompatible_tags: Vec<String> = vec![];
+
+        let can_use = can_character_use_item_test(
+            plate_required.as_ref(),
+            &knight_proficiencies,
+            &human_proficiencies,
+            &plate_tags,
+            &human_incompatible_tags,
+        );
+
+        assert!(can_use, "Human Knight should be able to use Plate Armor");
+    }
+
+    #[test]
+    fn test_gnome_knight_cannot_use_plate_armor() {
+        // Scenario: Gnome Knight CANNOT use Plate Armor due to heavy_armor tag
+        // Even though Knight has heavy_armor proficiency
+
+        let knight_proficiencies = vec![
+            "simple_weapon".to_string(),
+            "martial_melee".to_string(),
+            "light_armor".to_string(),
+            "medium_armor".to_string(),
+            "heavy_armor".to_string(),
+            "shield".to_string(),
+        ];
+        let gnome_proficiencies = vec!["short_sword".to_string(), "crossbow".to_string()];
+        let plate_required = Some("heavy_armor".to_string());
+        let plate_tags = vec!["heavy_armor".to_string()];
+        let gnome_incompatible_tags = vec!["large_weapon".to_string(), "heavy_armor".to_string()];
+
+        let can_use = can_character_use_item_test(
+            plate_required.as_ref(),
+            &knight_proficiencies,
+            &gnome_proficiencies,
+            &plate_tags,
+            &gnome_incompatible_tags,
+        );
+
+        assert!(
+            !can_use,
+            "Gnome Knight should NOT be able to use Plate Armor (heavy_armor tag)"
+        );
+    }
+
+    #[test]
+    fn test_dwarf_cleric_can_use_warhammer() {
+        // Scenario: Dwarf Cleric CAN use Warhammer
+        // Cleric has blunt_weapon, and dwarves have warhammer racial proficiency
+        // This tests UNION - either would suffice
+
+        let cleric_proficiencies = vec![
+            "simple_weapon".to_string(),
+            "blunt_weapon".to_string(),
+            "light_armor".to_string(),
+            "medium_armor".to_string(),
+            "shield".to_string(),
+            "divine_item".to_string(),
+        ];
+        let dwarf_proficiencies = vec!["battleaxe".to_string(), "warhammer".to_string()];
+        // Warhammer could require blunt_weapon proficiency
+        let warhammer_required = Some("blunt_weapon".to_string());
+        let warhammer_tags: Vec<String> = vec![];
+        let dwarf_incompatible_tags: Vec<String> = vec![];
+
+        let can_use = can_character_use_item_test(
+            warhammer_required.as_ref(),
+            &cleric_proficiencies,
+            &dwarf_proficiencies,
+            &warhammer_tags,
+            &dwarf_incompatible_tags,
+        );
+
+        assert!(can_use, "Dwarf Cleric should be able to use Warhammer");
+    }
+
+    #[test]
+    fn test_sorcerer_cannot_use_plate_armor() {
+        // Scenario: Sorcerer CANNOT use Plate Armor (no proficiency)
+
+        let sorcerer_proficiencies = vec!["simple_weapon".to_string(), "arcane_item".to_string()];
+        let human_proficiencies: Vec<String> = vec![];
+        let plate_required = Some("heavy_armor".to_string());
+        let plate_tags: Vec<String> = vec![];
+        let human_incompatible_tags: Vec<String> = vec![];
+
+        let can_use = can_character_use_item_test(
+            plate_required.as_ref(),
+            &sorcerer_proficiencies,
+            &human_proficiencies,
+            &plate_tags,
+            &human_incompatible_tags,
+        );
+
+        assert!(
+            !can_use,
+            "Sorcerer should NOT be able to use Plate Armor (no heavy_armor proficiency)"
+        );
+    }
+
+    #[test]
+    fn test_item_with_no_proficiency_requirement() {
+        // Scenario: Anyone can use items with no proficiency requirement
+        // (e.g., potions, quest items, basic clothing)
+
+        let sorcerer_proficiencies = vec!["simple_weapon".to_string(), "arcane_item".to_string()];
+        let gnome_proficiencies = vec!["short_sword".to_string()];
+        let no_requirement: Option<&ProficiencyId> = None;
+        let potion_tags: Vec<String> = vec![];
+        let gnome_incompatible_tags = vec!["large_weapon".to_string(), "heavy_armor".to_string()];
+
+        let can_use = can_character_use_item_test(
+            no_requirement,
+            &sorcerer_proficiencies,
+            &gnome_proficiencies,
+            &potion_tags,
+            &gnome_incompatible_tags,
+        );
+
+        assert!(
+            can_use,
+            "Anyone should be able to use items with no proficiency requirement"
+        );
+    }
+
     // ===== Load from file test =====
 
     #[test]
@@ -1251,5 +1505,115 @@ mod tests {
             assert!(db.validate().is_ok());
         }
         // If file doesn't exist yet, that's OK during Phase 1
+    }
+
+    #[test]
+    fn test_load_classes_with_proficiencies() {
+        use crate::domain::classes::ClassDatabase;
+
+        // Try to load from the actual data file
+        let result = ClassDatabase::load_from_file("data/classes.ron");
+        if let Ok(db) = result {
+            // Knight should have heavy_armor proficiency
+            if let Some(knight) = db.get_class("knight") {
+                assert!(
+                    knight.has_proficiency("heavy_armor"),
+                    "Knight should have heavy_armor proficiency"
+                );
+                assert!(
+                    knight.has_proficiency("martial_melee"),
+                    "Knight should have martial_melee proficiency"
+                );
+            }
+
+            // Sorcerer should have arcane_item but not heavy_armor
+            if let Some(sorcerer) = db.get_class("sorcerer") {
+                assert!(
+                    sorcerer.has_proficiency("arcane_item"),
+                    "Sorcerer should have arcane_item proficiency"
+                );
+                assert!(
+                    !sorcerer.has_proficiency("heavy_armor"),
+                    "Sorcerer should NOT have heavy_armor proficiency"
+                );
+            }
+
+            // Archer should have martial_ranged
+            if let Some(archer) = db.get_class("archer") {
+                assert!(
+                    archer.has_proficiency("martial_ranged"),
+                    "Archer should have martial_ranged proficiency"
+                );
+            }
+
+            // Cleric should have blunt_weapon and divine_item
+            if let Some(cleric) = db.get_class("cleric") {
+                assert!(
+                    cleric.has_proficiency("blunt_weapon"),
+                    "Cleric should have blunt_weapon proficiency"
+                );
+                assert!(
+                    cleric.has_proficiency("divine_item"),
+                    "Cleric should have divine_item proficiency"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_load_races_with_proficiencies_and_tags() {
+        use crate::domain::races::RaceDatabase;
+
+        // Try to load from the actual data file
+        let result = RaceDatabase::load_from_file("data/races.ron");
+        if let Ok(db) = result {
+            // Elf should have longbow/longsword proficiency
+            if let Some(elf) = db.get_race("elf") {
+                assert!(
+                    !elf.proficiencies.is_empty(),
+                    "Elf should have racial proficiencies"
+                );
+            }
+
+            // Gnome should have incompatible tags
+            if let Some(gnome) = db.get_race("gnome") {
+                assert!(
+                    gnome.is_item_incompatible("large_weapon"),
+                    "Gnome should be incompatible with large_weapon"
+                );
+                assert!(
+                    gnome.is_item_incompatible("heavy_armor"),
+                    "Gnome should be incompatible with heavy_armor"
+                );
+                assert!(
+                    !gnome.can_use_item(&["large_weapon".to_string()]),
+                    "Gnome should not be able to use items with large_weapon tag"
+                );
+                assert!(
+                    gnome.can_use_item(&["light".to_string()]),
+                    "Gnome should be able to use items with light tag"
+                );
+            }
+
+            // Dwarf should have battleaxe/warhammer proficiency
+            if let Some(dwarf) = db.get_race("dwarf") {
+                assert!(
+                    dwarf.has_proficiency("battleaxe") || dwarf.has_proficiency("warhammer"),
+                    "Dwarf should have dwarven weapon proficiencies"
+                );
+            }
+
+            // Human should have no restrictions
+            if let Some(human) = db.get_race("human") {
+                assert!(
+                    human.incompatible_item_tags.is_empty(),
+                    "Human should have no item tag restrictions"
+                );
+                assert!(
+                    human.can_use_item(&["large_weapon".to_string(), "heavy_armor".to_string()]),
+                    "Human should be able to use any item tags"
+                );
+            }
+        }
     }
 }

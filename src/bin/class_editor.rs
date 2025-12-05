@@ -202,6 +202,7 @@ impl ClassEditor {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: Vec::new(),
+            proficiencies: Vec::new(),
         };
 
         self.classes.push(class_def);
@@ -640,6 +641,7 @@ mod tests {
                 starting_weapon_id: None,
                 starting_armor_id: None,
                 starting_items: Vec::new(),
+                proficiencies: Vec::new(),
             },
             ClassDefinition {
                 id: "sorcerer".to_string(),
@@ -654,6 +656,7 @@ mod tests {
                 starting_weapon_id: None,
                 starting_armor_id: None,
                 starting_items: Vec::new(),
+                proficiencies: Vec::new(),
             },
         ];
 

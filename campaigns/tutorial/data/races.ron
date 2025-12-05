@@ -11,6 +11,15 @@
 //   Bit 1 (0b00000010) - Elf
 //   Bit 2 (0b00000100) - Dwarf
 //   Bit 3 (0b00001000) - Gnome
+//
+// Proficiencies (racial weapon bonuses):
+//   These proficiencies are combined with class proficiencies using UNION logic.
+//   If either class OR race grants a proficiency, the character can use items
+//   requiring that proficiency.
+//
+// Incompatible Item Tags:
+//   Items with these tags cannot be used by this race regardless of proficiencies.
+//   Common tags: "large_weapon" (for small races), "heavy_armor" (for small races)
 
 [
     // ===== Human - Balanced, versatile =====
@@ -40,6 +49,7 @@
         special_abilities: ["adaptable"],
         size: Medium,
         disablement_bit: 0,
+        // Humans have no racial weapon proficiencies - they rely entirely on class
         proficiencies: [],
         incompatible_item_tags: [],
     ),
@@ -71,7 +81,10 @@
         special_abilities: ["infravision", "resist_sleep"],
         size: Medium,
         disablement_bit: 1,
-        proficiencies: ["longbow"],
+        // Elves have natural proficiency with bows and longswords
+        // This allows Elf Sorcerers to use longbows even though Sorcerers
+        // don't have martial_ranged proficiency
+        proficiencies: ["martial_ranged", "longsword"],
         incompatible_item_tags: [],
     ),
 
@@ -102,7 +115,8 @@
         special_abilities: ["infravision", "stonecunning"],
         size: Medium,
         disablement_bit: 2,
-        proficiencies: ["battleaxe"],
+        // Dwarves have natural proficiency with axes and hammers
+        proficiencies: ["battleaxe", "warhammer"],
         incompatible_item_tags: [],
     ),
 
@@ -133,7 +147,9 @@
         special_abilities: ["infravision", "small_stature"],
         size: Small,
         disablement_bit: 3,
-        proficiencies: ["short_sword"],
-        incompatible_item_tags: ["large_weapon"],
+        // Gnomes have proficiency with smaller weapons
+        proficiencies: ["short_sword", "crossbow"],
+        // Small size prevents use of large weapons and heavy armor
+        incompatible_item_tags: ["large_weapon", "heavy_armor"],
     ),
 ]

@@ -12,6 +12,7 @@
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
 //! See `docs/explanation/sdk_implementation_plan.md` Phase 1 for implementation details.
 
+use crate::domain::proficiency::ProficiencyId;
 use crate::domain::types::{DiceRoll, ItemId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -90,6 +91,7 @@ pub enum SpellStat {
 ///     starting_weapon_id: None,
 ///     starting_armor_id: None,
 ///     starting_items: vec![],
+///     proficiencies: vec!["simple_weapon".to_string(), "heavy_armor".to_string()],
 /// };
 ///
 /// assert_eq!(knight.name, "Knight");
@@ -138,6 +140,13 @@ pub struct ClassDefinition {
     /// Starting items
     #[serde(default)]
     pub starting_items: Vec<ItemId>,
+
+    /// Proficiencies this class grants (e.g., "simple_weapon", "heavy_armor")
+    ///
+    /// These proficiencies determine what items a character of this class can use.
+    /// Uses UNION logic with race proficiencies (class OR race grants proficiency).
+    #[serde(default)]
+    pub proficiencies: Vec<ProficiencyId>,
 }
 
 impl ClassDefinition {
@@ -173,6 +182,7 @@ impl ClassDefinition {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec![],
         }
     }
 
@@ -197,6 +207,7 @@ impl ClassDefinition {
     ///     starting_weapon_id: None,
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
+    ///     proficiencies: vec![],
     /// };
     ///
     /// assert!(!knight.can_cast_spells());
@@ -226,6 +237,7 @@ impl ClassDefinition {
     ///     starting_weapon_id: None,
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
+    ///     proficiencies: vec![],
     /// };
     ///
     /// assert_eq!(knight.disablement_mask(), 0b00000001);
@@ -255,6 +267,7 @@ impl ClassDefinition {
     ///     starting_weapon_id: None,
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
+    ///     proficiencies: vec!["simple_weapon".to_string(), "light_armor".to_string()],
     /// };
     ///
     /// assert!(robber.has_ability("backstab"));
@@ -263,6 +276,50 @@ impl ClassDefinition {
     /// ```
     pub fn has_ability(&self, ability: &str) -> bool {
         self.special_abilities.iter().any(|a| a.as_str() == ability)
+    }
+
+    /// Checks if this class has a specific proficiency
+    ///
+    /// # Arguments
+    ///
+    /// * `proficiency` - The proficiency ID to check for
+    ///
+    /// # Returns
+    ///
+    /// `true` if this class grants the specified proficiency
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::classes::ClassDefinition;
+    /// use antares::domain::types::DiceRoll;
+    ///
+    /// let knight = ClassDefinition {
+    ///     id: "knight".to_string(),
+    ///     name: "Knight".to_string(),
+    ///     description: "A brave warrior".to_string(),
+    ///     hp_die: DiceRoll::new(1, 10, 0),
+    ///     spell_school: None,
+    ///     is_pure_caster: false,
+    ///     spell_stat: None,
+    ///     disablement_bit_index: 0,
+    ///     special_abilities: vec!["multiple_attacks".to_string()],
+    ///     starting_weapon_id: None,
+    ///     starting_armor_id: None,
+    ///     starting_items: vec![],
+    ///     proficiencies: vec![
+    ///         "simple_weapon".to_string(),
+    ///         "martial_melee".to_string(),
+    ///         "heavy_armor".to_string(),
+    ///     ],
+    /// };
+    ///
+    /// assert!(knight.has_proficiency("heavy_armor"));
+    /// assert!(knight.has_proficiency("martial_melee"));
+    /// assert!(!knight.has_proficiency("arcane_item"));
+    /// ```
+    pub fn has_proficiency(&self, proficiency: &str) -> bool {
+        self.proficiencies.iter().any(|p| p.as_str() == proficiency)
     }
 }
 
@@ -563,6 +620,11 @@ mod tests {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec![
+                "simple_weapon".to_string(),
+                "martial_melee".to_string(),
+                "heavy_armor".to_string(),
+            ],
         }
     }
 
@@ -580,6 +642,7 @@ mod tests {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec!["simple_weapon".to_string(), "arcane_item".to_string()],
         }
     }
 
@@ -606,6 +669,19 @@ mod tests {
         let knight = create_test_knight();
         assert!(knight.has_ability("multiple_attacks"));
         assert!(!knight.has_ability("backstab"));
+    }
+
+    #[test]
+    fn test_class_definition_has_proficiency() {
+        let knight = create_test_knight();
+        assert!(knight.has_proficiency("heavy_armor"));
+        assert!(knight.has_proficiency("martial_melee"));
+        assert!(!knight.has_proficiency("arcane_item"));
+
+        let sorcerer = create_test_sorcerer();
+        assert!(sorcerer.has_proficiency("arcane_item"));
+        assert!(sorcerer.has_proficiency("simple_weapon"));
+        assert!(!sorcerer.has_proficiency("heavy_armor"));
     }
 
     #[test]

@@ -401,6 +401,52 @@ impl RaceDefinition {
             .any(|t| t.as_str() == tag)
     }
 
+    /// Checks if this race can use an item based on its tags
+    ///
+    /// Returns `true` if the item has no tags that are incompatible with this race.
+    /// This is a convenience wrapper around tag-based compatibility checking.
+    ///
+    /// # Arguments
+    ///
+    /// * `item_tags` - The tags on the item to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if the race can use the item (no incompatible tags match)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::races::{RaceDefinition, StatModifiers, Resistances, SizeCategory};
+    ///
+    /// let gnome = RaceDefinition {
+    ///     id: "gnome".to_string(),
+    ///     name: "Gnome".to_string(),
+    ///     description: "Small but clever".to_string(),
+    ///     stat_modifiers: StatModifiers::default(),
+    ///     resistances: Resistances::default(),
+    ///     special_abilities: vec![],
+    ///     size: SizeCategory::Small,
+    ///     disablement_bit_index: 3,
+    ///     proficiencies: vec![],
+    ///     incompatible_item_tags: vec!["large_weapon".to_string(), "heavy_armor".to_string()],
+    /// };
+    ///
+    /// // Gnome cannot use large weapons
+    /// let large_sword_tags = vec!["large_weapon".to_string(), "two_handed".to_string()];
+    /// assert!(!gnome.can_use_item(&large_sword_tags));
+    ///
+    /// // Gnome can use small weapons
+    /// let dagger_tags = vec!["light".to_string()];
+    /// assert!(gnome.can_use_item(&dagger_tags));
+    ///
+    /// // Empty tags are always compatible
+    /// assert!(gnome.can_use_item(&[]));
+    /// ```
+    pub fn can_use_item(&self, item_tags: &[String]) -> bool {
+        !item_tags.iter().any(|tag| self.is_item_incompatible(tag))
+    }
+
     /// Returns true if this race is Small size
     pub fn is_small(&self) -> bool {
         self.size == SizeCategory::Small
@@ -939,6 +985,31 @@ mod tests {
         let gnome = create_test_gnome();
         assert!(gnome.is_item_incompatible("large_weapon"));
         assert!(!gnome.is_item_incompatible("sword"));
+    }
+
+    #[test]
+    fn test_race_definition_can_use_item() {
+        let gnome = create_test_gnome();
+
+        // Gnome cannot use large weapons
+        let large_sword_tags = vec!["large_weapon".to_string(), "two_handed".to_string()];
+        assert!(!gnome.can_use_item(&large_sword_tags));
+
+        // Gnome can use small weapons
+        let dagger_tags = vec!["light".to_string()];
+        assert!(gnome.can_use_item(&dagger_tags));
+
+        // Empty tags are always compatible
+        assert!(gnome.can_use_item(&[]));
+
+        // Human has no restrictions
+        let human = create_test_human();
+        assert!(human.can_use_item(&large_sword_tags));
+        assert!(human.can_use_item(&dagger_tags));
+
+        // Elf has no tag restrictions
+        let elf = create_test_elf();
+        assert!(elf.can_use_item(&large_sword_tags));
     }
 
     #[test]

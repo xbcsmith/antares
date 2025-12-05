@@ -2822,3 +2822,220 @@ Per the proficiency migration plan:
 4. Add validation to ensure proficiency IDs exist in proficiencies.ron
 
 ---
+
+## Proficiency System Migration - Phase 2: Class and Race Definition Migration (2025-XX-XX)
+
+### Background
+
+Phase 2 of the proficiency system migration adds proficiency support to class and race
+definitions, enabling the data-driven item usage system. This phase:
+
+- Adds a `proficiencies` field to `ClassDefinition` struct
+- Adds a `can_use_item()` method to `RaceDefinition` for tag-based compatibility
+- Updates all data files with appropriate proficiency assignments
+- Adds comprehensive tests for combined proficiency and tag checking
+
+### Changes Implemented
+
+#### 2.1 Updated ClassDefinition Struct
+
+Modified `src/domain/classes.rs`:
+
+- Added `proficiencies: Vec<ProficiencyId>` field with `#[serde(default)]`
+- Added `has_proficiency(&self, proficiency: &str) -> bool` method
+- Updated `ClassDefinition::new()` to initialize proficiencies as empty vector
+- Updated all doc examples to include the new field
+
+```rust
+pub struct ClassDefinition {
+    // ... existing fields ...
+
+    /// Proficiencies this class grants (e.g., "simple_weapon", "heavy_armor")
+    #[serde(default)]
+    pub proficiencies: Vec<ProficiencyId>,
+}
+
+impl ClassDefinition {
+    pub fn has_proficiency(&self, proficiency: &str) -> bool {
+        self.proficiencies.iter().any(|p| p.as_str() == proficiency)
+    }
+}
+```
+
+#### 2.2 Updated RaceDefinition
+
+Modified `src/domain/races.rs`:
+
+- Added `can_use_item(&self, item_tags: &[String]) -> bool` method
+- This checks if any item tags are incompatible with the race
+
+```rust
+impl RaceDefinition {
+    pub fn can_use_item(&self, item_tags: &[String]) -> bool {
+        !item_tags.iter().any(|tag| self.is_item_incompatible(tag))
+    }
+}
+```
+
+#### 2.3 Updated Data Files
+
+Updated `data/classes.ron` with proficiencies for each class:
+
+| Class    | Proficiencies                                                                                           |
+| -------- | ------------------------------------------------------------------------------------------------------- |
+| Knight   | simple_weapon, martial_melee, light_armor, medium_armor, heavy_armor, shield                            |
+| Paladin  | simple_weapon, martial_melee, blunt_weapon, light_armor, medium_armor, heavy_armor, shield, divine_item |
+| Archer   | simple_weapon, martial_ranged, light_armor, medium_armor                                                |
+| Cleric   | simple_weapon, blunt_weapon, light_armor, medium_armor, shield, divine_item                             |
+| Sorcerer | simple_weapon, arcane_item                                                                              |
+| Robber   | simple_weapon, martial_melee, light_armor                                                               |
+
+Updated `campaigns/tutorial/data/classes.ron` with the same proficiencies.
+
+Updated `campaigns/tutorial/data/races.ron` with enhanced racial proficiencies:
+
+| Race  | Proficiencies             | Incompatible Tags         |
+| ----- | ------------------------- | ------------------------- |
+| Human | (none)                    | (none)                    |
+| Elf   | martial_ranged, longsword | (none)                    |
+| Dwarf | battleaxe, warhammer      | (none)                    |
+| Gnome | short_sword, crossbow     | large_weapon, heavy_armor |
+
+### Tests Added
+
+Added comprehensive tests in `src/domain/proficiency.rs`:
+
+```rust
+#[test]
+fn test_elf_sorcerer_can_use_longbow() {
+    // Elf Sorcerer CAN use Long Bow because race grants martial_ranged
+    // even though Sorcerer class doesn't have martial_ranged proficiency
+}
+
+#[test]
+fn test_gnome_archer_cannot_use_longbow() {
+    // Gnome Archer CANNOT use Long Bow due to large_weapon tag
+    // even though Archer class has martial_ranged proficiency
+}
+
+#[test]
+fn test_gnome_archer_can_use_shortbow() {
+    // Gnome Archer CAN use Short Bow (no large_weapon tag)
+}
+
+#[test]
+fn test_human_knight_can_use_plate_armor() {
+    // Human Knight CAN use Plate Armor
+}
+
+#[test]
+fn test_gnome_knight_cannot_use_plate_armor() {
+    // Gnome Knight CANNOT use Plate Armor (heavy_armor tag)
+}
+
+#[test]
+fn test_dwarf_cleric_can_use_warhammer() {
+    // Tests UNION logic - either class OR race grants proficiency
+}
+
+#[test]
+fn test_sorcerer_cannot_use_plate_armor() {
+    // Sorcerer has no heavy_armor proficiency
+}
+
+#[test]
+fn test_item_with_no_proficiency_requirement() {
+    // Anyone can use items with no proficiency requirement
+}
+
+#[test]
+fn test_load_classes_with_proficiencies() {
+    // Integration test loading classes.ron
+}
+
+#[test]
+fn test_load_races_with_proficiencies_and_tags() {
+    // Integration test loading races.ron
+}
+```
+
+Added test in `src/domain/classes.rs`:
+
+```rust
+#[test]
+fn test_class_definition_has_proficiency() {
+    let knight = create_test_knight();
+    assert!(knight.has_proficiency("heavy_armor"));
+    assert!(knight.has_proficiency("martial_melee"));
+    assert!(!knight.has_proficiency("arcane_item"));
+}
+```
+
+Added test in `src/domain/races.rs`:
+
+```rust
+#[test]
+fn test_race_definition_can_use_item() {
+    let gnome = create_test_gnome();
+    assert!(!gnome.can_use_item(&["large_weapon".to_string()]));
+    assert!(gnome.can_use_item(&["light".to_string()]));
+}
+```
+
+### Files Modified
+
+- `src/domain/classes.rs` - Added proficiencies field and has_proficiency method
+- `src/domain/races.rs` - Added can_use_item method
+- `src/domain/proficiency.rs` - Added Phase 2 integration tests
+- `src/domain/character_definition.rs` - Updated test ClassDefinition instances
+- `src/bin/class_editor.rs` - Updated ClassDefinition instances
+- `data/classes.ron` - Added proficiencies to all classes
+- `data/races.ron` - Already had proficiencies (verified)
+- `campaigns/tutorial/data/classes.ron` - Added proficiencies to all classes
+- `campaigns/tutorial/data/races.ron` - Enhanced proficiency documentation
+
+### Validation
+
+- [x] `cargo fmt --all` applied successfully
+- [x] `cargo check --all-targets --all-features` passes
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` passes
+- [x] `cargo test --all-features` passes (585 tests)
+- [x] All doc tests pass (305 tests)
+
+### Architecture Compliance
+
+- [x] Uses `ProficiencyId` type alias consistently
+- [x] Follows `#[serde(default)]` pattern for backward compatibility
+- [x] RON format used for all data files
+- [x] UNION logic implemented (class OR race grants proficiency)
+- [x] Tag-based restrictions work independently of proficiencies
+
+### Success Criteria Met
+
+- [x] ClassDefinition has proficiencies field
+- [x] RaceDefinition has can_use_item method
+- [x] Data files updated with appropriate proficiencies
+- [x] Elf Sorcerer CAN use Long Bow (race grants proficiency)
+- [x] Gnome Archer CANNOT use Long Bow (large_weapon tag)
+- [x] Gnome Archer CAN use Short Bow (no large_weapon tag)
+- [x] Integration tests pass for loading classes and races
+
+### Deliverables Completed
+
+- [x] `src/domain/classes.rs` - Modified with proficiencies
+- [x] `src/domain/races.rs` - Modified with can_use_item method
+- [x] `data/classes.ron` - Updated with proficiencies
+- [x] `data/races.ron` - Verified with proficiencies and incompatible_item_tags
+- [x] `campaigns/tutorial/data/classes.ron` - Updated with proficiencies
+- [x] `campaigns/tutorial/data/races.ron` - Updated with proficiencies and incompatible_item_tags
+
+### Next Steps (Phase 3)
+
+Per the proficiency migration plan:
+
+1. Update ItemType sub-structs (WeaponData, ArmorData, AccessoryData) with classification fields
+2. Create migration mapping from old item data to new classification
+3. Update item data files with classifications
+4. Add `required_proficiency()` method to Item struct
+
+---

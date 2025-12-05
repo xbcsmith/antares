@@ -18,6 +18,18 @@
 //   - Cleric:   1d6  (medium HP, divine caster)
 //   - Sorcerer: 1d4  (lowest HP, arcane caster)
 //   - Robber:   1d6  (medium HP, utility specialist)
+//
+// Proficiencies (see data/proficiencies.ron for definitions):
+//   - simple_weapon: Basic weapons anyone can learn
+//   - martial_melee: Advanced melee weapons
+//   - martial_ranged: Ranged weapons requiring training
+//   - blunt_weapon: Maces, hammers, staffs (favored by clerics)
+//   - light_armor: Leather, padded armor
+//   - medium_armor: Chain mail, scale mail
+//   - heavy_armor: Plate mail, full plate
+//   - shield: All shield types
+//   - arcane_item: Wands, arcane scrolls
+//   - divine_item: Holy symbols, divine scrolls
 
 [
     // ===== Knight - Tank/Melee Specialist =====
@@ -34,6 +46,14 @@
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "martial_melee",
+                "light_armor",
+                "medium_armor",
+                "heavy_armor",
+                "shield",
+            ],
         ),
 
     // ===== Paladin - Hybrid Fighter/Cleric =====
@@ -50,6 +70,16 @@
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "martial_melee",
+                "blunt_weapon",
+                "light_armor",
+                "medium_armor",
+                "heavy_armor",
+                "shield",
+                "divine_item",
+            ],
         ),
 
     // ===== Archer - Ranged Specialist =====
@@ -66,6 +96,12 @@
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "martial_ranged",
+                "light_armor",
+                "medium_armor",
+            ],
         ),
 
     // ===== Cleric - Divine Spellcaster =====
@@ -82,6 +118,14 @@
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "blunt_weapon",
+                "light_armor",
+                "medium_armor",
+                "shield",
+                "divine_item",
+            ],
         ),
 
     // ===== Sorcerer - Arcane Spellcaster =====
@@ -98,6 +142,10 @@
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "arcane_item",
+            ],
         ),
 
     // ===== Robber - Utility Specialist =====
@@ -114,5 +162,10 @@
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "martial_melee",
+                "light_armor",
+            ],
         ),
 ]

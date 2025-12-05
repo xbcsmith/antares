@@ -2446,6 +2446,7 @@ mod tests {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec![],
         };
 
         // Endurance 10 = 0 modifier, HP = 10 + 0 = 10
@@ -2481,6 +2482,7 @@ mod tests {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec![],
         };
 
         // Very low endurance should still give minimum 1 HP
@@ -2506,6 +2508,7 @@ mod tests {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec![],
         };
 
         let stats = Stats::new(10, 16, 10, 10, 10, 10, 10);
@@ -2532,6 +2535,7 @@ mod tests {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec![],
         };
 
         // Intellect 16 = SP = 16 - 10 = 6
@@ -2564,6 +2568,7 @@ mod tests {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec![],
         };
 
         // Personality 16 = SP = (16 - 10) / 2 = 3
@@ -2590,6 +2595,7 @@ mod tests {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec![],
         };
 
         let paladin = ClassDefinition {
@@ -2605,6 +2611,7 @@ mod tests {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec![],
         };
 
         let knight = ClassDefinition {
@@ -2620,6 +2627,7 @@ mod tests {
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec![],
         };
 
         assert_eq!(calculate_starting_spell_level(&sorcerer), 1);
