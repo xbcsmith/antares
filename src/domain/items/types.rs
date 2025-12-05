@@ -42,6 +42,108 @@ pub enum ItemType {
     Quest(QuestData),
 }
 
+// ===== Classification Enums =====
+
+/// Weapon classification determines proficiency requirement
+///
+/// Each weapon belongs to exactly one classification, which maps to a
+/// proficiency requirement. Classes and races grant proficiencies that
+/// allow use of items with matching classifications.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::WeaponClassification;
+///
+/// let classification = WeaponClassification::MartialMelee;
+/// assert_ne!(classification, WeaponClassification::Simple);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum WeaponClassification {
+    /// Basic weapons anyone can use: clubs, daggers, staffs
+    #[default]
+    Simple,
+    /// Advanced melee weapons: swords, axes, maces (fighters, paladins)
+    MartialMelee,
+    /// Ranged weapons: bows, crossbows (archers, rangers)
+    MartialRanged,
+    /// Weapons without edge: maces, hammers, staffs (clerics)
+    Blunt,
+    /// Unarmed combat: fists, martial arts (monks)
+    Unarmed,
+}
+
+/// Armor classification determines proficiency requirement
+///
+/// Each armor piece belongs to exactly one classification, which maps to a
+/// proficiency requirement.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::ArmorClassification;
+///
+/// let classification = ArmorClassification::Heavy;
+/// assert_ne!(classification, ArmorClassification::Light);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum ArmorClassification {
+    /// Light armor: leather, padded
+    #[default]
+    Light,
+    /// Medium armor: chain mail, scale
+    Medium,
+    /// Heavy armor: plate mail, full plate
+    Heavy,
+    /// All shield types
+    Shield,
+}
+
+/// Magic item classification for arcane vs divine items
+///
+/// Determines which classes can use magical items like wands, scrolls,
+/// and holy symbols.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::MagicItemClassification;
+///
+/// let classification = MagicItemClassification::Arcane;
+/// assert_ne!(classification, MagicItemClassification::Divine);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum MagicItemClassification {
+    /// Arcane items: wands, arcane scrolls (sorcerers)
+    Arcane,
+    /// Divine items: holy symbols, divine scrolls (clerics)
+    Divine,
+    /// Universal items: potions, rings (anyone)
+    #[default]
+    Universal,
+}
+
+/// Alignment restriction for items (separate from proficiency)
+///
+/// Some items can only be used by characters of specific alignments.
+/// This is checked separately from proficiency requirements.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::AlignmentRestriction;
+///
+/// let restriction = AlignmentRestriction::GoodOnly;
+/// assert_ne!(restriction, AlignmentRestriction::EvilOnly);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AlignmentRestriction {
+    /// Only good-aligned characters can use this item
+    GoodOnly,
+    /// Only evil-aligned characters can use this item
+    EvilOnly,
+}
+
 // ===== Weapon Data =====
 
 /// Weapon-specific data
@@ -764,6 +866,7 @@ impl Disablement {
 ///     max_charges: 0,
 ///     is_cursed: false,
 ///     icon_path: None,
+///     tags: vec![],
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -793,6 +896,17 @@ pub struct Item {
     /// Path to item icon asset (optional)
     #[serde(default)]
     pub icon_path: Option<String>,
+    /// Arbitrary tags for fine-grained restrictions (e.g., "large_weapon", "two_handed")
+    ///
+    /// Standard tags by convention (not enforced):
+    /// - `large_weapon` - Too big for small races (Halfling, Gnome)
+    /// - `two_handed` - Requires both hands
+    /// - `heavy_armor` - Encumbering armor
+    /// - `elven_crafted` - Made by elves
+    /// - `dwarven_crafted` - Made by dwarves
+    /// - `requires_strength` - Needs high strength
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 impl Item {
@@ -1253,6 +1367,7 @@ mod tests {
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         assert!(weapon.is_weapon());
@@ -1282,6 +1397,7 @@ mod tests {
             max_charges: 30,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         assert!(magical_sword.is_magical());
@@ -1307,6 +1423,7 @@ mod tests {
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         assert_eq!(item.to_string(), "Basic Sword");
@@ -1331,6 +1448,7 @@ mod tests {
             max_charges: 0,
             is_cursed: true,
             icon_path: None,
+            tags: vec![],
         };
 
         assert_eq!(cursed.to_string(), "Cursed Mace (Cursed)");

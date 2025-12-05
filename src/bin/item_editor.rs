@@ -230,6 +230,7 @@ impl ItemEditor {
             max_charges,
             is_cursed,
             icon_path: None,
+            tags: vec![],
         };
 
         self.items.push(item);
@@ -837,14 +838,14 @@ mod tests {
             items: vec![
                 Item {
                     id: 1,
-                    name: "Item 1".to_string(),
+                    name: "Test Sword".to_string(),
                     item_type: ItemType::Weapon(WeaponData {
-                        damage: DiceRoll::new(1, 6, 0),
+                        damage: DiceRoll::new(1, 8, 0),
                         bonus: 0,
                         hands_required: 1,
                     }),
-                    base_cost: 10,
-                    sell_cost: 5,
+                    base_cost: 100,
+                    sell_cost: 50,
                     disablements: Disablement::ALL,
                     constant_bonus: None,
                     temporary_bonus: None,
@@ -852,6 +853,7 @@ mod tests {
                     max_charges: 0,
                     is_cursed: false,
                     icon_path: None,
+                    tags: vec![],
                 },
                 Item {
                     id: 5,
@@ -869,6 +871,7 @@ mod tests {
                     max_charges: 0,
                     is_cursed: false,
                     icon_path: None,
+                    tags: vec![],
                 },
             ],
             file_path: PathBuf::from("test.ron"),

@@ -23,6 +23,7 @@ pub mod conditions;
 pub mod dialogue;
 pub mod items;
 pub mod magic;
+pub mod proficiency;
 pub mod progression;
 pub mod quest;
 pub mod races;
@@ -39,3 +40,9 @@ pub use dialogue::{DialogueId, NodeId};
 pub use quest::QuestId;
 pub use types::{CharacterId, EventId, ItemId, MapId, MonsterId, RaceId, SpellId, TownId};
 pub use types::{DiceRoll, Direction, GameTime, Position};
+
+// Re-export proficiency types
+pub use proficiency::{
+    has_proficiency_union, is_item_compatible_with_race, ProficiencyCategory, ProficiencyDatabase,
+    ProficiencyDefinition, ProficiencyError, ProficiencyId,
+};

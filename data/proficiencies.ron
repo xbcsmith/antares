@@ -1,0 +1,98 @@
+// proficiencies.ron - Proficiency definitions for Antares RPG
+//
+// This file contains all proficiency definitions in RON (Rusty Object Notation) format.
+// See docs/explanation/proficiency_migration_plan.md for design details.
+//
+// Proficiencies define what types of items a character can use. They are:
+// - Granted by classes and races
+// - Required by items based on their classification
+// - Resolved using UNION logic (class OR race grants proficiency)
+
+[
+    // ===== Weapon Proficiencies =====
+    // Note: No inheritance - each proficiency is independent.
+    // martial_melee does NOT imply simple_weapon.
+
+    (
+        id: "simple_weapon",
+        name: "Simple Weapons",
+        category: Weapon,
+        description: "Basic weapons anyone can learn: clubs, daggers, staffs, quarterstaffs",
+    ),
+
+    (
+        id: "martial_melee",
+        name: "Martial Melee Weapons",
+        category: Weapon,
+        description: "Advanced melee weapons: swords, axes, maces, flails",
+    ),
+
+    (
+        id: "martial_ranged",
+        name: "Martial Ranged Weapons",
+        category: Weapon,
+        description: "Ranged weapons requiring training: bows, crossbows",
+    ),
+
+    (
+        id: "blunt_weapon",
+        name: "Blunt Weapons",
+        category: Weapon,
+        description: "Weapons without an edge: maces, hammers, staffs (favored by clerics)",
+    ),
+
+    (
+        id: "unarmed",
+        name: "Unarmed Combat",
+        category: Weapon,
+        description: "Fighting without weapons: fists, martial arts techniques",
+    ),
+
+    // ===== Armor Proficiencies =====
+
+    (
+        id: "light_armor",
+        name: "Light Armor",
+        category: Armor,
+        description: "Lightweight protective gear: leather armor, padded armor",
+    ),
+
+    (
+        id: "medium_armor",
+        name: "Medium Armor",
+        category: Armor,
+        description: "Moderate protection: chain mail, scale mail, breastplate",
+    ),
+
+    (
+        id: "heavy_armor",
+        name: "Heavy Armor",
+        category: Armor,
+        description: "Maximum protection: plate mail, full plate armor",
+    ),
+
+    // ===== Shield Proficiency =====
+
+    (
+        id: "shield",
+        name: "Shields",
+        category: Shield,
+        description: "All shield types: bucklers, kite shields, tower shields",
+    ),
+
+    // ===== Magic Item Proficiencies =====
+
+    (
+        id: "arcane_item",
+        name: "Arcane Items",
+        category: MagicItem,
+        description: "Magical items powered by arcane energy: wands, arcane scrolls, spellbooks",
+    ),
+
+    (
+        id: "divine_item",
+        name: "Divine Items",
+        category: MagicItem,
+        description: "Magical items blessed by divine power: holy symbols, divine scrolls, prayer beads",
+    ),
+]

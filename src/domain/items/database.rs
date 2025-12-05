@@ -185,6 +185,7 @@ impl ItemDatabase {
     ///     max_charges: 0,
     ///     is_cursed: false,
     ///     icon_path: None,
+    ///     tags: vec![],
     /// };
     /// db.add_item(club).unwrap();
     ///
@@ -281,6 +282,7 @@ impl ItemDatabase {
     ///     max_charges: 0,
     ///     is_cursed: false,
     ///     icon_path: None,
+    ///     tags: vec![],
     /// };
     /// db.add_item(club).unwrap();
     ///
@@ -322,6 +324,7 @@ mod tests {
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         }
     }
 

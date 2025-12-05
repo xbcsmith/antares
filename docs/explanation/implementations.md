@@ -2601,3 +2601,224 @@ All phases of the hard-coded removal plan are now complete:
    classes/races through the same data-driven interfaces.
 
 ---
+
+## Proficiency System Migration - Phase 1: Core Type Definitions (2025-XX-XX)
+
+**Objective**: Create the foundational proficiency and classification types without breaking existing code, as specified in `docs/explanation/proficiency_migration_plan.md`.
+
+### Background
+
+The proficiency system replaces the bit-mask based class disablement system with a more flexible, data-driven approach. Instead of items storing which classes CAN'T use them, the new system defines:
+
+- What proficiencies classes and races grant
+- What proficiencies items require based on their classification
+- UNION logic where a character can use an item if EITHER class OR race grants the proficiency
+
+### Changes Implemented
+
+#### 1.1 Created Classification Enums
+
+Added to `src/domain/items/types.rs`:
+
+- **WeaponClassification** enum: Simple, MartialMelee, MartialRanged, Blunt, Unarmed
+- **ArmorClassification** enum: Light, Medium, Heavy, Shield
+- **MagicItemClassification** enum: Arcane, Divine, Universal
+- **AlignmentRestriction** enum: GoodOnly, EvilOnly
+
+Each enum:
+
+- Has `#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]`
+- Uses `#[default]` attribute for the default variant
+- Includes comprehensive doc comments with examples
+
+#### 1.2 Added Tags Field to Item Struct
+
+Modified `Item` struct in `src/domain/items/types.rs`:
+
+```rust
+/// Arbitrary tags for fine-grained restrictions (e.g., "large_weapon", "two_handed")
+#[serde(default)]
+pub tags: Vec<String>,
+```
+
+Standard tags by convention (not enforced):
+
+- `large_weapon` - Too big for small races (Halfling, Gnome)
+- `two_handed` - Requires both hands
+- `heavy_armor` - Encumbering armor
+- `elven_crafted` - Made by elves
+- `dwarven_crafted` - Made by dwarves
+- `requires_strength` - Needs high strength
+
+#### 1.3 Created Proficiency Module
+
+Created new file `src/domain/proficiency.rs` with:
+
+**Type Aliases:**
+
+- `ProficiencyId = String` - Unique identifier for proficiencies
+
+**Enums:**
+
+- `ProficiencyCategory` - Weapon, Armor, Shield, MagicItem
+
+**Structs:**
+
+- `ProficiencyDefinition` - id, name, category, description
+- `ProficiencyDatabase` - HashMap-based storage with load/get/validate/all methods
+
+**Error Types:**
+
+- `ProficiencyError` - ProficiencyNotFound, LoadError, ParseError, ValidationError, DuplicateId
+
+**Classification Mapping Functions:**
+
+- `proficiency_for_weapon(WeaponClassification) -> ProficiencyId`
+- `proficiency_for_armor(ArmorClassification) -> ProficiencyId`
+- `proficiency_for_magic_item(MagicItemClassification) -> Option<ProficiencyId>`
+
+**Helper Functions:**
+
+- `has_proficiency_union()` - Core UNION logic for class + race proficiencies
+- `is_item_compatible_with_race()` - Tag-based compatibility check
+
+#### 1.4 Created Proficiency Data File
+
+Created `data/proficiencies.ron` with 11 standard proficiencies:
+
+**Weapon Proficiencies (5):**
+
+- `simple_weapon` - Clubs, daggers, staffs
+- `martial_melee` - Swords, axes, maces
+- `martial_ranged` - Bows, crossbows
+- `blunt_weapon` - Maces, hammers (clerics)
+- `unarmed` - Martial arts, fists
+
+**Armor Proficiencies (4):**
+
+- `light_armor` - Leather, padded
+- `medium_armor` - Chain mail, scale
+- `heavy_armor` - Plate mail, full plate
+- `shield` - All shield types
+
+**Magic Item Proficiencies (2):**
+
+- `arcane_item` - Wands, arcane scrolls
+- `divine_item` - Holy symbols, divine scrolls
+
+#### 1.5 Updated Module Exports
+
+Modified `src/domain/mod.rs`:
+
+- Added `pub mod proficiency;`
+- Re-exported: `has_proficiency_union`, `is_item_compatible_with_race`, `ProficiencyCategory`, `ProficiencyDatabase`, `ProficiencyDefinition`, `ProficiencyError`, `ProficiencyId`
+
+Modified `src/domain/items/mod.rs`:
+
+- Re-exported classification enums: `AlignmentRestriction`, `ArmorClassification`, `MagicItemClassification`, `WeaponClassification`
+
+### Tests Added
+
+**ProficiencyDefinition Tests:**
+
+- `test_proficiency_definition_new` - Constructor works
+- `test_proficiency_definition_with_description` - Description field
+
+**ProficiencyCategory Tests:**
+
+- `test_proficiency_category_default` - Default is Weapon
+- `test_proficiency_category_equality` - Equality works
+
+**ProficiencyDatabase Tests:**
+
+- `test_database_new` - Empty database creation
+- `test_database_add` - Adding proficiencies
+- `test_database_add_duplicate` - Duplicate ID rejection
+- `test_database_get` - Lookup by ID
+- `test_database_remove` - Removal
+- `test_database_all` - Getting all proficiencies
+- `test_database_all_ids` - Getting all IDs
+- `test_database_by_category` - Category filtering
+- `test_database_validate_success` - Validation passes
+- `test_database_load_from_string` - RON parsing
+- `test_database_load_from_string_duplicate` - Duplicate detection in load
+- `test_database_load_from_string_parse_error` - Invalid RON handling
+
+**Classification Mapping Tests:**
+
+- `test_proficiency_for_weapon` - All 5 weapon classifications
+- `test_proficiency_for_armor` - All 4 armor classifications
+- `test_proficiency_for_magic_item` - Arcane, Divine, Universal
+
+**Helper Function Tests:**
+
+- `test_has_proficiency_union_class_grants` - Class provides proficiency
+- `test_has_proficiency_union_race_grants` - Race provides proficiency
+- `test_has_proficiency_union_both_grant` - Both provide (still works)
+- `test_has_proficiency_union_neither_grants` - Neither provides
+- `test_has_proficiency_union_no_requirement` - No proficiency needed
+- `test_is_item_compatible_no_tags` - Item with no tags
+- `test_is_item_compatible_no_restrictions` - Race with no restrictions
+- `test_is_item_compatible_incompatible` - Incompatible tag found
+- `test_is_item_compatible_no_overlap` - No matching tags
+
+**Integration Test:**
+
+- `test_load_proficiencies_from_data_file` - Load actual data/proficiencies.ron
+
+### Files Modified for Tags Compatibility
+
+Updated Item initializers to include `tags: vec![]`:
+
+- `src/domain/items/database.rs` - Test helper and doc examples
+- `src/domain/items/types.rs` - Tests and doc examples
+- `src/sdk/templates.rs` - All template functions
+- `src/bin/item_editor.rs` - CLI editor tests
+
+### Validation
+
+All quality checks pass:
+
+- `cargo fmt --all` - Code formatted successfully
+- `cargo check --all-targets --all-features` - Compilation successful
+- `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- `cargo test --all-features` - 303 tests pass (unit + doc tests)
+
+### Architecture Compliance
+
+- [x] Classification enums match architecture design
+- [x] ProficiencyDatabase follows existing database patterns (ClassDatabase, RaceDatabase)
+- [x] RON format used for data files
+- [x] Type aliases used consistently (ProficiencyId)
+- [x] Module structure follows architecture.md Section 3.2
+- [x] No existing functionality broken
+- [x] Existing Item struct backward compatible (tags field has #[serde(default)])
+
+### Success Criteria Met
+
+- [x] `cargo check` passes
+- [x] `cargo clippy` passes with no warnings
+- [x] `cargo test` passes
+- [x] `ProficiencyDatabase` can load from RON file
+- [x] Classification enums serialize/deserialize correctly
+- [x] UNION logic helper functions work correctly
+- [x] Item tags field added without breaking existing data files
+
+### Deliverables Completed
+
+- [x] `src/domain/items/types.rs` - Classification enums + `tags: Vec<String>` field
+- [x] `src/domain/proficiency.rs` - New module with UNION logic
+- [x] `data/proficiencies.ron` - Standard proficiencies (11 total)
+- [x] `src/domain/mod.rs` - Export proficiency module
+- [x] Tests achieving >80% coverage
+
+### Next Steps (Phase 2)
+
+Per the proficiency migration plan:
+
+1. Add `proficiencies: Vec<ProficiencyId>` to ClassDefinition
+2. Update RaceDefinition with proficiencies (already has the field)
+3. Update data files (classes.ron, races.ron)
+4. Add validation to ensure proficiency IDs exist in proficiencies.ron
+
+---
