@@ -1795,3 +1795,176 @@ assert!(knight.is_alive());
 ```
 
 ---
+
+## Phase 6: Documentation and Cleanup (Character Definition Implementation Plan) (2025-01-XX)
+
+**Objective**: Complete documentation and finalize the character definition system
+implementation with architecture documentation, usage guides, and code cleanup.
+
+### Background
+
+Per the Character Definition Implementation Plan (`docs/explanation/character_definition_implementation_plan.md`),
+Phase 6 completes the character definition system by updating all relevant documentation,
+creating a how-to guide for campaign designers, and ensuring code quality.
+
+### Changes Implemented
+
+#### 6.1 Updated Architecture Documentation
+
+Updated `docs/reference/architecture.md`:
+
+- Added Section 4.7: Character Definition (Data-Driven Templates)
+
+  - `StartingEquipment` struct with slot-based equipment specification
+  - `BaseStats` struct for pre-modifier stat values
+  - `CharacterDefinition` struct with all template fields
+  - `CharacterDatabase` struct for loading and managing definitions
+  - `CharacterDefinitionError` enum for error handling
+  - Instantiation flow documentation
+  - Example usage code
+
+- Added `characters.ron` to Section 7.1 External Data Files listing
+- Added campaign-specific character file path documentation
+- Added Character Definition RON format example to Section 7.2
+- Documented character definition fields and instantiation process
+
+#### 6.2 Updated Implementation Documentation
+
+Updated `docs/explanation/implementations.md`:
+
+- Documented Phase 6 completion
+- Linked all documentation updates
+- Summarized character definition system components
+
+#### 6.3 Created How-To Guide
+
+Created `docs/how-to/create_characters.md`:
+
+- Overview of character definition system
+- Character types (premade vs template)
+- File locations (core vs campaign-specific)
+- Campaign Builder usage instructions
+- Manual RON file editing guide
+- Complete field reference table
+- Balancing guidelines with stat recommendations by class
+- Race modifier reference
+- Starting equipment tier guidelines
+- Instantiation process explanation with examples
+- Common patterns (premade party, NPC templates)
+- Validation instructions and common errors
+- Game code integration examples
+- Tips and best practices
+
+#### 6.4 Updated Campaign Loader
+
+Updated `src/sdk/campaign_loader.rs`:
+
+- Added `characters` field to `CampaignData` struct
+- Added `default_characters_path()` helper function returning `"data/characters.ron"`
+- Added `characters_file` field to `CampaignMetadata` struct
+- Updated `TryFrom<CampaignMetadata>` implementation to map characters field
+- Updated test `test_campaign_data_defaults` to verify characters path
+
+Updated dependent files:
+
+- `src/application/save_game.rs`: Added characters field to test
+- `src/sdk/campaign_packager.rs`: Added characters field to two tests
+- `tests/phase14_campaign_integration_test.rs`: Added characters field to test helper
+
+#### 6.5 Code Verification
+
+Verified code quality:
+
+- No TODO/FIXME/XXX comments in character_definition.rs
+- All public APIs have doc comments with examples
+- Code passes all quality checks
+
+### Validation
+
+```bash
+cargo fmt --all                                    # ✓ No changes
+cargo check --all-targets --all-features           # ✓ 0 errors
+cargo clippy --all-targets --all-features -- -D warnings  # ✓ 0 warnings
+cargo test --all-features                          # ✓ All tests passed
+```
+
+### Architecture Compliance
+
+- [x] Documentation follows Diataxis framework (how-to in how-to/, reference in reference/)
+- [x] Markdown filenames use lowercase_with_underscores.md
+- [x] RON format documented and exemplified correctly
+- [x] Architecture document updated with new data structures
+- [x] Type aliases documented (CharacterDefinitionId, RaceId, ClassId)
+- [x] No emojis in documentation
+
+### Success Criteria Met
+
+- [x] Architecture documentation is complete and accurate
+- [x] Implementation documentation updated
+- [x] How-to guide created for character creation
+- [x] All public APIs have doc comments with examples
+- [x] Code passes all quality checks
+- [x] No TODO comments remaining in implementation
+
+### Files Created
+
+- `docs/how-to/create_characters.md`: Step-by-step guide for creating character definitions
+
+### Files Modified
+
+- `docs/reference/architecture.md`:
+
+  - Added Section 4.7 Character Definition
+  - Added type aliases (CharacterDefinitionId, RaceId, ClassId)
+  - Updated Section 7.1 data files listing
+  - Added Section 7.2 Character Definition RON example
+
+- `docs/explanation/implementations.md`:
+
+  - Added Phase 6 documentation
+
+- `src/sdk/campaign_loader.rs`:
+
+  - Added `characters` field to `CampaignData` struct
+  - Added `default_characters_path()` function
+  - Added `characters_file` field to `CampaignMetadata` struct
+  - Updated `TryFrom<CampaignMetadata>` implementation
+  - Updated `test_campaign_data_defaults` test
+
+- `src/application/save_game.rs`:
+
+  - Added characters field to test CampaignData
+
+- `src/sdk/campaign_packager.rs`:
+
+  - Added characters field to test CampaignData (2 instances)
+
+- `tests/phase14_campaign_integration_test.rs`:
+  - Added characters field to test helper function
+
+### Character Definition System Summary
+
+The complete character definition system now includes:
+
+| Component       | Location                                        | Purpose                      |
+| --------------- | ----------------------------------------------- | ---------------------------- |
+| Domain Types    | `src/domain/character_definition.rs`            | Core data structures         |
+| Core Data       | `data/characters.ron`                           | Default premade characters   |
+| Campaign Data   | `campaigns/*/data/characters.ron`               | Campaign-specific characters |
+| SDK Integration | `src/sdk/database.rs`                           | ContentDatabase loading      |
+| SDK Editor      | `sdk/campaign_builder/src/characters_editor.rs` | Visual editor                |
+| Validation      | `sdk/campaign_builder/src/validation.rs`        | Reference validation         |
+| Architecture    | `docs/reference/architecture.md`                | Technical specification      |
+| How-To Guide    | `docs/how-to/create_characters.md`              | Usage documentation          |
+
+### Next Steps (Future Enhancements)
+
+The character definition system is complete. Potential future enhancements:
+
+1. **Level Scaling**: Add `starting_level` field for higher-level premade characters
+2. **Portrait System**: Extend portrait_id to support path-based custom portraits
+3. **NPC Extensions**: Add fields for dialogue_id, location, recruitment conditions
+4. **Procedural Generation**: Use templates with stat randomization ranges
+5. **Import/Export**: Add character definition import/export in Campaign Builder
+
+---

@@ -772,12 +772,206 @@ pub type MapId = u16;
 pub type CharacterId = usize;
 pub type TownId = u8;
 pub type EventId = u16;
+pub type CharacterDefinitionId = String;
+pub type RaceId = String;
+pub type ClassId = String;
 
 /// 2D position on a map
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Position {
     pub x: i32,
     pub y: i32,
+}
+```
+
+#### 4.7 Character Definition (Data-Driven Templates)
+
+Character definitions are data-driven templates stored in RON files that can be
+instantiated into runtime `Character` objects. This separates character templates
+(campaign data) from character instances (runtime state).
+
+```rust
+/// Starting equipment specification for character definitions
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StartingEquipment {
+    pub weapon: Option<ItemId>,
+    pub armor: Option<ItemId>,
+    pub shield: Option<ItemId>,
+    pub helmet: Option<ItemId>,
+    pub boots: Option<ItemId>,
+    pub accessory1: Option<ItemId>,
+    pub accessory2: Option<ItemId>,
+}
+
+impl StartingEquipment {
+    pub fn is_empty(&self) -> bool {
+        self.weapon.is_none() && self.armor.is_none() && self.shield.is_none()
+            && self.helmet.is_none() && self.boots.is_none()
+            && self.accessory1.is_none() && self.accessory2.is_none()
+    }
+
+    pub fn equipped_count(&self) -> usize {
+        [&self.weapon, &self.armor, &self.shield, &self.helmet,
+         &self.boots, &self.accessory1, &self.accessory2]
+            .iter()
+            .filter(|slot| slot.is_some())
+            .count()
+    }
+
+    pub fn all_item_ids(&self) -> Vec<ItemId> {
+        [self.weapon, self.armor, self.shield, self.helmet,
+         self.boots, self.accessory1, self.accessory2]
+            .iter()
+            .filter_map(|&id| id)
+            .collect()
+    }
+}
+
+/// Base stats for character definitions (before race/class modifiers)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BaseStats {
+    pub might: u8,
+    pub intellect: u8,
+    pub personality: u8,
+    pub endurance: u8,
+    pub speed: u8,
+    pub accuracy: u8,
+    pub luck: u8,
+}
+
+impl Default for BaseStats {
+    fn default() -> Self {
+        Self {
+            might: 10,
+            intellect: 10,
+            personality: 10,
+            endurance: 10,
+            speed: 10,
+            accuracy: 10,
+            luck: 10,
+        }
+    }
+}
+
+/// Data-driven character template for premade characters and NPCs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterDefinition {
+    pub id: CharacterDefinitionId,
+    pub name: String,
+    pub race_id: RaceId,
+    pub class_id: ClassId,
+    pub sex: Sex,
+    pub alignment: Alignment,
+    pub base_stats: BaseStats,
+    #[serde(default)]
+    pub portrait_id: u8,
+    #[serde(default)]
+    pub starting_gold: u32,
+    #[serde(default)]
+    pub starting_gems: u32,
+    #[serde(default = "default_starting_food")]
+    pub starting_food: u32,
+    #[serde(default)]
+    pub starting_items: Vec<ItemId>,
+    #[serde(default)]
+    pub starting_equipment: StartingEquipment,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub is_premade: bool,
+}
+
+fn default_starting_food() -> u32 { 10 }
+
+impl CharacterDefinition {
+    /// Creates a runtime Character from this definition
+    pub fn instantiate(
+        &self,
+        races: &RaceDatabase,
+        classes: &ClassDatabase,
+        items: &ItemDatabase,
+    ) -> Result<Character, CharacterDefinitionError> {
+        // 1. Validate references exist
+        // 2. Convert race_id/class_id to enums
+        // 3. Apply race stat modifiers to base_stats
+        // 4. Calculate starting HP (max roll of class HP die + endurance mod)
+        // 5. Calculate starting SP (based on class spell_stat)
+        // 6. Apply race resistances
+        // 7. Populate inventory with starting_items
+        // 8. Create equipment from starting_equipment
+        // 9. Return fully initialized Character
+    }
+}
+
+/// Database of character definitions loaded from RON files
+pub struct CharacterDatabase {
+    characters: HashMap<CharacterDefinitionId, CharacterDefinition>,
+}
+
+impl CharacterDatabase {
+    pub fn load_from_file(path: &str) -> Result<Self, CharacterDefinitionError>;
+    pub fn load_from_string(ron: &str) -> Result<Self, CharacterDefinitionError>;
+    pub fn get_character(&self, id: &str) -> Option<&CharacterDefinition>;
+    pub fn all_characters(&self) -> impl Iterator<Item = &CharacterDefinition>;
+    pub fn premade_characters(&self) -> impl Iterator<Item = &CharacterDefinition>;
+    pub fn template_characters(&self) -> impl Iterator<Item = &CharacterDefinition>;
+    pub fn validate(&self) -> Result<(), CharacterDefinitionError>;
+}
+
+/// Errors for character definition operations
+#[derive(Debug, Error)]
+pub enum CharacterDefinitionError {
+    #[error("Character not found: {0}")]
+    CharacterNotFound(String),
+    #[error("Failed to load character definitions: {0}")]
+    LoadError(String),
+    #[error("Failed to parse RON: {0}")]
+    ParseError(String),
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+    #[error("Duplicate character ID: {0}")]
+    DuplicateId(String),
+    #[error("Invalid race ID '{race_id}' for character '{character_id}'")]
+    InvalidRaceId { character_id: String, race_id: String },
+    #[error("Invalid class ID '{class_id}' for character '{character_id}'")]
+    InvalidClassId { character_id: String, class_id: String },
+    #[error("Invalid item ID '{item_id}' for character '{character_id}'")]
+    InvalidItemId { character_id: String, item_id: ItemId },
+    #[error("Instantiation error for '{character_id}': {message}")]
+    InstantiationError { character_id: String, message: String },
+    #[error("Inventory full for '{character_id}' when adding item {item_id}")]
+    InventoryFull { character_id: String, item_id: ItemId },
+}
+```
+
+**Instantiation Flow:**
+
+The `CharacterDefinition::instantiate()` method bridges data-driven templates
+with runtime Character instances:
+
+1. **Validation**: Verify race_id, class_id, and all item IDs exist in databases
+2. **Enum Conversion**: Convert string IDs to Race/Class enums
+3. **Stat Application**: Apply race modifiers to base stats (clamped to 3-25)
+4. **HP Calculation**: Max roll of class HP die + (endurance - 10) / 2, minimum 1
+5. **SP Calculation**: Based on class spell_stat (Intellect or Personality)
+6. **Resistance Setup**: Copy race resistances to character
+7. **Inventory Population**: Add starting_items to inventory
+8. **Equipment Setup**: Map starting_equipment slots to equipment slots
+9. **Return**: Fully initialized Character ready for gameplay
+
+```rust
+// Example: Instantiate a premade character
+let races = RaceDatabase::load_from_file("data/races.ron")?;
+let classes = ClassDatabase::load_from_file("data/classes.ron")?;
+let items = ItemDatabase::load_from_file("data/items.ron")?;
+let characters = CharacterDatabase::load_from_file("data/characters.ron")?;
+
+let knight_def = characters.get_character("pregen_human_knight").unwrap();
+let knight = knight_def.instantiate(&races, &classes, &items)?;
+
+assert_eq!(knight.name, "Sir Galahad");
+assert_eq!(knight.race, Race::Human);
+assert_eq!(knight.class, Class::Knight);
 }
 
 /// Cardinal directions
@@ -1244,6 +1438,7 @@ data/
 ├── monsters.ron          # Monster definitions
 ├── items.ron            # Item database
 ├── spells.ron           # Spell definitions
+├── characters.ron       # Character definition templates (premade, NPCs)
 ├── maps/
 │   ├── town_sorpigal.ron
 │   ├── dungeon_1.ron
@@ -1251,6 +1446,11 @@ data/
 ├── classes.ron          # Class definitions
 ├── races.ron            # Race definitions
 └── dialogue.ron         # NPC dialogue trees
+
+campaigns/
+└── <campaign_name>/
+    └── data/
+        └── characters.ron  # Campaign-specific character definitions
 ```
 
 #### 7.2 Example Data Format (RON)
@@ -1483,6 +1683,133 @@ data/
 - **Equip Bonus**: Permanent bonus while equipped (constant_bonus)
 - **Use Bonus**: Temporary bonus when used, consumes charges (temporary_bonus)
 - **Charges**: Number of times magical effect can be used (0 = non-magical)
+
+**Character Definition:**
+
+```ron
+// characters.ron - Premade characters and NPC templates
+[
+    (
+        id: "pregen_human_knight",
+        name: "Sir Galahad",
+        race_id: "human",
+        class_id: "knight",
+        sex: Male,
+        alignment: Good,
+        base_stats: (
+            might: 14,
+            intellect: 8,
+            personality: 10,
+            endurance: 14,
+            speed: 10,
+            accuracy: 12,
+            luck: 8,
+        ),
+        portrait_id: 1,
+        starting_gold: 100,
+        starting_gems: 0,
+        starting_food: 10,
+        starting_items: [1, 20],        // Club, Chain Mail
+        starting_equipment: (
+            weapon: Some(1),            // Club equipped
+            armor: Some(20),            // Chain Mail equipped
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "A noble knight seeking glory and honor.",
+        is_premade: true,
+    ),
+    (
+        id: "pregen_elf_sorcerer",
+        name: "Elindra",
+        race_id: "elf",
+        class_id: "sorcerer",
+        sex: Female,
+        alignment: Neutral,
+        base_stats: (
+            might: 8,
+            intellect: 16,
+            personality: 12,
+            endurance: 8,
+            speed: 12,
+            accuracy: 10,
+            luck: 10,
+        ),
+        portrait_id: 5,
+        starting_gold: 50,
+        starting_gems: 5,
+        starting_food: 10,
+        starting_items: [1],            // Club only
+        starting_equipment: (
+            weapon: Some(1),
+            armor: None,
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "An elven mage with a talent for arcane arts.",
+        is_premade: true,
+    ),
+    (
+        id: "npc_template_guard",
+        name: "Town Guard",
+        race_id: "human",
+        class_id: "knight",
+        sex: Male,
+        alignment: Good,
+        base_stats: (
+            might: 12,
+            intellect: 8,
+            personality: 8,
+            endurance: 12,
+            speed: 10,
+            accuracy: 10,
+            luck: 8,
+        ),
+        portrait_id: 10,
+        starting_gold: 20,
+        starting_gems: 0,
+        starting_food: 5,
+        starting_items: [],
+        starting_equipment: (
+            weapon: Some(2),            // Club +1
+            armor: Some(20),            // Chain Mail
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "A loyal town guard.",
+        is_premade: false,              // Template, not premade
+    ),
+]
+```
+
+**Character Definition Fields Explained:**
+
+- **id**: Unique identifier for the character definition (string)
+- **race_id/class_id**: References to races.ron and classes.ron entries
+- **base_stats**: Starting stats before race modifiers are applied
+- **starting_items**: Items added to inventory (by ItemId)
+- **starting_equipment**: Items equipped in slots (by ItemId)
+- **is_premade**: `true` for player-selectable premade characters, `false` for templates
+
+**Instantiation Process:**
+
+When a `CharacterDefinition` is instantiated:
+
+1. Race stat modifiers are applied to `base_stats`
+2. HP is calculated: max(class HP die) + (endurance - 10) / 2
+3. SP is calculated based on class `spell_stat` (Intellect or Personality)
+4. Race resistances are copied to the character
+5. Starting items populate the inventory
+6. Starting equipment is placed in equipment slots
 
 ---
 
