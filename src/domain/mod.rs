@@ -16,6 +16,7 @@
 //! - `items`: Item system (weapons, armor, consumables)
 
 pub mod character;
+pub mod character_definition;
 pub mod classes;
 pub mod combat;
 pub mod conditions;
@@ -30,6 +31,10 @@ pub mod types;
 pub mod world;
 
 // Re-export commonly used types from submodules
+pub use character_definition::{
+    BaseStats, CharacterDatabase, CharacterDefinition, CharacterDefinitionError,
+    CharacterDefinitionId, StartingEquipment,
+};
 pub use dialogue::{DialogueId, NodeId};
 pub use quest::QuestId;
 pub use types::{CharacterId, EventId, ItemId, MapId, MonsterId, RaceId, SpellId, TownId};

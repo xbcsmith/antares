@@ -957,3 +957,178 @@ Key outcomes:
 - Enforced consistency across all editors and added compliance tests and more unit tests to the editors.
 
 ---
+
+## Character Definition System - Phase 1: Domain Types (2025-01-XX)
+
+### Background
+
+The character definition system introduces data-driven character templates that can be
+defined in RON files and used to create pre-made characters, NPCs, and character templates
+for campaigns. This separates **character templates** (data definitions) from **character
+instances** (runtime state).
+
+### Changes Implemented
+
+#### 1.1 Created CharacterDefinition Module (`src/domain/character_definition.rs`)
+
+- **CharacterDefinitionId**: Type alias (`String`) for unique character definition identifiers
+- **CharacterDefinitionError**: Error enum with variants:
+  - `CharacterNotFound` - Definition not found in database
+  - `LoadError` - Failed to load from file
+  - `ParseError` - RON parsing failed
+  - `ValidationError` - Definition validation failed
+  - `DuplicateId` - Duplicate ID in database
+  - `InvalidRaceId` / `InvalidClassId` / `InvalidItemId` - Invalid references
+
+#### 1.2 Created StartingEquipment Struct
+
+Mirrors the Equipment struct for defining starting gear:
+
+- `weapon`, `armor`, `shield`, `helmet`, `boots`, `accessory1`, `accessory2`
+- Helper methods: `new()`, `is_empty()`, `equipped_count()`, `all_item_ids()`
+- Full Serialize/Deserialize support with `#[serde(default)]` for optional fields
+
+#### 1.3 Created BaseStats Struct
+
+Simple stat values for character definitions (before AttributePair conversion):
+
+- All seven stats: `might`, `intellect`, `personality`, `endurance`, `speed`, `accuracy`, `luck`
+- `to_stats()` method converts to runtime `Stats` type with `AttributePair` values
+- Default values of 10 for all stats
+
+#### 1.4 Created CharacterDefinition Struct
+
+Complete template for character creation:
+
+- `id`: Unique identifier (e.g., "pregen_human_knight")
+- `name`: Character display name
+- `race_id`: Reference to races.ron
+- `class_id`: Reference to classes.ron
+- `sex`: Character sex (reuses existing enum)
+- `alignment`: Starting alignment (reuses existing enum)
+- `base_stats`: Starting stats (BaseStats)
+- `portrait_id`: Portrait/avatar identifier
+- `starting_gold`, `starting_gems`, `starting_food`: Initial resources
+- `starting_items`: Items to add to inventory
+- `starting_equipment`: Items to equip
+- `description`: Character backstory/bio
+- `is_premade`: Distinguishes pre-made vs template characters
+
+#### 1.5 Created CharacterDatabase Struct
+
+Database for managing character definitions:
+
+- `new()` - Creates empty database
+- `load_from_file()` - Loads from RON file
+- `load_from_string()` - Loads from RON string (with validation)
+- `add_character()` / `remove_character()` - Mutation methods
+- `get_character()` - Lookup by ID
+- `all_characters()` / `all_character_ids()` - Iteration
+- `premade_characters()` / `template_characters()` - Filtered iteration
+- `validate()` - Validates all definitions
+- `merge()` - Combines two databases
+- `len()` / `is_empty()` - Size queries
+
+#### 1.6 Updated Domain Module Exports
+
+Updated `src/domain/mod.rs` to export:
+
+- `character_definition` module
+- Public types: `BaseStats`, `CharacterDatabase`, `CharacterDefinition`,
+  `CharacterDefinitionError`, `CharacterDefinitionId`, `StartingEquipment`
+
+### Tests Added
+
+34 comprehensive unit tests covering:
+
+**StartingEquipment tests:**
+
+- `test_starting_equipment_new` - Empty construction
+- `test_starting_equipment_is_empty` - Empty detection
+- `test_starting_equipment_equipped_count` - Count calculation
+- `test_starting_equipment_all_item_ids` - Item ID extraction
+- `test_starting_equipment_serialization` - RON round-trip
+
+**BaseStats tests:**
+
+- `test_base_stats_new` - Construction with values
+- `test_base_stats_default` - Default values
+- `test_base_stats_to_stats` - Conversion to runtime Stats
+- `test_base_stats_serialization` - RON round-trip
+
+**CharacterDefinition tests:**
+
+- `test_character_definition_new` - Basic construction
+- `test_character_definition_all_item_ids` - Combined item extraction
+- `test_character_definition_validate_success` - Valid definition
+- `test_character_definition_validate_empty_id` - Empty ID validation
+- `test_character_definition_validate_empty_name` - Empty name validation
+- `test_character_definition_validate_empty_race_id` - Empty race_id validation
+- `test_character_definition_validate_empty_class_id` - Empty class_id validation
+- `test_character_definition_serialization` - RON round-trip
+
+**CharacterDatabase tests:**
+
+- `test_character_database_new` - Empty database
+- `test_character_database_add_character` - Adding definitions
+- `test_character_database_add_duplicate_error` - Duplicate ID detection
+- `test_character_database_remove_character` - Removal
+- `test_character_database_get_character` - Lookup
+- `test_character_database_all_characters` - Iteration
+- `test_character_database_all_character_ids` - ID iteration
+- `test_character_database_premade_characters` - Premade filtering
+- `test_character_database_template_characters` - Template filtering
+- `test_character_database_validate` - Database validation
+- `test_character_database_merge` - Database merging
+- `test_character_database_merge_duplicate_error` - Merge conflict
+- `test_character_database_load_from_string` - Full RON loading
+- `test_character_database_load_minimal` - Minimal RON with defaults
+- `test_character_database_load_duplicate_id_error` - Duplicate in RON
+- `test_character_database_load_invalid_ron` - Parse error handling
+- `test_character_database_load_validation_error` - Validation during load
+
+### Validation
+
+All quality gates pass:
+
+- `cargo fmt --all` - Code formatted
+- `cargo check --all-targets --all-features` - Zero errors
+- `cargo clippy --all-targets --all-features -- -D warnings` - Zero warnings
+- `cargo test --all-features` - 272 tests pass (34 new)
+
+### Architecture Compliance
+
+- Follows `classes.rs` and `races.rs` patterns exactly
+- Uses existing type aliases (`RaceId`, `ClassId`, `ItemId`)
+- Uses existing enums (`Sex`, `Alignment`)
+- RON format for serialization (not JSON/YAML)
+- Proper error types with `thiserror`
+- Comprehensive doc comments with examples on all public items
+
+### Success Criteria Met
+
+- [x] `CharacterDefinitionId` type alias defined
+- [x] `CharacterDefinition` struct with all required fields
+- [x] `StartingEquipment` struct for slot-based gear
+- [x] `CharacterDefinitionError` enum for validation errors
+- [x] `CharacterDatabase` with load/get/validate methods
+- [x] Serde support with appropriate defaults
+- [x] Module exported from `src/domain/mod.rs`
+- [x] > 80% test coverage (34 tests)
+- [x] All cargo quality checks pass
+
+### Files Created
+
+- `src/domain/character_definition.rs` - Complete domain types (1643 lines)
+
+### Files Modified
+
+- `src/domain/mod.rs` - Added module export and re-exports
+
+### Next Steps (Phase 2)
+
+- Create `data/characters.ron` with pre-made characters
+- Create `campaigns/tutorial/data/characters.ron` with tutorial characters
+- Integration tests for data file loading
+
+---
