@@ -1408,3 +1408,156 @@ All quality checks pass:
 - Add race/class dropdowns, item picker, portrait selector
 
 ---
+
+## Phase 4: SDK Character Editor (Character Definition Implementation Plan) (2025-01-XX)
+
+### Background
+
+Following the completion of Phase 3 (SDK Integration), Phase 4 implements the
+visual editor for character definitions in the Campaign Builder. This editor
+allows campaign designers to create, edit, and manage character definitions
+(both pre-made characters and templates) through a graphical interface.
+
+### Changes Implemented
+
+#### 4.1 Created CharactersEditorState (`sdk/campaign_builder/src/characters_editor.rs`)
+
+- `CharactersEditorMode` enum with `List`, `Add`, `Edit` variants
+- `CharactersEditorState` struct with:
+  - Characters list and selection tracking
+  - Search filter and multiple filter options (race, class, alignment, premade)
+  - Edit buffer for form fields
+  - Unsaved changes tracking
+- `CharacterEditBuffer` struct for form field values with string representations
+
+#### 4.2 Implemented Editor State Management
+
+- `start_new_character()` - Initialize buffer for new character
+- `start_edit_character(idx)` - Populate buffer from existing character
+- `save_character()` - Validate and save buffer to characters list
+- `delete_character(idx)` - Remove character at index
+- `cancel_edit()` - Return to list mode without saving
+- `filtered_characters()` - Apply all filters to character list
+- `next_available_character_id()` - Generate unique ID
+- `clear_filters()` - Reset all filter options
+
+#### 4.3 Implemented Editor UI
+
+- `show()` - Main UI rendering method with toolbar and mode routing
+- `show_filters()` - Filter controls with dropdowns for race, class, alignment
+- `show_list()` - Two-column layout with character list and preview panel
+- `show_character_preview()` - Detailed view of selected character
+- `show_character_form()` - Add/Edit form with all CharacterDefinition fields
+- `show_equipment_editor()` - Equipment slot editors with item selection
+- `show_item_selector()` - Reusable item dropdown with ID input
+
+#### 4.4 Integrated into Campaign Builder
+
+- Added `mod characters_editor` declaration to `main.rs`
+- Added `EditorTab::Characters` variant to tab enum
+- Added `characters_file` field to `CampaignMetadata` struct
+- Added `characters_editor_state` field to `CampaignBuilderApp`
+- Added Characters tab to sidebar tabs list
+- Added match arm for `EditorTab::Characters` rendering
+- Added `load_characters_from_campaign()` method
+- Added `load_races_from_campaign()` method (needed for race dropdown)
+- Connected character loading to campaign open workflow
+
+#### 4.5 Filter System
+
+Implemented comprehensive filtering:
+
+- Search filter (matches name or ID)
+- Race filter (dropdown populated from loaded races)
+- Class filter (dropdown populated from loaded classes)
+- Alignment filter (Good/Neutral/Evil)
+- Premade only checkbox
+
+### Tests Added
+
+```rust
+// CharactersEditorState tests
+test_characters_editor_state_creation      - Default state initialization
+test_start_new_character                   - Mode transition to Add
+test_save_character_creates_new            - Character creation from buffer
+test_save_character_empty_id_error         - ID validation
+test_save_character_empty_name_error       - Name validation
+test_save_character_empty_race_error       - Race ID validation
+test_save_character_empty_class_error      - Class ID validation
+test_save_character_duplicate_id_error     - Duplicate ID detection
+test_delete_character                      - Character deletion
+test_cancel_edit                           - Edit cancellation
+test_filtered_characters                   - All filter combinations
+test_next_available_character_id           - ID generation
+test_start_edit_character                  - Edit mode initialization
+test_edit_character_saves_changes          - Update existing character
+test_character_edit_buffer_default         - Buffer default values
+test_editor_mode_transitions               - Complete mode flow
+test_clear_filters                         - Filter reset
+test_sex_name_helper                       - Sex display name
+test_alignment_name_helper                 - Alignment display name
+test_save_character_with_starting_items    - Starting items parsing
+test_save_character_with_equipment         - Equipment slot parsing
+test_save_character_invalid_stat           - Stat validation error
+test_save_character_invalid_gold           - Gold validation error
+test_has_unsaved_changes_flag              - Change tracking
+```
+
+### Validation
+
+```bash
+cargo fmt --all                                    # ✓ No changes
+cargo check --all-targets --all-features           # ✓ 0 errors
+cargo clippy --all-targets --all-features -- -D warnings  # ✓ 0 warnings
+cargo test --all-features                          # ✓ 276 tests passed
+```
+
+### Architecture Compliance
+
+- [x] Follows existing editor patterns (classes_editor, races_editor, items_editor)
+- [x] Uses shared UI components (EditorToolbar, ActionButtons, TwoColumnLayout)
+- [x] Uses type aliases (ItemId, RaceId, ClassId)
+- [x] Uses RON format for data files
+- [x] Implements proper validation with descriptive error messages
+- [x] Separates state from UI rendering
+- [x] Includes comprehensive unit tests
+
+### Success Criteria Met
+
+- [x] Characters tab appears in Campaign Builder
+- [x] Can create new character definitions
+- [x] Can edit existing character definitions
+- [x] Can delete character definitions
+- [x] Changes save to characters.ron in correct format
+- [x] Race dropdown populated from loaded races
+- [x] Class dropdown populated from loaded classes
+- [x] Filters work correctly (search, race, class, alignment, premade)
+- [x] Starting equipment slots editable with item picker
+- [x] Starting items editable as comma-separated IDs
+- [x] All quality checks pass
+
+### Files Created
+
+- `sdk/campaign_builder/src/characters_editor.rs` - Full visual editor
+
+### Files Modified
+
+- `sdk/campaign_builder/src/main.rs`:
+  - Added `mod characters_editor` declaration
+  - Added `EditorTab::Characters` enum variant
+  - Added `characters_file` to `CampaignMetadata`
+  - Added `characters_editor_state` to `CampaignBuilderApp`
+  - Added Characters to sidebar tabs array
+  - Added rendering match arm for Characters tab
+  - Added `load_characters_from_campaign()` method
+  - Added `load_races_from_campaign()` method
+
+### Next Steps (Phase 5)
+
+- Implement `CharacterDefinition::instantiate()` method in `src/domain/character_definition.rs`
+- Add helper functions for applying race/class modifiers
+- Add inventory population and equipment assignment
+- Add integration with new game character selection flow
+- Create documentation (`docs/how-to/create_characters.md`)
+
+---

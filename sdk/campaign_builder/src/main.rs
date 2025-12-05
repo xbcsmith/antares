@@ -23,6 +23,7 @@
 
 mod advanced_validation;
 mod asset_manager;
+mod characters_editor;
 mod classes_editor;
 mod conditions_editor;
 mod dialogue_editor;
@@ -149,6 +150,7 @@ struct CampaignMetadata {
     monsters_file: String,
     classes_file: String,
     races_file: String,
+    characters_file: String,
     maps_dir: String,
     quests_file: String,
     dialogue_file: String,
@@ -212,6 +214,7 @@ impl Default for CampaignMetadata {
             monsters_file: "data/monsters.ron".to_string(),
             classes_file: "data/classes.ron".to_string(),
             races_file: "data/races.ron".to_string(),
+            characters_file: "data/characters.ron".to_string(),
             maps_dir: "data/maps/".to_string(),
             quests_file: "data/quests.ron".to_string(),
             dialogue_file: "data/dialogue.ron".to_string(),
@@ -232,6 +235,7 @@ enum EditorTab {
     Quests,
     Classes,
     Races,
+    Characters,
     Dialogues,
     Assets,
     Validation,
@@ -257,6 +261,7 @@ impl EditorTab {
             EditorTab::Quests => "Quests",
             EditorTab::Classes => "Classes",
             EditorTab::Races => "Races",
+            EditorTab::Characters => "Characters",
             EditorTab::Dialogues => "Dialogues",
             EditorTab::Assets => "Assets",
             EditorTab::Validation => "Validation",
@@ -379,6 +384,9 @@ struct CampaignBuilderApp {
     // Races editor state
     races_editor_state: races_editor::RacesEditorState,
 
+    // Characters editor state
+    characters_editor_state: characters_editor::CharactersEditorState,
+
     // Phase 13: Distribution tools state
     export_wizard: Option<packager::ExportWizard>,
     test_play_session: Option<test_play::TestPlaySession>,
@@ -469,6 +477,8 @@ impl Default for CampaignBuilderApp {
             classes_editor_state: classes_editor::ClassesEditorState::default(),
 
             races_editor_state: races_editor::RacesEditorState::default(),
+
+            characters_editor_state: characters_editor::CharactersEditorState::default(),
 
             // Phase 13: Distribution tools
             export_wizard: None,
@@ -1683,6 +1693,8 @@ impl CampaignBuilderApp {
                     self.load_spells();
                     self.load_monsters();
                     self.load_classes_from_campaign();
+                    self.load_races_from_campaign();
+                    self.load_characters_from_campaign();
                     self.load_maps();
                     self.load_conditions();
 
@@ -2505,6 +2517,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Quests,
                     EditorTab::Classes,
                     EditorTab::Races,
+                    EditorTab::Characters,
                     EditorTab::Dialogues,
                     EditorTab::Assets,
                     EditorTab::Validation,
@@ -2618,6 +2631,17 @@ impl eframe::App for CampaignBuilderApp {
                 ui,
                 self.campaign_dir.as_ref(),
                 &self.campaign.races_file,
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+                &mut self.file_load_merge_mode,
+            ),
+            EditorTab::Characters => self.characters_editor_state.show(
+                ui,
+                &self.races_editor_state.races,
+                &self.classes_editor_state.classes,
+                &self.items,
+                self.campaign_dir.as_ref(),
+                &self.campaign.characters_file,
                 &mut self.unsaved_changes,
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,
@@ -3254,6 +3278,58 @@ impl CampaignBuilderApp {
             }
         } else {
             eprintln!("No campaign directory set when trying to load classes");
+        }
+    }
+
+    /// Load characters from campaign directory
+    fn load_characters_from_campaign(&mut self) {
+        if let Some(dir) = &self.campaign_dir {
+            let path = dir.join(&self.campaign.characters_file);
+            if path.exists() {
+                match self.characters_editor_state.load_from_file(&path) {
+                    Ok(_) => {
+                        self.status_message = format!(
+                            "Loaded {} characters",
+                            self.characters_editor_state.characters.len()
+                        );
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to load characters: {}", e);
+                        eprintln!("Failed to load characters from {:?}: {}", path, e);
+                    }
+                }
+            } else {
+                // Characters file is optional, don't log error if it doesn't exist
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!("Characters file does not exist: {:?}", path),
+                );
+            }
+        } else {
+            eprintln!("No campaign directory set when trying to load characters");
+        }
+    }
+
+    /// Load races from campaign directory
+    fn load_races_from_campaign(&mut self) {
+        if let Some(dir) = &self.campaign_dir {
+            let path = dir.join(&self.campaign.races_file);
+            if path.exists() {
+                match self.races_editor_state.load_from_file(&path) {
+                    Ok(_) => {
+                        self.status_message =
+                            format!("Loaded {} races", self.races_editor_state.races.len());
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to load races: {}", e);
+                        eprintln!("Failed to load races from {:?}: {}", path, e);
+                    }
+                }
+            } else {
+                eprintln!("Races file does not exist: {:?}", path);
+            }
+        } else {
+            eprintln!("No campaign directory set when trying to load races");
         }
     }
 
@@ -3916,6 +3992,7 @@ mod tests {
             monsters_file: "data/monsters.ron".to_string(),
             classes_file: "data/classes.ron".to_string(),
             races_file: "data/races.ron".to_string(),
+            characters_file: "data/characters.ron".to_string(),
             maps_dir: "data/maps/".to_string(),
             quests_file: "data/quests.ron".to_string(),
             dialogue_file: "data/dialogue.ron".to_string(),
