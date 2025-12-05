@@ -141,6 +141,41 @@ pub struct ClassDefinition {
 }
 
 impl ClassDefinition {
+    /// Creates a new class definition with minimal required fields
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Unique identifier for the class
+    /// * `name` - Display name for the class
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::classes::ClassDefinition;
+    ///
+    /// let knight = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+    /// assert_eq!(knight.id, "knight");
+    /// assert_eq!(knight.name, "Knight");
+    /// assert!(!knight.can_cast_spells());
+    /// ```
+    pub fn new(id: String, name: String) -> Self {
+        use crate::domain::types::DiceRoll;
+        Self {
+            id,
+            name,
+            description: String::new(),
+            hp_die: DiceRoll::new(1, 8, 0),
+            spell_school: None,
+            is_pure_caster: false,
+            spell_stat: None,
+            disablement_bit_index: 0,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+        }
+    }
+
     /// Checks if this class can cast spells
     ///
     /// # Examples
@@ -478,6 +513,35 @@ impl ClassDatabase {
     /// Returns true if the database is empty
     pub fn is_empty(&self) -> bool {
         self.classes.is_empty()
+    }
+
+    /// Adds a class definition to the database
+    ///
+    /// # Arguments
+    ///
+    /// * `class` - The class definition to add
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or `Err(ClassError::DuplicateId)` if
+    /// a class with the same ID already exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::classes::{ClassDatabase, ClassDefinition};
+    ///
+    /// let mut db = ClassDatabase::new();
+    /// let knight = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+    /// db.add_class(knight).unwrap();
+    /// assert!(db.get_class("knight").is_some());
+    /// ```
+    pub fn add_class(&mut self, class: ClassDefinition) -> Result<(), ClassError> {
+        if self.classes.contains_key(&class.id) {
+            return Err(ClassError::DuplicateId(class.id.clone()));
+        }
+        self.classes.insert(class.id.clone(), class);
+        Ok(())
     }
 }
 

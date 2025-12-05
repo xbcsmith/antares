@@ -47,6 +47,8 @@ pub enum ValidationCategory {
     Classes,
     /// Race definitions
     Races,
+    /// Character definitions
+    Characters,
     /// Asset files (images, sounds, etc.)
     Assets,
 }
@@ -82,6 +84,7 @@ impl ValidationCategory {
             ValidationCategory::Dialogues => "Dialogues",
             ValidationCategory::Classes => "Classes",
             ValidationCategory::Races => "Races",
+            ValidationCategory::Characters => "Characters",
             ValidationCategory::Assets => "Assets",
         }
     }
@@ -104,6 +107,7 @@ impl ValidationCategory {
             ValidationCategory::Dialogues,
             ValidationCategory::Classes,
             ValidationCategory::Races,
+            ValidationCategory::Characters,
             ValidationCategory::Assets,
         ]
     }
@@ -123,6 +127,7 @@ impl ValidationCategory {
             ValidationCategory::Dialogues => "💬",
             ValidationCategory::Classes => "⚔️",
             ValidationCategory::Races => "👤",
+            ValidationCategory::Characters => "🧑",
             ValidationCategory::Assets => "📦",
         }
     }

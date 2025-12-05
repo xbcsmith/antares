@@ -299,6 +299,42 @@ pub struct RaceDefinition {
 }
 
 impl RaceDefinition {
+    /// Creates a new race definition with minimal required fields
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Unique identifier for the race
+    /// * `name` - Display name for the race
+    /// * `description` - Description of the race
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::races::RaceDefinition;
+    ///
+    /// let human = RaceDefinition::new(
+    ///     "human".to_string(),
+    ///     "Human".to_string(),
+    ///     "Versatile and adaptable".to_string(),
+    /// );
+    /// assert_eq!(human.id, "human");
+    /// assert_eq!(human.name, "Human");
+    /// ```
+    pub fn new(id: String, name: String, description: String) -> Self {
+        Self {
+            id,
+            name,
+            description,
+            stat_modifiers: StatModifiers::default(),
+            resistances: Resistances::default(),
+            special_abilities: vec![],
+            size: SizeCategory::Medium,
+            disablement_bit_index: 0,
+            proficiencies: vec![],
+            incompatible_item_tags: vec![],
+        }
+    }
+
     /// Returns the disablement mask for this race (bit position as mask)
     ///
     /// # Examples
@@ -598,6 +634,32 @@ impl RaceDatabase {
         }
 
         Ok(())
+    }
+
+    /// Returns true if a race with the given ID exists
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The race ID to check
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::races::RaceDatabase;
+    ///
+    /// let ron_data = r#"[
+    ///     (
+    ///         id: "human",
+    ///         name: "Human",
+    ///     ),
+    /// ]"#;
+    ///
+    /// let db = RaceDatabase::load_from_string(ron_data).unwrap();
+    /// assert!(db.has_race("human"));
+    /// assert!(!db.has_race("nonexistent"));
+    /// ```
+    pub fn has_race(&self, id: &str) -> bool {
+        self.races.contains_key(id)
     }
 
     /// Returns the number of races in the database

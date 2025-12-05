@@ -1261,3 +1261,150 @@ All quality checks pass:
 - Add validation rules for character references
 
 ---
+
+## Phase 3: SDK Integration (Character Definition Implementation Plan) (2025-01-XX)
+
+**Objective**: Integrate character definitions into the SDK content database and campaign loader, enabling automatic loading and validation of character data.
+
+### Background
+
+Per the Character Definition Implementation Plan (`docs/explanation/character_definition_implementation_plan.md`), Phase 3 integrates the character definition system into the SDK's `ContentDatabase`. This allows campaigns to define characters in `characters.ron` files that are automatically loaded and validated against races, classes, and items.
+
+### Changes Implemented
+
+#### 3.1 Updated DatabaseError Enum
+
+Added to `src/sdk/database.rs`:
+
+- `CharacterLoadError(String)` variant for character loading failures
+
+#### 3.2 Updated ContentDatabase Struct
+
+Modified `src/sdk/database.rs`:
+
+- Added `pub characters: CharacterDatabase` field
+- Updated `ContentDatabase::new()` to initialize empty `CharacterDatabase`
+- Updated `ContentDatabase::load_campaign()` to load `characters.ron` from campaign data directory
+- Updated `ContentDatabase::load_core()` to load `characters.ron` from core data directory
+
+#### 3.3 Updated ContentDatabase::validate()
+
+Added comprehensive character validation:
+
+- Validates `CharacterDatabase.validate()` for internal consistency
+- Validates each character's `race_id` against loaded `RaceDatabase`
+- Validates each character's `class_id` against loaded `ClassDatabase`
+- Validates each character's `starting_items` against loaded `ItemDatabase`
+- Validates each character's `starting_equipment` against loaded `ItemDatabase`
+
+#### 3.4 Updated ContentStats Struct
+
+Added to `src/sdk/database.rs`:
+
+- `pub character_count: usize` field
+- Updated `ContentStats::total()` to include character count
+- Updated `ContentDatabase::stats()` to populate character count
+
+#### 3.5 Added ValidationCategory::Characters
+
+Updated `sdk/campaign_builder/src/validation.rs`:
+
+- Added `Characters` variant to `ValidationCategory` enum
+- Added display name "Characters"
+- Added icon "🧑" for the category
+- Added to `ValidationCategory::all()` list
+
+#### 3.6 Added Character Validation to Validator
+
+Updated `src/sdk/validation.rs`:
+
+- Added `validate_character_references()` method
+- Validates character race_id references
+- Validates character class_id references
+- Validates character starting_items references
+- Validates character starting_equipment references
+- Integrated into `validate_references()` method
+
+#### 3.7 Added Helper Methods to Domain Types
+
+Added convenience methods for testing:
+
+- `RaceDefinition::new(id, name, description)` - Creates race with defaults
+- `ClassDefinition::new(id, name)` - Creates class with defaults
+- `ClassDatabase::add_class(class)` - Adds class to database
+- `RaceDatabase::has_race(id)` - Checks if race exists
+
+#### 3.8 Fixed Tutorial Campaign Data
+
+Updated `campaigns/tutorial/data/characters.ron`:
+
+- Changed `npc_whisper` from `race_id: "half_elf"` to `race_id: "elf"`
+- Tutorial campaign only has 4 races (human, elf, dwarf, gnome)
+- Updated character description to match
+
+### Tests Added
+
+**ContentDatabase Tests (src/sdk/database.rs):**
+
+- `test_content_database_character_loading` - Verifies manual character addition
+- `test_content_database_load_core_characters` - Tests loading from core data directory
+- `test_content_database_load_campaign_characters` - Tests loading from campaign directory
+- `test_content_database_validate_with_characters` - Valid references pass validation
+- `test_content_database_validate_invalid_race_reference` - Invalid race detected
+- `test_content_database_validate_invalid_class_reference` - Invalid class detected
+- `test_content_database_validate_invalid_item_reference` - Invalid item detected
+- `test_content_stats_includes_characters` - Character count in stats total
+
+**Validator Tests (src/sdk/validation.rs):**
+
+- `test_validator_character_references_valid` - Valid references produce no errors
+- `test_validator_character_invalid_race` - Missing race generates error
+- `test_validator_character_invalid_class` - Missing class generates error
+- `test_validator_character_invalid_starting_items` - Missing items generate errors
+- `test_validator_character_invalid_starting_equipment` - Missing equipment generates errors
+
+### Validation
+
+All quality checks pass:
+
+- `cargo fmt --all` - Code formatted successfully
+- `cargo check --all-targets --all-features` - Compilation successful
+- `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- `cargo test --all-features` - 276 doc tests pass, all unit tests pass
+
+### Architecture Compliance
+
+- [x] Uses existing `CharacterDatabase` from domain layer
+- [x] Follows pattern from other database types (classes, races, items)
+- [x] Validation checks cross-references against loaded databases
+- [x] Error messages include context (character ID, invalid reference)
+- [x] ContentStats includes character_count
+- [x] ValidationCategory has Characters variant
+
+### Success Criteria Met
+
+- [x] `ContentDatabase::load_campaign()` loads characters.ron
+- [x] `ContentDatabase::load_core()` loads characters.ron
+- [x] `ContentDatabase::validate()` validates character references
+- [x] Invalid race/class/item references detected and reported
+- [x] `ContentStats.character_count` tracks loaded characters
+- [x] `ValidationCategory::Characters` added for campaign builder
+- [x] All tests pass including integration tests
+
+### Files Modified
+
+- `src/sdk/database.rs` - Added CharacterDatabase support, validation, stats
+- `src/sdk/validation.rs` - Added character reference validation
+- `sdk/campaign_builder/src/validation.rs` - Added Characters category
+- `src/domain/races.rs` - Added `RaceDefinition::new()` and `RaceDatabase::has_race()`
+- `src/domain/classes.rs` - Added `ClassDefinition::new()` and `ClassDatabase::add_class()`
+- `campaigns/tutorial/data/characters.ron` - Fixed invalid race reference
+
+### Next Steps (Phase 4)
+
+- Create `sdk/campaign_builder/src/characters_editor.rs` with visual editor
+- Add Characters tab to Campaign Builder UI
+- Implement list/add/edit modes with filters
+- Add race/class dropdowns, item picker, portrait selector
+
+---

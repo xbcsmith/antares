@@ -30,6 +30,7 @@
 //! # }
 //! ```
 
+use crate::domain::character_definition::CharacterDatabase;
 use crate::domain::classes::ClassDatabase;
 use crate::domain::combat::monster::Monster;
 use crate::domain::conditions::{ConditionDefinition, ConditionId};
@@ -73,6 +74,9 @@ pub enum DatabaseError {
 
     #[error("Failed to load conditions: {0}")]
     ConditionLoadError(String),
+
+    #[error("Failed to load characters: {0}")]
+    CharacterLoadError(String),
 
     #[error("Failed to load map {map_id}: {error}")]
     MapLoadError { map_id: MapId, error: String },
@@ -794,6 +798,9 @@ pub struct ContentDatabase {
 
     /// Condition definitions database
     pub conditions: ConditionDatabase,
+
+    /// Character definitions database
+    pub characters: CharacterDatabase,
 }
 
 impl ContentDatabase {
@@ -818,6 +825,7 @@ impl ContentDatabase {
             quests: QuestDatabase::new(),
             dialogues: DialogueDatabase::new(),
             conditions: ConditionDatabase::new(),
+            characters: CharacterDatabase::new(),
         }
     }
 
@@ -939,6 +947,14 @@ impl ContentDatabase {
             ConditionDatabase::new()
         };
 
+        // Load characters
+        let characters = if data_dir.join("characters.ron").exists() {
+            CharacterDatabase::load_from_file(data_dir.join("characters.ron"))
+                .map_err(|e| DatabaseError::CharacterLoadError(e.to_string()))?
+        } else {
+            CharacterDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -949,6 +965,7 @@ impl ContentDatabase {
             quests,
             dialogues,
             conditions,
+            characters,
         })
     }
 
@@ -1039,6 +1056,14 @@ impl ContentDatabase {
             ConditionDatabase::new()
         };
 
+        // Load characters
+        let characters = if data_path.join("characters.ron").exists() {
+            CharacterDatabase::load_from_file(data_path.join("characters.ron"))
+                .map_err(|e| DatabaseError::CharacterLoadError(e.to_string()))?
+        } else {
+            CharacterDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -1049,6 +1074,7 @@ impl ContentDatabase {
             quests,
             dialogues,
             conditions,
+            characters,
         })
     }
 
@@ -1129,6 +1155,50 @@ impl ContentDatabase {
             }
         }
 
+        // Validate character definitions
+        self.characters
+            .validate()
+            .map_err(|e| DatabaseError::ValidationError(e.to_string()))?;
+
+        // Validate character references against loaded races, classes, and items
+        for character in self.characters.all_characters() {
+            // Check race reference
+            if !self.races.has_race(&character.race_id) {
+                return Err(DatabaseError::ValidationError(format!(
+                    "Character '{}' references non-existent race '{}'",
+                    character.id, character.race_id
+                )));
+            }
+
+            // Check class reference
+            if self.classes.get_class(&character.class_id).is_none() {
+                return Err(DatabaseError::ValidationError(format!(
+                    "Character '{}' references non-existent class '{}'",
+                    character.id, character.class_id
+                )));
+            }
+
+            // Check starting items references
+            for item_id in &character.starting_items {
+                if !self.items.has_item(item_id) {
+                    return Err(DatabaseError::ValidationError(format!(
+                        "Character '{}' references non-existent starting item {}",
+                        character.id, item_id
+                    )));
+                }
+            }
+
+            // Check starting equipment references
+            for item_id in character.starting_equipment.all_item_ids() {
+                if !self.items.has_item(&item_id) {
+                    return Err(DatabaseError::ValidationError(format!(
+                        "Character '{}' references non-existent equipment item {}",
+                        character.id, item_id
+                    )));
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1155,6 +1225,7 @@ impl ContentDatabase {
             quest_count: self.quests.count(),
             dialogue_count: self.dialogues.count(),
             condition_count: self.conditions.count(),
+            character_count: self.characters.len(),
         }
     }
 }
@@ -1209,6 +1280,9 @@ pub struct ContentStats {
 
     /// Number of condition definitions
     pub condition_count: usize,
+
+    /// Number of character definitions
+    pub character_count: usize,
 }
 
 impl ContentStats {
@@ -1229,9 +1303,10 @@ impl ContentStats {
     ///     quest_count: 20,
     ///     dialogue_count: 15,
     ///     condition_count: 10,
+    ///     character_count: 8,
     /// };
     ///
-    /// assert_eq!(stats.total(), 243);
+    /// assert_eq!(stats.total(), 251);
     /// ```
     pub fn total(&self) -> usize {
         self.class_count
@@ -1243,6 +1318,7 @@ impl ContentStats {
             + self.quest_count
             + self.dialogue_count
             + self.condition_count
+            + self.character_count
     }
 }
 
@@ -1261,6 +1337,7 @@ mod tests {
         assert_eq!(stats.monster_count, 0);
         assert_eq!(stats.spell_count, 0);
         assert_eq!(stats.map_count, 0);
+        assert_eq!(stats.character_count, 0);
         assert_eq!(stats.total(), 0);
     }
 
@@ -1276,8 +1353,9 @@ mod tests {
             quest_count: 20,
             dialogue_count: 15,
             condition_count: 10,
+            character_count: 8,
         };
-        assert_eq!(stats.total(), 243);
+        assert_eq!(stats.total(), 251);
     }
 
     #[test]
@@ -1640,5 +1718,237 @@ mod tests {
     fn test_condition_database_load_nonexistent_file() {
         let db = ConditionDatabase::load_from_file("nonexistent_file.ron").unwrap();
         assert_eq!(db.count(), 0);
+    }
+
+    #[test]
+    fn test_content_database_character_loading() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+
+        // Create a ContentDatabase and add characters manually
+        let mut db = ContentDatabase::new();
+
+        let knight = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Sir Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        db.characters.add_character(knight).unwrap();
+
+        let stats = db.stats();
+        assert_eq!(stats.character_count, 1);
+        assert!(db.characters.get_character("test_knight").is_some());
+    }
+
+    #[test]
+    fn test_content_database_load_core_characters() {
+        // Test loading core characters from data directory
+        let result = ContentDatabase::load_core("data");
+
+        // Should succeed if data directory exists with characters.ron
+        if let Ok(db) = result {
+            // If characters.ron exists, we should have loaded characters
+            let stats = db.stats();
+            // Characters count depends on whether file exists
+            println!("Loaded {} characters from core data", stats.character_count);
+        }
+    }
+
+    #[test]
+    fn test_content_database_load_campaign_characters() {
+        // Test loading campaign characters
+        let result = ContentDatabase::load_campaign("campaigns/tutorial");
+
+        if let Ok(db) = result {
+            let stats = db.stats();
+            println!(
+                "Loaded {} characters from tutorial campaign",
+                stats.character_count
+            );
+        }
+    }
+
+    #[test]
+    fn test_content_database_validate_with_characters() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add a valid race
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Add a valid class
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add a character that references the valid race and class
+        let knight = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Sir Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        db.characters.add_character(knight).unwrap();
+
+        // Validation should pass
+        let result = db.validate();
+        assert!(
+            result.is_ok(),
+            "Validation should pass with valid references"
+        );
+    }
+
+    #[test]
+    fn test_content_database_validate_invalid_race_reference() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::classes::ClassDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add a valid class but NO races
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add a character that references a non-existent race
+        let knight = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Sir Test".to_string(),
+            "human".to_string(), // This race doesn't exist
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        db.characters.add_character(knight).unwrap();
+
+        // Validation should fail due to missing race
+        let result = db.validate();
+        assert!(
+            result.is_err(),
+            "Validation should fail with invalid race reference"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("race"), "Error should mention race");
+        assert!(
+            err_msg.contains("human"),
+            "Error should mention the invalid race id"
+        );
+    }
+
+    #[test]
+    fn test_content_database_validate_invalid_class_reference() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add a valid race but NO classes
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Add a character that references a non-existent class
+        let knight = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Sir Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(), // This class doesn't exist
+            Sex::Male,
+            Alignment::Good,
+        );
+        db.characters.add_character(knight).unwrap();
+
+        // Validation should fail due to missing class
+        let result = db.validate();
+        assert!(
+            result.is_err(),
+            "Validation should fail with invalid class reference"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("class"), "Error should mention class");
+        assert!(
+            err_msg.contains("knight"),
+            "Error should mention the invalid class id"
+        );
+    }
+
+    #[test]
+    fn test_content_database_validate_invalid_item_reference() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add valid race and class
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add a character with invalid starting items
+        let mut knight = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Sir Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        knight.starting_items = vec![255]; // Item ID that doesn't exist
+        db.characters.add_character(knight).unwrap();
+
+        // Validation should fail due to missing item
+        let result = db.validate();
+        assert!(
+            result.is_err(),
+            "Validation should fail with invalid item reference"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("item"), "Error should mention item");
+    }
+
+    #[test]
+    fn test_content_stats_includes_characters() {
+        let stats = ContentStats {
+            class_count: 6,
+            race_count: 6,
+            item_count: 50,
+            monster_count: 20,
+            spell_count: 40,
+            map_count: 5,
+            quest_count: 10,
+            dialogue_count: 8,
+            condition_count: 12,
+            character_count: 9,
+        };
+
+        // Total should include character_count
+        assert_eq!(stats.total(), 166);
+        assert_eq!(stats.character_count, 9);
     }
 }

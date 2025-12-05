@@ -167,12 +167,12 @@
         is_premade: false,
     ),
 
-    // ===== Whisper - Half-Elf Robber NPC =====
+    // ===== Whisper - Elf Robber NPC =====
     // A thief who can be recruited to help with locked doors and traps.
     (
         id: "npc_whisper",
         name: "Whisper",
-        race_id: "half_elf",
+        race_id: "elf",
         class_id: "robber",
         sex: Female,
         alignment: Neutral,
@@ -199,7 +199,7 @@
             accessory1: None,
             accessory2: None,
         ),
-        description: "A nimble half-elf with quick fingers and quicker feet. Whisper claims to be a 'locksmith' but her skills with traps suggest a more colorful past.",
+        description: "A nimble elf with quick fingers and quicker feet. Whisper claims to be a 'locksmith' but her skills with traps suggest a more colorful past.",
         is_premade: false,
     ),
 

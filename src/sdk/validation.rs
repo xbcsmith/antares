@@ -274,7 +274,7 @@ impl<'a> Validator<'a> {
     /// Checks that all ID references (class IDs, race IDs, item IDs, etc.)
     /// point to existing content.
     fn validate_references(&self) -> Vec<ValidationError> {
-        let errors = Vec::new();
+        let mut errors = Vec::new();
 
         // Validate item references (e.g., items that reference classes)
         // This is a placeholder - actual validation depends on item structure
@@ -294,6 +294,62 @@ impl<'a> Validator<'a> {
 
         // Validate map references
         // Placeholder - would check if maps reference valid monsters/items/events
+
+        // Validate character definition references
+        errors.extend(self.validate_character_references());
+
+        errors
+    }
+
+    /// Validates character definition cross-references
+    ///
+    /// Checks that all character definitions reference:
+    /// - Valid race IDs
+    /// - Valid class IDs
+    /// - Valid item IDs for starting items
+    /// - Valid item IDs for starting equipment
+    fn validate_character_references(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+
+        for character in self.db.characters.all_characters() {
+            let context = format!("character '{}'", character.id);
+
+            // Check race reference
+            if !self.db.races.has_race(&character.race_id) {
+                errors.push(ValidationError::MissingRace {
+                    context: context.clone(),
+                    race_id: character.race_id.clone(),
+                });
+            }
+
+            // Check class reference
+            if self.db.classes.get_class(&character.class_id).is_none() {
+                errors.push(ValidationError::MissingClass {
+                    context: context.clone(),
+                    class_id: character.class_id.clone(),
+                });
+            }
+
+            // Check starting items references
+            for item_id in &character.starting_items {
+                if !self.db.items.has_item(item_id) {
+                    errors.push(ValidationError::MissingItem {
+                        context: format!("{} starting items", context),
+                        item_id: *item_id,
+                    });
+                }
+            }
+
+            // Check starting equipment references
+            for item_id in character.starting_equipment.all_item_ids() {
+                if !self.db.items.has_item(&item_id) {
+                    errors.push(ValidationError::MissingItem {
+                        context: format!("{} starting equipment", context),
+                        item_id,
+                    });
+                }
+            }
+        }
 
         errors
     }
@@ -662,5 +718,245 @@ mod tests {
         };
         let cloned = error.clone();
         assert_eq!(error, cloned);
+    }
+
+    #[test]
+    fn test_validator_character_references_valid() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add valid race and class
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add a character with valid references
+        let knight = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Sir Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        db.characters.add_character(knight).unwrap();
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+
+        // Should have no MissingClass or MissingRace errors for our character
+        let character_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    ValidationError::MissingClass { context, .. }
+                    | ValidationError::MissingRace { context, .. }
+                    if context.contains("test_knight")
+                )
+            })
+            .collect();
+        assert!(
+            character_errors.is_empty(),
+            "Should have no character reference errors"
+        );
+    }
+
+    #[test]
+    fn test_validator_character_invalid_race() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::classes::ClassDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add class but NOT race
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add a character with invalid race reference
+        let knight = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Sir Test".to_string(),
+            "nonexistent_race".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        db.characters.add_character(knight).unwrap();
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+
+        // Should have a MissingRace error
+        let has_race_error = errors.iter().any(|e| {
+            matches!(
+                e,
+                ValidationError::MissingRace { race_id, .. }
+                if race_id == "nonexistent_race"
+            )
+        });
+        assert!(has_race_error, "Should detect missing race reference");
+    }
+
+    #[test]
+    fn test_validator_character_invalid_class() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add race but NOT class
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Add a character with invalid class reference
+        let knight = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Sir Test".to_string(),
+            "human".to_string(),
+            "nonexistent_class".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        db.characters.add_character(knight).unwrap();
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+
+        // Should have a MissingClass error
+        let has_class_error = errors.iter().any(|e| {
+            matches!(
+                e,
+                ValidationError::MissingClass { class_id, .. }
+                if class_id == "nonexistent_class"
+            )
+        });
+        assert!(has_class_error, "Should detect missing class reference");
+    }
+
+    #[test]
+    fn test_validator_character_invalid_starting_items() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add valid race and class
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add a character with invalid starting items
+        let mut knight = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Sir Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        knight.starting_items = vec![200, 201]; // Non-existent item IDs
+        db.characters.add_character(knight).unwrap();
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+
+        // Should have MissingItem errors
+        let item_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    ValidationError::MissingItem { context, .. }
+                    if context.contains("test_knight")
+                )
+            })
+            .collect();
+        assert_eq!(
+            item_errors.len(),
+            2,
+            "Should detect both missing item references"
+        );
+    }
+
+    #[test]
+    fn test_validator_character_invalid_starting_equipment() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::{CharacterDefinition, StartingEquipment};
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add valid race and class
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add a character with invalid starting equipment
+        let mut knight = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Sir Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        knight.starting_equipment = StartingEquipment {
+            weapon: Some(250), // Non-existent item ID
+            armor: Some(251),  // Non-existent item ID
+            ..StartingEquipment::new()
+        };
+        db.characters.add_character(knight).unwrap();
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+
+        // Should have MissingItem errors for equipment
+        let equipment_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    ValidationError::MissingItem { context, .. }
+                    if context.contains("equipment")
+                )
+            })
+            .collect();
+        assert_eq!(
+            equipment_errors.len(),
+            2,
+            "Should detect both missing equipment item references"
+        );
     }
 }
