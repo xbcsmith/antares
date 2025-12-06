@@ -31,9 +31,9 @@
 //! - Pretty-printed RON output
 
 use antares::domain::items::{
-    AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorData, AttributeType, Bonus,
-    BonusAttribute, ConsumableData, ConsumableEffect, Disablement, Item, ItemType, QuestData,
-    WeaponData,
+    AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
+    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Disablement,
+    Item, ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
 };
 use antares::domain::types::{DiceRoll, ItemId};
 use std::fs;
@@ -217,6 +217,10 @@ impl ItemEditor {
         // Cursed?
         let is_cursed = self.read_bool("Is cursed? (y/n): ");
 
+        // Alignment restriction
+        let alignment_restriction = self.select_alignment_restriction();
+
+        #[allow(deprecated)]
         let item = Item {
             id,
             name,
@@ -224,6 +228,7 @@ impl ItemEditor {
             base_cost,
             sell_cost,
             disablements,
+            alignment_restriction,
             constant_bonus,
             temporary_bonus,
             spell_effect,
@@ -247,11 +252,13 @@ impl ItemEditor {
         let damage = self.read_dice_roll("Damage dice (format: 1d8 or 2d6+1): ");
         let bonus = self.read_i8("To-hit/damage bonus: ", 0);
         let hands_required = self.read_u8("Hands required (1 or 2): ", 1);
+        let classification = self.select_weapon_classification();
 
         ItemType::Weapon(WeaponData {
             damage,
             bonus,
             hands_required,
+            classification,
         })
     }
 
@@ -261,8 +268,13 @@ impl ItemEditor {
 
         let ac_bonus = self.read_u8("AC bonus: ", 0);
         let weight = self.read_u8("Weight (pounds): ", 0);
+        let classification = self.select_armor_classification();
 
-        ItemType::Armor(ArmorData { ac_bonus, weight })
+        ItemType::Armor(ArmorData {
+            ac_bonus,
+            weight,
+            classification,
+        })
     }
 
     /// Creates accessory data
@@ -282,7 +294,12 @@ impl ItemEditor {
             _ => AccessorySlot::Ring,
         };
 
-        ItemType::Accessory(AccessoryData { slot })
+        let classification = self.select_magic_item_classification();
+
+        ItemType::Accessory(AccessoryData {
+            slot,
+            classification,
+        })
     }
 
     /// Creates consumable data
@@ -455,6 +472,78 @@ impl ItemEditor {
         }
 
         Disablement(flags)
+    }
+
+    /// Selects weapon classification
+    fn select_weapon_classification(&self) -> WeaponClassification {
+        println!("\n  Weapon Classification:");
+        println!("    [1] Simple (clubs, daggers, staffs - anyone can use)");
+        println!("    [2] Martial Melee (swords, axes - fighters)");
+        println!("    [3] Martial Ranged (bows, crossbows - archers)");
+        println!("    [4] Blunt (maces, hammers - clerics)");
+        println!("    [5] Unarmed (fists, martial arts)");
+
+        let choice = self.read_input("  Classification: ");
+        match choice.trim() {
+            "1" => WeaponClassification::Simple,
+            "2" => WeaponClassification::MartialMelee,
+            "3" => WeaponClassification::MartialRanged,
+            "4" => WeaponClassification::Blunt,
+            "5" => WeaponClassification::Unarmed,
+            _ => WeaponClassification::Simple,
+        }
+    }
+
+    /// Selects armor classification
+    fn select_armor_classification(&self) -> ArmorClassification {
+        println!("\n  Armor Classification:");
+        println!("    [1] Light (leather, padded)");
+        println!("    [2] Medium (chain mail, scale)");
+        println!("    [3] Heavy (plate mail, full plate)");
+        println!("    [4] Shield (all shield types)");
+
+        let choice = self.read_input("  Classification: ");
+        match choice.trim() {
+            "1" => ArmorClassification::Light,
+            "2" => ArmorClassification::Medium,
+            "3" => ArmorClassification::Heavy,
+            "4" => ArmorClassification::Shield,
+            _ => ArmorClassification::Light,
+        }
+    }
+
+    /// Selects magic item classification (for accessories)
+    fn select_magic_item_classification(&self) -> Option<MagicItemClassification> {
+        println!("\n  Magic Item Classification:");
+        println!("    [1] None (mundane accessory)");
+        println!("    [2] Arcane (wands, arcane scrolls - sorcerers)");
+        println!("    [3] Divine (holy symbols, divine scrolls - clerics)");
+        println!("    [4] Universal (potions, rings - anyone)");
+
+        let choice = self.read_input("  Classification: ");
+        match choice.trim() {
+            "1" => None,
+            "2" => Some(MagicItemClassification::Arcane),
+            "3" => Some(MagicItemClassification::Divine),
+            "4" => Some(MagicItemClassification::Universal),
+            _ => None,
+        }
+    }
+
+    /// Selects alignment restriction
+    fn select_alignment_restriction(&self) -> Option<AlignmentRestriction> {
+        println!("\n  Alignment Restriction:");
+        println!("    [1] None (any alignment can use)");
+        println!("    [2] Good only");
+        println!("    [3] Evil only");
+
+        let choice = self.read_input("  Restriction: ");
+        match choice.trim() {
+            "1" => None,
+            "2" => Some(AlignmentRestriction::GoodOnly),
+            "3" => Some(AlignmentRestriction::EvilOnly),
+            _ => None,
+        }
     }
 
     /// Selects a bonus (optional)
@@ -643,7 +732,9 @@ impl ItemEditor {
 
         println!("  Base Cost: {} gp", item.base_cost);
         println!("  Sell Cost: {} gp", item.sell_cost);
-        println!("  Disablement Flags: 0x{:02X}", item.disablements.0);
+        #[allow(deprecated)]
+        let dis_flags = item.disablements.0;
+        println!("  Disablement Flags: 0x{:02X}", dis_flags);
 
         if let Some(bonus) = &item.constant_bonus {
             println!("  Constant Bonus: {:?} {:+}", bonus.attribute, bonus.value);
@@ -833,6 +924,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_next_item_id_with_items() {
         let editor = ItemEditor {
             items: vec![
@@ -843,10 +935,12 @@ mod tests {
                         damage: DiceRoll::new(1, 8, 0),
                         bonus: 0,
                         hands_required: 1,
+                        classification: WeaponClassification::MartialMelee,
                     }),
                     base_cost: 100,
                     sell_cost: 50,
                     disablements: Disablement::ALL,
+                    alignment_restriction: None,
                     constant_bonus: None,
                     temporary_bonus: None,
                     spell_effect: None,
@@ -861,10 +955,12 @@ mod tests {
                     item_type: ItemType::Armor(ArmorData {
                         ac_bonus: 5,
                         weight: 20,
+                        classification: ArmorClassification::Medium,
                     }),
                     base_cost: 50,
                     sell_cost: 25,
                     disablements: Disablement::ALL,
+                    alignment_restriction: None,
                     constant_bonus: None,
                     temporary_bonus: None,
                     spell_effect: None,

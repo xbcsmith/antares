@@ -3039,3 +3039,204 @@ Per the proficiency migration plan:
 4. Add `required_proficiency()` method to Item struct
 
 ---
+
+## Phase 3: Item Definition Migration (Proficiency System Migration) (2025-01-XX)
+
+**Objective**: Add classification fields to item sub-structs (WeaponData, ArmorData, AccessoryData), add alignment_restriction to Item, implement `Item::required_proficiency()` method, and update data files with classifications and tags.
+
+### Background
+
+Per the Proficiency System Migration Plan (`docs/explanation/proficiency_migration_plan.md`) Phase 3, item definitions needed to be updated to support the new proficiency system. Items should derive their proficiency requirements from classification enums rather than relying solely on the legacy disablement bitmask.
+
+### Changes Implemented
+
+#### 3.1 Updated ItemType Sub-Structs with Classification Fields
+
+Modified `src/domain/items/types.rs`:
+
+**WeaponData** - Added `classification: WeaponClassification` field with `#[serde(default)]`:
+
+- `Simple` - Basic weapons anyone can use (clubs, daggers, staffs)
+- `MartialMelee` - Advanced melee weapons (swords, axes)
+- `MartialRanged` - Ranged weapons (bows, crossbows)
+- `Blunt` - Weapons without edge (maces, hammers - clerics)
+- `Unarmed` - Martial arts
+
+**ArmorData** - Added `classification: ArmorClassification` field with `#[serde(default)]`:
+
+- `Light` - Leather, padded armor
+- `Medium` - Chain mail, scale mail
+- `Heavy` - Plate mail, full plate
+- `Shield` - All shield types
+
+**AccessoryData** - Added `classification: Option<MagicItemClassification>` field with `#[serde(default)]`:
+
+- `Some(Arcane)` - Wands, arcane scrolls (sorcerers)
+- `Some(Divine)` - Holy symbols, divine scrolls (clerics)
+- `Some(Universal)` or `None` - Anyone can use
+
+#### 3.2 Added alignment_restriction to Item
+
+Added `alignment_restriction: Option<AlignmentRestriction>` field to Item struct:
+
+- `None` - Any alignment can use
+- `Some(GoodOnly)` - Only good-aligned characters
+- `Some(EvilOnly)` - Only evil-aligned characters
+
+This separates alignment restrictions from the legacy disablement bitmask.
+
+#### 3.3 Deprecated Disablement Field
+
+Marked `disablements` field on Item as deprecated:
+
+```rust
+#[deprecated(
+    since = "0.2.0",
+    note = "Use alignment_restriction field and proficiency system instead."
+)]
+pub disablements: Disablement,
+```
+
+#### 3.4 Added Item::required_proficiency() Method
+
+Added method to derive proficiency requirement from item classification:
+
+```rust
+pub fn required_proficiency(&self) -> Option<ProficiencyId>
+```
+
+Returns:
+
+- Weapons: Proficiency from `ProficiencyDatabase::proficiency_for_weapon(classification)`
+- Armor: Proficiency from `ProficiencyDatabase::proficiency_for_armor(classification)`
+- Accessories with magic classification: Proficiency from `ProficiencyDatabase::proficiency_for_magic_item()`
+- Consumables, Ammo, Quest items: `None` (no proficiency required)
+
+#### 3.5 Added Item::can_use_alignment() Method
+
+Added method to check alignment restrictions:
+
+```rust
+pub fn can_use_alignment(&self, alignment: Alignment) -> bool
+```
+
+#### 3.6 Updated Data Files
+
+**data/items.ron** and **campaigns/tutorial/data/items.ron**:
+
+- Added `classification` to all WeaponData, ArmorData, AccessoryData
+- Added `alignment_restriction` field to all items
+- Added `tags` field to appropriate items:
+  - Two-Handed Sword: `["large_weapon", "two_handed"]`
+  - Long Bow: `["large_weapon", "two_handed"]`
+  - Short Bow: `["two_handed"]`
+  - Plate Mail: `["heavy_armor"]`
+- Added new items:
+  - Long Bow (id: 8) - MartialRanged classification
+  - Short Bow (id: 9) - MartialRanged classification
+  - Wooden Shield (id: 23) - Shield classification
+  - Steel Shield (id: 24) - Shield classification
+  - Arcane Wand (id: 43) - Arcane magic classification
+  - Holy Symbol (id: 44) - Divine magic classification
+
+#### 3.7 Updated SDK Templates
+
+Modified `src/sdk/templates.rs`:
+
+- All template functions now include classification fields
+- Added `#[allow(deprecated)]` for disablements usage
+- Updated imports to include classification enums
+
+#### 3.8 Updated Item Editor CLI
+
+Modified `src/bin/item_editor.rs`:
+
+- Added classification selection helpers for weapons, armor, accessories
+- Added alignment restriction selection helper
+- Updated item creation flow to prompt for classifications
+- Added `#[allow(deprecated)]` for legacy disablements field
+
+### Tests Added
+
+New tests in `src/domain/items/types.rs`:
+
+**Item::required_proficiency() Tests:**
+
+- `test_weapon_required_proficiency_simple` - Simple weapons → simple_weapon
+- `test_weapon_required_proficiency_martial_melee` - Martial melee → martial_melee
+- `test_weapon_required_proficiency_martial_ranged` - Martial ranged → martial_ranged
+- `test_weapon_required_proficiency_blunt` - Blunt weapons → blunt_weapon
+- `test_armor_required_proficiency_light` - Light armor → light_armor
+- `test_armor_required_proficiency_heavy` - Heavy armor → heavy_armor
+- `test_armor_required_proficiency_shield` - Shields → shield
+- `test_accessory_required_proficiency_arcane` - Arcane items → arcane_item
+- `test_accessory_required_proficiency_divine` - Divine items → divine_item
+- `test_accessory_required_proficiency_universal` - Universal → None
+- `test_accessory_required_proficiency_mundane` - Mundane → None
+- `test_consumable_no_proficiency` - Consumables → None
+- `test_ammo_no_proficiency` - Ammo → None
+- `test_quest_item_no_proficiency` - Quest items → None
+
+**Item::can_use_alignment() Tests:**
+
+- `test_alignment_restriction_none` - No restriction allows all
+- `test_alignment_restriction_good_only` - Good only restriction
+- `test_alignment_restriction_evil_only` - Evil only restriction
+
+### Validation
+
+All quality gates pass:
+
+- `cargo fmt --all` - Code formatted
+- `cargo check --all-targets --all-features` - Compilation successful
+- `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+- `cargo test --all-features` - 307 doc tests pass, all unit tests pass
+
+### Architecture Compliance
+
+- [x] Classification enums defined per architecture (WeaponClassification, ArmorClassification, MagicItemClassification)
+- [x] `#[serde(default)]` used for backward compatibility with existing data files
+- [x] RON format used for all data files
+- [x] `ProficiencyId` type alias used consistently
+- [x] Item tags system implemented for fine-grained restrictions
+- [x] Deprecation added to legacy disablements field with migration guidance
+
+### Success Criteria Met
+
+- [x] All quality gates pass
+- [x] Items load correctly with new classification fields
+- [x] `Item::required_proficiency()` correctly derives from classification
+- [x] Proficiency checks work end-to-end (class + race)
+- [x] Alignment restriction separate from proficiency system
+- [x] Data files updated with classifications and tags
+- [x] Long Bow has `["large_weapon", "two_handed"]` tags
+- [x] Short Bow has `["two_handed"]` tag (no large_weapon)
+- [x] Plate Mail has `["heavy_armor"]` tag
+
+### Deliverables Completed
+
+- [x] `src/domain/items/types.rs` - Modified ItemType sub-structs with classification + tags
+- [x] `data/items.ron` - Migrated to classification + tags system
+- [x] `campaigns/tutorial/data/items.ron` - Migrated with appropriate tags
+- [x] `src/sdk/templates.rs` - Updated with classification fields
+- [x] `src/bin/item_editor.rs` - Updated with classification selection
+
+### Files Modified
+
+- `src/domain/items/types.rs` - Added classification fields, required_proficiency(), can_use_alignment()
+- `src/domain/items/database.rs` - Updated doc examples and test helpers
+- `src/sdk/templates.rs` - Updated all templates with classification fields
+- `src/bin/item_editor.rs` - Added classification selection helpers
+- `data/items.ron` - Full migration with classifications and tags
+- `campaigns/tutorial/data/items.ron` - Full migration with classifications and tags
+
+### Next Steps (Phase 4)
+
+Per the proficiency migration plan:
+
+1. Update SDK Classes Editor to edit proficiencies list
+2. Update SDK Races Editor to edit proficiencies and incompatible_item_tags
+3. Update SDK Items Editor to edit classification and tags
+4. Add validation for proficiency references
+
+---

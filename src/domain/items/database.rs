@@ -164,10 +164,11 @@ impl ItemDatabase {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::items::{ItemDatabase, Item, ItemType, WeaponData, Disablement};
+    /// use antares::domain::items::{ItemDatabase, Item, ItemType, WeaponData, WeaponClassification, Disablement};
     /// use antares::domain::types::DiceRoll;
     ///
     /// let mut db = ItemDatabase::new();
+    /// #[allow(deprecated)]
     /// let club = Item {
     ///     id: 1,
     ///     name: "Club".to_string(),
@@ -175,10 +176,12 @@ impl ItemDatabase {
     ///         damage: DiceRoll::new(1, 3, 0),
     ///         bonus: 0,
     ///         hands_required: 1,
+    ///         classification: WeaponClassification::Simple,
     ///     }),
     ///     base_cost: 1,
     ///     sell_cost: 0,
     ///     disablements: Disablement::ALL,
+    ///     alignment_restriction: None,
     ///     constant_bonus: None,
     ///     temporary_bonus: None,
     ///     spell_effect: None,
@@ -261,10 +264,11 @@ impl ItemDatabase {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::items::{ItemDatabase, Item, ItemType, WeaponData, Disablement};
+    /// use antares::domain::items::{ItemDatabase, Item, ItemType, WeaponData, WeaponClassification, Disablement};
     /// use antares::domain::types::DiceRoll;
     ///
     /// let mut db = ItemDatabase::new();
+    /// #[allow(deprecated)]
     /// let club = Item {
     ///     id: 1,
     ///     name: "Club".to_string(),
@@ -272,10 +276,12 @@ impl ItemDatabase {
     ///         damage: DiceRoll::new(1, 3, 0),
     ///         bonus: 0,
     ///         hands_required: 1,
+    ///         classification: WeaponClassification::Simple,
     ///     }),
     ///     base_cost: 1,
     ///     sell_cost: 0,
     ///     disablements: Disablement::ALL,
+    ///     alignment_restriction: None,
     ///     constant_bonus: None,
     ///     temporary_bonus: None,
     ///     spell_effect: None,
@@ -303,9 +309,10 @@ impl Default for ItemDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::items::{Disablement, ItemType, WeaponData};
+    use crate::domain::items::{Disablement, ItemType, WeaponClassification, WeaponData};
     use crate::domain::types::DiceRoll;
 
+    #[allow(deprecated)]
     fn create_test_item(id: ItemId, name: &str) -> Item {
         Item {
             id,
@@ -314,10 +321,12 @@ mod tests {
                 damage: DiceRoll::new(1, 6, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::Simple,
             }),
             base_cost: 10,
             sell_cost: 5,
             disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
