@@ -33,6 +33,31 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
 
+/// Standard proficiency IDs recognized by the system
+const STANDARD_PROFICIENCY_IDS: &[&str] = &[
+    "simple_weapon",
+    "martial_melee",
+    "martial_ranged",
+    "blunt_weapon",
+    "unarmed",
+    "light_armor",
+    "medium_armor",
+    "heavy_armor",
+    "shield",
+    "arcane_item",
+    "divine_item",
+];
+
+/// Standard item tags used for race restrictions
+const STANDARD_ITEM_TAGS: &[&str] = &[
+    "large_weapon",
+    "two_handed",
+    "heavy_armor",
+    "elven_crafted",
+    "dwarven_crafted",
+    "requires_strength",
+];
+
 /// Main application state
 struct RaceEditor {
     races: Vec<RaceDefinition>,
@@ -250,11 +275,19 @@ impl RaceEditor {
         );
         println!(
             "  7. Proficiencies (currently: {})",
-            race.proficiencies.len()
+            if race.proficiencies.is_empty() {
+                "None".to_string()
+            } else {
+                race.proficiencies.join(", ")
+            }
         );
         println!(
             "  8. Incompatible Item Tags (currently: {})",
-            race.incompatible_item_tags.len()
+            if race.incompatible_item_tags.is_empty() {
+                "None".to_string()
+            } else {
+                race.incompatible_item_tags.join(", ")
+            }
         );
         println!("  c. Cancel");
 
@@ -304,8 +337,8 @@ impl RaceEditor {
                 println!("Proficiencies updated");
             }
             "8" => {
-                let tags = self.input_incompatible_tags();
-                self.races[idx].incompatible_item_tags = tags;
+                let incompatible_tags = self.input_incompatible_tags();
+                self.races[idx].incompatible_item_tags = incompatible_tags;
                 self.modified = true;
                 println!("Incompatible item tags updated");
             }
@@ -657,10 +690,29 @@ impl RaceEditor {
             .collect()
     }
 
-    /// Inputs proficiencies
+    /// Inputs proficiencies with validation
     fn input_proficiencies(&self) -> Vec<String> {
-        println!("\nProficiencies (comma-separated, or leave empty):");
-        println!("  Examples: longbow, longsword, battleaxe");
+        println!("\n========================================");
+        println!("        PROFICIENCY SELECTION           ");
+        println!("========================================");
+        println!("\nStandard Proficiencies:");
+        println!("  Weapons:");
+        println!("    • simple_weapon      - Simple weapons (daggers, clubs)");
+        println!("    • martial_melee      - Martial melee weapons (swords, axes)");
+        println!("    • martial_ranged     - Martial ranged weapons (longbows, crossbows)");
+        println!("    • blunt_weapon       - Blunt weapons (maces, flails)");
+        println!("    • unarmed            - Unarmed combat");
+        println!("\n  Armor:");
+        println!("    • light_armor        - Light armor (leather, padded)");
+        println!("    • medium_armor       - Medium armor (chainmail, scale)");
+        println!("    • heavy_armor        - Heavy armor (plate, full plate)");
+        println!("    • shield             - Shields");
+        println!("\n  Magic Items:");
+        println!("    • arcane_item        - Arcane magic items (wands, staves)");
+        println!("    • divine_item        - Divine magic items (holy symbols, relics)");
+
+        println!("\nEnter proficiencies (comma-separated, or leave empty):");
+        println!("  Example: simple_weapon,light_armor,shield");
 
         let input = self.read_input("Proficiencies: ");
         let trimmed = input.trim();
@@ -669,30 +721,84 @@ impl RaceEditor {
             return Vec::new();
         }
 
-        trimmed
+        let proficiencies: Vec<String> = trimmed
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            .collect()
+            .collect();
+
+        // Validate proficiencies
+        let mut valid_proficiencies = Vec::new();
+        for prof in proficiencies {
+            if STANDARD_PROFICIENCY_IDS.contains(&prof.as_str()) {
+                valid_proficiencies.push(prof);
+            } else {
+                println!("⚠️  Warning: '{}' is not a standard proficiency ID", prof);
+                println!("   Standard IDs: {}", STANDARD_PROFICIENCY_IDS.join(", "));
+                let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", prof));
+                if confirm.trim().eq_ignore_ascii_case("y") {
+                    valid_proficiencies.push(prof);
+                }
+            }
+        }
+
+        if !valid_proficiencies.is_empty() {
+            println!("✅ Added proficiencies: {}", valid_proficiencies.join(", "));
+        }
+
+        valid_proficiencies
     }
 
-    /// Inputs incompatible item tags
+    /// Inputs incompatible item tags with validation
     fn input_incompatible_tags(&self) -> Vec<String> {
-        println!("\nIncompatible Item Tags (comma-separated, or leave empty):");
-        println!("  Examples: large_weapon, heavy_armor");
+        println!("\n========================================");
+        println!("   INCOMPATIBLE ITEM TAGS SELECTION     ");
+        println!("========================================");
+        println!("\nStandard Item Tags:");
+        println!("  • large_weapon       - Large/oversized weapons");
+        println!("  • two_handed         - Two-handed weapons");
+        println!("  • heavy_armor        - Heavy armor pieces");
+        println!("  • elven_crafted      - Elven-crafted items");
+        println!("  • dwarven_crafted    - Dwarven-crafted items");
+        println!("  • requires_strength  - Items requiring high strength");
 
-        let input = self.read_input("Tags: ");
+        println!("\nRaces with incompatible tags cannot use items with those tags.");
+        println!("Example: A halfling might have 'large_weapon,heavy_armor' incompatible.");
+        println!("\nEnter incompatible tags (comma-separated, or leave empty):");
+
+        let input = self.read_input("Incompatible Tags: ");
         let trimmed = input.trim();
 
         if trimmed.is_empty() {
             return Vec::new();
         }
 
-        trimmed
+        let tags: Vec<String> = trimmed
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            .collect()
+            .collect();
+
+        // Validate tags
+        let mut valid_tags = Vec::new();
+        for tag in tags {
+            if STANDARD_ITEM_TAGS.contains(&tag.as_str()) {
+                valid_tags.push(tag);
+            } else {
+                println!("⚠️  Warning: '{}' is not a standard item tag", tag);
+                println!("   Standard tags: {}", STANDARD_ITEM_TAGS.join(", "));
+                let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", tag));
+                if confirm.trim().eq_ignore_ascii_case("y") {
+                    valid_tags.push(tag);
+                }
+            }
+        }
+
+        if !valid_tags.is_empty() {
+            println!("✅ Added incompatible tags: {}", valid_tags.join(", "));
+        }
+
+        valid_tags
     }
 }
 

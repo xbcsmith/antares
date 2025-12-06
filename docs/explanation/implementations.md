@@ -1,5 +1,164 @@
 # Implementation Summary
 
+## Phase 5: CLI Editor Updates for Proficiency Migration (2025-01-XX)
+
+**Objective**: Update command-line editors to support the new proficiency, classification, tags, and alignment restriction system introduced in Phases 1-4.
+
+### Background
+
+Following the completion of Phase 4 (SDK Editor Updates), Phase 5 extends proficiency migration support to the CLI editors used for creating and editing game data files. The CLI editors (`class_editor`, `race_editor`, `item_editor`) now provide interactive prompts for the new fields while maintaining backward compatibility with legacy disablement flags.
+
+### Changes Implemented
+
+#### 5.1 Class Editor CLI (`src/bin/class_editor.rs`)
+
+**Added Constants:**
+
+- `STANDARD_PROFICIENCY_IDS` - Array of 11 standard proficiency IDs for validation
+
+**New Functionality:**
+
+- `input_proficiencies()` - Interactive proficiency selection with:
+  - Formatted menu showing all standard proficiencies grouped by category (Weapons, Armor, Magic Items)
+  - Comma-separated input with validation
+  - Warning for non-standard proficiency IDs with confirmation prompt
+  - Success message showing added proficiencies
+
+**Updated Methods:**
+
+- `add_class()` - Now prompts for proficiencies and stores in `ClassDefinition`
+- `edit_class()` - Added option 5 to edit proficiencies, showing current proficiencies in menu
+
+**User Experience:**
+
+- Clear categorized display: Weapons (5 types), Armor (4 types), Magic Items (2 types)
+- Each proficiency shown with descriptive text (e.g., "simple_weapon - Simple weapons (daggers, clubs)")
+- Validation warnings for typos or custom proficiency IDs
+- Non-intrusive: empty input = no proficiencies
+
+#### 5.2 Race Editor CLI (`src/bin/race_editor.rs`)
+
+**Added Constants:**
+
+- `STANDARD_PROFICIENCY_IDS` - Same 11 standard proficiency IDs
+- `STANDARD_ITEM_TAGS` - Array of 6 standard item tags for race restrictions
+
+**New Functionality:**
+
+- `input_proficiencies()` - Same interactive proficiency selection as class editor
+- `input_incompatible_tags()` - Interactive tag selection with:
+  - Formatted menu showing all standard item tags with descriptions
+  - Explanation of how incompatible tags work (race cannot use items with those tags)
+  - Example usage (e.g., "halfling with 'large_weapon' incompatible")
+  - Comma-separated input with validation
+  - Warning for non-standard tags with confirmation prompt
+
+**Updated Methods:**
+
+- `add_race()` - Now prompts for both proficiencies and incompatible_item_tags
+- `edit_race()` - Added options 7 and 8 to edit proficiencies and incompatible tags
+- Menu now shows current proficiencies and incompatible tags (or "None")
+
+**User Experience:**
+
+- Clear explanations of each standard tag's purpose
+- Contextual help text explaining the restriction system
+- Validation prevents typos while allowing custom tags if confirmed
+
+#### 5.3 Item Editor CLI (`src/bin/item_editor.rs`)
+
+**Added Constants:**
+
+- `STANDARD_ITEM_TAGS` - Same 6 standard item tags
+
+**New Functionality:**
+
+- `input_item_tags()` - Interactive tag selection with:
+  - Formatted menu showing all standard tags with detailed descriptions
+  - Explanation of how tags interact with race restrictions
+  - Example showing race incompatible_item_tags usage
+  - Comma-separated input with validation
+  - Warning for non-standard tags with confirmation prompt
+
+**Enhanced Existing Methods:**
+
+- `select_weapon_classification()` - Already existed, selects WeaponClassification (Simple, MartialMelee, MartialRanged, Blunt, Unarmed)
+- `select_armor_classification()` - Already existed, selects ArmorClassification (Light, Medium, Heavy, Shield)
+- `select_magic_item_classification()` - Already existed, selects MagicItemClassification (None, Arcane, Divine, Universal)
+- `select_alignment_restriction()` - Already existed, selects AlignmentRestriction (None, GoodOnly, EvilOnly)
+
+**Updated Methods:**
+
+- `add_item()` - Now calls `input_item_tags()` and stores tags in Item
+- `preview_item()` - Enhanced to display:
+  - Alignment restriction (Good Only / Evil Only / Any)
+  - Item tags (comma-separated list)
+  - **Derived proficiency requirement** using `item.required_proficiency()` - shows computed proficiency from classification
+  - Legacy disablement flags labeled as "(legacy)"
+
+**User Experience:**
+
+- All item properties visible in preview including new fields
+- Derived proficiency shown with ⚔️ emoji for visibility
+- Clear indication that proficiency is auto-derived from classification
+- Tags explained with practical examples of their effects
+
+### Validation Features
+
+All three CLI editors now include:
+
+- **Input validation** against standard proficiency/tag constants
+- **User confirmation** for non-standard values (allows custom IDs but warns user)
+- **Visual feedback** with ✅ success messages and ⚠️ warning symbols
+- **Helpful prompts** with examples of correct input format
+- **Non-intrusive defaults** (empty input = no proficiencies/tags)
+
+### Backward Compatibility
+
+- All editors preserve legacy `disablement_bit_index` and `disablement` fields
+- Old data files load correctly with `#[serde(default)]` on new fields
+- Legacy disablement flags still shown in previews, labeled as "(legacy)"
+- No breaking changes to existing CLI workflows
+
+### Testing
+
+All quality gates passed:
+
+- ✅ `cargo fmt --all` - Formatted successfully
+- ✅ `cargo check --all-targets --all-features` - Compiled without errors
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - Zero warnings
+- ✅ `cargo test --all-features` - All 307 tests passed
+
+### Files Modified
+
+- `src/bin/class_editor.rs` - Added proficiency input and validation (47 lines added)
+- `src/bin/race_editor.rs` - Added proficiency and incompatible tag input with validation (115 lines added)
+- `src/bin/item_editor.rs` - Added tag input and enhanced preview display (68 lines added)
+
+### Success Criteria ✅
+
+- [x] CLI editors build and run without errors
+- [x] Can create/edit classes with proficiencies via interactive menu
+- [x] Can create/edit items with classifications, tags, and alignment restrictions
+- [x] Can create/edit races with proficiencies and incompatible_item_tags
+- [x] All standard proficiency IDs and tags are validated
+- [x] Non-standard values trigger warnings but can be confirmed
+- [x] Item preview shows derived proficiency requirement
+- [x] All quality gates pass (fmt, check, clippy, test)
+
+### Next Steps
+
+With Phase 5 complete, the proficiency migration is functionally complete for editing workflows. Recommended next phases:
+
+1. **Phase 6: Cleanup and Deprecation Removal** - Remove deprecated `disablement` fields and legacy code
+2. **Data File Migration** - Convert existing RON data files to use new classification/tags/proficiencies
+3. **End-to-End Testing** - Test complete gameplay flow from character creation through item equipping
+4. **Migration Guide** - Document the migration for modders and content creators
+
+---
+
+# Implementation Summary
+
 ## Phase 1: Character Struct Migration (Hard-coded Removal Plan) (2025-01-XX)
 
 **Objective**: Migrate the `Character` struct from enum-based to ID-based class and race references, enabling gradual migration to data-driven lookups.

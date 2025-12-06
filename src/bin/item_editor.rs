@@ -41,6 +41,16 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
 
+/// Standard item tags used for race restrictions and item properties
+const STANDARD_ITEM_TAGS: &[&str] = &[
+    "large_weapon",
+    "two_handed",
+    "heavy_armor",
+    "elven_crafted",
+    "dwarven_crafted",
+    "requires_strength",
+];
+
 /// Main application state
 struct ItemEditor {
     items: Vec<Item>,
@@ -200,6 +210,9 @@ impl ItemEditor {
         // Get class restrictions
         let disablements = self.select_class_restrictions();
 
+        // Item tags
+        let tags = self.input_item_tags();
+
         // Optional bonuses
         let constant_bonus = self.select_bonus("Constant bonus (passive)", true);
         let temporary_bonus = self.select_bonus("Temporary bonus (on use)", true);
@@ -235,7 +248,7 @@ impl ItemEditor {
             max_charges,
             is_cursed,
             icon_path: None,
-            tags: vec![],
+            tags,
         };
 
         self.items.push(item);
@@ -595,6 +608,59 @@ impl ItemEditor {
         Some(Bonus { attribute, value })
     }
 
+    /// Inputs item tags with validation
+    fn input_item_tags(&self) -> Vec<String> {
+        println!("\n╔════════════════════════════════════════╗");
+        println!("║        ITEM TAGS SELECTION             ║");
+        println!("╚════════════════════════════════════════╝");
+        println!("\nStandard Item Tags:");
+        println!("  • large_weapon       - Large/oversized weapons (restricted by small races)");
+        println!("  • two_handed         - Two-handed weapons (requires both hands)");
+        println!("  • heavy_armor        - Heavy armor pieces (restricted by small races)");
+        println!("  • elven_crafted      - Elven-crafted items (may have race restrictions)");
+        println!("  • dwarven_crafted    - Dwarven-crafted items (may have race restrictions)");
+        println!("  • requires_strength  - Items requiring high strength");
+
+        println!("\n📝 Tags are used for race restrictions (incompatible_item_tags).");
+        println!("   Example: A halfling with 'large_weapon' incompatible cannot use items tagged 'large_weapon'.");
+        println!("\nEnter item tags (comma-separated, or leave empty):");
+        println!("   Example: large_weapon,two_handed");
+
+        let input = self.read_input("Tags: ");
+        let trimmed = input.trim();
+
+        if trimmed.is_empty() {
+            return Vec::new();
+        }
+
+        let tags: Vec<String> = trimmed
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        // Validate tags
+        let mut valid_tags = Vec::new();
+        for tag in tags {
+            if STANDARD_ITEM_TAGS.contains(&tag.as_str()) {
+                valid_tags.push(tag);
+            } else {
+                println!("⚠️  Warning: '{}' is not a standard item tag", tag);
+                println!("   Standard tags: {}", STANDARD_ITEM_TAGS.join(", "));
+                let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", tag));
+                if confirm.trim().eq_ignore_ascii_case("y") {
+                    valid_tags.push(tag);
+                }
+            }
+        }
+
+        if !valid_tags.is_empty() {
+            println!("✅ Added tags: {}", valid_tags.join(", "));
+        }
+
+        valid_tags
+    }
+
     /// Edits an existing item
     fn edit_item(&mut self) {
         if self.items.is_empty() {
@@ -732,9 +798,27 @@ impl ItemEditor {
 
         println!("  Base Cost: {} gp", item.base_cost);
         println!("  Sell Cost: {} gp", item.sell_cost);
+
+        // Show alignment restriction
+        match &item.alignment_restriction {
+            Some(AlignmentRestriction::GoodOnly) => println!("  Alignment: Good Only"),
+            Some(AlignmentRestriction::EvilOnly) => println!("  Alignment: Evil Only"),
+            None => println!("  Alignment: Any"),
+        }
+
+        // Show tags
+        if !item.tags.is_empty() {
+            println!("  Tags: {}", item.tags.join(", "));
+        }
+
+        // Show derived proficiency requirement
+        if let Some(prof_id) = item.required_proficiency() {
+            println!("  ⚔️  Required Proficiency: {}", prof_id);
+        }
+
         #[allow(deprecated)]
         let dis_flags = item.disablements.0;
-        println!("  Disablement Flags: 0x{:02X}", dis_flags);
+        println!("  Disablement Flags (legacy): 0x{:02X}", dis_flags);
 
         if let Some(bonus) = &item.constant_bonus {
             println!("  Constant Bonus: {:?} {:+}", bonus.attribute, bonus.value);
