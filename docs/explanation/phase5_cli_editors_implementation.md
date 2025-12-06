@@ -89,7 +89,7 @@ Standard Proficiencies:
 **Example Output**:
 ```
 ========================================
-   INCOMPATIBLE ITEM TAGS SELECTION     
+   INCOMPATIBLE ITEM TAGS SELECTION
 ========================================
 
 Standard Item Tags:

@@ -123,7 +123,8 @@ pub struct ClassDefinition {
 
     /// Bit index for item disablement checking (0 = bit 0).
     /// Use values 0..=7; compute the bitmask with `1 << disablement_bit_index`.
-    #[serde(rename = "disablement_bit")]
+    /// DEPRECATED: Use proficiency system instead. Defaults to 0 for legacy data.
+    #[serde(rename = "disablement_bit", default)]
     pub disablement_bit_index: u8,
 
     /// Special abilities this class has (e.g., "multiple_attacks", "backstab")

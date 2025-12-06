@@ -201,7 +201,6 @@ impl ClassEditor {
 
         let hp_die = self.select_hp_die();
         let (spell_school, is_pure_caster, spell_stat) = self.select_spell_access();
-        let disablement_bit = self.get_next_disablement_bit();
         let special_abilities = self.input_special_abilities();
         let proficiencies = self.input_proficiencies();
 
@@ -213,7 +212,7 @@ impl ClassEditor {
             spell_school,
             is_pure_caster,
             spell_stat,
-            disablement_bit_index: disablement_bit,
+            disablement_bit_index: 0,
             special_abilities,
             starting_weapon_id: None,
             starting_armor_id: None,
@@ -402,12 +401,6 @@ impl ClassEditor {
                 .map(|s| format!("{:?}", s))
                 .unwrap_or_else(|| "N/A".to_string())
         );
-        println!(
-            "  Disablement Bit Index: {} (mask: 0b{:08b})",
-            class.disablement_bit_index,
-            1 << class.disablement_bit_index
-        );
-
         if class.special_abilities.is_empty() {
             println!("  Special Abilities: None");
         } else {
@@ -553,26 +546,6 @@ impl ClassEditor {
         }
     }
 
-    /// Gets the next available disablement bit
-    fn get_next_disablement_bit(&self) -> u8 {
-        let mut used_bits = [false; 8];
-
-        for class in &self.classes {
-            if (class.disablement_bit_index as usize) < 8 {
-                used_bits[class.disablement_bit_index as usize] = true;
-            }
-        }
-
-        for (idx, &used) in used_bits.iter().enumerate() {
-            if !used {
-                return idx as u8;
-            }
-        }
-
-        // If all bits used, find the next available
-        self.classes.len() as u8 % 8
-    }
-
     /// Inputs special abilities
     fn input_special_abilities(&self) -> Vec<String> {
         println!("\nSpecial Abilities (comma-separated, or leave empty):");
@@ -701,60 +674,5 @@ mod tests {
         assert_eq!(truncate("short", 10), "short");
         assert_eq!(truncate("this is a very long string", 10), "this is...");
         assert_eq!(truncate("exactly10c", 10), "exactly10c");
-    }
-
-    #[test]
-    fn test_get_next_disablement_bit_empty() {
-        let editor = ClassEditor {
-            classes: Vec::new(),
-            file_path: PathBuf::from("test.ron"),
-            modified: false,
-        };
-
-        assert_eq!(editor.get_next_disablement_bit(), 0);
-    }
-
-    #[test]
-    fn test_get_next_disablement_bit_sequential() {
-        let classes = vec![
-            ClassDefinition {
-                id: "knight".to_string(),
-                name: "Knight".to_string(),
-                description: String::new(),
-                hp_die: DiceRoll::new(1, 10, 0),
-                spell_school: None,
-                is_pure_caster: false,
-                spell_stat: None,
-                disablement_bit_index: 0,
-                special_abilities: vec![],
-                starting_weapon_id: None,
-                starting_armor_id: None,
-                starting_items: Vec::new(),
-                proficiencies: Vec::new(),
-            },
-            ClassDefinition {
-                id: "sorcerer".to_string(),
-                name: "Sorcerer".to_string(),
-                description: String::new(),
-                hp_die: DiceRoll::new(1, 4, 0),
-                spell_school: Some(SpellSchool::Sorcerer),
-                is_pure_caster: true,
-                spell_stat: Some(SpellStat::Intellect),
-                disablement_bit_index: 1,
-                special_abilities: vec![],
-                starting_weapon_id: None,
-                starting_armor_id: None,
-                starting_items: Vec::new(),
-                proficiencies: Vec::new(),
-            },
-        ];
-
-        let editor = ClassEditor {
-            classes,
-            file_path: PathBuf::from("test.ron"),
-            modified: false,
-        };
-
-        assert_eq!(editor.get_next_disablement_bit(), 2);
     }
 }
