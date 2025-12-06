@@ -52,9 +52,9 @@ use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
 use antares::domain::conditions::ConditionDefinition;
 use antares::domain::dialogue::{DialogueTree, NodeId};
 use antares::domain::items::types::{
-    AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorData, AttributeType, Bonus,
-    BonusAttribute, ConsumableData, ConsumableEffect, Disablement, Item, ItemType, QuestData,
-    WeaponData,
+    AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
+    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Disablement,
+    Item, ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
 };
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
 use antares::domain::quest::{Quest, QuestId};
@@ -514,6 +514,7 @@ impl Default for CampaignBuilderApp {
 
 impl CampaignBuilderApp {
     /// Create a default item for the edit buffer
+    #[allow(deprecated)]
     fn default_item() -> Item {
         Item {
             id: 0,
@@ -522,16 +523,19 @@ impl CampaignBuilderApp {
                 damage: DiceRoll::new(1, 6, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::Simple,
             }),
             base_cost: 0,
             sell_cost: 0,
             disablements: Disablement(255), // All classes
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         }
     }
 
@@ -5327,6 +5331,7 @@ mod tests {
             damage: DiceRoll::new(1, 8, 0),
             bonus: 1,
             hands_required: 1,
+            classification: WeaponClassification::MartialMelee,
         });
 
         let filter = ItemTypeFilter::Weapon;
@@ -5337,11 +5342,13 @@ mod tests {
         armor.item_type = ItemType::Armor(antares::domain::items::types::ArmorData {
             ac_bonus: 5,
             weight: 20,
+            classification: ArmorClassification::Medium,
         });
         assert!(!filter.matches(&armor));
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_type_filter_all_types() {
         use antares::domain::items::types::*;
 
@@ -5352,16 +5359,19 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 10,
             sell_cost: 5,
             disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         let armor_item = Item {
@@ -5370,16 +5380,19 @@ mod tests {
             item_type: ItemType::Armor(ArmorData {
                 ac_bonus: 5,
                 weight: 30,
+                classification: ArmorClassification::Medium,
             }),
             base_cost: 50,
             sell_cost: 25,
             disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         assert!(ItemTypeFilter::Weapon.matches(&weapon_item));
@@ -5463,6 +5476,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_import_export_roundtrip() {
         use antares::domain::items::types::*;
 
@@ -5473,10 +5487,12 @@ mod tests {
                 damage: DiceRoll::new(2, 6, 1),
                 bonus: 2,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 100,
             sell_cost: 50,
             disablements: Disablement(0xFF),
+            alignment_restriction: None,
             constant_bonus: Some(Bonus {
                 attribute: BonusAttribute::Might,
                 value: 3,
@@ -5486,6 +5502,7 @@ mod tests {
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         // Export to RON
@@ -5515,6 +5532,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_type_specific_editors() {
         use antares::domain::items::types::*;
 
@@ -5526,16 +5544,19 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 15,
             sell_cost: 7,
             disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
         assert!(weapon.is_weapon());
 
@@ -5546,16 +5567,19 @@ mod tests {
             item_type: ItemType::Armor(ArmorData {
                 ac_bonus: 8,
                 weight: 50,
+                classification: ArmorClassification::Heavy,
             }),
             base_cost: 100,
             sell_cost: 50,
             disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec!["heavy_armor".to_string()],
         };
         assert!(armor.is_armor());
 
@@ -5570,17 +5594,20 @@ mod tests {
             base_cost: 10,
             sell_cost: 5,
             disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
         assert!(potion.is_consumable());
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_combined_filters() {
         use antares::domain::items::types::*;
 
@@ -5594,10 +5621,12 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 0),
                 bonus: 1,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 100,
             sell_cost: 50,
             disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: Some(Bonus {
                 attribute: BonusAttribute::Might,
                 value: 2,
@@ -5607,6 +5636,7 @@ mod tests {
             max_charges: 5,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         let cursed_armor = Item {
@@ -5615,16 +5645,19 @@ mod tests {
             item_type: ItemType::Armor(ArmorData {
                 ac_bonus: 5,
                 weight: 30,
+                classification: ArmorClassification::Medium,
             }),
             base_cost: 50,
             sell_cost: 0,
             disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: true,
             icon_path: None,
+            tags: vec![],
         };
 
         app.items.push(magical_weapon.clone());
@@ -5714,6 +5747,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_preview_displays_all_info() {
         use antares::domain::items::types::*;
 
@@ -5728,10 +5762,12 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 2),
                 bonus: 3,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 500,
             sell_cost: 250,
             disablements: Disablement(BIT_KNIGHT | BIT_PALADIN | Disablement::GOOD),
+            alignment_restriction: Some(AlignmentRestriction::GoodOnly),
             constant_bonus: Some(Bonus {
                 attribute: BonusAttribute::Might,
                 value: 2,
@@ -5741,6 +5777,7 @@ mod tests {
             max_charges: 20,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         // Verify item has all expected properties

@@ -1565,6 +1565,7 @@ mod tests {
 
         // Create an item with a matching name pattern
         use antares::domain::types::DiceRoll;
+        #[allow(deprecated)]
         let item = Item {
             id: 1 as ItemId,
             name: "Longsword".to_string(),
@@ -1572,16 +1573,19 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: antares::domain::items::WeaponClassification::MartialMelee,
             }),
             base_cost: 100,
             sell_cost: 50,
             disablements: Disablement::NONE,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         // Scan references

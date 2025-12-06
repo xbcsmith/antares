@@ -583,9 +583,10 @@ impl Command for DeleteQuestCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antares::domain::items::types::{Disablement, ItemType, WeaponData};
+    use antares::domain::items::types::{Disablement, ItemType, WeaponClassification, WeaponData};
     use antares::domain::types::DiceRoll;
 
+    #[allow(deprecated)]
     fn create_test_item(id: u32, name: &str) -> Item {
         Item {
             id: id.try_into().expect("ItemId out of range"),
@@ -594,16 +595,19 @@ mod tests {
                 damage: DiceRoll::new(1, 6, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::Simple,
             }),
             base_cost: 100,
             sell_cost: 50,
             disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         }
     }
 

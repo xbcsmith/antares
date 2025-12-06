@@ -62,6 +62,7 @@ pub struct ClassEditBuffer {
     pub starting_weapon_id: String,
     pub starting_armor_id: String,
     pub starting_items: Vec<String>,
+    pub proficiencies: String, // Comma-separated proficiency IDs
 }
 
 impl Default for ClassEditBuffer {
@@ -81,6 +82,7 @@ impl Default for ClassEditBuffer {
             starting_weapon_id: String::new(),
             starting_armor_id: String::new(),
             starting_items: Vec::new(),
+            proficiencies: String::new(),
         }
     }
 }
@@ -142,6 +144,7 @@ impl ClassesEditorState {
                     .iter()
                     .map(|id| id.to_string())
                     .collect(),
+                proficiencies: class.proficiencies.join(", "),
             };
         }
     }
@@ -188,6 +191,14 @@ impl ClassesEditorState {
             .filter(|s| !s.is_empty())
             .collect();
 
+        let proficiencies: Vec<String> = self
+            .buffer
+            .proficiencies
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
         let starting_weapon_id = if self.buffer.starting_weapon_id.is_empty() {
             None
         } else {
@@ -220,6 +231,7 @@ impl ClassesEditorState {
             starting_weapon_id,
             starting_armor_id,
             starting_items,
+            proficiencies,
         };
 
         if let Some(idx) = self.selected_class {
@@ -820,6 +832,75 @@ impl ClassesEditorState {
 
                     if ui.button("➕ Add Starting Item").clicked() {
                         self.buffer.starting_items.push(String::new());
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                ui.group(|ui| {
+                    ui.label("Proficiencies");
+                    ui.label("Proficiency IDs (comma separated):");
+                    ui.text_edit_singleline(&mut self.buffer.proficiencies);
+                    ui.label("ℹ️").on_hover_text(
+                        "Enter proficiency IDs separated by commas.\n\
+                         Standard proficiencies:\n\
+                         • Weapons: simple_weapon, martial_melee, martial_ranged, blunt_weapon, unarmed\n\
+                         • Armor: light_armor, medium_armor, heavy_armor, shield\n\
+                         • Magic Items: arcane_item, divine_item"
+                    );
+
+                    // Show quick-add buttons for common proficiencies
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Quick add:");
+                        let proficiency_buttons = [
+                            ("simple_weapon", "Simple Wpn"),
+                            ("martial_melee", "Martial Melee"),
+                            ("martial_ranged", "Martial Ranged"),
+                            ("blunt_weapon", "Blunt"),
+                            ("light_armor", "Light Armor"),
+                            ("medium_armor", "Medium Armor"),
+                            ("heavy_armor", "Heavy Armor"),
+                            ("shield", "Shield"),
+                            ("arcane_item", "Arcane"),
+                            ("divine_item", "Divine"),
+                        ];
+
+                        for (prof_id, label) in proficiency_buttons {
+                            let current_profs: Vec<&str> = self.buffer.proficiencies
+                                .split(',')
+                                .map(|s| s.trim())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            let has_prof = current_profs.contains(&prof_id);
+
+                            if ui.selectable_label(has_prof, label).clicked() {
+                                if has_prof {
+                                    // Remove proficiency
+                                    let new_profs: Vec<&str> = current_profs
+                                        .into_iter()
+                                        .filter(|p| *p != prof_id)
+                                        .collect();
+                                    self.buffer.proficiencies = new_profs.join(", ");
+                                } else {
+                                    // Add proficiency
+                                    if self.buffer.proficiencies.trim().is_empty() {
+                                        self.buffer.proficiencies = prof_id.to_string();
+                                    } else {
+                                        self.buffer.proficiencies = format!("{}, {}", self.buffer.proficiencies, prof_id);
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    // Show current proficiencies as derived info
+                    let current_profs: Vec<&str> = self.buffer.proficiencies
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if !current_profs.is_empty() {
+                        ui.label(format!("This class grants {} proficiencies", current_profs.len()));
                     }
                 });
 

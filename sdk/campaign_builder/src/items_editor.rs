@@ -4,9 +4,9 @@
 use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
-    AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorData, AttributeType, Bonus,
-    BonusAttribute, ConsumableData, ConsumableEffect, Disablement, Item, ItemType, QuestData,
-    WeaponData,
+    AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
+    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Disablement,
+    Item, ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
 };
 use antares::domain::types::DiceRoll;
 use eframe::egui;
@@ -105,6 +105,7 @@ impl ItemsEditorState {
         Self::default()
     }
 
+    #[allow(deprecated)]
     pub fn default_item() -> Item {
         Item {
             id: 0,
@@ -113,16 +114,19 @@ impl ItemsEditorState {
                 damage: DiceRoll::new(1, 6, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::Simple,
             }),
             base_cost: 10,
             sell_cost: 5,
             is_cursed: false,
             disablements: Disablement(0),
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             icon_path: None,
+            tags: vec![],
         }
     }
 
@@ -354,6 +358,7 @@ impl ItemsEditorState {
         }
     }
 
+    #[allow(deprecated)]
     fn show_list(
         &mut self,
         ui: &mut egui::Ui,
@@ -828,6 +833,7 @@ impl ItemsEditorState {
                                 damage: DiceRoll::new(1, 6, 0),
                                 bonus: 0,
                                 hands_required: 1,
+                                classification: WeaponClassification::Simple,
                             });
                         }
                         if ui
@@ -837,6 +843,7 @@ impl ItemsEditorState {
                             self.edit_buffer.item_type = ItemType::Armor(ArmorData {
                                 ac_bonus: 0,
                                 weight: 0,
+                                classification: ArmorClassification::Light,
                             });
                         }
                         if ui
@@ -845,6 +852,7 @@ impl ItemsEditorState {
                         {
                             self.edit_buffer.item_type = ItemType::Accessory(AccessoryData {
                                 slot: AccessorySlot::Ring,
+                                classification: None,
                             });
                         }
                         if ui
@@ -883,8 +891,127 @@ impl ItemsEditorState {
                 ui.add_space(10.0);
 
                 ui.group(|ui| {
-                    ui.heading("Class Restrictions");
+                    ui.heading("Class Restrictions (Legacy)");
                     self.show_disablement_editor(ui, classes);
+                });
+
+                ui.add_space(10.0);
+
+                ui.group(|ui| {
+                    ui.heading("Alignment Restriction");
+                    ui.horizontal(|ui| {
+                        let alignment_text = match self.edit_buffer.alignment_restriction {
+                            None => "None (Any Alignment)",
+                            Some(AlignmentRestriction::GoodOnly) => "Good Only",
+                            Some(AlignmentRestriction::EvilOnly) => "Evil Only",
+                        };
+                        egui::ComboBox::from_id_salt("alignment_restriction")
+                            .selected_text(alignment_text)
+                            .show_ui(ui, |ui| {
+                                if ui
+                                    .selectable_label(
+                                        self.edit_buffer.alignment_restriction.is_none(),
+                                        "None (Any Alignment)",
+                                    )
+                                    .clicked()
+                                {
+                                    self.edit_buffer.alignment_restriction = None;
+                                }
+                                if ui
+                                    .selectable_label(
+                                        self.edit_buffer.alignment_restriction
+                                            == Some(AlignmentRestriction::GoodOnly),
+                                        "Good Only",
+                                    )
+                                    .clicked()
+                                {
+                                    self.edit_buffer.alignment_restriction =
+                                        Some(AlignmentRestriction::GoodOnly);
+                                }
+                                if ui
+                                    .selectable_label(
+                                        self.edit_buffer.alignment_restriction
+                                            == Some(AlignmentRestriction::EvilOnly),
+                                        "Evil Only",
+                                    )
+                                    .clicked()
+                                {
+                                    self.edit_buffer.alignment_restriction =
+                                        Some(AlignmentRestriction::EvilOnly);
+                                }
+                            });
+                        ui.label("ℹ️").on_hover_text(
+                            "Alignment restriction limits who can use the item:\n\
+                             • None: Any alignment can use\n\
+                             • Good Only: Only good-aligned characters\n\
+                             • Evil Only: Only evil-aligned characters",
+                        );
+                    });
+                });
+
+                ui.add_space(10.0);
+
+                ui.group(|ui| {
+                    ui.heading("Item Tags");
+                    ui.label("Tags (comma separated):");
+                    let mut tags_string = self.edit_buffer.tags.join(", ");
+                    if ui.text_edit_singleline(&mut tags_string).changed() {
+                        self.edit_buffer.tags = tags_string
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                    }
+                    ui.label("ℹ️").on_hover_text(
+                        "Tags allow fine-grained item restrictions.\n\
+                         Standard tags:\n\
+                         • large_weapon - Too big for small races\n\
+                         • two_handed - Requires both hands\n\
+                         • heavy_armor - Encumbering armor\n\
+                         • elven_crafted - Made by elves\n\
+                         • dwarven_crafted - Made by dwarves\n\
+                         • requires_strength - Needs high strength",
+                    );
+
+                    // Quick-add buttons for common tags
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Quick add:");
+                        let tag_buttons = [
+                            ("large_weapon", "Large Weapon"),
+                            ("two_handed", "Two-Handed"),
+                            ("heavy_armor", "Heavy Armor"),
+                            ("elven_crafted", "Elven Crafted"),
+                            ("dwarven_crafted", "Dwarven Crafted"),
+                            ("requires_strength", "Req. Strength"),
+                        ];
+
+                        for (tag_id, label) in tag_buttons {
+                            let has_tag = self.edit_buffer.tags.iter().any(|t| t == tag_id);
+
+                            if ui.selectable_label(has_tag, label).clicked() {
+                                if has_tag {
+                                    // Remove tag
+                                    self.edit_buffer.tags.retain(|t| t != tag_id);
+                                } else {
+                                    // Add tag
+                                    self.edit_buffer.tags.push(tag_id.to_string());
+                                }
+                            }
+                        }
+                    });
+
+                    if !self.edit_buffer.tags.is_empty() {
+                        ui.label(format!("Current tags: {}", self.edit_buffer.tags.len()));
+                    }
+
+                    // Show derived proficiency requirement
+                    ui.separator();
+                    ui.label("Derived Proficiency Requirement:");
+                    if let Some(prof_id) = self.edit_buffer.required_proficiency() {
+                        ui.label(format!("  {} (from classification)", prof_id));
+                    } else {
+                        ui.label("  None (anyone can use)");
+                    }
                 });
 
                 ui.add_space(10.0);
@@ -941,6 +1068,52 @@ impl ItemsEditorState {
                     ui.label("Hands Required:");
                     ui.add(egui::DragValue::new(&mut data.hands_required).range(1..=2));
                 });
+                ui.horizontal(|ui| {
+                    ui.label("Classification:");
+                    egui::ComboBox::from_id_salt("weapon_classification")
+                        .selected_text(format!("{:?}", data.classification))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut data.classification,
+                                WeaponClassification::Simple,
+                                "Simple",
+                            );
+                            ui.selectable_value(
+                                &mut data.classification,
+                                WeaponClassification::MartialMelee,
+                                "Martial Melee",
+                            );
+                            ui.selectable_value(
+                                &mut data.classification,
+                                WeaponClassification::MartialRanged,
+                                "Martial Ranged",
+                            );
+                            ui.selectable_value(
+                                &mut data.classification,
+                                WeaponClassification::Blunt,
+                                "Blunt",
+                            );
+                            ui.selectable_value(
+                                &mut data.classification,
+                                WeaponClassification::Unarmed,
+                                "Unarmed",
+                            );
+                        });
+                    ui.label("ℹ️").on_hover_text(
+                        "Weapon classification determines proficiency requirement:\n\
+                         • Simple: Clubs, daggers, staffs (anyone)\n\
+                         • Martial Melee: Swords, axes (fighters)\n\
+                         • Martial Ranged: Bows, crossbows (archers)\n\
+                         • Blunt: Maces, hammers (clerics)\n\
+                         • Unarmed: Martial arts (monks)",
+                    );
+                });
+                // Show derived proficiency
+                let prof_id =
+                    antares::domain::proficiency::ProficiencyDatabase::proficiency_for_weapon(
+                        data.classification,
+                    );
+                ui.label(format!("Required proficiency: {}", prof_id));
             }
             ItemType::Armor(data) => {
                 ui.label("Armor Properties:");
@@ -952,6 +1125,46 @@ impl ItemsEditorState {
                     ui.label("Weight:");
                     ui.add(egui::DragValue::new(&mut data.weight).range(0..=100));
                 });
+                ui.horizontal(|ui| {
+                    ui.label("Classification:");
+                    egui::ComboBox::from_id_salt("armor_classification")
+                        .selected_text(format!("{:?}", data.classification))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut data.classification,
+                                ArmorClassification::Light,
+                                "Light",
+                            );
+                            ui.selectable_value(
+                                &mut data.classification,
+                                ArmorClassification::Medium,
+                                "Medium",
+                            );
+                            ui.selectable_value(
+                                &mut data.classification,
+                                ArmorClassification::Heavy,
+                                "Heavy",
+                            );
+                            ui.selectable_value(
+                                &mut data.classification,
+                                ArmorClassification::Shield,
+                                "Shield",
+                            );
+                        });
+                    ui.label("ℹ️").on_hover_text(
+                        "Armor classification determines proficiency requirement:\n\
+                         • Light: Leather, padded armor\n\
+                         • Medium: Chain mail, scale mail\n\
+                         • Heavy: Plate mail, full plate\n\
+                         • Shield: All shield types",
+                    );
+                });
+                // Show derived proficiency
+                let prof_id =
+                    antares::domain::proficiency::ProficiencyDatabase::proficiency_for_armor(
+                        data.classification,
+                    );
+                ui.label(format!("Required proficiency: {}", prof_id));
             }
             ItemType::Accessory(data) => {
                 ui.label("Accessory Properties:");
@@ -966,6 +1179,69 @@ impl ItemsEditorState {
                             ui.selectable_value(&mut data.slot, AccessorySlot::Cloak, "Cloak");
                         });
                 });
+                ui.horizontal(|ui| {
+                    ui.label("Magic Classification:");
+                    let classification_text = match data.classification {
+                        None => "None (Mundane)",
+                        Some(MagicItemClassification::Arcane) => "Arcane",
+                        Some(MagicItemClassification::Divine) => "Divine",
+                        Some(MagicItemClassification::Universal) => "Universal",
+                    };
+                    egui::ComboBox::from_id_salt("accessory_magic_classification")
+                        .selected_text(classification_text)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(data.classification.is_none(), "None (Mundane)")
+                                .clicked()
+                            {
+                                data.classification = None;
+                            }
+                            if ui
+                                .selectable_label(
+                                    data.classification == Some(MagicItemClassification::Arcane),
+                                    "Arcane",
+                                )
+                                .clicked()
+                            {
+                                data.classification = Some(MagicItemClassification::Arcane);
+                            }
+                            if ui
+                                .selectable_label(
+                                    data.classification == Some(MagicItemClassification::Divine),
+                                    "Divine",
+                                )
+                                .clicked()
+                            {
+                                data.classification = Some(MagicItemClassification::Divine);
+                            }
+                            if ui
+                                .selectable_label(
+                                    data.classification == Some(MagicItemClassification::Universal),
+                                    "Universal",
+                                )
+                                .clicked()
+                            {
+                                data.classification = Some(MagicItemClassification::Universal);
+                            }
+                        });
+                    ui.label("ℹ️").on_hover_text(
+                        "Magic item classification determines proficiency requirement:\n\
+                         • None (Mundane): Anyone can use\n\
+                         • Arcane: Wands, arcane scrolls (sorcerers)\n\
+                         • Divine: Holy symbols, divine scrolls (clerics)\n\
+                         • Universal: Potions, rings (anyone)",
+                    );
+                });
+                // Show derived proficiency
+                if let Some(classification) = data.classification {
+                    if let Some(prof_id) = antares::domain::proficiency::ProficiencyDatabase::proficiency_for_magic_item(classification) {
+                        ui.label(format!("Required proficiency: {}", prof_id));
+                    } else {
+                        ui.label("No proficiency required (universal)");
+                    }
+                } else {
+                    ui.label("No proficiency required (mundane)");
+                }
             }
             ItemType::Consumable(data) => {
                 ui.label("Consumable Properties:");
@@ -1099,6 +1375,7 @@ impl ItemsEditorState {
         }
     }
 
+    #[allow(deprecated)]
     fn show_disablement_editor(&mut self, ui: &mut egui::Ui, classes: &[ClassDefinition]) {
         let disablement = &mut self.edit_buffer.disablements;
 
@@ -1261,6 +1538,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_type_filter_matches_weapon() {
         let weapon_item = Item {
             id: 1,
@@ -1269,16 +1547,19 @@ mod tests {
                 damage: DiceRoll::new(1, 6, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::Simple,
             }),
             base_cost: 10,
             sell_cost: 5,
             is_cursed: false,
             disablements: Disablement(0),
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             icon_path: None,
+            tags: vec![],
         };
 
         assert!(ItemTypeFilter::Weapon.matches(&weapon_item));
@@ -1287,6 +1568,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_type_filter_matches_armor() {
         let armor_item = Item {
             id: 2,
@@ -1294,16 +1576,19 @@ mod tests {
             item_type: ItemType::Armor(ArmorData {
                 ac_bonus: 5,
                 weight: 50,
+                classification: ArmorClassification::Heavy,
             }),
             base_cost: 100,
             sell_cost: 50,
             is_cursed: false,
             disablements: Disablement(0),
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             icon_path: None,
+            tags: vec![],
         };
 
         assert!(ItemTypeFilter::Armor.matches(&armor_item));
@@ -1311,6 +1596,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_type_filter_matches_quest() {
         let quest_item = Item {
             id: 3,
@@ -1323,11 +1609,13 @@ mod tests {
             sell_cost: 0,
             is_cursed: false,
             disablements: Disablement(0),
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             icon_path: None,
+            tags: vec![],
         };
 
         assert!(ItemTypeFilter::Quest.matches(&quest_item));

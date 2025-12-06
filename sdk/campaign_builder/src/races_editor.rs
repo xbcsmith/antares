@@ -945,26 +945,140 @@ impl RacesEditorState {
                     });
 
                 ui.add_space(10.0);
-                ui.heading("Abilities & Proficiencies");
-                egui::Grid::new("abilities_grid")
-                    .num_columns(2)
-                    .spacing([10.0, 5.0])
-                    .show(ui, |ui| {
-                        ui.label("Special Abilities:");
-                        ui.text_edit_singleline(&mut self.buffer.special_abilities);
-                        ui.end_row();
+                ui.heading("Special Abilities");
+                ui.label("Special Abilities (comma separated):");
+                ui.text_edit_singleline(&mut self.buffer.special_abilities);
+                ui.label("ℹ️").on_hover_text(
+                    "Examples: infravision, magic_resistance, poison_immunity"
+                );
 
-                        ui.label("Proficiencies:");
-                        ui.text_edit_singleline(&mut self.buffer.proficiencies);
-                        ui.end_row();
+                ui.add_space(10.0);
+                ui.heading("Proficiencies");
+                ui.label("Proficiency IDs (comma separated):");
+                ui.text_edit_singleline(&mut self.buffer.proficiencies);
+                ui.label("ℹ️").on_hover_text(
+                    "Races can grant proficiencies that combine with class proficiencies.\n\
+                     Standard proficiencies:\n\
+                     • Weapons: simple_weapon, martial_melee, martial_ranged, blunt_weapon, unarmed\n\
+                     • Armor: light_armor, medium_armor, heavy_armor, shield\n\
+                     • Magic Items: arcane_item, divine_item"
+                );
 
-                        ui.label("Incompatible Tags:");
-                        ui.text_edit_singleline(&mut self.buffer.incompatible_item_tags);
-                        ui.end_row();
-                    });
+                // Quick-add buttons for proficiencies
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Quick add:");
+                    let proficiency_buttons = [
+                        ("simple_weapon", "Simple Wpn"),
+                        ("martial_melee", "Martial Melee"),
+                        ("martial_ranged", "Martial Ranged"),
+                        ("blunt_weapon", "Blunt"),
+                        ("light_armor", "Light Armor"),
+                        ("medium_armor", "Medium Armor"),
+                        ("heavy_armor", "Heavy Armor"),
+                        ("shield", "Shield"),
+                        ("arcane_item", "Arcane"),
+                        ("divine_item", "Divine"),
+                    ];
 
-                ui.add_space(5.0);
-                ui.label("(Separate multiple values with commas)");
+                    for (prof_id, label) in proficiency_buttons {
+                        let current_profs: Vec<&str> = self.buffer.proficiencies
+                            .split(',')
+                            .map(|s| s.trim())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        let has_prof = current_profs.contains(&prof_id);
+
+                        if ui.selectable_label(has_prof, label).clicked() {
+                            if has_prof {
+                                // Remove proficiency
+                                let new_profs: Vec<&str> = current_profs
+                                    .into_iter()
+                                    .filter(|p| *p != prof_id)
+                                    .collect();
+                                self.buffer.proficiencies = new_profs.join(", ");
+                            } else {
+                                // Add proficiency
+                                if self.buffer.proficiencies.trim().is_empty() {
+                                    self.buffer.proficiencies = prof_id.to_string();
+                                } else {
+                                    self.buffer.proficiencies = format!("{}, {}", self.buffer.proficiencies, prof_id);
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Show current proficiency count
+                let current_profs: Vec<&str> = self.buffer.proficiencies
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if !current_profs.is_empty() {
+                    ui.label(format!("This race grants {} proficiencies", current_profs.len()));
+                }
+
+                ui.add_space(10.0);
+                ui.heading("Incompatible Item Tags");
+                ui.label("Incompatible Tags (comma separated):");
+                ui.text_edit_singleline(&mut self.buffer.incompatible_item_tags);
+                ui.label("ℹ️").on_hover_text(
+                    "Items with these tags cannot be used by this race.\n\
+                     Standard tags:\n\
+                     • large_weapon - Two-handed swords, longbows (too big for small races)\n\
+                     • two_handed - Requires both hands\n\
+                     • heavy_armor - Plate mail and similar (encumbering)"
+                );
+
+                // Quick-add buttons for common item tags
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Quick add:");
+                    let tag_buttons = [
+                        ("large_weapon", "Large Weapon"),
+                        ("two_handed", "Two-Handed"),
+                        ("heavy_armor", "Heavy Armor"),
+                        ("elven_crafted", "Elven Crafted"),
+                        ("dwarven_crafted", "Dwarven Crafted"),
+                        ("requires_strength", "Req. Strength"),
+                    ];
+
+                    for (tag_id, label) in tag_buttons {
+                        let current_tags: Vec<&str> = self.buffer.incompatible_item_tags
+                            .split(',')
+                            .map(|s| s.trim())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        let has_tag = current_tags.contains(&tag_id);
+
+                        if ui.selectable_label(has_tag, label).clicked() {
+                            if has_tag {
+                                // Remove tag
+                                let new_tags: Vec<&str> = current_tags
+                                    .into_iter()
+                                    .filter(|t| *t != tag_id)
+                                    .collect();
+                                self.buffer.incompatible_item_tags = new_tags.join(", ");
+                            } else {
+                                // Add tag
+                                if self.buffer.incompatible_item_tags.trim().is_empty() {
+                                    self.buffer.incompatible_item_tags = tag_id.to_string();
+                                } else {
+                                    self.buffer.incompatible_item_tags = format!("{}, {}", self.buffer.incompatible_item_tags, tag_id);
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Show current tag count
+                let current_tags: Vec<&str> = self.buffer.incompatible_item_tags
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if !current_tags.is_empty() {
+                    ui.label(format!("This race has {} incompatible item tags", current_tags.len()));
+                }
 
                 ui.add_space(20.0);
 

@@ -621,6 +621,316 @@ pub fn validate_character_references<'a>(
     results
 }
 
+/// Standard proficiency IDs used in the game.
+///
+/// These are the proficiency IDs defined in data/proficiencies.ron.
+pub const STANDARD_PROFICIENCY_IDS: &[&str] = &[
+    "simple_weapon",
+    "martial_melee",
+    "martial_ranged",
+    "blunt_weapon",
+    "unarmed",
+    "light_armor",
+    "medium_armor",
+    "heavy_armor",
+    "shield",
+    "arcane_item",
+    "divine_item",
+];
+
+/// Validates that a proficiency ID is a known standard proficiency.
+///
+/// # Arguments
+///
+/// * `proficiency_id` - The proficiency ID to validate
+/// * `context` - Description of where the reference is used (e.g., "class 'Knight'")
+///
+/// # Returns
+///
+/// Returns `Some(ValidationResult)` with a warning if the proficiency_id is not
+/// a standard proficiency, or `None` if the reference is valid.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::campaign_builder::validation::validate_proficiency_id;
+///
+/// let result = validate_proficiency_id("martial_melee", "class 'Knight'");
+/// assert!(result.is_none()); // Valid proficiency
+///
+/// let result = validate_proficiency_id("unknown_prof", "class 'Knight'");
+/// assert!(result.is_some()); // Unknown proficiency (warning)
+/// ```
+pub fn validate_proficiency_id(proficiency_id: &str, context: &str) -> Option<ValidationResult> {
+    if proficiency_id.is_empty() {
+        return Some(ValidationResult::warning(
+            ValidationCategory::Classes,
+            format!("Empty proficiency ID in {}", context),
+        ));
+    }
+
+    if !STANDARD_PROFICIENCY_IDS.contains(&proficiency_id) {
+        Some(ValidationResult::warning(
+            ValidationCategory::Classes,
+            format!(
+                "Unknown proficiency ID '{}' in {} (standard: {})",
+                proficiency_id,
+                context,
+                STANDARD_PROFICIENCY_IDS.join(", ")
+            ),
+        ))
+    } else {
+        None
+    }
+}
+
+/// Validates all proficiency IDs in a class definition.
+///
+/// # Arguments
+///
+/// * `class_id` - The class identifier
+/// * `proficiencies` - Iterator of proficiency IDs to validate
+///
+/// # Returns
+///
+/// A vector of validation results for any invalid proficiency IDs found.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::campaign_builder::validation::validate_class_proficiencies;
+///
+/// let proficiencies = vec!["martial_melee", "heavy_armor", "shield"];
+/// let results = validate_class_proficiencies("knight", proficiencies.into_iter());
+/// assert!(results.is_empty()); // All valid
+///
+/// let proficiencies = vec!["martial_melee", "unknown_prof"];
+/// let results = validate_class_proficiencies("knight", proficiencies.into_iter());
+/// assert_eq!(results.len(), 1); // One warning for unknown_prof
+/// ```
+pub fn validate_class_proficiencies<'a>(
+    class_id: &str,
+    proficiencies: impl Iterator<Item = &'a str>,
+) -> Vec<ValidationResult> {
+    let mut results = Vec::new();
+    let context = format!("class '{}'", class_id);
+
+    for prof_id in proficiencies {
+        if let Some(result) = validate_proficiency_id(prof_id, &context) {
+            results.push(result);
+        }
+    }
+
+    results
+}
+
+/// Validates all proficiency IDs in a race definition.
+///
+/// # Arguments
+///
+/// * `race_id` - The race identifier
+/// * `proficiencies` - Iterator of proficiency IDs to validate
+///
+/// # Returns
+///
+/// A vector of validation results for any invalid proficiency IDs found.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::campaign_builder::validation::validate_race_proficiencies;
+///
+/// let proficiencies = vec!["martial_ranged"];
+/// let results = validate_race_proficiencies("elf", proficiencies.into_iter());
+/// assert!(results.is_empty()); // All valid
+/// ```
+pub fn validate_race_proficiencies<'a>(
+    race_id: &str,
+    proficiencies: impl Iterator<Item = &'a str>,
+) -> Vec<ValidationResult> {
+    let mut results = Vec::new();
+    let context = format!("race '{}'", race_id);
+
+    for prof_id in proficiencies {
+        if let Some(result) = validate_proficiency_id(prof_id, &context) {
+            results.push(result);
+        }
+    }
+
+    results
+}
+
+/// Standard item tags used in the game.
+///
+/// These are the conventional tags that races can mark as incompatible.
+pub const STANDARD_ITEM_TAGS: &[&str] = &[
+    "large_weapon",
+    "two_handed",
+    "heavy_armor",
+    "elven_crafted",
+    "dwarven_crafted",
+    "requires_strength",
+];
+
+/// Validates that an item tag is a known standard tag.
+///
+/// # Arguments
+///
+/// * `tag` - The tag to validate
+/// * `context` - Description of where the tag is used
+///
+/// # Returns
+///
+/// Returns `Some(ValidationResult)` with an info message if the tag is not
+/// a standard tag, or `None` if the tag is recognized.
+pub fn validate_item_tag(tag: &str, context: &str) -> Option<ValidationResult> {
+    if tag.is_empty() {
+        return Some(ValidationResult::warning(
+            ValidationCategory::Items,
+            format!("Empty tag in {}", context),
+        ));
+    }
+
+    if !STANDARD_ITEM_TAGS.contains(&tag) {
+        Some(ValidationResult::info(
+            ValidationCategory::Items,
+            format!(
+                "Custom tag '{}' in {} (standard: {})",
+                tag,
+                context,
+                STANDARD_ITEM_TAGS.join(", ")
+            ),
+        ))
+    } else {
+        None
+    }
+}
+
+/// Validates all item tags for a race's incompatible_item_tags.
+///
+/// # Arguments
+///
+/// * `race_id` - The race identifier
+/// * `tags` - Iterator of tag strings to validate
+///
+/// # Returns
+///
+/// A vector of validation results for any non-standard tags found.
+pub fn validate_race_incompatible_tags<'a>(
+    race_id: &str,
+    tags: impl Iterator<Item = &'a str>,
+) -> Vec<ValidationResult> {
+    let mut results = Vec::new();
+    let context = format!("race '{}' incompatible_item_tags", race_id);
+
+    for tag in tags {
+        if let Some(result) = validate_item_tag(tag, &context) {
+            results.push(result);
+        }
+    }
+
+    results
+}
+
+/// Validates all tags for an item.
+///
+/// # Arguments
+///
+/// * `item_id` - The item identifier
+/// * `item_name` - The item name for display
+/// * `tags` - Iterator of tag strings to validate
+///
+/// # Returns
+///
+/// A vector of validation results for any non-standard tags found.
+pub fn validate_item_tags<'a>(
+    item_id: u8,
+    item_name: &str,
+    tags: impl Iterator<Item = &'a str>,
+) -> Vec<ValidationResult> {
+    let mut results = Vec::new();
+    let context = format!("item '{}' (ID: {})", item_name, item_id);
+
+    for tag in tags {
+        if let Some(result) = validate_item_tag(tag, &context) {
+            results.push(result);
+        }
+    }
+
+    results
+}
+
+/// Validates that a weapon has a classification set.
+///
+/// # Arguments
+///
+/// * `item_id` - The item identifier
+/// * `item_name` - The item name for display
+/// * `has_classification` - Whether the weapon has a non-default classification
+///
+/// # Returns
+///
+/// Returns a validation result if classification should be reviewed.
+pub fn validate_weapon_classification(
+    item_id: u8,
+    item_name: &str,
+    classification: &str,
+) -> Option<ValidationResult> {
+    // Simple is the default, so it's fine if set explicitly or by default
+    // We just provide info that classification affects proficiency requirements
+    Some(ValidationResult::info(
+        ValidationCategory::Items,
+        format!(
+            "Weapon '{}' (ID: {}) classification: {} (requires {} proficiency)",
+            item_name,
+            item_id,
+            classification,
+            match classification {
+                "Simple" => "simple_weapon",
+                "MartialMelee" => "martial_melee",
+                "MartialRanged" => "martial_ranged",
+                "Blunt" => "blunt_weapon",
+                "Unarmed" => "unarmed",
+                _ => "unknown",
+            }
+        ),
+    ))
+}
+
+/// Validates that an armor has a classification set.
+///
+/// # Arguments
+///
+/// * `item_id` - The item identifier
+/// * `item_name` - The item name for display
+/// * `classification` - The armor classification string
+///
+/// # Returns
+///
+/// Returns a validation result with info about the proficiency requirement.
+pub fn validate_armor_classification(
+    item_id: u8,
+    item_name: &str,
+    classification: &str,
+) -> Option<ValidationResult> {
+    Some(ValidationResult::info(
+        ValidationCategory::Items,
+        format!(
+            "Armor '{}' (ID: {}) classification: {} (requires {} proficiency)",
+            item_name,
+            item_id,
+            classification,
+            match classification {
+                "Light" => "light_armor",
+                "Medium" => "medium_armor",
+                "Heavy" => "heavy_armor",
+                "Shield" => "shield",
+                _ => "unknown",
+            }
+        ),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,7 +1003,7 @@ mod tests {
 
         let results = validate_character_references(characters.into_iter(), &classes, &races);
         assert_eq!(results.len(), 1);
-        assert!(results[0].message.contains("invalid_class"));
+        assert!(results[0].is_error());
     }
 
     #[test]
@@ -704,17 +1014,168 @@ mod tests {
 
         let results = validate_character_references(characters.into_iter(), &classes, &races);
         assert_eq!(results.len(), 1);
-        assert!(results[0].message.contains("invalid_race"));
+        assert!(results[0].is_error());
     }
 
     #[test]
     fn test_validate_character_references_both_invalid() {
-        let characters = vec![("Hero", "bad_class", "bad_race")];
+        let characters = vec![("Hero", "invalid_class", "invalid_race")];
         let classes = vec!["knight".to_string()];
         let races = vec!["human".to_string()];
 
         let results = validate_character_references(characters.into_iter(), &classes, &races);
-        assert_eq!(results.len(), 2); // One for class, one for race
+        assert_eq!(results.len(), 2);
+    }
+
+    // Proficiency validation tests
+
+    #[test]
+    fn test_validate_proficiency_id_valid() {
+        let result = validate_proficiency_id("martial_melee", "class 'Knight'");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_validate_proficiency_id_invalid() {
+        let result = validate_proficiency_id("unknown_prof", "class 'Knight'");
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(result.is_warning());
+        assert!(result.message.contains("unknown_prof"));
+    }
+
+    #[test]
+    fn test_validate_proficiency_id_empty() {
+        let result = validate_proficiency_id("", "class 'Knight'");
+        assert!(result.is_some());
+        assert!(result.unwrap().message.contains("Empty proficiency ID"));
+    }
+
+    #[test]
+    fn test_validate_class_proficiencies_all_valid() {
+        let proficiencies = vec!["martial_melee", "heavy_armor", "shield"];
+        let results = validate_class_proficiencies("knight", proficiencies.into_iter());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_validate_class_proficiencies_with_invalid() {
+        let proficiencies = vec!["martial_melee", "unknown_prof", "heavy_armor"];
+        let results = validate_class_proficiencies("knight", proficiencies.into_iter());
+        assert_eq!(results.len(), 1);
+        assert!(results[0].message.contains("unknown_prof"));
+    }
+
+    #[test]
+    fn test_validate_race_proficiencies_valid() {
+        let proficiencies = vec!["martial_ranged"];
+        let results = validate_race_proficiencies("elf", proficiencies.into_iter());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_validate_race_proficiencies_with_invalid() {
+        let proficiencies = vec!["bow_mastery"];
+        let results = validate_race_proficiencies("elf", proficiencies.into_iter());
+        assert_eq!(results.len(), 1);
+        assert!(results[0].message.contains("bow_mastery"));
+    }
+
+    // Item tag validation tests
+
+    #[test]
+    fn test_validate_item_tag_valid() {
+        let result = validate_item_tag("large_weapon", "item 'Greatsword'");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_validate_item_tag_custom() {
+        let result = validate_item_tag("custom_tag", "item 'Special Item'");
+        assert!(result.is_some());
+        // Custom tags are info, not warnings
+        let result = result.unwrap();
+        assert_eq!(result.severity, ValidationSeverity::Info);
+    }
+
+    #[test]
+    fn test_validate_item_tag_empty() {
+        let result = validate_item_tag("", "item 'Test'");
+        assert!(result.is_some());
+        assert!(result.unwrap().is_warning());
+    }
+
+    #[test]
+    fn test_validate_race_incompatible_tags_valid() {
+        let tags = vec!["large_weapon", "heavy_armor"];
+        let results = validate_race_incompatible_tags("gnome", tags.into_iter());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_validate_race_incompatible_tags_custom() {
+        let tags = vec!["large_weapon", "gnome_unfriendly"];
+        let results = validate_race_incompatible_tags("gnome", tags.into_iter());
+        assert_eq!(results.len(), 1);
+        assert!(results[0].message.contains("gnome_unfriendly"));
+    }
+
+    #[test]
+    fn test_validate_item_tags_valid() {
+        let tags = vec!["two_handed", "large_weapon"];
+        let results = validate_item_tags(1, "Greatsword", tags.into_iter());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_validate_item_tags_with_custom() {
+        let tags = vec!["two_handed", "magical_aura"];
+        let results = validate_item_tags(1, "Magic Sword", tags.into_iter());
+        assert_eq!(results.len(), 1);
+        assert!(results[0].message.contains("magical_aura"));
+    }
+
+    #[test]
+    fn test_validate_weapon_classification() {
+        let result = validate_weapon_classification(1, "Longsword", "MartialMelee");
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(result.message.contains("martial_melee"));
+    }
+
+    #[test]
+    fn test_validate_armor_classification() {
+        let result = validate_armor_classification(10, "Plate Mail", "Heavy");
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(result.message.contains("heavy_armor"));
+    }
+
+    #[test]
+    fn test_standard_proficiency_ids_complete() {
+        // Ensure all expected proficiencies are in the list
+        assert!(STANDARD_PROFICIENCY_IDS.contains(&"simple_weapon"));
+        assert!(STANDARD_PROFICIENCY_IDS.contains(&"martial_melee"));
+        assert!(STANDARD_PROFICIENCY_IDS.contains(&"martial_ranged"));
+        assert!(STANDARD_PROFICIENCY_IDS.contains(&"blunt_weapon"));
+        assert!(STANDARD_PROFICIENCY_IDS.contains(&"unarmed"));
+        assert!(STANDARD_PROFICIENCY_IDS.contains(&"light_armor"));
+        assert!(STANDARD_PROFICIENCY_IDS.contains(&"medium_armor"));
+        assert!(STANDARD_PROFICIENCY_IDS.contains(&"heavy_armor"));
+        assert!(STANDARD_PROFICIENCY_IDS.contains(&"shield"));
+        assert!(STANDARD_PROFICIENCY_IDS.contains(&"arcane_item"));
+        assert!(STANDARD_PROFICIENCY_IDS.contains(&"divine_item"));
+    }
+
+    #[test]
+    fn test_standard_item_tags_complete() {
+        // Ensure all expected tags are in the list
+        assert!(STANDARD_ITEM_TAGS.contains(&"large_weapon"));
+        assert!(STANDARD_ITEM_TAGS.contains(&"two_handed"));
+        assert!(STANDARD_ITEM_TAGS.contains(&"heavy_armor"));
+        assert!(STANDARD_ITEM_TAGS.contains(&"elven_crafted"));
+        assert!(STANDARD_ITEM_TAGS.contains(&"dwarven_crafted"));
+        assert!(STANDARD_ITEM_TAGS.contains(&"requires_strength"));
     }
 
     #[test]
