@@ -11,6 +11,7 @@ This plan addresses the remaining deliverables from Phase 5 (CLI Editor Updates)
 ### Existing Infrastructure
 
 **Completed in Phase 5 (Initial Implementation)**:
+
 - `src/bin/class_editor.rs` - Proficiency input added to add flow
 - `src/bin/race_editor.rs` - Proficiency and incompatible tags input added
 - `src/bin/item_editor.rs` - Tags, classification, and alignment added to add flow
@@ -19,6 +20,7 @@ This plan addresses the remaining deliverables from Phase 5 (CLI Editor Updates)
 - Implementation documentation created
 
 **What Works**:
+
 - All three CLI editors (`class_editor.rs`, `item_editor.rs`, `race_editor.rs`) compile and run
 - Add flows support all new proficiency fields (classifications, tags, alignment restrictions)
 - Preview functions display new fields correctly
@@ -54,6 +56,7 @@ Remove all legacy disablement bit infrastructure from class editor while preserv
 - The field itself must remain in the struct for backward compatibility with existing RON files
 
 **Expected Changes:**
+
 ```
 add_class() function:
   - Remove: let disablement_bit = self.get_next_disablement_bit();
@@ -68,6 +71,7 @@ add_class() function:
 - Remove disablement bit display from `preview_class()` function (L405-409)
 
 **Expected Changes:**
+
 ```
 Remove entire function:
   - fn get_next_disablement_bit(&self) -> u8 { ... }
@@ -86,6 +90,7 @@ Update preview_class():
 - Keep `test_truncate()` as it tests active functionality
 
 **Expected Changes:**
+
 ```
 Remove test functions:
   - fn test_get_next_disablement_bit_empty() { ... }
@@ -125,6 +130,7 @@ Implement full editing capability for item classifications, tags, and alignment 
 Design the edit menu structure for `edit_item()` function (currently a stub at L665-695).
 
 **Required Menu Options:**
+
 1. Edit basic info (name, costs)
 2. Edit item type data (classification, weapon/armor stats)
 3. Edit tags
@@ -136,6 +142,7 @@ Design the edit menu structure for `edit_item()` function (currently a stub at L
 9. Save changes / Cancel
 
 **Constraints:**
+
 - Cannot change core item type (Weapon → Armor) without recreating item
 - Must validate all inputs same as `add_item()` flow
 - Should reuse existing helper methods: `select_weapon_classification()`, `select_armor_classification()`, `input_item_tags()`, `select_alignment_restriction()`, etc.
@@ -147,12 +154,14 @@ Design the edit menu structure for `edit_item()` function (currently a stub at L
 Add menu option handlers for editing basic fields that don't require complex validation.
 
 **Fields to support:**
+
 - `name: String` - simple text input
 - `base_cost: u32` - numeric input with validation
 - `sell_cost: u32` - numeric input with validation
 - `is_cursed: bool` - boolean toggle
 
 **Implementation approach:**
+
 ```
 Match menu choice:
   "1" => Edit name (read_input, update self.items[idx].name)
@@ -167,12 +176,14 @@ Match menu choice:
 Add menu option to edit item type-specific classifications.
 
 **Fields to support based on ItemType:**
+
 - `ItemType::Weapon` - edit `WeaponData.classification` via `select_weapon_classification()`
 - `ItemType::Armor` - edit `ArmorData.classification` via `select_armor_classification()`
 - `ItemType::Accessory` - edit `AccessoryData.classification` via `select_magic_item_classification()`
 - Other types - show "No classification for this item type"
 
 **Implementation approach:**
+
 ```
 Match item type:
   ItemType::Weapon(ref mut data) => {
@@ -189,10 +200,12 @@ Match item type:
 Add menu options to edit tags and alignment restrictions.
 
 **Fields to support:**
+
 - `tags: Vec<String>` - use existing `input_item_tags()` method
 - `alignment_restriction: Option<AlignmentRestriction>` - use existing `select_alignment_restriction()` method
 
 **Implementation approach:**
+
 ```
 "3" => Edit tags:
   let new_tags = self.input_item_tags();
@@ -210,12 +223,14 @@ Add menu options to edit tags and alignment restrictions.
 Add proper state management for edit mode.
 
 **Requirements:**
+
 - Track if changes were made (`modified` flag)
 - Show preview before final save
 - Confirm before discarding changes if modified
 - Update `self.modified = true` when item is changed
 
 **Implementation approach:**
+
 ```
 Loop edit menu until user chooses Save or Cancel:
   - Track local modified flag
@@ -257,6 +272,7 @@ Add unit and integration tests for CLI editor proficiency functionality.
 Create integration test file for CLI editor round-trip testing.
 
 **Test Structure:**
+
 ```rust
 // Test data creation helpers
 fn create_test_class_with_proficiencies() -> ClassDefinition { ... }
@@ -271,6 +287,7 @@ fn create_test_race_with_restrictions() -> RaceDefinition { ... }
 ```
 
 **Dependencies:**
+
 - `tempfile` crate for temporary test files
 - Access to domain types: `ClassDefinition`, `Item`, `RaceDefinition`
 - RON serialization/deserialization
@@ -282,11 +299,13 @@ fn create_test_race_with_restrictions() -> RaceDefinition { ... }
 Test that classes with proficiencies can be saved and reloaded correctly.
 
 **Test Cases:**
+
 1. `test_class_proficiency_round_trip()` - Create class with multiple proficiencies, save, reload, verify proficiencies match
 2. `test_class_empty_proficiency_round_trip()` - Create class with empty proficiencies list, verify it loads as empty (not null)
 3. `test_class_non_standard_proficiency_round_trip()` - Create class with custom proficiency ID, verify it persists
 
 **Verification Points:**
+
 - Proficiencies list length matches
 - Proficiency IDs match exactly (order-independent comparison)
 - All other fields unchanged (HP die, spell school, etc.)
@@ -298,12 +317,14 @@ Test that classes with proficiencies can be saved and reloaded correctly.
 Test that items with classifications, tags, and alignment restrictions can be saved and reloaded.
 
 **Test Cases:**
+
 1. `test_weapon_classification_round_trip()` - Create weapon with `WeaponClassification::MartialMelee`, save, reload, verify classification matches
 2. `test_item_tags_round_trip()` - Create item with tags `["two_handed", "heavy"]`, save, reload, verify tags match
 3. `test_alignment_restriction_round_trip()` - Create item with `AlignmentRestriction::GoodOnly`, save, reload, verify restriction matches
 4. `test_item_derived_proficiency()` - Create weapon with classification, verify `item.required_proficiency()` returns correct proficiency ID
 
 **Verification Points:**
+
 - Classification enum matches exactly
 - Tags list matches (order-independent)
 - Alignment restriction matches
@@ -316,11 +337,13 @@ Test that items with classifications, tags, and alignment restrictions can be sa
 Test that races with proficiencies and incompatible tags can be saved and reloaded.
 
 **Test Cases:**
+
 1. `test_race_proficiency_round_trip()` - Create race with proficiencies, save, reload, verify proficiencies match
 2. `test_race_incompatible_tags_round_trip()` - Create race with incompatible_item_tags, save, reload, verify tags match
 3. `test_race_combined_restrictions()` - Create race with both proficiencies and incompatible tags, verify both persist
 
 **Verification Points:**
+
 - Proficiencies list matches
 - Incompatible tags list matches
 - All stat modifiers unchanged
@@ -333,12 +356,14 @@ Test that races with proficiencies and incompatible tags can be saved and reload
 Test that old RON files with deprecated fields load correctly into new structures.
 
 **Test Cases:**
+
 1. `test_load_legacy_class_with_disablement_bit()` - Load class RON with `disablement_bit_index`, verify it loads without error
 2. `test_load_legacy_item_without_tags()` - Load item RON without `tags` field, verify `tags` defaults to empty vec
 3. `test_load_legacy_item_without_classification()` - Load weapon RON without `classification` field, verify it defaults correctly
 
 **Test Data:**
 Create test RON strings with old schema format:
+
 ```ron
 ClassDefinition(
   id: "knight",
@@ -349,6 +374,7 @@ ClassDefinition(
 ```
 
 **Verification Points:**
+
 - Deserialization succeeds (no errors)
 - Missing fields get correct defaults (`#[serde(default)]` values)
 - Legacy fields are preserved (backward compatibility)
@@ -388,6 +414,7 @@ Complete documentation deliverables and create manual test checklist.
 Document manual test procedures and results for Phase 5 completion.
 
 **Required Sections:**
+
 1. **Environment Setup** - How to run CLI editors for testing
 2. **Class Editor Tests** - Step-by-step procedures for testing proficiency input/editing
 3. **Item Editor Tests** - Procedures for testing classification, tags, alignment input/editing
@@ -397,9 +424,12 @@ Document manual test procedures and results for Phase 5 completion.
 7. **Test Results** - Checklist with pass/fail status for each test
 
 **Format:**
+
 ```markdown
 ## Test: Class Editor - Add Class with Proficiencies
+
 **Procedure:**
+
 1. Run `cargo run --bin class_editor data/classes.ron`
 2. Choose option 2 (Add class)
 3. Enter proficiencies: simple_weapon, light_armor
@@ -422,6 +452,7 @@ Document manual test procedures and results for Phase 5 completion.
 Update Phase 5 entry with completion status and reference to completion plan.
 
 **Changes:**
+
 - Add reference to `phase5_completion_plan.md`
 - Update status from "Partial" to "Complete" after all sub-phases done
 - List completed deliverables with links
@@ -433,28 +464,84 @@ Update Phase 5 entry with completion status and reference to completion plan.
 Add sections documenting completion work (deprecated code removal, edit flow implementation, testing).
 
 **New Sections:**
+
 - **Phase 5A: Deprecated Code Removal** - What was removed and why
 - **Phase 5B: Edit Flow Completion** - How edit functionality works
 - **Phase 5C: Test Coverage** - Overview of test infrastructure and test cases
 - **Known Limitations** - Document any remaining gaps or future improvements
 
-#### 5D.4 Testing Requirements
+#### 5D.4 Update Architecture Document
+
+**File:** `docs/reference/architecture.md`
+
+Update architecture document to reflect proficiency system implementation and test coverage.
+
+**Changes Required:**
+
+1. **Section 4.5 Item System** - Update to reflect actual Item structure fields:
+
+   - Document `base_cost` and `sell_cost` (not `value`)
+   - Document `max_charges` (not `charges`)
+   - Document `is_cursed` (not `cursed`)
+   - Document `tags` field for race restrictions
+   - Document `alignment_restriction` field
+   - Mark `disablements` field as deprecated with migration notes
+
+2. **Section 4.6 Supporting Types** - Update DiceRoll documentation:
+
+   - Confirm `bonus` field (not `modifier`)
+
+3. **Add Section 4.5.1 Item Classifications** - Document classification enums:
+
+   - `WeaponClassification` (Simple, MartialMelee, MartialRanged, Blunt, Unarmed)
+   - `ArmorClassification` (Light, Medium, Heavy, Shield)
+   - `MagicItemClassification` (Arcane, Divine, Universal)
+   - `AccessorySlot` (Ring, Amulet, Belt, Cloak)
+
+4. **Add Section 4.5.2 Consumable Effects** - Document ConsumableEffect variants:
+
+   - `HealHp(u16)` - Restore hit points
+   - `RestoreSp(u16)` - Restore spell points
+   - `CureCondition(u8)` - Clear condition flags
+   - `BoostAttribute(AttributeType, i8)` - Temporary attribute boost
+
+5. **Section 4.7 Character Definition** - Update class/race documentation:
+
+   - Document `proficiencies` field on ClassDefinition
+   - Document `proficiencies` and `incompatible_item_tags` on RaceDefinition
+   - Mark `disablement_bit_index` as deprecated
+
+6. **Add Section 9.1 Test Coverage** - Document automated testing:
+   - Reference `tests/cli_editor_tests.rs` (20 integration tests)
+   - Document round-trip testing pattern
+   - List test categories (class, item, race, legacy compatibility)
+
+**Rationale:**
+
+- Architecture document should reflect actual implementation (Phase 5C revealed field name discrepancies)
+- Classification system is now fully implemented and tested
+- Proficiency system migration is complete
+- Test coverage provides architectural validation
+
+#### 5D.5 Testing Requirements
 
 - Manual test checklist executed and documented with results
 - All tests marked as Pass
 - Any failures documented with workaround or fix plan
 
-#### 5D.5 Deliverables
+#### 5D.6 Deliverables
 
 - [ ] `docs/explanation/phase5_manual_test_checklist.md` created and completed
 - [ ] `docs/explanation/implementations.md` updated with Phase 5 completion status
 - [ ] `docs/explanation/phase5_cli_editors_implementation.md` updated with completion work details
+- [ ] `docs/reference/architecture.md` updated with proficiency system and test coverage documentation
 
-#### 5D.6 Success Criteria
+#### 5D.7 Success Criteria
 
 - Manual test checklist covers all user-facing functionality
 - All tests pass
 - Documentation provides complete picture of Phase 5 work (original + completion)
+- Architecture document accurately reflects implemented data structures and test coverage
 - Clear evidence that Phase 5 requirements are fully met
 
 ---
@@ -485,15 +572,18 @@ Add sections documenting completion work (deprecated code removal, edit flow imp
 ## Timeline Estimate
 
 - **Phase 5A (Deprecated Code Removal):** 1-2 hours
+
   - Straightforward deletion of well-defined code
   - Manual testing to verify backward compatibility
 
 - **Phase 5B (Edit Flow Implementation):** 4-6 hours
+
   - Most complex phase - requires menu implementation
   - Reuses existing helpers but needs integration work
   - Manual testing for each field type
 
 - **Phase 5C (Automated Tests):** 3-4 hours
+
   - Test infrastructure setup
   - Writing test cases (repetitive but important)
   - Debugging test failures
