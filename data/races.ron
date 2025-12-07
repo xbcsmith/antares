@@ -6,7 +6,13 @@
 // Race stat modifiers affect the base stats of characters.
 // Positive values indicate racial bonuses, negative values indicate penalties.
 //
-
+// Proficiency System:
+//   Races grant proficiency CATEGORIES that combine with class proficiencies using UNION logic.
+//   Standard proficiency IDs:
+//     Weapons: simple_weapon, martial_melee, martial_ranged, blunt_weapon, unarmed
+//     Armor: light_armor, medium_armor, heavy_armor, shield
+//     Magic Items: arcane_item, divine_item
+//
 // Size Categories:
 //   Small  - Gnomes (smaller weapons, can fit in tight spaces)
 //   Medium - Humans, Elves, Dwarves, Half-Elves, Half-Orcs
@@ -69,7 +75,7 @@
         ),
         special_abilities: ["infravision", "resist_sleep", "resist_charm"],
         size: Medium,
-        proficiencies: ["longbow", "longsword"],
+        proficiencies: ["martial_ranged", "martial_melee"],
         incompatible_item_tags: [],
     ),
 
@@ -99,7 +105,7 @@
         ),
         special_abilities: ["infravision", "stonecunning", "poison_resistance"],
         size: Medium,
-        proficiencies: ["battleaxe", "warhammer"],
+        proficiencies: ["martial_melee", "blunt_weapon"],
         incompatible_item_tags: [],
     ),
 
@@ -129,7 +135,7 @@
         ),
         special_abilities: ["infravision", "small_stature"],
         size: Small,
-        proficiencies: ["short_sword", "crossbow"],
+        proficiencies: ["simple_weapon", "martial_ranged"],
         incompatible_item_tags: ["large_weapon", "heavy_armor"],
     ),
 
@@ -159,7 +165,7 @@
         ),
         special_abilities: ["infravision", "resist_sleep"],
         size: Medium,
-        proficiencies: ["longsword"],
+        proficiencies: ["martial_melee"],
         incompatible_item_tags: [],
     ),
 
@@ -189,7 +195,7 @@
         ),
         special_abilities: ["infravision", "intimidating"],
         size: Medium,
-        proficiencies: ["greataxe", "falchion"],
+        proficiencies: ["martial_melee", "blunt_weapon"],
         incompatible_item_tags: [],
     ),
 ]

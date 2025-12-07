@@ -1,21 +1,13 @@
-// items.ron - Tutorial campaign item definitions for Antares RPG
-//
-// Phase 3 Migration: Added classification fields to weapons, armor, and accessories.
-// Added alignment_restriction and tags fields to items.
-//
-// Tags (convention, not enforced):
-//   - large_weapon: Too big for small races (Halfling, Gnome)
-//   - two_handed: Requires both hands
-//   - heavy_armor: Encumbering armor
-
 [
-    // ===== Basic Weapons =====
-
     (
         id: 1,
         name: "Club",
         item_type: Weapon((
-            damage: (count: 1, sides: 3, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 3,
+                bonus: 0,
+            ),
             bonus: 0,
             hands_required: 1,
             classification: Simple,
@@ -31,12 +23,15 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 2,
         name: "Dagger",
         item_type: Weapon((
-            damage: (count: 1, sides: 4, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 4,
+                bonus: 0,
+            ),
             bonus: 0,
             hands_required: 1,
             classification: Simple,
@@ -52,12 +47,15 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 3,
         name: "Short Sword",
         item_type: Weapon((
-            damage: (count: 1, sides: 6, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 6,
+                bonus: 0,
+            ),
             bonus: 0,
             hands_required: 1,
             classification: MartialMelee,
@@ -73,12 +71,15 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 4,
         name: "Long Sword",
         item_type: Weapon((
-            damage: (count: 1, sides: 8, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 8,
+                bonus: 0,
+            ),
             bonus: 0,
             hands_required: 1,
             classification: MartialMelee,
@@ -94,12 +95,15 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 5,
         name: "Mace",
         item_type: Weapon((
-            damage: (count: 1, sides: 6, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 6,
+                bonus: 0,
+            ),
             bonus: 0,
             hands_required: 1,
             classification: Blunt,
@@ -115,12 +119,15 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 6,
         name: "Battle Axe",
         item_type: Weapon((
-            damage: (count: 1, sides: 8, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 8,
+                bonus: 0,
+            ),
             bonus: 0,
             hands_required: 1,
             classification: MartialMelee,
@@ -136,12 +143,15 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 7,
         name: "Two-Handed Sword",
         item_type: Weapon((
-            damage: (count: 2, sides: 6, bonus: 0),
+            damage: (
+                count: 2,
+                sides: 6,
+                bonus: 0,
+            ),
             bonus: 0,
             hands_required: 2,
             classification: MartialMelee,
@@ -155,14 +165,20 @@
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
-        tags: ["large_weapon", "two_handed"],
+        tags: [
+            "large_weapon",
+            "two_handed",
+        ],
     ),
-
     (
         id: 8,
         name: "Long Bow",
         item_type: Weapon((
-            damage: (count: 1, sides: 6, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 6,
+                bonus: 0,
+            ),
             bonus: 0,
             hands_required: 2,
             classification: MartialRanged,
@@ -176,14 +192,20 @@
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
-        tags: ["large_weapon", "two_handed"],
+        tags: [
+            "large_weapon",
+            "two_handed",
+        ],
     ),
-
     (
         id: 9,
         name: "Short Bow",
         item_type: Weapon((
-            damage: (count: 1, sides: 4, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 4,
+                bonus: 0,
+            ),
             bonus: 0,
             hands_required: 2,
             classification: MartialRanged,
@@ -197,16 +219,19 @@
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
-        tags: ["two_handed"],
+        tags: [
+            "two_handed",
+        ],
     ),
-
-    // ===== Magical Weapons =====
-
     (
         id: 10,
         name: "Club +1",
         item_type: Weapon((
-            damage: (count: 1, sides: 3, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 3,
+                bonus: 0,
+            ),
             bonus: 1,
             hands_required: 1,
             classification: Simple,
@@ -222,12 +247,15 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 11,
         name: "Flaming Sword",
         item_type: Weapon((
-            damage: (count: 1, sides: 8, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 8,
+                bonus: 0,
+            ),
             bonus: 3,
             hands_required: 1,
             classification: MartialMelee,
@@ -246,12 +274,15 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 12,
         name: "Accurate Sword",
         item_type: Weapon((
-            damage: (count: 1, sides: 8, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 8,
+                bonus: 0,
+            ),
             bonus: 6,
             hands_required: 1,
             classification: MartialMelee,
@@ -273,9 +304,6 @@
         icon_path: None,
         tags: [],
     ),
-
-    // ===== Basic Armor =====
-
     (
         id: 20,
         name: "Leather Armor",
@@ -295,7 +323,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 21,
         name: "Chain Mail",
@@ -315,7 +342,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 22,
         name: "Plate Mail",
@@ -333,9 +359,10 @@
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
-        tags: ["heavy_armor"],
+        tags: [
+            "heavy_armor",
+        ],
     ),
-
     (
         id: 23,
         name: "Wooden Shield",
@@ -355,9 +382,6 @@
         icon_path: None,
         tags: [],
     ),
-
-    // ===== Magical Armor =====
-
     (
         id: 30,
         name: "Chain Mail +1",
@@ -380,7 +404,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 31,
         name: "Dragon Scale Mail",
@@ -403,9 +426,6 @@
         icon_path: None,
         tags: [],
     ),
-
-    // ===== Accessories =====
-
     (
         id: 40,
         name: "Ring of Protection",
@@ -427,7 +447,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 41,
         name: "Amulet of Might",
@@ -449,7 +468,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 42,
         name: "Belt of Speed",
@@ -471,7 +489,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 43,
         name: "Arcane Wand",
@@ -493,7 +510,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 44,
         name: "Holy Symbol",
@@ -515,9 +531,6 @@
         icon_path: None,
         tags: [],
     ),
-
-    // ===== Consumables =====
-
     (
         id: 50,
         name: "Healing Potion",
@@ -536,7 +549,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 51,
         name: "Magic Potion",
@@ -555,7 +567,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 52,
         name: "Cure Poison Potion",
@@ -574,9 +585,6 @@
         icon_path: None,
         tags: [],
     ),
-
-    // ===== Ammunition =====
-
     (
         id: 60,
         name: "Arrows",
@@ -595,7 +603,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 61,
         name: "Crossbow Bolts",
@@ -614,9 +621,6 @@
         icon_path: None,
         tags: [],
     ),
-
-    // ===== Quest Items =====
-
     (
         id: 100,
         name: "Ruby Whistle",
@@ -638,14 +642,15 @@
         icon_path: None,
         tags: [],
     ),
-
-    // ===== Cursed Items =====
-
     (
         id: 101,
         name: "Mace of Undead",
         item_type: Weapon((
-            damage: (count: 1, sides: 6, bonus: 0),
+            damage: (
+                count: 1,
+                sides: 6,
+                bonus: 0,
+            ),
             bonus: 0,
             hands_required: 1,
             classification: Blunt,
@@ -661,9 +666,6 @@
         icon_path: None,
         tags: [],
     ),
-
-    // ===== Tutorial-specific test items =====
-
     (
         id: 102,
         name: "Foo",
@@ -682,7 +684,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 103,
         name: "Foo Stand",
@@ -701,7 +702,6 @@
         icon_path: None,
         tags: [],
     ),
-
     (
         id: 104,
         name: "Bar",

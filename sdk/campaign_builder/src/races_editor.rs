@@ -33,6 +33,12 @@ pub struct RacesEditorState {
 
     /// Unsaved changes
     pub has_unsaved_changes: bool,
+
+    /// Show import/export dialog
+    pub show_import_dialog: bool,
+
+    /// Import/export buffer for RON data
+    pub import_export_buffer: String,
 }
 
 /// Editor mode
@@ -111,6 +117,8 @@ impl Default for RacesEditorState {
             buffer: RaceEditBuffer::default(),
             search_filter: String::new(),
             has_unsaved_changes: false,
+            show_import_dialog: false,
+            import_export_buffer: String::new(),
         }
     }
 }
@@ -480,8 +488,8 @@ impl RacesEditorState {
                 }
             }
             ToolbarAction::Import => {
-                // Import not yet implemented for races
-                *status_message = "Import not yet implemented for races".to_string();
+                self.show_import_dialog = true;
+                self.import_export_buffer.clear();
             }
             ToolbarAction::Export => {
                 if let Some(path) = rfd::FileDialog::new()
@@ -525,6 +533,17 @@ impl RacesEditorState {
         }
 
         ui.separator();
+
+        // Show import/export dialog if requested
+        if self.show_import_dialog {
+            self.show_import_dialog(
+                ui.ctx(),
+                unsaved_changes,
+                status_message,
+                campaign_dir,
+                races_file,
+            );
+        }
 
         // Main content - use TwoColumnLayout for list mode
         match self.mode {
@@ -697,6 +716,7 @@ impl RacesEditorState {
                                             .with_edit(true)
                                             .with_delete(true)
                                             .with_duplicate(true)
+                                            .with_export(true)
                                             .show(ui);
 
                                         if action != ItemAction::None {
@@ -740,7 +760,26 @@ impl RacesEditorState {
                                 *unsaved_changes = true;
                             }
                         }
-                        ItemAction::Export | ItemAction::None => {}
+                        ItemAction::Export => {
+                            if idx < self.races.len() {
+                                match ron::ser::to_string_pretty(
+                                    &self.races[idx],
+                                    Default::default(),
+                                ) {
+                                    Ok(ron_str) => {
+                                        self.import_export_buffer = ron_str;
+                                        self.show_import_dialog = true;
+                                        *status_message =
+                                            "Race exported to clipboard dialog".to_string();
+                                    }
+                                    Err(e) => {
+                                        *status_message =
+                                            format!("Failed to serialize race: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        ItemAction::None => {}
                     }
                 }
             }
@@ -1073,6 +1112,83 @@ impl RacesEditorState {
                 });
             });
     }
+
+    /// Shows the import/export dialog for individual races
+    fn show_import_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        unsaved_changes: &mut bool,
+        status_message: &mut String,
+        campaign_dir: Option<&PathBuf>,
+        races_file: &str,
+    ) {
+        let mut open = self.show_import_dialog;
+
+        egui::Window::new("Import/Export Race")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(500.0)
+            .show(ctx, |ui| {
+                ui.heading("Race RON Data");
+                ui.separator();
+
+                ui.label("Paste RON data to import, or copy exported data:");
+                let text_edit = egui::TextEdit::multiline(&mut self.import_export_buffer)
+                    .desired_rows(15)
+                    .code_editor();
+                ui.add(text_edit);
+
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("📥 Import").clicked() {
+                        match ron::from_str::<RaceDefinition>(&self.import_export_buffer) {
+                            Ok(mut race) => {
+                                // Check for duplicate ID and auto-generate new one if needed
+                                if self.races.iter().any(|r| r.id == race.id) {
+                                    let original_id = race.id.clone();
+                                    race.id = self.next_available_race_id();
+                                    *status_message = format!(
+                                        "Race imported with new ID '{}' (original: '{}')",
+                                        race.id, original_id
+                                    );
+                                } else {
+                                    *status_message = "Race imported successfully".to_string();
+                                }
+
+                                self.races.push(race);
+
+                                // Auto-save to file
+                                if let Some(dir) = campaign_dir {
+                                    let path = dir.join(races_file);
+                                    if let Err(e) = self.save_to_file(&path) {
+                                        *status_message =
+                                            format!("Import succeeded but save failed: {}", e);
+                                    }
+                                }
+
+                                *unsaved_changes = true;
+                                self.show_import_dialog = false;
+                            }
+                            Err(e) => {
+                                *status_message = format!("Import failed: {}", e);
+                            }
+                        }
+                    }
+
+                    if ui.button("📋 Copy to Clipboard").clicked() {
+                        ui.ctx().copy_text(self.import_export_buffer.clone());
+                        *status_message = "Copied to clipboard".to_string();
+                    }
+
+                    if ui.button("❌ Close").clicked() {
+                        self.show_import_dialog = false;
+                    }
+                });
+            });
+
+        self.show_import_dialog = open;
+    }
 }
 
 #[cfg(test)]
@@ -1169,6 +1285,86 @@ mod tests {
 
         state.cancel_edit();
         assert_eq!(state.mode, RacesEditorMode::List);
+    }
+
+    #[test]
+    fn test_import_export_dialog_state() {
+        let state = RacesEditorState::new();
+        assert!(!state.show_import_dialog);
+        assert!(state.import_export_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_import_export_buffer_initial_state() {
+        let mut state = RacesEditorState::new();
+
+        // Add a race to export
+        state.start_new_race();
+        state.buffer.id = "test_race".to_string();
+        state.buffer.name = "Test Race".to_string();
+        state.save_race().unwrap();
+
+        // Verify we can serialize it
+        let race = &state.races[0];
+        let ron_result = ron::ser::to_string_pretty(race, Default::default());
+        assert!(ron_result.is_ok());
+
+        let ron_str = ron_result.unwrap();
+        assert!(ron_str.contains("test_race"));
+        assert!(ron_str.contains("Test Race"));
+    }
+
+    #[test]
+    fn test_import_race_from_ron() {
+        // Create a valid RON string for a race
+        let race = RaceDefinition {
+            id: "imported_race".to_string(),
+            name: "Imported Race".to_string(),
+            description: "A race imported from RON".to_string(),
+            stat_modifiers: StatModifiers::default(),
+            resistances: Resistances::default(),
+            special_abilities: vec!["Test Ability".to_string()],
+            size: SizeCategory::Medium,
+            proficiencies: vec!["simple_weapon".to_string()],
+            incompatible_item_tags: vec!["heavy_armor".to_string()],
+        };
+
+        let ron_str = ron::ser::to_string_pretty(&race, Default::default()).unwrap();
+
+        // Parse it back
+        let parsed: Result<RaceDefinition, _> = ron::from_str(&ron_str);
+        assert!(parsed.is_ok());
+
+        let parsed_race = parsed.unwrap();
+        assert_eq!(parsed_race.id, "imported_race");
+        assert_eq!(parsed_race.name, "Imported Race");
+        assert_eq!(parsed_race.proficiencies, vec!["simple_weapon"]);
+    }
+
+    #[test]
+    fn test_next_available_race_id() {
+        let mut state = RacesEditorState::new();
+
+        // Empty state should start with race_1
+        let id1 = state.next_available_race_id();
+        assert_eq!(id1, "race_1");
+
+        // Add a race
+        state.races.push(RaceDefinition {
+            id: "race_1".to_string(),
+            name: "First Race".to_string(),
+            description: String::new(),
+            stat_modifiers: StatModifiers::default(),
+            resistances: Resistances::default(),
+            special_abilities: Vec::new(),
+            size: SizeCategory::Medium,
+            proficiencies: Vec::new(),
+            incompatible_item_tags: Vec::new(),
+        });
+
+        // Next should be race_2
+        let id2 = state.next_available_race_id();
+        assert_eq!(id2, "race_2");
     }
 
     #[test]

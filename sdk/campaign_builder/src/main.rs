@@ -798,11 +798,10 @@ impl CampaignBuilderApp {
             ));
         }
 
-        // Races category - races are configured via file path but not loaded into app state
-        // Show info message indicating races are managed via external file
+        // Races category - races are editable in the UI via the Races Editor tab
         results.push(validation::ValidationResult::info(
             validation::ValidationCategory::Races,
-            "Races configured via races_file - use Race Editor CLI to manage",
+            "Races configured via races_file - editable in the Races Editor tab",
         ));
 
         results
