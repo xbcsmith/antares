@@ -26,6 +26,12 @@
         category: Weapon,
         description: "Advanced melee weapons: swords, axes, maces, flails",
     ),
+    (
+        id: "longsword",
+        name: "Longsword",
+        category: Weapon,
+        description: "Specific proficiency for Longsword (individual weapon mastery)",
+    ),
 
     (
         id: "martial_ranged",

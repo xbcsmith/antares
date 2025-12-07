@@ -252,7 +252,7 @@ fn create_test_race_with_modifiers() -> RaceDefinition {
         special_abilities: vec!["infravision".to_string(), "keen_senses".to_string()],
         size: SizeCategory::Medium,
 
-        proficiencies: vec!["longbow".to_string(), "longsword".to_string()],
+        proficiencies: vec!["martial_ranged".to_string(), "martial_melee".to_string()],
         incompatible_item_tags: vec!["heavy_weapon".to_string()],
     }
 }

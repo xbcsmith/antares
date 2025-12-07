@@ -742,7 +742,7 @@ mod tests {
             },
             special_abilities: vec!["infravision".to_string(), "resist_sleep".to_string()],
             size: SizeCategory::Medium,
-            proficiencies: vec!["longbow".to_string()],
+            proficiencies: vec!["martial_ranged".to_string()],
             incompatible_item_tags: vec![],
         }
     }
@@ -773,7 +773,7 @@ mod tests {
             },
             special_abilities: vec!["stonecunning".to_string()],
             size: SizeCategory::Medium,
-            proficiencies: vec!["battleaxe".to_string(), "warhammer".to_string()],
+            proficiencies: vec!["martial_melee".to_string(), "blunt_weapon".to_string()],
             incompatible_item_tags: vec![],
         }
     }
@@ -913,12 +913,12 @@ mod tests {
     #[test]
     fn test_race_definition_has_proficiency() {
         let elf = create_test_elf();
-        assert!(elf.has_proficiency("longbow"));
+        assert!(elf.has_proficiency("martial_ranged"));
         assert!(!elf.has_proficiency("battleaxe"));
 
         let dwarf = create_test_dwarf();
-        assert!(dwarf.has_proficiency("battleaxe"));
-        assert!(dwarf.has_proficiency("warhammer"));
+        assert!(dwarf.has_proficiency("martial_melee"));
+        assert!(dwarf.has_proficiency("blunt_weapon"));
     }
 
     #[test]

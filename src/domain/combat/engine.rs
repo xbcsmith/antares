@@ -357,7 +357,7 @@ impl CombatState {
 ///
 /// let stats = Stats::new(10, 8, 6, 10, 8, 7, 5);
 /// let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
-/// let monster = Monster::new(1, "Goblin".to_string(), stats, 10, 5, attacks, LootTable::none(), 25);
+/// let monster = Monster::new(1, "Goblin".to_string(), stats, 10, 5, attacks, LootTable::none());
 /// combat.add_monster(monster);
 ///
 /// start_combat(&mut combat);
@@ -601,7 +601,6 @@ mod tests {
             5,
             attacks,
             LootTable::none(),
-            25,
         )
     }
 

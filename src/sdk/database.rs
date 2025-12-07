@@ -318,7 +318,7 @@ impl MonsterDatabase {
     pub fn monsters_by_experience_range(&self, min_xp: u32, max_xp: u32) -> Vec<&Monster> {
         self.monsters
             .values()
-            .filter(|m| m.experience_value >= min_xp && m.experience_value <= max_xp)
+            .filter(|m| m.loot.experience >= min_xp && m.loot.experience <= max_xp)
             .collect()
     }
 }
@@ -1477,7 +1477,6 @@ mod tests {
                     items: [],
                     experience: 10
                 ),
-                experience_value: 10,
                 flee_threshold: 20,
                 special_attack_threshold: 0,
                 resistances: (physical: false, fire: false, cold: false, electricity: false, energy: false, paralysis: false, fear: false, sleep: false),

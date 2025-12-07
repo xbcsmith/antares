@@ -797,31 +797,16 @@ impl CharactersEditorState {
                                 for (original_idx, character) in &filtered_characters {
                                     let is_selected = selected_character_idx == Some(*original_idx);
 
-                                    ui.horizontal(|ui| {
-                                        // Character info
-                                        let label = format!(
-                                            "{} ({} {})",
-                                            character.name, character.race_id, character.class_id
-                                        );
-                                        let response = ui.selectable_label(is_selected, label);
+                                    // Character info
+                                    let label = format!(
+                                        "{} ({} {})",
+                                        character.name, character.race_id, character.class_id
+                                    );
+                                    let response = ui.selectable_label(is_selected, label);
 
-                                        if response.clicked() {
-                                            select_idx = Some(*original_idx);
-                                        }
-
-                                        // Action buttons
-                                        let action = ActionButtons::new()
-                                            .enabled(true)
-                                            .with_edit(true)
-                                            .with_delete(true)
-                                            .with_duplicate(true)
-                                            .show(ui);
-
-                                        if action != ItemAction::None {
-                                            action_idx = Some(*original_idx);
-                                            action_type = action;
-                                        }
-                                    });
+                                    if response.clicked() {
+                                        select_idx = Some(*original_idx);
+                                    }
 
                                     // Show character type badge
                                     ui.horizontal(|ui| {
@@ -858,6 +843,23 @@ impl CharactersEditorState {
                     // Right panel: preview of selected character
                     if let Some(idx) = selected_character_idx {
                         if let Some(character) = self.characters.get(idx) {
+                            right_ui.heading(&character.name);
+                            right_ui.separator();
+
+                            // Action buttons (correct placement - in RIGHT panel)
+                            let action = ActionButtons::new()
+                                .enabled(true)
+                                .with_edit(true)
+                                .with_delete(true)
+                                .with_duplicate(true)
+                                .show(right_ui);
+
+                            if action != ItemAction::None {
+                                action_idx = Some(idx);
+                                action_type = action;
+                            }
+
+                            right_ui.separator();
                             self.show_character_preview(right_ui, character, items);
                         }
                     } else {
@@ -904,9 +906,6 @@ impl CharactersEditorState {
         character: &CharacterDefinition,
         items: &[Item],
     ) {
-        ui.heading(&character.name);
-        ui.separator();
-
         egui::Grid::new("character_preview_grid")
             .num_columns(2)
             .spacing([20.0, 4.0])

@@ -75,7 +75,7 @@
         ),
         special_abilities: ["infravision", "resist_sleep", "resist_charm"],
         size: Medium,
-        proficiencies: ["martial_ranged", "martial_melee"],
+        proficiencies: ["martial_ranged", "martial_melee", "longsword"],
         incompatible_item_tags: [],
     ),
 

@@ -256,7 +256,6 @@ impl Default for LootTable {
 ///     ac: AttributePair::new(6),
 ///     attacks: vec![Attack::physical(DiceRoll::new(1, 6, 0))],
 ///     loot: LootTable::new(5, 15, 0, 1, 25),
-///     experience_value: 25,
 ///     flee_threshold: 25,
 ///     special_attack_threshold: 0,
 ///     resistances: MonsterResistances::new(),
@@ -285,8 +284,6 @@ pub struct Monster {
     pub attacks: Vec<Attack>,
     /// Loot dropped when defeated
     pub loot: LootTable,
-    /// Experience points awarded when defeated
-    pub experience_value: u32,
     /// HP percentage at which monster attempts to flee (0-100)
     #[serde(default)]
     pub flee_threshold: u8,
@@ -330,7 +327,6 @@ impl Monster {
         ac: u8,
         attacks: Vec<Attack>,
         loot: LootTable,
-        experience_value: u32,
     ) -> Self {
         Self {
             id,
@@ -340,7 +336,6 @@ impl Monster {
             ac: AttributePair::new(ac),
             attacks,
             loot,
-            experience_value,
             flee_threshold: 0,
             special_attack_threshold: 0,
             resistances: MonsterResistances::new(),
@@ -562,14 +557,14 @@ mod tests {
         let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 1))];
         let loot = LootTable::new(5, 20, 0, 1, 50);
 
-        let monster = Monster::new(1, "Orc".to_string(), stats, 15, 5, attacks, loot, 50);
+        let monster = Monster::new(1, "Orc".to_string(), stats, 15, 5, attacks, loot);
 
         assert_eq!(monster.id, 1);
         assert_eq!(monster.name, "Orc");
         assert_eq!(monster.hp.base, 15);
         assert_eq!(monster.hp.current, 15);
         assert_eq!(monster.ac.base, 5);
-        assert_eq!(monster.experience_value, 50);
+        assert_eq!(monster.loot.experience, 50);
         assert!(!monster.has_acted);
     }
 
@@ -579,7 +574,7 @@ mod tests {
         let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
         let loot = LootTable::none();
 
-        let mut monster = Monster::new(1, "Test".to_string(), stats, 20, 5, attacks, loot, 0);
+        let mut monster = Monster::new(1, "Test".to_string(), stats, 20, 5, attacks, loot);
         assert!(monster.is_alive());
 
         monster.hp.current = 0;
@@ -592,7 +587,7 @@ mod tests {
         let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
         let loot = LootTable::none();
 
-        let mut monster = Monster::new(1, "Test".to_string(), stats, 20, 5, attacks, loot, 0);
+        let mut monster = Monster::new(1, "Test".to_string(), stats, 20, 5, attacks, loot);
         assert!(monster.can_act());
 
         monster.has_acted = true;
@@ -609,7 +604,7 @@ mod tests {
         let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
         let loot = LootTable::none();
 
-        let mut monster = Monster::new(1, "Test".to_string(), stats, 20, 5, attacks, loot, 0);
+        let mut monster = Monster::new(1, "Test".to_string(), stats, 20, 5, attacks, loot);
         monster.flee_threshold = 25;
 
         assert!(!monster.should_flee()); // At 100% HP
@@ -624,7 +619,7 @@ mod tests {
         let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
         let loot = LootTable::none();
 
-        let mut monster = Monster::new(1, "Troll".to_string(), stats, 30, 5, attacks, loot, 0);
+        let mut monster = Monster::new(1, "Troll".to_string(), stats, 30, 5, attacks, loot);
         monster.can_regenerate = true;
         monster.hp.current = 20;
 
@@ -638,7 +633,7 @@ mod tests {
         let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
         let loot = LootTable::none();
 
-        let mut monster = Monster::new(1, "Test".to_string(), stats, 20, 5, attacks, loot, 0);
+        let mut monster = Monster::new(1, "Test".to_string(), stats, 20, 5, attacks, loot);
 
         let died = monster.take_damage(10);
         assert!(!died);
@@ -656,7 +651,7 @@ mod tests {
         let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
         let loot = LootTable::none();
 
-        let mut monster = Monster::new(1, "Test".to_string(), stats, 20, 5, attacks, loot, 0);
+        let mut monster = Monster::new(1, "Test".to_string(), stats, 20, 5, attacks, loot);
 
         assert!(!monster.has_acted);
         monster.mark_acted();

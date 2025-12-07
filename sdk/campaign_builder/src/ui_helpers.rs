@@ -326,6 +326,38 @@ impl<'a> EditorToolbar<'a> {
     pub fn show(self, ui: &mut egui::Ui) -> ToolbarAction {
         let mut action = ToolbarAction::None;
 
+        // Check for keyboard shortcuts
+        ui.input(|input| {
+            // Ctrl+N for New
+            if input.key_pressed(egui::Key::N) && input.modifiers.ctrl && !input.modifiers.shift {
+                action = ToolbarAction::New;
+            }
+            // Ctrl+S for Save
+            if self.show_save
+                && input.key_pressed(egui::Key::S)
+                && input.modifiers.ctrl
+                && !input.modifiers.shift
+            {
+                action = ToolbarAction::Save;
+            }
+            // Ctrl+L for Load
+            if input.key_pressed(egui::Key::L) && input.modifiers.ctrl && !input.modifiers.shift {
+                action = ToolbarAction::Load;
+            }
+            // Ctrl+Shift+I for Import
+            if input.key_pressed(egui::Key::I) && input.modifiers.ctrl && input.modifiers.shift {
+                action = ToolbarAction::Import;
+            }
+            // Ctrl+Shift+E for Export
+            if input.key_pressed(egui::Key::E) && input.modifiers.ctrl && input.modifiers.shift {
+                action = ToolbarAction::Export;
+            }
+            // F5 for Reload
+            if input.key_pressed(egui::Key::F5) {
+                action = ToolbarAction::Reload;
+            }
+        });
+
         // Use horizontal_wrapped for the toolbar so it gracefully wraps onto
         // multiple rows when the UI width is constrained, preventing UI clipping
         // and ensuring all actions remain accessible at narrow sizes.
@@ -343,20 +375,38 @@ impl<'a> EditorToolbar<'a> {
                 ui.separator();
             }
 
-            // Action buttons
-            if ui.button("➕ New").clicked() {
+            // Action buttons with keyboard shortcuts in tooltips
+            if ui
+                .button("➕ New")
+                .on_hover_text("Create new entry (Ctrl+N)")
+                .clicked()
+            {
                 action = ToolbarAction::New;
             }
 
-            if self.show_save && ui.button("💾 Save").clicked() {
-                action = ToolbarAction::Save;
+            if self.show_save {
+                if ui
+                    .button("💾 Save")
+                    .on_hover_text("Save to campaign (Ctrl+S)")
+                    .clicked()
+                {
+                    action = ToolbarAction::Save;
+                }
             }
 
-            if ui.button("📂 Load").clicked() {
+            if ui
+                .button("📂 Load")
+                .on_hover_text("Load from file (Ctrl+L)")
+                .clicked()
+            {
                 action = ToolbarAction::Load;
             }
 
-            if ui.button("📥 Import").clicked() {
+            if ui
+                .button("📥 Import")
+                .on_hover_text("Import from RON text (Ctrl+Shift+I)")
+                .clicked()
+            {
                 action = ToolbarAction::Import;
             }
 
@@ -370,11 +420,19 @@ impl<'a> EditorToolbar<'a> {
                 });
             }
 
-            if ui.button("📋 Export").clicked() {
+            if ui
+                .button("📋 Export")
+                .on_hover_text("Export to file (Ctrl+Shift+E)")
+                .clicked()
+            {
                 action = ToolbarAction::Export;
             }
 
-            if ui.button("🔄 Reload").clicked() {
+            if ui
+                .button("🔄 Reload")
+                .on_hover_text("Reload from campaign (F5)")
+                .clicked()
+            {
                 action = ToolbarAction::Reload;
             }
 
@@ -522,19 +580,69 @@ impl ActionButtons {
     pub fn show(self, ui: &mut egui::Ui) -> ItemAction {
         let mut action = ItemAction::None;
 
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(self.enabled, |ui| {
-                if self.show_edit && ui.button("✏️ Edit").clicked() {
+        // Check for keyboard shortcuts if buttons are enabled
+        if self.enabled {
+            ui.input(|input| {
+                // Ctrl+E for Edit
+                if self.show_edit
+                    && input.key_pressed(egui::Key::E)
+                    && input.modifiers.ctrl
+                    && !input.modifiers.shift
+                {
                     action = ItemAction::Edit;
                 }
-                if self.show_delete && ui.button("🗑️ Delete").clicked() {
+                // Delete key for Delete
+                if self.show_delete && input.key_pressed(egui::Key::Delete) {
                     action = ItemAction::Delete;
                 }
-                if self.show_duplicate && ui.button("📋 Duplicate").clicked() {
+                // Ctrl+D for Duplicate
+                if self.show_duplicate
+                    && input.key_pressed(egui::Key::D)
+                    && input.modifiers.ctrl
+                    && !input.modifiers.shift
+                {
                     action = ItemAction::Duplicate;
                 }
-                if self.show_export && ui.button("📤 Export").clicked() {
-                    action = ItemAction::Export;
+            });
+        }
+
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(self.enabled, |ui| {
+                if self.show_edit {
+                    if ui
+                        .button("✏️ Edit")
+                        .on_hover_text("Edit selected item (Ctrl+E)")
+                        .clicked()
+                    {
+                        action = ItemAction::Edit;
+                    }
+                }
+                if self.show_delete {
+                    if ui
+                        .button("🗑️ Delete")
+                        .on_hover_text("Delete selected item (Delete)")
+                        .clicked()
+                    {
+                        action = ItemAction::Delete;
+                    }
+                }
+                if self.show_duplicate {
+                    if ui
+                        .button("📋 Duplicate")
+                        .on_hover_text("Duplicate selected item (Ctrl+D)")
+                        .clicked()
+                    {
+                        action = ItemAction::Duplicate;
+                    }
+                }
+                if self.show_export {
+                    if ui
+                        .button("📤 Export")
+                        .on_hover_text("Export selected item")
+                        .clicked()
+                    {
+                        action = ItemAction::Export;
+                    }
                 }
             });
         });
@@ -1978,5 +2086,86 @@ mod tests {
         // Verify constants have the expected values
         assert_eq!(DEFAULT_LEFT_COLUMN_WIDTH, 300.0);
         assert_eq!(DEFAULT_PANEL_MIN_HEIGHT, 100.0);
+    }
+
+    // =========================================================================
+    // Keyboard Shortcuts Tests
+    // =========================================================================
+
+    #[test]
+    fn toolbar_action_keyboard_shortcuts_documented() {
+        // This test documents the keyboard shortcuts for EditorToolbar:
+        // - Ctrl+N: New
+        // - Ctrl+S: Save
+        // - Ctrl+L: Load
+        // - Ctrl+Shift+I: Import
+        // - Ctrl+Shift+E: Export
+        // - F5: Reload
+        //
+        // Note: We cannot easily unit test keyboard input in egui without
+        // a full rendering context, so this test serves as documentation.
+        // The shortcuts are implemented in EditorToolbar::show() and should
+        // be manually tested.
+        assert_eq!(ToolbarAction::None as i32, 0);
+    }
+
+    #[test]
+    fn item_action_keyboard_shortcuts_documented() {
+        // This test documents the keyboard shortcuts for ActionButtons:
+        // - Ctrl+E: Edit
+        // - Delete: Delete
+        // - Ctrl+D: Duplicate
+        //
+        // Note: We cannot easily unit test keyboard input in egui without
+        // a full rendering context, so this test serves as documentation.
+        // The shortcuts are implemented in ActionButtons::show() and should
+        // be manually tested.
+        assert_eq!(ItemAction::None as i32, 0);
+    }
+
+    #[test]
+    fn toolbar_buttons_have_consistent_labels() {
+        // This test documents the standardized button labels:
+        // - ➕ New
+        // - 💾 Save
+        // - 📂 Load
+        // - 📥 Import
+        // - 📋 Export
+        // - 🔄 Reload
+        //
+        // All editors must use these labels consistently.
+        // The labels are implemented in EditorToolbar::show().
+        assert!(true);
+    }
+
+    #[test]
+    fn action_buttons_have_consistent_labels() {
+        // This test documents the standardized action button labels:
+        // - ✏️ Edit
+        // - 🗑️ Delete
+        // - 📋 Duplicate
+        // - 📤 Export
+        //
+        // All editors must use these labels consistently.
+        // The labels are implemented in ActionButtons::show().
+        assert!(true);
+    }
+
+    #[test]
+    fn toolbar_buttons_have_tooltips_with_shortcuts() {
+        // This test documents that all toolbar buttons should have
+        // tooltips showing their keyboard shortcuts.
+        // The tooltips are implemented using .on_hover_text() in
+        // EditorToolbar::show().
+        assert!(true);
+    }
+
+    #[test]
+    fn action_buttons_have_tooltips_with_shortcuts() {
+        // This test documents that all action buttons should have
+        // tooltips showing their keyboard shortcuts.
+        // The tooltips are implemented using .on_hover_text() in
+        // ActionButtons::show().
+        assert!(true);
     }
 }

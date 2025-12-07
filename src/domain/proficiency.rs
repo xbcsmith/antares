@@ -1253,7 +1253,7 @@ mod tests {
         let sorcerer_proficiencies = vec!["simple_weapon".to_string(), "arcane_item".to_string()];
         let elf_proficiencies = vec![
             "martial_ranged".to_string(), // Elves get bow proficiency
-            "longsword".to_string(),
+            "martial_melee".to_string(),
         ];
         let longbow_required = Some("martial_ranged".to_string());
         let longbow_tags: Vec<String> = vec!["large_weapon".to_string()]; // Longbow is large
@@ -1284,7 +1284,7 @@ mod tests {
             "light_armor".to_string(),
             "medium_armor".to_string(),
         ];
-        let gnome_proficiencies = vec!["short_sword".to_string(), "crossbow".to_string()];
+        let gnome_proficiencies = vec!["simple_weapon".to_string(), "martial_ranged".to_string()];
         let longbow_required = Some("martial_ranged".to_string());
         let longbow_tags = vec!["large_weapon".to_string()]; // Longbow is large
         let gnome_incompatible_tags = vec!["large_weapon".to_string(), "heavy_armor".to_string()];
@@ -1408,7 +1408,7 @@ mod tests {
             "shield".to_string(),
             "divine_item".to_string(),
         ];
-        let dwarf_proficiencies = vec!["battleaxe".to_string(), "warhammer".to_string()];
+        let dwarf_proficiencies = vec!["martial_melee".to_string(), "blunt_weapon".to_string()];
         // Warhammer could require blunt_weapon proficiency
         let warhammer_required = Some("blunt_weapon".to_string());
         let warhammer_tags: Vec<String> = vec![];
@@ -1503,8 +1503,13 @@ mod tests {
 
             // Validate database
             assert!(db.validate().is_ok());
+
+            // New test: specific per-item proficiency present for legacy/edge-case tests
+            assert!(
+                db.has("longsword"),
+                "Expected 'longsword' proficiency to be present in data/proficiencies.ron"
+            );
         }
-        // If file doesn't exist yet, that's OK during Phase 1
     }
 
     #[test]
@@ -1598,7 +1603,7 @@ mod tests {
             // Dwarf should have battleaxe/warhammer proficiency
             if let Some(dwarf) = db.get_race("dwarf") {
                 assert!(
-                    dwarf.has_proficiency("battleaxe") || dwarf.has_proficiency("warhammer"),
+                    dwarf.has_proficiency("martial_melee") || dwarf.has_proficiency("blunt_weapon"),
                     "Dwarf should have dwarven weapon proficiencies"
                 );
             }

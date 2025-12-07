@@ -529,8 +529,9 @@ pub struct Monster {
     pub hp: Health,
     pub ac: ArmorClass,
     pub attacks: Vec<Attack>,
+    /// Experience awarded for defeating a monster is stored in the monster's loot table:
+    /// `loot.experience`.
     pub loot: LootTable,
-    pub experience_value: u32,
     pub flee_threshold: u8,
     pub special_attack_threshold: u8,  // Percentage chance
     pub resistances: MonsterResistances,
