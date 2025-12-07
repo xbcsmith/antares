@@ -3,21 +3,22 @@
 // This file contains all item definitions in RON (Rusty Object Notation) format.
 // See architecture.md Section 7.2 for format specifications.
 //
-// Phase 3 Migration: Added classification fields to weapons, armor, and accessories.
-// Added alignment_restriction and tags fields to items.
+// Item Classification System:
+//   Weapons use WeaponClassification enum (Simple, MartialMelee, MartialRanged, Blunt)
+//   Armor uses ArmorClassification enum (Light, Medium, Heavy)
+//   Magic items use MagicItemClassification enum (Arcane, Divine)
 //
-// Classification Mapping (from old disablement masks):
-//   - Weapons with mask 255 (all classes) -> Simple
-//   - Weapons with mask 43 (KPAR) -> MartialMelee
-//   - Weapons with mask 75 (KPACR, includes cleric) -> Blunt
-//   - Armor with mask 255 -> Light
-//   - Armor with mask 75 -> Medium
-//   - Armor with mask 11 (KPC) -> Heavy
+// Proficiency System:
+//   Characters can use items when their class OR race grants the required proficiency.
+//   Proficiencies are defined in data/proficiencies.ron.
 //
-// Tags (convention, not enforced):
+// Item Tags (fine-grained restrictions):
 //   - large_weapon: Too big for small races (Halfling, Gnome)
 //   - two_handed: Requires both hands
 //   - heavy_armor: Encumbering armor
+//
+// Alignment Restrictions:
+//   Some items can only be used by characters of specific alignments.
 
 [
     // ===== Basic Weapons =====
@@ -33,7 +34,6 @@
         )),
         base_cost: 1,
         sell_cost: 0,
-        disablements: (255), // All classes
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -55,7 +55,6 @@
         )),
         base_cost: 2,
         sell_cost: 1,
-        disablements: (255), // All classes
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -77,7 +76,6 @@
         )),
         base_cost: 10,
         sell_cost: 5,
-        disablements: (63), // KPACSR (not for Sorcerer at bit 4)
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -99,7 +97,6 @@
         )),
         base_cost: 15,
         sell_cost: 7,
-        disablements: (43), // Knight, Paladin, Archer, Robber
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -121,7 +118,6 @@
         )),
         base_cost: 8,
         sell_cost: 4,
-        disablements: (75), // Knight, Paladin, Archer, Cleric, Robber
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -143,7 +139,6 @@
         )),
         base_cost: 15,
         sell_cost: 7,
-        disablements: (43), // KPAR
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -165,7 +160,6 @@
         )),
         base_cost: 30,
         sell_cost: 15,
-        disablements: (43), // KPAR
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -187,7 +181,6 @@
         )),
         base_cost: 25,
         sell_cost: 12,
-        disablements: (7), // Knight, Paladin, Archer
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -209,7 +202,6 @@
         )),
         base_cost: 15,
         sell_cost: 7,
-        disablements: (7), // Knight, Paladin, Archer
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -233,7 +225,6 @@
         )),
         base_cost: 30,
         sell_cost: 15,
-        disablements: (255),
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -255,7 +246,6 @@
         )),
         base_cost: 500,
         sell_cost: 250,
-        disablements: (43),
         alignment_restriction: None,
         constant_bonus: Some((
             attribute: ResistFire,
@@ -280,7 +270,6 @@
         )),
         base_cost: 6500,
         sell_cost: 3250,
-        disablements: (106), // KPA + Good (64 + 42)
         alignment_restriction: Some(GoodOnly),
         constant_bonus: Some((
             attribute: Accuracy,
@@ -309,7 +298,6 @@
         )),
         base_cost: 5,
         sell_cost: 2,
-        disablements: (255), // All classes
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -330,7 +318,6 @@
         )),
         base_cost: 200,
         sell_cost: 100,
-        disablements: (75), // Knight, Paladin, Archer, Cleric, Robber
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -351,7 +338,6 @@
         )),
         base_cost: 600,
         sell_cost: 300,
-        disablements: (11), // Knight, Paladin, Cleric
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -372,7 +358,6 @@
         )),
         base_cost: 10,
         sell_cost: 5,
-        disablements: (75), // Knight, Paladin, Archer, Cleric, Robber
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -393,7 +378,6 @@
         )),
         base_cost: 50,
         sell_cost: 25,
-        disablements: (11), // Knight, Paladin, Cleric
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -416,7 +400,6 @@
         )),
         base_cost: 500,
         sell_cost: 250,
-        disablements: (75),
         alignment_restriction: None,
         constant_bonus: Some((
             attribute: ResistFire,
@@ -440,7 +423,6 @@
         )),
         base_cost: 5000,
         sell_cost: 2500,
-        disablements: (43), // KPAR
         alignment_restriction: None,
         constant_bonus: Some((
             attribute: ResistFire,
@@ -465,7 +447,6 @@
         )),
         base_cost: 100,
         sell_cost: 50,
-        disablements: (255),
         alignment_restriction: None,
         constant_bonus: Some((
             attribute: ArmorClass,
@@ -488,7 +469,6 @@
         )),
         base_cost: 500,
         sell_cost: 250,
-        disablements: (255),
         alignment_restriction: None,
         constant_bonus: Some((
             attribute: Might,
@@ -511,7 +491,6 @@
         )),
         base_cost: 750,
         sell_cost: 375,
-        disablements: (255),
         alignment_restriction: None,
         constant_bonus: Some((
             attribute: Speed,
@@ -534,7 +513,6 @@
         )),
         base_cost: 1000,
         sell_cost: 500,
-        disablements: (16), // Sorcerer only
         alignment_restriction: None,
         constant_bonus: Some((
             attribute: Intellect,
@@ -557,7 +535,6 @@
         )),
         base_cost: 800,
         sell_cost: 400,
-        disablements: (10), // Paladin, Cleric
         alignment_restriction: None,
         constant_bonus: Some((
             attribute: Personality,
@@ -582,7 +559,6 @@
         )),
         base_cost: 50,
         sell_cost: 25,
-        disablements: (255),
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -602,7 +578,6 @@
         )),
         base_cost: 100,
         sell_cost: 50,
-        disablements: (255),
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -622,7 +597,6 @@
         )),
         base_cost: 75,
         sell_cost: 37,
-        disablements: (255),
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -644,7 +618,6 @@
         )),
         base_cost: 5,
         sell_cost: 2,
-        disablements: (255),
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -664,7 +637,6 @@
         )),
         base_cost: 7,
         sell_cost: 3,
-        disablements: (255),
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -686,7 +658,6 @@
         )),
         base_cost: 500,
         sell_cost: 250,
-        disablements: (0), // Cannot equip
         alignment_restriction: None,
         constant_bonus: Some((
             attribute: Luck,
@@ -713,7 +684,6 @@
         )),
         base_cost: 500,
         sell_cost: 250,
-        disablements: (74), // KPAC + Good (64 + 10)
         alignment_restriction: Some(GoodOnly),
         constant_bonus: None,
         temporary_bonus: None,

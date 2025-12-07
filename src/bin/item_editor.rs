@@ -32,8 +32,8 @@
 
 use antares::domain::items::{
     AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
-    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Disablement,
-    Item, ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
+    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Item,
+    ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
 };
 use antares::domain::types::{DiceRoll, ItemId};
 use std::fs;
@@ -207,10 +207,7 @@ impl ItemEditor {
         let base_cost = self.read_u32("Base cost (gold): ", 0);
         let sell_cost = self.read_u32("Sell cost (gold): ", base_cost / 2);
 
-        // Get class restrictions
-        let disablements = self.select_class_restrictions();
-
-        // Item tags
+        // Item tags (proficiency system now handles restrictions)
         let tags = self.input_item_tags();
 
         // Optional bonuses
@@ -240,7 +237,7 @@ impl ItemEditor {
             item_type,
             base_cost,
             sell_cost,
-            disablements,
+
             alignment_restriction,
             constant_bonus,
             temporary_bonus,
@@ -413,79 +410,7 @@ impl ItemEditor {
         }
     }
 
-    /// Selects class restrictions
-    fn select_class_restrictions(&self) -> Disablement {
-        println!("\n  Class Restrictions:");
-        println!("    [1] All classes can use (0xFF)");
-        println!("    [2] No classes (quest item)");
-        println!("    [3] Custom selection");
-
-        let choice = self.read_input("  Choice: ");
-        match choice.trim() {
-            "1" => Disablement::ALL,
-            "2" => Disablement::NONE,
-            "3" => self.custom_class_selection(),
-            _ => Disablement::ALL,
-        }
-    }
-
-    /// Custom class restriction selection
-    ///
-    /// Uses standard class bit positions:
-    /// - Bit 0 (0b0000_0001): Knight
-    /// - Bit 1 (0b0000_0010): Paladin
-    /// - Bit 2 (0b0000_0100): Archer
-    /// - Bit 3 (0b0000_1000): Cleric
-    /// - Bit 4 (0b0001_0000): Sorcerer
-    /// - Bit 5 (0b0010_0000): Robber
-    fn custom_class_selection(&self) -> Disablement {
-        // Standard class bit positions
-        const BIT_KNIGHT: u8 = 0b0000_0001;
-        const BIT_PALADIN: u8 = 0b0000_0010;
-        const BIT_ARCHER: u8 = 0b0000_0100;
-        const BIT_CLERIC: u8 = 0b0000_1000;
-        const BIT_SORCERER: u8 = 0b0001_0000;
-        const BIT_ROBBER: u8 = 0b0010_0000;
-
-        println!("\n    Select classes that CAN use this item:");
-
-        let knight = self.read_bool("    Knight? (y/n): ");
-        let paladin = self.read_bool("    Paladin? (y/n): ");
-        let archer = self.read_bool("    Archer? (y/n): ");
-        let cleric = self.read_bool("    Cleric? (y/n): ");
-        let sorcerer = self.read_bool("    Sorcerer? (y/n): ");
-        let robber = self.read_bool("    Robber? (y/n): ");
-        let good = self.read_bool("    Good alignment only? (y/n): ");
-        let evil = self.read_bool("    Evil alignment only? (y/n): ");
-
-        let mut flags = 0u8;
-        if knight {
-            flags |= BIT_KNIGHT;
-        }
-        if paladin {
-            flags |= BIT_PALADIN;
-        }
-        if archer {
-            flags |= BIT_ARCHER;
-        }
-        if cleric {
-            flags |= BIT_CLERIC;
-        }
-        if sorcerer {
-            flags |= BIT_SORCERER;
-        }
-        if robber {
-            flags |= BIT_ROBBER;
-        }
-        if good {
-            flags |= Disablement::GOOD;
-        }
-        if evil {
-            flags |= Disablement::EVIL;
-        }
-
-        Disablement(flags)
-    }
+    // Disablement functions removed - proficiency system now handles restrictions
 
     /// Selects weapon classification
     fn select_weapon_classification(&self) -> WeaponClassification {
@@ -1215,9 +1140,7 @@ impl ItemEditor {
             println!("  ⚔️  Required Proficiency: {}", prof_id);
         }
 
-        #[allow(deprecated)]
-        let dis_flags = item.disablements.0;
-        println!("  Disablement Flags (legacy): 0x{:02X}", dis_flags);
+        // Disablement system removed - proficiency system now handles restrictions
 
         if let Some(bonus) = &item.constant_bonus {
             println!("  Constant Bonus: {:?} {:+}", bonus.attribute, bonus.value);
@@ -1422,7 +1345,7 @@ mod tests {
                     }),
                     base_cost: 100,
                     sell_cost: 50,
-                    disablements: Disablement::ALL,
+
                     alignment_restriction: None,
                     constant_bonus: None,
                     temporary_bonus: None,
@@ -1442,7 +1365,7 @@ mod tests {
                     }),
                     base_cost: 50,
                     sell_cost: 25,
-                    disablements: Disablement::ALL,
+
                     alignment_restriction: None,
                     constant_bonus: None,
                     temporary_bonus: None,
@@ -1460,41 +1383,7 @@ mod tests {
         assert_eq!(editor.next_item_id(), 6);
     }
 
-    #[test]
-    fn test_custom_class_selection_all_flags() {
-        // Standard class bit positions
-        const BIT_KNIGHT: u8 = 0b0000_0001;
-        const BIT_PALADIN: u8 = 0b0000_0010;
-        const BIT_ARCHER: u8 = 0b0000_0100;
-        const BIT_CLERIC: u8 = 0b0000_1000;
-        const BIT_SORCERER: u8 = 0b0001_0000;
-        const BIT_ROBBER: u8 = 0b0010_0000;
-
-        // This test validates the bit flags are correctly set
-        let flags = BIT_KNIGHT | BIT_PALADIN | BIT_ARCHER | BIT_CLERIC | BIT_SORCERER | BIT_ROBBER;
-
-        let dis = Disablement(flags);
-        assert!(dis.can_use_class(BIT_KNIGHT));
-        assert!(dis.can_use_class(BIT_PALADIN));
-        assert!(dis.can_use_class(BIT_ARCHER));
-        assert!(dis.can_use_class(BIT_CLERIC));
-        assert!(dis.can_use_class(BIT_SORCERER));
-        assert!(dis.can_use_class(BIT_ROBBER));
-        assert!(!dis.good_only());
-        assert!(!dis.evil_only());
-    }
-
-    #[test]
-    fn test_disablement_all() {
-        let dis = Disablement::ALL;
-        assert_eq!(dis.0, 0xFF);
-    }
-
-    #[test]
-    fn test_disablement_none() {
-        let dis = Disablement::NONE;
-        assert_eq!(dis.0, 0x00);
-    }
+    // Disablement-related tests removed - proficiency system now handles restrictions
 
     #[test]
     fn test_format_classification_weapon() {
@@ -1621,7 +1510,7 @@ mod tests {
             }),
             base_cost: 500,
             sell_cost: 250,
-            disablements: Disablement::ALL,
+
             alignment_restriction: Some(AlignmentRestriction::GoodOnly),
             constant_bonus: None,
             temporary_bonus: None,
@@ -1653,7 +1542,7 @@ mod tests {
             }),
             base_cost: 150,
             sell_cost: 75,
-            disablements: Disablement::ALL,
+
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
@@ -1681,7 +1570,7 @@ mod tests {
             }),
             base_cost: 100,
             sell_cost: 0,
-            disablements: Disablement::ALL,
+
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
@@ -1708,7 +1597,7 @@ mod tests {
             }),
             base_cost: 500,
             sell_cost: 250,
-            disablements: Disablement::ALL,
+
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,

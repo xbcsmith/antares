@@ -68,7 +68,6 @@ pub struct RaceEditBuffer {
     pub psychic_resist: String,
     // Other fields
     pub size: SizeCategory,
-    pub disablement_bit_index: String,
     pub special_abilities: String,      // Comma-separated
     pub proficiencies: String,          // Comma-separated
     pub incompatible_item_tags: String, // Comma-separated
@@ -96,7 +95,6 @@ impl Default for RaceEditBuffer {
             poison_resist: "0".to_string(),
             psychic_resist: "0".to_string(),
             size: SizeCategory::Medium,
-            disablement_bit_index: "0".to_string(),
             special_abilities: String::new(),
             proficiencies: String::new(),
             incompatible_item_tags: String::new(),
@@ -156,7 +154,6 @@ impl RacesEditorState {
                 poison_resist: race.resistances.poison.to_string(),
                 psychic_resist: race.resistances.psychic.to_string(),
                 size: race.size,
-                disablement_bit_index: race.disablement_bit_index.to_string(),
                 special_abilities: race.special_abilities.join(", "),
                 proficiencies: race.proficiencies.join(", "),
                 incompatible_item_tags: race.incompatible_item_tags.join(", "),
@@ -255,12 +252,6 @@ impl RacesEditorState {
             .parse::<u8>()
             .map_err(|_| "Invalid Psychic resistance")?;
 
-        let disablement = self
-            .buffer
-            .disablement_bit_index
-            .parse::<u8>()
-            .map_err(|_| "Invalid Disablement Bit")?;
-
         let special_abilities: Vec<String> = self
             .buffer
             .special_abilities
@@ -310,7 +301,6 @@ impl RacesEditorState {
             },
             special_abilities,
             size: self.buffer.size,
-            disablement_bit_index: disablement,
             proficiencies,
             incompatible_item_tags,
         };
@@ -385,6 +375,10 @@ impl RacesEditorState {
             ron::from_str(&content).map_err(|e| format!("Failed to parse races: {}", e))?;
         self.races = races;
         self.has_unsaved_changes = false;
+        // Auto-select first race if any races were loaded
+        if !self.races.is_empty() {
+            self.selected_race = Some(0);
+        }
         Ok(())
     }
 
@@ -600,140 +594,120 @@ impl RacesEditorState {
 
                         // Right panel - race details
                         if let Some(idx) = selected_race_idx {
-                            if idx < races_snapshot.len() {
-                                if let Some((_, race)) =
-                                    races_snapshot.iter().find(|(i, _)| *i == idx)
-                                {
-                                    egui::ScrollArea::vertical()
-                                        .id_salt("race_details_scroll")
-                                        .show(right_ui, |ui| {
-                                            ui.heading(&race.name);
-                                            ui.label(format!("ID: {}", race.id));
-                                            ui.label(format!("Size: {:?}", race.size));
+                            if let Some((_, race)) = races_snapshot.iter().find(|(i, _)| *i == idx)
+                            {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("race_details_scroll")
+                                    .show(right_ui, |ui| {
+                                        ui.heading(&race.name);
+                                        ui.label(format!("ID: {}", race.id));
+                                        ui.label(format!("Size: {:?}", race.size));
 
-                                            if !race.description.is_empty() {
-                                                ui.add_space(5.0);
-                                                ui.label(&race.description);
-                                            }
+                                        if !race.description.is_empty() {
+                                            ui.add_space(5.0);
+                                            ui.label(&race.description);
+                                        }
 
-                                            ui.add_space(10.0);
-                                            ui.heading("Stat Modifiers");
-                                            ui.horizontal(|ui| {
-                                                ui.label(format!(
-                                                    "Might: {:+}",
-                                                    race.stat_modifiers.might
-                                                ));
-                                                ui.label(format!(
-                                                    "Intellect: {:+}",
-                                                    race.stat_modifiers.intellect
-                                                ));
-                                                ui.label(format!(
-                                                    "Personality: {:+}",
-                                                    race.stat_modifiers.personality
-                                                ));
-                                            });
-                                            ui.horizontal(|ui| {
-                                                ui.label(format!(
-                                                    "Endurance: {:+}",
-                                                    race.stat_modifiers.endurance
-                                                ));
-                                                ui.label(format!(
-                                                    "Speed: {:+}",
-                                                    race.stat_modifiers.speed
-                                                ));
-                                                ui.label(format!(
-                                                    "Accuracy: {:+}",
-                                                    race.stat_modifiers.accuracy
-                                                ));
-                                                ui.label(format!(
-                                                    "Luck: {:+}",
-                                                    race.stat_modifiers.luck
-                                                ));
-                                            });
-
-                                            ui.add_space(10.0);
-                                            ui.heading("Resistances");
-                                            ui.horizontal(|ui| {
-                                                ui.label(format!(
-                                                    "Magic: {}%",
-                                                    race.resistances.magic
-                                                ));
-                                                ui.label(format!(
-                                                    "Fire: {}%",
-                                                    race.resistances.fire
-                                                ));
-                                                ui.label(format!(
-                                                    "Cold: {}%",
-                                                    race.resistances.cold
-                                                ));
-                                                ui.label(format!(
-                                                    "Elec: {}%",
-                                                    race.resistances.electricity
-                                                ));
-                                            });
-                                            ui.horizontal(|ui| {
-                                                ui.label(format!(
-                                                    "Acid: {}%",
-                                                    race.resistances.acid
-                                                ));
-                                                ui.label(format!(
-                                                    "Fear: {}%",
-                                                    race.resistances.fear
-                                                ));
-                                                ui.label(format!(
-                                                    "Poison: {}%",
-                                                    race.resistances.poison
-                                                ));
-                                                ui.label(format!(
-                                                    "Psychic: {}%",
-                                                    race.resistances.psychic
-                                                ));
-                                            });
-
-                                            if !race.special_abilities.is_empty() {
-                                                ui.add_space(10.0);
-                                                ui.heading("Special Abilities");
-                                                for ability in &race.special_abilities {
-                                                    ui.label(format!("• {}", ability));
-                                                }
-                                            }
-
-                                            if !race.proficiencies.is_empty() {
-                                                ui.add_space(10.0);
-                                                ui.heading("Proficiencies");
-                                                for prof in &race.proficiencies {
-                                                    ui.label(format!("• {}", prof));
-                                                }
-                                            }
-
-                                            if !race.incompatible_item_tags.is_empty() {
-                                                ui.add_space(10.0);
-                                                ui.heading("Incompatible Item Tags");
-                                                for tag in &race.incompatible_item_tags {
-                                                    ui.label(format!("• {}", tag));
-                                                }
-                                            }
-
-                                            ui.add_space(10.0);
+                                        ui.add_space(10.0);
+                                        ui.heading("Stat Modifiers");
+                                        ui.horizontal(|ui| {
                                             ui.label(format!(
-                                                "Disablement Bit: {} (mask: 0b{:08b})",
-                                                race.disablement_bit_index,
-                                                race.disablement_mask()
+                                                "Might: {:+}",
+                                                race.stat_modifiers.might
                                             ));
-
-                                            // Action buttons
-                                            ui.add_space(10.0);
-                                            let action = ActionButtons::new()
-                                                .with_edit(true)
-                                                .with_delete(true)
-                                                .with_duplicate(true)
-                                                .show(ui);
-
-                                            if action != ItemAction::None {
-                                                action_to_perform = Some((idx, action));
-                                            }
+                                            ui.label(format!(
+                                                "Intellect: {:+}",
+                                                race.stat_modifiers.intellect
+                                            ));
+                                            ui.label(format!(
+                                                "Personality: {:+}",
+                                                race.stat_modifiers.personality
+                                            ));
                                         });
-                                }
+                                        ui.horizontal(|ui| {
+                                            ui.label(format!(
+                                                "Endurance: {:+}",
+                                                race.stat_modifiers.endurance
+                                            ));
+                                            ui.label(format!(
+                                                "Speed: {:+}",
+                                                race.stat_modifiers.speed
+                                            ));
+                                            ui.label(format!(
+                                                "Accuracy: {:+}",
+                                                race.stat_modifiers.accuracy
+                                            ));
+                                            ui.label(format!(
+                                                "Luck: {:+}",
+                                                race.stat_modifiers.luck
+                                            ));
+                                        });
+
+                                        ui.add_space(10.0);
+                                        ui.heading("Resistances");
+                                        ui.horizontal(|ui| {
+                                            ui.label(format!("Magic: {}%", race.resistances.magic));
+                                            ui.label(format!("Fire: {}%", race.resistances.fire));
+                                            ui.label(format!("Cold: {}%", race.resistances.cold));
+                                            ui.label(format!(
+                                                "Elec: {}%",
+                                                race.resistances.electricity
+                                            ));
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label(format!("Acid: {}%", race.resistances.acid));
+                                            ui.label(format!("Fear: {}%", race.resistances.fear));
+                                            ui.label(format!(
+                                                "Poison: {}%",
+                                                race.resistances.poison
+                                            ));
+                                            ui.label(format!(
+                                                "Psychic: {}%",
+                                                race.resistances.psychic
+                                            ));
+                                        });
+
+                                        if !race.special_abilities.is_empty() {
+                                            ui.add_space(10.0);
+                                            ui.heading("Special Abilities");
+                                            for ability in &race.special_abilities {
+                                                ui.label(format!("• {}", ability));
+                                            }
+                                        }
+
+                                        if !race.proficiencies.is_empty() {
+                                            ui.add_space(10.0);
+                                            ui.heading("Proficiencies");
+                                            for prof in &race.proficiencies {
+                                                ui.label(format!("• {}", prof));
+                                            }
+                                        }
+
+                                        if !race.incompatible_item_tags.is_empty() {
+                                            ui.add_space(10.0);
+                                            ui.heading("Incompatible Item Tags");
+                                            for tag in &race.incompatible_item_tags {
+                                                ui.label(format!("• {}", tag));
+                                            }
+                                        }
+
+                                        // Action buttons
+                                        ui.add_space(10.0);
+                                        let action = ActionButtons::new()
+                                            .with_edit(true)
+                                            .with_delete(true)
+                                            .with_duplicate(true)
+                                            .show(ui);
+
+                                        if action != ItemAction::None {
+                                            action_to_perform = Some((idx, action));
+                                        }
+                                    });
+                            } else {
+                                // Selected race is filtered out by search
+                                right_ui.centered_and_justified(|ui| {
+                                    ui.label("Selected race not visible in current filter");
+                                });
                             }
                         } else {
                             right_ui.centered_and_justified(|ui| {
@@ -835,9 +809,6 @@ impl RacesEditorState {
                             });
                         ui.end_row();
 
-                        ui.label("Disablement Bit:");
-                        ui.text_edit_singleline(&mut self.buffer.disablement_bit_index);
-                        ui.end_row();
                     });
 
                 ui.add_space(10.0);
@@ -1213,7 +1184,6 @@ mod tests {
             resistances: Resistances::default(),
             special_abilities: vec![],
             size: SizeCategory::Medium,
-            disablement_bit_index: 0,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
         });
@@ -1225,7 +1195,6 @@ mod tests {
             resistances: Resistances::default(),
             special_abilities: vec![],
             size: SizeCategory::Medium,
-            disablement_bit_index: 1,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
         });
@@ -1259,7 +1228,6 @@ mod tests {
             resistances: Resistances::default(),
             special_abilities: vec!["adaptable".to_string()],
             size: SizeCategory::Medium,
-            disablement_bit_index: 0,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
         });
@@ -1284,7 +1252,6 @@ mod tests {
             resistances: Resistances::default(),
             special_abilities: vec![],
             size: SizeCategory::Medium,
-            disablement_bit_index: 0,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
         });

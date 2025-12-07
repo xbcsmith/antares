@@ -17,8 +17,8 @@
 use antares::domain::classes::{ClassDefinition, SpellSchool, SpellStat};
 use antares::domain::items::{
     AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorClassification, ArmorData,
-    AttributeType, ConsumableData, ConsumableEffect, Disablement, Item, ItemType,
-    MagicItemClassification, QuestData, WeaponClassification, WeaponData,
+    AttributeType, ConsumableData, ConsumableEffect, Item, ItemType, MagicItemClassification,
+    QuestData, WeaponClassification, WeaponData,
 };
 use antares::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
 use antares::domain::types::DiceRoll;
@@ -51,7 +51,7 @@ fn create_test_class_with_proficiencies() -> ClassDefinition {
         spell_school: None,
         is_pure_caster: false,
         spell_stat: None,
-        disablement_bit_index: 0,
+
         special_abilities: vec!["multiple_attacks".to_string()],
         starting_weapon_id: Some(1),
         starting_armor_id: Some(100),
@@ -74,7 +74,7 @@ fn create_test_spellcasting_class() -> ClassDefinition {
         spell_school: Some(SpellSchool::Sorcerer),
         is_pure_caster: true,
         spell_stat: Some(SpellStat::Intellect),
-        disablement_bit_index: 1,
+
         special_abilities: vec!["spell_mastery".to_string()],
         starting_weapon_id: Some(10),
         starting_armor_id: None,
@@ -97,7 +97,6 @@ fn create_test_weapon() -> Item {
         base_cost: 150,
         sell_cost: 75,
         #[allow(deprecated)]
-        disablements: Disablement(0xFF), // All classes can use
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -122,7 +121,6 @@ fn create_test_armor() -> Item {
         base_cost: 500,
         sell_cost: 250,
         #[allow(deprecated)]
-        disablements: Disablement(0xFF),
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -146,7 +144,6 @@ fn create_test_accessory() -> Item {
         base_cost: 1000,
         sell_cost: 500,
         #[allow(deprecated)]
-        disablements: Disablement(0xFF),
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -170,7 +167,6 @@ fn create_test_consumable() -> Item {
         base_cost: 50,
         sell_cost: 25,
         #[allow(deprecated)]
-        disablements: Disablement(0xFF),
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -194,7 +190,6 @@ fn create_test_ammo() -> Item {
         base_cost: 10,
         sell_cost: 5,
         #[allow(deprecated)]
-        disablements: Disablement(0xFF),
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -218,7 +213,6 @@ fn create_test_quest_item() -> Item {
         base_cost: 0,
         sell_cost: 0,
         #[allow(deprecated)]
-        disablements: Disablement(0x00), // Quest items can't be used
         alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
@@ -257,7 +251,7 @@ fn create_test_race_with_modifiers() -> RaceDefinition {
         },
         special_abilities: vec!["infravision".to_string(), "keen_senses".to_string()],
         size: SizeCategory::Medium,
-        disablement_bit_index: 2,
+
         proficiencies: vec!["longbow".to_string(), "longsword".to_string()],
         incompatible_item_tags: vec!["heavy_weapon".to_string()],
     }
@@ -290,7 +284,7 @@ fn create_test_race_with_resistances() -> RaceDefinition {
         },
         special_abilities: vec!["stonecunning".to_string()],
         size: SizeCategory::Medium,
-        disablement_bit_index: 3,
+
         proficiencies: vec!["axe".to_string(), "hammer".to_string()],
         incompatible_item_tags: vec![],
     }
@@ -384,7 +378,7 @@ fn test_class_legacy_disablement_handling() {
     let loaded_string = fs::read_to_string(&file_path).unwrap();
     let loaded: ClassDefinition = ron::from_str(&loaded_string).unwrap();
 
-    assert_eq!(loaded.disablement_bit_index, 4);
+    // disablement_bit_index field removed - proficiency system now handles restrictions
     assert_eq!(loaded.id, "legacy_warrior");
 }
 
@@ -578,7 +572,6 @@ fn test_item_all_classifications_preserved() {
             base_cost: 100,
             sell_cost: 50,
             #[allow(deprecated)]
-            disablements: Disablement(0xFF),
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
@@ -769,7 +762,7 @@ fn test_legacy_race_without_proficiencies() {
     // Verify defaults
     assert_eq!(loaded.proficiencies, Vec::<String>::new());
     assert_eq!(loaded.incompatible_item_tags, Vec::<String>::new());
-    assert_eq!(loaded.disablement_bit_index, 0);
+    // disablement_bit_index field removed - proficiency system now handles restrictions
     assert_eq!(loaded.stat_modifiers.luck, 1);
 }
 
@@ -822,7 +815,7 @@ fn test_class_proficiency_migration_path() {
     let loaded: ClassDefinition = ron::from_str(mixed_ron).unwrap();
 
     // Both should be present during migration period
-    assert_eq!(loaded.disablement_bit_index, 2);
+    // disablement_bit_index field removed - proficiency system now handles restrictions
     assert_eq!(loaded.proficiencies.len(), 2);
     assert!(loaded.proficiencies.contains(&"simple_weapon".to_string()));
     assert!(loaded.proficiencies.contains(&"martial_melee".to_string()));
@@ -848,8 +841,6 @@ fn test_item_consumable_effect_variants() {
             }),
             base_cost: 50,
             sell_cost: 25,
-            #[allow(deprecated)]
-            disablements: Disablement(0xFF),
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
@@ -891,10 +882,8 @@ fn test_armor_classifications_preserved() {
                 ac_bonus: 5,
                 weight: 30,
             }),
-            base_cost: 200,
-            sell_cost: 100,
-            #[allow(deprecated)]
-            disablements: Disablement(0xFF),
+            base_cost: 50,
+            sell_cost: 25,
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
@@ -935,10 +924,8 @@ fn test_accessory_slots_preserved() {
                 slot,
                 classification: None,
             }),
-            base_cost: 300,
-            sell_cost: 150,
-            #[allow(deprecated)]
-            disablements: Disablement(0xFF),
+            base_cost: 10,
+            sell_cost: 5,
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,

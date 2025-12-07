@@ -212,7 +212,7 @@ impl RaceEditor {
         let stat_modifiers = self.input_stat_modifiers();
         let resistances = self.input_resistances();
         let size = self.input_size_category();
-        let disablement_bit_index = self.get_next_disablement_bit();
+
         let special_abilities = self.input_special_abilities();
         let proficiencies = self.input_proficiencies();
         let incompatible_item_tags = self.input_incompatible_tags();
@@ -225,7 +225,6 @@ impl RaceEditor {
             resistances,
             special_abilities,
             size,
-            disablement_bit_index,
             proficiencies,
             incompatible_item_tags,
         };
@@ -433,11 +432,7 @@ impl RaceEditor {
         println!("    Poison:      {:3}%", race.resistances.poison);
         println!("    Psychic:     {:3}%", race.resistances.psychic);
 
-        println!(
-            "\n  Disablement Bit: {} (mask: 0b{:08b})",
-            race.disablement_bit_index,
-            race.disablement_mask()
-        );
+        // Disablement system removed - proficiency system now handles restrictions
 
         if race.special_abilities.is_empty() {
             println!("\n  Special Abilities: None");
@@ -651,26 +646,6 @@ impl RaceEditor {
         }
     }
 
-    /// Gets the next available disablement bit
-    fn get_next_disablement_bit(&self) -> u8 {
-        let mut used_bits = [false; 8];
-
-        for race in &self.races {
-            if (race.disablement_bit_index as usize) < 8 {
-                used_bits[race.disablement_bit_index as usize] = true;
-            }
-        }
-
-        for (idx, &used) in used_bits.iter().enumerate() {
-            if !used {
-                return idx as u8;
-            }
-        }
-
-        // If all bits used, find the next available
-        self.races.len() as u8 % 8
-    }
-
     /// Inputs special abilities
     fn input_special_abilities(&self) -> Vec<String> {
         println!("\nSpecial Abilities (comma-separated, or leave empty):");
@@ -851,55 +826,6 @@ mod tests {
         assert_eq!(truncate("short", 10), "short");
         assert_eq!(truncate("this is a very long string", 10), "this is...");
         assert_eq!(truncate("exactly10c", 10), "exactly10c");
-    }
-
-    #[test]
-    fn test_get_next_disablement_bit_empty() {
-        let editor = RaceEditor {
-            races: Vec::new(),
-            file_path: PathBuf::from("test.ron"),
-            modified: false,
-        };
-
-        assert_eq!(editor.get_next_disablement_bit(), 0);
-    }
-
-    #[test]
-    fn test_get_next_disablement_bit_sequential() {
-        let races = vec![
-            RaceDefinition {
-                id: "human".to_string(),
-                name: "Human".to_string(),
-                description: String::new(),
-                stat_modifiers: StatModifiers::default(),
-                resistances: Resistances::default(),
-                special_abilities: vec![],
-                size: SizeCategory::Medium,
-                disablement_bit_index: 0,
-                proficiencies: vec![],
-                incompatible_item_tags: vec![],
-            },
-            RaceDefinition {
-                id: "elf".to_string(),
-                name: "Elf".to_string(),
-                description: String::new(),
-                stat_modifiers: StatModifiers::default(),
-                resistances: Resistances::default(),
-                special_abilities: vec![],
-                size: SizeCategory::Medium,
-                disablement_bit_index: 1,
-                proficiencies: vec![],
-                incompatible_item_tags: vec![],
-            },
-        ];
-
-        let editor = RaceEditor {
-            races,
-            file_path: PathBuf::from("test.ron"),
-            modified: false,
-        };
-
-        assert_eq!(editor.get_next_disablement_bit(), 2);
     }
 
     #[test]

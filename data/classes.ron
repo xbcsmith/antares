@@ -3,14 +3,6 @@
 // This file contains all character class definitions in RON (Rusty Object Notation) format.
 // See docs/explanation/sdk_implementation_plan.md Phase 1 for specifications.
 //
-// Class Disablement Bits (for item restrictions):
-//   Bit 0 (0b00000001) - Knight
-//   Bit 1 (0b00000010) - Paladin
-//   Bit 2 (0b00000100) - Archer
-//   Bit 3 (0b00001000) - Cleric
-//   Bit 4 (0b00010000) - Sorcerer
-//   Bit 5 (0b00100000) - Robber
-//
 // HP Dice:
 //   - Knight:   1d10 (highest HP)
 //   - Paladin:  1d8  (high HP, hybrid caster)
@@ -41,7 +33,6 @@
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            disablement_bit: 0,
             special_abilities: ["multiple_attacks", "heavy_armor"],
             starting_weapon_id: None,
             starting_armor_id: None,
@@ -65,7 +56,6 @@
             spell_school: Some(Cleric),
             is_pure_caster: false,
             spell_stat: Some(Personality),
-            disablement_bit: 1,
             special_abilities: ["turn_undead", "lay_on_hands"],
             starting_weapon_id: None,
             starting_armor_id: None,
@@ -91,7 +81,6 @@
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            disablement_bit: 2,
             special_abilities: ["ranged_bonus", "precision_shot"],
             starting_weapon_id: None,
             starting_armor_id: None,
@@ -113,7 +102,6 @@
             spell_school: Some(Cleric),
             is_pure_caster: true,
             spell_stat: Some(Personality),
-            disablement_bit: 3,
             special_abilities: ["turn_undead", "divine_intervention"],
             starting_weapon_id: None,
             starting_armor_id: None,
@@ -137,7 +125,6 @@
             spell_school: Some(Sorcerer),
             is_pure_caster: true,
             spell_stat: Some(Intellect),
-            disablement_bit: 4,
             special_abilities: ["arcane_mastery", "spell_penetration"],
             starting_weapon_id: None,
             starting_armor_id: None,
@@ -157,7 +144,6 @@
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            disablement_bit: 5,
             special_abilities: ["backstab", "disarm_trap", "pick_lock"],
             starting_weapon_id: None,
             starting_armor_id: None,

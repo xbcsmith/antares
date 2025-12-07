@@ -240,21 +240,20 @@ impl Resistances {
 /// ```
 /// use antares::domain::races::{RaceDefinition, StatModifiers, Resistances, SizeCategory};
 ///
-/// let human = RaceDefinition {
-///     id: "human".to_string(),
-///     name: "Human".to_string(),
-///     description: "Versatile and adaptable".to_string(),
+/// let halfling = RaceDefinition {
+///     id: "halfling".to_string(),
+///     name: "Halfling".to_string(),
+///     description: "Small and nimble".to_string(),
 ///     stat_modifiers: StatModifiers::default(),
 ///     resistances: Resistances::default(),
 ///     special_abilities: vec![],
-///     size: SizeCategory::Medium,
-///     disablement_bit_index: 0,
+///     size: SizeCategory::Small,
 ///     proficiencies: vec![],
-///     incompatible_item_tags: vec![],
+///     incompatible_item_tags: vec!["large_weapon".to_string(), "heavy_armor".to_string()],
 /// };
 ///
-/// assert_eq!(human.name, "Human");
-/// assert_eq!(human.size, SizeCategory::Medium);
+/// assert_eq!(halfling.name, "Halfling");
+/// assert_eq!(halfling.size, SizeCategory::Small);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RaceDefinition {
@@ -283,11 +282,6 @@ pub struct RaceDefinition {
     /// Size category affecting equipment and combat
     #[serde(default)]
     pub size: SizeCategory,
-
-    /// Bit index for item disablement checking (0 = bit 0).
-    /// Use values 0..=7; compute the bitmask with `1 << disablement_bit_index`.
-    #[serde(default, rename = "disablement_bit")]
-    pub disablement_bit_index: u8,
 
     /// Proficiencies this race starts with (forward-compatible with proficiency system)
     #[serde(default)]
@@ -329,36 +323,9 @@ impl RaceDefinition {
             resistances: Resistances::default(),
             special_abilities: vec![],
             size: SizeCategory::Medium,
-            disablement_bit_index: 0,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
         }
-    }
-
-    /// Returns the disablement mask for this race (bit position as mask)
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::races::{RaceDefinition, StatModifiers, Resistances, SizeCategory};
-    ///
-    /// let elf = RaceDefinition {
-    ///     id: "elf".to_string(),
-    ///     name: "Elf".to_string(),
-    ///     description: "Graceful and magical".to_string(),
-    ///     stat_modifiers: StatModifiers::default(),
-    ///     resistances: Resistances::default(),
-    ///     special_abilities: vec!["infravision".to_string()],
-    ///     size: SizeCategory::Medium,
-    ///     disablement_bit_index: 1,
-    ///     proficiencies: vec![],
-    ///     incompatible_item_tags: vec![],
-    /// };
-    ///
-    /// assert_eq!(elf.disablement_mask(), 0b00000010);
-    /// ```
-    pub fn disablement_mask(&self) -> u8 {
-        1 << self.disablement_bit_index
     }
 
     /// Checks if this race has a specific special ability
@@ -376,8 +343,7 @@ impl RaceDefinition {
     ///     resistances: Resistances::default(),
     ///     special_abilities: vec!["infravision".to_string(), "resist_sleep".to_string()],
     ///     size: SizeCategory::Medium,
-    ///     disablement_bit_index: 1,
-    ///     proficiencies: vec![],
+    ///     proficiencies: vec!["martial_ranged".to_string()],
     ///     incompatible_item_tags: vec![],
     /// };
     ///
@@ -426,8 +392,7 @@ impl RaceDefinition {
     ///     stat_modifiers: StatModifiers::default(),
     ///     resistances: Resistances::default(),
     ///     special_abilities: vec![],
-    ///     size: SizeCategory::Small,
-    ///     disablement_bit_index: 3,
+    ///     size: SizeCategory::Medium,
     ///     proficiencies: vec![],
     ///     incompatible_item_tags: vec!["large_weapon".to_string(), "heavy_armor".to_string()],
     /// };
@@ -546,7 +511,6 @@ impl RaceDatabase {
     ///         ),
     ///         special_abilities: [],
     ///         size: Medium,
-    ///         disablement_bit: 0,
     ///         proficiencies: [],
     ///         incompatible_item_tags: [],
     ///     ),
@@ -643,14 +607,7 @@ impl RaceDatabase {
     /// Returns `Ok(())` if validation passes, or an error describing the issue.
     pub fn validate(&self) -> Result<(), RaceError> {
         for race_def in self.races.values() {
-            // Check disablement bit range
-            if race_def.disablement_bit_index > 7 {
-                return Err(RaceError::ValidationError(format!(
-                    "Invalid disablement_bit_index {} in race '{}' (must be 0-7)",
-                    race_def.disablement_bit_index, race_def.id
-                )));
-            }
-
+            // Check proficiency format (basic validation)
             // Check resistance values
             if let Err(e) = race_def.resistances.validate() {
                 return Err(RaceError::ValidationError(format!(
@@ -754,7 +711,6 @@ mod tests {
             resistances: Resistances::default(),
             special_abilities: vec![],
             size: SizeCategory::Medium,
-            disablement_bit_index: 0,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
         }
@@ -786,7 +742,6 @@ mod tests {
             },
             special_abilities: vec!["infravision".to_string(), "resist_sleep".to_string()],
             size: SizeCategory::Medium,
-            disablement_bit_index: 1,
             proficiencies: vec!["longbow".to_string()],
             incompatible_item_tags: vec![],
         }
@@ -818,7 +773,6 @@ mod tests {
             },
             special_abilities: vec!["stonecunning".to_string()],
             size: SizeCategory::Medium,
-            disablement_bit_index: 2,
             proficiencies: vec!["battleaxe".to_string(), "warhammer".to_string()],
             incompatible_item_tags: vec![],
         }
@@ -850,7 +804,6 @@ mod tests {
             },
             special_abilities: vec!["infravision".to_string()],
             size: SizeCategory::Small,
-            disablement_bit_index: 3,
             proficiencies: vec![],
             incompatible_item_tags: vec!["large_weapon".to_string()],
         }
@@ -948,18 +901,6 @@ mod tests {
     }
 
     // ===== RaceDefinition Tests =====
-
-    #[test]
-    fn test_race_definition_disablement_mask() {
-        let human = create_test_human();
-        assert_eq!(human.disablement_mask(), 0b00000001);
-
-        let elf = create_test_elf();
-        assert_eq!(elf.disablement_mask(), 0b00000010);
-
-        let dwarf = create_test_dwarf();
-        assert_eq!(dwarf.disablement_mask(), 0b00000100);
-    }
 
     #[test]
     fn test_race_definition_has_ability() {
@@ -1083,7 +1024,6 @@ mod tests {
                 ),
                 special_abilities: [],
                 size: Medium,
-                disablement_bit: 0,
                 proficiencies: [],
                 incompatible_item_tags: [],
             ),
@@ -1101,7 +1041,6 @@ mod tests {
                 ),
                 special_abilities: ["infravision", "resist_sleep"],
                 size: Medium,
-                disablement_bit: 1,
                 proficiencies: ["longbow"],
                 incompatible_item_tags: [],
             ),
@@ -1188,20 +1127,6 @@ mod tests {
     }
 
     #[test]
-    fn test_race_database_validation_invalid_bit_range() {
-        let ron_data = r#"[
-            (
-                id: "invalid",
-                name: "Invalid",
-                disablement_bit: 8,
-            ),
-        ]"#;
-
-        let result = RaceDatabase::load_from_string(ron_data);
-        assert!(matches!(result, Err(RaceError::ValidationError(_))));
-    }
-
-    #[test]
     fn test_race_database_validation_invalid_resistance() {
         let ron_data = r#"[
             (
@@ -1234,6 +1159,7 @@ mod tests {
         ]"#;
 
         let result = RaceDatabase::load_from_string(ron_data);
+        // This test now validates proficiency format instead of disablement bit range
         assert!(matches!(result, Err(RaceError::ValidationError(_))));
     }
 

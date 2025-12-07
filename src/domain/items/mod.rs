@@ -40,6 +40,6 @@ pub mod types;
 pub use database::{ItemDatabase, ItemDatabaseError};
 pub use types::{
     AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
-    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Disablement,
-    Item, ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
+    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Item,
+    ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
 };

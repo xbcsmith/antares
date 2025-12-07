@@ -6,14 +6,7 @@
 // Race stat modifiers affect the base stats of characters.
 // Positive values indicate racial bonuses, negative values indicate penalties.
 //
-// Race Disablement Bits (for item restrictions):
-//   Bit 0 (0b00000001) - Human
-//   Bit 1 (0b00000010) - Elf
-//   Bit 2 (0b00000100) - Dwarf
-//   Bit 3 (0b00001000) - Gnome
-//   Bit 4 (0b00010000) - Half-Elf
-//   Bit 5 (0b00100000) - Half-Orc
-//
+
 // Size Categories:
 //   Small  - Gnomes (smaller weapons, can fit in tight spaces)
 //   Medium - Humans, Elves, Dwarves, Half-Elves, Half-Orcs
@@ -46,7 +39,6 @@
         ),
         special_abilities: ["adaptable"],
         size: Medium,
-        disablement_bit: 0,
         proficiencies: [],
         incompatible_item_tags: [],
     ),
@@ -77,7 +69,6 @@
         ),
         special_abilities: ["infravision", "resist_sleep", "resist_charm"],
         size: Medium,
-        disablement_bit: 1,
         proficiencies: ["longbow", "longsword"],
         incompatible_item_tags: [],
     ),
@@ -108,7 +99,6 @@
         ),
         special_abilities: ["infravision", "stonecunning", "poison_resistance"],
         size: Medium,
-        disablement_bit: 2,
         proficiencies: ["battleaxe", "warhammer"],
         incompatible_item_tags: [],
     ),
@@ -139,7 +129,6 @@
         ),
         special_abilities: ["infravision", "small_stature"],
         size: Small,
-        disablement_bit: 3,
         proficiencies: ["short_sword", "crossbow"],
         incompatible_item_tags: ["large_weapon", "heavy_armor"],
     ),
@@ -170,7 +159,6 @@
         ),
         special_abilities: ["infravision", "resist_sleep"],
         size: Medium,
-        disablement_bit: 4,
         proficiencies: ["longsword"],
         incompatible_item_tags: [],
     ),
@@ -201,7 +189,6 @@
         ),
         special_abilities: ["infravision", "intimidating"],
         size: Medium,
-        disablement_bit: 5,
         proficiencies: ["greataxe", "falchion"],
         incompatible_item_tags: [],
     ),

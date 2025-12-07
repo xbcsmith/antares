@@ -212,7 +212,7 @@ impl ClassEditor {
             spell_school,
             is_pure_caster,
             spell_stat,
-            disablement_bit_index: 0,
+
             special_abilities,
             starting_weapon_id: None,
             starting_armor_id: None,
