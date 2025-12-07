@@ -2,7 +2,7 @@
 
 ## Phase 6 Cleanup Plan: Disablement System Removal (2025-01-26)
 
-**Status:** ✅ PHASES 1-4 COMPLETE | **Latest Update:** Phase 4 Tutorial Campaign Data Files (2025-01-26)
+**Status:** ✅ PHASES 1-5 COMPLETE | **Latest Update:** Phase 5 Proficiency UNION Logic Integration Tests (2025-01-26)
 
 The deprecated `Disablement` bitmask system has been fully removed from the codebase and replaced with the proficiency-based classification system. All documentation has been updated, and final verification confirms no remaining references to the legacy system.
 
@@ -48,6 +48,100 @@ The tutorial campaign now loads successfully with zero disablement system refere
 
 - Tutorial campaign data files load correctly
 - Game state initialization works with the campaign
+
+### Phase 5: Proficiency UNION Logic Integration Tests (2025-01-26)
+
+**Objective:** Add comprehensive integration tests to verify proficiency resolution with UNION logic.
+
+**Implementation:**
+
+Created `tests/proficiency_integration_test.rs` with 15 comprehensive integration tests that verify the proficiency system's UNION logic using real tutorial campaign data.
+
+**Test Coverage:**
+
+1. **Class Grants Proficiency (2 tests)**:
+
+   - `test_proficiency_union_class_grants()` - Human Knight can use Longsword (class grants martial_melee)
+   - `test_proficiency_union_class_grants_heavy_armor()` - Dwarf Knight can use Plate Mail (class grants heavy_armor)
+
+2. **Race Grants Proficiency (2 tests)**:
+
+   - `test_proficiency_union_race_grants()` - Elf Sorcerer can use Long Bow (race grants martial_ranged, even though class doesn't)
+   - `test_proficiency_union_race_grants_longsword()` - Elf Archer can use Longsword (race grants longsword proficiency)
+
+3. **Neither Class Nor Race Grants Proficiency (2 tests)**:
+
+   - `test_proficiency_union_neither_grants()` - Human Sorcerer CANNOT use Longsword (no martial_melee proficiency)
+   - `test_proficiency_union_neither_grants_heavy_armor()` - Human Sorcerer CANNOT use Plate Mail (no heavy_armor proficiency)
+
+4. **Race Incompatible Tags Block Usage (2 tests)**:
+
+   - `test_race_incompatible_tags()` - Gnome Archer CANNOT use Long Bow (large_weapon tag blocks Small race)
+   - `test_race_incompatible_tags_heavy_armor()` - Gnome Knight CANNOT use Plate Mail (heavy_armor tag blocks Small race)
+
+5. **Proficiency Does NOT Override Race Tag Restrictions (2 tests)**:
+
+   - `test_proficiency_overrides_race_tag()` - Gnome Archer with martial_ranged proficiency still CANNOT use Long Bow (tag check fails)
+   - `test_proficiency_overrides_race_tag_heavy_armor()` - Gnome Paladin with heavy_armor proficiency still CANNOT use Plate Mail (tag check fails)
+
+6. **Edge Cases (5 tests)**:
+   - `test_gnome_archer_can_use_shortbow()` - Gnome Archer CAN use Short Bow (no large_weapon tag)
+   - `test_human_versatility_no_restrictions()` - Human Archer CAN use Long Bow (humans have no size restrictions)
+   - `test_elf_versatility_no_restrictions()` - Elf Knight CAN use Plate Mail (elves have no incompatible tags)
+   - `test_item_with_no_proficiency_requirement()` - All characters can use items with no proficiency requirement
+   - `test_item_with_no_tags()` - Items with no tags can be used if proficiency satisfied
+
+**Key Implementation Details:**
+
+- **Helper Functions**:
+
+  - `load_tutorial_databases()` - Loads ClassDatabase, RaceDatabase, ProficiencyDatabase from tutorial campaign
+  - `can_character_use_item()` - Simulates full proficiency check: proficiency UNION + tag compatibility
+  - `get_weapon_proficiency()` - Maps WeaponClassification to proficiency requirement
+  - `get_armor_proficiency()` - Maps ArmorClassification to proficiency requirement
+
+- **Two-Step Validation Logic**:
+
+  1. **Step 1: Proficiency Check** - Uses `has_proficiency_union()` to verify class OR race grants required proficiency
+  2. **Step 2: Tag Compatibility Check** - Verifies item tags don't conflict with race incompatible_item_tags
+  3. **Final Result** - Item usable only if BOTH checks pass
+
+- **Real Campaign Data Usage**:
+  - Tests load actual `campaigns/tutorial/data/classes.ron` and `campaigns/tutorial/data/races.ron`
+  - Uses `.get_class()` and `.get_race()` methods to retrieve definitions
+  - Tests verify real-world scenarios (Elf Sorcerer + Long Bow, Gnome Archer + Long Bow, etc.)
+
+**Verification Results:**
+
+- ✅ Created `tests/proficiency_integration_test.rs` - 675 lines, 15 tests
+- ✅ `cargo test --test proficiency_integration_test` - **15 tests passed** (0.00s)
+- ✅ `cargo fmt --all` - Successful
+- ✅ `cargo check --all-targets --all-features` - Zero errors (0.36s)
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - Zero warnings (0.35s)
+- ✅ `cargo test --all-features` - **890 tests passed** (590 unit/integration tests + 300 doctests)
+
+**Key Findings:**
+
+1. **UNION Logic Verified**: Tests confirm that a character can use an item if **either** their class **OR** race grants the required proficiency.
+
+2. **Tag Restrictions Override Proficiency**: Tests confirm that race incompatible tags (e.g., `large_weapon` for Small races) block item usage **even when proficiency is granted**.
+
+3. **Two Checks Both Required**: Tests demonstrate that both proficiency and tag compatibility checks must pass for item usage.
+
+4. **Real-World Scenarios Work**: Tests using actual campaign data (Elf Sorcerers with bows, Gnome restrictions, etc.) pass correctly.
+
+**Architecture Compliance:**
+
+- ✅ Uses exact type aliases from architecture (`ProficiencyId`, `ClassId`, `RaceId`)
+- ✅ Tests use real ClassDatabase and RaceDatabase methods (`.get_class()`, `.get_race()`)
+- ✅ Verifies `has_proficiency_union()` function from `src/domain/proficiency.rs`
+- ✅ Tests classification system (WeaponClassification, ArmorClassification)
+- ✅ Validates race incompatible_item_tags system
+
+**Conclusion:**
+
+Phase 5 complete. The proficiency UNION logic is thoroughly tested with 15 integration tests that cover all required scenarios using real tutorial campaign data. All tests pass, confirming the proficiency system works correctly as specified in the architecture.
+
 - Save/load functionality preserves campaign references
 - The proficiency-based classification system is fully operational
 

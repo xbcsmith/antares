@@ -96,7 +96,7 @@ The system uses **UNION logic** to determine if a character can use an item:
 ```text
 required_proficiency = item.classification.to_proficiency_id()
 
-can_use = class.proficiencies.contains(required_proficiency) 
+can_use = class.proficiencies.contains(required_proficiency)
           OR race.proficiencies.contains(required_proficiency)
 ```
 
