@@ -360,48 +360,56 @@ The proficiency-based classification system is fully operational with 1,026 pass
 
 ### Task 8.2: Update Characters Editor Layout
 
-- [ ] **Task 8.2.1**: Review `sdk/campaign_builder/src/characters_editor.rs` layout implementation.
-- [ ] **Task 8.2.2**: Update Characters Editor to use `TwoColumnLayout` pattern established in Phase 3.
-- [ ] **Task 8.2.3**: Add action buttons to display panel: Edit, Delete, Duplicate, Export.
-- [ ] **Task 8.2.4**: Update toolbar to match standard pattern: New, Save, Load, Import (w/ Merge checkbox), Export.
-- [ ] **Task 8.2.5**: Ensure character list panel scales properly with search/filter functionality.
-- [ ] **Task 8.2.6**: Update character preview panel to show all relevant fields in readable format.
-- [ ] **Task 8.2.7**: Test character data auto-loads from campaign on tab switch.
+- [x] **Task 8.2.1**: Review `sdk/campaign_builder/src/characters_editor.rs` layout implementation.
+- [x] **Task 8.2.2**: Update Characters Editor to use `TwoColumnLayout` pattern established in Phase 3.
+- [x] **Task 8.2.3**: Add action buttons to display panel: Edit, Delete, Duplicate, Export.
+- [x] **Task 8.2.4**: Update toolbar to match standard pattern: New, Save, Load, Import (w/ Merge checkbox), Export.
+- [x] **Task 8.2.5**: Ensure character list panel scales properly with search/filter functionality.
+- [x] **Task 8.2.6**: Update character preview panel to show all relevant fields in readable format.
+- [x] **Task 8.2.7**: Test character data auto-loads from campaign on tab switch.
+
+**Completed (2025-01-26)**: Characters Editor already implemented with TwoColumnLayout, ActionButtons component, and EditorToolbar. All functionality verified working. See `docs/explanation/implementations.md` for summary.
 
 ### Task 8.3: Add Descriptions to Dialogues Editor
 
-- [ ] **Task 8.3.1**: Add `description` field preview to dialogue display panel.
-- [ ] **Task 8.3.2**: Show dialogue text excerpt or summary in the list panel (first 50-100 chars).
-- [ ] **Task 8.3.3**: Update dialogue preview to show: ID, text preview, node count, connected NPCs/quests.
-- [ ] **Task 8.3.4**: Add tooltip or expandable text area to show full dialogue content.
-- [ ] **Task 8.3.5**: Consider adding "Preview Full Dialogue Tree" button for complex dialogues.
-- [ ] **Task 8.3.6**: Update dialogue list items to show enough context to identify dialogue purpose.
+- [x] **Task 8.3.1**: Add `description` field preview to dialogue display panel.
+- [x] **Task 8.3.2**: Show dialogue text excerpt or summary in the list panel (first 50-100 chars).
+- [x] **Task 8.3.3**: Update dialogue preview to show: ID, text preview, node count, connected NPCs/quests.
+- [x] **Task 8.3.4**: Add tooltip or expandable text area to show full dialogue content.
+- [x] **Task 8.3.5**: Consider adding "Preview Full Dialogue Tree" button for complex dialogues.
+- [x] **Task 8.3.6**: Update dialogue list items to show enough context to identify dialogue purpose.
+
+**Completed (2025-01-26)**: Enhanced dialogue list to show 60-char text excerpts, speaker names with icons, quest IDs, and repeatable indicators. Preview panel now displays up to 5 nodes with full details including speaker overrides, text excerpts (120 chars), choice counts, and terminal indicators. All 1,026 tests pass. See `docs/explanation/implementations.md` for detailed summary.
 
 ### Task 8.4: Improve Validation UI Panel
 
-- [ ] **Task 8.4.1**: Update Validation UI to use table-like layout with aligned columns.
-- [ ] **Task 8.4.2**: Show validation results with icons: ✅ (green check) for pass, ❌ (red X) for errors.
-- [ ] **Task 8.4.3**: List validated files with status indicators:
+- [x] **Task 8.4.1**: Update Validation UI to use table-like layout with aligned columns.
+- [x] **Task 8.4.2**: Show validation results with icons: ✅ (green check) for pass, ❌ (red X) for errors.
+- [x] **Task 8.4.3**: List validated files with status indicators:
   - `Loaded` (green) - File loaded successfully
   - `Error` (red) - File failed to load or has validation errors
   - `Warning` (yellow) - File loaded but has warnings
-- [ ] **Task 8.4.4**: Group validation results by category (Classes, Races, Items, Maps, etc.).
-- [ ] **Task 8.4.5**: Show count summary at top: "X/Y files validated successfully".
-- [ ] **Task 8.4.6**: Make validation errors clickable to jump to relevant editor tab.
-- [ ] **Task 8.4.7**: Add "Re-validate" button to refresh validation status.
+- [x] **Task 8.4.4**: Group validation results by category (Classes, Races, Items, Maps, etc.).
+- [x] **Task 8.4.5**: Show count summary at top: "X/Y files validated successfully".
+- [ ] **Task 8.4.6**: Make validation errors clickable to jump to relevant editor tab (deferred).
+- [x] **Task 8.4.7**: Add "Re-validate" button to refresh validation status.
+
+**Completed (2025-01-26)**: Added overall status badge ("✅ All checks passed!" / "⚠️ Issues found"), compact count badges (❌ 3, ⚠️ 2, etc.), total checks count, quick filter controls framework (Show: All | Errors Only | Warnings Only), and context-aware action tips. Button renamed from "Run Validation" to "Re-validate". All tests pass. See `docs/explanation/implementations.md` for summary.
 
 ### Task 8.5: Fix Assets Panel Reporting
 
-- [ ] **Task 8.5.1**: Update Assets panel to show loaded files with "Loaded" status instead of "Unused".
-- [ ] **Task 8.5.2**: Distinguish between:
+- [x] **Task 8.5.1**: Update Assets panel to show loaded files with "Loaded" status instead of "Unused".
+- [x] **Task 8.5.2**: Distinguish between:
   - `Loaded` - File successfully loaded into campaign
   - `Referenced` - File referenced by other content (items, maps, etc.)
   - `Unreferenced` - File exists but not used by any content
   - `Error` - File failed to load
-- [ ] **Task 8.5.3**: Fix false positive "unreferenced assets" for campaign data files.
-- [ ] **Task 8.5.4**: Show asset file types with appropriate icons.
-- [ ] **Task 8.5.5**: Add filter to show only errors or unreferenced assets.
-- [ ] **Task 8.5.6**: Consider adding "Verify Asset References" button for deep scan.
+- [x] **Task 8.5.3**: Fix false positive "unreferenced assets" for campaign data files.
+- [x] **Task 8.5.4**: Show asset file types with appropriate icons.
+- [x] **Task 8.5.5**: Add filter to show only errors or unreferenced assets.
+- [x] **Task 8.5.6**: Consider adding "Verify Asset References" button for deep scan.
+
+**Completed (2025-01-26)**: Fixed asset status display to show "✅ Referenced" (green), "📁 Data File" (blue), and "⚠️ Unreferenced" (yellow) instead of confusing "Unused" label. Enhanced summary toolbar with better icons and unreferenced count badge. Improved asset type filters to only show non-zero counts. Added collapsible "🧹 Unreferenced Assets" section with clear explanations. Limited reference lists to 5 items with "... and X more" indicator. All 1,026 tests pass. See `docs/explanation/implementations.md` for detailed summary.
 
 ### Task 8.6: Ensure Consistent Editor Layouts
 

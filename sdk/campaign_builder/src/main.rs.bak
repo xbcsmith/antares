@@ -53,8 +53,8 @@ use antares::domain::conditions::ConditionDefinition;
 use antares::domain::dialogue::{DialogueTree, NodeId};
 use antares::domain::items::types::{
     AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
-    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Item,
-    ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
+    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect,
+    Item, ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
 };
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
 use antares::domain::quest::{Quest, QuestId};
@@ -3642,11 +3642,11 @@ impl CampaignBuilderApp {
             // Asset type filters with counts
             ui.horizontal_wrapped(|ui| {
                 ui.label("Filter:");
-                let _ = ui.selectable_label(true, "All");
+                ui.selectable_label(true, "All");
                 for asset_type in asset_manager::AssetType::all() {
                     let count = manager.asset_count_by_type(asset_type);
                     if count > 0 {
-                        let _ = ui.selectable_label(
+                        ui.selectable_label(
                             false,
                             format!("{} {}", asset_type.display_name(), count),
                         );
@@ -5772,6 +5772,7 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
 
         // Set all classes enabled
+        app.items_editor_state.edit_buffer.disablements = Disablement(0b0011_1111);
 
         assert!(app
             .items_editor_state
@@ -5815,6 +5816,7 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
 
         // Only knight and paladin
+        app.items_editor_state.edit_buffer.disablements = Disablement(BIT_KNIGHT | BIT_PALADIN);
 
         assert!(app
             .items_editor_state

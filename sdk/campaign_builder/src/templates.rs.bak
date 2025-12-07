@@ -16,8 +16,8 @@ use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResis
 use antares::domain::combat::types::Attack;
 use antares::domain::dialogue::{DialogueNode, DialogueTree};
 use antares::domain::items::types::{
-    ArmorClassification, ArmorData, ConsumableData, Item, ItemType, WeaponClassification,
-    WeaponData,
+    ArmorClassification, ArmorData, ConsumableData, Disablement, Item, ItemType,
+    WeaponClassification, WeaponData,
 };
 
 use antares::domain::quest::{Quest, QuestId, QuestObjective, QuestReward, QuestStage};

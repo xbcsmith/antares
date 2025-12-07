@@ -5,8 +5,8 @@ use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
     AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
-    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Item,
-    ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
+    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Disablement,
+    Item, ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
 };
 use antares::domain::types::DiceRoll;
 use eframe::egui;

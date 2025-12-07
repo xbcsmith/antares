@@ -728,6 +728,7 @@ mod tests {
             }),
             base_cost: value,
             sell_cost: value / 2,
+            disablements: Disablement(255),
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,

@@ -56,7 +56,6 @@ pub struct ClassEditBuffer {
     pub spell_school: Option<SpellSchool>,
     pub is_pure_caster: bool,
     pub spell_stat: Option<SpellStat>,
-    pub disablement_bit_index: String,
     pub special_abilities: String, // Comma-separated
     pub description: String,
     pub starting_weapon_id: String,
@@ -76,7 +75,6 @@ impl Default for ClassEditBuffer {
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            disablement_bit_index: "0".to_string(),
             special_abilities: String::new(),
             description: String::new(),
             starting_weapon_id: String::new(),
@@ -128,7 +126,6 @@ impl ClassesEditorState {
                 spell_school: class.spell_school,
                 is_pure_caster: class.is_pure_caster,
                 spell_stat: class.spell_stat,
-                disablement_bit_index: class.disablement_bit_index.to_string(),
                 special_abilities: class.special_abilities.join(", "),
                 description: class.description.clone(),
                 starting_weapon_id: class
@@ -177,11 +174,7 @@ impl ClassesEditorState {
             .parse::<i8>()
             .map_err(|_| "Invalid HP Die Modifier")?;
 
-        let disablement = self
-            .buffer
-            .disablement_bit_index
-            .parse::<u8>()
-            .map_err(|_| "Invalid Disablement Bit")?;
+        // Legacy disablement_bit_index removed - now using proficiency system
 
         let abilities: Vec<String> = self
             .buffer
@@ -226,7 +219,6 @@ impl ClassesEditorState {
             spell_school: self.buffer.spell_school,
             is_pure_caster: self.buffer.is_pure_caster,
             spell_stat: self.buffer.spell_stat,
-            disablement_bit_index: disablement,
             special_abilities: abilities,
             starting_weapon_id,
             starting_armor_id,
@@ -704,24 +696,7 @@ impl ClassesEditorState {
 
                 ui.add_space(10.0);
 
-                ui.group(|ui| {
-                    ui.label("Item Restrictions");
-                    ui.horizontal(|ui| {
-                        ui.label("Disablement Bit:");
-                        ui.text_edit_singleline(&mut self.buffer.disablement_bit_index);
-                        ui.label("ℹ️").on_hover_text(
-                            "This bit flag (0-7) determines item restrictions.\n\
-                             Items can be flagged to disable usage by specific classes.\n\
-                             Bit 0 = Knight, Bit 1 = Paladin, Bit 2 = Archer, etc.\n\
-                             Example: A class with bit 2 cannot use items with disablement flag bit 2 set."
-                        );
-                    });
-                    if let Ok(bit) = self.buffer.disablement_bit_index.parse::<u8>() {
-                        if bit <= 7 {
-                            ui.label(format!("This class uses restriction bit position: {}", bit));
-                        }
-                    }
-                });
+                // Legacy disablement bit editor removed - now using proficiency system
 
                 ui.add_space(10.0);
 
