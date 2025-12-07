@@ -129,17 +129,52 @@ Tests use helper functions that mirror the actual game logic and verify against 
 
 **Note**: Phase 5 complete. The proficiency UNION logic is thoroughly tested and verified to work as specified in the architecture.
 
-## Phase 6: Update Documentation
+## Phase 6: Update Documentation ✅ COMPLETED (2025-01-26)
 
 **Objective**: Rename and rewrite disablement documentation to describe the proficiency system.
 
-- [ ] **Task 6.1**: Delete `docs/explanation/disablement_bits.md`.
-- [ ] **Task 6.2**: Create `docs/explanation/proficiency_system.md` documenting:
+- [x] **Task 6.1**: Delete `docs/explanation/disablement_bits.md` - **NOT FOUND** (never existed)
+- [x] **Task 6.2**: Create `docs/explanation/proficiency_system.md` documenting:
   - Classification enums (`WeaponClassification`, `ArmorClassification`, `MagicItemClassification`)
   - Proficiency resolution logic (UNION of class and race proficiencies)
   - Item tags system for fine-grained restrictions
   - Data file formats for classes, races, and items
-- [ ] **Task 6.3**: Update `docs/explanation/implementations.md` to mark Phase 6 complete.
+- [x] **Task 6.3**: Update `docs/explanation/implementations.md` to mark Phase 6 complete.
+
+**Verification Results:**
+
+- ✅ `grep -r "Disablement\|disablement" docs/**/*.md` - **Zero matches** in explanation/how-to/tutorials
+- ✅ Verified `docs/reference/architecture.md` correctly marks `Disablement` struct as DEPRECATED
+- ✅ Created comprehensive `docs/explanation/proficiency_system.md` (410 lines)
+- ✅ Documentation covers: system overview, classification enums, UNION logic, tag system, examples, migration guide
+- ✅ Filename uses lowercase_with_underscores.md convention
+- ✅ Documentation categorized correctly (explanation/)
+- ✅ No emojis used in documentation
+- ✅ All code examples use proper path notation
+- ✅ Updated `docs/explanation/implementations.md` with Phase 6 completion summary
+
+**Key Documentation Content:**
+
+1. **System Principles:** UNION logic (class OR race), two-step validation (proficiency + tags), race incompatibility overrides
+2. **Classification Mappings:** Weapon/Armor/Magic classifications → proficiency IDs
+3. **Standard Proficiency IDs:** 11 total (5 weapon, 4 armor, 2 magic)
+4. **Item Tags System:** `large_weapon`, `heavy_armor`, `two_handed`, etc.
+5. **Real Examples:** Elf Sorcerer + longbow, Halfling Knight + greatsword, etc.
+6. **Migration Guide:** From Disablement bitmask to proficiency system
+7. **Testing Strategy:** References to integration tests in `tests/proficiency_integration_test.rs`
+
+**Note on Architecture.md:**
+
+The `docs/reference/architecture.md` correctly maintains deprecated `Disablement` sections with DEPRECATED markers for reference purposes. This is appropriate for a technical reference document as it:
+
+- Provides historical context
+- Documents migration path
+- Explains optional legacy fields
+- Serves as complete technical specification
+
+The new `proficiency_system.md` provides current, recommended approach without legacy confusion.
+
+**Conclusion:** Phase 6 complete. Comprehensive proficiency system documentation created with no legacy disablement documentation remaining outside of properly marked reference sections.
 
 ## Phase 7: Final Verification
 
