@@ -16,8 +16,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 ```bash
 # Ubuntu/Debian
-sudo apt-get install libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-  libxkbcommon-dev libssl-dev
+sudo apt-get installlibxkbcommon-dev libxkbregistry-dev libwayland-dev libasound2-dev libudev-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev pkg-config
 
 # Fedora/RHEL
 sudo dnf install libxcb-devel libxkbcommon-devel wayland-devel systemd-devel alsa-lib-devel
