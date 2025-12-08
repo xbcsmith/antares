@@ -10,6 +10,8 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.5 for complete specifications.
 
+use crate::domain::character::Alignment;
+use crate::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
 use crate::domain::types::{DiceRoll, ItemId, SpellId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -21,13 +23,14 @@ use std::fmt;
 /// # Examples
 ///
 /// ```
-/// use antares::domain::items::{ItemType, WeaponData};
+/// use antares::domain::items::{ItemType, WeaponData, WeaponClassification};
 /// use antares::domain::types::DiceRoll;
 ///
 /// let weapon_type = ItemType::Weapon(WeaponData {
 ///     damage: DiceRoll::new(1, 8, 0),
 ///     bonus: 1,
 ///     hands_required: 1,
+///     classification: WeaponClassification::MartialMelee,
 /// });
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,6 +43,108 @@ pub enum ItemType {
     Quest(QuestData),
 }
 
+// ===== Classification Enums =====
+
+/// Weapon classification determines proficiency requirement
+///
+/// Each weapon belongs to exactly one classification, which maps to a
+/// proficiency requirement. Classes and races grant proficiencies that
+/// allow use of items with matching classifications.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::WeaponClassification;
+///
+/// let classification = WeaponClassification::MartialMelee;
+/// assert_ne!(classification, WeaponClassification::Simple);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum WeaponClassification {
+    /// Basic weapons anyone can use: clubs, daggers, staffs
+    #[default]
+    Simple,
+    /// Advanced melee weapons: swords, axes, maces (fighters, paladins)
+    MartialMelee,
+    /// Ranged weapons: bows, crossbows (archers, rangers)
+    MartialRanged,
+    /// Weapons without edge: maces, hammers, staffs (clerics)
+    Blunt,
+    /// Unarmed combat: fists, martial arts (monks)
+    Unarmed,
+}
+
+/// Armor classification determines proficiency requirement
+///
+/// Each armor piece belongs to exactly one classification, which maps to a
+/// proficiency requirement.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::ArmorClassification;
+///
+/// let classification = ArmorClassification::Heavy;
+/// assert_ne!(classification, ArmorClassification::Light);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum ArmorClassification {
+    /// Light armor: leather, padded
+    #[default]
+    Light,
+    /// Medium armor: chain mail, scale
+    Medium,
+    /// Heavy armor: plate mail, full plate
+    Heavy,
+    /// All shield types
+    Shield,
+}
+
+/// Magic item classification for arcane vs divine items
+///
+/// Determines which classes can use magical items like wands, scrolls,
+/// and holy symbols.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::MagicItemClassification;
+///
+/// let classification = MagicItemClassification::Arcane;
+/// assert_ne!(classification, MagicItemClassification::Divine);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum MagicItemClassification {
+    /// Arcane items: wands, arcane scrolls (sorcerers)
+    Arcane,
+    /// Divine items: holy symbols, divine scrolls (clerics)
+    Divine,
+    /// Universal items: potions, rings (anyone)
+    #[default]
+    Universal,
+}
+
+/// Alignment restriction for items (separate from proficiency)
+///
+/// Some items can only be used by characters of specific alignments.
+/// This is checked separately from proficiency requirements.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::AlignmentRestriction;
+///
+/// let restriction = AlignmentRestriction::GoodOnly;
+/// assert_ne!(restriction, AlignmentRestriction::EvilOnly);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AlignmentRestriction {
+    /// Only good-aligned characters can use this item
+    GoodOnly,
+    /// Only evil-aligned characters can use this item
+    EvilOnly,
+}
+
 // ===== Weapon Data =====
 
 /// Weapon-specific data
@@ -47,21 +152,23 @@ pub enum ItemType {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::items::WeaponData;
+/// use antares::domain::items::{WeaponData, WeaponClassification};
 /// use antares::domain::types::DiceRoll;
 ///
-/// // Club: 1d3 damage, no bonus, 1-handed
+/// // Club: 1d3 damage, no bonus, 1-handed, simple weapon
 /// let club = WeaponData {
 ///     damage: DiceRoll::new(1, 3, 0),
 ///     bonus: 0,
 ///     hands_required: 1,
+///     classification: WeaponClassification::Simple,
 /// };
 ///
-/// // Two-handed sword: 2d6 damage, +2 bonus, 2-handed
+/// // Two-handed sword: 2d6 damage, +2 bonus, 2-handed, martial melee
 /// let greatsword = WeaponData {
 ///     damage: DiceRoll::new(2, 6, 0),
 ///     bonus: 2,
 ///     hands_required: 2,
+///     classification: WeaponClassification::MartialMelee,
 /// };
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,6 +179,9 @@ pub struct WeaponData {
     pub bonus: i8,
     /// Number of hands required (1 or 2)
     pub hands_required: u8,
+    /// Weapon classification determines required proficiency
+    #[serde(default)]
+    pub classification: WeaponClassification,
 }
 
 // ===== Armor Data =====
@@ -81,18 +191,20 @@ pub struct WeaponData {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::items::ArmorData;
+/// use antares::domain::items::{ArmorData, ArmorClassification};
 ///
-/// // Leather armor: +2 AC, light
+/// // Leather armor: +2 AC, light armor
 /// let leather = ArmorData {
 ///     ac_bonus: 2,
 ///     weight: 15,
+///     classification: ArmorClassification::Light,
 /// };
 ///
-/// // Plate mail: +8 AC, heavy
+/// // Plate mail: +8 AC, heavy armor
 /// let plate = ArmorData {
 ///     ac_bonus: 8,
 ///     weight: 50,
+///     classification: ArmorClassification::Heavy,
 /// };
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +213,9 @@ pub struct ArmorData {
     pub ac_bonus: u8,
     /// Weight in pounds (affects movement)
     pub weight: u8,
+    /// Armor classification determines required proficiency
+    #[serde(default)]
+    pub classification: ArmorClassification,
 }
 
 // ===== Accessory Data =====
@@ -110,16 +225,27 @@ pub struct ArmorData {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::items::{AccessoryData, AccessorySlot};
+/// use antares::domain::items::{AccessoryData, AccessorySlot, MagicItemClassification};
 ///
+/// // Mundane ring (no magic classification)
 /// let ring = AccessoryData {
 ///     slot: AccessorySlot::Ring,
+///     classification: None,
+/// };
+///
+/// // Arcane wand (requires arcane_item proficiency)
+/// let wand = AccessoryData {
+///     slot: AccessorySlot::Ring,
+///     classification: Some(MagicItemClassification::Arcane),
 /// };
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccessoryData {
     /// Which accessory slot this occupies
     pub slot: AccessorySlot,
+    /// Magic item classification (None for mundane accessories)
+    #[serde(default)]
+    pub classification: Option<MagicItemClassification>,
 }
 
 /// Accessory equipment slots
@@ -277,98 +403,6 @@ pub enum BonusAttribute {
     ArmorClass,
 }
 
-// ===== Disablement Flags =====
-
-/// Class/alignment restrictions for items (bitfield)
-///
-/// Bit layout (MM1 style):
-/// - Bit 0: Knight
-/// - Bit 1: Paladin
-/// - Bit 2: Archer
-/// - Bit 3: Cleric
-/// - Bit 4: Sorcerer
-/// - Bit 5: Robber (Thief)
-/// - Bit 6: Good alignment only
-/// - Bit 7: Evil alignment only
-///
-/// # Examples
-///
-/// ```
-/// use antares::domain::items::Disablement;
-///
-/// // All classes can use (0xFF)
-/// let universal = Disablement(0xFF);
-///
-/// // Knight, Paladin, Archer, Robber (0b00101011 = 0x2B)
-/// let martial = Disablement(0x2B);
-///
-/// // Cleric/Paladin only, Good alignment (0b01001010 = 0x4A)
-/// let holy = Disablement(0x4A);
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Disablement(pub u8);
-
-impl Disablement {
-    /// All classes can use
-    pub const ALL: Self = Self(0xFF);
-
-    /// No classes can use (quest items)
-    pub const NONE: Self = Self(0x00);
-
-    // Class flags
-    pub const KNIGHT: u8 = 0b0000_0001;
-    pub const PALADIN: u8 = 0b0000_0010;
-    pub const ARCHER: u8 = 0b0000_0100;
-    pub const CLERIC: u8 = 0b0000_1000;
-    pub const SORCERER: u8 = 0b0001_0000;
-    pub const ROBBER: u8 = 0b0010_0000;
-    pub const GOOD: u8 = 0b0100_0000;
-    pub const EVIL: u8 = 0b1000_0000;
-
-    /// Check if a specific class can use this item
-    pub fn can_use_class(&self, class_bit: u8) -> bool {
-        (self.0 & class_bit) != 0
-    }
-
-    /// Check if good alignment can use
-    pub fn good_only(&self) -> bool {
-        (self.0 & Self::GOOD) != 0
-    }
-
-    /// Check if evil alignment can use
-    pub fn evil_only(&self) -> bool {
-        (self.0 & Self::EVIL) != 0
-    }
-
-    /// Create a `Disablement` from a bit index (0..=7), producing the corresponding mask.
-    ///
-    /// This is useful when you have a bit position and need the bitmask.
-    pub const fn from_index(index: u8) -> Self {
-        // Constrain to 0..=7 by masking the index
-        Self(1u8 << (index & 0x07))
-    }
-
-    /// Return the raw mask for a given bit index (0..=7).
-    pub const fn mask_from_index(index: u8) -> u8 {
-        1u8 << (index & 0x07)
-    }
-
-    /// If this Disablement represents a single bit, return its index.
-    /// Returns `None` for 0 or multi-bit masks.
-    pub fn to_index(&self) -> Option<u8> {
-        let n = self.0;
-        if n == 0 {
-            return None;
-        }
-        // If multiple bits set, it's not a single index
-        if n & (n - 1) != 0 {
-            return None;
-        }
-        // trailing_zeros gives position of single bit
-        Some(n.trailing_zeros() as u8)
-    }
-}
-
 // ===== Complete Item Definition =====
 
 /// Complete item definition
@@ -378,7 +412,7 @@ impl Disablement {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::items::{Item, ItemType, WeaponData, Disablement};
+/// use antares::domain::items::{Item, ItemType, WeaponData, WeaponClassification, AlignmentRestriction};
 /// use antares::domain::types::DiceRoll;
 ///
 /// let club = Item {
@@ -388,16 +422,40 @@ impl Disablement {
 ///         damage: DiceRoll::new(1, 3, 0),
 ///         bonus: 0,
 ///         hands_required: 1,
+///         classification: WeaponClassification::Simple,
 ///     }),
 ///     base_cost: 1,
 ///     sell_cost: 0,
-///     disablements: Disablement::ALL,
+///     alignment_restriction: None,
 ///     constant_bonus: None,
 ///     temporary_bonus: None,
 ///     spell_effect: None,
 ///     max_charges: 0,
 ///     is_cursed: false,
 ///     icon_path: None,
+///     tags: vec![],
+/// };
+///
+/// // Holy Sword - good alignment only
+/// let holy_sword = Item {
+///     id: 2,
+///     name: "Holy Sword".to_string(),
+///     item_type: ItemType::Weapon(WeaponData {
+///         damage: DiceRoll::new(1, 8, 0),
+///         bonus: 2,
+///         hands_required: 1,
+///         classification: WeaponClassification::MartialMelee,
+///     }),
+///     base_cost: 500,
+///     sell_cost: 250,
+///     alignment_restriction: Some(AlignmentRestriction::GoodOnly),
+///     constant_bonus: None,
+///     temporary_bonus: None,
+///     spell_effect: None,
+///     max_charges: 0,
+///     is_cursed: false,
+///     icon_path: None,
+///     tags: vec![],
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -412,8 +470,15 @@ pub struct Item {
     pub base_cost: u32,
     /// Sell value in gold
     pub sell_cost: u32,
-    /// Class/alignment restrictions
-    pub disablements: Disablement,
+
+    /// Alignment restriction for this item (separate from proficiency)
+    ///
+    /// Some items can only be used by characters of specific alignments.
+    /// - `None` - Any alignment can use
+    /// - `Some(GoodOnly)` - Only good-aligned characters
+    /// - `Some(EvilOnly)` - Only evil-aligned characters
+    #[serde(default)]
+    pub alignment_restriction: Option<AlignmentRestriction>,
     /// Permanent bonus while equipped/carried
     pub constant_bonus: Option<Bonus>,
     /// Temporary bonus when used (consumes charges)
@@ -427,6 +492,17 @@ pub struct Item {
     /// Path to item icon asset (optional)
     #[serde(default)]
     pub icon_path: Option<String>,
+    /// Arbitrary tags for fine-grained restrictions (e.g., "large_weapon", "two_handed")
+    ///
+    /// Standard tags by convention (not enforced):
+    /// - `large_weapon` - Too big for small races (Halfling, Gnome)
+    /// - `two_handed` - Requires both hands
+    /// - `heavy_armor` - Encumbering armor
+    /// - `elven_crafted` - Made by elves
+    /// - `dwarven_crafted` - Made by dwarves
+    /// - `requires_strength` - Needs high strength
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 impl Item {
@@ -467,6 +543,145 @@ impl Item {
             || self.temporary_bonus.is_some()
             || self.spell_effect.is_some()
     }
+
+    /// Get the proficiency ID required to use this item
+    ///
+    /// Derives the required proficiency from the item's classification.
+    /// Items without a classification requirement (consumables, ammo, quest items,
+    /// universal accessories) return `None`.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(ProficiencyId)` - The proficiency required to use this item
+    /// - `None` - No proficiency required (anyone can use)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::{Item, ItemType, WeaponData, WeaponClassification};
+    /// use antares::domain::types::DiceRoll;
+    ///
+    /// let sword = Item {
+    ///     id: 1,
+    ///     name: "Long Sword".to_string(),
+    ///     item_type: ItemType::Weapon(WeaponData {
+    ///         damage: DiceRoll::new(1, 8, 0),
+    ///         bonus: 0,
+    ///         hands_required: 1,
+    ///         classification: WeaponClassification::MartialMelee,
+    ///     }),
+    ///     base_cost: 15,
+    ///     sell_cost: 7,
+    ///     alignment_restriction: None,
+    ///     constant_bonus: None,
+    ///     temporary_bonus: None,
+    ///     spell_effect: None,
+    ///     max_charges: 0,
+    ///     is_cursed: false,
+    ///     icon_path: None,
+    ///     tags: vec![],
+    /// };
+    ///
+    /// assert!(sword.is_weapon());
+    /// assert!(!sword.is_armor());
+    /// ```
+    ///
+    /// // Holy weapon with alignment restriction
+    /// let holy_avenger = Item {
+    ///     id: 2,
+    ///     name: "Holy Avenger".to_string(),
+    ///     item_type: ItemType::Weapon(WeaponData {
+    ///         damage: DiceRoll::new(1, 8, 0),
+    ///         bonus: 3,
+    ///         hands_required: 1,
+    ///         classification: WeaponClassification::MartialMelee,
+    ///     }),
+    ///     base_cost: 1000,
+    ///     sell_cost: 500,
+    ///     alignment_restriction: Some(AlignmentRestriction::GoodOnly),
+    ///     constant_bonus: None,
+    ///     temporary_bonus: None,
+    ///     spell_effect: None,
+    ///     max_charges: 0,
+    ///     is_cursed: false,
+    ///     icon_path: None,
+    ///     tags: vec![],
+    /// };
+    ///
+    /// // Access item properties
+    /// assert_eq!(sword.name, "Long Sword");
+    /// assert_eq!(sword.base_cost, 15);
+    /// ```
+    pub fn required_proficiency(&self) -> Option<ProficiencyId> {
+        match &self.item_type {
+            ItemType::Weapon(data) => Some(ProficiencyDatabase::proficiency_for_weapon(
+                data.classification,
+            )),
+            ItemType::Armor(data) => Some(ProficiencyDatabase::proficiency_for_armor(
+                data.classification,
+            )),
+            ItemType::Accessory(data) => {
+                // Accessories only require proficiency if they have a magic classification
+                data.classification
+                    .and_then(ProficiencyDatabase::proficiency_for_magic_item)
+            }
+            // Consumables, ammo, and quest items have no proficiency requirements
+            ItemType::Consumable(_) | ItemType::Ammo(_) | ItemType::Quest(_) => None,
+        }
+    }
+
+    /// Check if a character can use this item based on alignment
+    ///
+    /// This checks only the alignment restriction, not proficiency.
+    /// Use in combination with proficiency checks for complete validation.
+    ///
+    /// # Arguments
+    ///
+    /// * `alignment` - The character's alignment
+    ///
+    /// # Returns
+    ///
+    /// `true` if the character's alignment allows them to use this item
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::{Item, ItemType, WeaponData, WeaponClassification, AlignmentRestriction};
+    /// use antares::domain::character::Alignment;
+    /// use antares::domain::types::DiceRoll;
+    ///
+    /// let holy_sword = Item {
+    ///     id: 1,
+    ///     name: "Holy Sword".to_string(),
+    ///     item_type: ItemType::Weapon(WeaponData {
+    ///         damage: DiceRoll::new(1, 8, 0),
+    ///         bonus: 2,
+    ///         hands_required: 1,
+    ///         classification: WeaponClassification::MartialMelee,
+    ///     }),
+    ///     base_cost: 500,
+    ///     sell_cost: 250,
+    ///     alignment_restriction: Some(AlignmentRestriction::GoodOnly),
+    ///     constant_bonus: None,
+    ///     temporary_bonus: None,
+    ///     spell_effect: None,
+    ///     max_charges: 0,
+    ///     is_cursed: false,
+    ///     icon_path: None,
+    ///     tags: vec![],
+    /// };
+    ///
+    /// assert!(holy_sword.can_use_alignment(Alignment::Good));
+    /// assert!(!holy_sword.can_use_alignment(Alignment::Evil));
+    /// assert!(!holy_sword.can_use_alignment(Alignment::Neutral));
+    /// ```
+    pub fn can_use_alignment(&self, alignment: Alignment) -> bool {
+        match self.alignment_restriction {
+            None => true, // No restriction, any alignment can use
+            Some(AlignmentRestriction::GoodOnly) => alignment == Alignment::Good,
+            Some(AlignmentRestriction::EvilOnly) => alignment == Alignment::Evil,
+        }
+    }
 }
 
 impl fmt::Display for Item {
@@ -487,57 +702,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_disablement_from_index_and_mask() {
-        assert_eq!(Disablement::from_index(0).0, 1_u8);
-        assert_eq!(Disablement::from_index(4).0, 1_u8 << 4);
-
-        assert_eq!(Disablement::mask_from_index(0), 0b0000_0001);
-        assert_eq!(Disablement::mask_from_index(3), 0b0000_1000);
-    }
-
-    #[test]
-    fn disablement_to_index_examples() {
-        assert_eq!(Disablement(0b0000_1000).to_index(), Some(3));
-        assert_eq!(Disablement(0).to_index(), None);
-        assert_eq!(Disablement(0b0000_0110).to_index(), None);
-        assert_eq!(Disablement(0b1111_1111).to_index(), None);
-    }
-
-    #[test]
-    fn can_use_class_and_alignment() {
-        let d = Disablement::from_index(0); // mask 0b0000_0001
-        assert!(d.can_use_class(Disablement::KNIGHT));
-        assert!(!d.can_use_class(Disablement::ARCHER));
-        let d = Disablement::ALL;
-        assert!(d.can_use_class(Disablement::KNIGHT));
-        // presence tested for compile/coverage only
-        assert!(d.good_only());
-        assert!(d.evil_only());
-    }
-
-    #[test]
-    fn test_disablement_all_classes() {
-        let dis = Disablement::ALL;
-        assert!(dis.can_use_class(Disablement::KNIGHT));
-        assert!(dis.can_use_class(Disablement::SORCERER));
-        assert!(dis.can_use_class(Disablement::ROBBER));
-    }
-
-    #[test]
-    fn test_disablement_knight_only() {
-        let dis = Disablement(Disablement::KNIGHT);
-        assert!(dis.can_use_class(Disablement::KNIGHT));
-        assert!(!dis.can_use_class(Disablement::SORCERER));
-    }
-
-    #[test]
-    fn test_disablement_good_alignment() {
-        let dis = Disablement(Disablement::PALADIN | Disablement::GOOD);
-        assert!(dis.good_only());
-        assert!(!dis.evil_only());
-    }
-
-    #[test]
     fn test_item_type_checks() {
         let weapon = Item {
             id: 1,
@@ -546,16 +710,18 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 10,
             sell_cost: 5,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         assert!(weapon.is_weapon());
@@ -572,10 +738,11 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 0),
                 bonus: 3,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 500,
             sell_cost: 250,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: Some(Bonus {
                 attribute: BonusAttribute::ResistFire,
                 value: 20,
@@ -585,6 +752,7 @@ mod tests {
             max_charges: 30,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         assert!(magical_sword.is_magical());
@@ -600,22 +768,25 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 10,
             sell_cost: 5,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         assert_eq!(item.to_string(), "Basic Sword");
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_cursed_item_display() {
         let cursed = Item {
             id: 2,
@@ -624,18 +795,499 @@ mod tests {
                 damage: DiceRoll::new(1, 6, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::Blunt,
             }),
             base_cost: 100,
             sell_cost: 50,
-            disablements: Disablement::ALL,
+
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: true,
             icon_path: None,
+            tags: vec![],
         };
 
         assert_eq!(cursed.to_string(), "Cursed Mace (Cursed)");
+    }
+
+    // ===== Phase 3: Item::required_proficiency Tests =====
+
+    #[test]
+    fn test_weapon_required_proficiency_simple() {
+        let club = Item {
+            id: 1,
+            name: "Club".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 3, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::Simple,
+            }),
+            base_cost: 1,
+            sell_cost: 0,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert_eq!(
+            club.required_proficiency(),
+            Some("simple_weapon".to_string())
+        );
+    }
+
+    #[test]
+    fn test_weapon_required_proficiency_martial_melee() {
+        let longsword = Item {
+            id: 1,
+            name: "Long Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 15,
+            sell_cost: 7,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert_eq!(
+            longsword.required_proficiency(),
+            Some("martial_melee".to_string())
+        );
+    }
+
+    #[test]
+    fn test_weapon_required_proficiency_martial_ranged() {
+        let longbow = Item {
+            id: 1,
+            name: "Long Bow".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 6, 0),
+                bonus: 0,
+                hands_required: 2,
+                classification: WeaponClassification::MartialRanged,
+            }),
+            base_cost: 25,
+            sell_cost: 12,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec!["large_weapon".to_string(), "two_handed".to_string()],
+        };
+
+        assert_eq!(
+            longbow.required_proficiency(),
+            Some("martial_ranged".to_string())
+        );
+    }
+
+    #[test]
+    fn test_weapon_required_proficiency_blunt() {
+        let mace = Item {
+            id: 1,
+            name: "Mace".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 6, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::Blunt,
+            }),
+            base_cost: 8,
+            sell_cost: 4,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert_eq!(
+            mace.required_proficiency(),
+            Some("blunt_weapon".to_string())
+        );
+    }
+
+    #[test]
+    fn test_armor_required_proficiency_light() {
+        let leather = Item {
+            id: 20,
+            name: "Leather Armor".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 2,
+                weight: 15,
+                classification: ArmorClassification::Light,
+            }),
+            base_cost: 5,
+            sell_cost: 2,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert_eq!(
+            leather.required_proficiency(),
+            Some("light_armor".to_string())
+        );
+    }
+
+    #[test]
+    fn test_armor_required_proficiency_heavy() {
+        let platemail = Item {
+            id: 22,
+            name: "Plate Mail".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 8,
+                weight: 50,
+                classification: ArmorClassification::Heavy,
+            }),
+            base_cost: 600,
+            sell_cost: 300,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec!["heavy_armor".to_string()],
+        };
+
+        assert_eq!(
+            platemail.required_proficiency(),
+            Some("heavy_armor".to_string())
+        );
+    }
+
+    #[test]
+    fn test_armor_required_proficiency_shield() {
+        let shield = Item {
+            id: 23,
+            name: "Wooden Shield".to_string(),
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 1,
+                weight: 8,
+                classification: ArmorClassification::Shield,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert_eq!(shield.required_proficiency(), Some("shield".to_string()));
+    }
+
+    #[test]
+    fn test_accessory_required_proficiency_arcane() {
+        let wand = Item {
+            id: 43,
+            name: "Arcane Wand".to_string(),
+            item_type: ItemType::Accessory(AccessoryData {
+                slot: AccessorySlot::Ring,
+                classification: Some(MagicItemClassification::Arcane),
+            }),
+            base_cost: 1000,
+            sell_cost: 500,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 20,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert_eq!(wand.required_proficiency(), Some("arcane_item".to_string()));
+    }
+
+    #[test]
+    fn test_accessory_required_proficiency_divine() {
+        #[allow(deprecated)]
+        let symbol = Item {
+            id: 44,
+            name: "Holy Symbol".to_string(),
+            item_type: ItemType::Accessory(AccessoryData {
+                slot: AccessorySlot::Amulet,
+                classification: Some(MagicItemClassification::Divine),
+            }),
+            base_cost: 800,
+            sell_cost: 400,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 15,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert_eq!(
+            symbol.required_proficiency(),
+            Some("divine_item".to_string())
+        );
+    }
+
+    #[test]
+    fn test_accessory_required_proficiency_universal() {
+        let ring = Item {
+            id: 40,
+            name: "Ring of Protection".to_string(),
+            item_type: ItemType::Accessory(AccessoryData {
+                slot: AccessorySlot::Ring,
+                classification: Some(MagicItemClassification::Universal),
+            }),
+            base_cost: 100,
+            sell_cost: 50,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        // Universal magic items have no proficiency requirement
+        assert_eq!(ring.required_proficiency(), None);
+    }
+
+    #[test]
+    fn test_accessory_required_proficiency_mundane() {
+        #[allow(deprecated)]
+        let ring = Item {
+            id: 40,
+            name: "Plain Ring".to_string(),
+            item_type: ItemType::Accessory(AccessoryData {
+                slot: AccessorySlot::Ring,
+                classification: None,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        // Mundane accessories have no proficiency requirement
+        assert_eq!(ring.required_proficiency(), None);
+    }
+
+    #[test]
+    fn test_consumable_no_proficiency() {
+        let potion = Item {
+            id: 50,
+            name: "Healing Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(20),
+                is_combat_usable: true,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 1,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert_eq!(potion.required_proficiency(), None);
+    }
+
+    #[test]
+    fn test_ammo_no_proficiency() {
+        #[allow(deprecated)]
+        let arrows = Item {
+            id: 60,
+            name: "Arrows".to_string(),
+            item_type: ItemType::Ammo(AmmoData {
+                ammo_type: AmmoType::Arrow,
+                quantity: 20,
+            }),
+            base_cost: 5,
+            sell_cost: 2,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert_eq!(arrows.required_proficiency(), None);
+    }
+
+    #[test]
+    fn test_quest_item_no_proficiency() {
+        let quest_item = Item {
+            id: 100,
+            name: "Ruby Whistle".to_string(),
+            item_type: ItemType::Quest(QuestData {
+                quest_id: "brothers_quest".to_string(),
+                is_key_item: true,
+            }),
+            base_cost: 500,
+            sell_cost: 250,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 200,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert_eq!(quest_item.required_proficiency(), None);
+    }
+
+    // ===== Phase 3: Item::can_use_alignment Tests =====
+
+    #[test]
+    fn test_alignment_restriction_none() {
+        let item = Item {
+            id: 1,
+            name: "Normal Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 15,
+            sell_cost: 7,
+
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert!(item.can_use_alignment(Alignment::Good));
+        assert!(item.can_use_alignment(Alignment::Evil));
+        assert!(item.can_use_alignment(Alignment::Neutral));
+    }
+
+    #[test]
+    fn test_alignment_restriction_good_only() {
+        let holy_sword = Item {
+            id: 1,
+            name: "Holy Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 2,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 500,
+            sell_cost: 250,
+
+            alignment_restriction: Some(AlignmentRestriction::GoodOnly),
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert!(holy_sword.can_use_alignment(Alignment::Good));
+        assert!(!holy_sword.can_use_alignment(Alignment::Evil));
+        assert!(!holy_sword.can_use_alignment(Alignment::Neutral));
+    }
+
+    #[test]
+    fn test_alignment_restriction_evil_only() {
+        let dark_blade = Item {
+            id: 1,
+            name: "Dark Blade".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 2,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 500,
+            sell_cost: 250,
+
+            alignment_restriction: Some(AlignmentRestriction::EvilOnly),
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        assert!(!dark_blade.can_use_alignment(Alignment::Good));
+        assert!(dark_blade.can_use_alignment(Alignment::Evil));
+        assert!(!dark_blade.can_use_alignment(Alignment::Neutral));
     }
 }

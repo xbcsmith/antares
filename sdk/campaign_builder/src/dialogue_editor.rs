@@ -1246,10 +1246,53 @@ impl DialogueEditorState {
 
                 for (idx, dialogue) in &dialogues_snapshot {
                     let is_selected = selected_dialogue_idx == Some(*idx);
-                    let label = format!("{} ({})", dialogue.name, dialogue.nodes.len());
-                    if left_ui.selectable_label(is_selected, label).clicked() {
-                        new_selection = Some(*idx);
-                    }
+
+                    left_ui.group(|group_ui| {
+                        group_ui.set_min_width(group_ui.available_width());
+
+                        // Main dialogue name
+                        let label = format!("{} ({})", dialogue.name, dialogue.nodes.len());
+                        if group_ui.selectable_label(is_selected, &label).clicked() {
+                            new_selection = Some(*idx);
+                        }
+
+                        // Show text excerpt from first node if available
+                        if let Some((_, first_node)) = dialogue.nodes.iter().next() {
+                            let excerpt: String = first_node.text.chars().take(60).collect();
+                            let display_text = if first_node.text.len() > 60 {
+                                format!("\"{}...\"", excerpt)
+                            } else {
+                                format!("\"{}\"", excerpt)
+                            };
+                            group_ui.label(egui::RichText::new(display_text).small().weak());
+                        }
+
+                        // Show speaker and quest info if available
+                        group_ui.horizontal(|inner_ui| {
+                            if let Some(speaker) = &dialogue.speaker_name {
+                                inner_ui.label(
+                                    egui::RichText::new(format!("👤 {}", speaker))
+                                        .small()
+                                        .color(egui::Color32::LIGHT_BLUE),
+                                );
+                            }
+                            if let Some(quest_id) = dialogue.associated_quest {
+                                inner_ui.label(
+                                    egui::RichText::new(format!("📜 Quest #{}", quest_id))
+                                        .small()
+                                        .color(egui::Color32::GOLD),
+                                );
+                            }
+                            if dialogue.repeatable {
+                                inner_ui.label(
+                                    egui::RichText::new("🔄")
+                                        .small()
+                                        .color(egui::Color32::GREEN),
+                                );
+                            }
+                        });
+                    });
+                    left_ui.add_space(4.0);
                 }
             },
             |right_ui| {
@@ -1302,21 +1345,85 @@ impl DialogueEditorState {
                                 }
                             });
 
-                        // Node preview if enabled
+                        // Node preview with better formatting
                         if show_preview && !dialogue.nodes.is_empty() {
                             right_ui.separator();
-                            right_ui.label("Nodes Preview:");
-                            for (node_id, node) in dialogue.nodes.iter().take(3) {
-                                right_ui.label(format!(
-                                    "  {} - {}",
-                                    node_id,
-                                    node.text.chars().take(40).collect::<String>()
-                                ));
-                            }
-                            if dialogue.nodes.len() > 3 {
-                                right_ui
-                                    .label(format!("  ... and {} more", dialogue.nodes.len() - 3));
-                            }
+                            right_ui.heading("Dialogue Flow Preview");
+                            right_ui.add_space(5.0);
+
+                            egui::ScrollArea::vertical()
+                                .max_height(300.0)
+                                .id_salt("dialogue_preview_scroll")
+                                .show(right_ui, |ui| {
+                                    for (node_id, node) in dialogue.nodes.iter().take(5) {
+                                        ui.group(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(format!("Node: {}", node_id))
+                                                    .strong(),
+                                            );
+
+                                            // Show speaker override if present
+                                            if let Some(speaker) = &node.speaker_override {
+                                                ui.label(
+                                                    egui::RichText::new(format!("👤 {}", speaker))
+                                                        .small()
+                                                        .color(egui::Color32::LIGHT_BLUE),
+                                                );
+                                            }
+
+                                            // Show node text with wrapping
+                                            let excerpt: String =
+                                                node.text.chars().take(120).collect();
+                                            let display_text = if node.text.len() > 120 {
+                                                format!("\"{}...\"", excerpt)
+                                            } else {
+                                                format!("\"{}\"", node.text)
+                                            };
+                                            ui.label(display_text);
+
+                                            // Show choice count
+                                            if !node.choices.is_empty() {
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "→ {} choices",
+                                                        node.choices.len()
+                                                    ))
+                                                    .small()
+                                                    .weak(),
+                                                );
+                                            }
+
+                                            // Terminal node indicator
+                                            if node.is_terminal {
+                                                ui.label(
+                                                    egui::RichText::new("🏁 Terminal")
+                                                        .small()
+                                                        .color(egui::Color32::from_rgb(
+                                                            255, 100, 100,
+                                                        )),
+                                                );
+                                            }
+                                        });
+                                        ui.add_space(4.0);
+                                    }
+
+                                    if dialogue.nodes.len() > 5 {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "... and {} more nodes",
+                                                dialogue.nodes.len() - 5
+                                            ))
+                                            .weak(),
+                                        );
+                                    }
+                                });
+                        } else if !dialogue.nodes.is_empty() {
+                            right_ui.separator();
+                            right_ui.label(
+                                egui::RichText::new("💡 Tip: Enable preview to see dialogue flow")
+                                    .small()
+                                    .weak(),
+                            );
                         }
                     } else {
                         right_ui.label("Select a dialogue to view details");

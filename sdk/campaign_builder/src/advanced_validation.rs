@@ -712,9 +712,10 @@ mod tests {
     use antares::domain::character::{AttributePair, Stats};
     use antares::domain::combat::monster::{LootTable, MonsterResistances};
     use antares::domain::combat::types::{Attack, AttackType};
-    use antares::domain::items::types::{Disablement, ItemType, WeaponData};
+    use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
     use antares::domain::types::DiceRoll;
 
+    #[allow(deprecated)]
     fn create_test_item(id: u32, value: u32) -> Item {
         Item {
             id: id as u8,
@@ -723,16 +724,18 @@ mod tests {
                 damage: DiceRoll::new(1, 6, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::Simple,
             }),
             base_cost: value,
             sell_cost: value / 2,
-            disablements: Disablement(255),
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         }
     }
 

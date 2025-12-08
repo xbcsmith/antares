@@ -12,6 +12,7 @@
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
 //! See `docs/explanation/sdk_implementation_plan.md` Phase 1 for implementation details.
 
+use crate::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
 use crate::domain::types::{DiceRoll, ItemId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -37,6 +38,9 @@ pub enum ClassError {
 
     #[error("Duplicate class ID: {0}")]
     DuplicateId(String),
+
+    #[error("Invalid proficiency reference: {0}")]
+    InvalidProficiency(String),
 }
 
 // ===== Type Aliases =====
@@ -85,11 +89,11 @@ pub enum SpellStat {
 ///     spell_school: None,
 ///     is_pure_caster: false,
 ///     spell_stat: None,
-///     disablement_bit_index: 0,
 ///     special_abilities: vec!["multiple_attacks".to_string()],
 ///     starting_weapon_id: None,
 ///     starting_armor_id: None,
 ///     starting_items: vec![],
+///     proficiencies: vec!["simple_weapon".to_string(), "heavy_armor".to_string()],
 /// };
 ///
 /// assert_eq!(knight.name, "Knight");
@@ -119,11 +123,6 @@ pub struct ClassDefinition {
     /// Stat used for spell point calculation
     pub spell_stat: Option<SpellStat>,
 
-    /// Bit index for item disablement checking (0 = bit 0).
-    /// Use values 0..=7; compute the bitmask with `1 << disablement_bit_index`.
-    #[serde(rename = "disablement_bit")]
-    pub disablement_bit_index: u8,
-
     /// Special abilities this class has (e.g., "multiple_attacks", "backstab")
     pub special_abilities: Vec<String>,
 
@@ -138,9 +137,51 @@ pub struct ClassDefinition {
     /// Starting items
     #[serde(default)]
     pub starting_items: Vec<ItemId>,
+
+    /// Proficiencies this class grants (e.g., "simple_weapon", "heavy_armor")
+    ///
+    /// These proficiencies determine what items a character of this class can use.
+    /// Uses UNION logic with race proficiencies (class OR race grants proficiency).
+    #[serde(default)]
+    pub proficiencies: Vec<ProficiencyId>,
 }
 
 impl ClassDefinition {
+    /// Creates a new class definition with minimal required fields
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Unique identifier for the class
+    /// * `name` - Display name for the class
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::classes::ClassDefinition;
+    ///
+    /// let knight = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+    /// assert_eq!(knight.id, "knight");
+    /// assert_eq!(knight.name, "Knight");
+    /// assert!(!knight.can_cast_spells());
+    /// ```
+    pub fn new(id: String, name: String) -> Self {
+        use crate::domain::types::DiceRoll;
+        Self {
+            id,
+            name,
+            description: String::new(),
+            hp_die: DiceRoll::new(1, 8, 0),
+            spell_school: None,
+            is_pure_caster: false,
+            spell_stat: None,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+            proficiencies: vec![],
+        }
+    }
+
     /// Checks if this class can cast spells
     ///
     /// # Examples
@@ -157,11 +198,11 @@ impl ClassDefinition {
     ///     spell_school: None,
     ///     is_pure_caster: false,
     ///     spell_stat: None,
-    ///     disablement_bit_index: 0,
     ///     special_abilities: vec!["multiple_attacks".to_string()],
     ///     starting_weapon_id: None,
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
+    ///     proficiencies: vec![],
     /// };
     ///
     /// assert!(!knight.can_cast_spells());
@@ -186,19 +227,15 @@ impl ClassDefinition {
     ///     spell_school: None,
     ///     is_pure_caster: false,
     ///     spell_stat: None,
-    ///     disablement_bit_index: 0,
     ///     special_abilities: vec!["multiple_attacks".to_string()],
     ///     starting_weapon_id: None,
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
+    ///     proficiencies: vec![],
     /// };
     ///
-    /// assert_eq!(knight.disablement_mask(), 0b00000001);
+    /// assert_eq!(knight.name, "Knight");
     /// ```
-    pub fn disablement_mask(&self) -> u8 {
-        1 << self.disablement_bit_index
-    }
-
     /// Checks if this class has a specific special ability
     ///
     /// # Examples
@@ -215,11 +252,11 @@ impl ClassDefinition {
     ///     spell_school: None,
     ///     is_pure_caster: false,
     ///     spell_stat: None,
-    ///     disablement_bit_index: 5,
     ///     special_abilities: vec!["backstab".to_string(), "disarm_trap".to_string()],
     ///     starting_weapon_id: None,
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
+    ///     proficiencies: vec!["simple_weapon".to_string(), "light_armor".to_string()],
     /// };
     ///
     /// assert!(robber.has_ability("backstab"));
@@ -228,6 +265,49 @@ impl ClassDefinition {
     /// ```
     pub fn has_ability(&self, ability: &str) -> bool {
         self.special_abilities.iter().any(|a| a.as_str() == ability)
+    }
+
+    /// Checks if this class has a specific proficiency
+    ///
+    /// # Arguments
+    ///
+    /// * `proficiency` - The proficiency ID to check for
+    ///
+    /// # Returns
+    ///
+    /// `true` if this class grants the specified proficiency
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::classes::ClassDefinition;
+    /// use antares::domain::types::DiceRoll;
+    ///
+    /// let knight = ClassDefinition {
+    ///     id: "knight".to_string(),
+    ///     name: "Knight".to_string(),
+    ///     description: "A brave warrior".to_string(),
+    ///     hp_die: DiceRoll::new(1, 10, 0),
+    ///     spell_school: None,
+    ///     is_pure_caster: false,
+    ///     spell_stat: None,
+    ///     special_abilities: vec!["multiple_attacks".to_string()],
+    ///     starting_weapon_id: None,
+    ///     starting_armor_id: None,
+    ///     starting_items: vec![],
+    ///     proficiencies: vec![
+    ///         "simple_weapon".to_string(),
+    ///         "martial_melee".to_string(),
+    ///         "heavy_armor".to_string(),
+    ///     ],
+    /// };
+    ///
+    /// assert!(knight.has_proficiency("heavy_armor"));
+    /// assert!(knight.has_proficiency("martial_melee"));
+    /// assert!(!knight.has_proficiency("arcane_item"));
+    /// ```
+    pub fn has_proficiency(&self, proficiency: &str) -> bool {
+        self.proficiencies.iter().any(|p| p.as_str() == proficiency)
     }
 }
 
@@ -421,21 +501,7 @@ impl ClassDatabase {
         // let mut used_bits = std::collections::HashSet::new();
 
         for class_def in self.classes.values() {
-            // Check disablement bit uniqueness - RELAXED for SDK compatibility
-            // if !used_bits.insert(class_def.disablement_bit) {
-            //     return Err(ClassError::ValidationError(format!(
-            //         "Duplicate disablement_bit {} in class '{}'",
-            //         class_def.disablement_bit, class_def.id
-            //     )));
-            // }
-
-            // Check disablement bit range
-            if class_def.disablement_bit_index > 7 {
-                return Err(ClassError::ValidationError(format!(
-                    "Invalid disablement_bit_index {} in class '{}' (must be 0-7)",
-                    class_def.disablement_bit_index, class_def.id
-                )));
-            }
+            // Basic validation for proficiencies
 
             // Check spellcaster consistency
             if class_def.spell_school.is_some() {
@@ -470,6 +536,40 @@ impl ClassDatabase {
         Ok(())
     }
 
+    /// Validate proficiencies referenced by classes exist in the provided proficiency database.
+    ///
+    /// This performs the usual `validate()` checks (spellcaster settings, HP dice, etc.)
+    /// and then verifies that every `proficiency` ID referenced by class definitions is
+    /// present in the given `ProficiencyDatabase`.
+    ///
+    /// # Arguments
+    ///
+    /// * `prof_db` - Reference to the loaded `ProficiencyDatabase` for cross-reference validation
+    ///
+    /// # Errors
+    ///
+    /// Returns `ClassError::InvalidProficiency` if any class references a proficiency that
+    /// does not exist in `prof_db`.
+    pub fn validate_with_proficiency_db(
+        &self,
+        prof_db: &ProficiencyDatabase,
+    ) -> Result<(), ClassError> {
+        // First run the normal validation logic
+        self.validate()?;
+
+        for class_def in self.classes.values() {
+            for prof in &class_def.proficiencies {
+                if !prof_db.has(prof) {
+                    return Err(ClassError::InvalidProficiency(format!(
+                        "Class '{}' references unknown proficiency '{}'",
+                        class_def.id, prof
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Returns the number of classes in the database
     pub fn len(&self) -> usize {
         self.classes.len()
@@ -478,6 +578,35 @@ impl ClassDatabase {
     /// Returns true if the database is empty
     pub fn is_empty(&self) -> bool {
         self.classes.is_empty()
+    }
+
+    /// Adds a class definition to the database
+    ///
+    /// # Arguments
+    ///
+    /// * `class` - The class definition to add
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or `Err(ClassError::DuplicateId)` if
+    /// a class with the same ID already exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::classes::{ClassDatabase, ClassDefinition};
+    ///
+    /// let mut db = ClassDatabase::new();
+    /// let knight = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+    /// db.add_class(knight).unwrap();
+    /// assert!(db.get_class("knight").is_some());
+    /// ```
+    pub fn add_class(&mut self, class: ClassDefinition) -> Result<(), ClassError> {
+        if self.classes.contains_key(&class.id) {
+            return Err(ClassError::DuplicateId(class.id.clone()));
+        }
+        self.classes.insert(class.id.clone(), class);
+        Ok(())
     }
 }
 
@@ -494,11 +623,15 @@ mod tests {
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            disablement_bit_index: 0,
             special_abilities: vec!["multiple_attacks".to_string()],
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec![
+                "simple_weapon".to_string(),
+                "martial_melee".to_string(),
+                "heavy_armor".to_string(),
+            ],
         }
     }
 
@@ -511,11 +644,11 @@ mod tests {
             spell_school: Some(SpellSchool::Sorcerer),
             is_pure_caster: true,
             spell_stat: Some(SpellStat::Intellect),
-            disablement_bit_index: 4,
             special_abilities: vec![],
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: vec![],
+            proficiencies: vec!["simple_weapon".to_string(), "arcane_item".to_string()],
         }
     }
 
@@ -529,19 +662,23 @@ mod tests {
     }
 
     #[test]
-    fn test_class_definition_disablement_mask() {
-        let knight = create_test_knight();
-        assert_eq!(knight.disablement_mask(), 0b00000001);
-
-        let sorcerer = create_test_sorcerer();
-        assert_eq!(sorcerer.disablement_mask(), 0b00010000);
-    }
-
-    #[test]
     fn test_class_definition_has_ability() {
         let knight = create_test_knight();
         assert!(knight.has_ability("multiple_attacks"));
         assert!(!knight.has_ability("backstab"));
+    }
+
+    #[test]
+    fn test_class_definition_has_proficiency() {
+        let knight = create_test_knight();
+        assert!(knight.has_proficiency("heavy_armor"));
+        assert!(knight.has_proficiency("martial_melee"));
+        assert!(!knight.has_proficiency("arcane_item"));
+
+        let sorcerer = create_test_sorcerer();
+        assert!(sorcerer.has_proficiency("arcane_item"));
+        assert!(sorcerer.has_proficiency("simple_weapon"));
+        assert!(!sorcerer.has_proficiency("heavy_armor"));
     }
 
     #[test]
@@ -785,29 +922,6 @@ mod tests {
     }
 
     #[test]
-    fn test_class_database_validation_invalid_bit_range() {
-        let ron_data = r#"[
-            (
-                id: "broken_knight",
-                name: "Broken Knight",
-                description: "A broken knight",
-                hp_die: (count: 1, sides: 10, bonus: 0),
-                spell_school: None,
-                is_pure_caster: false,
-                spell_stat: None,
-                disablement_bit: 10,
-                special_abilities: [],
-                starting_weapon_id: None,
-                starting_armor_id: None,
-                starting_items: [],
-            ),
-        ]"#;
-
-        let result = ClassDatabase::load_from_string(ron_data);
-        assert!(matches!(result, Err(ClassError::ValidationError(_))));
-    }
-
-    #[test]
     fn test_load_classes_from_data_file() {
         // This test verifies that the actual data/classes.ron file is valid
         let result = ClassDatabase::load_from_file("data/classes.ron");
@@ -833,7 +947,6 @@ mod tests {
         assert_eq!(knight.name, "Knight");
         assert_eq!(knight.hp_die.sides, 10);
         assert!(!knight.can_cast_spells());
-        assert_eq!(knight.disablement_bit_index, 0);
 
         // Verify Sorcerer properties
         let sorcerer = db.get_class("sorcerer").unwrap();
@@ -843,7 +956,6 @@ mod tests {
         assert_eq!(sorcerer.spell_school, Some(SpellSchool::Sorcerer));
         assert_eq!(sorcerer.spell_stat, Some(SpellStat::Intellect));
         assert!(sorcerer.is_pure_caster);
-        assert_eq!(sorcerer.disablement_bit_index, 4);
 
         // Verify Cleric properties
         let cleric = db.get_class("cleric").unwrap();
@@ -855,5 +967,34 @@ mod tests {
         let paladin = db.get_class("paladin").unwrap();
         assert_eq!(paladin.spell_school, Some(SpellSchool::Cleric));
         assert!(!paladin.is_pure_caster);
+    }
+    #[test]
+    fn test_class_validate_with_proficiency_db_rejects_unknown_proficiency() {
+        use crate::domain::proficiency::ProficiencyDatabase;
+
+        let ron_data = r#"[
+            (
+                id: "test_class",
+                name: "Test Class",
+                description: "A class with unknown proficiency",
+                hp_die: (count: 1, sides: 6, bonus: 0),
+                spell_school: None,
+                is_pure_caster: false,
+                spell_stat: None,
+                disablement_bit: 0,
+                special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
+                proficiencies: ["nonexistent_prof"],
+            ),
+        ]"#;
+
+        let db = ClassDatabase::load_from_string(ron_data).unwrap();
+        let prof_db = ProficiencyDatabase::new(); // Empty DB: doesn't contain 'nonexistent_prof'
+
+        // Should return InvalidProficiency error
+        let res = db.validate_with_proficiency_db(&prof_db);
+        assert!(matches!(res, Err(ClassError::InvalidProficiency(_))));
     }
 }

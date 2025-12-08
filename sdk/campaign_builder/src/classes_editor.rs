@@ -56,12 +56,12 @@ pub struct ClassEditBuffer {
     pub spell_school: Option<SpellSchool>,
     pub is_pure_caster: bool,
     pub spell_stat: Option<SpellStat>,
-    pub disablement_bit_index: String,
     pub special_abilities: String, // Comma-separated
     pub description: String,
     pub starting_weapon_id: String,
     pub starting_armor_id: String,
     pub starting_items: Vec<String>,
+    pub proficiencies: String, // Comma-separated proficiency IDs
 }
 
 impl Default for ClassEditBuffer {
@@ -75,12 +75,12 @@ impl Default for ClassEditBuffer {
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            disablement_bit_index: "0".to_string(),
             special_abilities: String::new(),
             description: String::new(),
             starting_weapon_id: String::new(),
             starting_armor_id: String::new(),
             starting_items: Vec::new(),
+            proficiencies: String::new(),
         }
     }
 }
@@ -126,7 +126,6 @@ impl ClassesEditorState {
                 spell_school: class.spell_school,
                 is_pure_caster: class.is_pure_caster,
                 spell_stat: class.spell_stat,
-                disablement_bit_index: class.disablement_bit_index.to_string(),
                 special_abilities: class.special_abilities.join(", "),
                 description: class.description.clone(),
                 starting_weapon_id: class
@@ -142,6 +141,7 @@ impl ClassesEditorState {
                     .iter()
                     .map(|id| id.to_string())
                     .collect(),
+                proficiencies: class.proficiencies.join(", "),
             };
         }
     }
@@ -174,15 +174,19 @@ impl ClassesEditorState {
             .parse::<i8>()
             .map_err(|_| "Invalid HP Die Modifier")?;
 
-        let disablement = self
-            .buffer
-            .disablement_bit_index
-            .parse::<u8>()
-            .map_err(|_| "Invalid Disablement Bit")?;
+        // Legacy disablement_bit_index removed - now using proficiency system
 
         let abilities: Vec<String> = self
             .buffer
             .special_abilities
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let proficiencies: Vec<String> = self
+            .buffer
+            .proficiencies
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
@@ -215,11 +219,11 @@ impl ClassesEditorState {
             spell_school: self.buffer.spell_school,
             is_pure_caster: self.buffer.is_pure_caster,
             spell_stat: self.buffer.spell_stat,
-            disablement_bit_index: disablement,
             special_abilities: abilities,
             starting_weapon_id,
             starting_armor_id,
             starting_items,
+            proficiencies,
         };
 
         if let Some(idx) = self.selected_class {
@@ -692,24 +696,7 @@ impl ClassesEditorState {
 
                 ui.add_space(10.0);
 
-                ui.group(|ui| {
-                    ui.label("Item Restrictions");
-                    ui.horizontal(|ui| {
-                        ui.label("Disablement Bit:");
-                        ui.text_edit_singleline(&mut self.buffer.disablement_bit_index);
-                        ui.label("ℹ️").on_hover_text(
-                            "This bit flag (0-7) determines item restrictions.\n\
-                             Items can be flagged to disable usage by specific classes.\n\
-                             Bit 0 = Knight, Bit 1 = Paladin, Bit 2 = Archer, etc.\n\
-                             Example: A class with bit 2 cannot use items with disablement flag bit 2 set."
-                        );
-                    });
-                    if let Ok(bit) = self.buffer.disablement_bit_index.parse::<u8>() {
-                        if bit <= 7 {
-                            ui.label(format!("This class uses restriction bit position: {}", bit));
-                        }
-                    }
-                });
+                // Legacy disablement bit editor removed - now using proficiency system
 
                 ui.add_space(10.0);
 
@@ -820,6 +807,75 @@ impl ClassesEditorState {
 
                     if ui.button("➕ Add Starting Item").clicked() {
                         self.buffer.starting_items.push(String::new());
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                ui.group(|ui| {
+                    ui.label("Proficiencies");
+                    ui.label("Proficiency IDs (comma separated):");
+                    ui.text_edit_singleline(&mut self.buffer.proficiencies);
+                    ui.label("ℹ️").on_hover_text(
+                        "Enter proficiency IDs separated by commas.\n\
+                         Standard proficiencies:\n\
+                         • Weapons: simple_weapon, martial_melee, martial_ranged, blunt_weapon, unarmed\n\
+                         • Armor: light_armor, medium_armor, heavy_armor, shield\n\
+                         • Magic Items: arcane_item, divine_item"
+                    );
+
+                    // Show quick-add buttons for common proficiencies
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Quick add:");
+                        let proficiency_buttons = [
+                            ("simple_weapon", "Simple Wpn"),
+                            ("martial_melee", "Martial Melee"),
+                            ("martial_ranged", "Martial Ranged"),
+                            ("blunt_weapon", "Blunt"),
+                            ("light_armor", "Light Armor"),
+                            ("medium_armor", "Medium Armor"),
+                            ("heavy_armor", "Heavy Armor"),
+                            ("shield", "Shield"),
+                            ("arcane_item", "Arcane"),
+                            ("divine_item", "Divine"),
+                        ];
+
+                        for (prof_id, label) in proficiency_buttons {
+                            let current_profs: Vec<&str> = self.buffer.proficiencies
+                                .split(',')
+                                .map(|s| s.trim())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            let has_prof = current_profs.contains(&prof_id);
+
+                            if ui.selectable_label(has_prof, label).clicked() {
+                                if has_prof {
+                                    // Remove proficiency
+                                    let new_profs: Vec<&str> = current_profs
+                                        .into_iter()
+                                        .filter(|p| *p != prof_id)
+                                        .collect();
+                                    self.buffer.proficiencies = new_profs.join(", ");
+                                } else {
+                                    // Add proficiency
+                                    if self.buffer.proficiencies.trim().is_empty() {
+                                        self.buffer.proficiencies = prof_id.to_string();
+                                    } else {
+                                        self.buffer.proficiencies = format!("{}, {}", self.buffer.proficiencies, prof_id);
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    // Show current proficiencies as derived info
+                    let current_profs: Vec<&str> = self.buffer.proficiencies
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if !current_profs.is_empty() {
+                        ui.label(format!("This class grants {} proficiencies", current_profs.len()));
                     }
                 });
 

@@ -1,0 +1,240 @@
+// characters.ron - Pre-made character definitions for Antares RPG
+//
+// This file contains pre-made character definitions in RON (Rusty Object Notation) format.
+// Characters defined here are available as starting party options.
+//
+// Each character references:
+//   - race_id: Must match an id in races.ron
+//   - class_id: Must match an id in classes.ron
+//   - starting_items: Item IDs from items.ron (inventory items)
+//   - starting_equipment: Item IDs from items.ron (equipped items)
+//
+// Sex values: Male, Female, Other
+// Alignment values: Good, Neutral, Evil
+//
+// Base stats range from 3-18 (standard RPG stat range)
+// Portrait IDs are 0-255 (u8)
+
+[
+    // ===== Sir Aldric - Human Knight =====
+    // A stalwart warrior trained in the art of heavy combat.
+    // Balanced stats with high Might and Endurance for front-line fighting.
+    (
+        id: "pregen_human_knight",
+        name: "Sir Aldric",
+        race_id: "human",
+        class_id: "knight",
+        sex: Male,
+        alignment: Good,
+        base_stats: (
+            might: 16,
+            intellect: 10,
+            personality: 12,
+            endurance: 15,
+            speed: 11,
+            accuracy: 13,
+            luck: 10,
+        ),
+        portrait_id: 1,
+        starting_gold: 50,
+        starting_gems: 0,
+        starting_food: 10,
+        starting_items: [50], // Healing Potion
+        starting_equipment: (
+            weapon: Some(4),   // Long Sword
+            armor: Some(21),   // Chain Mail
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "Sir Aldric served as a castle guard before answering the call to adventure. His unwavering courage and mastery of blade and shield make him an ideal protector for any party.",
+        is_premade: true,
+    ),
+
+    // ===== Sister Elara - Elf Paladin =====
+    // A holy warrior combining martial skill with divine magic.
+    // Good Personality for spellcasting, solid combat stats.
+    (
+        id: "pregen_elf_paladin",
+        name: "Sister Elara",
+        race_id: "elf",
+        class_id: "paladin",
+        sex: Female,
+        alignment: Good,
+        base_stats: (
+            might: 14,
+            intellect: 12,
+            personality: 15,
+            endurance: 13,
+            speed: 12,
+            accuracy: 12,
+            luck: 11,
+        ),
+        portrait_id: 2,
+        starting_gold: 40,
+        starting_gems: 1,
+        starting_food: 10,
+        starting_items: [50], // Healing Potion
+        starting_equipment: (
+            weapon: Some(5),   // Mace
+            armor: Some(21),   // Chain Mail
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "Once a temple acolyte, Sister Elara received visions calling her to venture beyond sacred halls. Her divine gifts and combat training serve her well against the forces of darkness.",
+        is_premade: true,
+    ),
+
+    // ===== Finn Swiftarrow - Half-Elf Archer =====
+    // A skilled marksman with keen eyes and steady hands.
+    // High Speed and Accuracy for ranged combat excellence.
+    (
+        id: "pregen_halfelf_archer",
+        name: "Finn Swiftarrow",
+        race_id: "half_elf",
+        class_id: "archer",
+        sex: Male,
+        alignment: Neutral,
+        base_stats: (
+            might: 13,
+            intellect: 11,
+            personality: 10,
+            endurance: 12,
+            speed: 15,
+            accuracy: 16,
+            luck: 12,
+        ),
+        portrait_id: 3,
+        starting_gold: 35,
+        starting_gems: 0,
+        starting_food: 10,
+        starting_items: [60, 50], // Arrows, Healing Potion
+        starting_equipment: (
+            weapon: Some(3),   // Short Sword
+            armor: Some(20),   // Leather Armor
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "Raised in the borderlands between human and elven territories, Finn learned to hunt from an early age. His uncanny aim has earned him fame in archery competitions across the realm.",
+        is_premade: true,
+    ),
+
+    // ===== Brother Marcus - Dwarf Cleric =====
+    // A devoted priest wielding divine healing magic.
+    // High Personality for spellcasting, good Endurance for survival.
+    (
+        id: "pregen_dwarf_cleric",
+        name: "Brother Marcus",
+        race_id: "dwarf",
+        class_id: "cleric",
+        sex: Male,
+        alignment: Good,
+        base_stats: (
+            might: 12,
+            intellect: 11,
+            personality: 16,
+            endurance: 14,
+            speed: 10,
+            accuracy: 11,
+            luck: 13,
+        ),
+        portrait_id: 4,
+        starting_gold: 30,
+        starting_gems: 2,
+        starting_food: 10,
+        starting_items: [50, 52], // Healing Potion, Cure Poison Potion
+        starting_equipment: (
+            weapon: Some(5),   // Mace
+            armor: Some(20),   // Leather Armor
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "Brother Marcus left his mountain monastery to bring healing to those in need. His faith is as solid as stone, and his prayers can mend wounds and banish evil spirits.",
+        is_premade: true,
+    ),
+
+    // ===== Lyria Starweaver - Gnome Sorcerer =====
+    // A master of arcane magic with devastating spells.
+    // High Intellect for spellcasting, good Luck for magical effects.
+    (
+        id: "pregen_gnome_sorcerer",
+        name: "Lyria Starweaver",
+        race_id: "gnome",
+        class_id: "sorcerer",
+        sex: Female,
+        alignment: Neutral,
+        base_stats: (
+            might: 8,
+            intellect: 17,
+            personality: 12,
+            endurance: 10,
+            speed: 11,
+            accuracy: 10,
+            luck: 15,
+        ),
+        portrait_id: 5,
+        starting_gold: 25,
+        starting_gems: 3,
+        starting_food: 10,
+        starting_items: [51, 51], // Magic Potion x2
+        starting_equipment: (
+            weapon: Some(2),   // Dagger
+            armor: None,
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "Lyria discovered her magical talents while tinkering with enchanted trinkets in her workshop. Now she channels raw arcane energy with frightening precision, though she still prefers a good puzzle to a battle.",
+        is_premade: true,
+    ),
+
+    // ===== Shadow - Half-Orc Robber =====
+    // A cunning rogue skilled in stealth and opportunistic combat.
+    // High Speed for initiative, good Luck for critical strikes.
+    (
+        id: "pregen_halforc_robber",
+        name: "Shadow",
+        race_id: "half_orc",
+        class_id: "robber",
+        sex: Other,
+        alignment: Neutral,
+        base_stats: (
+            might: 14,
+            intellect: 10,
+            personality: 8,
+            endurance: 12,
+            speed: 16,
+            accuracy: 14,
+            luck: 14,
+        ),
+        portrait_id: 6,
+        starting_gold: 75,
+        starting_gems: 0,
+        starting_food: 10,
+        starting_items: [50, 2], // Healing Potion, extra Dagger
+        starting_equipment: (
+            weapon: Some(3),   // Short Sword
+            armor: Some(20),   // Leather Armor
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "Known only as Shadow, this mysterious figure has a talent for acquiring things that don't belong to them. Their orcish heritage provides muscle when stealth fails, and their quick wit has gotten them out of more jails than they can count.",
+        is_premade: true,
+    ),
+]

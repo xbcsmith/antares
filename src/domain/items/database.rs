@@ -11,6 +11,7 @@
 //! See `docs/reference/architecture.md` Section 7.1-7.2 for data file specifications.
 
 use crate::domain::items::types::Item;
+use crate::domain::proficiency::ProficiencyDatabase;
 use crate::domain::types::ItemId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -33,6 +34,9 @@ pub enum ItemDatabaseError {
 
     #[error("Duplicate item ID {0} detected")]
     DuplicateId(ItemId),
+
+    #[error("Item ID {0} references unknown proficiency: {1}")]
+    InvalidProficiency(ItemId, String),
 }
 
 // ===== Item Database =====
@@ -164,7 +168,7 @@ impl ItemDatabase {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::items::{ItemDatabase, Item, ItemType, WeaponData, Disablement};
+    /// use antares::domain::items::{ItemDatabase, Item, ItemType, WeaponData, WeaponClassification};
     /// use antares::domain::types::DiceRoll;
     ///
     /// let mut db = ItemDatabase::new();
@@ -175,16 +179,18 @@ impl ItemDatabase {
     ///         damage: DiceRoll::new(1, 3, 0),
     ///         bonus: 0,
     ///         hands_required: 1,
+    ///         classification: WeaponClassification::Simple,
     ///     }),
     ///     base_cost: 1,
     ///     sell_cost: 0,
-    ///     disablements: Disablement::ALL,
+    ///     alignment_restriction: None,
     ///     constant_bonus: None,
     ///     temporary_bonus: None,
     ///     spell_effect: None,
     ///     max_charges: 0,
     ///     is_cursed: false,
     ///     icon_path: None,
+    ///     tags: vec![],
     /// };
     /// db.add_item(club).unwrap();
     ///
@@ -260,7 +266,7 @@ impl ItemDatabase {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::items::{ItemDatabase, Item, ItemType, WeaponData, Disablement};
+    /// use antares::domain::items::{ItemDatabase, Item, ItemType, WeaponData, WeaponClassification};
     /// use antares::domain::types::DiceRoll;
     ///
     /// let mut db = ItemDatabase::new();
@@ -271,24 +277,52 @@ impl ItemDatabase {
     ///         damage: DiceRoll::new(1, 3, 0),
     ///         bonus: 0,
     ///         hands_required: 1,
+    ///         classification: WeaponClassification::Simple,
     ///     }),
     ///     base_cost: 1,
     ///     sell_cost: 0,
-    ///     disablements: Disablement::ALL,
+    ///     alignment_restriction: None,
     ///     constant_bonus: None,
     ///     temporary_bonus: None,
     ///     spell_effect: None,
     ///     max_charges: 0,
     ///     is_cursed: false,
     ///     icon_path: None,
+    ///     tags: vec![],
     /// };
-    /// db.add_item(club).unwrap();
+    /// db.add_item(club.clone()).unwrap();
     ///
+    /// assert_eq!(db.all_items().len(), 1);
     /// assert!(db.has_item(&1));
     /// assert!(!db.has_item(&99));
     /// ```
     pub fn has_item(&self, id: &ItemId) -> bool {
         self.items.contains_key(id)
+    }
+
+    /// Validate that each item's required proficiency (derived from classification) exists
+    /// in the given `ProficiencyDatabase`.
+    ///
+    /// # Arguments
+    ///
+    /// * `prof_db` - Reference to the loaded `ProficiencyDatabase` for cross-reference validation
+    ///
+    /// # Errors
+    ///
+    /// Returns `ItemDatabaseError::InvalidProficiency` if any item references a proficiency that
+    /// does not exist in `prof_db`.
+    pub fn validate_with_proficiency_db(
+        &self,
+        prof_db: &ProficiencyDatabase,
+    ) -> Result<(), ItemDatabaseError> {
+        for (id, item) in &self.items {
+            if let Some(prof) = item.required_proficiency() {
+                if !prof_db.has(&prof) {
+                    return Err(ItemDatabaseError::InvalidProficiency(*id, prof.clone()));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -301,8 +335,87 @@ impl Default for ItemDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::items::{Disablement, ItemType, WeaponData};
+    use crate::domain::proficiency::{
+        ProficiencyCategory, ProficiencyDatabase, ProficiencyDefinition,
+    };
     use crate::domain::types::DiceRoll;
+
+    #[test]
+    fn test_item_validate_with_proficiency_db_rejects_unknown_proficiency() {
+        let mut db = ItemDatabase::new();
+
+        let sword = Item {
+            id: 250,
+            name: "Test Sword".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        db.add_item(sword).unwrap();
+
+        // Proficiency DB missing "martial_melee", validation must fail
+        let prof_db = ProficiencyDatabase::new();
+        let res = db.validate_with_proficiency_db(&prof_db);
+        assert!(matches!(
+            res,
+            Err(ItemDatabaseError::InvalidProficiency(_, _))
+        ));
+    }
+
+    #[test]
+    fn test_item_validate_with_proficiency_db_accepts_known_proficiency() {
+        let mut db = ItemDatabase::new();
+
+        let sword = Item {
+            id: 251,
+            name: "Test Sword 2".to_string(),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 8, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+
+        db.add_item(sword).unwrap();
+
+        // Proficiency DB contains "martial_melee"
+        let mut prof_db = ProficiencyDatabase::new();
+        let prof_def = ProficiencyDefinition::new(
+            "martial_melee".to_string(),
+            "Martial Melee".to_string(),
+            ProficiencyCategory::Weapon,
+        );
+        prof_db.add(prof_def).unwrap();
+
+        let res_ok = db.validate_with_proficiency_db(&prof_db);
+        assert!(res_ok.is_ok());
+    }
+    use crate::domain::items::{ItemType, WeaponClassification, WeaponData};
 
     fn create_test_item(id: ItemId, name: &str) -> Item {
         Item {
@@ -312,16 +425,18 @@ mod tests {
                 damage: DiceRoll::new(1, 6, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::Simple,
             }),
             base_cost: 10,
             sell_cost: 5,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         }
     }
 
@@ -379,7 +494,6 @@ mod tests {
         )),
         base_cost: 1,
         sell_cost: 0,
-        disablements: (255),
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,
@@ -397,7 +511,6 @@ mod tests {
         )),
         base_cost: 10,
         sell_cost: 5,
-        disablements: (255),
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,

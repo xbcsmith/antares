@@ -23,6 +23,7 @@
 
 mod advanced_validation;
 mod asset_manager;
+mod characters_editor;
 mod classes_editor;
 mod conditions_editor;
 mod dialogue_editor;
@@ -32,6 +33,7 @@ mod map_editor;
 mod monsters_editor;
 mod packager;
 mod quest_editor;
+mod races_editor;
 mod spells_editor;
 mod templates;
 mod test_play;
@@ -50,9 +52,9 @@ use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
 use antares::domain::conditions::ConditionDefinition;
 use antares::domain::dialogue::{DialogueTree, NodeId};
 use antares::domain::items::types::{
-    AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorData, AttributeType, Bonus,
-    BonusAttribute, ConsumableData, ConsumableEffect, Disablement, Item, ItemType, QuestData,
-    WeaponData,
+    AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
+    ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Item,
+    ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
 };
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
 use antares::domain::quest::{Quest, QuestId};
@@ -148,6 +150,7 @@ struct CampaignMetadata {
     monsters_file: String,
     classes_file: String,
     races_file: String,
+    characters_file: String,
     maps_dir: String,
     quests_file: String,
     dialogue_file: String,
@@ -211,6 +214,7 @@ impl Default for CampaignMetadata {
             monsters_file: "data/monsters.ron".to_string(),
             classes_file: "data/classes.ron".to_string(),
             races_file: "data/races.ron".to_string(),
+            characters_file: "data/characters.ron".to_string(),
             maps_dir: "data/maps/".to_string(),
             quests_file: "data/quests.ron".to_string(),
             dialogue_file: "data/dialogue.ron".to_string(),
@@ -230,6 +234,8 @@ enum EditorTab {
     Maps,
     Quests,
     Classes,
+    Races,
+    Characters,
     Dialogues,
     Assets,
     Validation,
@@ -254,6 +260,8 @@ impl EditorTab {
             EditorTab::Maps => "Maps",
             EditorTab::Quests => "Quests",
             EditorTab::Classes => "Classes",
+            EditorTab::Races => "Races",
+            EditorTab::Characters => "Characters",
             EditorTab::Dialogues => "Dialogues",
             EditorTab::Assets => "Assets",
             EditorTab::Validation => "Validation",
@@ -373,6 +381,12 @@ struct CampaignBuilderApp {
     // Classes editor state
     classes_editor_state: classes_editor::ClassesEditorState,
 
+    // Races editor state
+    races_editor_state: races_editor::RacesEditorState,
+
+    // Characters editor state
+    characters_editor_state: characters_editor::CharactersEditorState,
+
     // Phase 13: Distribution tools state
     export_wizard: Option<packager::ExportWizard>,
     test_play_session: Option<test_play::TestPlaySession>,
@@ -462,6 +476,10 @@ impl Default for CampaignBuilderApp {
 
             classes_editor_state: classes_editor::ClassesEditorState::default(),
 
+            races_editor_state: races_editor::RacesEditorState::default(),
+
+            characters_editor_state: characters_editor::CharactersEditorState::default(),
+
             // Phase 13: Distribution tools
             export_wizard: None,
             test_play_session: None,
@@ -496,6 +514,7 @@ impl Default for CampaignBuilderApp {
 
 impl CampaignBuilderApp {
     /// Create a default item for the edit buffer
+    #[allow(deprecated)]
     fn default_item() -> Item {
         Item {
             id: 0,
@@ -504,16 +523,18 @@ impl CampaignBuilderApp {
                 damage: DiceRoll::new(1, 6, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::Simple,
             }),
             base_cost: 0,
             sell_cost: 0,
-            disablements: Disablement(255), // All classes
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         }
     }
 
@@ -777,12 +798,18 @@ impl CampaignBuilderApp {
             ));
         }
 
-        // Races category - races are configured via file path but not loaded into app state
-        // Show info message indicating races are managed via external file
-        results.push(validation::ValidationResult::info(
-            validation::ValidationCategory::Races,
-            "Races configured via races_file - use Race Editor CLI to manage",
-        ));
+        // Races category
+        if self.races_editor_state.races.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Races,
+                "No races loaded - add races or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Races,
+                format!("{} races validated", self.races_editor_state.races.len()),
+            ));
+        }
 
         results
     }
@@ -1675,6 +1702,8 @@ impl CampaignBuilderApp {
                     self.load_spells();
                     self.load_monsters();
                     self.load_classes_from_campaign();
+                    self.load_races_from_campaign();
+                    self.load_characters_from_campaign();
                     self.load_maps();
                     self.load_conditions();
 
@@ -2233,6 +2262,8 @@ impl CampaignBuilderApp {
     }
 }
 
+// Tests moved to the existing tests module below
+
 impl eframe::App for CampaignBuilderApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Top menu bar
@@ -2496,6 +2527,8 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Maps,
                     EditorTab::Quests,
                     EditorTab::Classes,
+                    EditorTab::Races,
+                    EditorTab::Characters,
                     EditorTab::Dialogues,
                     EditorTab::Assets,
                     EditorTab::Validation,
@@ -2537,6 +2570,7 @@ impl eframe::App for CampaignBuilderApp {
             EditorTab::Items => self.items_editor_state.show(
                 ui,
                 &mut self.items,
+                &self.classes_editor_state.classes,
                 self.campaign_dir.as_ref(),
                 &self.campaign.items_file,
                 &mut self.unsaved_changes,
@@ -2601,6 +2635,25 @@ impl eframe::App for CampaignBuilderApp {
                 &self.items,
                 self.campaign_dir.as_ref(),
                 &self.campaign.classes_file,
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+                &mut self.file_load_merge_mode,
+            ),
+            EditorTab::Races => self.races_editor_state.show(
+                ui,
+                self.campaign_dir.as_ref(),
+                &self.campaign.races_file,
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+                &mut self.file_load_merge_mode,
+            ),
+            EditorTab::Characters => self.characters_editor_state.show(
+                ui,
+                &self.races_editor_state.races,
+                &self.classes_editor_state.classes,
+                &self.items,
+                self.campaign_dir.as_ref(),
+                &self.campaign.characters_file,
                 &mut self.unsaved_changes,
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,
@@ -3240,6 +3293,58 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load characters from campaign directory
+    fn load_characters_from_campaign(&mut self) {
+        if let Some(dir) = &self.campaign_dir {
+            let path = dir.join(&self.campaign.characters_file);
+            if path.exists() {
+                match self.characters_editor_state.load_from_file(&path) {
+                    Ok(_) => {
+                        self.status_message = format!(
+                            "Loaded {} characters",
+                            self.characters_editor_state.characters.len()
+                        );
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to load characters: {}", e);
+                        eprintln!("Failed to load characters from {:?}: {}", path, e);
+                    }
+                }
+            } else {
+                // Characters file is optional, don't log error if it doesn't exist
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!("Characters file does not exist: {:?}", path),
+                );
+            }
+        } else {
+            eprintln!("No campaign directory set when trying to load characters");
+        }
+    }
+
+    /// Load races from campaign directory
+    fn load_races_from_campaign(&mut self) {
+        if let Some(dir) = &self.campaign_dir {
+            let path = dir.join(&self.campaign.races_file);
+            if path.exists() {
+                match self.races_editor_state.load_from_file(&path) {
+                    Ok(_) => {
+                        self.status_message =
+                            format!("Loaded {} races", self.races_editor_state.races.len());
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to load races: {}", e);
+                        eprintln!("Failed to load races from {:?}: {}", path, e);
+                    }
+                }
+            } else {
+                eprintln!("Races file does not exist: {:?}", path);
+            }
+        } else {
+            eprintln!("No campaign directory set when trying to load races");
+        }
+    }
+
     /// Show file browser
     fn show_file_browser(&self, ui: &mut egui::Ui) {
         ui.heading("📁 Campaign File Structure");
@@ -3294,7 +3399,7 @@ impl CampaignBuilderApp {
         ui.horizontal(|ui| {
             ui.heading("✅ Campaign Validation");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("🔄 Run Validation").clicked() {
+                if ui.button("🔄 Re-validate").clicked() {
                     self.validate_campaign();
                 }
             });
@@ -3306,39 +3411,66 @@ impl CampaignBuilderApp {
         // Calculate summary using the validation module
         let summary = validation::ValidationSummary::from_results(&self.validation_errors);
 
-        // Always show summary counts at the top
+        // Enhanced summary section with status badge
         ui.horizontal(|ui| {
+            // Overall status badge
+            if summary.error_count == 0 && summary.warning_count == 0 {
+                ui.colored_label(
+                    egui::Color32::from_rgb(80, 200, 80),
+                    "✅ All checks passed!",
+                );
+            } else if summary.error_count > 0 {
+                ui.colored_label(egui::Color32::from_rgb(255, 80, 80), "⚠️ Issues found");
+            } else {
+                ui.colored_label(egui::Color32::from_rgb(255, 180, 0), "⚠️ Warnings only");
+            }
+
+            ui.separator();
+
+            // Count badges
             if summary.error_count > 0 {
                 ui.colored_label(
                     validation::ValidationSeverity::Error.color(),
-                    format!("❌ {} Error(s)", summary.error_count),
+                    format!("❌ {}", summary.error_count),
                 );
             }
             if summary.warning_count > 0 {
                 ui.colored_label(
                     validation::ValidationSeverity::Warning.color(),
-                    format!("⚠️ {} Warning(s)", summary.warning_count),
+                    format!("⚠️ {}", summary.warning_count),
                 );
             }
             if summary.info_count > 0 {
                 ui.colored_label(
                     validation::ValidationSeverity::Info.color(),
-                    format!("ℹ️ {} Info", summary.info_count),
+                    format!("ℹ️ {}", summary.info_count),
                 );
             }
             if summary.passed_count > 0 {
                 ui.colored_label(
                     validation::ValidationSeverity::Passed.color(),
-                    format!("✅ {} Passed", summary.passed_count),
+                    format!("✅ {}", summary.passed_count),
                 );
             }
-            // Show "All Passed" indicator when no errors or warnings
-            if summary.error_count == 0 && summary.warning_count == 0 {
-                ui.label("  ");
-                ui.colored_label(
-                    egui::Color32::from_rgb(80, 200, 80),
-                    "✅ All checks passed!",
-                );
+
+            // Total count
+            ui.separator();
+            ui.label(format!("Total: {} checks", self.validation_errors.len()));
+        });
+
+        ui.separator();
+
+        // Quick filter controls
+        ui.horizontal(|ui| {
+            ui.label("Show:");
+            if ui.selectable_label(true, "All").clicked() {
+                // Show all - default behavior
+            }
+            if summary.error_count > 0 && ui.selectable_label(false, "Errors Only").clicked() {
+                // Filter would be implemented here in future
+            }
+            if summary.warning_count > 0 && ui.selectable_label(false, "Warnings Only").clicked() {
+                // Filter would be implemented here in future
             }
         });
 
@@ -3393,11 +3525,18 @@ impl CampaignBuilderApp {
             });
 
         ui.separator();
-        if summary.error_count > 0 || summary.warning_count > 0 {
-            ui.label("💡 Tip: Fix errors in the Metadata and Config tabs");
-        } else {
-            ui.label("💡 Tip: Run validation after making changes to verify your campaign");
-        }
+
+        // Action tips based on validation status
+        ui.horizontal(|ui| {
+            ui.label("💡");
+            if summary.error_count > 0 {
+                ui.label("Fix errors in the Metadata and Config tabs to enable test play");
+            } else if summary.warning_count > 0 {
+                ui.label("Address warnings to ensure best campaign quality");
+            } else {
+                ui.label("Campaign is valid! Click 'Re-validate' after making changes");
+            }
+        });
     }
 
     /// Load dialogues from campaign file
@@ -3457,17 +3596,33 @@ impl CampaignBuilderApp {
                         &self.campaign.dialogue_file,
                         Some("data/conditions.ron"),
                     );
+                    // DEBUG: Show the number of scanned assets to aid troubleshooting (temporary)
+                    self.status_message = format!("Scanned {} assets", manager.assets().len());
                     self.asset_manager = Some(manager);
+
+                    // Auto-load races into the Races Editor when the asset manager initializes.
+                    // This ensures the Races Editor's in-memory state is populated after scanning
+                    // the campaign assets, resolving the case where assets show as "Loaded" but
+                    // the Races Editor list is empty.
+                    if self.campaign_dir.is_some() {
+                        // Load races from the configured file and update UI status
+                        self.load_races_from_campaign();
+                    }
                 }
+            } else {
+                // no campaign dir
             }
         }
 
         if let Some(ref mut manager) = self.asset_manager {
             // Toolbar with actions
+            // Asset summary toolbar
             ui.horizontal(|ui| {
-                ui.label(format!("Total Assets: {}", manager.asset_count()));
+                ui.label(
+                    egui::RichText::new(format!("📊 {} Assets", manager.asset_count())).strong(),
+                );
                 ui.separator();
-                ui.label(format!("Total Size: {}", manager.total_size_string()));
+                ui.label(format!("💾 {}", manager.total_size_string()));
                 ui.separator();
 
                 if ui.button("🔄 Refresh").clicked() {
@@ -3491,20 +3646,31 @@ impl CampaignBuilderApp {
                     manager.mark_data_files_as_referenced();
                     self.status_message = "Asset references scanned".to_string();
                 }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let unreferenced = manager.orphaned_assets().len();
+                    if unreferenced > 0 {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(255, 180, 0),
+                            format!("⚠️ {} unreferenced", unreferenced),
+                        );
+                    }
+                });
             });
 
             ui.separator();
 
-            // Asset type filters
-            ui.horizontal(|ui| {
-                ui.label("Filter by type:");
+            // Asset type filters with counts
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Filter:");
+                let _ = ui.selectable_label(true, "All");
                 for asset_type in asset_manager::AssetType::all() {
                     let count = manager.asset_count_by_type(asset_type);
-                    if ui
-                        .button(format!("{} ({})", asset_type.display_name(), count))
-                        .clicked()
-                    {
-                        // Filter would be implemented here
+                    if count > 0 {
+                        let _ = ui.selectable_label(
+                            false,
+                            format!("{} {}", asset_type.display_name(), count),
+                        );
                     }
                 }
             });
@@ -3601,38 +3767,45 @@ impl CampaignBuilderApp {
 
             ui.separator();
 
-            // Orphaned assets warning and cleanup (only truly orphaned, not data files)
+            // Unreferenced assets section (excluding data files)
             let orphaned_count = manager.orphaned_assets().len();
             let cleanup_candidates_count = manager.get_cleanup_candidates().len();
 
-            if orphaned_count > 0 {
-                ui.horizontal(|ui| {
-                    ui.colored_label(
-                        egui::Color32::YELLOW,
-                        format!("⚠ {} orphaned asset files found", orphaned_count),
-                    );
+            if orphaned_count > 0 || cleanup_candidates_count > 0 {
+                ui.collapsing("🧹 Unreferenced Assets", |ui| {
+                    if orphaned_count > 0 {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(255, 180, 0),
+                            format!("⚠️ {} asset files are not referenced by campaign data", orphaned_count),
+                        );
+                        ui.label(egui::RichText::new("These files exist but aren't used by items, maps, or other content").small().weak());
+                    }
 
                     if cleanup_candidates_count > 0 {
-                        if ui
-                            .button(format!(
-                                "🧹 Cleanup {} Unused Assets",
-                                cleanup_candidates_count
-                            ))
-                            .clicked()
-                        {
-                            // Show confirmation or perform cleanup
-                            match manager.cleanup_unused(true) {
-                                Ok(would_delete) => {
-                                    self.status_message = format!(
-                                        "Would delete {} assets (dry run)",
-                                        would_delete.len()
-                                    );
-                                }
-                                Err(e) => {
-                                    self.status_message = format!("Cleanup error: {}", e);
+                        ui.add_space(5.0);
+                        ui.horizontal(|ui| {
+                            if ui
+                                .button(format!(
+                                    "🧹 Review {} Cleanup Candidates",
+                                    cleanup_candidates_count
+                                ))
+                                .clicked()
+                            {
+                                // Show confirmation or perform cleanup
+                                match manager.cleanup_unused(true) {
+                                    Ok(would_delete) => {
+                                        self.status_message = format!(
+                                            "Would delete {} assets (dry run)",
+                                            would_delete.len()
+                                        );
+                                    }
+                                    Err(e) => {
+                                        self.status_message = format!("Cleanup error: {}", e);
+                                    }
                                 }
                             }
-                        }
+                            ui.label(egui::RichText::new("(Safe cleanup preview)").small().weak());
+                        });
                     }
                 });
                 ui.separator();
@@ -3651,10 +3824,26 @@ impl CampaignBuilderApp {
                                     |ui| {
                                         ui.label(asset.size_string());
                                         ui.label(asset.asset_type.display_name());
-                                        if !asset.is_referenced {
-                                            ui.colored_label(egui::Color32::YELLOW, "⚠ Unused");
+
+                                        // Show better status for assets
+                                        if asset.is_referenced {
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(80, 200, 80),
+                                                "✅ Referenced",
+                                            );
+                                        } else if asset.asset_type == asset_manager::AssetType::Data
+                                        {
+                                            // Data files that are loaded but not "referenced" by items
+                                            // should show as "Loaded" not "Unused"
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(100, 180, 255),
+                                                "📁 Data File",
+                                            );
                                         } else {
-                                            ui.colored_label(egui::Color32::GREEN, "✓ In Use");
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(255, 180, 0),
+                                                "⚠️ Unreferenced",
+                                            );
                                         }
                                     },
                                 );
@@ -3663,13 +3852,43 @@ impl CampaignBuilderApp {
                             // Show references if any
                             if !asset.references.is_empty() {
                                 ui.indent("asset_refs", |ui| {
-                                    ui.label(format!(
-                                        "Referenced by {} item(s):",
-                                        asset.references.len()
-                                    ));
-                                    for reference in &asset.references {
-                                        ui.label(format!("  • {}", reference.display_string()));
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "Referenced by {} item(s):",
+                                            asset.references.len()
+                                        ))
+                                        .small(),
+                                    );
+                                    for reference in asset.references.iter().take(5) {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "  • {}",
+                                                reference.display_string()
+                                            ))
+                                            .small()
+                                            .weak(),
+                                        );
                                     }
+                                    if asset.references.len() > 5 {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "  ... and {} more",
+                                                asset.references.len() - 5
+                                            ))
+                                            .small()
+                                            .weak(),
+                                        );
+                                    }
+                                });
+                            } else if asset.asset_type == asset_manager::AssetType::Data {
+                                ui.indent("asset_info", |ui| {
+                                    ui.label(
+                                        egui::RichText::new(
+                                            "Campaign data file (items, spells, etc.)",
+                                        )
+                                        .small()
+                                        .weak(),
+                                    );
                                 });
                             }
                         });
@@ -3692,6 +3911,123 @@ mod tests {
     use antares::domain::character::{AttributePair, AttributePair16};
     use antares::domain::combat::monster::MonsterCondition;
     use antares::domain::quest::QuestStage;
+    use antares::domain::races::RaceDefinition;
+
+    #[test]
+    fn test_generate_category_status_checks_empty_races_shows_info() {
+        // Default app has no races loaded
+        let app = CampaignBuilderApp::default();
+        let results = app.generate_category_status_checks();
+
+        let race_info = results
+            .iter()
+            .find(|r| r.category == validation::ValidationCategory::Races);
+
+        assert!(
+            race_info.is_some(),
+            "Races category missing from validation results"
+        );
+        let result = race_info.unwrap();
+        assert_eq!(
+            result.severity,
+            validation::ValidationSeverity::Info,
+            "Expected Info severity for empty races"
+        );
+        assert!(
+            result
+                .message
+                .contains("No races loaded - add races or load from file"),
+            "Unexpected message: {}",
+            result.message
+        );
+    }
+
+    #[test]
+    fn test_generate_category_status_checks_loaded_races_shows_passed() {
+        // Create a CampaignBuilderApp and add a single race definition
+        let mut app = CampaignBuilderApp::default();
+        let race =
+            RaceDefinition::new("test".to_string(), "Test".to_string(), "A test".to_string());
+        app.races_editor_state.races.push(race);
+
+        let results = app.generate_category_status_checks();
+        let race_result = results
+            .iter()
+            .find(|r| r.category == validation::ValidationCategory::Races);
+
+        assert!(
+            race_result.is_some(),
+            "Races category missing from validation results"
+        );
+        let result = race_result.unwrap();
+        assert_eq!(
+            result.severity,
+            validation::ValidationSeverity::Passed,
+            "Expected Passed severity when races are loaded"
+        );
+        assert!(
+            result.message.contains(&format!(
+                "{} races validated",
+                app.races_editor_state.races.len()
+            )),
+            "Unexpected message: {}",
+            result.message
+        );
+    }
+
+    #[test]
+    fn test_load_races_from_campaign_populates_races_editor_state() {
+        use std::fs;
+        use std::path::PathBuf;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Build a temporary campaign directory under the system temp dir
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_millis();
+        let tmp_base = std::env::temp_dir();
+        let tmpdir = tmp_base.join(format!("antares_test_races_{}", unique));
+        let data_dir = tmpdir.join("data");
+
+        // Ensure directory exists
+        fs::create_dir_all(&data_dir).expect("Failed to create temp data dir");
+
+        // RON content containing two race definitions (human, elf)
+        let races_ron = r#"
+[
+    (
+        id: "human",
+        name: "Human",
+    ),
+    (
+        id: "elf",
+        name: "Elf",
+    ),
+]
+"#;
+
+        // Write races.ron to the data directory
+        let races_path = data_dir.join("races.ron");
+        fs::write(&races_path, races_ron).expect("Failed to write races.ron");
+
+        // Setup the CampaignBuilderApp, and point it at our temporary campaign
+        let mut app = CampaignBuilderApp::default();
+        app.campaign_dir = Some(tmpdir.clone());
+        // Use the default "data/races.ron" path; set explicitly to be safe
+        app.campaign.races_file = "data/races.ron".to_string();
+
+        // Load races into the editor state (this should populate races_editor_state.races)
+        app.load_races_from_campaign();
+
+        // Validate we loaded exactly 2 races and they have the expected IDs
+        assert_eq!(app.races_editor_state.races.len(), 2);
+        assert_eq!(app.races_editor_state.races[0].id, "human");
+        assert_eq!(app.races_editor_state.races[1].id, "elf");
+
+        // Cleanup any temporary files/directories
+        let _ = fs::remove_dir_all(tmpdir);
+    }
 
     #[test]
     fn test_campaign_metadata_default() {
@@ -3899,6 +4235,7 @@ mod tests {
             monsters_file: "data/monsters.ron".to_string(),
             classes_file: "data/classes.ron".to_string(),
             races_file: "data/races.ron".to_string(),
+            characters_file: "data/characters.ron".to_string(),
             maps_dir: "data/maps/".to_string(),
             quests_file: "data/quests.ron".to_string(),
             dialogue_file: "data/dialogue.ron".to_string(),
@@ -5232,6 +5569,7 @@ mod tests {
             damage: DiceRoll::new(1, 8, 0),
             bonus: 1,
             hands_required: 1,
+            classification: WeaponClassification::MartialMelee,
         });
 
         let filter = ItemTypeFilter::Weapon;
@@ -5242,11 +5580,13 @@ mod tests {
         armor.item_type = ItemType::Armor(antares::domain::items::types::ArmorData {
             ac_bonus: 5,
             weight: 20,
+            classification: ArmorClassification::Medium,
         });
         assert!(!filter.matches(&armor));
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_type_filter_all_types() {
         use antares::domain::items::types::*;
 
@@ -5257,16 +5597,18 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 10,
             sell_cost: 5,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         let armor_item = Item {
@@ -5275,16 +5617,18 @@ mod tests {
             item_type: ItemType::Armor(ArmorData {
                 ac_bonus: 5,
                 weight: 30,
+                classification: ArmorClassification::Medium,
             }),
             base_cost: 50,
             sell_cost: 25,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         assert!(ItemTypeFilter::Weapon.matches(&weapon_item));
@@ -5342,27 +5686,39 @@ mod tests {
     }
 
     #[test]
-    fn test_disablement_flags() {
+    fn test_item_proficiency_and_alignment_restrictions() {
+        // Local imports for clarity and isolation in test function
+        use antares::domain::items::types::{AlignmentRestriction, WeaponClassification};
+        use antares::domain::proficiency::ProficiencyDatabase;
+
         let mut item = CampaignBuilderApp::default_item();
 
-        // Test all classes enabled
-        item.disablements = Disablement(0xFF);
-        assert!(item.disablements.can_use_class(Disablement::KNIGHT));
-        assert!(item.disablements.can_use_class(Disablement::SORCERER));
+        // Default item should derive the correct proficiency for a simple weapon
+        assert_eq!(
+            item.required_proficiency(),
+            Some(ProficiencyDatabase::proficiency_for_weapon(
+                WeaponClassification::Simple
+            ))
+        );
 
-        // Test specific class restriction
-        item.disablements = Disablement(Disablement::KNIGHT | Disablement::PALADIN);
-        assert!(item.disablements.can_use_class(Disablement::KNIGHT));
-        assert!(item.disablements.can_use_class(Disablement::PALADIN));
-        assert!(!item.disablements.can_use_class(Disablement::SORCERER));
+        // Default alignment restriction should be None
+        assert_eq!(item.alignment_restriction, None);
 
-        // Test alignment flags
-        item.disablements = Disablement(Disablement::KNIGHT | Disablement::GOOD);
-        assert!(item.disablements.good_only());
-        assert!(!item.disablements.evil_only());
+        // Update alignment restriction to GoodOnly and confirm it is stored correctly
+        item.alignment_restriction = Some(AlignmentRestriction::GoodOnly);
+        assert_eq!(
+            item.alignment_restriction,
+            Some(AlignmentRestriction::GoodOnly)
+        );
+        // Ensure EvilOnly is not set
+        assert_ne!(
+            item.alignment_restriction,
+            Some(AlignmentRestriction::EvilOnly)
+        );
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_import_export_roundtrip() {
         use antares::domain::items::types::*;
 
@@ -5373,10 +5729,11 @@ mod tests {
                 damage: DiceRoll::new(2, 6, 1),
                 bonus: 2,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 100,
             sell_cost: 50,
-            disablements: Disablement(0xFF),
+            alignment_restriction: None,
             constant_bonus: Some(Bonus {
                 attribute: BonusAttribute::Might,
                 value: 3,
@@ -5386,6 +5743,7 @@ mod tests {
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         // Export to RON
@@ -5415,6 +5773,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_type_specific_editors() {
         use antares::domain::items::types::*;
 
@@ -5426,16 +5785,18 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 0),
                 bonus: 0,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 15,
             sell_cost: 7,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
         assert!(weapon.is_weapon());
 
@@ -5446,16 +5807,18 @@ mod tests {
             item_type: ItemType::Armor(ArmorData {
                 ac_bonus: 8,
                 weight: 50,
+                classification: ArmorClassification::Heavy,
             }),
             base_cost: 100,
             sell_cost: 50,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec!["heavy_armor".to_string()],
         };
         assert!(armor.is_armor());
 
@@ -5469,18 +5832,20 @@ mod tests {
             }),
             base_cost: 10,
             sell_cost: 5,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
         assert!(potion.is_consumable());
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_combined_filters() {
         use antares::domain::items::types::*;
 
@@ -5494,10 +5859,11 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 0),
                 bonus: 1,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 100,
             sell_cost: 50,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: Some(Bonus {
                 attribute: BonusAttribute::Might,
                 value: 2,
@@ -5507,6 +5873,7 @@ mod tests {
             max_charges: 5,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         let cursed_armor = Item {
@@ -5515,16 +5882,18 @@ mod tests {
             item_type: ItemType::Armor(ArmorData {
                 ac_bonus: 5,
                 weight: 30,
+                classification: ArmorClassification::Medium,
             }),
             base_cost: 50,
             sell_cost: 0,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: true,
             icon_path: None,
+            tags: vec![],
         };
 
         app.items.push(magical_weapon.clone());
@@ -5538,72 +5907,68 @@ mod tests {
     }
 
     #[test]
-    fn test_disablement_editor_all_classes() {
+    fn test_items_editor_default_required_proficiency() {
+        // Ensure the items editor edit buffer starts with a default weapon and correct derived proficiency
+        use antares::domain::items::types::WeaponClassification;
+        use antares::domain::proficiency::ProficiencyDatabase;
+
         let mut app = CampaignBuilderApp::default();
 
-        // Set all classes enabled
-        app.items_editor_state.edit_buffer.disablements = Disablement(0b0011_1111);
+        // Default edit_buffer is a simple weapon; required_proficiency should match simple_weapon id
+        let required_prof = app
+            .items_editor_state
+            .edit_buffer
+            .required_proficiency()
+            .expect("Default edit buffer should have a derived proficiency");
 
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(Disablement::KNIGHT));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(Disablement::PALADIN));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(Disablement::ARCHER));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(Disablement::CLERIC));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(Disablement::SORCERER));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(Disablement::ROBBER));
+        assert_eq!(
+            required_prof,
+            ProficiencyDatabase::proficiency_for_weapon(WeaponClassification::Simple)
+        );
+
+        // Default alignment restriction should be None
+        assert_eq!(
+            app.items_editor_state.edit_buffer.alignment_restriction,
+            None
+        );
     }
 
     #[test]
-    fn test_disablement_editor_specific_classes() {
+    fn test_items_editor_classification_changes_required_proficiency() {
+        use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
+        use antares::domain::proficiency::ProficiencyDatabase;
+        use antares::domain::types::DiceRoll;
+
         let mut app = CampaignBuilderApp::default();
 
-        // Only knight and paladin
-        app.items_editor_state.edit_buffer.disablements =
-            Disablement(Disablement::KNIGHT | Disablement::PALADIN);
+        // Change the edit buffer weapon classification to MartialMelee and verify derived proficiency
+        app.items_editor_state.edit_buffer.item_type = ItemType::Weapon(WeaponData {
+            damage: DiceRoll::new(2, 6, 0),
+            bonus: 1,
+            hands_required: 1,
+            classification: WeaponClassification::MartialMelee,
+        });
 
-        assert!(app
+        let required_prof = app
             .items_editor_state
             .edit_buffer
-            .disablements
-            .can_use_class(Disablement::KNIGHT));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(Disablement::PALADIN));
-        assert!(!app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(Disablement::SORCERER));
+            .required_proficiency()
+            .expect("Martial melee weapon should have a derived proficiency");
+
+        assert_eq!(
+            required_prof,
+            ProficiencyDatabase::proficiency_for_weapon(WeaponClassification::MartialMelee)
+        );
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_item_preview_displays_all_info() {
         use antares::domain::items::types::*;
+
+        // Standard class bit positions
+        const BIT_KNIGHT: u8 = 0b0000_0001;
+        const BIT_PALADIN: u8 = 0b0000_0010;
 
         let item = Item {
             id: 10,
@@ -5612,12 +5977,11 @@ mod tests {
                 damage: DiceRoll::new(1, 8, 2),
                 bonus: 3,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 500,
             sell_cost: 250,
-            disablements: Disablement(
-                Disablement::KNIGHT | Disablement::PALADIN | Disablement::GOOD,
-            ),
+            alignment_restriction: Some(AlignmentRestriction::GoodOnly),
             constant_bonus: Some(Bonus {
                 attribute: BonusAttribute::Might,
                 value: 2,
@@ -5627,6 +5991,7 @@ mod tests {
             max_charges: 20,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         // Verify item has all expected properties
@@ -7294,7 +7659,7 @@ impl GoodEditorState {
             .show_ui(ui, |ui| {});
         EditorToolbar::new("Good").show(ui);
         ActionButtons::new().show(ui);
-        TwoColumnLayout::new("good").show(ui, |ui| {});
+        TwoColumnLayout::new("good").show_split(ui, |left_ui| {}, |right_ui| {});
     }
 }
 

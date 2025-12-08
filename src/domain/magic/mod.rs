@@ -18,7 +18,7 @@
 //! # Examples
 //!
 //! ```
-//! use antares::domain::character::{Character, Class, Race, Sex, Alignment};
+//! use antares::domain::character::{Character, Sex, Alignment};
 //! use antares::domain::magic::types::{Spell, SpellSchool, SpellContext, SpellTarget};
 //! use antares::domain::magic::casting::{can_cast_spell, cast_spell};
 //! use antares::domain::types::GameMode;
@@ -26,8 +26,8 @@
 //! // Create a cleric character
 //! let mut cleric = Character::new(
 //!     "Healer".to_string(),
-//!     Race::Human,
-//!     Class::Cleric,
+//!     "human".to_string(),
+//!     "cleric".to_string(),
 //!     Sex::Female,
 //!     Alignment::Good,
 //! );
@@ -67,8 +67,9 @@ pub mod types;
 
 // Re-export commonly used types
 pub use casting::{
-    calculate_spell_points, can_cast_spell, can_class_cast_school, cast_spell,
-    get_required_level_for_spell,
+    calculate_spell_points, calculate_spell_points_by_id, can_cast_spell, can_class_cast_school,
+    can_class_cast_school_by_id, cast_spell, get_required_level_for_spell,
+    get_required_level_for_spell_by_id,
 };
 pub use database::{SpellDatabase, SpellDatabaseError};
 pub use spell_effects::{

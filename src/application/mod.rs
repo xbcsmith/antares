@@ -382,7 +382,7 @@ impl Default for GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Alignment, Character, Class, Race, Sex};
+    use crate::domain::character::{Alignment, Character, Sex};
 
     #[test]
     fn test_game_state_creation() {
@@ -399,8 +399,8 @@ mod tests {
         // Add a character to the party
         let hero = Character::new(
             "Hero".to_string(),
-            Race::Human,
-            Class::Knight,
+            "human".to_string(),
+            "knight".to_string(),
             Sex::Male,
             Alignment::Good,
         );

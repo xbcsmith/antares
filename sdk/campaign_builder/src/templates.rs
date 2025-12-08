@@ -16,7 +16,8 @@ use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResis
 use antares::domain::combat::types::Attack;
 use antares::domain::dialogue::{DialogueNode, DialogueTree};
 use antares::domain::items::types::{
-    ArmorData, ConsumableData, Disablement, Item, ItemType, WeaponData,
+    ArmorClassification, ArmorData, ConsumableData, Item, ItemType, WeaponClassification,
+    WeaponData,
 };
 
 use antares::domain::quest::{Quest, QuestId, QuestObjective, QuestReward, QuestStage};
@@ -165,6 +166,7 @@ impl TemplateManager {
     }
 
     /// Create an item from a template
+    #[allow(deprecated)]
     pub fn create_item(&self, template_id: &str, id: u32) -> Option<Item> {
         let id: u8 = id.try_into().ok()?;
         match template_id {
@@ -175,16 +177,18 @@ impl TemplateManager {
                     damage: DiceRoll::new(1, 6, 0),
                     bonus: 0,
                     hands_required: 1,
+                    classification: WeaponClassification::MartialMelee,
                 }),
                 base_cost: 50,
                 sell_cost: 25,
-                disablements: Disablement::ALL,
+                alignment_restriction: None,
                 constant_bonus: None,
                 temporary_bonus: None,
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
                 icon_path: None,
+                tags: vec![],
             }),
             "basic_dagger" => Some(Item {
                 id,
@@ -193,16 +197,18 @@ impl TemplateManager {
                     damage: DiceRoll::new(1, 4, 0),
                     bonus: 0,
                     hands_required: 1,
+                    classification: WeaponClassification::Simple,
                 }),
                 base_cost: 20,
                 sell_cost: 10,
-                disablements: Disablement::ALL,
+                alignment_restriction: None,
                 constant_bonus: None,
                 temporary_bonus: None,
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
                 icon_path: None,
+                tags: vec![],
             }),
             "basic_bow" => Some(Item {
                 id,
@@ -211,16 +217,18 @@ impl TemplateManager {
                     damage: DiceRoll::new(1, 6, 0),
                     bonus: 0,
                     hands_required: 2,
+                    classification: WeaponClassification::MartialRanged,
                 }),
                 base_cost: 60,
                 sell_cost: 30,
-                disablements: Disablement::ALL,
+                alignment_restriction: None,
                 constant_bonus: None,
                 temporary_bonus: None,
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
                 icon_path: None,
+                tags: vec!["two_handed".to_string()],
             }),
             "basic_staff" => Some(Item {
                 id,
@@ -229,16 +237,18 @@ impl TemplateManager {
                     damage: DiceRoll::new(1, 4, 0),
                     bonus: 0,
                     hands_required: 2,
+                    classification: WeaponClassification::Simple,
                 }),
                 base_cost: 30,
                 sell_cost: 15,
-                disablements: Disablement::ALL,
+                alignment_restriction: None,
                 constant_bonus: None,
                 temporary_bonus: None,
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
                 icon_path: None,
+                tags: vec!["two_handed".to_string()],
             }),
             "leather_armor" => Some(Item {
                 id,
@@ -246,16 +256,18 @@ impl TemplateManager {
                 item_type: ItemType::Armor(ArmorData {
                     ac_bonus: 2,
                     weight: 8,
+                    classification: ArmorClassification::Light,
                 }),
                 base_cost: 40,
                 sell_cost: 20,
-                disablements: Disablement::ALL,
+                alignment_restriction: None,
                 constant_bonus: None,
                 temporary_bonus: None,
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
                 icon_path: None,
+                tags: vec![],
             }),
             "chain_mail" => Some(Item {
                 id,
@@ -263,16 +275,18 @@ impl TemplateManager {
                 item_type: ItemType::Armor(ArmorData {
                     ac_bonus: 4,
                     weight: 20,
+                    classification: ArmorClassification::Medium,
                 }),
                 base_cost: 150,
                 sell_cost: 75,
-                disablements: Disablement::ALL,
+                alignment_restriction: None,
                 constant_bonus: None,
                 temporary_bonus: None,
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
                 icon_path: None,
+                tags: vec![],
             }),
             "plate_mail" => Some(Item {
                 id,
@@ -280,16 +294,18 @@ impl TemplateManager {
                 item_type: ItemType::Armor(ArmorData {
                     ac_bonus: 6,
                     weight: 35,
+                    classification: ArmorClassification::Heavy,
                 }),
                 base_cost: 400,
                 sell_cost: 200,
-                disablements: Disablement::ALL,
+                alignment_restriction: None,
                 constant_bonus: None,
                 temporary_bonus: None,
                 spell_effect: None,
                 max_charges: 0,
                 is_cursed: false,
                 icon_path: None,
+                tags: vec!["heavy_armor".to_string()],
             }),
             "healing_potion" => Some(Item {
                 id,
@@ -300,13 +316,14 @@ impl TemplateManager {
                 }),
                 base_cost: 50,
                 sell_cost: 25,
-                disablements: Disablement::ALL,
+                alignment_restriction: None,
                 constant_bonus: None,
                 temporary_bonus: None,
                 spell_effect: None,
                 max_charges: 1,
                 is_cursed: false,
                 icon_path: None,
+                tags: vec![],
             }),
             "mana_potion" => Some(Item {
                 id,
@@ -317,13 +334,14 @@ impl TemplateManager {
                 }),
                 base_cost: 60,
                 sell_cost: 30,
-                disablements: Disablement::ALL,
+                alignment_restriction: None,
                 constant_bonus: None,
                 temporary_bonus: None,
                 spell_effect: None,
                 max_charges: 1,
                 is_cursed: false,
                 icon_path: None,
+                tags: vec![],
             }),
             _ => {
                 // Check custom templates
@@ -883,6 +901,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_custom_templates() {
         let mut manager = TemplateManager::new();
         let initial_count = manager.item_templates().len();
@@ -894,16 +913,18 @@ mod tests {
                 damage: DiceRoll::new(2, 8, 2),
                 bonus: 2,
                 hands_required: 1,
+                classification: WeaponClassification::MartialMelee,
             }),
             base_cost: 500,
             sell_cost: 250,
-            disablements: Disablement::ALL,
+            alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
             spell_effect: None,
             max_charges: 0,
             is_cursed: false,
             icon_path: None,
+            tags: vec![],
         };
 
         manager.add_custom_item(custom_item.clone());

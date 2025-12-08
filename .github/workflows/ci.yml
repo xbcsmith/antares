@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: ["*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate (fmt, check, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install Wayland bits and Weston compositor
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbregistry-dev libwayland-dev libasound2-dev libudev-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev pkg-config
+          sudo apt clean
+
+      - name: Install Rust toolchain and components
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+          override: true
+
+      - name: Check formatting (cargo fmt --all)
+        run: cargo fmt --all -- --check
+
+      # - name: Cargo check (all targets & features)
+      #  run: cargo check --all-targets --all-features
+
+      # - name: Run Clippy (treat warnings as errors)
+      #  run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # - name: Run tests (all features)
+      #  run: cargo test --all-features -- --nocapture

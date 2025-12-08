@@ -7,17 +7,15 @@
 //! party management, and state transitions between different game modes.
 
 use antares::application::{GameMode, GameState};
-use antares::domain::character::{
-    Alignment, AttributePair, Character, Class, Condition, Race, Sex,
-};
+use antares::domain::character::{Alignment, AttributePair, Character, Condition, Sex};
 use antares::domain::types::GameTime;
 
 /// Helper function to create a test character
-fn create_character(name: &str, class: Class) -> Character {
+fn create_character(name: &str, class_id: &str) -> Character {
     Character::new(
         name.to_string(),
-        Race::Human,
-        class,
+        "human".to_string(),
+        class_id.to_string(),
         Sex::Male,
         Alignment::Good,
     )
@@ -42,9 +40,9 @@ fn test_party_formation() {
     // Arrange: Create game state and characters
     let mut game_state = GameState::new();
 
-    let knight = create_character("Knight", Class::Knight);
-    let cleric = create_character("Cleric", Class::Cleric);
-    let sorcerer = create_character("Sorcerer", Class::Sorcerer);
+    let knight = create_character("Knight", "knight");
+    let cleric = create_character("Cleric", "cleric");
+    let sorcerer = create_character("Sorcerer", "sorcerer");
 
     // Act: Add characters directly to party
     game_state
@@ -69,7 +67,7 @@ fn test_party_formation() {
 fn test_game_mode_transitions() {
     // Arrange: Create game with party
     let mut game_state = GameState::new();
-    let hero = create_character("Hero", Class::Paladin);
+    let hero = create_character("Hero", "paladin");
     game_state
         .party
         .add_member(hero)
@@ -105,7 +103,7 @@ fn test_game_mode_transitions() {
 fn test_party_resource_sharing() {
     // Arrange: Create game state and party
     let mut game_state = GameState::new();
-    let knight = create_character("Knight", Class::Knight);
+    let knight = create_character("Knight", "knight");
     game_state
         .party
         .add_member(knight)
@@ -147,7 +145,7 @@ fn test_time_progression() {
 fn test_character_state_persistence_across_modes() {
     // Arrange: Create game with damaged character
     let mut game_state = GameState::new();
-    let mut warrior = create_character("Warrior", Class::Knight);
+    let mut warrior = create_character("Warrior", "knight");
     warrior.hp.base = 30;
     warrior.hp.current = 30;
 
@@ -177,7 +175,7 @@ fn test_character_state_persistence_across_modes() {
 #[test]
 fn test_stat_modification_and_reset() {
     // Arrange: Create character with base stats
-    let mut character = create_character("TestChar", Class::Knight);
+    let mut character = create_character("TestChar", "knight");
     let original_might = character.stats.might.base;
 
     // Act: Apply temporary buff
@@ -198,7 +196,7 @@ fn test_stat_modification_and_reset() {
 fn test_party_member_conditions() {
     // Arrange: Create party
     let mut game_state = GameState::new();
-    let hero = create_character("Hero", Class::Cleric);
+    let hero = create_character("Hero", "cleric");
     game_state
         .party
         .add_member(hero)
@@ -232,12 +230,12 @@ fn test_multiple_characters_in_roster_and_party() {
 
     // Create 6 characters for party
     let party_members = vec![
-        create_character("Knight", Class::Knight),
-        create_character("Paladin", Class::Paladin),
-        create_character("Archer", Class::Archer),
-        create_character("Cleric", Class::Cleric),
-        create_character("Sorcerer", Class::Sorcerer),
-        create_character("Robber", Class::Robber),
+        create_character("Knight", "knight"),
+        create_character("Paladin", "paladin"),
+        create_character("Archer", "archer"),
+        create_character("Cleric", "cleric"),
+        create_character("Sorcerer", "sorcerer"),
+        create_character("Robber", "robber"),
     ];
 
     // Act: Form full party (max 6)
@@ -253,7 +251,7 @@ fn test_multiple_characters_in_roster_and_party() {
     assert!(game_state.party.is_full());
 
     // Try to add one more (should fail - party full)
-    let bench_char = create_character("Reserve Knight", Class::Knight);
+    let bench_char = create_character("Reserve Knight", "knight");
     let result = game_state.party.add_member(bench_char);
     assert!(
         result.is_err(),
@@ -265,7 +263,7 @@ fn test_multiple_characters_in_roster_and_party() {
 fn test_exploration_loop_simulation() {
     // Arrange: Create game ready for exploration
     let mut game_state = GameState::new();
-    let adventurer = create_character("Adventurer", Class::Archer);
+    let adventurer = create_character("Adventurer", "archer");
     game_state
         .party
         .add_member(adventurer)
