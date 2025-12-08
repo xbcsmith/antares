@@ -3576,24 +3576,6 @@ impl CampaignBuilderApp {
         ui.heading("📦 Asset Manager");
         ui.add_space(5.0);
         ui.label("Manage campaign assets (images, sounds, music, tilesets)");
-
-        // Quick action to open the Races Editor and ensure races are loaded from the campaign
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("Open Races Editor & Load").clicked() {
-                // Only attempt to load if a campaign directory is set
-                if self.campaign_dir.is_some() {
-                    // Use the campaign's races_file path (the load helper updates the editor state)
-                    self.load_races_from_campaign();
-                    // Switch to the Races editor tab so the user can immediately see loaded races
-                    self.active_tab = EditorTab::Races;
-                } else {
-                    // Set a helpful status message if the app does not have a campaign directory set
-                    self.status_message =
-                        "No campaign directory loaded - cannot load races into UI".to_string();
-                }
-            }
-        });
-
         ui.separator();
 
         // Initialize asset manager if needed
