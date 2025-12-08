@@ -909,11 +909,6 @@ impl<'a> Widget for MapGridWidget<'a> {
         let (response, painter) =
             ui.allocate_painter(Vec2::new(width, height), Sense::click_and_drag());
 
-        if crate::logging::Logger::debug_enabled() {
-            eprintln!("MapGridWidget: map {}x{} map_px {}x{} avail {:?} tile_size {} computed width {} height {}",
-                      self.state.map.width, self.state.map.height, map_width_px, map_height_px, avail, self.tile_size, width, height);
-        }
-
         // Draw a visible debug border around the allocated grid area so we can see whether the widget's area
         // is being allocated (if the plot is blank, this border will still render).
         // Removed temporary debug red border to avoid distracting visual noise.

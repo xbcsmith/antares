@@ -29,6 +29,8 @@ cargo install cargo-audit  # Optional but recommended
 
 **Rule**: If architecture.md defines it, YOU MUST USE IT EXACTLY AS DEFINED.
 Deviation = violation.
+**Rule**: BE CONSISTENT WITH NAMING CONVENTIONS AND STYLE GUIDELINES.
+**Rule**: WE DO NOT CARE ABOUT BACKWARDS COMPATIBILITY RIGHT NOW.
 
 #### Step 3: Plan Your Implementation
 
@@ -984,7 +986,6 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [ ] No uppercase in filenames except `README.md`
 - [ ] Files placed in correct architecture layer (Section 3.2)
 - [ ] Documentation in correct Diataxis category
-
 
 ### Architecture
 
