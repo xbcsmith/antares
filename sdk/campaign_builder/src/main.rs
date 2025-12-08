@@ -7677,7 +7677,7 @@ impl GoodEditorState {
             .show_ui(ui, |ui| {});
         EditorToolbar::new("Good").show(ui);
         ActionButtons::new().show(ui);
-        TwoColumnLayout::new("good").show(ui, |ui| {});
+        TwoColumnLayout::new("good").show_split(ui, |left_ui| {}, |right_ui| {});
     }
 }
 

@@ -780,7 +780,7 @@ mod tests {
                 pub fn show(&mut self, ui: &mut egui::Ui) {
                     EditorToolbar::new("Items").show(ui);
                     ActionButtons::new().show(ui);
-                    TwoColumnLayout::new("items").show(ui, |ui| {});
+                    TwoColumnLayout::new("items").show_split(ui, |left_ui| {}, |right_ui| {});
                 }
             }
 

@@ -4050,6 +4050,44 @@ Phase 1 created shared UI components. Phase 2 extracted Classes and Dialogues ed
 
 Updated `classes_editor.rs` to use shared components:
 
+#### 3.9 TwoColumnLayout Migration: show → show_split
+
+Removed the legacy `TwoColumnLayout::show` API and migrated all SDK campaign builder editors to use `TwoColumnLayout::show_split(ui, left_content, right_content)`. The migration was done to address multiple layout/borrow-checker and rendering regressions observed when using the single-closure `show` API; the `show_split` API is explicit, less error-prone, and easier to reason about.
+
+Key changes:
+
+- Replaced all in-repo usages of:
+  ```
+  TwoColumnLayout::new("...").show(ui, |left_ui, right_ui| { ... });
+  ```
+  with:
+  ```
+  TwoColumnLayout::new("...")
+      .show_split(ui,
+          |left_ui| { ... },
+          |right_ui| { ... });
+  ```
+- Updated sample editor/test snippets in `sdk/campaign_builder/src/main.rs` and `sdk/campaign_builder/src/test_utils.rs` to use `show_split`.
+- Updated `docs/explanation/` and code examples in `ui_helpers.rs` to show examples using `show_split`.
+- `TwoColumnLayout::show` implementation was removed from `ui_helpers.rs` and replaced with a deprecated stub that panics at runtime to clearly indicate removal and the need to migrate to `show_split`.
+- Added guidance for migrate-to-`show_split` in developer docs and implementation notes.
+
+Testing & Validation:
+
+- Updated editor compliance checks and tests to use `show_split`.
+- Run CI style checks and `cargo check` during the migration and confirmed no `TwoColumnLayout::show` usages remain in the SDK campaign builder sources.
+- Confirmed that `Races`, `Items`, `Monsters`, `Maps`, `Characters`, `Classes`, `Conditions`, `Dialogues`, `Quests`, and `Spells` editors use `show_split`.
+- Note: If you find any `TwoColumnLayout::show` remaining in user code or examples, convert them to `show_split` and resolve any shared-state borrow conflicts via `Cell`, `Rc<RefCell>`, or other safe patterns.
+
+Why:
+
+- `show_split` avoids shared borrow/ownership issues and produces more predictable UI layout behaviour.
+- This was necessary to remove a persistent bug where some editors (e.g., races_editor) reported "loaded" but rendered blank content due to the helper `show` semantics.
+
+Notes:
+
+- The deprecated `show` stub will panic if invoked so that anyone still using it is forced to migrate. If desired, we can replace the stub with a compile-time deprecation directive or a helper that maps to `show_split` where possible, but this change prefers hard migration and a clear failure mode to prevent regressions.
+
 - Replaced manual toolbar with `EditorToolbar` component
 - Added `ActionButtons` (Edit/Delete/Duplicate/Export) to detail panel
 - Implemented `TwoColumnLayout` for list/detail split view

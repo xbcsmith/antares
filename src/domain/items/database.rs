@@ -318,10 +318,7 @@ impl ItemDatabase {
         for (id, item) in &self.items {
             if let Some(prof) = item.required_proficiency() {
                 if !prof_db.has(&prof) {
-                    return Err(ItemDatabaseError::InvalidProficiency(
-                        id.clone(),
-                        prof.clone(),
-                    ));
+                    return Err(ItemDatabaseError::InvalidProficiency(*id, prof.clone()));
                 }
             }
         }

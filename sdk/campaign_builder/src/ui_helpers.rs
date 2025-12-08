@@ -689,12 +689,17 @@ impl<'a> TwoColumnLayout<'a> {
     ///
     /// fn example(ui: &mut egui::Ui) {
     ///     TwoColumnLayout::new("items")
-    ///         .show(ui, |left_ui, right_ui| {
-    ///             // left_ui: render list
-    ///             left_ui.label("Item list goes here");
-    ///             // right_ui: render detail/preview
-    ///             right_ui.label("Details go here");
-    ///         });
+    ///         .show_split(
+    ///             ui,
+    ///             |left_ui| {
+    ///                 // left_ui: render list
+    ///                 left_ui.label("Item list goes here");
+    ///             },
+    ///             |right_ui| {
+    ///                 // right_ui: render detail/preview
+    ///                 right_ui.label("Details go here");
+    ///             },
+    ///         );
     /// }
     /// ```
     pub fn new(id_salt: &'a str) -> Self {
@@ -748,92 +753,6 @@ impl<'a> TwoColumnLayout<'a> {
         // We don't strictly enforce bounds here; the clamp occurs where the value is used.
         self.max_left_ratio = ratio;
         self
-    }
-
-    /// Renders the two-column layout and calls the provided closure.
-    ///
-    /// # Arguments
-    ///
-    /// * `ui` - The egui UI context
-    /// * `content` - Closure that receives mutable references to left and right UI regions
-    ///
-    /// # Returns
-    ///
-    /// The computed panel height used for both columns.
-    pub fn show<F>(self, ui: &mut egui::Ui, content: F) -> f32
-    where
-        F: FnOnce(&mut egui::Ui, &mut egui::Ui),
-    {
-        let panel_height = compute_panel_height(ui, self.min_height);
-
-        // Compute the left width via the shared helper so the same behavior is used everywhere.
-        let total_width = ui.available_width();
-        let sep_margin = 12.0;
-        // Use the inspector minimum (with a default fallback) to ensure we set the
-        // right panel's min width consistently with the helper's expectations.
-        let inspector_min = self.inspector_min_width.max(DEFAULT_INSPECTOR_MIN_WIDTH);
-        let left_width = compute_left_column_width(
-            total_width,
-            self.left_width,
-            inspector_min,
-            sep_margin,
-            MIN_SAFE_LEFT_COLUMN_WIDTH,
-            self.max_left_ratio,
-        );
-
-        // Determine available rectangle for coordinates, then split into left and right rects.
-        ui.horizontal(|ui| {
-            // Determine the absolute rectangle we can use for layout computations
-            let available_rect = ui.available_rect_before_wrap();
-
-            // Left and right rectangle computation
-            let sep_margin = 12.0;
-            let left_rect = egui::Rect::from_min_size(
-                available_rect.min,
-                egui::Vec2::new(left_width, panel_height),
-            );
-
-            let right_min_x = available_rect.min.x + left_width + sep_margin;
-            let right_width = (available_rect.width() - left_width - sep_margin).max(0.0);
-            let right_rect = egui::Rect::from_min_size(
-                egui::pos2(right_min_x, available_rect.min.y),
-                egui::Vec2::new(right_width, panel_height),
-            );
-
-            // Allocate left-side UI at left_rect. Inside the left-side scroll closure we allocate
-            // right-side area and its scroll area, then call the `content` closure with both scroll UIs.
-            ui.allocate_ui_at_rect(left_rect, |left_child| {
-                left_child.set_min_height(panel_height);
-
-                egui::ScrollArea::vertical()
-                    .id_salt(format!("{}_left_scroll", self.id_salt))
-                    .auto_shrink([false, false])
-                    .max_height(panel_height)
-                    .show(left_child, |left_scroll| {
-                        // Ensure left scroll area width is consistent
-                        left_scroll.set_min_width(left_scroll.available_width());
-
-                        // Allocate right-side area *from the root ui* so both columns are positioned correctly
-                        ui.allocate_ui_at_rect(right_rect, |right_child| {
-                            right_child.set_min_height(panel_height);
-
-                            egui::ScrollArea::vertical()
-                                .id_salt(format!("{}_right_scroll", self.id_salt))
-                                .auto_shrink([false, false])
-                                .max_height(panel_height)
-                                .show(right_child, |right_scroll| {
-                                    // Ensure right scroll area width is consistent
-                                    right_scroll.set_min_width(right_scroll.available_width());
-
-                                    // Now invoke the content closure with both inner scroll UIs
-                                    content(left_scroll, right_scroll);
-                                });
-                        });
-                    });
-            });
-        });
-
-        panel_height
     }
 
     /// Renders the two-column layout with separate closures for each column.
@@ -1870,6 +1789,13 @@ mod tests {
     #[test]
     fn two_column_layout_show_split_calls_both_closures() {
         let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(1200.0, 800.0),
+        ));
+        ctx.begin_pass(raw_input);
+
         let left_called = std::rc::Rc::new(std::cell::Cell::new(false));
         let right_called = std::rc::Rc::new(std::cell::Cell::new(false));
 
@@ -1895,6 +1821,7 @@ mod tests {
                     );
             });
         }
+        let _ = ctx.end_pass();
 
         assert!(left_called.get());
         assert!(right_called.get());
@@ -2120,7 +2047,7 @@ mod tests {
         // a full rendering context, so this test serves as documentation.
         // The shortcuts are implemented in EditorToolbar::show() and should
         // be manually tested.
-        assert_eq!(ToolbarAction::None as i32, 0);
+        assert_eq!(ToolbarAction::New as i32, 0);
     }
 
     #[test]
@@ -2134,7 +2061,7 @@ mod tests {
         // a full rendering context, so this test serves as documentation.
         // The shortcuts are implemented in ActionButtons::show() and should
         // be manually tested.
-        assert_eq!(ItemAction::None as i32, 0);
+        assert_eq!(ItemAction::Edit as i32, 0);
     }
 
     #[test]

@@ -1376,15 +1376,25 @@ mod tests {
         let path = tmp.path().to_path_buf();
 
         let races = vec![
-            RaceDefinition::new("human".to_string(), "Human".to_string(), "Human description".to_string()),
-            RaceDefinition::new("elf".to_string(), "Elf".to_string(), "Elf description".to_string()),
+            RaceDefinition::new(
+                "human".to_string(),
+                "Human".to_string(),
+                "Human description".to_string(),
+            ),
+            RaceDefinition::new(
+                "elf".to_string(),
+                "Elf".to_string(),
+                "Elf description".to_string(),
+            ),
         ];
 
         let ron_str = ron::ser::to_string_pretty(&races, Default::default()).unwrap();
         std::fs::write(&path, ron_str).expect("failed to write RON file");
 
         let mut state = RacesEditorState::new();
-        state.load_from_file(&path).expect("load_from_file should succeed");
+        state
+            .load_from_file(&path)
+            .expect("load_from_file should succeed");
 
         // Ensure the races were loaded and the first race is auto-selected
         assert_eq!(state.races.len(), 2);

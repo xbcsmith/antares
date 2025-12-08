@@ -444,10 +444,10 @@ enhance usability and provide power users with efficient keyboard navigation.
 
 ### Test Execution Record
 
-**Date:** ____________  
-**Tester:** ____________  
-**Platform:** ____________  
-**Display Scaling:** ____________  
+**Date:** ____________
+**Tester:** ____________
+**Platform:** ____________
+**Display Scaling:** ____________
 **Campaign Builder Version:** ____________
 
 | Test ID | Test Name                      | Result | Notes |
