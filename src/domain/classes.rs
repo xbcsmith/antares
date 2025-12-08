@@ -12,7 +12,7 @@
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
 //! See `docs/explanation/sdk_implementation_plan.md` Phase 1 for implementation details.
 
-use crate::domain::proficiency::ProficiencyId;
+use crate::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
 use crate::domain::types::{DiceRoll, ItemId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -38,6 +38,9 @@ pub enum ClassError {
 
     #[error("Duplicate class ID: {0}")]
     DuplicateId(String),
+
+    #[error("Invalid proficiency reference: {0}")]
+    InvalidProficiency(String),
 }
 
 // ===== Type Aliases =====
@@ -533,6 +536,40 @@ impl ClassDatabase {
         Ok(())
     }
 
+    /// Validate proficiencies referenced by classes exist in the provided proficiency database.
+    ///
+    /// This performs the usual `validate()` checks (spellcaster settings, HP dice, etc.)
+    /// and then verifies that every `proficiency` ID referenced by class definitions is
+    /// present in the given `ProficiencyDatabase`.
+    ///
+    /// # Arguments
+    ///
+    /// * `prof_db` - Reference to the loaded `ProficiencyDatabase` for cross-reference validation
+    ///
+    /// # Errors
+    ///
+    /// Returns `ClassError::InvalidProficiency` if any class references a proficiency that
+    /// does not exist in `prof_db`.
+    pub fn validate_with_proficiency_db(
+        &self,
+        prof_db: &ProficiencyDatabase,
+    ) -> Result<(), ClassError> {
+        // First run the normal validation logic
+        self.validate()?;
+
+        for class_def in self.classes.values() {
+            for prof in &class_def.proficiencies {
+                if !prof_db.has(prof) {
+                    return Err(ClassError::InvalidProficiency(format!(
+                        "Class '{}' references unknown proficiency '{}'",
+                        class_def.id, prof
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Returns the number of classes in the database
     pub fn len(&self) -> usize {
         self.classes.len()
@@ -930,5 +967,34 @@ mod tests {
         let paladin = db.get_class("paladin").unwrap();
         assert_eq!(paladin.spell_school, Some(SpellSchool::Cleric));
         assert!(!paladin.is_pure_caster);
+    }
+    #[test]
+    fn test_class_validate_with_proficiency_db_rejects_unknown_proficiency() {
+        use crate::domain::proficiency::ProficiencyDatabase;
+
+        let ron_data = r#"[
+            (
+                id: "test_class",
+                name: "Test Class",
+                description: "A class with unknown proficiency",
+                hp_die: (count: 1, sides: 6, bonus: 0),
+                spell_school: None,
+                is_pure_caster: false,
+                spell_stat: None,
+                disablement_bit: 0,
+                special_abilities: [],
+                starting_weapon_id: None,
+                starting_armor_id: None,
+                starting_items: [],
+                proficiencies: ["nonexistent_prof"],
+            ),
+        ]"#;
+
+        let db = ClassDatabase::load_from_string(ron_data).unwrap();
+        let prof_db = ProficiencyDatabase::new(); // Empty DB: doesn't contain 'nonexistent_prof'
+
+        // Should return InvalidProficiency error
+        let res = db.validate_with_proficiency_db(&prof_db);
+        assert!(matches!(res, Err(ClassError::InvalidProficiency(_))));
     }
 }

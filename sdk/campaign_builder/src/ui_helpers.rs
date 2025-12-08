@@ -781,40 +781,54 @@ impl<'a> TwoColumnLayout<'a> {
             self.max_left_ratio,
         );
 
+        // Determine available rectangle for coordinates, then split into left and right rects.
         ui.horizontal(|ui| {
-            // Left column
-            ui.vertical(|left_ui| {
-                left_ui.set_width(left_width);
-                left_ui.set_min_height(panel_height);
+            // Determine the absolute rectangle we can use for layout computations
+            let available_rect = ui.available_rect_before_wrap();
+
+            // Left and right rectangle computation
+            let sep_margin = 12.0;
+            let left_rect = egui::Rect::from_min_size(
+                available_rect.min,
+                egui::Vec2::new(left_width, panel_height),
+            );
+
+            let right_min_x = available_rect.min.x + left_width + sep_margin;
+            let right_width = (available_rect.width() - left_width - sep_margin).max(0.0);
+            let right_rect = egui::Rect::from_min_size(
+                egui::pos2(right_min_x, available_rect.min.y),
+                egui::Vec2::new(right_width, panel_height),
+            );
+
+            // Allocate left-side UI at left_rect. Inside the left-side scroll closure we allocate
+            // right-side area and its scroll area, then call the `content` closure with both scroll UIs.
+            ui.allocate_ui_at_rect(left_rect, |left_child| {
+                left_child.set_min_height(panel_height);
 
                 egui::ScrollArea::vertical()
                     .id_salt(format!("{}_left_scroll", self.id_salt))
                     .auto_shrink([false, false])
                     .max_height(panel_height)
-                    .show(left_ui, |scroll_ui| {
-                        // Add horizontal padding inside the scroll area so the map/list content does not
-                        // hug the column edges and both columns feel visually balanced.
-                        scroll_ui.set_min_width(scroll_ui.available_width());
+                    .show(left_child, |left_scroll| {
+                        // Ensure left scroll area width is consistent
+                        left_scroll.set_min_width(left_scroll.available_width());
 
-                        // For older-style `show` usage, calling `content` isn't trivial since it takes both
-                        // left and right `Ui` references at once. Prefer using `show_split` which is the
-                        // recommended method for new code.
-                    });
-            });
+                        // Allocate right-side area *from the root ui* so both columns are positioned correctly
+                        ui.allocate_ui_at_rect(right_rect, |right_child| {
+                            right_child.set_min_height(panel_height);
 
-            ui.separator();
+                            egui::ScrollArea::vertical()
+                                .id_salt(format!("{}_right_scroll", self.id_salt))
+                                .auto_shrink([false, false])
+                                .max_height(panel_height)
+                                .show(right_child, |right_scroll| {
+                                    // Ensure right scroll area width is consistent
+                                    right_scroll.set_min_width(right_scroll.available_width());
 
-            // Right column
-            ui.vertical(|right_ui| {
-                right_ui.set_min_width(inspector_min);
-                right_ui.set_min_height(panel_height);
-
-                egui::ScrollArea::vertical()
-                    .id_salt(format!("{}_right_scroll", self.id_salt))
-                    .auto_shrink([false, false])
-                    .max_height(panel_height)
-                    .show(right_ui, |scroll_ui| {
-                        // Placeholder; content closure cannot be called with both `Ui` instances easily here.
+                                    // Now invoke the content closure with both inner scroll UIs
+                                    content(left_scroll, right_scroll);
+                                });
+                        });
                     });
             });
         });

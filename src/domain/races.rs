@@ -12,6 +12,7 @@
 //! See `docs/reference/architecture.md` Section 4 for core data structures.
 //! See `docs/explanation/hardcoded_removal_implementation_plan.md` Phase 4.
 
+use crate::domain::proficiency::ProficiencyDatabase;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -33,6 +34,9 @@ pub enum RaceError {
 
     #[error("Validation error: {0}")]
     ValidationError(String),
+
+    #[error("Invalid proficiency reference in race '{0}': {1}")]
+    InvalidProficiency(String, String),
 
     #[error("Duplicate race ID: {0}")]
     DuplicateId(String),
@@ -639,6 +643,34 @@ impl RaceDatabase {
         Ok(())
     }
 
+    /// Validate proficiencies referenced by races exist in the `ProficiencyDatabase`.
+    ///
+    /// This method performs the usual race database validation (via `validate()`) and
+    /// then verifies that every `proficiencies` entry referenced in each race exists
+    /// in the given `ProficiencyDatabase`. If any referenced proficiency is missing,
+    /// an `RaceError::InvalidProficiency` error is returned.
+    pub fn validate_with_proficiency_db(
+        &self,
+        prof_db: &ProficiencyDatabase,
+    ) -> Result<(), RaceError> {
+        // Perform existing base validation first
+        self.validate()?;
+
+        // Validate each race's proficiencies against the proficiency database
+        for race_def in self.races.values() {
+            for prof in &race_def.proficiencies {
+                if !prof_db.has(prof) {
+                    return Err(RaceError::InvalidProficiency(
+                        race_def.id.clone(),
+                        prof.clone(),
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Returns true if a race with the given ID exists
     ///
     /// # Arguments
@@ -793,20 +825,66 @@ mod tests {
                 luck: 2,
             },
             resistances: Resistances {
-                magic: 5,
+                magic: 10,
                 fire: 0,
                 cold: 0,
                 electricity: 0,
                 acid: 0,
-                fear: 0,
-                poison: 0,
-                psychic: 5,
+                fear: 5,
+                poison: 5,
+                psychic: 10,
             },
-            special_abilities: vec!["infravision".to_string()],
+            special_abilities: vec!["infravision".to_string(), "small_stature".to_string()],
             size: SizeCategory::Small,
-            proficiencies: vec![],
-            incompatible_item_tags: vec!["large_weapon".to_string()],
+            proficiencies: vec!["simple_weapon".to_string(), "martial_ranged".to_string()],
+            incompatible_item_tags: vec!["large_weapon".to_string(), "heavy_armor".to_string()],
         }
+    }
+
+    #[test]
+    fn test_race_validate_with_proficiency_db_rejects_unknown_proficiency() {
+        use crate::domain::proficiency::ProficiencyDatabase;
+
+        // Minimal RON for a race that references a non-existent proficiency id:
+        let ron_data = r#"[
+            (
+                id: "test_race",
+                name: "Test Race",
+                description: "A race with unknown proficiency",
+                stat_modifiers: (
+                    might: 0,
+                    intellect: 0,
+                    personality: 0,
+                    endurance: 0,
+                    speed: 0,
+                    accuracy: 0,
+                    luck: 0,
+                ),
+                resistances: (
+                    magic: 0,
+                    fire: 0,
+                    cold: 0,
+                    electricity: 0,
+                    acid: 0,
+                    fear: 0,
+                    poison: 0,
+                    psychic: 0,
+                ),
+                special_abilities: [],
+                size: Medium,
+                proficiencies: ["nonexistent_prof"],
+                incompatible_item_tags: [],
+            ),
+        ]"#;
+
+        let db = RaceDatabase::load_from_string(ron_data).unwrap();
+        // Empty proficiency DB = 'nonexistent_prof' is not present
+        let prof_db = ProficiencyDatabase::new();
+
+        let res = db.validate_with_proficiency_db(&prof_db);
+
+        // Ensure it rejects with the InvalidProficiency error
+        assert!(matches!(res, Err(RaceError::InvalidProficiency(_, _))));
     }
 
     // ===== StatModifiers Tests =====

@@ -1543,7 +1543,7 @@ mod tests {
 
     #[test]
     fn test_scan_references_marks_assets_referenced() {
-        use antares::domain::items::types::{Disablement, Item, ItemType};
+        use antares::domain::items::types::{Item, ItemType};
         use antares::domain::types::ItemId;
         use std::path::PathBuf;
 

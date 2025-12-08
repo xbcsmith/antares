@@ -712,7 +712,7 @@ mod tests {
     use antares::domain::character::{AttributePair, Stats};
     use antares::domain::combat::monster::{LootTable, MonsterResistances};
     use antares::domain::combat::types::{Attack, AttackType};
-    use antares::domain::items::types::{Disablement, ItemType, WeaponClassification, WeaponData};
+    use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
     use antares::domain::types::DiceRoll;
 
     #[allow(deprecated)]

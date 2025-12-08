@@ -798,11 +798,18 @@ impl CampaignBuilderApp {
             ));
         }
 
-        // Races category - races are editable in the UI via the Races Editor tab
-        results.push(validation::ValidationResult::info(
-            validation::ValidationCategory::Races,
-            "Races configured via races_file - editable in the Races Editor tab",
-        ));
+        // Races category
+        if self.races_editor_state.races.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Races,
+                "No races loaded - add races or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Races,
+                format!("{} races validated", self.races_editor_state.races.len()),
+            ));
+        }
 
         results
     }
@@ -2255,6 +2262,8 @@ impl CampaignBuilderApp {
     }
 }
 
+// Tests moved to the existing tests module below
+
 impl eframe::App for CampaignBuilderApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Top menu bar
@@ -3567,6 +3576,24 @@ impl CampaignBuilderApp {
         ui.heading("📦 Asset Manager");
         ui.add_space(5.0);
         ui.label("Manage campaign assets (images, sounds, music, tilesets)");
+
+        // Quick action to open the Races Editor and ensure races are loaded from the campaign
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button("Open Races Editor & Load").clicked() {
+                // Only attempt to load if a campaign directory is set
+                if self.campaign_dir.is_some() {
+                    // Use the campaign's races_file path (the load helper updates the editor state)
+                    self.load_races_from_campaign();
+                    // Switch to the Races editor tab so the user can immediately see loaded races
+                    self.active_tab = EditorTab::Races;
+                } else {
+                    // Set a helpful status message if the app does not have a campaign directory set
+                    self.status_message =
+                        "No campaign directory loaded - cannot load races into UI".to_string();
+                }
+            }
+        });
+
         ui.separator();
 
         // Initialize asset manager if needed
@@ -3587,8 +3614,21 @@ impl CampaignBuilderApp {
                         &self.campaign.dialogue_file,
                         Some("data/conditions.ron"),
                     );
+                    // DEBUG: Show the number of scanned assets to aid troubleshooting (temporary)
+                    self.status_message = format!("Scanned {} assets", manager.assets().len());
                     self.asset_manager = Some(manager);
+
+                    // Auto-load races into the Races Editor when the asset manager initializes.
+                    // This ensures the Races Editor's in-memory state is populated after scanning
+                    // the campaign assets, resolving the case where assets show as "Loaded" but
+                    // the Races Editor list is empty.
+                    if self.campaign_dir.is_some() {
+                        // Load races from the configured file and update UI status
+                        self.load_races_from_campaign();
+                    }
                 }
+            } else {
+                // no campaign dir
             }
         }
 
@@ -3889,6 +3929,123 @@ mod tests {
     use antares::domain::character::{AttributePair, AttributePair16};
     use antares::domain::combat::monster::MonsterCondition;
     use antares::domain::quest::QuestStage;
+    use antares::domain::races::RaceDefinition;
+
+    #[test]
+    fn test_generate_category_status_checks_empty_races_shows_info() {
+        // Default app has no races loaded
+        let app = CampaignBuilderApp::default();
+        let results = app.generate_category_status_checks();
+
+        let race_info = results
+            .iter()
+            .find(|r| r.category == validation::ValidationCategory::Races);
+
+        assert!(
+            race_info.is_some(),
+            "Races category missing from validation results"
+        );
+        let result = race_info.unwrap();
+        assert_eq!(
+            result.severity,
+            validation::ValidationSeverity::Info,
+            "Expected Info severity for empty races"
+        );
+        assert!(
+            result
+                .message
+                .contains("No races loaded - add races or load from file"),
+            "Unexpected message: {}",
+            result.message
+        );
+    }
+
+    #[test]
+    fn test_generate_category_status_checks_loaded_races_shows_passed() {
+        // Create a CampaignBuilderApp and add a single race definition
+        let mut app = CampaignBuilderApp::default();
+        let race =
+            RaceDefinition::new("test".to_string(), "Test".to_string(), "A test".to_string());
+        app.races_editor_state.races.push(race);
+
+        let results = app.generate_category_status_checks();
+        let race_result = results
+            .iter()
+            .find(|r| r.category == validation::ValidationCategory::Races);
+
+        assert!(
+            race_result.is_some(),
+            "Races category missing from validation results"
+        );
+        let result = race_result.unwrap();
+        assert_eq!(
+            result.severity,
+            validation::ValidationSeverity::Passed,
+            "Expected Passed severity when races are loaded"
+        );
+        assert!(
+            result.message.contains(&format!(
+                "{} races validated",
+                app.races_editor_state.races.len()
+            )),
+            "Unexpected message: {}",
+            result.message
+        );
+    }
+
+    #[test]
+    fn test_load_races_from_campaign_populates_races_editor_state() {
+        use std::fs;
+        use std::path::PathBuf;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Build a temporary campaign directory under the system temp dir
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_millis();
+        let tmp_base = std::env::temp_dir();
+        let tmpdir = tmp_base.join(format!("antares_test_races_{}", unique));
+        let data_dir = tmpdir.join("data");
+
+        // Ensure directory exists
+        fs::create_dir_all(&data_dir).expect("Failed to create temp data dir");
+
+        // RON content containing two race definitions (human, elf)
+        let races_ron = r#"
+[
+    (
+        id: "human",
+        name: "Human",
+    ),
+    (
+        id: "elf",
+        name: "Elf",
+    ),
+]
+"#;
+
+        // Write races.ron to the data directory
+        let races_path = data_dir.join("races.ron");
+        fs::write(&races_path, races_ron).expect("Failed to write races.ron");
+
+        // Setup the CampaignBuilderApp, and point it at our temporary campaign
+        let mut app = CampaignBuilderApp::default();
+        app.campaign_dir = Some(tmpdir.clone());
+        // Use the default "data/races.ron" path; set explicitly to be safe
+        app.campaign.races_file = "data/races.ron".to_string();
+
+        // Load races into the editor state (this should populate races_editor_state.races)
+        app.load_races_from_campaign();
+
+        // Validate we loaded exactly 2 races and they have the expected IDs
+        assert_eq!(app.races_editor_state.races.len(), 2);
+        assert_eq!(app.races_editor_state.races[0].id, "human");
+        assert_eq!(app.races_editor_state.races[1].id, "elf");
+
+        // Cleanup any temporary files/directories
+        let _ = fs::remove_dir_all(tmpdir);
+    }
 
     #[test]
     fn test_campaign_metadata_default() {
@@ -5547,26 +5704,35 @@ mod tests {
     }
 
     #[test]
-    fn test_disablement_flags() {
-        // Standard class bit positions
-        const BIT_KNIGHT: u8 = 0b0000_0001;
-        const BIT_PALADIN: u8 = 0b0000_0010;
-        const BIT_SORCERER: u8 = 0b0001_0000;
+    fn test_item_proficiency_and_alignment_restrictions() {
+        // Local imports for clarity and isolation in test function
+        use antares::domain::items::types::{AlignmentRestriction, WeaponClassification};
+        use antares::domain::proficiency::ProficiencyDatabase;
 
         let mut item = CampaignBuilderApp::default_item();
 
-        // Test all classes enabled
-        assert!(item.disablements.can_use_class(BIT_KNIGHT));
-        assert!(item.disablements.can_use_class(BIT_SORCERER));
+        // Default item should derive the correct proficiency for a simple weapon
+        assert_eq!(
+            item.required_proficiency(),
+            Some(ProficiencyDatabase::proficiency_for_weapon(
+                WeaponClassification::Simple
+            ))
+        );
 
-        // Test specific class restriction
-        assert!(item.disablements.can_use_class(BIT_KNIGHT));
-        assert!(item.disablements.can_use_class(BIT_PALADIN));
-        assert!(!item.disablements.can_use_class(BIT_SORCERER));
+        // Default alignment restriction should be None
+        assert_eq!(item.alignment_restriction, None);
 
-        // Test alignment flags
-        assert!(item.disablements.good_only());
-        assert!(!item.disablements.evil_only());
+        // Update alignment restriction to GoodOnly and confirm it is stored correctly
+        item.alignment_restriction = Some(AlignmentRestriction::GoodOnly);
+        assert_eq!(
+            item.alignment_restriction,
+            Some(AlignmentRestriction::GoodOnly)
+        );
+        // Ensure EvilOnly is not set
+        assert_ne!(
+            item.alignment_restriction,
+            Some(AlignmentRestriction::EvilOnly)
+        );
     }
 
     #[test]
@@ -5759,77 +5925,58 @@ mod tests {
     }
 
     #[test]
-    fn test_disablement_editor_all_classes() {
-        // Standard class bit positions
-        const BIT_KNIGHT: u8 = 0b0000_0001;
-        const BIT_PALADIN: u8 = 0b0000_0010;
-        const BIT_ARCHER: u8 = 0b0000_0100;
-        const BIT_CLERIC: u8 = 0b0000_1000;
-        const BIT_SORCERER: u8 = 0b0001_0000;
-        const BIT_ROBBER: u8 = 0b0010_0000;
+    fn test_items_editor_default_required_proficiency() {
+        // Ensure the items editor edit buffer starts with a default weapon and correct derived proficiency
+        use antares::domain::items::types::WeaponClassification;
+        use antares::domain::proficiency::ProficiencyDatabase;
 
         let mut app = CampaignBuilderApp::default();
 
-        // Set all classes enabled
+        // Default edit_buffer is a simple weapon; required_proficiency should match simple_weapon id
+        let required_prof = app
+            .items_editor_state
+            .edit_buffer
+            .required_proficiency()
+            .expect("Default edit buffer should have a derived proficiency");
 
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(BIT_KNIGHT));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(BIT_PALADIN));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(BIT_ARCHER));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(BIT_CLERIC));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(BIT_SORCERER));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(BIT_ROBBER));
+        assert_eq!(
+            required_prof,
+            ProficiencyDatabase::proficiency_for_weapon(WeaponClassification::Simple)
+        );
+
+        // Default alignment restriction should be None
+        assert_eq!(
+            app.items_editor_state.edit_buffer.alignment_restriction,
+            None
+        );
     }
 
     #[test]
-    fn test_disablement_editor_specific_classes() {
-        // Standard class bit positions
-        const BIT_KNIGHT: u8 = 0b0000_0001;
-        const BIT_PALADIN: u8 = 0b0000_0010;
-        const BIT_SORCERER: u8 = 0b0001_0000;
+    fn test_items_editor_classification_changes_required_proficiency() {
+        use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
+        use antares::domain::proficiency::ProficiencyDatabase;
+        use antares::domain::types::DiceRoll;
 
         let mut app = CampaignBuilderApp::default();
 
-        // Only knight and paladin
+        // Change the edit buffer weapon classification to MartialMelee and verify derived proficiency
+        app.items_editor_state.edit_buffer.item_type = ItemType::Weapon(WeaponData {
+            damage: DiceRoll::new(2, 6, 0),
+            bonus: 1,
+            hands_required: 1,
+            classification: WeaponClassification::MartialMelee,
+        });
 
-        assert!(app
+        let required_prof = app
             .items_editor_state
             .edit_buffer
-            .disablements
-            .can_use_class(BIT_KNIGHT));
-        assert!(app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(BIT_PALADIN));
-        assert!(!app
-            .items_editor_state
-            .edit_buffer
-            .disablements
-            .can_use_class(BIT_SORCERER));
+            .required_proficiency()
+            .expect("Martial melee weapon should have a derived proficiency");
+
+        assert_eq!(
+            required_prof,
+            ProficiencyDatabase::proficiency_for_weapon(WeaponClassification::MartialMelee)
+        );
     }
 
     #[test]

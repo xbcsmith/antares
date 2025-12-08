@@ -583,7 +583,7 @@ impl Command for DeleteQuestCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antares::domain::items::types::{Disablement, ItemType, WeaponClassification, WeaponData};
+    use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
     use antares::domain::types::DiceRoll;
 
     #[allow(deprecated)]
@@ -599,7 +599,6 @@ mod tests {
             }),
             base_cost: 100,
             sell_cost: 50,
-            disablements: Disablement::ALL,
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
