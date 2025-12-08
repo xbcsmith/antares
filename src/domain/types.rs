@@ -40,6 +40,9 @@ pub type TownId = u8;
 /// Event identifier
 pub type EventId = u16;
 
+/// Race identifier (e.g., "human", "elf", "dwarf")
+pub type RaceId = String;
+
 // ===== Position =====
 
 /// 2D position on a map

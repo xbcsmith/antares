@@ -37,7 +37,7 @@ fn get_condition_element(def: &ConditionDefinition) -> Option<&str> {
 /// # use antares::domain::character::*;
 /// # use antares::domain::conditions::*;
 ///
-/// let mut character = Character::new("Hero".to_string(), Race::Human, Class::Knight, Sex::Male, Alignment::Good);
+/// let mut character = Character::new("Hero".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
 /// // ... setup spell and conditions
 /// // apply_spell_conditions_to_character(&spell, &mut character, &conditions, true);
 /// ```
@@ -165,7 +165,7 @@ pub fn apply_condition_dot_effects(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Alignment, Character, Class, Race, Sex};
+    use crate::domain::character::{Alignment, Character, Sex};
     use crate::domain::conditions::{ConditionDefinition, ConditionDuration};
     use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
 
@@ -173,8 +173,8 @@ mod tests {
     fn test_apply_spell_conditions() {
         let mut character = Character::new(
             "TestHero".to_string(),
-            Race::Human,
-            Class::Knight,
+            "human".to_string(),
+            "knight".to_string(),
             Sex::Male,
             Alignment::Good,
         );
@@ -217,8 +217,8 @@ mod tests {
     fn test_saving_throw_resists_condition() {
         let mut character = Character::new(
             "TestHero".to_string(),
-            Race::Human,
-            Class::Knight,
+            "human".to_string(),
+            "knight".to_string(),
             Sex::Male,
             Alignment::Good,
         );

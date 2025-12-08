@@ -9,6 +9,7 @@ Before creating maps, you should:
 1. Read [`docs/reference/map_ron_format.md`](../reference/map_ron_format.md) - Complete format specification
 2. Have a text editor that supports RON syntax (VS Code with Rust extension recommended)
 3. Understand the coordinate system (0,0 = top-left corner)
+4. Familiarity with the item, monster, and character definition systems
 
 ## Quick Start: Your First Map
 
@@ -484,6 +485,7 @@ exits: [
 ### Map Builder Tool
 
 For visual map creation, see the map builder tools:
+
 - [Using Map Builder](using_map_builder.md) - Visual map creation tool
 - [Using SDK Map Editor](using_sdk_map_editor.md) - SDK map editor
 
@@ -503,34 +505,50 @@ To add new event types:
 3. Add to RON deserializer
 4. Update this documentation
 
-## Monster and Item IDs
+## Content IDs Reference
 
 ### Finding Valid IDs
 
 Check these files for available content:
 
-- **Monsters**: `data/monsters.ron`
-- **Items**: `data/items.ron`
-- **Spells**: `data/spells.ron` (for spell-casting NPCs)
+- **Monsters**: `data/monsters.ron` - Monster definitions with stats and abilities
+- **Items**: `data/items.ron` - Items using proficiency and classification system
+- **Spells**: `data/spells.ron` - Spell definitions for spell-casting NPCs
+- **Character Definitions**: `data/character_definitions.ron` - Pre-made character templates
 
-### Common Monster IDs
+### Monster IDs (MonsterId = u8)
+
+Valid range: 1-255 (0 is reserved/invalid)
+
+Check `data/monsters.ron` for your campaign's available monsters. Common examples:
 
 ```text
 1  - Goblin (weak, starter enemy)
 2  - Orc (medium strength)
 3  - Wolf (fast, pack enemy)
-4  - Skeleton (undead, resistant to arrows)
+4  - Skeleton (undead, resistant to certain attacks)
 5  - Zombie (slow, high HP)
 ```
 
-### Common Item IDs
+### Item IDs (ItemId = u8)
+
+Valid range: 1-255 (0 is reserved/invalid)
+
+Items now use the proficiency system with classifications and tags. Check `data/items.ron` for available items:
 
 ```text
 1-9   - Basic weapons (Club, Dagger, Short Sword, etc.)
-10-20 - Armor (Leather, Chain, Plate)
+10-20 - Armor pieces (Leather, Chain, Plate)
 50-60 - Consumables (Healing Potion, Antidote, etc.)
 100+  - Special/quest items
 ```
+
+**Note**: Items are no longer restricted by class/race disablement bits. Instead, they use:
+
+- **Proficiencies**: Skills required to use the item (e.g., LongBow, PlateArmor)
+- **Classifications**: Item categories (WeaponType, ArmorWeight, etc.)
+- **Alignment Restrictions**: Good/Neutral/Evil restrictions
+- **Racial Tags**: Race-specific size or biological restrictions
 
 ## Examples
 
@@ -580,13 +598,58 @@ A small 12x12 indoor map with NPCs and a rest area:
 )
 ```
 
+## Advanced Map Features
+
+### Using Character Definitions in Events
+
+Maps can reference pre-made character definitions for special encounters or NPCs:
+
+```ron
+events: [
+    (
+        position: (x: 15, y: 15),
+        event_type: Text((
+            message: "A mysterious warrior challenges you!",
+        )),
+        repeatable: false,
+        triggered: false,
+    ),
+],
+```
+
+Character definitions are stored in `data/character_definitions.ron` and can be instantiated into full characters during gameplay.
+
+### Quest Integration
+
+Maps can trigger quest events that set flags in the campaign state:
+
+```ron
+events: [
+    (
+        position: (x: 10, y: 10),
+        event_type: Quest((
+            quest_id: 1,
+            flag_name: "found_ancient_artifact",
+            message: "You have discovered the Ancient Artifact of Power!",
+        )),
+        repeatable: false,
+        triggered: false,
+    ),
+],
+```
+
 ## References
 
 - **Format Specification**: [`docs/reference/map_ron_format.md`](../reference/map_ron_format.md)
 - **Architecture**: [`docs/reference/architecture.md`](../reference/architecture.md) Section 4.2
+- **Character Definitions**: [`docs/how-to/character_definitions.md`](character_definitions.md)
+- **Proficiency System**: [`docs/reference/architecture.md`](../reference/architecture.md) Section 4.4
 - **Validation Tool**: `src/bin/validate_map.rs`
+- **Map Editor Tools**:
+  - CLI Map Validator: `cargo run --bin validate_map`
+  - SDK Map Editor: Campaign Builder UI
 
 ---
 
-**Last Updated**: 2024
-**Version**: 1.0
+**Last Updated**: 2025-01-25
+**Version**: 2.0

@@ -33,6 +33,21 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process;
 
+/// Standard proficiency IDs recognized by the system
+const STANDARD_PROFICIENCY_IDS: &[&str] = &[
+    "simple_weapon",
+    "martial_melee",
+    "martial_ranged",
+    "blunt_weapon",
+    "unarmed",
+    "light_armor",
+    "medium_armor",
+    "heavy_armor",
+    "shield",
+    "arcane_item",
+    "divine_item",
+];
+
 /// Main application state
 struct ClassEditor {
     classes: Vec<ClassDefinition>,
@@ -186,8 +201,8 @@ impl ClassEditor {
 
         let hp_die = self.select_hp_die();
         let (spell_school, is_pure_caster, spell_stat) = self.select_spell_access();
-        let disablement_bit = self.get_next_disablement_bit();
         let special_abilities = self.input_special_abilities();
+        let proficiencies = self.input_proficiencies();
 
         let class_def = ClassDefinition {
             id: id.clone(),
@@ -197,11 +212,12 @@ impl ClassEditor {
             spell_school,
             is_pure_caster,
             spell_stat,
-            disablement_bit_index: disablement_bit,
+
             special_abilities,
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: Vec::new(),
+            proficiencies,
         };
 
         self.classes.push(class_def);
@@ -255,6 +271,14 @@ impl ClassEditor {
             "  4. Special Abilities (currently: {})",
             class.special_abilities.len()
         );
+        println!(
+            "  5. Proficiencies (currently: {})",
+            if class.proficiencies.is_empty() {
+                "None".to_string()
+            } else {
+                class.proficiencies.join(", ")
+            }
+        );
         println!("  c. Cancel");
 
         let choice = self.read_input("\nChoice: ");
@@ -285,6 +309,12 @@ impl ClassEditor {
                 self.classes[idx].special_abilities = abilities;
                 self.modified = true;
                 println!("✅ Special abilities updated");
+            }
+            "5" => {
+                let proficiencies = self.input_proficiencies();
+                self.classes[idx].proficiencies = proficiencies;
+                self.modified = true;
+                println!("✅ Proficiencies updated");
             }
             "c" | "C" => println!("Cancelled"),
             _ => println!("❌ Invalid choice"),
@@ -371,12 +401,6 @@ impl ClassEditor {
                 .map(|s| format!("{:?}", s))
                 .unwrap_or_else(|| "N/A".to_string())
         );
-        println!(
-            "  Disablement Bit Index: {} (mask: 0b{:08b})",
-            class.disablement_bit_index,
-            1 << class.disablement_bit_index
-        );
-
         if class.special_abilities.is_empty() {
             println!("  Special Abilities: None");
         } else {
@@ -522,26 +546,6 @@ impl ClassEditor {
         }
     }
 
-    /// Gets the next available disablement bit
-    fn get_next_disablement_bit(&self) -> u8 {
-        let mut used_bits = [false; 8];
-
-        for class in &self.classes {
-            if (class.disablement_bit_index as usize) < 8 {
-                used_bits[class.disablement_bit_index as usize] = true;
-            }
-        }
-
-        for (idx, &used) in used_bits.iter().enumerate() {
-            if !used {
-                return idx as u8;
-            }
-        }
-
-        // If all bits used, find the next available
-        self.classes.len() as u8 % 8
-    }
-
     /// Inputs special abilities
     fn input_special_abilities(&self) -> Vec<String> {
         println!("\nSpecial Abilities (comma-separated, or leave empty):");
@@ -559,6 +563,65 @@ impl ClassEditor {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect()
+    }
+
+    /// Inputs proficiencies with validation
+    fn input_proficiencies(&self) -> Vec<String> {
+        println!("\n╔════════════════════════════════════════╗");
+        println!("║        PROFICIENCY SELECTION           ║");
+        println!("╚════════════════════════════════════════╝");
+        println!("\nStandard Proficiencies:");
+        println!("  Weapons:");
+        println!("    • simple_weapon      - Simple weapons (daggers, clubs)");
+        println!("    • martial_melee      - Martial melee weapons (swords, axes)");
+        println!("    • martial_ranged     - Martial ranged weapons (longbows, crossbows)");
+        println!("    • blunt_weapon       - Blunt weapons (maces, flails)");
+        println!("    • unarmed            - Unarmed combat");
+        println!("\n  Armor:");
+        println!("    • light_armor        - Light armor (leather, padded)");
+        println!("    • medium_armor       - Medium armor (chainmail, scale)");
+        println!("    • heavy_armor        - Heavy armor (plate, full plate)");
+        println!("    • shield             - Shields");
+        println!("\n  Magic Items:");
+        println!("    • arcane_item        - Arcane magic items (wands, staves)");
+        println!("    • divine_item        - Divine magic items (holy symbols, relics)");
+
+        println!("\n📝 Enter proficiencies (comma-separated, or leave empty):");
+        println!("   Example: simple_weapon,light_armor,shield");
+
+        let input = self.read_input("Proficiencies: ");
+        let trimmed = input.trim();
+
+        if trimmed.is_empty() {
+            return Vec::new();
+        }
+
+        let proficiencies: Vec<String> = trimmed
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        // Validate proficiencies
+        let mut valid_proficiencies = Vec::new();
+        for prof in proficiencies {
+            if STANDARD_PROFICIENCY_IDS.contains(&prof.as_str()) {
+                valid_proficiencies.push(prof);
+            } else {
+                println!("⚠️  Warning: '{}' is not a standard proficiency ID", prof);
+                println!("   Standard IDs: {}", STANDARD_PROFICIENCY_IDS.join(", "));
+                let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", prof));
+                if confirm.trim().eq_ignore_ascii_case("y") {
+                    valid_proficiencies.push(prof);
+                }
+            }
+        }
+
+        if !valid_proficiencies.is_empty() {
+            println!("✅ Added proficiencies: {}", valid_proficiencies.join(", "));
+        }
+
+        valid_proficiencies
     }
 }
 
@@ -611,58 +674,5 @@ mod tests {
         assert_eq!(truncate("short", 10), "short");
         assert_eq!(truncate("this is a very long string", 10), "this is...");
         assert_eq!(truncate("exactly10c", 10), "exactly10c");
-    }
-
-    #[test]
-    fn test_get_next_disablement_bit_empty() {
-        let editor = ClassEditor {
-            classes: Vec::new(),
-            file_path: PathBuf::from("test.ron"),
-            modified: false,
-        };
-
-        assert_eq!(editor.get_next_disablement_bit(), 0);
-    }
-
-    #[test]
-    fn test_get_next_disablement_bit_sequential() {
-        let classes = vec![
-            ClassDefinition {
-                id: "knight".to_string(),
-                name: "Knight".to_string(),
-                description: String::new(),
-                hp_die: DiceRoll::new(1, 10, 0),
-                spell_school: None,
-                is_pure_caster: false,
-                spell_stat: None,
-                disablement_bit_index: 0,
-                special_abilities: vec![],
-                starting_weapon_id: None,
-                starting_armor_id: None,
-                starting_items: Vec::new(),
-            },
-            ClassDefinition {
-                id: "sorcerer".to_string(),
-                name: "Sorcerer".to_string(),
-                description: String::new(),
-                hp_die: DiceRoll::new(1, 4, 0),
-                spell_school: Some(SpellSchool::Sorcerer),
-                is_pure_caster: true,
-                spell_stat: Some(SpellStat::Intellect),
-                disablement_bit_index: 1,
-                special_abilities: vec![],
-                starting_weapon_id: None,
-                starting_armor_id: None,
-                starting_items: Vec::new(),
-            },
-        ];
-
-        let editor = ClassEditor {
-            classes,
-            file_path: PathBuf::from("test.ron"),
-            modified: false,
-        };
-
-        assert_eq!(editor.get_next_disablement_bit(), 2);
     }
 }

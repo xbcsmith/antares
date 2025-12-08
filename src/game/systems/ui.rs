@@ -61,8 +61,8 @@ fn ui_system(mut contexts: EguiContexts, global_state: Res<GlobalState>, game_lo
                         ui.label(format!("HP: {}/{}", member.hp.current, member.hp.base));
                         ui.label(format!("SP: {}/{}", member.sp.current, member.sp.base));
                         ui.label(format!("Lvl: {}", member.level));
-                        ui.label(format!("{:?}", member.class));
-                        ui.label(format!("{:?}", member.race));
+                        ui.label(&member.class_id);
+                        ui.label(&member.race_id);
                     });
                 }
                 if game_state.party.members.is_empty() {

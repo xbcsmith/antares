@@ -72,14 +72,14 @@ pub const REST_DURATION_HOURS: u32 = 8;
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::{Party, Character, Class, Race, Sex, Alignment};
+/// use antares::domain::character::{Party, Character, Sex, Alignment};
 /// use antares::domain::resources::consume_food;
 ///
 /// let mut party = Party::new();
 /// let character = Character::new(
 ///     "Hero".to_string(),
-///     Race::Human,
-///     Class::Knight,
+///     "human".to_string(),
+///     "knight".to_string(),
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
@@ -208,15 +208,15 @@ pub fn is_dark(party: &Party) -> bool {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::{Party, Character, Class, Race, Sex, Alignment};
+/// use antares::domain::character::{Party, Character, Sex, Alignment};
 /// use antares::domain::resources::rest_party;
 /// use antares::domain::types::GameTime;
 ///
 /// let mut party = Party::new();
 /// let mut character = Character::new(
 ///     "Hero".to_string(),
-///     Race::Human,
-///     Class::Knight,
+///     "human".to_string(),
+///     "knight".to_string(),
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
@@ -290,14 +290,14 @@ pub fn rest_party(
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::{Party, Character, Class, Race, Sex, Alignment};
+/// use antares::domain::character::{Party, Character, Sex, Alignment};
 /// use antares::domain::resources::apply_starvation_damage;
 ///
 /// let mut party = Party::new();
 /// let mut character = Character::new(
 ///     "Hero".to_string(),
-///     Race::Human,
-///     Class::Knight,
+///     "human".to_string(),
+///     "knight".to_string(),
 ///     Sex::Male,
 ///     Alignment::Good,
 /// );
@@ -328,15 +328,15 @@ pub fn apply_starvation_damage(party: &mut Party, damage_per_member: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Alignment, Character, Class, Race, Sex};
+    use crate::domain::character::{Alignment, Character, Sex};
 
     fn create_test_party() -> Party {
         let mut party = Party::new();
         for i in 0..3 {
             let mut character = Character::new(
                 format!("Hero{}", i),
-                Race::Human,
-                Class::Knight,
+                "human".to_string(),
+                "knight".to_string(),
                 Sex::Male,
                 Alignment::Good,
             );

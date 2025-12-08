@@ -436,6 +436,7 @@ mod tests {
                 maps: "maps".to_string(),
                 quests: "quests.ron".to_string(),
                 dialogues: "dialogues.ron".to_string(),
+                characters: "characters.ron".to_string(),
             },
             assets: CampaignAssets {
                 tilesets: "tilesets".to_string(),

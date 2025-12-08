@@ -3,14 +3,6 @@
 // This file contains all character class definitions in RON (Rusty Object Notation) format.
 // See docs/explanation/sdk_implementation_plan.md Phase 1 for specifications.
 //
-// Class Disablement Bits (for item restrictions):
-//   Bit 0 (0b00000001) - Knight
-//   Bit 1 (0b00000010) - Paladin
-//   Bit 2 (0b00000100) - Archer
-//   Bit 3 (0b00001000) - Cleric
-//   Bit 4 (0b00010000) - Sorcerer
-//   Bit 5 (0b00100000) - Robber
-//
 // HP Dice:
 //   - Knight:   1d10 (highest HP)
 //   - Paladin:  1d8  (high HP, hybrid caster)
@@ -18,6 +10,18 @@
 //   - Cleric:   1d6  (medium HP, divine caster)
 //   - Sorcerer: 1d4  (lowest HP, arcane caster)
 //   - Robber:   1d6  (medium HP, utility specialist)
+//
+// Proficiencies (see data/proficiencies.ron for definitions):
+//   - simple_weapon: Basic weapons anyone can learn
+//   - martial_melee: Advanced melee weapons
+//   - martial_ranged: Ranged weapons requiring training
+//   - blunt_weapon: Maces, hammers, staffs (favored by clerics)
+//   - light_armor: Leather, padded armor
+//   - medium_armor: Chain mail, scale mail
+//   - heavy_armor: Plate mail, full plate
+//   - shield: All shield types
+//   - arcane_item: Wands, arcane scrolls
+//   - divine_item: Holy symbols, divine scrolls
 
 [
     // ===== Knight - Tank/Melee Specialist =====
@@ -29,11 +33,18 @@
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            disablement_bit: 0,
             special_abilities: ["multiple_attacks", "heavy_armor"],
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "martial_melee",
+                "light_armor",
+                "medium_armor",
+                "heavy_armor",
+                "shield",
+            ],
         ),
 
     // ===== Paladin - Hybrid Fighter/Cleric =====
@@ -45,11 +56,20 @@
             spell_school: Some(Cleric),
             is_pure_caster: false,
             spell_stat: Some(Personality),
-            disablement_bit: 1,
             special_abilities: ["turn_undead", "lay_on_hands"],
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "martial_melee",
+                "blunt_weapon",
+                "light_armor",
+                "medium_armor",
+                "heavy_armor",
+                "shield",
+                "divine_item",
+            ],
         ),
 
     // ===== Archer - Ranged Specialist =====
@@ -61,11 +81,16 @@
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            disablement_bit: 2,
             special_abilities: ["ranged_bonus", "precision_shot"],
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "martial_ranged",
+                "light_armor",
+                "medium_armor",
+            ],
         ),
 
     // ===== Cleric - Divine Spellcaster =====
@@ -77,11 +102,18 @@
             spell_school: Some(Cleric),
             is_pure_caster: true,
             spell_stat: Some(Personality),
-            disablement_bit: 3,
             special_abilities: ["turn_undead", "divine_intervention"],
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "blunt_weapon",
+                "light_armor",
+                "medium_armor",
+                "shield",
+                "divine_item",
+            ],
         ),
 
     // ===== Sorcerer - Arcane Spellcaster =====
@@ -93,11 +125,14 @@
             spell_school: Some(Sorcerer),
             is_pure_caster: true,
             spell_stat: Some(Intellect),
-            disablement_bit: 4,
             special_abilities: ["arcane_mastery", "spell_penetration"],
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "arcane_item",
+            ],
         ),
 
     // ===== Robber - Utility Specialist =====
@@ -109,10 +144,14 @@
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            disablement_bit: 5,
             special_abilities: ["backstab", "disarm_trap", "pick_lock"],
             starting_weapon_id: None,
             starting_armor_id: None,
             starting_items: [],
+            proficiencies: [
+                "simple_weapon",
+                "martial_melee",
+                "light_armor",
+            ],
         ),
 ]

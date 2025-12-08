@@ -4,7 +4,7 @@
 **Time**: 30-45 minutes
 **Prerequisites**: Antares SDK installed
 
-This tutorial walks you through creating a complete playable campaign from scratch.
+This tutorial walks you through creating a complete playable campaign from scratch using the data-driven architecture with proficiency-based restrictions and character definitions.
 
 ---
 
@@ -19,10 +19,11 @@ This tutorial walks you through creating a complete playable campaign from scrat
 7. [Step 5: Create Items](#step-5-create-items)
 8. [Step 6: Create Monsters](#step-6-create-monsters)
 9. [Step 7: Create Spells](#step-7-create-spells)
-10. [Step 8: Create Maps](#step-8-create-maps)
-11. [Step 9: Validate](#step-9-validate)
-12. [Step 10: Test](#step-10-test)
-13. [Next Steps](#next-steps)
+10. [Step 8: Create Character Definitions](#step-8-create-character-definitions)
+11. [Step 9: Create Maps](#step-9-create-maps)
+12. [Step 10: Validate](#step-10-validate)
+13. [Step 11: Test](#step-11-test)
+14. [Next Steps](#next-steps)
 
 ---
 
@@ -30,11 +31,12 @@ This tutorial walks you through creating a complete playable campaign from scrat
 
 By the end of this tutorial, you'll have created **"The Cursed Village"**, a small campaign featuring:
 
-- 2 character classes (Knight, Mage)
-- 2 playable races (Human, Elf)
-- 5 items (weapons and armor)
+- 2 character classes (Knight, Mage) with proficiencies
+- 2 playable races (Human, Elf) with racial traits
+- 5 items with proficiency requirements (weapons and armor)
 - 3 monster types (Goblin, Dire Wolf, Necromancer)
 - 3 spells (Heal, Fireball, Lightning Bolt)
+- 2 pre-made character definitions
 - 2 maps (Village, Cursed Crypt)
 
 ---
@@ -52,12 +54,14 @@ cd cursed_village
 ### 2. Install SDK Tools (if not already installed)
 
 ```bash
+cd antares
 cargo build --release --bin class_editor
 cargo build --release --bin race_editor
 cargo build --release --bin item_editor
-cargo build --release --bin campaign_validator
+cargo build --release --bin validate_campaign
 ```
 
+These CLI editors make content creation easier than writing RON by hand. The validator ensures your campaign is properly structured.
 Binaries will be in `target/release/`.
 
 ---
@@ -74,6 +78,7 @@ touch data/races.ron
 touch data/items.ron
 touch data/monsters.ron
 touch data/spells.ron
+touch data/character_definitions.ron
 ```
 
 Your directory should now look like:
@@ -87,6 +92,7 @@ campaigns/cursed_village/
     ├── items.ron
     ├── monsters.ron
     ├── spells.ron
+    ├── character_definitions.ron
     └── maps/
 ```
 
@@ -109,6 +115,7 @@ Edit `campaign.ron`:
 ```
 
 **Field Explanations**:
+
 - `id`: Unique identifier (lowercase, underscores only)
 - `name`: Display name shown to players
 - `version`: Semantic version (major.minor.patch)
@@ -128,6 +135,7 @@ Edit `campaign.ron`:
 Follow the prompts to add two classes:
 
 **Knight**:
+
 - ID: 1
 - Name: Knight
 - HP Die: d10 (10 sides)
@@ -137,6 +145,7 @@ Follow the prompts to add two classes:
 - Special Abilities: None
 
 **Mage**:
+
 - ID: 2
 - Name: Mage
 - HP Die: d6 (6 sides)
@@ -149,7 +158,7 @@ Save and exit.
 
 ### Manual Creation (Alternative)
 
-Edit `data/classes.ron`:
+Create `data/classes.ron` (now using proficiency system):
 
 ```ron
 {
@@ -160,7 +169,8 @@ Edit `data/classes.ron`:
         spell_school: None,
         is_pure_caster: false,
         spell_stat: None,
-        disablement_bit: 1,
+        spell_progression: [],
+        proficiencies: [ShortSword, LongSword, Axe, Mace, Shield, ChainArmor, PlateArmor],
         special_abilities: [],
     ),
     2: (
@@ -170,16 +180,21 @@ Edit `data/classes.ron`:
         spell_school: Some(Elemental),
         is_pure_caster: true,
         spell_stat: Some(Intellect),
-        disablement_bit: 2,
+        spell_progression: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        proficiencies: [Staff, Dagger, Cloth],
         special_abilities: [],
     ),
 }
 ```
 
 **Key Points**:
+
 - `hp_die`: Number of sides on hit point die (d6 = 6, d8 = 8, d10 = 10)
-- `disablement_bit`: Unique power-of-2 for item restrictions (1, 2, 4, 8, 16, etc.)
+- `proficiencies`: List of equipment/weapon types the class can use
 - `is_pure_caster`: True if class gets spells every level
+- `spell_progression`: Number of spells gained at each level (empty for non-casters)
+
+**Proficiency System**: Classes now use proficiencies instead of disablement bits. Items require specific proficiencies to use.
 
 ---
 
@@ -192,18 +207,20 @@ Edit `data/classes.ron`:
 ```
 
 **Human**:
+
 - ID: 1
 - Name: Human
 - Stat Modifiers: All 0 (balanced)
-- Resistances: None
-- Disablement Bit: 1
+- Proficiencies: None (no restrictions)
+- Racial Tags: Medium (size)
 
 **Elf**:
+
 - ID: 2
 - Name: Elf
 - Stat Modifiers: Intellect +2, Endurance -1
-- Resistances: None
-- Disablement Bit: 2
+- Proficiencies: LongBow (racial bonus)
+- Racial Tags: Medium, Elf
 
 ### Manual Creation (Alternative)
 
@@ -217,15 +234,15 @@ Edit `data/races.ron`:
         stat_modifiers: (
             might: 0,
             intellect: 0,
-            personality: 0,
-            endurance: 0,
             speed: 0,
+            endurance: 0,
             accuracy: 0,
+            personality: 0,
             luck: 0,
         ),
-        resistances: [],
-        special_abilities: [],
-        disablement_bit: 1,
+        resistances: 0,
+        proficiencies: [],
+        racial_tags: [Medium],
     ),
     2: (
         id: 2,
@@ -233,18 +250,22 @@ Edit `data/races.ron`:
         stat_modifiers: (
             might: 0,
             intellect: 2,
-            personality: 0,
+            speed: 0,
             endurance: -1,
-            speed: 1,
-            accuracy: 1,
+            accuracy: 0,
+            personality: 0,
             luck: 0,
         ),
-        resistances: [],
-        special_abilities: [],
-        disablement_bit: 2,
+        resistances: 0,
+        proficiencies: [LongBow],
+        racial_tags: [Medium, Elf],
     ),
 }
 ```
+
+**Racial Proficiencies**: Races can grant bonus proficiencies (e.g., Elves with LongBow).
+
+**Racial Tags**: Used for item restrictions based on size or biology (e.g., Small races can't use Medium-sized weapons).
 
 ---
 
@@ -259,38 +280,48 @@ Edit `data/races.ron`:
 Create these items:
 
 **1. Rusty Sword** (ID: 1)
-- Type: Weapon
+
+- Type: Weapon (Short Sword classification)
 - Damage: 1d6
 - Value: 10
-- Usable by: All classes
+- Required Proficiency: ShortSword
+- Usable by: Knights (have ShortSword proficiency)
 
 **2. Steel Longsword** (ID: 2)
-- Type: Weapon
+
+- Type: Weapon (Long Sword classification)
 - Damage: 1d8
 - Value: 100
-- Usable by: Knight only
+- Required Proficiency: LongSword
+- Usable by: Knights only
 
 **3. Wooden Staff** (ID: 3)
-- Type: Weapon
+
+- Type: Weapon (Staff classification)
 - Damage: 1d4
 - Value: 5
-- Usable by: Mage only
+- Required Proficiency: Staff
+- Usable by: Mages only
 
 **4. Leather Armor** (ID: 4)
-- Type: Armor
+
+- Type: Armor (Light armor)
 - AC Bonus: +2
 - Value: 50
+- Required Proficiency: None (light armor has no restriction)
 - Usable by: All
 
 **5. Healing Potion** (ID: 5)
+
 - Type: Consumable
 - Effect: Restore 2d8 HP
 - Value: 25
+- Required Proficiency: None
 - Usable by: All
 
 ### Manual Creation (Alternative)
 
-Edit `data/items.ron`:
+Edit `data/items.ron` (now using proficiency system):
 
 ```ron
 {
@@ -302,10 +333,12 @@ Edit `data/items.ron`:
             damage_type: Physical,
             attack_bonus: 0,
             crit_chance: 5,
+            classification: ShortSword,
         )),
         value: 10,
         weight: 3,
-        disablements: Disablement(0),
+        tags: [Medium],
+        alignment_restriction: None,
         bonuses: [],
         cursed: false,
         identified: true,
@@ -318,10 +351,12 @@ Edit `data/items.ron`:
             damage_type: Physical,
             attack_bonus: 1,
             crit_chance: 5,
+            classification: LongSword,
         )),
         value: 100,
         weight: 4,
-        disablements: Disablement(1), // Knight only (bit 1)
+        tags: [Medium],
+        alignment_restriction: None,
         bonuses: [],
         cursed: false,
         identified: true,
@@ -334,10 +369,12 @@ Edit `data/items.ron`:
             damage_type: Physical,
             attack_bonus: 0,
             crit_chance: 5,
+            classification: Staff,
         )),
         value: 5,
         weight: 2,
-        disablements: Disablement(2), // Mage only (bit 2)
+        tags: [Medium],
+        alignment_restriction: None,
         bonuses: [
             (attribute: SpellPower, value: Constant(2)),
         ],
@@ -349,12 +386,13 @@ Edit `data/items.ron`:
         name: "Leather Armor",
         item_type: Armor((
             ac_bonus: 2,
-            armor_type: Light,
+            classification: Light,
             dexterity_cap: None,
         )),
         value: 50,
         weight: 10,
-        disablements: Disablement(0),
+        tags: [Medium],
+        alignment_restriction: None,
         bonuses: [],
         cursed: false,
         identified: true,
@@ -368,7 +406,8 @@ Edit `data/items.ron`:
         )),
         value: 25,
         weight: 1,
-        disablements: Disablement(0),
+        tags: [],
+        alignment_restriction: None,
         bonuses: [],
         cursed: false,
         identified: true,
@@ -376,11 +415,13 @@ Edit `data/items.ron`:
 }
 ```
 
-**Disablement Bits**:
-- `0`: All classes can use
-- `1`: Knight only (matches class disablement_bit)
-- `2`: Mage only
-- `3`: Knight OR Mage (bitwise OR: 1 | 2 = 3)
+**Proficiency System**:
+
+- Items now specify `classification` (e.g., ShortSword, Staff, Light)
+- Classes/races have `proficiencies` lists
+- Characters can use items if they have the matching proficiency
+- `tags` restrict by race (e.g., Medium-sized weapons for Medium+ races)
+- `alignment_restriction` can limit items to Good, Neutral, or Evil characters
 
 ---
 
@@ -439,6 +480,7 @@ Edit `data/monsters.ron`:
 ```
 
 **Monster Design Tips**:
+
 - `level`: Determines difficulty (1-10 typical)
 - `ac`: Armor Class (10-20 range)
 - `attack_bonus`: Added to attack rolls (+0 to +10)
@@ -493,13 +535,96 @@ Edit `data/spells.ron`:
 ```
 
 **Spell Balance Guidelines**:
+
 - Level 1 spells: 5-10 SP, 1d6-1d8 damage
 - Level 2 spells: 10-15 SP, 2d6-2d8 damage
 - Level 3+ spells: 15-25 SP, 3d6-4d8 damage or area effects
 
 ---
 
-## Step 8: Create Maps
+## Step 8: Create Character Definitions
+
+Character definitions are pre-made character templates that can be used for:
+
+- Quick-start characters for players
+- NPCs with complete stats
+- Campaign-specific heroes
+
+### Using the SDK (Recommended)
+
+Use the Campaign Builder's Character Editor:
+
+```bash
+cargo run --bin campaign_builder
+# Navigate to "Characters" tab
+# Click "Add Character"
+# Fill in the form and click "Save"
+```
+
+### Manual Creation
+
+Create `data/character_definitions.ron`:
+
+```ron
+[
+    (
+        id: 1,
+        name: "Sir Roland",
+        race_id: 1,  // Human
+        class_id: 1,  // Knight
+        base_stats: (
+            might: 16,
+            intellect: 10,
+            speed: 12,
+            endurance: 14,
+            accuracy: 13,
+            personality: 11,
+            luck: 10,
+        ),
+        starting_equipment: (
+            weapon_id: Some(2),  // Steel Longsword
+            armor_ids: [4],      // Leather Armor
+            accessory_ids: [],
+        ),
+        starting_gold: 100,
+        alignment: Good,
+    ),
+    (
+        id: 2,
+        name: "Elara the Wise",
+        race_id: 2,  // Elf
+        class_id: 2,  // Mage
+        base_stats: (
+            might: 8,
+            intellect: 16,
+            speed: 12,
+            endurance: 10,
+            accuracy: 11,
+            personality: 14,
+            luck: 12,
+        ),
+        starting_equipment: (
+            weapon_id: Some(3),  // Wooden Staff
+            armor_ids: [4],      // Leather Armor
+            accessory_ids: [],
+        ),
+        starting_gold: 75,
+        alignment: Neutral,
+    ),
+]
+```
+
+**Key Points**:
+
+- `id`: Unique character definition ID
+- `race_id`/`class_id`: Must match IDs in races.ron and classes.ron
+- `base_stats`: Starting attribute values
+- `starting_equipment`: Items the character begins with
+- `alignment`: Good, Neutral, or Evil
+
+---
+
+## Step 9: Create Maps
 
 ### Map 1: Village (Starting Area)
 
@@ -567,6 +692,7 @@ Create `data/maps/village.ron`:
 ```
 
 **Map Key**:
+
 - Tiles are listed left-to-right, top-to-bottom
 - `(x, y)` coordinates: (0,0) = top-left
 - Events trigger when party enters tile
@@ -644,6 +770,7 @@ Create `data/maps/cursed_crypt.ron`:
 ```
 
 **Dungeon Design Tips**:
+
 - Use `Wall` tiles for structure
 - Place treasure after combat challenges
 - Boss encounters at the end
@@ -651,7 +778,7 @@ Create `data/maps/cursed_crypt.ron`:
 
 ---
 
-## Step 9: Validate
+## Step 10: Validate
 
 ### Run the Campaign Validator
 
@@ -684,39 +811,46 @@ Campaign is valid!
 If you see errors, here's how to fix them:
 
 **Error: "MissingItem { context: 'treasure_event', item_id: 2 }"**
+
 - Fix: Item ID 2 doesn't exist in `items.ron`
 - Solution: Add the missing item or change the ID
 
 **Error: "DisconnectedMap { map_id: 2 }"**
+
 - Fix: Map 2 has no path back to starting map
 - Solution: Add an exit connecting to map 1
 
 **Error: "DuplicateId { entity_type: 'monster', id: 1 }"**
+
 - Fix: Two monsters have the same ID
 - Solution: Change one ID to a unique value
 
 ---
 
-## Step 10: Test
+## Step 11: Test
 
 ### Manual Testing Checklist
 
 1. **Character Creation**:
+
    - Can you create a Knight?
    - Can you create a Mage?
    - Do race stat modifiers apply?
 
 2. **Village Map**:
+
    - Does the village render correctly?
    - Does the NPC dialogue appear?
    - Can you enter combat with goblins?
 
 3. **Inventory**:
+
    - Can you equip the Rusty Sword?
    - Can Knights equip Steel Longsword?
    - Can Mages NOT equip Steel Longsword? (class restriction)
 
 4. **Crypt Map**:
+
    - Can you travel from village to crypt?
    - Do encounters trigger?
    - Can you find treasure?
@@ -765,6 +899,7 @@ Now that you have the basics, try:
 **Problem**: `FileNotFound` error
 
 **Solution**: Check directory structure matches expected layout:
+
 ```
 campaigns/cursed_village/
 ├── campaign.ron
@@ -784,6 +919,7 @@ campaigns/cursed_village/
 **Problem**: `ParseError: expected ','`
 
 **Solution**: Check for:
+
 - Missing commas between fields
 - Missing closing parentheses `)` or braces `}`
 - Incorrect nesting
@@ -796,9 +932,10 @@ Use `validate_ron_syntax` from SDK to check syntax.
 **Problem**: Items defined but not showing in game
 
 **Solution**: Verify:
+
 - Item ID matches between `items.ron` and map events
 - Item is marked as `identified: true`
-- Disablement bits are correct (0 = all classes)
+- Character has required proficiency for the item
 
 ---
 
@@ -813,3 +950,8 @@ Share your campaign with others by packaging it:
 ```
 
 For more advanced campaign creation techniques, see the **Modding Guide**.
+
+---
+
+**Last Updated**: 2025-01-25
+**Version**: 2.0

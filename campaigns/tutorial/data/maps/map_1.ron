@@ -4417,6 +4417,14 @@
         ),
         (
             x: 13,
+            y: 18,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "WARNING: Dungeon Entrance Ahead. PREPARE FOR COMBAT!",
+        ),
+        (
+            x: 13,
             y: 3,
         ): Sign(
             name: "",
@@ -4430,14 +4438,6 @@
             name: "",
             description: "",
             text: "General Store - Buy and Sell items for your party!",
-        ),
-        (
-            x: 13,
-            y: 18,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "WARNING: Dungeon Entrance Ahead. PREPARE FOR COMBAT!",
         ),
     },
     npcs: [

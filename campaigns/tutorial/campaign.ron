@@ -22,6 +22,7 @@ CampaignMetadata(
     monsters_file: "data/monsters.ron",
     classes_file: "data/classes.ron",
     races_file: "data/races.ron",
+    characters_file: "data/characters.ron",
     maps_dir: "data/maps/",
     quests_file: "data/quests.ron",
     dialogue_file: "data/dialogues.ron",

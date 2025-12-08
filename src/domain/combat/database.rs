@@ -169,7 +169,6 @@ impl MonsterDefinition {
             self.ac.base,
             self.attacks.clone(),
             self.loot.clone(),
-            self.loot.experience,
         );
 
         monster.flee_threshold = self.flee_threshold;

@@ -1,51 +1,53 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Content templates for quick creation of game content
+//! SDK Templates for creating common game entities
 //!
-//! This module provides pre-configured templates for creating common game
-//! content types like weapons, armor, maps, and other entities. These templates
-//! serve as starting points that can be customized for specific needs.
+//! This module provides template functions for creating items, maps, and other
+//! game entities with sensible defaults. Use these templates as starting points
+//! when creating content for the game.
 //!
 //! # Architecture Reference
 //!
-//! See `docs/explanation/sdk_implementation_plan.md` Phase 3.5 for specifications.
+//! See `docs/reference/architecture.md` Section 7 for data file specifications.
 //!
 //! # Examples
 //!
 //! ```
-//! use antares::sdk::templates::{basic_weapon, basic_armor, town_map, dungeon_map};
+//! use antares::sdk::templates::{basic_weapon, basic_armor, healing_potion};
 //! use antares::domain::types::DiceRoll;
 //!
-//! // Create a basic weapon template
-//! let sword = basic_weapon(1, "Iron Sword", DiceRoll::new(1, 8, 0));
-//! assert_eq!(sword.name, "Iron Sword");
+//! // Create a simple sword
+//! let sword = basic_weapon(1, "Longsword", DiceRoll::new(1, 8, 0));
 //!
-//! // Create a basic armor template
-//! let leather = basic_armor(2, "Leather Armor", 2);
-//! assert_eq!(leather.name, "Leather Armor");
+//! // Create some chainmail
+//! let chainmail = basic_armor(2, "Chainmail", 4);
+//!
+//! // Create a healing potion
+//! let potion = healing_potion(3, "Minor Healing Potion", 20);
 //! ```
 
 use crate::domain::items::{
-    AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorData, Bonus, BonusAttribute,
-    ConsumableData, ConsumableEffect, Disablement, Item, ItemType, QuestData, WeaponData,
+    AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorClassification, ArmorData, Bonus,
+    BonusAttribute, ConsumableData, ConsumableEffect, Item, ItemType, QuestData,
+    WeaponClassification, WeaponData,
 };
 use crate::domain::types::{DiceRoll, ItemId, MapId};
 use crate::domain::world::{Map, TerrainType, Tile, WallType};
 
 // ===== Weapon Templates =====
 
-/// Creates a basic weapon template
+/// Creates a basic one-handed weapon template
 ///
 /// # Arguments
 ///
 /// * `id` - Item ID
 /// * `name` - Weapon name
-/// * `damage` - Damage dice roll (e.g., 1d8+0)
+/// * `damage` - Base damage dice
 ///
 /// # Returns
 ///
-/// Returns an `Item` configured as a basic weapon with no special properties.
+/// Returns an `Item` configured as a basic weapon.
 ///
 /// # Examples
 ///
@@ -57,6 +59,7 @@ use crate::domain::world::{Map, TerrainType, Tile, WallType};
 /// assert_eq!(sword.name, "Longsword");
 /// assert!(sword.is_weapon());
 /// ```
+#[allow(deprecated)]
 pub fn basic_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
     Item {
         id,
@@ -65,16 +68,18 @@ pub fn basic_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
             damage,
             bonus: 0,
             hands_required: 1,
+            classification: WeaponClassification::Simple,
         }),
         base_cost: 100,
         sell_cost: 50,
-        disablements: Disablement::ALL,
+        alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -89,6 +94,7 @@ pub fn basic_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
 /// let greatsword = two_handed_weapon(2, "Greatsword", DiceRoll::new(2, 6, 0));
 /// assert_eq!(greatsword.name, "Greatsword");
 /// ```
+#[allow(deprecated)]
 pub fn two_handed_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
     Item {
         id,
@@ -97,20 +103,22 @@ pub fn two_handed_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
             damage,
             bonus: 0,
             hands_required: 2,
+            classification: WeaponClassification::MartialMelee,
         }),
-        base_cost: 200,
-        sell_cost: 100,
-        disablements: Disablement::ALL,
+        base_cost: 150,
+        sell_cost: 75,
+        alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec!["two_handed".to_string()],
     }
 }
 
-/// Creates a magical weapon template
+/// Creates a magical weapon template with bonus
 ///
 /// # Examples
 ///
@@ -122,6 +130,7 @@ pub fn two_handed_weapon(id: ItemId, name: &str, damage: DiceRoll) -> Item {
 /// assert_eq!(flame_sword.name, "Flame Sword");
 /// assert!(flame_sword.is_magical());
 /// ```
+#[allow(deprecated)]
 pub fn magical_weapon(id: ItemId, name: &str, damage: DiceRoll, bonus: i8) -> Item {
     Item {
         id,
@@ -130,10 +139,11 @@ pub fn magical_weapon(id: ItemId, name: &str, damage: DiceRoll, bonus: i8) -> It
             damage,
             bonus,
             hands_required: 1,
+            classification: WeaponClassification::MartialMelee,
         }),
         base_cost: 500,
         sell_cost: 250,
-        disablements: Disablement::ALL,
+        alignment_restriction: None,
         constant_bonus: Some(Bonus {
             attribute: BonusAttribute::Might,
             value: 1,
@@ -143,6 +153,7 @@ pub fn magical_weapon(id: ItemId, name: &str, damage: DiceRoll, bonus: i8) -> It
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -169,21 +180,27 @@ pub fn magical_weapon(id: ItemId, name: &str, damage: DiceRoll, bonus: i8) -> It
 /// assert_eq!(chainmail.name, "Chainmail");
 /// assert!(chainmail.is_armor());
 /// ```
+#[allow(deprecated)]
 pub fn basic_armor(id: ItemId, name: &str, ac_bonus: u8) -> Item {
     let weight = ac_bonus * 5;
     Item {
         id,
         name: name.to_string(),
-        item_type: ItemType::Armor(ArmorData { ac_bonus, weight }),
+        item_type: ItemType::Armor(ArmorData {
+            ac_bonus,
+            weight,
+            classification: ArmorClassification::Light,
+        }),
         base_cost: (ac_bonus as u32) * 50,
         sell_cost: (ac_bonus as u32) * 25,
-        disablements: Disablement::ALL,
+        alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -197,6 +214,7 @@ pub fn basic_armor(id: ItemId, name: &str, ac_bonus: u8) -> Item {
 /// let wooden_shield = shield(11, "Wooden Shield", 1);
 /// assert_eq!(wooden_shield.name, "Wooden Shield");
 /// ```
+#[allow(deprecated)]
 pub fn shield(id: ItemId, name: &str, ac_bonus: u8) -> Item {
     Item {
         id,
@@ -204,16 +222,18 @@ pub fn shield(id: ItemId, name: &str, ac_bonus: u8) -> Item {
         item_type: ItemType::Armor(ArmorData {
             ac_bonus,
             weight: 10,
+            classification: ArmorClassification::Shield,
         }),
         base_cost: 50,
         sell_cost: 25,
-        disablements: Disablement::ALL,
+        alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -228,15 +248,20 @@ pub fn shield(id: ItemId, name: &str, ac_bonus: u8) -> Item {
 /// assert_eq!(enchanted_mail.name, "Enchanted Mail");
 /// assert!(enchanted_mail.is_magical());
 /// ```
+#[allow(deprecated)]
 pub fn magical_armor(id: ItemId, name: &str, ac_bonus: u8, magic_bonus: i8) -> Item {
     let weight = ac_bonus * 5;
     Item {
         id,
         name: name.to_string(),
-        item_type: ItemType::Armor(ArmorData { ac_bonus, weight }),
+        item_type: ItemType::Armor(ArmorData {
+            ac_bonus,
+            weight,
+            classification: ArmorClassification::Medium,
+        }),
         base_cost: (ac_bonus as u32) * 100 + (magic_bonus as u32) * 200,
         sell_cost: (ac_bonus as u32) * 50 + (magic_bonus as u32) * 100,
-        disablements: Disablement::ALL,
+        alignment_restriction: None,
         constant_bonus: Some(Bonus {
             attribute: BonusAttribute::ArmorClass,
             value: magic_bonus,
@@ -246,6 +271,7 @@ pub fn magical_armor(id: ItemId, name: &str, ac_bonus: u8, magic_bonus: i8) -> I
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -265,22 +291,25 @@ pub fn magical_armor(id: ItemId, name: &str, ac_bonus: u8, magic_bonus: i8) -> I
 /// });
 /// assert_eq!(ring.name, "Ring of Strength");
 /// ```
+#[allow(deprecated)]
 pub fn basic_ring(id: ItemId, name: &str, bonus: Bonus) -> Item {
     Item {
         id,
         name: name.to_string(),
         item_type: ItemType::Accessory(AccessoryData {
             slot: AccessorySlot::Ring,
+            classification: None,
         }),
         base_cost: 500,
         sell_cost: 250,
-        disablements: Disablement::ALL,
+        alignment_restriction: None,
         constant_bonus: Some(bonus),
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -298,22 +327,25 @@ pub fn basic_ring(id: ItemId, name: &str, bonus: Bonus) -> Item {
 /// });
 /// assert_eq!(amulet.name, "Amulet of Protection");
 /// ```
+#[allow(deprecated)]
 pub fn basic_amulet(id: ItemId, name: &str, bonus: Bonus) -> Item {
     Item {
         id,
         name: name.to_string(),
         item_type: ItemType::Accessory(AccessoryData {
             slot: AccessorySlot::Amulet,
+            classification: None,
         }),
         base_cost: 750,
         sell_cost: 375,
-        disablements: Disablement::ALL,
+        alignment_restriction: None,
         constant_bonus: Some(bonus),
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -329,6 +361,7 @@ pub fn basic_amulet(id: ItemId, name: &str, bonus: Bonus) -> Item {
 /// let potion = healing_potion(30, "Healing Potion", 20);
 /// assert_eq!(potion.name, "Healing Potion");
 /// ```
+#[allow(deprecated)]
 pub fn healing_potion(id: ItemId, name: &str, healing_amount: u16) -> Item {
     Item {
         id,
@@ -339,13 +372,14 @@ pub fn healing_potion(id: ItemId, name: &str, healing_amount: u16) -> Item {
         }),
         base_cost: (healing_amount as u32) * 5,
         sell_cost: (healing_amount as u32) * 2,
-        disablements: Disablement::ALL,
+        alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -359,6 +393,7 @@ pub fn healing_potion(id: ItemId, name: &str, healing_amount: u16) -> Item {
 /// let potion = sp_potion(31, "Mana Potion", 10);
 /// assert_eq!(potion.name, "Mana Potion");
 /// ```
+#[allow(deprecated)]
 pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item {
     Item {
         id,
@@ -369,13 +404,14 @@ pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item {
         }),
         base_cost: (sp_amount as u32) * 10,
         sell_cost: (sp_amount as u32) * 5,
-        disablements: Disablement::ALL,
+        alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -391,6 +427,7 @@ pub fn sp_potion(id: ItemId, name: &str, sp_amount: u16) -> Item {
 /// let arrows = arrow_bundle(40, 20);
 /// assert!(arrows.name.contains("Arrow"));
 /// ```
+#[allow(deprecated)]
 pub fn arrow_bundle(id: ItemId, count: u16) -> Item {
     Item {
         id,
@@ -401,13 +438,14 @@ pub fn arrow_bundle(id: ItemId, count: u16) -> Item {
         }),
         base_cost: (count as u32) * 2,
         sell_cost: count as u32,
-        disablements: Disablement::ALL,
+        alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -421,6 +459,7 @@ pub fn arrow_bundle(id: ItemId, count: u16) -> Item {
 /// let bolts = bolt_bundle(41, 15);
 /// assert!(bolts.name.contains("Bolt"));
 /// ```
+#[allow(deprecated)]
 pub fn bolt_bundle(id: ItemId, count: u16) -> Item {
     Item {
         id,
@@ -431,13 +470,14 @@ pub fn bolt_bundle(id: ItemId, count: u16) -> Item {
         }),
         base_cost: (count as u32) * 3,
         sell_cost: (count as u32) * 2,
-        disablements: Disablement::ALL,
+        alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -453,6 +493,7 @@ pub fn bolt_bundle(id: ItemId, count: u16) -> Item {
 /// let key = quest_item(50, "Ancient Key", "brothers_quest");
 /// assert_eq!(key.name, "Ancient Key");
 /// ```
+#[allow(deprecated)]
 pub fn quest_item(id: ItemId, name: &str, quest_id: &str) -> Item {
     Item {
         id,
@@ -463,13 +504,14 @@ pub fn quest_item(id: ItemId, name: &str, quest_id: &str) -> Item {
         }),
         base_cost: 0,
         sell_cost: 0,
-        disablements: Disablement::NONE,
+        alignment_restriction: None,
         constant_bonus: None,
         temporary_bonus: None,
         spell_effect: None,
         max_charges: 0,
         is_cursed: false,
         icon_path: None,
+        tags: vec![],
     }
 }
 
@@ -499,12 +541,10 @@ pub fn quest_item(id: ItemId, name: &str, quest_id: &str) -> Item {
 /// assert_eq!(town.height, 20);
 /// ```
 pub fn town_map(id: MapId, name: &str, description: &str, width: u32, height: u32) -> Map {
-    // Create 2D tile grid filled with grass
     let tiles = (0..(width * height))
-        .enumerate()
-        .map(|(i, _)| {
-            let x = (i as u32 % width) as i32;
-            let y = (i as u32 / width) as i32;
+        .map(|i| {
+            let x = (i % width) as i32;
+            let y = (i / width) as i32;
             Tile::new(x, y, TerrainType::Grass, WallType::None)
         })
         .collect();
@@ -546,12 +586,10 @@ pub fn town_map(id: MapId, name: &str, description: &str, width: u32, height: u3
 /// assert_eq!(dungeon.height, 30);
 /// ```
 pub fn dungeon_map(id: MapId, name: &str, description: &str, width: u32, height: u32) -> Map {
-    // Create 2D tile grid filled with stone floor
     let tiles = (0..(width * height))
-        .enumerate()
-        .map(|(i, _)| {
-            let x = (i as u32 % width) as i32;
-            let y = (i as u32 / width) as i32;
+        .map(|i| {
+            let x = (i % width) as i32;
+            let y = (i / width) as i32;
             Tile::new(x, y, TerrainType::Stone, WallType::None)
         })
         .collect();
@@ -581,12 +619,10 @@ pub fn dungeon_map(id: MapId, name: &str, description: &str, width: u32, height:
 /// assert_eq!(forest.height, 40);
 /// ```
 pub fn forest_map(id: MapId, name: &str, description: &str, width: u32, height: u32) -> Map {
-    // Create 2D tile grid filled with forest terrain
     let tiles = (0..(width * height))
-        .enumerate()
-        .map(|(i, _)| {
-            let x = (i as u32 % width) as i32;
-            let y = (i as u32 / width) as i32;
+        .map(|i| {
+            let x = (i % width) as i32;
+            let y = (i / width) as i32;
             Tile::new(x, y, TerrainType::Forest, WallType::None)
         })
         .collect();
@@ -609,9 +645,9 @@ mod tests {
 
     #[test]
     fn test_basic_weapon() {
-        let sword = basic_weapon(1, "Sword", DiceRoll::new(1, 8, 0));
+        let sword = basic_weapon(1, "Test Sword", DiceRoll::new(1, 8, 0));
         assert_eq!(sword.id, 1);
-        assert_eq!(sword.name, "Sword");
+        assert_eq!(sword.name, "Test Sword");
         assert!(sword.is_weapon());
         assert!(!sword.is_cursed);
     }
@@ -767,6 +803,7 @@ mod tests {
         assert_eq!(forest.height, 40);
         assert_eq!(forest.tiles.len(), 1600);
     }
+
     #[test]
     fn test_weapon_costs() {
         let sword = basic_weapon(1, "Sword", DiceRoll::new(1, 8, 0));
@@ -779,7 +816,6 @@ mod tests {
     fn test_armor_scaling() {
         let light = basic_armor(1, "Light", 2);
         let heavy = basic_armor(2, "Heavy", 6);
-        // Higher AC bonus should mean higher cost
         assert!(heavy.base_cost > light.base_cost);
     }
 

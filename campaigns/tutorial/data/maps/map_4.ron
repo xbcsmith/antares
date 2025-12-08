@@ -4408,14 +4408,36 @@
     ],
     events: {
         (
-            x: 14,
-            y: 4,
-        ): Encounter(
+            x: 7,
+            y: 17,
+        ): Trap(
             name: "",
             description: "",
-            monster_group: [
-                5,
-                4,
+            damage: 8,
+            effect: None,
+        ),
+        (
+            x: 16,
+            y: 2,
+        ): Treasure(
+            name: "",
+            description: "",
+            loot: [
+                14,
+                24,
+            ],
+        ),
+        (
+            x: 10,
+            y: 13,
+        ): Treasure(
+            name: "",
+            description: "",
+            loot: [
+                15,
+                25,
+                33,
+                40,
             ],
         ),
         (
@@ -4436,41 +4458,6 @@
                 13,
                 23,
                 32,
-            ],
-        ),
-        (
-            x: 3,
-            y: 11,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                6,
-                5,
-            ],
-        ),
-        (
-            x: 10,
-            y: 13,
-        ): Treasure(
-            name: "",
-            description: "",
-            loot: [
-                15,
-                25,
-                33,
-                40,
-            ],
-        ),
-        (
-            x: 16,
-            y: 2,
-        ): Treasure(
-            name: "",
-            description: "",
-            loot: [
-                14,
-                24,
             ],
         ),
         (
@@ -4496,13 +4483,26 @@
             ],
         ),
         (
-            x: 7,
-            y: 17,
-        ): Trap(
+            x: 3,
+            y: 11,
+        ): Encounter(
             name: "",
             description: "",
-            damage: 8,
-            effect: None,
+            monster_group: [
+                6,
+                5,
+            ],
+        ),
+        (
+            x: 14,
+            y: 4,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                5,
+                4,
+            ],
         ),
     },
     npcs: [

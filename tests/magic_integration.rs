@@ -7,17 +7,17 @@
 //! resource consumption, and integration with character and combat systems.
 
 use antares::application::{GameMode, GameState};
-use antares::domain::character::{Alignment, Character, Class, Race, Sex};
+use antares::domain::character::{Alignment, Character, Sex};
 use antares::domain::magic::casting::can_cast_spell;
 use antares::domain::magic::database::SpellDatabase;
 use antares::domain::magic::types::{SpellContext, SpellError, SpellSchool, SpellTarget};
 
 /// Helper function to create a spellcasting character
-fn create_caster(name: &str, class: Class, sp: u16) -> Character {
+fn create_caster(name: &str, class_id: &str, sp: u16) -> Character {
     let mut character = Character::new(
         name.to_string(),
-        Race::Human,
-        class,
+        "human".to_string(),
+        class_id.to_string(),
         Sex::Male,
         Alignment::Good,
     );
@@ -48,7 +48,7 @@ fn test_cleric_can_cast_cleric_spells() {
     // Arrange: Load spells and create cleric
     let spell_db =
         SpellDatabase::load_from_file("data/spells.ron").expect("Failed to load spell database");
-    let cleric = create_caster("Father Michael", Class::Cleric, 50);
+    let cleric = create_caster("Father Michael", "cleric", 50);
 
     // Act: Find a level 1 cleric spell that can be cast anytime
     let cleric_spells = spell_db.get_spells_by_school(SpellSchool::Cleric);
@@ -78,7 +78,7 @@ fn test_sorcerer_can_cast_sorcerer_spells() {
     // Arrange: Load spells and create sorcerer
     let spell_db =
         SpellDatabase::load_from_file("data/spells.ron").expect("Failed to load spell database");
-    let sorcerer = create_caster("Merlin", Class::Sorcerer, 50);
+    let sorcerer = create_caster("Merlin", "sorcerer", 50);
 
     // Act: Find a level 1 sorcerer spell that can be cast anytime
     let sorcerer_spells = spell_db.get_spells_by_school(SpellSchool::Sorcerer);
@@ -110,7 +110,7 @@ fn test_class_restriction_prevents_casting() {
         SpellDatabase::load_from_file("data/spells.ron").expect("Failed to load spell database");
 
     // Create a knight (cannot cast spells)
-    let knight = create_caster("Sir Lancelot", Class::Knight, 50);
+    let knight = create_caster("Sir Lancelot", "knight", 50);
 
     // Find a cleric spell
     let cleric_spells = spell_db.get_spells_by_school(SpellSchool::Cleric);
@@ -129,7 +129,7 @@ fn test_insufficient_spell_points() {
     // Arrange: Load spells and create cleric with low SP
     let spell_db =
         SpellDatabase::load_from_file("data/spells.ron").expect("Failed to load spell database");
-    let mut cleric = create_caster("Weak Cleric", Class::Cleric, 1);
+    let mut cleric = create_caster("Weak Cleric", "cleric", 1);
 
     // Find a high-level spell (costs more SP) that can be cast anytime
     let cleric_spells = spell_db.get_spells_by_school(SpellSchool::Cleric);
@@ -162,7 +162,7 @@ fn test_context_restrictions() {
     // Arrange: Load spells
     let spell_db =
         SpellDatabase::load_from_file("data/spells.ron").expect("Failed to load spell database");
-    let mut cleric = create_caster("Cleric", Class::Cleric, 100);
+    let mut cleric = create_caster("Cleric", "cleric", 100);
     cleric.level = 10; // Set level high enough to cast any spell
 
     // Find a combat-only cleric spell
@@ -201,7 +201,7 @@ fn test_context_restrictions() {
 #[test]
 fn test_spell_point_consumption() {
     // Arrange: Create character with known SP
-    let mut character = create_caster("Caster", Class::Cleric, 50);
+    let mut character = create_caster("Caster", "cleric", 50);
     let initial_sp = character.sp.current;
 
     // Act: Simulate casting spell that costs 5 SP
@@ -216,7 +216,7 @@ fn test_spell_point_consumption() {
 #[test]
 fn test_spell_point_restoration() {
     // Arrange: Create character with depleted SP
-    let mut character = create_caster("Tired Caster", Class::Sorcerer, 100);
+    let mut character = create_caster("Tired Caster", "sorcerer", 100);
     character.sp.current = 20; // Depleted
 
     // Act: Rest restores SP
@@ -229,7 +229,7 @@ fn test_spell_point_restoration() {
 #[test]
 fn test_silenced_character_cannot_cast() {
     // Arrange: Create silenced character
-    let mut character = create_caster("Silenced", Class::Cleric, 50);
+    let mut character = create_caster("Silenced", "cleric", 50);
     character
         .conditions
         .add(antares::domain::character::Condition::SILENCED);
@@ -294,7 +294,7 @@ fn test_spell_target_types() {
 fn test_complete_spell_casting_flow() {
     // Arrange: Create game state with caster
     let mut game_state = GameState::new();
-    let cleric = create_caster("Healer", Class::Cleric, 30);
+    let cleric = create_caster("Healer", "cleric", 30);
     game_state
         .party
         .add_member(cleric)
@@ -374,7 +374,7 @@ fn test_outdoor_spell_restrictions() {
     // Arrange: Load spells
     let spell_db =
         SpellDatabase::load_from_file("data/spells.ron").expect("Failed to load spell database");
-    let sorcerer = create_caster("Outdoor Mage", Class::Sorcerer, 100);
+    let sorcerer = create_caster("Outdoor Mage", "sorcerer", 100);
 
     // Find indoor-only spells (if any)
     let all_spells = spell_db.all_spells();
