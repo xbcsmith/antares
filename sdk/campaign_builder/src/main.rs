@@ -23,6 +23,7 @@
 
 mod advanced_validation;
 mod asset_manager;
+mod campaign_editor;
 mod characters_editor;
 mod classes_editor;
 mod conditions_editor;
@@ -378,6 +379,9 @@ struct CampaignBuilderApp {
     pending_action: Option<PendingAction>,
     file_tree: Vec<FileNode>,
 
+    // Campaign metadata editor state
+    campaign_editor_state: campaign_editor::CampaignMetadataEditorState,
+
     // Data editor state
     items: Vec<Item>,
     items_editor_state: ItemsEditorState,
@@ -480,6 +484,9 @@ impl Default for CampaignBuilderApp {
             show_unsaved_warning: false,
             pending_action: None,
             file_tree: Vec::new(),
+
+            // Campaign metadata editor state
+            campaign_editor_state: campaign_editor::CampaignMetadataEditorState::new(),
 
             items: Vec::new(),
             items_editor_state: ItemsEditorState::new(),
@@ -3011,89 +3018,19 @@ impl eframe::App for CampaignBuilderApp {
 }
 
 impl CampaignBuilderApp {
-    /// Show the metadata editor
+    /// Show the metadata editor (delegates to the campaign_editor module)
     fn show_metadata_editor(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Campaign Metadata");
-        ui.add_space(5.0);
-        ui.label("Basic information about your campaign");
-        ui.separator();
-
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            egui::Grid::new("metadata_grid")
-                .num_columns(2)
-                .spacing([10.0, 8.0])
-                .striped(true)
-                .show(ui, |ui| {
-                    // Campaign ID
-                    ui.label("Campaign ID:");
-                    if ui.text_edit_singleline(&mut self.campaign.id).changed() {
-                        self.unsaved_changes = true;
-                    }
-                    ui.end_row();
-
-                    // Campaign Name
-                    ui.label("Name:");
-                    if ui.text_edit_singleline(&mut self.campaign.name).changed() {
-                        self.unsaved_changes = true;
-                    }
-                    ui.end_row();
-
-                    // Version
-                    ui.label("Version:");
-                    if ui
-                        .text_edit_singleline(&mut self.campaign.version)
-                        .changed()
-                    {
-                        self.unsaved_changes = true;
-                    }
-                    ui.end_row();
-
-                    // Author
-                    ui.label("Author:");
-                    if ui.text_edit_singleline(&mut self.campaign.author).changed() {
-                        self.unsaved_changes = true;
-                    }
-                    ui.end_row();
-
-                    // Engine Version
-                    ui.label("Engine Version:");
-                    if ui
-                        .text_edit_singleline(&mut self.campaign.engine_version)
-                        .changed()
-                    {
-                        self.unsaved_changes = true;
-                    }
-                    ui.end_row();
-                });
-
-            ui.add_space(10.0);
-            ui.label("Description:");
-            let response =
-                ui.add(egui::TextEdit::multiline(&mut self.campaign.description).desired_rows(6));
-            if response.changed() {
-                self.unsaved_changes = true;
-            }
-
-            ui.add_space(10.0);
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                if ui.button("💾 Save Campaign").clicked() {
-                    if self.campaign_path.is_some() {
-                        if let Err(e) = self.save_campaign() {
-                            self.status_message = format!("Save failed: {}", e);
-                        }
-                    } else {
-                        self.save_campaign_as();
-                    }
-                }
-
-                if ui.button("✅ Validate").clicked() {
-                    self.validate_campaign();
-                    self.active_tab = EditorTab::Validation;
-                }
-            });
-        });
+        // Delegate the UI rendering and editing behavior to the dedicated editor
+        // state. The editor manages a local buffer and applies changes to the
+        // active `self.campaign` when the user saves.
+        self.campaign_editor_state.show(
+            ui,
+            &mut self.campaign,
+            &mut self.campaign_path,
+            self.campaign_dir.as_ref(),
+            &mut self.unsaved_changes,
+            &mut self.status_message,
+        );
     }
 
     /// Show the configuration editor

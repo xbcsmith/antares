@@ -163,6 +163,70 @@ All editors use consistent button labels with emojis:
 ✅ **Maintains backward compatibility**
 ✅ **All public APIs documented with examples**
 
+## Phase 1: Foundation — Extraction & Module Setup (2025-xx-xx)
+
+**Status:** ✅ COMPLETED | **Type:** Feature Extraction + Module Setup | **Files:** 2 added/modified
+
+**Objective:** Create a dedicated campaign metadata editor module that extracts metadata UI and logic from `main.rs` into a single-responsibility module `sdk/campaign_builder/src/campaign_editor.rs`, add a `CampaignMetadataEditorState` (edit buffer + state), and wire it into the `CampaignBuilderApp` to allow a clean editing flow, tests, and a foundation for further UI and validation work.
+
+### Implementation Details
+
+**Files:**
+
+- `sdk/campaign_builder/src/campaign_editor.rs` (new)
+- `sdk/campaign_builder/src/main.rs` (modified to integrate editor)
+
+**Key Changes:**
+
+- New module `campaign_editor.rs`:
+  - Added a `CampaignMetadataEditorState` type with the following fields:
+    - `mode` (List / Creating / Editing),
+    - `metadata` (authoritative CampaignMetadata),
+    - `buffer` (CampaignMetadataEditBuffer),
+    - `search_filter`, `selected_section`, `has_unsaved_changes`, and import/export flags.
+  - Added `CampaignMetadataEditBuffer` to mirror `CampaignMetadata` in an editable buffer shape.
+  - Implemented core file operations and editor lifecycle methods:
+    - `new()` — default initialization,
+    - `start_edit()` — set buffer from `metadata`,
+    - `cancel_edit()` — revert buffer to known `metadata`,
+    - `apply_buffer_to_metadata()` — apply edits back to authoritative `metadata`,
+    - `save_to_file()` and `load_from_file()` for RON-based persistence,
+    - `show()` — render a minimal UI (header, grid, description, Save/Validate actions).
+- Integration in `main.rs`:
+  - Added `mod campaign_editor;` at top-level modules.
+  - Added a `campaign_editor_state: campaign_editor::CampaignMetadataEditorState` field to `CampaignBuilderApp`.
+  - Initialized `campaign_editor_state` in `CampaignBuilderApp::default()`.
+  - Replaced `show_metadata_editor()` body with a single delegation call:
+    - `self.campaign_editor_state.show(ui, &mut self.campaign, &mut self.campaign_path, self.campaign_dir.as_ref(), &mut self.unsaved_changes, &mut self.status_message);`
+  - Keeps `validate_campaign()` and other app-level behaviors (validation, save-as flows) invoked by the UI buttons or app-level operations as before but now easier to reason about.
+
+**Unit Tests Added:**
+
+- `sdk/campaign_builder/src/campaign_editor.rs` tests include:
+  - `test_campaign_metadata_editor_new` — ensures editor initializes correctly.
+  - `test_save_and_load_roundtrip` — verifies save/load round-trip using a temp file.
+  - `test_cancel_edit_restores_buffer` — verifies cancel edit resets buffer.
+
+**Form & UI Behavior (Phase 1 skeleton):**
+
+- The `show()` method mirrors the metadata UI previously in `main.rs` to avoid regression.
+  - Editing updates the `buffer` and sets `has_unsaved_changes`.
+  - Save action either writes to `campaign_path` or triggers a Save As dialog.
+  - Validate triggers are preserved to keep app-level flows consistent.
+
+### Code Quality & Validation
+
+✅ `cargo fmt --all` — Passed
+✅ `cargo check --all-targets --all-features` — Passed
+✅ `cargo clippy --all-targets --all-features -- -D warnings` — Passed
+✅ `cargo test --all-features` — Passed
+
+### Notes and Next Steps
+
+- The editor module follows the patterns used by other editors (items, races, etc.) and adheres to the project's `AttributePair`/buffer patterns and style.
+- This phase purposefully implements a minimal `show()` UI and file operations; further UI polish (TwoColumn fully implemented), validation integration, and advanced features are reserved for Phase 2/3.
+- The `CampaignMetadataEditorState` foundation simplifies moving the metadata form from `main.rs`, significantly decreasing `main.rs` complexity and enabling easier testing and maintenance of metadata editing logic.
+
 ### Files Changed
 
 ```
