@@ -676,6 +676,119 @@ Created comprehensive phased implementation plan in `docs/explanation/campaign_b
 
 #### Task 8.4: Validation UI Panel Improvements ✅
 
+---
+
+### Phase 6: Validation Panel UI & Configuration Checks - Phase 1 (2025-12-09)
+
+**Status:** ✅ COMPLETED | **Type:** UI Layout & Foundation | **Files:** 2 modified
+
+**Objective:** Rework the Validation panel layout to match the Assets Manager's table/grid pattern, add a vertical ScrollArea with a constrained max height, add shared UI helpers for consistent header and severity icon rendering, and add the first UI behavior toggle for showing passed checks. Preserve the existing behavior of only showing categories with visible results (Option B).
+
+**Files Modified:**
+
+- `sdk/campaign_builder/src/main.rs`
+  - Updated `show_validation_panel`: replaced manual header/columns with a reusable grid header; added a constrained ScrollArea using `ui_helpers::compute_default_panel_height(ui)`; introduced a `validation_show_passed` toggle field on `CampaignBuilderApp` to control whether passed checks are shown; filtered results to hide categories that are empty after filtering (e.g., categories containing only `Passed` checks are hidden by default).
+  - Implemented validation filters (Phase 3 polish): `All`, `Errors Only`, `Warnings Only` with a `Reset Filter` button. These set a `validation_filter` enum on `CampaignBuilderApp` and are applied at group/render time so UI shows only the selected severities.
+  - Added `grouped_filtered_validation_results()` to generate category groups and their filtered check results, returning owned clones of `ValidationResult` entries to avoid borrow conflicts inside egui UI closures. This ensures the UI can mutate `self` safely while rendering.
+  - Added clickable file paths for validation results: file path labels are now a clickable UI element with a tooltip showing the absolute path. Clicking sets `validation_focus_asset` on `CampaignBuilderApp`, sets `show_asset_manager` to true, and focuses the Asset Manager on the selected file.
+  - Asset Manager updates: highlights the asset that was selected from the Validation panel with a `🔎 Selected from Validation` badge when `validation_focus_asset` equals the asset path. The Asset Manager will show the focused asset when the validation path is clicked.
+  - Replaced inlined status icon rendering with `ui_helpers::show_validation_severity_icon` (rich tooltip + color), and standardized result table headers using `ui_helpers::render_grid_header`.
+  - To avoid UI borrow conflicts during validation rendering, the panel uses a small `pending_focus` mechanism to accumulate a requested focus asset during drawing and apply the `focus_asset()` action after the render closure completes.
+  - Tests added/updated:
+    - `test_validation_filter_errors_only` — verifies the Errors Only filter shows only error results in grouped output.
+    - `test_validation_focus_asset_click_sets_state` — validates that calling the focus action sets `show_asset_manager` and `validation_focus_asset`.
+    - Existing tests were updated to use the grouped/filtered helpers where appropriate (e.g., `test_validation_configuration_category_grouping`).
+  - UI behavior preserved: categories are shown only when they have visible results after the filter (Option B for showing empty categories was maintained).
+- `sdk/campaign_builder/src/ui_helpers.rs`
+  - Added `render_grid_header(ui, headers: &[&str])` helper to render consistent, bold grid headers and call `ui.end_row()`.
+  - Added `show_validation_severity_icon(ui, severity)` helper to centralize severity icon rendering with color and tooltip text.
+- Tests:
+  - `sdk/campaign_builder/src/ui_helpers.rs` — Added `render_grid_header_runs` and `show_validation_severity_icon_shows_icon` tests that exercise the helpers using `egui::Context::default()` to ensure no panics happen when rendering headers/icons in a UI context.
+  - `sdk/campaign_builder/src/main.rs` — Added `test_validation_show_passed_toggle_filters_out_passed` to assert that categories containing only passed checks are hidden when the default toggle is `false`, and become visible when toggled on.
+
+**Implementation Details:**
+
+- `show_validation_panel` now:
+  - Uses `ui.horizontal` header with "✅ Campaign Validation" and a "🔄 Re-validate" button as before.
+  - Creates a compact summary using `ValidationSummary::from_results(&self.validation_errors)` and shows `error`, `warning`, `info`, and `passed` counts as color-coded badges.
+  - Offers a minimal Quick Filter row and the new `Show passed checks` checkbox (`validation_show_passed`) to toggle inclusion of `Passed` entries.
+  - Groups results using `validation::group_results_by_category(&self.validation_errors)`.
+  - Filters grouped results to skip `Passed` severity entries when `validation_show_passed` is `false`; categories that end up empty after filtering are not rendered.
+  - Uses `egui::ScrollArea::vertical().max_height(ui_helpers::compute_default_panel_height(ui)).id_salt("validation_panel_scroll")` for a constrained scrollable list.
+  - Renders results using `egui::Grid::new(...).num_columns(3).striped(true)` with the header row rendered by `ui_helpers::render_grid_header(ui, &["Status", "Message", "File"])` for consistent look and column labeling.
+  - Renders severity icons via `ui_helpers::show_validation_severity_icon(ui, result.severity)` for consistent color and tooltip presentation.
+
+**Testing & QA:**
+
+- UI helper tests exercise header and severity icon rendering under a headless `egui::Context::default()` to ensure no panics while rendering (UI smoke tests).
+- A new unit test validates the `validation_show_passed` toggle logic by:
+  - Pushing a `Passed` validation result into `app.validation_errors`,
+  - Asserting that the filtered visible count is zero with default toggle disabled,
+  - Toggling `validation_show_passed = true` and asserting the visible count increases.
+- Verified that there are no compilation warnings or errors after the changes.
+- Suggested manual visual checks:
+  - Column alignment and header appearance consistent with Assets Manager.
+  - Scrollbar visible when many results exist and max height respects available UI space.
+  - Severity icons match color and tooltip expectations.
+  - Categories only appear if they contain visible entries after filtering (i.e., `Passed` only categories are hidden by default).
+
+**Notes & Next Steps:**
+
+- This is Phase 1 (foundation): UI layout, helpers, and the `Show passed checks` toggle were implemented.
+- Phase 2 will focus on adding campaign-specific `ValidationCategory::Configuration` checks (starting map existence, starting level bounds, roster/party size constraints, etc.) and ensure `validate_campaign()` emits `ValidationResult`s in `Configuration`.
+- Phase 3 will include additional UI behavior and polish (filtering to Errors/Warnings only, clickable file paths, improved accessibility and tooltips, and reusability of header/severity helpers across other grids).
+
+### Phase 2: Campaign Configuration Checks (2025-11-XX)
+
+**Status:** ✅ COMPLETED | **Type:** Validation & Feature | **Files:** 1 modified
+
+**Objective:** Add robust campaign configuration checks to the Campaign Builder and ensure that invalid/edge-case campaign configurations produce `ValidationCategory::Configuration` results which the Validation panel displays.
+
+#### Implementation Details
+
+- `sdk/campaign_builder/src/main.rs::validate_campaign()`:
+  - Added starting map existence check (Error) when maps are loaded:
+    - Matching rules:
+      - Numeric map ID strings (e.g., "1") match `Map.id`.
+      - `map_N` pattern (e.g., `map_1`) maps to numeric IDs.
+      - Filename forms like `map_1.ron` or `starter_town.ron` are supported.
+      - Fallback normalized name match (`starter_town` -> "starter town") checks `Map.name` case-insensitively.
+    - Only validates existence if `self.maps` is non-empty, avoiding false positives when maps haven't been loaded.
+  - Updated `max_party_size` validation to use the `PARTY_MAX_SIZE` constant (Warning).
+  - Added `starting_food` bounds check using `FOOD_MIN` and `FOOD_MAX` from domain and emit a Warning if out-of-range.
+  - Added `starting_gold` soft-limit warning via a `STARTING_GOLD_MAX` constant to highlight unusually large starting gold amounts.
+  - Retained and reused existing Validation framework (`ValidationResult`, `ValidationCategory`, `ValidationSeverity`) and ensured `Configuration`-scoped results are pushed into `self.validation_errors`.
+
+#### Tests Added
+
+- `test_validation_starting_map_missing` — ensures missing starting map triggers `ValidationCategory::Configuration` error when maps are present.
+- `test_validation_starting_map_exists_by_name` — verifies normalized `starter_town` names match loaded `Map` names (positive case).
+- `test_validation_starting_food_invalid` — validates that an out-of-range `starting_food` produces a `Configuration` warning.
+- `test_validation_configuration_category_grouping` — verifies that `ValidationCategory::Configuration` appears when grouped results are computed.
+
+#### Files Modified
+
+- `sdk/campaign_builder/src/main.rs`
+  - Added checks for starting map existence and resource bounds.
+  - Replaced the party size magic-number check with `PARTY_MAX_SIZE` from `domain::character`.
+  - Added `STARTING_GOLD_MAX` with a recommended warning threshold.
+  - Added the above unit tests to the main tests module.
+
+#### Success Criteria
+
+- Broken campaign configuration conditions (e.g., nonexistent starting map or invalid level values) produce `ValidationCategory::Configuration` results and are visible in the Validation panel table layout.
+- The Validation UI continues to be consistent with other parts of the SDK (table layout and severity icons).
+- New tests assert the presence and severity of `Configuration` results.
+- System respects domain constants for max/min bounds where applicable (e.g., `PARTY_MAX_SIZE`, `FOOD_MIN`, `FOOD_MAX`).
+
+#### Notes & Decisions
+
+- Classification rationale: `Error` for blocking structural errors (e.g., missing starting map), `Warning` for non-blocking resource bounds (like `starting_food`), and a soft recommendation for unusually large starting gold.
+- Map existence check uses normalization for names and file-like keys and accepts numeric IDs; this mirrors the SDK loader behavior.
+- To avoid test and UX regressions, we only validate `starting_map` existence if `self.maps` is non-empty (the check will not fail when no map list is loaded).
+- Did not change campaign metadata defaults (e.g., `max_party_size` default/values) in this change; follow-up tasks may align defaults with domain constants and adjust tests as necessary.
+- Documentation and usage examples updated in tests and comments to help future maintainers understand and reuse the new UI helper functions.
+
 **File Modified:** `sdk/campaign_builder/src/main.rs` (show_validation_panel method)
 
 **Improvements:**

@@ -46,6 +46,7 @@ use antares::sdk::tool_config::ToolConfig;
 use logging::{category, LogLevel, Logger};
 
 use antares::domain::character::Stats;
+use antares::domain::character::{FOOD_MAX, FOOD_MIN, PARTY_MAX_SIZE};
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
 use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
@@ -72,6 +73,8 @@ use spells_editor::SpellsEditorState;
 use std::fs;
 use std::path::PathBuf;
 use thiserror::Error;
+
+const STARTING_GOLD_MAX: u32 = 100_000;
 
 fn main() -> Result<(), eframe::Error> {
     // Initialize logger from command-line arguments
@@ -318,6 +321,31 @@ impl ItemTypeFilter {
     }
 }
 
+/// Quick validation filter for the Validation Panel.
+///
+/// The filter controls which severities the UI will display. These are user-facing
+/// selections and are persisted via the `CampaignBuilderApp` state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValidationFilter {
+    /// Show all severities (default)
+    All,
+    /// Only show `Error` severity checks
+    ErrorsOnly,
+    /// Only show `Warning` severity checks
+    WarningsOnly,
+}
+
+impl ValidationFilter {
+    /// Returns a short label for the control UI
+    fn as_str(&self) -> &str {
+        match self {
+            ValidationFilter::All => "All",
+            ValidationFilter::ErrorsOnly => "Errors Only",
+            ValidationFilter::WarningsOnly => "Warnings Only",
+        }
+    }
+}
+
 /// File I/O errors
 #[derive(Debug, Error)]
 enum CampaignError {
@@ -343,6 +371,8 @@ struct CampaignBuilderApp {
     status_message: String,
     unsaved_changes: bool,
     validation_errors: Vec<validation::ValidationResult>,
+    validation_filter: ValidationFilter,
+    validation_focus_asset: Option<PathBuf>,
     show_about_dialog: bool,
     show_unsaved_warning: bool,
     pending_action: Option<PendingAction>,
@@ -444,6 +474,8 @@ impl Default for CampaignBuilderApp {
             status_message: String::new(),
             unsaved_changes: false,
             validation_errors: Vec::new(),
+            validation_filter: ValidationFilter::All,
+            validation_focus_asset: None,
             show_about_dialog: false,
             show_unsaved_warning: false,
             pending_action: None,
@@ -812,6 +844,64 @@ impl CampaignBuilderApp {
         }
 
         results
+    }
+
+    /// Groups and filters validation results according to the UI filter settings and
+    /// returns only categories that have results after applying the filters.
+    ///
+    /// This variation returns owned `ValidationResult` objects (cloned) to avoid
+    /// lifetime/borrow conflicts with UI closures that can overlap `&mut self`
+    /// borrows. Cloning is acceptable for this UI-only structure and keeps the
+    /// UI code simpler and safer.
+    fn grouped_filtered_validation_results(
+        &self,
+    ) -> Vec<(
+        validation::ValidationCategory,
+        Vec<validation::ValidationResult>,
+    )> {
+        use std::collections::HashMap;
+
+        // Bucket results by category after applying UI filters.
+        let mut buckets: HashMap<
+            validation::ValidationCategory,
+            Vec<validation::ValidationResult>,
+        > = HashMap::new();
+
+        for res in &self.validation_errors {
+            // Apply active severity filter
+            let should_show = match self.validation_filter {
+                ValidationFilter::All => true,
+                ValidationFilter::ErrorsOnly => {
+                    res.severity == validation::ValidationSeverity::Error
+                }
+                ValidationFilter::WarningsOnly => {
+                    res.severity == validation::ValidationSeverity::Warning
+                }
+            };
+
+            if !should_show {
+                continue;
+            }
+
+            // Clone the result into the bucket, providing an owned copy for UI use.
+            buckets.entry(res.category).or_default().push(res.clone());
+        }
+
+        // Convert into a Vec ordered by category display order.
+        let mut result: Vec<(
+            validation::ValidationCategory,
+            Vec<validation::ValidationResult>,
+        )> = Vec::new();
+
+        for category in validation::ValidationCategory::all() {
+            if let Some(group) = buckets.remove(&category) {
+                if !group.is_empty() {
+                    result.push((category, group));
+                }
+            }
+        }
+
+        result
     }
 
     /// Get next available item ID
@@ -1442,13 +1532,73 @@ impl CampaignBuilderApp {
                     validation::ValidationCategory::Configuration,
                     "Starting map is required",
                 ));
+        } else if !self.maps.is_empty() {
+            // Only validate existence if the maps are loaded - avoids false positives during
+            // tests or when the campaign hasn't loaded assets yet.
+            let start_map_key = self.campaign.starting_map.trim();
+            let mut found = false;
+
+            // 1) Numeric map ID (e.g., "1")
+            if let Ok(parsed_id) = start_map_key.parse::<u16>() {
+                found = self.maps.iter().any(|m| m.id == parsed_id);
+            }
+
+            // 2) map_N pattern (e.g., "map_1")
+            if !found && start_map_key.starts_with("map_") {
+                if let Ok(num) = start_map_key[4..].parse::<u16>() {
+                    found = self.maps.iter().any(|m| m.id == num);
+                }
+            }
+
+            // 3) filename pattern with .ron (e.g., "map_1.ron" or "starter_town.ron")
+            if !found && start_map_key.ends_with(".ron") {
+                let base = start_map_key.trim_end_matches(".ron");
+                if base.starts_with("map_") {
+                    if let Ok(num) = base[4..].parse::<u16>() {
+                        found = self.maps.iter().any(|m| m.id == num);
+                    }
+                }
+                if !found {
+                    if let Ok(num) = base.parse::<u16>() {
+                        found = self.maps.iter().any(|m| m.id == num);
+                    }
+                }
+                if !found {
+                    let normalized = base.replace('_', " ").to_lowercase();
+                    found = self
+                        .maps
+                        .iter()
+                        .any(|m| m.name.to_lowercase() == normalized);
+                }
+            }
+
+            // 4) Normalized name match: starter_town -> "starter town" matches "Starter Town"
+            if !found {
+                let normalized = start_map_key.replace('_', " ").to_lowercase();
+                found = self
+                    .maps
+                    .iter()
+                    .any(|m| m.name.to_lowercase() == normalized);
+            }
+
+            // If no match, this is a configuration error for the campaign
+            if !found {
+                self.validation_errors
+                    .push(validation::ValidationResult::error(
+                        validation::ValidationCategory::Configuration,
+                        format!(
+                            "Starting map '{}' does not match any loaded map",
+                            start_map_key
+                        ),
+                    ));
+            }
         }
 
-        if self.campaign.max_party_size == 0 || self.campaign.max_party_size > 10 {
+        if self.campaign.max_party_size == 0 || self.campaign.max_party_size > PARTY_MAX_SIZE {
             self.validation_errors
                 .push(validation::ValidationResult::warning(
                     validation::ValidationCategory::Configuration,
-                    "Max party size should be between 1 and 10",
+                    format!("Max party size should be between 1 and {}", PARTY_MAX_SIZE),
                 ));
         }
 
@@ -1467,6 +1617,31 @@ impl CampaignBuilderApp {
                 .push(validation::ValidationResult::error(
                     validation::ValidationCategory::Configuration,
                     "Starting level must be between 1 and max level",
+                ));
+        }
+
+        // Starting resource validity checks
+        if self.campaign.starting_food < FOOD_MIN as u32
+            || self.campaign.starting_food > FOOD_MAX as u32
+        {
+            self.validation_errors
+                .push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Configuration,
+                    format!(
+                        "Starting food must be between {} and {}",
+                        FOOD_MIN, FOOD_MAX
+                    ),
+                ));
+        }
+
+        if self.campaign.starting_gold > STARTING_GOLD_MAX {
+            self.validation_errors
+                .push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Configuration,
+                    format!(
+                        "Starting gold ({}) exceeds recommended maximum {}",
+                        self.campaign.starting_gold, STARTING_GOLD_MAX
+                    ),
                 ));
         }
 
@@ -3463,66 +3638,115 @@ impl CampaignBuilderApp {
         // Quick filter controls
         ui.horizontal(|ui| {
             ui.label("Show:");
-            if ui.selectable_label(true, "All").clicked() {
-                // Show all - default behavior
+            if ui
+                .selectable_label(self.validation_filter == ValidationFilter::All, "All")
+                .clicked()
+            {
+                self.validation_filter = ValidationFilter::All;
             }
-            if summary.error_count > 0 && ui.selectable_label(false, "Errors Only").clicked() {
-                // Filter would be implemented here in future
+            if summary.error_count > 0
+                && ui
+                    .selectable_label(
+                        self.validation_filter == ValidationFilter::ErrorsOnly,
+                        "Errors Only",
+                    )
+                    .clicked()
+            {
+                self.validation_filter = ValidationFilter::ErrorsOnly;
             }
-            if summary.warning_count > 0 && ui.selectable_label(false, "Warnings Only").clicked() {
-                // Filter would be implemented here in future
+            if summary.warning_count > 0
+                && ui
+                    .selectable_label(
+                        self.validation_filter == ValidationFilter::WarningsOnly,
+                        "Warnings Only",
+                    )
+                    .clicked()
+            {
+                self.validation_filter = ValidationFilter::WarningsOnly;
+            }
+            ui.add_space(10.0);
+            ui.add_space(8.0);
+            if ui.button("🔁 Reset Filter").clicked() {
+                self.reset_validation_filters();
             }
         });
 
         ui.separator();
 
         // Always show category breakdown - group results by category and display in table format
-        let grouped = validation::group_results_by_category(&self.validation_errors);
+        let grouped = self.grouped_filtered_validation_results();
+
+        let max_height = ui_helpers::compute_default_panel_height(ui);
+        // We'll track any clicked path inside the closure and handle it after the UI
+        // closure completes so we don't attempt to mutably borrow `self` while the UI
+        // code still holds references to `ui`.
+        let mut pending_focus: Option<PathBuf> = None;
 
         egui::ScrollArea::vertical()
+            .max_height(max_height)
             .id_salt("validation_panel_scroll")
             .show(ui, |ui| {
-                for (category, results) in grouped {
-                    // Category header with icon
-                    ui.horizontal(|ui| {
-                        ui.label(category.icon());
-                        ui.heading(category.display_name());
-                        ui.label(format!("({})", results.len()));
-                    });
+                // Render a single unified grid for all validation results rather than a per-category grid.
+                // This provides the "Category | File | Status | Message" layout used by the design.
+                if !grouped.is_empty() {
+                    // Flatten grouped results into a single vector while preserving order.
+                    let mut all_results: Vec<validation::ValidationResult> = Vec::new();
+                    for (_cat, results) in grouped.iter() {
+                        for r in results.iter() {
+                            all_results.push(r.clone());
+                        }
+                    }
 
-                    // Table-like display for results in this category
-                    egui::Grid::new(format!("validation_grid_{:?}", category))
-                        .num_columns(3)
+                    // Unified table across categories
+                    egui::Grid::new("validation_grid_all")
+                        .num_columns(4)
                         .spacing([10.0, 4.0])
                         .striped(true)
                         .show(ui, |ui| {
-                            // Header row
-                            ui.label(egui::RichText::new("Status").strong());
-                            ui.label(egui::RichText::new("Message").strong());
-                            ui.label(egui::RichText::new("File").strong());
-                            ui.end_row();
+                            ui_helpers::render_grid_header(
+                                ui,
+                                &["Category", "File", "Status", "Message"],
+                            );
 
-                            // Result rows
-                            for result in results {
-                                // Status icon with color
-                                ui.colored_label(result.severity.color(), result.severity.icon());
+                            for result in all_results.iter() {
+                                // First column: Category (icon + name)
+                                ui.horizontal(|ui| {
+                                    ui.label(result.category.icon());
+                                    ui.add_space(4.0);
+                                    ui.label(result.category.display_name());
+                                });
 
-                                // Message
-                                ui.label(&result.message);
-
-                                // File path (if any)
-                                if let Some(ref path) = result.file_path {
-                                    ui.label(path.display().to_string());
+                                // Second column: File (clickable)
+                                if let Some(path) = result.file_path.as_ref() {
+                                    let resp = ui_helpers::show_clickable_path(ui, path);
+                                    if resp.clicked() {
+                                        pending_focus = Some(path.clone());
+                                    }
                                 } else {
                                     ui.label("-");
                                 }
+
+                                // Third column: Status icon
+                                ui_helpers::show_validation_severity_icon(ui, result.severity);
+
+                                // Fourth column: Message
+                                ui.label(&result.message);
+
                                 ui.end_row();
                             }
                         });
 
                     ui.add_space(10.0);
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.label("No validation results");
+                    });
                 }
             });
+        // Apply the pending focus if one was requested while rendering the validation panel.
+        if let Some(path) = pending_focus {
+            self.focus_asset(path);
+        }
 
         ui.separator();
 
@@ -3537,9 +3761,10 @@ impl CampaignBuilderApp {
                 ui.label("Campaign is valid! Click 'Re-validate' after making changes");
             }
         });
-    }
+    } // end of show_validation_panel
 
     /// Load dialogues from campaign file
+
     fn load_dialogues(&mut self) -> Result<(), CampaignError> {
         if let Some(dir) = &self.campaign_dir {
             let dialogue_path = dir.join(&self.campaign.dialogue_file);
@@ -3566,6 +3791,24 @@ impl CampaignBuilderApp {
             }
         }
         Ok(())
+    }
+
+    /// Focus (and open) the asset manager to the given asset path.
+    ///
+    /// When a user clicks a file path in the validation panel, we set this value,
+    /// open the Asset Manager, and surface a useful status message. The asset
+    /// editor UI will highlight the focused asset if present.
+    fn reset_validation_filters(&mut self) {
+        // Restore default validation filter state and clear any asset focus
+        self.validation_filter = ValidationFilter::All;
+        self.validation_focus_asset = None;
+        self.status_message = "Validation filters reset".to_string();
+    }
+
+    fn focus_asset(&mut self, path: PathBuf) {
+        self.validation_focus_asset = Some(path.clone());
+        self.show_asset_manager = true;
+        self.status_message = format!("🔎 Focused asset: {}", path.display());
     }
 
     /// Show assets editor
@@ -3819,6 +4062,17 @@ impl CampaignBuilderApp {
                             // Asset header
                             ui.horizontal(|ui| {
                                 ui.label(format!("📄 {}", path.display()));
+
+                                // Highlight if selected from the Validation panel
+                                if let Some(ref focus) = self.validation_focus_asset {
+                                    if focus == path {
+                                        ui.colored_label(
+                                            egui::Color32::from_rgb(100, 180, 255),
+                                            "🔎 Selected from Validation",
+                                        );
+                                    }
+                                }
+
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -4075,6 +4329,30 @@ mod tests {
     }
 
     #[test]
+    fn test_validation_filter_all_shows_passed() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Add a passed check to the validation_errors and ensure All shows it
+        app.validation_errors
+            .push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Items,
+                format!("{} items validated", 1),
+            ));
+        app.validation_filter = ValidationFilter::All;
+
+        let grouped = app.grouped_filtered_validation_results();
+        let has_passed = grouped.iter().any(|(_cat, results)| {
+            results
+                .iter()
+                .any(|r| r.severity == validation::ValidationSeverity::Passed)
+        });
+        assert!(
+            has_passed,
+            "All filter should include passed checks by default"
+        );
+    }
+
+    #[test]
     fn test_validation_invalid_id_characters() {
         let mut app = CampaignBuilderApp::default();
         app.campaign.id = "invalid-id-with-dashes".to_string();
@@ -4135,6 +4413,27 @@ mod tests {
     }
 
     #[test]
+    fn test_validation_starting_map_missing() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+        app.campaign.name = "Test".to_string();
+
+        // Add a loaded map (name "Starter Town") so the validator checks against loaded maps
+        let map = Map::new(1, "Starter Town".to_string(), "Desc".to_string(), 10, 10);
+        app.maps.push(map);
+
+        app.campaign.starting_map = "does_not_exist".to_string();
+        app.validate_campaign();
+
+        let has_map_error = app.validation_errors.iter().any(|e| {
+            e.category == validation::ValidationCategory::Configuration
+                && e.is_error()
+                && e.message.contains("Starting map")
+        });
+        assert!(has_map_error);
+    }
+
+    #[test]
     fn test_validation_starting_level_invalid() {
         let mut app = CampaignBuilderApp::default();
         app.campaign.id = "test".to_string();
@@ -4148,6 +4447,174 @@ mod tests {
                 .contains("Starting level must be between 1 and max level")
         });
         assert!(has_level_error);
+    }
+
+    #[test]
+    fn test_validation_starting_map_exists_by_name() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+        app.campaign.name = "Test".to_string();
+
+        // Add a loaded map (name "Starter Town") so the validator checks against loaded maps
+        let map = Map::new(1, "Starter Town".to_string(), "Desc".to_string(), 10, 10);
+        app.maps.push(map);
+
+        // Use the normalized map key (underscores -> spaces) that should match the map name
+        app.campaign.starting_map = "starter_town".to_string();
+        app.validate_campaign();
+
+        // There should NOT be a configuration error related to starting map
+        let has_map_error = app.validation_errors.iter().any(|e| {
+            e.category == validation::ValidationCategory::Configuration
+                && e.is_error()
+                && e.message.contains("Starting map")
+        });
+        assert!(!has_map_error);
+    }
+
+    #[test]
+    fn test_validation_configuration_category_grouping() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+        app.campaign.name = "Test".to_string();
+
+        // Force a configuration error (empty starting_map)
+        app.campaign.starting_map = "".to_string();
+        app.validate_campaign();
+
+        let grouped = validation::group_results_by_category(&app.validation_errors);
+        let has_config_group = grouped
+            .iter()
+            .any(|(category, _results)| *category == validation::ValidationCategory::Configuration);
+        assert!(has_config_group);
+    }
+
+    #[test]
+    fn test_validation_filter_errors_only() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+        app.campaign.name = "Test".to_string();
+
+        // Add an error and a warning in the same category
+        app.validation_errors.clear();
+        app.validation_errors
+            .push(validation::ValidationResult::error(
+                validation::ValidationCategory::Items,
+                "Item ID duplicate",
+            ));
+        app.validation_errors
+            .push(validation::ValidationResult::warning(
+                validation::ValidationCategory::Items,
+                "Item name recommended",
+            ));
+
+        // Enable Errors Only filter
+        app.validation_filter = ValidationFilter::ErrorsOnly;
+        let grouped = validation::group_results_by_category(&app.validation_errors);
+
+        // Use the grouped & filtered results (matching what the UI shows)
+        let grouped2 = app.grouped_filtered_validation_results();
+        let visible: usize = grouped2
+            .iter()
+            .map(|(_category, results)| results.len())
+            .sum();
+
+        assert_eq!(visible, 1, "Filter should show only the error result");
+    }
+
+    #[test]
+    fn test_validation_filter_warnings_only() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+        app.campaign.name = "Test".to_string();
+
+        // Add an error and a warning in the same category
+        app.validation_errors.clear();
+        app.validation_errors
+            .push(validation::ValidationResult::error(
+                validation::ValidationCategory::Items,
+                "Item ID duplicate",
+            ));
+        app.validation_errors
+            .push(validation::ValidationResult::warning(
+                validation::ValidationCategory::Items,
+                "Item name recommended",
+            ));
+
+        // Enable Warnings Only filter
+        app.validation_filter = ValidationFilter::WarningsOnly;
+
+        let grouped2 = app.grouped_filtered_validation_results();
+        let visible: usize = grouped2
+            .iter()
+            .map(|(_category, results)| results.len())
+            .sum();
+
+        assert_eq!(visible, 1, "Filter should show only the warning result");
+    }
+
+    #[test]
+    fn test_validation_focus_asset_click_sets_state() {
+        use std::path::PathBuf;
+        let mut app = CampaignBuilderApp::default();
+
+        // Create a temporary campaign directory and write a dummy asset file
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let tmp_base = std::env::temp_dir();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_millis();
+        let tmpdir = tmp_base.join(format!("antares_test_assets_{}", unique));
+        std::fs::create_dir_all(tmpdir.join("data")).expect("Failed to create temp data dir");
+
+        let item_file = tmpdir.join("data").join("items.ron");
+        std::fs::write(&item_file, "[]").expect("Failed to write dummy items.ron");
+
+        let mut manager = asset_manager::AssetManager::new(tmpdir.clone());
+        manager.scan_directory().expect("scan_directory failed");
+        app.asset_manager = Some(manager);
+
+        let asset_path = PathBuf::from("data/items.ron");
+
+        // Simulate clicking the file path (invoking the focus method directly)
+        app.focus_asset(asset_path.clone());
+
+        assert!(app.show_asset_manager);
+        assert_eq!(app.validation_focus_asset, Some(asset_path.clone()));
+    }
+
+    #[test]
+    fn test_validation_reset_filters_clears_state() {
+        use std::path::PathBuf;
+        let mut app = CampaignBuilderApp::default();
+
+        // Set a non-default state to simulate user changes
+        app.validation_filter = ValidationFilter::ErrorsOnly;
+        app.validation_focus_asset = Some(PathBuf::from("data/items.ron"));
+
+        // Call the reset helper and verify all state is reverted
+        app.reset_validation_filters();
+
+        assert_eq!(app.validation_filter, ValidationFilter::All);
+        assert_eq!(app.validation_focus_asset, None);
+    }
+
+    #[test]
+    fn test_validation_starting_food_invalid() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+        app.campaign.name = "Test".to_string();
+        app.campaign.starting_map = "test".to_string();
+        app.campaign.starting_food = (FOOD_MAX as u32) + 10;
+        app.validate_campaign();
+
+        let has_food_warning = app.validation_errors.iter().any(|e| {
+            e.category == validation::ValidationCategory::Configuration
+                && e.is_warning()
+                && e.message.contains("Starting food")
+        });
+        assert!(has_food_warning);
     }
 
     #[test]
@@ -4199,6 +4666,45 @@ mod tests {
             .filter(|e| e.is_error())
             .count();
         assert_eq!(error_count, 0);
+    }
+
+    #[test]
+    fn test_validation_all_shows_passed_and_errors_only_filters_out_passed() {
+        // Ensure 'All' filter shows Passed results by default and 'Errors Only' filters them out.
+        let mut app = CampaignBuilderApp::default();
+
+        // Add a single 'Passed' validation result for the Items category.
+        app.validation_errors
+            .push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Items,
+                "All items validated",
+            ));
+
+        // Default filter is All; verify passed checks are included.
+        app.validation_filter = ValidationFilter::All;
+        let grouped_all = app.grouped_filtered_validation_results();
+        let has_passed_in_all = grouped_all.iter().any(|(_cat, results)| {
+            results
+                .iter()
+                .any(|r| r.severity == validation::ValidationSeverity::Passed)
+        });
+        assert!(
+            has_passed_in_all,
+            "All filter should include passed checks by default"
+        );
+
+        // Switch to ErrorsOnly filter and verify passed checks are excluded.
+        app.validation_filter = ValidationFilter::ErrorsOnly;
+        let grouped_errors = app.grouped_filtered_validation_results();
+        let has_passed_in_errors = grouped_errors.iter().any(|(_cat, results)| {
+            results
+                .iter()
+                .any(|r| r.severity == validation::ValidationSeverity::Passed)
+        });
+        assert!(
+            !has_passed_in_errors,
+            "ErrorsOnly filter should exclude passed checks"
+        );
     }
 
     #[test]
@@ -5912,7 +6418,7 @@ mod tests {
         use antares::domain::items::types::WeaponClassification;
         use antares::domain::proficiency::ProficiencyDatabase;
 
-        let mut app = CampaignBuilderApp::default();
+        let app = CampaignBuilderApp::default();
 
         // Default edit_buffer is a simple weapon; required_proficiency should match simple_weapon id
         let required_prof = app

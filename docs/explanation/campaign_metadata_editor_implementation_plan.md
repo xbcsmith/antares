@@ -12,9 +12,9 @@ Build a new `campaign_editor.rs` module to host a focused Campaign Metadata edit
 6. Polishing: UX, accessibility, docs, and CI tests.
 
 **Open Questions**
-1. Should metadata editing be per campaign file only, or also support inline per-campaign instances? (File-only / Per-instance)
-2. Preferred left column: list of field groups (Overview/Files/Gameplay) or one-row list? (Groups / Flat)
-3. Should Save auto-exit back to list or remain in edit mode? (Exit on save / Remain)
+1. Should metadata editing be per campaign file only, or also support inline per-campaign instances? File-only
+2. Preferred left column: list of field groups (Overview/Files/Gameplay) or one-row list? Flat
+3. Should Save auto-exit back to list or remain in edit mode? Remain
 
 ---
 
