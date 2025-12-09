@@ -209,6 +209,51 @@ All editors use consistent button labels with emojis:
 
 **Form & UI Behavior (Phase 1 skeleton):**
 
+### Phase 3: Integration & Validation (2025-xx-xx)
+
+**Status:** ✅ COMPLETED | **Type:** Integration + Validator enhancements | **Files:** `sdk/campaign_builder/src/main.rs`, `sdk/campaign_builder/src/campaign_editor.rs`, `sdk/campaign_builder/src/validation.rs`.
+
+**Objective:** Integrate the Campaign Metadata editor's Validate action with the central app-level validator and add robust configuration validation checks that surface in the Validation panel as `ValidationCategory::Configuration` results.
+
+### Implementation Summary
+
+- validate_campaign() updates (main.ts):
+
+  - Added configuration checks to the central `validate_campaign()` method:
+    - Starting map presence and existence — Errors when missing and when the selected starting map doesn't match loaded map assets (supports numeric IDs, `map_N`, file names, and normalized names).
+    - Starting level must be within 1..=max_level (Error).
+    - Max party size validation uses `PARTY_MAX_SIZE` constant (Warning if out-of-range).
+    - Max roster size must be >= max party size (Error).
+    - Starting food within `FOOD_MIN`/`FOOD_MAX` (Warning).
+    - Soft recommendation for starting gold using `STARTING_GOLD_MAX` (Warning).
+    - File path checks for required data files (presence & `.ron` extension guidance — FilePaths category).
+  - All configuration results now create `ValidationResult` entries with `ValidationCategory::Configuration` and appropriate severity levels.
+
+- Campaign Metadata Validate button wiring:
+
+  - `sdk/campaign_builder/src/campaign_editor.rs`:
+    - The editor's Validate action now ensures the editor's buffer is applied to the authoritative campaign metadata (applies buffer to the editor metadata and copies it into the app's `campaign` reference), so the validator sees the user's unsaved edits without requiring file save.
+    - Sets a short-lived `validate_requested` flag in the editor state to signal the main app that validation should run.
+  - `sdk/campaign_builder/src/main.rs`:
+    - `show_metadata_editor()` consumes `validate_requested` and, if set, calls `validate_campaign()` and switches the UI into the Validation tab (`self.active_tab = EditorTab::Validation`), so results are immediately visible to users.
+
+- Validation UI & Panel:
+  - Configuration validation results are grouped and shown in the Validation panel (existing panel logic supports `ValidationCategory::Configuration` entries).
+  - Summary badges, counts, and filters continue to work with added configuration results.
+  - Validation panel supports clickable file paths to focus assets and the quick "Re-validate" button for re-runs.
+
+### Tests & QA
+
+- Added integration unit test(s):
+  - `sdk/campaign_builder/src/main.rs::test_metadata_editor_validate_triggers_validation` — verifies that when the campaign editor issues a validation request (simulated by `validate_requested`), the main app runs `validate_campaign()` and switches to the Validation tab, and an expected `Configuration` result is produced (e.g., missing starting map).
+- Existing configuration checks (like `test_validation_starting_map_missing` and `test_validation_starting_level_invalid`) were kept and validated to ensure accurate severity & category assignment.
+
+### Notes & Edge Cases
+
+- Map existence checks are only performed when maps are loaded to avoid false positives for campaigns that haven't loaded assets yet (consistent with existing behavior).
+- Map matching rules include numeric ID, `map_N` patterns, `.ron` filename forms, and normalized name comparison (case-insensitive, underscore -> space).
+- The editor's Validate action updates the in-memory authoritative `campaign` before validation runs (no file is written), ensuring the user can validate draft changes without persisting them to disk.
+
 - The `show()` method mirrors the metadata UI previously in `main.rs` to avoid regression.
   - Editing updates the `buffer` and sets `has_unsaved_changes`.
   - Save action either writes to `campaign_path` or triggers a Save As dialog.

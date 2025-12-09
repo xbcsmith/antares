@@ -17,6 +17,7 @@ use antares::domain::character::{FOOD_MAX, FOOD_MIN, PARTY_MAX_SIZE};
 use eframe::egui;
 use ron;
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -188,20 +189,23 @@ pub struct CampaignMetadataEditorState {
     /// Import/export dialog and buffer (future)
     pub show_import_dialog: bool,
     pub import_export_buffer: String,
+
+    /// Flag set when the editor requests app-level validation (e.g., user clicked Validate)
+    pub validate_requested: bool,
 }
 
 impl Default for CampaignMetadataEditorState {
     fn default() -> Self {
-        let meta = crate::CampaignMetadata::default();
         Self {
             mode: CampaignEditorMode::List,
-            metadata: meta.clone(),
-            buffer: CampaignMetadataEditBuffer::from_metadata(&meta),
+            metadata: crate::CampaignMetadata::default(),
+            buffer: CampaignMetadataEditBuffer::default(),
             search_filter: String::new(),
             selected_section: Some(CampaignSection::Overview),
             has_unsaved_changes: false,
             show_import_dialog: false,
             import_export_buffer: String::new(),
+            validate_requested: false,
         }
     }
 }
@@ -230,6 +234,15 @@ impl CampaignMetadataEditorState {
     pub fn apply_buffer_to_metadata(&mut self) {
         self.buffer.apply_to(&mut self.metadata);
         self.has_unsaved_changes = true;
+    }
+
+    /// Consume the current validation request flag.
+    ///
+    /// Returns `true` if a validation was requested since the last call, and resets the flag.
+    pub fn consume_validate_request(&mut self) -> bool {
+        let requested = self.validate_requested;
+        self.validate_requested = false;
+        requested
     }
 
     /// Save the current authoritative metadata to the given path using RON.
@@ -328,7 +341,7 @@ impl CampaignMetadataEditorState {
 
         // Two-column layout: left side lists sections, right side shows the form for that section.
         // Two-column layout: sections on left, form on right.
-        let mut new_selected = self.selected_section.unwrap_or(CampaignSection::Overview);
+        let new_selected = Cell::new(self.selected_section.unwrap_or(CampaignSection::Overview));
         let meta_id = self.metadata.id.clone();
         let meta_name = self.metadata.name.clone();
         let meta_version = self.metadata.version.clone();
@@ -344,24 +357,24 @@ impl CampaignMetadataEditorState {
                     left_ui.separator();
 
                     // List of sections (mutate local `new_selected`, not `self`); use local booleans to avoid borrow conflicts
-                    let is_overview = new_selected == CampaignSection::Overview;
+                    let is_overview = new_selected.get() == CampaignSection::Overview;
                     if left_ui.selectable_label(is_overview, "Overview").clicked() {
-                        new_selected = CampaignSection::Overview;
+                        new_selected.set(CampaignSection::Overview);
                     }
 
-                    let is_gameplay = new_selected == CampaignSection::Gameplay;
+                    let is_gameplay = new_selected.get() == CampaignSection::Gameplay;
                     if left_ui.selectable_label(is_gameplay, "Gameplay").clicked() {
-                        new_selected = CampaignSection::Gameplay;
+                        new_selected.set(CampaignSection::Gameplay);
                     }
 
-                    let is_files = new_selected == CampaignSection::Files;
+                    let is_files = new_selected.get() == CampaignSection::Files;
                     if left_ui.selectable_label(is_files, "Files").clicked() {
-                        new_selected = CampaignSection::Files;
+                        new_selected.set(CampaignSection::Files);
                     }
 
-                    let is_advanced = new_selected == CampaignSection::Advanced;
+                    let is_advanced = new_selected.get() == CampaignSection::Advanced;
                     if left_ui.selectable_label(is_advanced, "Advanced").clicked() {
-                        new_selected = CampaignSection::Advanced;
+                        new_selected.set(CampaignSection::Advanced);
                     }
 
                     left_ui.separator();
@@ -379,7 +392,8 @@ impl CampaignMetadataEditorState {
                 },
                 |right_ui| {
                     // Show the selected section's form
-                    match new_selected {
+                    let selected = new_selected.get();
+                    match selected {
                         CampaignSection::Overview => {
                             // Overview grid: ID, Name, Version, Author, Engine, Description
                             egui::Grid::new("campaign_overview_grid")
@@ -932,6 +946,9 @@ impl CampaignMetadataEditorState {
                                         *status_message =
                                             format!("Saved campaign to {}", path.display());
                                         *metadata = self.metadata.clone();
+                                        // Request a validation run after a successful save so the
+                                        // Validation panel shows updated results.
+                                        self.validate_requested = true;
                                     }
                                     Err(e) => *status_message = format!("Save failed: {}", e),
                                 }
@@ -948,6 +965,9 @@ impl CampaignMetadataEditorState {
                                             *status_message =
                                                 format!("Saved campaign to {}", path.display());
                                             *metadata = self.metadata.clone();
+                                            // Request a validation run after a successful Save As
+                                            // so the Validation panel shows updated results.
+                                            self.validate_requested = true;
                                         }
                                         Err(e) => *status_message = format!("Save failed: {}", e),
                                     }
@@ -956,7 +976,17 @@ impl CampaignMetadataEditorState {
                         }
 
                         if ui.button("✅ Validate").clicked() {
-                            // Defer to app-level validator; set a helpful status here.
+                            // Apply pending edits in the buffer to the editor's metadata and
+                            // update the shared `metadata` reference so the app-level validator
+                            // validates the latest values without requiring an explicit save.
+                            self.apply_buffer_to_metadata();
+                            *metadata = self.metadata.clone();
+
+                            // Signal to the app that validation was requested. The app should
+                            // call `validate_campaign()` and switch to the Validation tab when
+                            // this flag is set.
+                            self.validate_requested = true;
+
                             *status_message =
                                 "Validation requested from Campaign metadata editor".to_string();
                         }
@@ -965,7 +995,7 @@ impl CampaignMetadataEditorState {
             );
 
         // Persist the potentially changed selection back into the state
-        self.selected_section = Some(new_selected);
+        self.selected_section = Some(new_selected.get());
 
         // End TwoColumnLayout
     }

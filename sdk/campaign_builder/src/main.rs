@@ -3031,6 +3031,13 @@ impl CampaignBuilderApp {
             &mut self.unsaved_changes,
             &mut self.status_message,
         );
+
+        // If the campaign metadata editor requested validation, run the shared
+        // validator and switch to the Validation tab so results are visible.
+        if self.campaign_editor_state.consume_validate_request() {
+            self.validate_campaign();
+            self.active_tab = EditorTab::Validation;
+        }
     }
 
     /// Show the configuration editor
@@ -4368,6 +4375,39 @@ mod tests {
                 && e.message.contains("Starting map")
         });
         assert!(has_map_error);
+    }
+
+    #[test]
+    fn test_metadata_editor_validate_triggers_validation_and_switches_tab() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Ensure ID/Name are present to avoid unrelated Metadata errors and create a
+        // configuration error by leaving starting_map empty.
+        app.campaign.id = "test".to_string();
+        app.campaign.name = "Test".to_string();
+        app.campaign.starting_map = "".to_string();
+
+        // Simulate 'Validate' button click in the Campaign metadata editor by setting
+        // the request flag that the editor sets when the UI Validate button is clicked.
+        app.campaign_editor_state.validate_requested = true;
+
+        // Behavior in the main app after the editor returns:
+        // If a validate request was issued, consume it, run validation, and switch to the Validation tab.
+        if app.campaign_editor_state.consume_validate_request() {
+            app.validate_campaign();
+            app.active_tab = EditorTab::Validation;
+        }
+
+        // After validation, the active tab should be the Validation tab and at least
+        // one Configuration category error should be present.
+        assert_eq!(app.active_tab, EditorTab::Validation);
+
+        let has_config_error = app
+            .validation_errors
+            .iter()
+            .any(|e| e.category == validation::ValidationCategory::Configuration && e.is_error());
+
+        assert!(has_config_error);
     }
 
     #[test]
