@@ -10,7 +10,10 @@
 //! layout previously implemented in `main.rs` and exposes an editing flow
 //! compatible with other editor modules in the SDK.
 
-use crate::ui_helpers::{EditorToolbar, ToolbarAction};
+use crate::ui_helpers::{
+    compute_default_panel_height, EditorToolbar, ToolbarAction, TwoColumnLayout,
+};
+use antares::domain::character::{FOOD_MAX, FOOD_MIN, PARTY_MAX_SIZE};
 use eframe::egui;
 use ron;
 use serde::{Deserialize, Serialize};
@@ -271,7 +274,7 @@ impl CampaignMetadataEditorState {
         ui.label("Basic information about your campaign");
         ui.separator();
 
-        // Toolbar (basic)
+        // Toolbar (basic) - supports Search / Save / Load / Import / Export
         let toolbar_action = EditorToolbar::new("Campaign")
             .with_total_count(1)
             .with_search(&mut self.search_filter)
@@ -279,7 +282,6 @@ impl CampaignMetadataEditorState {
 
         match toolbar_action {
             ToolbarAction::Save => {
-                // Apply buffer to metadata, then persist to disk / campaign path
                 self.apply_buffer_to_metadata();
                 if let Some(path) = campaign_path.as_ref() {
                     if let Err(e) = self.save_to_file(path.as_path()) {
@@ -289,7 +291,6 @@ impl CampaignMetadataEditorState {
                         *status_message = format!("Saved campaign to: {}", path.display());
                     }
                 } else {
-                    // If no existing path, prompt for save as
                     if let Some(path) = rfd::FileDialog::new()
                         .set_file_name("campaign.ron")
                         .add_filter("RON", &["ron"])
@@ -315,7 +316,6 @@ impl CampaignMetadataEditorState {
                             *metadata = self.metadata.clone();
                             *unsaved_changes = false;
                             *status_message = format!("Loaded campaign from: {}", path.display());
-                            // Keep the selected campaign path in the app if present
                         }
                         Err(e) => {
                             *status_message = format!("Failed to load campaign: {}", e);
@@ -326,115 +326,648 @@ impl CampaignMetadataEditorState {
             _ => {}
         }
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            egui::Grid::new("metadata_grid")
-                .num_columns(2)
-                .spacing([10.0, 8.0])
-                .striped(true)
-                .show(ui, |ui| {
-                    // Campaign ID
-                    ui.label("Campaign ID:");
-                    if ui.text_edit_singleline(&mut self.buffer.id).changed() {
-                        self.has_unsaved_changes = true;
-                        *unsaved_changes = true;
+        // Two-column layout: left side lists sections, right side shows the form for that section.
+        // Two-column layout: sections on left, form on right.
+        let mut new_selected = self.selected_section.unwrap_or(CampaignSection::Overview);
+        let meta_id = self.metadata.id.clone();
+        let meta_name = self.metadata.name.clone();
+        let meta_version = self.metadata.version.clone();
+        let meta_description = self.metadata.description.clone();
+
+        TwoColumnLayout::new("campaign_metadata_layout")
+            .with_left_width(300.0)
+            .with_min_height(compute_default_panel_height(ui))
+            .show_split(
+                ui,
+                |left_ui| {
+                    left_ui.heading("Sections");
+                    left_ui.separator();
+
+                    // List of sections (mutate local `new_selected`, not `self`); use local booleans to avoid borrow conflicts
+                    let is_overview = new_selected == CampaignSection::Overview;
+                    if left_ui.selectable_label(is_overview, "Overview").clicked() {
+                        new_selected = CampaignSection::Overview;
                     }
-                    ui.end_row();
 
-                    // Campaign Name
-                    ui.label("Name:");
-                    if ui.text_edit_singleline(&mut self.buffer.name).changed() {
-                        self.has_unsaved_changes = true;
-                        *unsaved_changes = true;
+                    let is_gameplay = new_selected == CampaignSection::Gameplay;
+                    if left_ui.selectable_label(is_gameplay, "Gameplay").clicked() {
+                        new_selected = CampaignSection::Gameplay;
                     }
-                    ui.end_row();
 
-                    // Version
-                    ui.label("Version:");
-                    if ui.text_edit_singleline(&mut self.buffer.version).changed() {
-                        self.has_unsaved_changes = true;
-                        *unsaved_changes = true;
+                    let is_files = new_selected == CampaignSection::Files;
+                    if left_ui.selectable_label(is_files, "Files").clicked() {
+                        new_selected = CampaignSection::Files;
                     }
-                    ui.end_row();
 
-                    // Author
-                    ui.label("Author:");
-                    if ui.text_edit_singleline(&mut self.buffer.author).changed() {
-                        self.has_unsaved_changes = true;
-                        *unsaved_changes = true;
+                    let is_advanced = new_selected == CampaignSection::Advanced;
+                    if left_ui.selectable_label(is_advanced, "Advanced").clicked() {
+                        new_selected = CampaignSection::Advanced;
                     }
-                    ui.end_row();
 
-                    // Engine Version
-                    ui.label("Engine Version:");
-                    if ui
-                        .text_edit_singleline(&mut self.buffer.engine_version)
-                        .changed()
-                    {
-                        self.has_unsaved_changes = true;
-                        *unsaved_changes = true;
-                    }
-                    ui.end_row();
-                });
-
-            ui.add_space(10.0);
-            ui.label("Description:");
-            let response =
-                ui.add(egui::TextEdit::multiline(&mut self.buffer.description).desired_rows(6));
-            if response.changed() {
-                self.has_unsaved_changes = true;
-                *unsaved_changes = true;
-            }
-
-            ui.add_space(10.0);
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                if ui.button("⬅ Back to List").clicked() {
-                    self.mode = CampaignEditorMode::List;
-                }
-
-                if ui.button("💾 Save Campaign").clicked() {
-                    // Duplicate save flow to support the non-toolbar button
-                    self.apply_buffer_to_metadata();
-                    if let Some(path) = campaign_path.as_ref() {
-                        match self.save_to_file(path.as_path()) {
-                            Ok(_) => {
-                                *unsaved_changes = false;
-                                *status_message = format!("Saved campaign to {}", path.display());
-                                // propagate metadata changes back to the provided metadata reference
-                                *metadata = self.metadata.clone();
-                            }
-                            Err(e) => *status_message = format!("Save failed: {}", e),
-                        }
+                    left_ui.separator();
+                    left_ui.heading("Preview");
+                    left_ui.add_space(6.0);
+                    left_ui.label(format!("ID: {}", meta_id));
+                    left_ui.label(format!("Name: {}", meta_name));
+                    left_ui.label(format!("Version: {}", meta_version));
+                    left_ui.add_space(4.0);
+                    if !meta_description.is_empty() {
+                        left_ui.label(egui::RichText::new(&meta_description).small());
                     } else {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_file_name("campaign.ron")
-                            .add_filter("RON", &["ron"])
-                            .save_file()
-                        {
-                            match self.save_to_file(path.as_path()) {
-                                Ok(_) => {
-                                    *campaign_path = Some(path.clone());
-                                    *unsaved_changes = false;
-                                    *status_message =
-                                        format!("Saved campaign to {}", path.display());
-                                    *metadata = self.metadata.clone();
+                        left_ui.colored_label(egui::Color32::GRAY, "No description");
+                    }
+                },
+                |right_ui| {
+                    // Show the selected section's form
+                    match new_selected {
+                        CampaignSection::Overview => {
+                            // Overview grid: ID, Name, Version, Author, Engine, Description
+                            egui::Grid::new("campaign_overview_grid")
+                                .num_columns(2)
+                                .spacing([10.0, 8.0])
+                                .striped(true)
+                                .show(right_ui, |ui| {
+                                    ui.label("Campaign ID:");
+                                    if ui.text_edit_singleline(&mut self.buffer.id).changed() {
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Name:");
+                                    if ui.text_edit_singleline(&mut self.buffer.name).changed() {
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Version:");
+                                    if ui.text_edit_singleline(&mut self.buffer.version).changed() {
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Author:");
+                                    if ui.text_edit_singleline(&mut self.buffer.author).changed() {
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Engine Version:");
+                                    if ui
+                                        .text_edit_singleline(&mut self.buffer.engine_version)
+                                        .changed()
+                                    {
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+                                });
+
+                            right_ui.add_space(10.0);
+                            right_ui.label("Description:");
+                            let response = right_ui.add(
+                                egui::TextEdit::multiline(&mut self.buffer.description)
+                                    .desired_rows(6),
+                            );
+                            if response.changed() {
+                                self.has_unsaved_changes = true;
+                                *unsaved_changes = true;
+                            }
+                        }
+
+                        CampaignSection::Files => {
+                            // Files grid: items, spells, monsters, classes, races, characters, maps_dir, quests, dialogue, conditions
+                            egui::Grid::new("campaign_files_grid")
+                                .num_columns(2)
+                                .spacing([10.0, 8.0])
+                                .striped(true)
+                                .show(right_ui, |ui| {
+                                    // Helper macro-like inline: label + path + browse
+                                    ui.label("Items File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.items_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.items_file = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label("Spells File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.spells_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.spells_file = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label("Monsters File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.monsters_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.monsters_file = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label("Classes File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.classes_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.classes_file = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label("Races File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.races_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.races_file = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label("Characters File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.characters_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.characters_file =
+                                                    p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label("Maps Directory:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.maps_dir)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📂").on_hover_text("Browse Folder").clicked()
+                                        {
+                                            if let Some(p) = rfd::FileDialog::new().pick_folder() {
+                                                self.buffer.maps_dir = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label("Quests File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.quests_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.quests_file = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label("Dialogue File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.dialogue_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.dialogue_file = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label("Conditions File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.conditions_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.conditions_file =
+                                                    p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+                                });
+                        }
+
+                        CampaignSection::Gameplay => {
+                            // Gameplay grid: starting map/position/direction, gold/food, difficulty, flags, levels, limits
+                            egui::Grid::new("campaign_gameplay_grid")
+                                .num_columns(2)
+                                .spacing([10.0, 8.0])
+                                .striped(true)
+                                .show(right_ui, |ui| {
+                                    ui.label("Starting Map:");
+                                    if ui
+                                        .text_edit_singleline(&mut self.buffer.starting_map)
+                                        .changed()
+                                    {
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Starting Position (X, Y):");
+                                    ui.horizontal(|ui| {
+                                        let mut x = self.buffer.starting_position.0 as i32;
+                                        let mut y = self.buffer.starting_position.1 as i32;
+                                        if ui.add(egui::DragValue::new(&mut x)).changed() {
+                                            self.buffer.starting_position.0 = x.max(0) as u32;
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.add(egui::DragValue::new(&mut y)).changed() {
+                                            self.buffer.starting_position.1 = y.max(0) as u32;
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label("Starting Direction:");
+                                    let mut dir = self.buffer.starting_direction.clone();
+                                    egui::ComboBox::from_label("")
+                                        .selected_text(dir.clone())
+                                        .show_ui(ui, |ui| {
+                                            for d in &["North", "East", "South", "West"] {
+                                                if ui.selectable_label(dir == *d, *d).clicked() {
+                                                    dir = (*d).to_string();
+                                                    self.buffer.starting_direction = dir.clone();
+                                                    self.has_unsaved_changes = true;
+                                                    *unsaved_changes = true;
+                                                }
+                                            }
+                                        });
+                                    ui.end_row();
+
+                                    ui.label("Starting Gold:");
+                                    let mut gold = self.buffer.starting_gold as i64;
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut gold)
+                                                .range(0..=crate::STARTING_GOLD_MAX as i64),
+                                        )
+                                        .changed()
+                                    {
+                                        self.buffer.starting_gold = gold.max(0) as u32;
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Starting Food:");
+                                    let mut food = self.buffer.starting_food as i64;
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut food)
+                                                .range(FOOD_MIN as i64..=FOOD_MAX as i64),
+                                        )
+                                        .changed()
+                                    {
+                                        self.buffer.starting_food =
+                                            (food.max(FOOD_MIN as i64)) as u32;
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Difficulty:");
+                                    egui::ComboBox::from_label("")
+                                        .selected_text(self.buffer.difficulty.as_str())
+                                        .show_ui(ui, |ui| {
+                                            for &diff in &crate::Difficulty::all() {
+                                                if ui
+                                                    .selectable_label(
+                                                        self.buffer.difficulty == diff,
+                                                        diff.as_str(),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.buffer.difficulty = diff;
+                                                    self.has_unsaved_changes = true;
+                                                    *unsaved_changes = true;
+                                                }
+                                            }
+                                        });
+                                    ui.end_row();
+
+                                    ui.label("Permadeath:");
+                                    if ui.checkbox(&mut self.buffer.permadeath, "").changed() {
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Allow Multiclassing:");
+                                    if ui
+                                        .checkbox(&mut self.buffer.allow_multiclassing, "")
+                                        .changed()
+                                    {
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Starting Level:");
+                                    let mut start_level = self.buffer.starting_level as i32;
+                                    if ui
+                                        .add(egui::DragValue::new(&mut start_level).range(1..=255))
+                                        .changed()
+                                    {
+                                        self.buffer.starting_level = (start_level.max(1)) as u8;
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Max Level:");
+                                    let mut max_level = self.buffer.max_level as i32;
+                                    if ui
+                                        .add(egui::DragValue::new(&mut max_level).range(1..=255))
+                                        .changed()
+                                    {
+                                        self.buffer.max_level = (max_level.max(1)) as u8;
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Max Party Size:");
+                                    let mut max_party = self.buffer.max_party_size as i32;
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut max_party)
+                                                .range(1..=(PARTY_MAX_SIZE as i32)),
+                                        )
+                                        .changed()
+                                    {
+                                        self.buffer.max_party_size = max_party.max(1) as usize;
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Max Roster Size:");
+                                    let mut roster = self.buffer.max_roster_size as i32;
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut roster)
+                                                .range(self.buffer.max_party_size as i32..=1000),
+                                        )
+                                        .changed()
+                                    {
+                                        self.buffer.max_roster_size =
+                                            roster.max(self.buffer.max_party_size as i32) as usize;
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+                                });
+
+                            // Inline feedback for common configuration mistakes
+                            if self.buffer.max_roster_size < self.buffer.max_party_size {
+                                right_ui.colored_label(
+                                    egui::Color32::RED,
+                                    "Max roster size must be >= max party size.",
+                                );
+                            }
+                            if (self.buffer.starting_level == 0)
+                                || (self.buffer.starting_level > self.buffer.max_level)
+                            {
+                                right_ui.colored_label(
+                                    egui::Color32::RED,
+                                    "Starting level must be between 1 and max level.",
+                                );
+                            }
+                        }
+
+                        CampaignSection::Advanced => {
+                            // Advanced shows a concise representation of all fields not included above, and a RON export utility
+                            right_ui.label("Advanced");
+                            right_ui.add_space(6.0);
+                            right_ui.label("Engine & File Metadata (short)");
+                            egui::Grid::new("campaign_advanced_grid")
+                                .num_columns(2)
+                                .spacing([10.0, 8.0])
+                                .striped(true)
+                                .show(right_ui, |ui| {
+                                    ui.label("Engine Version:");
+                                    ui.label(&self.buffer.engine_version);
+                                    ui.end_row();
+
+                                    ui.label("Starting Map:");
+                                    ui.label(&self.buffer.starting_map);
+                                    ui.end_row();
+
+                                    ui.label("Data files path preview:");
+                                    ui.label(&self.buffer.items_file);
+                                    ui.end_row();
+                                });
+
+                            right_ui.add_space(10.0);
+                            right_ui.horizontal(|ui| {
+                                if ui.button("Export RON").clicked() {
+                                    // Show dialog with RON content pre-filled (uses import/export dialog in ui_helpers)
+                                    self.show_import_dialog = true;
+                                    if let Ok(serialized) = ron::ser::to_string_pretty(
+                                        &self.buffer,
+                                        ron::ser::PrettyConfig::default(),
+                                    ) {
+                                        self.import_export_buffer = serialized;
+                                    }
                                 }
-                                Err(e) => *status_message = format!("Save failed: {}", e),
+                            });
+
+                            // Render import/export dialog if requested
+                            if self.show_import_dialog {
+                                let mut dlg_state =
+                                    crate::ui_helpers::ImportExportDialogState::new();
+                                dlg_state.open_export(self.import_export_buffer.clone());
+                                let result = crate::ui_helpers::ImportExportDialog::new(
+                                    "Export Campaign Metadata",
+                                    &mut dlg_state,
+                                )
+                                .show(right_ui.ctx());
+                                // import/export state is ephemeral for now
+                                if let crate::ui_helpers::ImportExportResult::Cancel = result {
+                                    self.show_import_dialog = false;
+                                }
                             }
                         }
                     }
-                }
 
-                if ui.button("✅ Validate").clicked() {
-                    // Validation is performed at the app-level via `validate_campaign`.
-                    // For now we set a helpful status message and the app can be
-                    // wired to perform validation after calling this function.
-                    *status_message =
-                        "Validation requested from Campaign metadata editor".to_string();
-                }
-            });
-        });
+                    // Inspector bottom actions (Back, Save, Validate)
+                    right_ui.add_space(10.0);
+                    right_ui.separator();
+                    right_ui.add_space(6.0);
+                    right_ui.horizontal(|ui| {
+                        if ui.button("⬅ Back to List").clicked() {
+                            self.mode = CampaignEditorMode::List;
+                        }
+
+                        if ui.button("💾 Save Campaign").clicked() {
+                            self.apply_buffer_to_metadata();
+                            if let Some(path) = campaign_path.as_ref() {
+                                match self.save_to_file(path.as_path()) {
+                                    Ok(_) => {
+                                        *unsaved_changes = false;
+                                        *status_message =
+                                            format!("Saved campaign to {}", path.display());
+                                        *metadata = self.metadata.clone();
+                                    }
+                                    Err(e) => *status_message = format!("Save failed: {}", e),
+                                }
+                            } else {
+                                if let Some(path) = rfd::FileDialog::new()
+                                    .set_file_name("campaign.ron")
+                                    .add_filter("RON", &["ron"])
+                                    .save_file()
+                                {
+                                    match self.save_to_file(path.as_path()) {
+                                        Ok(_) => {
+                                            *campaign_path = Some(path.clone());
+                                            *unsaved_changes = false;
+                                            *status_message =
+                                                format!("Saved campaign to {}", path.display());
+                                            *metadata = self.metadata.clone();
+                                        }
+                                        Err(e) => *status_message = format!("Save failed: {}", e),
+                                    }
+                                }
+                            }
+                        }
+
+                        if ui.button("✅ Validate").clicked() {
+                            // Defer to app-level validator; set a helpful status here.
+                            *status_message =
+                                "Validation requested from Campaign metadata editor".to_string();
+                        }
+                    });
+                },
+            );
+
+        // Persist the potentially changed selection back into the state
+        self.selected_section = Some(new_selected);
+
+        // End TwoColumnLayout
     }
 }
 
