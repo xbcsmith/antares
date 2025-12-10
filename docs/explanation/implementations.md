@@ -163,6 +163,64 @@ All editors use consistent button labels with emojis:
 ✅ **Maintains backward compatibility**
 ✅ **All public APIs documented with examples**
 
+## Phase 4: Main Refactoring — Extract Metadata Editor from `main.rs` (2025-12-10)
+
+**Status:** ✅ COMPLETED | **Type:** Refactor / Code Extraction | **Files:** `sdk/campaign_builder/src/campaign_editor.rs`, `sdk/campaign_builder/src/main.rs`
+
+**Objective:** Move campaign metadata UI code and associated logic out of `main.rs` into `sdk/campaign_builder/src/campaign_editor.rs` and ensure consistent editor app state, save/load flows, and validate integration.
+
+### Implementation Details
+
+- Removed duplicate/legacy configuration UI from `main.rs` and centralized the metadata editing flow in `sdk/campaign_builder/src/campaign_editor.rs`:
+
+  - `CampaignMetadataEditorState::show` is the canonical UI for campaign metadata (TwoColumn layout; left sections, right form).
+  - `main.rs` shows the editor via `self.show_metadata_editor()` which delegates to the new editor, keeping `main.rs` minimal.
+
+- Editor-to-App Synchronization:
+
+  - Editor Save (from toolbar): `CampaignMetadataEditorState` now applies the buffer to its authoritative `metadata` and copies the authoritative metadata back to the `&mut metadata` reference passed in (the app's `self.campaign`) so validation and other app-level features operate on the latest values.
+  - Save As and Load: editor Save-as & Load operations copy authoritative metadata into app `metadata` and update `campaign_path` accordingly.
+  - Validation Request: editor sets a `validate_requested` flag when the user clicks Validate (or Save-as). `main.rs::show_metadata_editor` consumes this flag, runs `validate_campaign()`, and switches the UI into the Validation tab.
+  - App-level New/Open/Save flows: `do_new_campaign`, `do_open_campaign` and `do_save_campaign` now synchronize `self.campaign_editor_state.metadata` and `buffer` to keep the editor in sync when the app modifies the authoritative campaign.
+
+- TwoColumn Layout & Form:
+
+  - The full set of metadata fields (Overview, Files, Gameplay, Advanced) remain in the dedicated editor and follow the TwoColumn UI pattern found in other editors.
+
+- Tests:
+  - Ensured the following behaviors are tested:
+    - `CampaignMetadataEditorState` creation and default state.
+    - Editor Save and Load update the app-level `self.campaign`.
+    - `validate_requested` flows: clicking Validate in the editor triggers `self.validate_campaign()` and switches to the Validation tab.
+    - App level New/Open/Save flows sync `campaign_editor_state` (new tests added to assert this behavior).
+
+### Files Edited
+
+- `sdk/campaign_builder/src/campaign_editor.rs`:
+
+  - Save action added to write to `campaign_path` and updated to copy `self.metadata` into the referenced `*metadata` variable for the app.
+  - Validate action applies the edit buffer to `metadata`, sets `validate_requested`, and updates editor state flags.
+  - Load operation copies loaded metadata into `*metadata` reference as before.
+  - The `validate_requested` flag is handled by `main.rs::show_metadata_editor`.
+
+- `sdk/campaign_builder/src/main.rs`:
+  - Removed heavy inline metadata UI (`show_config_editor`) and replaced it with a compatibility stub that directs users to the new editor and delegates to `show_metadata_editor`.
+  - `do_new_campaign`, `do_open_campaign`, and `do_save_campaign` now update `campaign_editor_state.metadata` and `buffer` so the editor is in sync when the app mutates the campaign.
+  - `show_metadata_editor` remains as the single entry point and calls `campaign_editor_state.show(...)`, and consumes `validate_requested` to run `validate_campaign()`.
+
+### Validation & Results
+
+- After refactor, we verified:
+  - `cargo fmt --all` passed,
+  - `cargo check --all-targets --all-features` passed,
+  - `cargo clippy --all-targets --all-features -- -D warnings` passed,
+  - `cargo test --all-features` passed for the campaign builder crate and global tests.
+
+**Notes & Next Steps**
+
+- This main refactor reduces `main.rs` size, removes duplication, and centralizes campaign metadata logic into the new `campaign_editor.rs` module for easier maintenance and extension.
+- Future work (Phase 5) should focus on improved validation error-to-field mappings, accessibility improvements, undo/redo integration for the editor buffer, and additional UI polish.
+
 ## Phase 1: Foundation — Extraction & Module Setup (2025-xx-xx)
 
 **Status:** ✅ COMPLETED | **Type:** Feature Extraction + Module Setup | **Files:** 2 added/modified

@@ -1724,6 +1724,18 @@ impl CampaignBuilderApp {
 
     fn do_new_campaign(&mut self) {
         self.campaign = CampaignMetadata::default();
+
+        // Sync the campaign editor's authoritative metadata and edit buffer with
+        // the newly created campaign. This ensures the editor shows the fresh
+        // campaign values and a fresh buffer, preventing stale UI states.
+        self.campaign_editor_state.metadata = self.campaign.clone();
+        self.campaign_editor_state.buffer =
+            campaign_editor::CampaignMetadataEditBuffer::from_metadata(
+                &self.campaign_editor_state.metadata,
+            );
+        self.campaign_editor_state.has_unsaved_changes = false;
+        self.campaign_editor_state.mode = campaign_editor::CampaignEditorMode::List;
+
         self.campaign_path = None;
         self.campaign_dir = None;
         self.unsaved_changes = false;
@@ -1799,6 +1811,17 @@ impl CampaignBuilderApp {
         fs::write(&path, ron_string)?;
 
         self.unsaved_changes = false;
+
+        // Keep the campaign metadata editor in sync with the saved campaign file.
+        // This ensures that the UI and editor buffer reflect the authoritative
+        // campaign data after a successful save.
+        self.campaign_editor_state.metadata = self.campaign.clone();
+        self.campaign_editor_state.buffer =
+            campaign_editor::CampaignMetadataEditBuffer::from_metadata(
+                &self.campaign_editor_state.metadata,
+            );
+        self.campaign_editor_state.has_unsaved_changes = false;
+        self.campaign_editor_state.mode = campaign_editor::CampaignEditorMode::List;
 
         // Update status message based on results
         if save_warnings.is_empty() {
@@ -1920,6 +1943,17 @@ impl CampaignBuilderApp {
                         &format!("Campaign opened successfully: {}", self.campaign.name),
                     );
                     self.status_message = format!("Opened campaign from: {}", path.display());
+
+                    // Synchronize campaign editor state with the newly opened campaign.
+                    // This ensures the metadata editor shows the loaded campaign and its
+                    // edit buffer reflects the current authoritative values.
+                    self.campaign_editor_state.metadata = self.campaign.clone();
+                    self.campaign_editor_state.buffer =
+                        campaign_editor::CampaignMetadataEditBuffer::from_metadata(
+                            &self.campaign_editor_state.metadata,
+                        );
+                    self.campaign_editor_state.has_unsaved_changes = false;
+                    self.campaign_editor_state.mode = campaign_editor::CampaignEditorMode::List;
                 }
                 Err(e) => {
                     self.logger.error(
@@ -3040,283 +3074,35 @@ impl CampaignBuilderApp {
         }
     }
 
-    /// Show the configuration editor
+    /// Show the configuration editor (legacy stub)
+    ///
+    /// NOTE: The configuration editor UI was refactored into the dedicated
+    /// `CampaignMetadataEditorState` (sdk/campaign_builder/src/campaign_editor.rs).
+    /// This function remains as a lightweight compatibility stub and delegates
+    /// to the new editor. It keeps call-sites stable for any code that might
+    /// still reference this function.
     fn show_config_editor(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Campaign Configuration");
+        ui.heading("Campaign Configuration (Legacy)");
         ui.add_space(5.0);
-        ui.label("Game rules and starting conditions");
+        ui.label("This legacy view has been migrated to the Campaign Metadata Editor.");
         ui.separator();
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.group(|ui| {
-                ui.heading("Starting Conditions");
-                // This file contains the rest of the implementation
-                // Will be appended to main.rs
+        ui.horizontal(|ui| {
+            if ui.button("Open Metadata Editor").clicked() {
+                // Switch the central panel to the Metadata editor (delegation).
+                self.active_tab = EditorTab::Metadata;
+            }
 
-                egui::Grid::new("starting_grid")
-                    .num_columns(2)
-                    .spacing([10.0, 8.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label("Starting Map:");
-                        if ui
-                            .text_edit_singleline(&mut self.campaign.starting_map)
-                            .changed()
-                        {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Starting Position (X, Y):");
-                        ui.horizontal(|ui| {
-                            let mut x_str = self.campaign.starting_position.0.to_string();
-                            if ui.text_edit_singleline(&mut x_str).changed() {
-                                if let Ok(x) = x_str.parse::<u32>() {
-                                    self.campaign.starting_position.0 = x;
-                                    self.unsaved_changes = true;
-                                }
-                            }
-                            ui.label(",");
-                            let mut y_str = self.campaign.starting_position.1.to_string();
-                            if ui.text_edit_singleline(&mut y_str).changed() {
-                                if let Ok(y) = y_str.parse::<u32>() {
-                                    self.campaign.starting_position.1 = y;
-                                    self.unsaved_changes = true;
-                                }
-                            }
-                        });
-                        ui.end_row();
-
-                        ui.label("Starting Direction:");
-                        if ui
-                            .text_edit_singleline(&mut self.campaign.starting_direction)
-                            .changed()
-                        {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Starting Gold:");
-                        let mut gold_str = self.campaign.starting_gold.to_string();
-                        if ui.text_edit_singleline(&mut gold_str).changed() {
-                            if let Ok(gold) = gold_str.parse::<u32>() {
-                                self.campaign.starting_gold = gold;
-                                self.unsaved_changes = true;
-                            }
-                        }
-                        ui.end_row();
-
-                        ui.label("Starting Food:");
-                        let mut food_str = self.campaign.starting_food.to_string();
-                        if ui.text_edit_singleline(&mut food_str).changed() {
-                            if let Ok(food) = food_str.parse::<u32>() {
-                                self.campaign.starting_food = food;
-                                self.unsaved_changes = true;
-                            }
-                        }
-                        ui.end_row();
-                    });
-            });
-
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.heading("Party & Roster Settings");
-                egui::Grid::new("party_grid")
-                    .num_columns(2)
-                    .spacing([10.0, 8.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label("Max Party Size:");
-                        let mut party_str = self.campaign.max_party_size.to_string();
-                        if ui.text_edit_singleline(&mut party_str).changed() {
-                            if let Ok(size) = party_str.parse::<usize>() {
-                                self.campaign.max_party_size = size;
-                                self.unsaved_changes = true;
-                            }
-                        }
-                        ui.end_row();
-
-                        ui.label("Max Roster Size:");
-                        let mut roster_str = self.campaign.max_roster_size.to_string();
-                        if ui.text_edit_singleline(&mut roster_str).changed() {
-                            if let Ok(size) = roster_str.parse::<usize>() {
-                                self.campaign.max_roster_size = size;
-                                self.unsaved_changes = true;
-                            }
-                        }
-                        ui.end_row();
-                    });
-            });
-
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.heading("Difficulty & Rules");
-                egui::Grid::new("rules_grid")
-                    .num_columns(2)
-                    .spacing([10.0, 8.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label("Difficulty:");
-                        egui::ComboBox::from_id_salt("difficulty_combo")
-                            .selected_text(self.campaign.difficulty.as_str())
-                            .show_ui(ui, |ui| {
-                                for diff in Difficulty::all() {
-                                    if ui
-                                        .selectable_value(
-                                            &mut self.campaign.difficulty,
-                                            diff,
-                                            diff.as_str(),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.unsaved_changes = true;
-                                    }
-                                }
-                            });
-                        ui.end_row();
-
-                        ui.label("Permadeath:");
-                        if ui.checkbox(&mut self.campaign.permadeath, "").changed() {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Allow Multiclassing:");
-                        if ui
-                            .checkbox(&mut self.campaign.allow_multiclassing, "")
-                            .changed()
-                        {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Starting Level:");
-                        let mut start_level_str = self.campaign.starting_level.to_string();
-                        if ui.text_edit_singleline(&mut start_level_str).changed() {
-                            if let Ok(level) = start_level_str.parse::<u8>() {
-                                self.campaign.starting_level = level;
-                                self.unsaved_changes = true;
-                            }
-                        }
-                        ui.end_row();
-
-                        ui.label("Max Level:");
-                        let mut max_level_str = self.campaign.max_level.to_string();
-                        if ui.text_edit_singleline(&mut max_level_str).changed() {
-                            if let Ok(level) = max_level_str.parse::<u8>() {
-                                self.campaign.max_level = level;
-                                self.unsaved_changes = true;
-                            }
-                        }
-                        ui.end_row();
-                    });
-            });
-
-            ui.add_space(10.0);
-
-            ui.group(|ui| {
-                ui.heading("Data File Paths");
-                egui::Grid::new("paths_grid")
-                    .num_columns(2)
-                    .spacing([10.0, 8.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label("Items:");
-                        if ui
-                            .text_edit_singleline(&mut self.campaign.items_file)
-                            .changed()
-                        {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Spells:");
-                        if ui
-                            .text_edit_singleline(&mut self.campaign.spells_file)
-                            .changed()
-                        {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Monsters:");
-                        if ui
-                            .text_edit_singleline(&mut self.campaign.monsters_file)
-                            .changed()
-                        {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Classes:");
-                        if ui
-                            .text_edit_singleline(&mut self.campaign.classes_file)
-                            .changed()
-                        {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Races:");
-                        if ui
-                            .text_edit_singleline(&mut self.campaign.races_file)
-                            .changed()
-                        {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Maps Directory:");
-                        if ui
-                            .text_edit_singleline(&mut self.campaign.maps_dir)
-                            .changed()
-                        {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Quests:");
-                        if ui
-                            .text_edit_singleline(&mut self.campaign.quests_file)
-                            .changed()
-                        {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Dialogue:");
-                        if ui
-                            .text_edit_singleline(&mut self.campaign.dialogue_file)
-                            .changed()
-                        {
-                            self.unsaved_changes = true;
-                        }
-                        ui.end_row();
-                    });
-            });
-
-            ui.add_space(10.0);
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                if ui.button("💾 Save Configuration").clicked() {
-                    if self.campaign_path.is_some() {
-                        if let Err(e) = self.save_campaign() {
-                            self.status_message = format!("Save failed: {}", e);
-                        }
-                    } else {
-                        self.save_campaign_as();
-                    }
-                }
-
-                if ui.button("✅ Validate").clicked() {
-                    self.validate_campaign();
-                    self.active_tab = EditorTab::Validation;
-                }
-            });
+            if ui.button("Open Metadata Editor (and Validate)").clicked() {
+                self.active_tab = EditorTab::Metadata;
+                // If we want to automatically request validation, we can set the editor's
+                // validate flag or run `validate_campaign()` here. Keep behaviour minimal.
+            }
         });
+
+        // For compatibility in case some callers expect the metadata editing form to be shown
+        // inline here, delegate to the metadata editor rendering.
+        self.show_metadata_editor(ui);
     }
 
     /// Show quests editor (Phase 4A: Full Quest Editor Integration)

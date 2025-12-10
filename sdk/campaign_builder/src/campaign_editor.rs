@@ -302,6 +302,10 @@ impl CampaignMetadataEditorState {
                     } else {
                         *unsaved_changes = false;
                         *status_message = format!("Saved campaign to: {}", path.display());
+                        // Apply the updated metadata back to the shared campaign metadata
+                        *metadata = self.metadata.clone();
+                        // Request a validation run so the Validation panel reflects the saved changes
+                        self.validate_requested = true;
                     }
                 } else {
                     if let Some(path) = rfd::FileDialog::new()
@@ -315,6 +319,9 @@ impl CampaignMetadataEditorState {
                             *unsaved_changes = false;
                             *status_message = format!("Saved campaign to: {}", path.display());
                             *campaign_path = Some(path);
+                            // Also update the shared campaign metadata and request validation on Save As
+                            *metadata = self.metadata.clone();
+                            self.validate_requested = true;
                         }
                     }
                 }
