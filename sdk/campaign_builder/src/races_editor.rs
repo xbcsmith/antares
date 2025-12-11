@@ -384,9 +384,9 @@ impl RacesEditorState {
             ron::from_str(&content).map_err(|e| format!("Failed to parse races: {}", e))?;
         self.races = races;
         self.has_unsaved_changes = false;
-        // Auto-select first race if any races were loaded
+        // Do not auto-select a race on load; wait for the user to select one
         if !self.races.is_empty() {
-            self.selected_race = Some(0);
+            self.selected_race = None;
         }
         Ok(())
     }
@@ -627,6 +627,19 @@ impl RacesEditorState {
                                         .id_salt("race_details_scroll")
                                         .show(right_ui, |ui| {
                                             ui.heading(&race.name);
+                                            ui.separator();
+
+                                            let action = ActionButtons::new()
+                                                .with_edit(true)
+                                                .with_delete(true)
+                                                .with_duplicate(true)
+                                                .with_export(true)
+                                                .show(ui);
+
+                                            if action != ItemAction::None {
+                                                action_to_perform.set(Some((idx, action)));
+                                            }
+                                            ui.separator();
                                             ui.label(format!("ID: {}", race.id));
                                             ui.label(format!("Size: {:?}", race.size));
 
@@ -735,16 +748,6 @@ impl RacesEditorState {
 
                                             // Action buttons
                                             ui.add_space(10.0);
-                                            let action = ActionButtons::new()
-                                                .with_edit(true)
-                                                .with_delete(true)
-                                                .with_duplicate(true)
-                                                .with_export(true)
-                                                .show(ui);
-
-                                            if action != ItemAction::None {
-                                                action_to_perform.set(Some((idx, action)));
-                                            }
                                         });
                                 } else {
                                     // Selected race is filtered out by search
@@ -1116,23 +1119,26 @@ impl RacesEditorState {
                     ui.label(format!("This race has {} incompatible item tags", current_tags.len()));
                 }
 
-                ui.add_space(20.0);
+                ui.add_space(10.0);
+                ui.separator();
 
-                // Form buttons
+                // Save/Cancel/Back to List buttons
                 ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() {
+                    if ui.button("Back to List").clicked() {
+                        self.cancel_edit();
+                    }
+                    if ui.button("💾 Save").clicked() {
                         match self.save_race() {
                             Ok(_) => {
                                 *unsaved_changes = true;
-                                *status_message = "Race saved".to_string();
+                                self.mode = RacesEditorMode::List;
                             }
                             Err(e) => {
-                                *status_message = format!("Error: {}", e);
+                                ui.label(egui::RichText::new(e).color(egui::Color32::RED));
                             }
                         }
                     }
-
-                    if ui.button("Cancel").clicked() {
+                    if ui.button("❌ Cancel").clicked() {
                         self.cancel_edit();
                     }
                 });
@@ -1398,7 +1404,7 @@ mod tests {
 
         // Ensure the races were loaded and the first race is auto-selected
         assert_eq!(state.races.len(), 2);
-        assert_eq!(state.selected_race, Some(0));
+        assert_eq!(state.selected_race, None);
     }
 
     #[test]

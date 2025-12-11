@@ -1076,6 +1076,7 @@ impl CharactersEditorState {
         } else {
             "Edit Character"
         };
+
         ui.heading(title);
         ui.separator();
 
@@ -1309,8 +1310,11 @@ impl CharactersEditorState {
                 ui.add_space(20.0);
                 ui.separator();
 
-                // Save/Cancel buttons
+                // Save/Cancel/Back to List buttons
                 ui.horizontal(|ui| {
+                    if ui.button("Back to List").clicked() {
+                        self.cancel_edit();
+                    }
                     if ui.button("💾 Save").clicked() {
                         match self.save_character() {
                             Ok(_) => {}

@@ -19,7 +19,7 @@
 
 use antares::domain::character::{AttributePair, AttributePair16};
 use eframe::egui;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // =============================================================================
 // Constants
@@ -47,6 +47,73 @@ pub const MIN_SAFE_LEFT_COLUMN_WIDTH: f32 = 250.0;
 /// This value prevents panels from collapsing to 0 or very short heights when
 /// the computed available region is very small.
 pub const DEFAULT_PANEL_MIN_HEIGHT: f32 = 100.0;
+
+/// Renders a bold header row inside an `egui::Grid`.
+///
+/// This should be called from within a `egui::Grid::show(...)` closure and will
+/// automatically mark the end of the header row by calling `ui.end_row()`.
+///
+/// # Examples
+///
+/// ```no_run
+/// use eframe::egui;
+/// use antares::sdk::campaign_builder::ui_helpers::render_grid_header;
+///
+/// // Example usage inside a Grid:
+/// // egui::Grid::new("example_grid").num_columns(3).show(ui, |ui| {
+/// //     render_grid_header(ui, &["Status", "Message", "File"]);
+/// //     // row content...
+/// //     ui.end_row();
+/// // });
+/// ```
+pub fn render_grid_header(ui: &mut egui::Ui, headers: &[&str]) {
+    for header in headers {
+        ui.label(egui::RichText::new(*header).strong());
+    }
+    ui.end_row();
+}
+
+/// Renders a colored validation severity icon with a tooltip of its display name.
+/// Accepts the `ValidationSeverity` type from the validation module and renders
+/// the icon using the appropriate color and tooltip text.
+///
+/// # Examples
+///
+/// ```no_run
+/// use eframe::egui;
+/// use antares::sdk::campaign_builder::ui_helpers::show_validation_severity_icon;
+///
+/// // Example usage:
+/// // show_validation_severity_icon(ui, crate::validation::ValidationSeverity::Error);
+/// ```
+pub fn show_validation_severity_icon(
+    ui: &mut egui::Ui,
+    severity: crate::validation::ValidationSeverity,
+) {
+    ui.colored_label(severity.color(), severity.icon())
+        .on_hover_text(severity.display_name());
+}
+
+/// Renders a clickable file path label with an on-hover tooltip and returns
+/// the widget `Response` so callers can react to clicks.
+///
+/// This helper centralizes a common pattern used in the Validation panel and
+/// the Asset Manager where file paths should be interactive. The label is
+/// shown with a more compact font size to visually fit into grid cells.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI to render into
+/// * `path` - The path to display. The tooltip shows the same path text.
+///
+pub fn show_clickable_path(ui: &mut egui::Ui, path: &Path) -> egui::Response {
+    let path_display = path.display().to_string();
+    let label = egui::RichText::new(path_display.clone()).small();
+    // Build the clickable label
+    let resp = ui.add(egui::Label::new(label).sense(egui::Sense::click()));
+    // Attach a tooltip showing the path and return the Response for click detection
+    resp.on_hover_text(path_display)
+}
 
 // =============================================================================
 // Panel Height Helpers
@@ -1825,6 +1892,47 @@ mod tests {
 
         assert!(left_called.get());
         assert!(right_called.get());
+    }
+
+    #[test]
+    fn render_grid_header_draws_headers() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        ));
+        ctx.begin_pass(raw_input);
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            egui::Grid::new("test_grid").num_columns(3).show(ui, |ui| {
+                render_grid_header(ui, &["Status", "Message", "File"]);
+                // Add a sample row to ensure grid usage doesn't panic
+                ui.colored_label(egui::Color32::from_rgb(255, 80, 80), "❌");
+                ui.label("Sample message");
+                ui.label("-");
+                ui.end_row();
+            });
+        });
+
+        let _ = ctx.end_pass();
+    }
+
+    #[test]
+    fn show_validation_severity_icon_shows_icon() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(400.0, 300.0),
+        ));
+        ctx.begin_pass(raw_input);
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            super::show_validation_severity_icon(ui, crate::validation::ValidationSeverity::Error);
+        });
+
+        let _ = ctx.end_pass();
     }
 
     // =========================================================================
