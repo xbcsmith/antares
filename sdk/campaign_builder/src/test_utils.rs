@@ -993,8 +993,8 @@ mod tests {
                         .with_search(&mut self.search_filter)
                         .show(ui);
 
-                    TwoColumnLayout::new("{}").show_split(ui, |left| {{}}, |right| {{
-                        let action = ActionButtons::new().enabled(true).show(right);
+                    TwoColumnLayout::new("{}").show_split(ui, |left_ui| {{}}, |right_ui| {{
+                        let action = ActionButtons::new().enabled(true).show(right_ui);
                     }});
                 }}
             }}
@@ -1154,7 +1154,7 @@ mod tests {
         let with_layout = SourceFile::new(
             "test_editor.rs",
             r#"
-            TwoColumnLayout::new("items").show_split(ui, |left| {}, |right| {});
+            TwoColumnLayout::new("items").show_split(ui, |left_ui| {}, |right_ui| {});
             "#,
         );
 

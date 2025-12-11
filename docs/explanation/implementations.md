@@ -163,6 +163,239 @@ All editors use consistent button labels with emojis:
 ✅ **Maintains backward compatibility**
 ✅ **All public APIs documented with examples**
 
+## Phase 4: Main Refactoring — Extract Metadata Editor from `main.rs` (2025-12-10)
+
+## Phase 5: Docs, Cleanup and Handoff — COMPLETED (2025-12-10)
+
+**Status:** ✅ COMPLETED | **Type:** Documentation, Test Coverage & Handoff | **Files Updated:** `sdk/campaign_builder/src/campaign_editor.rs`, `sdk/campaign_builder/src/main.rs`, `docs/explanation/implementations.md`, `docs/explanation/campaign_metadata_editor_implementation_plan.md`, `docs/how-to/edit_campaign_metadata.md`
+
+**Objective:** Finalize developer- and user-facing documentation, tests, and code comments for the Campaign Metadata Editor so the feature is ready for handoff and maintenance.
+
+### Summary of Work Completed
+
+- Developer Notes & Doc Comments:
+
+  - Added developer-level guidance and inline doc comments to `sdk/campaign_builder/src/campaign_editor.rs`, documenting the edit-buffer pattern, validation request workflow, and extension checklist for adding new metadata fields.
+  - Ensured public functions/types include `///` documentation and small examples where appropriate.
+
+- How-To Documentation:
+
+  - Created `docs/how-to/edit_campaign_metadata.md` (how-to guide for users and developers), covering editor navigation, toolbar actions (Save/Load/Validate/Export), UI layout, and the developer checklist for adding fields.
+
+- Tests & QA:
+
+  - Added unit tests for editor behavior (round-trip save/load, `apply_buffer_to_metadata()` updates metadata and flags unsaved, `consume_validate_request()` toggles/reset behavior), and preserved existing coverage.
+  - Confirmed Save / Save As / Load behavior and verified `validate_requested` flow triggers app-level `validate_campaign()` and switches to the Validation tab.
+
+- Integration:
+
+  - Ensured `main.rs` integrates with the editor via `campaign_editor_state.show(...)`, consumes `validate_requested`, runs `validate_campaign()` centrally, and switches to the Validation tab.
+  - Verified Save & Load flows update the shared authoritative metadata in `self.campaign` so other app components always see the latest values (without requiring a separate Save).
+
+- Cleanup:
+  - Consolidated inline metadata UI in `main.rs` into the `campaign_editor` module to simplify `main.rs`.
+  - Polished the TwoColumn Layout and tooling buttons in `campaign_editor` to match SDK UI patterns (`EditorToolbar`, `TwoColumnLayout`, etc.).
+
+### Implementation Details
+
+- Developer guidance in `campaign_editor.rs` covers:
+
+  - Edit buffer round-trip (`from_metadata()` / `apply_to()`).
+  - Save/Load helpers using RON serialization (RON is enforced across the SDK).
+  - Using `validate_requested` to request app-level validation to avoid egui-borrow rules.
+  - How to add a new metadata field end-to-end: domain struct → buffer → UI → validator → tests → docs.
+
+- Tests added:
+
+  - `test_apply_buffer_to_metadata_updates_metadata_and_unsaved` — ensures buffer flush applies to authoritative metadata and sets `has_unsaved_changes`.
+  - `test_consume_validate_request_resets_flag` — ensures the validate request flag toggles and resets correctly.
+  - Existing roundtrip tests (save/load) were kept and run.
+
+- Documentation updates:
+  - Updated `docs/explanation/implementations.md` to include this Phase 5 summary (this entry) describing the docs, cleanup, and QA results of the Campaign Metadata Editor refactor.
+  - Updated `docs/explanation/campaign_metadata_editor_implementation_plan.md` to mark Phase 5 completed and summarize deliverables and handoff details.
+
+### QA & Handoff Checklist
+
+- [x] Verified `cargo fmt --all` runs cleanly.
+- [x] Verified `cargo check --all-targets --all-features` runs cleanly.
+- [x] Verified `cargo clippy --all-targets --all-features -- -D warnings` runs cleanly.
+- [x] Verified `cargo test --all-features` runs cleanly for campaign builder and overall workspace tests.
+- [x] Manual QA checklist included in `docs/how-to/edit_campaign_metadata.md`: open the Metadata tab, edit fields, Save, Save As, Validate, and Load with roundtrip check.
+- [x] Developer guide: step-by-step for adding fields and tests in `campaign_editor.rs` doc comments and how-to guide.
+
+### Next Steps (Optional)
+
+- Add clickable Validation results that focus the relevant field in the editor.
+- Add a small in-editor validation status indicator so users know a validation run is pending.
+- Expand automated UI-level tests (egui-based integration tests) to capture Save/Load/Validate flows end-to-end.
+- Add undo/redo support for the buffer based on the SDK's `undo_redo` pattern.
+
+**Status:** ✅ COMPLETED | **Type:** Refactor / Code Extraction | **Files:** `sdk/campaign_builder/src/campaign_editor.rs`, `sdk/campaign_builder/src/main.rs`
+
+**Objective:** Move campaign metadata UI code and associated logic out of `main.rs` into `sdk/campaign_builder/src/campaign_editor.rs` and ensure consistent editor app state, save/load flows, and validate integration.
+
+### Implementation Details
+
+- Removed duplicate/legacy configuration UI from `main.rs` and centralized the metadata editing flow in `sdk/campaign_builder/src/campaign_editor.rs`:
+
+  - `CampaignMetadataEditorState::show` is the canonical UI for campaign metadata (TwoColumn layout; left sections, right form).
+  - `main.rs` shows the editor via `self.show_metadata_editor()` which delegates to the new editor, keeping `main.rs` minimal.
+
+- Editor-to-App Synchronization:
+
+  - Editor Save (from toolbar): `CampaignMetadataEditorState` now applies the buffer to its authoritative `metadata` and copies the authoritative metadata back to the `&mut metadata` reference passed in (the app's `self.campaign`) so validation and other app-level features operate on the latest values.
+  - Save As and Load: editor Save-as & Load operations copy authoritative metadata into app `metadata` and update `campaign_path` accordingly.
+  - Validation Request: editor sets a `validate_requested` flag when the user clicks Validate (or Save-as). `main.rs::show_metadata_editor` consumes this flag, runs `validate_campaign()`, and switches the UI into the Validation tab.
+  - App-level New/Open/Save flows: `do_new_campaign`, `do_open_campaign` and `do_save_campaign` now synchronize `self.campaign_editor_state.metadata` and `buffer` to keep the editor in sync when the app modifies the authoritative campaign.
+
+- TwoColumn Layout & Form:
+
+  - The full set of metadata fields (Overview, Files, Gameplay, Advanced) remain in the dedicated editor and follow the TwoColumn UI pattern found in other editors.
+
+- Tests:
+  - Ensured the following behaviors are tested:
+    - `CampaignMetadataEditorState` creation and default state.
+    - Editor Save and Load update the app-level `self.campaign`.
+    - `validate_requested` flows: clicking Validate in the editor triggers `self.validate_campaign()` and switches to the Validation tab.
+    - App level New/Open/Save flows sync `campaign_editor_state` (new tests added to assert this behavior).
+
+### Files Edited
+
+- `sdk/campaign_builder/src/campaign_editor.rs`:
+
+  - Save action added to write to `campaign_path` and updated to copy `self.metadata` into the referenced `*metadata` variable for the app.
+  - Validate action applies the edit buffer to `metadata`, sets `validate_requested`, and updates editor state flags.
+  - Load operation copies loaded metadata into `*metadata` reference as before.
+  - The `validate_requested` flag is handled by `main.rs::show_metadata_editor`.
+
+- `sdk/campaign_builder/src/main.rs`:
+  - Removed heavy inline metadata UI (`show_config_editor`) and replaced it with a compatibility stub that directs users to the new editor and delegates to `show_metadata_editor`.
+  - `do_new_campaign`, `do_open_campaign`, and `do_save_campaign` now update `campaign_editor_state.metadata` and `buffer` so the editor is in sync when the app mutates the campaign.
+  - `show_metadata_editor` remains as the single entry point and calls `campaign_editor_state.show(...)`, and consumes `validate_requested` to run `validate_campaign()`.
+
+### Validation & Results
+
+- After refactor, we verified:
+  - `cargo fmt --all` passed,
+  - `cargo check --all-targets --all-features` passed,
+  - `cargo clippy --all-targets --all-features -- -D warnings` passed,
+  - `cargo test --all-features` passed for the campaign builder crate and global tests.
+
+**Notes & Next Steps**
+
+- This main refactor reduces `main.rs` size, removes duplication, and centralizes campaign metadata logic into the new `campaign_editor.rs` module for easier maintenance and extension.
+- Future work (Phase 5) should focus on improved validation error-to-field mappings, accessibility improvements, undo/redo integration for the editor buffer, and additional UI polish.
+
+## Phase 1: Foundation — Extraction & Module Setup (2025-xx-xx)
+
+**Status:** ✅ COMPLETED | **Type:** Feature Extraction + Module Setup | **Files:** 2 added/modified
+
+**Objective:** Create a dedicated campaign metadata editor module that extracts metadata UI and logic from `main.rs` into a single-responsibility module `sdk/campaign_builder/src/campaign_editor.rs`, add a `CampaignMetadataEditorState` (edit buffer + state), and wire it into the `CampaignBuilderApp` to allow a clean editing flow, tests, and a foundation for further UI and validation work.
+
+### Implementation Details
+
+**Files:**
+
+- `sdk/campaign_builder/src/campaign_editor.rs` (new)
+- `sdk/campaign_builder/src/main.rs` (modified to integrate editor)
+
+**Key Changes:**
+
+- New module `campaign_editor.rs`:
+  - Added a `CampaignMetadataEditorState` type with the following fields:
+    - `mode` (List / Creating / Editing),
+    - `metadata` (authoritative CampaignMetadata),
+    - `buffer` (CampaignMetadataEditBuffer),
+    - `search_filter`, `selected_section`, `has_unsaved_changes`, and import/export flags.
+  - Added `CampaignMetadataEditBuffer` to mirror `CampaignMetadata` in an editable buffer shape.
+  - Implemented core file operations and editor lifecycle methods:
+    - `new()` — default initialization,
+    - `start_edit()` — set buffer from `metadata`,
+    - `cancel_edit()` — revert buffer to known `metadata`,
+    - `apply_buffer_to_metadata()` — apply edits back to authoritative `metadata`,
+    - `save_to_file()` and `load_from_file()` for RON-based persistence,
+    - `show()` — render a minimal UI (header, grid, description, Save/Validate actions).
+- Integration in `main.rs`:
+  - Added `mod campaign_editor;` at top-level modules.
+  - Added a `campaign_editor_state: campaign_editor::CampaignMetadataEditorState` field to `CampaignBuilderApp`.
+  - Initialized `campaign_editor_state` in `CampaignBuilderApp::default()`.
+  - Replaced `show_metadata_editor()` body with a single delegation call:
+    - `self.campaign_editor_state.show(ui, &mut self.campaign, &mut self.campaign_path, self.campaign_dir.as_ref(), &mut self.unsaved_changes, &mut self.status_message);`
+  - Keeps `validate_campaign()` and other app-level behaviors (validation, save-as flows) invoked by the UI buttons or app-level operations as before but now easier to reason about.
+
+**Unit Tests Added:**
+
+- `sdk/campaign_builder/src/campaign_editor.rs` tests include:
+  - `test_campaign_metadata_editor_new` — ensures editor initializes correctly.
+  - `test_save_and_load_roundtrip` — verifies save/load round-trip using a temp file.
+  - `test_cancel_edit_restores_buffer` — verifies cancel edit resets buffer.
+
+**Form & UI Behavior (Phase 1 skeleton):**
+
+### Phase 3: Integration & Validation (2025-xx-xx)
+
+**Status:** ✅ COMPLETED | **Type:** Integration + Validator enhancements | **Files:** `sdk/campaign_builder/src/main.rs`, `sdk/campaign_builder/src/campaign_editor.rs`, `sdk/campaign_builder/src/validation.rs`.
+
+**Objective:** Integrate the Campaign Metadata editor's Validate action with the central app-level validator and add robust configuration validation checks that surface in the Validation panel as `ValidationCategory::Configuration` results.
+
+### Implementation Summary
+
+- validate_campaign() updates (main.ts):
+
+  - Added configuration checks to the central `validate_campaign()` method:
+    - Starting map presence and existence — Errors when missing and when the selected starting map doesn't match loaded map assets (supports numeric IDs, `map_N`, file names, and normalized names).
+    - Starting level must be within 1..=max_level (Error).
+    - Max party size validation uses `PARTY_MAX_SIZE` constant (Warning if out-of-range).
+    - Max roster size must be >= max party size (Error).
+    - Starting food within `FOOD_MIN`/`FOOD_MAX` (Warning).
+    - Soft recommendation for starting gold using `STARTING_GOLD_MAX` (Warning).
+    - File path checks for required data files (presence & `.ron` extension guidance — FilePaths category).
+  - All configuration results now create `ValidationResult` entries with `ValidationCategory::Configuration` and appropriate severity levels.
+
+- Campaign Metadata Validate button wiring:
+
+  - `sdk/campaign_builder/src/campaign_editor.rs`:
+    - The editor's Validate action now ensures the editor's buffer is applied to the authoritative campaign metadata (applies buffer to the editor metadata and copies it into the app's `campaign` reference), so the validator sees the user's unsaved edits without requiring file save.
+    - Sets a short-lived `validate_requested` flag in the editor state to signal the main app that validation should run.
+  - `sdk/campaign_builder/src/main.rs`:
+    - `show_metadata_editor()` consumes `validate_requested` and, if set, calls `validate_campaign()` and switches the UI into the Validation tab (`self.active_tab = EditorTab::Validation`), so results are immediately visible to users.
+
+- Validation UI & Panel:
+  - Configuration validation results are grouped and shown in the Validation panel (existing panel logic supports `ValidationCategory::Configuration` entries).
+  - Summary badges, counts, and filters continue to work with added configuration results.
+  - Validation panel supports clickable file paths to focus assets and the quick "Re-validate" button for re-runs.
+
+### Tests & QA
+
+- Added integration unit test(s):
+  - `sdk/campaign_builder/src/main.rs::test_metadata_editor_validate_triggers_validation` — verifies that when the campaign editor issues a validation request (simulated by `validate_requested`), the main app runs `validate_campaign()` and switches to the Validation tab, and an expected `Configuration` result is produced (e.g., missing starting map).
+- Existing configuration checks (like `test_validation_starting_map_missing` and `test_validation_starting_level_invalid`) were kept and validated to ensure accurate severity & category assignment.
+
+### Notes & Edge Cases
+
+- Map existence checks are only performed when maps are loaded to avoid false positives for campaigns that haven't loaded assets yet (consistent with existing behavior).
+- Map matching rules include numeric ID, `map_N` patterns, `.ron` filename forms, and normalized name comparison (case-insensitive, underscore -> space).
+- The editor's Validate action updates the in-memory authoritative `campaign` before validation runs (no file is written), ensuring the user can validate draft changes without persisting them to disk.
+
+- The `show()` method mirrors the metadata UI previously in `main.rs` to avoid regression.
+  - Editing updates the `buffer` and sets `has_unsaved_changes`.
+  - Save action either writes to `campaign_path` or triggers a Save As dialog.
+  - Validate triggers are preserved to keep app-level flows consistent.
+
+### Code Quality & Validation
+
+✅ `cargo fmt --all` — Passed
+✅ `cargo check --all-targets --all-features` — Passed
+✅ `cargo clippy --all-targets --all-features -- -D warnings` — Passed
+✅ `cargo test --all-features` — Passed
+
+### Notes and Next Steps
+
+- The editor module follows the patterns used by other editors (items, races, etc.) and adheres to the project's `AttributePair`/buffer patterns and style.
+- This phase purposefully implements a minimal `show()` UI and file operations; further UI polish (TwoColumn fully implemented), validation integration, and advanced features are reserved for Phase 2/3.
+- The `CampaignMetadataEditorState` foundation simplifies moving the metadata form from `main.rs`, significantly decreasing `main.rs` complexity and enabling easier testing and maintenance of metadata editing logic.
+
 ### Files Changed
 
 ```
@@ -268,7 +501,7 @@ if let Some(character) = self.characters.get(idx) {
 
 **File:** `sdk/campaign_builder/src/map_editor.rs`
 
-**Status:** ✅ No changes needed - already compliant
+**Status:** ✅ Updated - map-aware left column clamp implemented (left width is now clamped to map pixel width plus padding)
 
 **Verification:** The Maps Editor is already using `TwoColumnLayout` correctly with proper configuration:
 
@@ -276,7 +509,7 @@ if let Some(character) = self.characters.get(idx) {
 - Properly configures `inspector_min_width` from `display_config`
 - Uses `compute_left_column_width()` helper function correctly
 - Sets `left_column_max_ratio` from `display_config` (default: 0.72)
-- No horizontal padding issues found in current implementation
+- Left column width is now clamped to the map's pixel width plus a small padding using the local helper `compute_map_requested_left` (map-aware clamp), which avoids excessive horizontal padding for small maps and keeps the inspector visible in a default editor window
 
 **Current Code (Lines 1595-1602):**
 
@@ -289,7 +522,7 @@ TwoColumnLayout::new("maps")
     .show_split(ui, |left_ui| { ... }, |right_ui| { ... });
 ```
 
-**Conclusion:** The old code referenced in the audit document no longer exists. Maps Editor was already refactored to use the standard `TwoColumnLayout` component with proper width calculations.
+**Conclusion:** The old code referenced in the audit document no longer exists. Maps Editor was refactored to use the standard `TwoColumnLayout` component with proper width calculations, and a map-aware left column clamp was added (via `compute_map_requested_left`) so the left column won't be unnecessarily large for small maps — improving layout and reducing horizontal padding while preserving inspector usability.
 
 **3. Editor Consistency Status**
 
@@ -675,6 +908,119 @@ Created comprehensive phased implementation plan in `docs/explanation/campaign_b
 **Impact:** Dialogue authors can now quickly identify dialogues by reading text excerpts in the list, understand dialogue flow without editing, and see quest/speaker context at a glance.
 
 #### Task 8.4: Validation UI Panel Improvements ✅
+
+---
+
+### Phase 6: Validation Panel UI & Configuration Checks - Phase 1 (2025-12-09)
+
+**Status:** ✅ COMPLETED | **Type:** UI Layout & Foundation | **Files:** 2 modified
+
+**Objective:** Rework the Validation panel layout to match the Assets Manager's table/grid pattern, add a vertical ScrollArea with a constrained max height, add shared UI helpers for consistent header and severity icon rendering, and add the first UI behavior toggle for showing passed checks. Preserve the existing behavior of only showing categories with visible results (Option B).
+
+**Files Modified:**
+
+- `sdk/campaign_builder/src/main.rs`
+  - Updated `show_validation_panel`: replaced manual header/columns with a reusable grid header; added a constrained ScrollArea using `ui_helpers::compute_default_panel_height(ui)`; introduced a `validation_show_passed` toggle field on `CampaignBuilderApp` to control whether passed checks are shown; filtered results to hide categories that are empty after filtering (e.g., categories containing only `Passed` checks are hidden by default).
+  - Implemented validation filters (Phase 3 polish): `All`, `Errors Only`, `Warnings Only` with a `Reset Filter` button. These set a `validation_filter` enum on `CampaignBuilderApp` and are applied at group/render time so UI shows only the selected severities.
+  - Added `grouped_filtered_validation_results()` to generate category groups and their filtered check results, returning owned clones of `ValidationResult` entries to avoid borrow conflicts inside egui UI closures. This ensures the UI can mutate `self` safely while rendering.
+  - Added clickable file paths for validation results: file path labels are now a clickable UI element with a tooltip showing the absolute path. Clicking sets `validation_focus_asset` on `CampaignBuilderApp`, sets `show_asset_manager` to true, and focuses the Asset Manager on the selected file.
+  - Asset Manager updates: highlights the asset that was selected from the Validation panel with a `🔎 Selected from Validation` badge when `validation_focus_asset` equals the asset path. The Asset Manager will show the focused asset when the validation path is clicked.
+  - Replaced inlined status icon rendering with `ui_helpers::show_validation_severity_icon` (rich tooltip + color), and standardized result table headers using `ui_helpers::render_grid_header`.
+  - To avoid UI borrow conflicts during validation rendering, the panel uses a small `pending_focus` mechanism to accumulate a requested focus asset during drawing and apply the `focus_asset()` action after the render closure completes.
+  - Tests added/updated:
+    - `test_validation_filter_errors_only` — verifies the Errors Only filter shows only error results in grouped output.
+    - `test_validation_focus_asset_click_sets_state` — validates that calling the focus action sets `show_asset_manager` and `validation_focus_asset`.
+    - Existing tests were updated to use the grouped/filtered helpers where appropriate (e.g., `test_validation_configuration_category_grouping`).
+  - UI behavior preserved: categories are shown only when they have visible results after the filter (Option B for showing empty categories was maintained).
+- `sdk/campaign_builder/src/ui_helpers.rs`
+  - Added `render_grid_header(ui, headers: &[&str])` helper to render consistent, bold grid headers and call `ui.end_row()`.
+  - Added `show_validation_severity_icon(ui, severity)` helper to centralize severity icon rendering with color and tooltip text.
+- Tests:
+  - `sdk/campaign_builder/src/ui_helpers.rs` — Added `render_grid_header_runs` and `show_validation_severity_icon_shows_icon` tests that exercise the helpers using `egui::Context::default()` to ensure no panics happen when rendering headers/icons in a UI context.
+  - `sdk/campaign_builder/src/main.rs` — Added `test_validation_show_passed_toggle_filters_out_passed` to assert that categories containing only passed checks are hidden when the default toggle is `false`, and become visible when toggled on.
+
+**Implementation Details:**
+
+- `show_validation_panel` now:
+  - Uses `ui.horizontal` header with "✅ Campaign Validation" and a "🔄 Re-validate" button as before.
+  - Creates a compact summary using `ValidationSummary::from_results(&self.validation_errors)` and shows `error`, `warning`, `info`, and `passed` counts as color-coded badges.
+  - Offers a minimal Quick Filter row and the new `Show passed checks` checkbox (`validation_show_passed`) to toggle inclusion of `Passed` entries.
+  - Groups results using `validation::group_results_by_category(&self.validation_errors)`.
+  - Filters grouped results to skip `Passed` severity entries when `validation_show_passed` is `false`; categories that end up empty after filtering are not rendered.
+  - Uses `egui::ScrollArea::vertical().max_height(ui_helpers::compute_default_panel_height(ui)).id_salt("validation_panel_scroll")` for a constrained scrollable list.
+  - Renders results using `egui::Grid::new(...).num_columns(3).striped(true)` with the header row rendered by `ui_helpers::render_grid_header(ui, &["Status", "Message", "File"])` for consistent look and column labeling.
+  - Renders severity icons via `ui_helpers::show_validation_severity_icon(ui, result.severity)` for consistent color and tooltip presentation.
+
+**Testing & QA:**
+
+- UI helper tests exercise header and severity icon rendering under a headless `egui::Context::default()` to ensure no panics while rendering (UI smoke tests).
+- A new unit test validates the `validation_show_passed` toggle logic by:
+  - Pushing a `Passed` validation result into `app.validation_errors`,
+  - Asserting that the filtered visible count is zero with default toggle disabled,
+  - Toggling `validation_show_passed = true` and asserting the visible count increases.
+- Verified that there are no compilation warnings or errors after the changes.
+- Suggested manual visual checks:
+  - Column alignment and header appearance consistent with Assets Manager.
+  - Scrollbar visible when many results exist and max height respects available UI space.
+  - Severity icons match color and tooltip expectations.
+  - Categories only appear if they contain visible entries after filtering (i.e., `Passed` only categories are hidden by default).
+
+**Notes & Next Steps:**
+
+- This is Phase 1 (foundation): UI layout, helpers, and the `Show passed checks` toggle were implemented.
+- Phase 2 will focus on adding campaign-specific `ValidationCategory::Configuration` checks (starting map existence, starting level bounds, roster/party size constraints, etc.) and ensure `validate_campaign()` emits `ValidationResult`s in `Configuration`.
+- Phase 3 will include additional UI behavior and polish (filtering to Errors/Warnings only, clickable file paths, improved accessibility and tooltips, and reusability of header/severity helpers across other grids).
+
+### Phase 2: Campaign Configuration Checks (2025-11-XX)
+
+**Status:** ✅ COMPLETED | **Type:** Validation & Feature | **Files:** 1 modified
+
+**Objective:** Add robust campaign configuration checks to the Campaign Builder and ensure that invalid/edge-case campaign configurations produce `ValidationCategory::Configuration` results which the Validation panel displays.
+
+#### Implementation Details
+
+- `sdk/campaign_builder/src/main.rs::validate_campaign()`:
+  - Added starting map existence check (Error) when maps are loaded:
+    - Matching rules:
+      - Numeric map ID strings (e.g., "1") match `Map.id`.
+      - `map_N` pattern (e.g., `map_1`) maps to numeric IDs.
+      - Filename forms like `map_1.ron` or `starter_town.ron` are supported.
+      - Fallback normalized name match (`starter_town` -> "starter town") checks `Map.name` case-insensitively.
+    - Only validates existence if `self.maps` is non-empty, avoiding false positives when maps haven't been loaded.
+  - Updated `max_party_size` validation to use the `PARTY_MAX_SIZE` constant (Warning).
+  - Added `starting_food` bounds check using `FOOD_MIN` and `FOOD_MAX` from domain and emit a Warning if out-of-range.
+  - Added `starting_gold` soft-limit warning via a `STARTING_GOLD_MAX` constant to highlight unusually large starting gold amounts.
+  - Retained and reused existing Validation framework (`ValidationResult`, `ValidationCategory`, `ValidationSeverity`) and ensured `Configuration`-scoped results are pushed into `self.validation_errors`.
+
+#### Tests Added
+
+- `test_validation_starting_map_missing` — ensures missing starting map triggers `ValidationCategory::Configuration` error when maps are present.
+- `test_validation_starting_map_exists_by_name` — verifies normalized `starter_town` names match loaded `Map` names (positive case).
+- `test_validation_starting_food_invalid` — validates that an out-of-range `starting_food` produces a `Configuration` warning.
+- `test_validation_configuration_category_grouping` — verifies that `ValidationCategory::Configuration` appears when grouped results are computed.
+
+#### Files Modified
+
+- `sdk/campaign_builder/src/main.rs`
+  - Added checks for starting map existence and resource bounds.
+  - Replaced the party size magic-number check with `PARTY_MAX_SIZE` from `domain::character`.
+  - Added `STARTING_GOLD_MAX` with a recommended warning threshold.
+  - Added the above unit tests to the main tests module.
+
+#### Success Criteria
+
+- Broken campaign configuration conditions (e.g., nonexistent starting map or invalid level values) produce `ValidationCategory::Configuration` results and are visible in the Validation panel table layout.
+- The Validation UI continues to be consistent with other parts of the SDK (table layout and severity icons).
+- New tests assert the presence and severity of `Configuration` results.
+- System respects domain constants for max/min bounds where applicable (e.g., `PARTY_MAX_SIZE`, `FOOD_MIN`, `FOOD_MAX`).
+
+#### Notes & Decisions
+
+- Classification rationale: `Error` for blocking structural errors (e.g., missing starting map), `Warning` for non-blocking resource bounds (like `starting_food`), and a soft recommendation for unusually large starting gold.
+- Map existence check uses normalization for names and file-like keys and accepts numeric IDs; this mirrors the SDK loader behavior.
+- To avoid test and UX regressions, we only validate `starting_map` existence if `self.maps` is non-empty (the check will not fail when no map list is loaded).
+- Did not change campaign metadata defaults (e.g., `max_party_size` default/values) in this change; follow-up tasks may align defaults with domain constants and adjust tests as necessary.
+- Documentation and usage examples updated in tests and comments to help future maintainers understand and reuse the new UI helper functions.
 
 **File Modified:** `sdk/campaign_builder/src/main.rs` (show_validation_panel method)
 
