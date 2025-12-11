@@ -3,12 +3,38 @@
 
 //! Campaign Metadata Editor
 //!
-//! Phase 1 - Foundation: extraction & module setup for a focused Campaign
-//! metadata editor. This module contains the `CampaignMetadataEditorState`
-//! which is a lightweight editor state and file operations for campaign
-//! metadata. UI rendering is provided by `show()` which mirrors the basic
-//! layout previously implemented in `main.rs` and exposes an editing flow
-//! compatible with other editor modules in the SDK.
+//! A dedicated metadata editor for `CampaignMetadata` with a TwoColumn UI.
+//!
+//! Phase 5 - Docs, Cleanup & Handoff:
+//! - Finalized API and added examples, targeted unit tests, and developer guidance.
+//! - Consolidated validation request flow so the app remains the single source of truth.
+//! - Cleaned up UI/UX interactions and added tests for editor state transitions.
+//!
+//! Developer Notes:
+//! - Design Pattern: The editor uses an edit-buffer (`CampaignMetadataEditBuffer`) so all
+//!   changes remain transient until persisted. Call `apply_buffer_to_metadata()` to copy
+//!   buffer data into the authoritative `metadata`.
+//! - Validation: Editors should not directly invoke `validate_campaign()` while they
+//!   hold UI-state borrows. Instead, set `validate_requested` to true (callers can
+//!   use `consume_validate_request()` to check the flag), then let the main app run the
+//!   centralized validator. This avoids borrow issues with egui and maintains a single
+//!   validation entry point.
+//! - UI ID collision avoidance:
+//!   Avoid using `egui::ComboBox::from_label("")` with an empty label. Instead:
+//!   - Use `egui::ComboBox::from_id_source("unique_id")` when the UI label is displayed elsewhere (e.g., grid cell `ui.label("...")`).
+//!   - Or `egui::ComboBox::from_label("UniqueLabel")` with a unique label when you want the ComboBox to render its own label.
+//!   This ensures unique internal control IDs and avoids ID collisions when multiple ComboBoxes coexist in the same UI.
+//! - Extensibility checklist for adding a new metadata field:
+//!   1. Add the field to `CampaignMetadata` in `domain`.
+//!   2. Add a matching field to `CampaignMetadataEditBuffer`.
+//!   3. Update `from_metadata()` and `apply_to()` so values are round-tripped.
+//!   4. Add UI controls in `show()` under the correct section (Overview/Files/Gameplay).
+//!   5. Add validation checks to `validate_campaign()` and unit tests to cover edge-cases.
+//!
+//! API Notes:
+//! - Use `save_to_file()` / `load_from_file()` for RON-based persistence.
+//! - `show()` implements a TwoColumn layout and uses `ui_helpers` components for
+//!   consistency with other editors.
 
 use crate::ui_helpers::{
     compute_default_panel_height, EditorToolbar, ToolbarAction, TwoColumnLayout,
@@ -35,9 +61,13 @@ pub enum CampaignEditorMode {
 /// Logical sections for the two-column UI (for future use)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CampaignSection {
+    /// Overview contains general campaign metadata (id, name, description)
     Overview,
+    /// Files contains paths to data files used by the campaign
     Files,
+    /// Gameplay contains starting positions, levels and difficulty settings
     Gameplay,
+    /// Advanced includes extra fields and RON export utilities
     Advanced,
 }
 
@@ -217,6 +247,17 @@ impl CampaignMetadataEditorState {
     }
 
     /// Begin editing the currently loaded metadata
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::sdk::campaign_builder::campaign_editor::{CampaignMetadataEditorState, CampaignEditorMode};
+    ///
+    /// let mut state = CampaignMetadataEditorState::new();
+    /// state.metadata.id = "x".to_string();
+    /// state.start_edit();
+    /// assert_eq!(state.mode, CampaignEditorMode::Editing);
+    /// ```
     pub fn start_edit(&mut self) {
         self.mode = CampaignEditorMode::Editing;
         self.buffer = CampaignMetadataEditBuffer::from_metadata(&self.metadata);
@@ -224,6 +265,20 @@ impl CampaignMetadataEditorState {
     }
 
     /// Cancel the current edit, restoring the buffer to the loaded metadata.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::sdk::campaign_builder::campaign_editor::{CampaignMetadataEditorState, CampaignEditorMode};
+    ///
+    /// let mut state = CampaignMetadataEditorState::new();
+    /// state.metadata.id = "orig_id".to_string();
+    /// state.start_edit();
+    /// state.buffer.id = "modified".to_string();
+    /// state.cancel_edit();
+    /// assert_eq!(state.mode, CampaignEditorMode::List);
+    /// assert_eq!(state.buffer.id, state.metadata.id);
+    /// ```
     pub fn cancel_edit(&mut self) {
         self.buffer = CampaignMetadataEditBuffer::from_metadata(&self.metadata);
         self.has_unsaved_changes = false;
@@ -231,14 +286,35 @@ impl CampaignMetadataEditorState {
     }
 
     /// Apply the buffer to the authoritative metadata and mark unsaved.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut state = campaign_editor::CampaignMetadataEditorState::new();
+    /// state.start_edit();
+    /// state.buffer.id = "my_campaign".to_string();
+    /// state.apply_buffer_to_metadata();
+    /// assert!(state.has_unsaved_changes);
+    /// assert_eq!(state.metadata.id, "my_campaign");
+    /// ```
     pub fn apply_buffer_to_metadata(&mut self) {
         self.buffer.apply_to(&mut self.metadata);
         self.has_unsaved_changes = true;
     }
 
     /// Consume the current validation request flag.
+    /// Consume the current validation request flag.
     ///
     /// Returns `true` if a validation was requested since the last call, and resets the flag.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut state = campaign_editor::CampaignMetadataEditorState::new();
+    /// state.validate_requested = true;
+    /// assert!(state.consume_validate_request());
+    /// assert!(!state.validate_requested);
+    /// ```
     pub fn consume_validate_request(&mut self) -> bool {
         let requested = self.validate_requested;
         self.validate_requested = false;
@@ -248,6 +324,15 @@ impl CampaignMetadataEditorState {
     /// Save the current authoritative metadata to the given path using RON.
     ///
     /// Returns `crate::CampaignError` on error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let state = campaign_editor::CampaignMetadataEditorState::new();
+    /// let tmpdir = tempfile::tempdir().unwrap();
+    /// let path = tmpdir.path().join("campaign_save.ron");
+    /// let _ = state.save_to_file(path.as_path());
+    /// ```
     pub fn save_to_file(&self, path: &Path) -> Result<(), crate::CampaignError> {
         let s = ron::ser::to_string_pretty(&self.metadata, ron::ser::PrettyConfig::default())?;
         fs::write(path, s)?;
@@ -255,6 +340,16 @@ impl CampaignMetadataEditorState {
     }
 
     /// Load campaign metadata from a RON file and replace the current authoritative metadata.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut state = campaign_editor::CampaignMetadataEditorState::new();
+    /// let tmpdir = tempfile::tempdir().unwrap();
+    /// let path = tmpdir.path().join("campaign_load.ron");
+    /// // If a valid RON file exists at `path`, the following loads the metadata.
+    /// let _ = state.load_from_file(path.as_path());
+    /// ```
     pub fn load_from_file(&mut self, path: &Path) -> Result<(), crate::CampaignError> {
         let contents = fs::read_to_string(path)?;
         let parsed: crate::CampaignMetadata = ron::from_str(&contents)?;
@@ -725,7 +820,8 @@ impl CampaignMetadataEditorState {
 
                                     ui.label("Starting Direction:");
                                     let mut dir = self.buffer.starting_direction.clone();
-                                    egui::ComboBox::from_label("")
+                                    // Use `from_id_source` to avoid ID collisions with other ComboBoxes in the UI
+                                    egui::ComboBox::from_id_source("campaign_starting_direction")
                                         .selected_text(dir.clone())
                                         .show_ui(ui, |ui| {
                                             for d in &["North", "East", "South", "West"] {
@@ -771,7 +867,8 @@ impl CampaignMetadataEditorState {
                                     ui.end_row();
 
                                     ui.label("Difficulty:");
-                                    egui::ComboBox::from_label("")
+                                    // Use `from_id_source` to avoid ID collisions with other ComboBoxes in the UI
+                                    egui::ComboBox::from_id_source("campaign_difficulty")
                                         .selected_text(self.buffer.difficulty.as_str())
                                         .show_ui(ui, |ui| {
                                             for &diff in &crate::Difficulty::all() {
@@ -1072,5 +1169,40 @@ mod tests {
         assert_eq!(s.buffer.id, "orig_id");
         assert_eq!(s.buffer.name, "Original");
         assert_eq!(s.mode, CampaignEditorMode::List);
+    }
+
+    /// apply_buffer_to_metadata should update authoritative metadata and mark unsaved
+    #[test]
+    fn test_apply_buffer_to_metadata_updates_metadata_and_unsaved() {
+        let mut s = CampaignMetadataEditorState::new();
+        s.buffer.id = "new_id".to_string();
+        s.buffer.name = "New Name".to_string();
+        s.buffer.starting_gold = 123u32;
+
+        s.apply_buffer_to_metadata();
+
+        assert_eq!(s.metadata.id, "new_id");
+        assert_eq!(s.metadata.name, "New Name");
+        assert_eq!(s.metadata.starting_gold, 123u32);
+        assert!(
+            s.has_unsaved_changes,
+            "apply_buffer_to_metadata should set has_unsaved_changes"
+        );
+    }
+
+    /// consume_validate_request should return the current value and reset the flag
+    #[test]
+    fn test_consume_validate_request_resets_flag() {
+        let mut s = CampaignMetadataEditorState::new();
+
+        // Initially, no validation requested
+        assert_eq!(s.consume_validate_request(), false);
+
+        // Request validation and check that it is consumed
+        s.validate_requested = true;
+        assert_eq!(s.consume_validate_request(), true);
+
+        // After consuming, it should be reset
+        assert_eq!(s.consume_validate_request(), false);
     }
 }

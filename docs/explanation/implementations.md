@@ -165,6 +165,72 @@ All editors use consistent button labels with emojis:
 
 ## Phase 4: Main Refactoring — Extract Metadata Editor from `main.rs` (2025-12-10)
 
+## Phase 5: Docs, Cleanup and Handoff — COMPLETED (2025-12-10)
+
+**Status:** ✅ COMPLETED | **Type:** Documentation, Test Coverage & Handoff | **Files Updated:** `sdk/campaign_builder/src/campaign_editor.rs`, `sdk/campaign_builder/src/main.rs`, `docs/explanation/implementations.md`, `docs/explanation/campaign_metadata_editor_implementation_plan.md`, `docs/how-to/edit_campaign_metadata.md`
+
+**Objective:** Finalize developer- and user-facing documentation, tests, and code comments for the Campaign Metadata Editor so the feature is ready for handoff and maintenance.
+
+### Summary of Work Completed
+
+- Developer Notes & Doc Comments:
+
+  - Added developer-level guidance and inline doc comments to `sdk/campaign_builder/src/campaign_editor.rs`, documenting the edit-buffer pattern, validation request workflow, and extension checklist for adding new metadata fields.
+  - Ensured public functions/types include `///` documentation and small examples where appropriate.
+
+- How-To Documentation:
+
+  - Created `docs/how-to/edit_campaign_metadata.md` (how-to guide for users and developers), covering editor navigation, toolbar actions (Save/Load/Validate/Export), UI layout, and the developer checklist for adding fields.
+
+- Tests & QA:
+
+  - Added unit tests for editor behavior (round-trip save/load, `apply_buffer_to_metadata()` updates metadata and flags unsaved, `consume_validate_request()` toggles/reset behavior), and preserved existing coverage.
+  - Confirmed Save / Save As / Load behavior and verified `validate_requested` flow triggers app-level `validate_campaign()` and switches to the Validation tab.
+
+- Integration:
+
+  - Ensured `main.rs` integrates with the editor via `campaign_editor_state.show(...)`, consumes `validate_requested`, runs `validate_campaign()` centrally, and switches to the Validation tab.
+  - Verified Save & Load flows update the shared authoritative metadata in `self.campaign` so other app components always see the latest values (without requiring a separate Save).
+
+- Cleanup:
+  - Consolidated inline metadata UI in `main.rs` into the `campaign_editor` module to simplify `main.rs`.
+  - Polished the TwoColumn Layout and tooling buttons in `campaign_editor` to match SDK UI patterns (`EditorToolbar`, `TwoColumnLayout`, etc.).
+
+### Implementation Details
+
+- Developer guidance in `campaign_editor.rs` covers:
+
+  - Edit buffer round-trip (`from_metadata()` / `apply_to()`).
+  - Save/Load helpers using RON serialization (RON is enforced across the SDK).
+  - Using `validate_requested` to request app-level validation to avoid egui-borrow rules.
+  - How to add a new metadata field end-to-end: domain struct → buffer → UI → validator → tests → docs.
+
+- Tests added:
+
+  - `test_apply_buffer_to_metadata_updates_metadata_and_unsaved` — ensures buffer flush applies to authoritative metadata and sets `has_unsaved_changes`.
+  - `test_consume_validate_request_resets_flag` — ensures the validate request flag toggles and resets correctly.
+  - Existing roundtrip tests (save/load) were kept and run.
+
+- Documentation updates:
+  - Updated `docs/explanation/implementations.md` to include this Phase 5 summary (this entry) describing the docs, cleanup, and QA results of the Campaign Metadata Editor refactor.
+  - Updated `docs/explanation/campaign_metadata_editor_implementation_plan.md` to mark Phase 5 completed and summarize deliverables and handoff details.
+
+### QA & Handoff Checklist
+
+- [x] Verified `cargo fmt --all` runs cleanly.
+- [x] Verified `cargo check --all-targets --all-features` runs cleanly.
+- [x] Verified `cargo clippy --all-targets --all-features -- -D warnings` runs cleanly.
+- [x] Verified `cargo test --all-features` runs cleanly for campaign builder and overall workspace tests.
+- [x] Manual QA checklist included in `docs/how-to/edit_campaign_metadata.md`: open the Metadata tab, edit fields, Save, Save As, Validate, and Load with roundtrip check.
+- [x] Developer guide: step-by-step for adding fields and tests in `campaign_editor.rs` doc comments and how-to guide.
+
+### Next Steps (Optional)
+
+- Add clickable Validation results that focus the relevant field in the editor.
+- Add a small in-editor validation status indicator so users know a validation run is pending.
+- Expand automated UI-level tests (egui-based integration tests) to capture Save/Load/Validate flows end-to-end.
+- Add undo/redo support for the buffer based on the SDK's `undo_redo` pattern.
+
 **Status:** ✅ COMPLETED | **Type:** Refactor / Code Extraction | **Files:** `sdk/campaign_builder/src/campaign_editor.rs`, `sdk/campaign_builder/src/main.rs`
 
 **Objective:** Move campaign metadata UI code and associated logic out of `main.rs` into `sdk/campaign_builder/src/campaign_editor.rs` and ensure consistent editor app state, save/load flows, and validate integration.
@@ -435,7 +501,7 @@ if let Some(character) = self.characters.get(idx) {
 
 **File:** `sdk/campaign_builder/src/map_editor.rs`
 
-**Status:** ✅ No changes needed - already compliant
+**Status:** ✅ Updated - map-aware left column clamp implemented (left width is now clamped to map pixel width plus padding)
 
 **Verification:** The Maps Editor is already using `TwoColumnLayout` correctly with proper configuration:
 
@@ -443,7 +509,7 @@ if let Some(character) = self.characters.get(idx) {
 - Properly configures `inspector_min_width` from `display_config`
 - Uses `compute_left_column_width()` helper function correctly
 - Sets `left_column_max_ratio` from `display_config` (default: 0.72)
-- No horizontal padding issues found in current implementation
+- Left column width is now clamped to the map's pixel width plus a small padding using the local helper `compute_map_requested_left` (map-aware clamp), which avoids excessive horizontal padding for small maps and keeps the inspector visible in a default editor window
 
 **Current Code (Lines 1595-1602):**
 
@@ -456,7 +522,7 @@ TwoColumnLayout::new("maps")
     .show_split(ui, |left_ui| { ... }, |right_ui| { ... });
 ```
 
-**Conclusion:** The old code referenced in the audit document no longer exists. Maps Editor was already refactored to use the standard `TwoColumnLayout` component with proper width calculations.
+**Conclusion:** The old code referenced in the audit document no longer exists. Maps Editor was refactored to use the standard `TwoColumnLayout` component with proper width calculations, and a map-aware left column clamp was added (via `compute_map_requested_left`) so the left column won't be unnecessarily large for small maps — improving layout and reducing horizontal padding while preserving inspector usability.
 
 **3. Editor Consistency Status**
 

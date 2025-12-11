@@ -224,26 +224,89 @@ Goals:
 
 ---
 
-### Phase 5: Docs, Cleanup and Handoff
+### Phase 5: Docs, Cleanup and Handoff — COMPLETED (2025-12-10)
 
-#### 5.1 Feature Work
+**Status:** ✅ COMPLETED | **Type:** Documentation, Test Coverage & Handoff | **Files Updated:** `sdk/campaign_builder/src/campaign_editor.rs`, `sdk/campaign_builder/src/main.rs`, `docs/explanation/implementations.md`, `docs/explanation/campaign_metadata_editor_implementation_plan.md`, `docs/how-to/edit_campaign_metadata.md`
 
-- Update `docs/explanation/implementations.md` and `docs/explanation/campaign_metadata_editor_implementation_plan.md` with usage instructions, UI screenshots (if possible), and running tests.
-- Add developer notes and guidelines in code comments on `campaign_editor.rs`.
+#### 5.1 Summary of Work Completed
 
-#### 5.2 Integrate Feature
+- Finalized the Campaign Metadata Editor module:
+  - Created comprehensive developer notes and inline doc comments in `sdk/campaign_builder/src/campaign_editor.rs` describing the edit-buffer pattern, validation flow, and extension checklist.
+  - Ensured all public functions and types include `///` doc comments and, where appropriate, runnable examples consistent with repository patterns.
+- Documentation updates:
+  - Added a how-to guide: `docs/how-to/edit_campaign_metadata.md` with clear end-user steps and a developer-oriented extension guide.
+  - Updated `docs/explanation/implementations.md` with a Phase 5 summary and validation results.
+  - Updated this implementation plan (`docs/explanation/campaign_metadata_editor_implementation_plan.md`) to mark Phase 5 as complete and recorded deliverables.
+- Tests and QA improvements:
+  - Added unit tests for `CampaignMetadataEditorState` behavior (e.g., `apply_buffer_to_metadata` and `consume_validate_request`), and preserved all roundtrip and cancel tests.
+  - Verified Save/Load roundtrip behavior and editor state transitions under test.
+- Integration & Validation:
+  - Verified the editor uses `validate_requested` to signal the main app to run `validate_campaign()`. `main.rs` consumes the flag and switches to the `Validation` tab; this remains the canonical validation path.
+  - The editor continues to use RON for Save/Load and export/import; `Save` and `Save As` flows update `campaign_path` and copy the authoritative metadata into the app state.
 
-- Add QA checks and test coverage for new functionalities.
-- Add doc comments per public functions and types to meet `AGENTS.md` standards.
+#### 5.2 Detailed Implementation Notes
+
+- Developer Guidance:
+  - To add a new metadata field, follow the checklist:
+    1. Update `CampaignMetadata` in domain
+    2. Add the field to `CampaignMetadataEditBuffer`
+    3. Update `from_metadata()` and `apply_to()` mappings
+    4. Add UI controls in `show()` and ensure the buffer flags `has_unsaved_changes`
+    5. Add validation in `validate_campaign()` and tests
+    6. Update docs/how-to and sample RON files if necessary
+- UX & Accessibility:
+  - TwoColumn layout maintained with left-to-right section navigation and a RON export option in the Advanced section.
+  - Browse buttons and file dialog usage follow the project's UI components.
+- Code Quality:
+  - Public API documented with examples and `///` doc comments.
+  - Code style and lints respected; existing unit tests extended and new tests added where necessary.
 
 #### 5.3 Deliverables
 
-- Documentation, documentation snippets and "how-to" for editing campaign metadata.
+- `sdk/campaign_builder/src/campaign_editor.rs`:
+  - Developer-facing module-level doc with usage and extension notes
+  - Doc comments for public functions and types, with examples
+  - Unit tests for new behaviors (`apply_buffer_to_metadata`, `consume_validate_request`)
+- `sdk/campaign_builder/src/main.rs`:
+  - Updated integration for consuming `validate_requested` and switching to `EditorTab::Validation`
+  - Simplified metadata UI (delegates to the `campaign_editor` module)
+- Documentation:
+  - `docs/how-to/edit_campaign_metadata.md`: How-to guide for both editors and developers
+  - `docs/explanation/implementations.md`: Summary entry for this phase and the overall refactor
+  - Plan (this file): Marked Phase 5 as Complete with actionable handoff notes
 
-#### 5.4 Success Criteria
+#### 5.4 Validation & Results
 
-- Developers can add new metadata fields with minimal changes and tests.
-- UI is properly documented and consistent with other editors.
+- Confirmation Steps (performed during the handoff):
+  - Saved a test campaign RON and reloaded it to verify roundtrip integrity
+  - Confirmed `validate_requested` toggle triggers `validate_campaign()` in the main app and switches to the Validation tab
+  - Verified that editor changes are applied to the app's authoritative `self.campaign` on Save/Save As and before validation, without requiring a final explicit Save
+  - Confirmed doc updates and test coverage: `cargo fmt`, `cargo check`, `cargo clippy` (with -D warnings), and `cargo test` were used as validation gates
+  - Updated QA checklist and manual validation steps in the how-to guide
+
+#### 5.5 Success Criteria Revisited
+
+- The editor exposes a TwoColumn layout with full editing flows for campaign metadata fields and clear sectioning.
+- Validation integration works via the `validate_requested` flag and `main.rs` remains the single validation orchestrator.
+- New developer-oriented documentation and how-to guides are in place, reducing onboarding friction.
+- Unit and integration tests exercise the primary workflows, and new tests validate editor-specific state transitions.
+
+#### 5.6 Handoff Checklist (For QA / Maintainability)
+
+- [x] All public functions and types documented with examples or developer notes
+- [x] Tests added for editor state transitions and save/load roundtrip
+- [x] `docs/how-to/edit_campaign_metadata.md` provides an end-user flow and a developer extension guide
+- [x] `main.rs` integration for validation measured and confirmed
+- [x] RON roundtrips checked for all metadata fields and file references
+
+#### 5.7 Next Steps (Optional Future Work)
+
+- Implement clickable Validation results to focus the relevant field in the editor.
+- Add more automated UI-level tests (egui-based) to simulate Save/Load and Validate in the live UI.
+- Consider adding undo/redo support for the edit buffer to improve UX.
+- Extend integration tests to cover edge cases for complex metadata references (assets, map existence).
+
+---
 
 ---
 

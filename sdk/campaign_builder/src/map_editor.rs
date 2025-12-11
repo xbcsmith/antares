@@ -1079,6 +1079,29 @@ const ZOOM_STEP: f32 = 0.25;
 const BASE_TILE_SIZE: f32 = 24.0;
 /// Minimum tile size in pixels (for usability)
 const MIN_TILE_SIZE: f32 = 8.0;
+/// Horizontal padding (pixels) to keep around the map when computing left column width.
+const MAP_HORIZONTAL_PADDING: f32 = 8.0;
+
+/// Compute the fallback requested left width for maps:
+/// - `total_width` - total available width for interface.
+/// - `inspector_min_width` - minimum width for the inspector (right column).
+/// - `sep_margin` - separation/margin between columns.
+/// - `map_pixel_width` - width of the map in pixels at the current zoom.
+/// - `map_padding` - horizontal padding around the map content.
+///
+/// This function centralizes the "requested left width" calculation for the MapsEditor
+/// to avoid duplicating the logic inline, and enables simple unit testing.
+fn compute_map_requested_left(
+    total_width: f32,
+    inspector_min_width: f32,
+    sep_margin: f32,
+    map_pixel_width: f32,
+    map_padding: f32,
+) -> f32 {
+    let fallback_requested_left = total_width - inspector_min_width - sep_margin;
+    let desired_left_for_map = map_pixel_width + 2.0 * map_padding;
+    fallback_requested_left.min(desired_left_for_map)
+}
 
 impl Default for MapsEditorState {
     fn default() -> Self {
@@ -1536,8 +1559,53 @@ impl MapsEditorState {
         if let Some(ref mut editor) = self.active_editor {
             // Use a raw pointer to the editor to avoid simultaneous mutable borrows in the left/right closures
             let editor_ptr: *mut MapEditorState = editor as *mut _;
-            // Tool palette row
-            let zoom_action = Self::show_tool_palette(ui, editor, self.zoom_level);
+            // Map view (Grid/Events/NPCs & Zoom) and Tool palette rows.
+            // Show a dedicated row for map view toggles and zoom controls first so the Tools row isn't cut off on narrow windows.
+            let view_zoom_action = {
+                let mut a: Option<ZoomAction> = None;
+
+                ui.horizontal(|ui| {
+                    // View options
+                    ui.label("View: ");
+                    ui.checkbox(&mut editor.show_grid, "Grid");
+                    ui.checkbox(&mut editor.show_events, "Events");
+                    ui.checkbox(&mut editor.show_npcs, "NPCs");
+
+                    ui.checkbox(&mut editor.auto_fit_on_resize, "Auto Fit").on_hover_text(
+                        "When enabled, the map will automatically scale to fit the left column when the window is resized. Manual zoom persists until Fit is clicked.",
+                    );
+
+                    ui.separator();
+
+                    // Zoom controls
+                    ui.label("Zoom:");
+                    if ui.button("➖").on_hover_text("Zoom Out").clicked() {
+                        a = Some(ZoomAction::Out);
+                    }
+
+                    ui.label(format!("{}%", (self.zoom_level * 100.0) as i32));
+
+                    if ui.button("➕").on_hover_text("Zoom In").clicked() {
+                        a = Some(ZoomAction::In);
+                    }
+
+                    if ui.button("⊡ Fit").on_hover_text("Fit map to available space").clicked() {
+                        a = Some(ZoomAction::Fit);
+                    }
+
+                    if ui.button("100%").on_hover_text("Reset to 100%").clicked() {
+                        a = Some(ZoomAction::Reset);
+                    }
+                });
+
+                a
+            };
+
+            // Tool palette row (Tools, Terrain, and Wall)
+            let tool_zoom_action = Self::show_tool_palette(ui, editor, self.zoom_level);
+
+            // Prefer zoom action from the view toolbar over the tool palette (fallback to tool palette).
+            let zoom_action = view_zoom_action.or(tool_zoom_action);
 
             // Apply immediate zoom in/out/reset changes
             if let Some(action) = zoom_action {
@@ -1577,7 +1645,16 @@ impl MapsEditorState {
                     .inspector_min_width
                     .max(crate::ui_helpers::DEFAULT_INSPECTOR_MIN_WIDTH);
 
-                let default_requested_left = total_width - inspector_min_width - sep_margin;
+                // Map-specific logic: limit the requested left width to the map pixel width + a small padding,
+                // so the list column will not be larger than needed for the map itself (prevents excessive horizontal padding).
+                let default_requested_left = compute_map_requested_left(
+                    total_width,
+                    inspector_min_width,
+                    sep_margin,
+                    editor.map.width as f32 * BASE_TILE_SIZE * self.zoom_level,
+                    MAP_HORIZONTAL_PADDING,
+                );
+
                 let left_width = crate::ui_helpers::compute_left_column_width(
                     total_width,
                     default_requested_left,
@@ -1800,23 +1877,34 @@ impl MapsEditorState {
                     }
                 });
 
+            // Keep a lightweight separator; the view controls and zoom are now above the tools.
             ui.separator();
+        });
+        action
+    }
 
+    /// Show map view toggle controls (Grid, Events, NPCs, Auto Fit) and Zoom controls.
+    fn show_map_view_controls(
+        ui: &mut egui::Ui,
+        editor: &mut MapEditorState,
+        current_zoom: f32,
+    ) -> Option<ZoomAction> {
+        let mut action: Option<ZoomAction> = None;
+
+        ui.horizontal(|ui| {
             // View options
             ui.checkbox(&mut editor.show_grid, "Grid");
             ui.checkbox(&mut editor.show_events, "Events");
             ui.checkbox(&mut editor.show_npcs, "NPCs");
 
-            // Auto-fit to available area on window resize
-            ui.checkbox(&mut editor.auto_fit_on_resize, "Auto Fit").on_hover_text("When enabled, the map will automatically scale to fit the left column when the window is resized. Manual zoom (Zoom In/Out/Reset) will persist until Fit is clicked to recompute scaling.");
-
-            // Debug prints removed: toggle state logging no longer emitted to stderr.
+            ui.checkbox(&mut editor.auto_fit_on_resize, "Auto Fit").on_hover_text(
+                "When enabled, the map will automatically scale to fit the left column when the window is resized. Manual zoom persists until Fit is clicked.",
+            );
 
             ui.separator();
 
             // Zoom controls
             ui.label("Zoom:");
-
             if ui.button("➖").on_hover_text("Zoom Out").clicked() {
                 action = Some(ZoomAction::Out);
             }
@@ -1827,11 +1915,7 @@ impl MapsEditorState {
                 action = Some(ZoomAction::In);
             }
 
-            if ui
-                .button("⊡ Fit")
-                .on_hover_text("Fit map to available space")
-                .clicked()
-            {
+            if ui.button("⊡ Fit").on_hover_text("Fit map to available space").clicked() {
                 action = Some(ZoomAction::Fit);
             }
 
@@ -1839,6 +1923,7 @@ impl MapsEditorState {
                 action = Some(ZoomAction::Reset);
             }
         });
+
         action
     }
 
@@ -2467,6 +2552,61 @@ mod tests {
         assert_eq!(state.current_tool, EditorTool::Select);
         assert!(!state.show_metadata_editor);
         assert_eq!(state.metadata.name, "Map 1");
+    }
+
+    #[test]
+    fn compute_map_requested_left_small_map() {
+        let total_width = 800.0;
+        let inspector_min_width = 300.0;
+        let sep_margin = 12.0;
+        let map_pixel_width = 200.0; // map 200px wide
+        let padding = 8.0;
+        let computed = compute_map_requested_left(
+            total_width,
+            inspector_min_width,
+            sep_margin,
+            map_pixel_width,
+            padding,
+        );
+        // expected: desired_left_for_map = 200 + 16 = 216; fallback = 800 - 300 - 12 = 488; result = min(216, 488) = 216
+        assert_eq!(computed, 216.0);
+    }
+
+    #[test]
+    fn compute_map_requested_left_fallback_when_map_too_large() {
+        let total_width = 800.0;
+        let inspector_min_width = 300.0;
+        let sep_margin = 12.0;
+        let map_pixel_width = 600.0; // map 600 px wide
+        let padding = 8.0;
+        let computed = compute_map_requested_left(
+            total_width,
+            inspector_min_width,
+            sep_margin,
+            map_pixel_width,
+            padding,
+        );
+        // fallback = 488; desired = 600 + 16 = 616; result = min(616, 488) = 488
+        assert_eq!(computed, 488.0);
+    }
+
+    #[test]
+    fn compute_map_requested_left_no_space() {
+        // total width smaller than inspector min + margin -> fallback negative
+        let total_width = 200.0;
+        let inspector_min_width = 220.0;
+        let sep_margin = 12.0;
+        let map_pixel_width = 100.0;
+        let padding = 8.0;
+        let computed = compute_map_requested_left(
+            total_width,
+            inspector_min_width,
+            sep_margin,
+            map_pixel_width,
+            padding,
+        );
+        // fallback = 200 - 220 - 12 = -32
+        assert_eq!(computed, -32.0);
     }
 
     #[test]
