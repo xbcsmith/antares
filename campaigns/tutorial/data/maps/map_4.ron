@@ -4408,38 +4408,12 @@
     ],
     events: {
         (
-            x: 8,
-            y: 8,
-        ): Treasure(
+            x: 0,
+            y: 10,
+        ): Sign(
             name: "",
             description: "",
-            loot: [
-                13,
-                23,
-                32,
-            ],
-        ),
-        (
-            x: 14,
-            y: 4,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                5,
-                4,
-            ],
-        ),
-        (
-            x: 16,
-            y: 2,
-        ): Treasure(
-            name: "",
-            description: "",
-            loot: [
-                14,
-                24,
-            ],
+            text: "Exit to town.",
         ),
         (
             x: 17,
@@ -4453,34 +4427,25 @@
             ],
         ),
         (
-            x: 5,
-            y: 3,
-        ): Encounter(
+            x: 7,
+            y: 17,
+        ): Trap(
             name: "",
             description: "",
-            monster_group: [
-                4,
-                4,
-            ],
+            damage: 8,
+            effect: None,
         ),
         (
-            x: 3,
-            y: 11,
-        ): Encounter(
+            x: 8,
+            y: 8,
+        ): Treasure(
             name: "",
             description: "",
-            monster_group: [
-                6,
-                5,
+            loot: [
+                13,
+                23,
+                32,
             ],
-        ),
-        (
-            x: 0,
-            y: 10,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Exit to town.",
         ),
         (
             x: 10,
@@ -4496,13 +4461,48 @@
             ],
         ),
         (
-            x: 7,
-            y: 17,
-        ): Trap(
+            x: 16,
+            y: 2,
+        ): Treasure(
             name: "",
             description: "",
-            damage: 8,
-            effect: None,
+            loot: [
+                14,
+                24,
+            ],
+        ),
+        (
+            x: 14,
+            y: 4,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                5,
+                4,
+            ],
+        ),
+        (
+            x: 3,
+            y: 11,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                6,
+                5,
+            ],
+        ),
+        (
+            x: 5,
+            y: 3,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                4,
+                4,
+            ],
         ),
     },
     npcs: [

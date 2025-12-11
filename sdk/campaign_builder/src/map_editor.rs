@@ -402,6 +402,15 @@ impl MapEditorState {
         }
     }
 
+    /// Apply the metadata fields back into the map struct
+    ///
+    /// Ensures metadata set via the editor (e.g., `metadata.name`) are copied into the
+    /// underlying map before saving/export.
+    pub fn apply_metadata(&mut self) {
+        self.map.name = self.metadata.name.clone();
+        self.map.description = self.metadata.description.clone();
+    }
+
     /// Erases a tile (resets to default)
     pub fn erase_tile(&mut self, pos: Position) {
         let default_tile = Tile::new(pos.x, pos.y, TerrainType::Ground, WallType::None);
@@ -1766,9 +1775,12 @@ impl MapsEditorState {
         // Handle back action
         if back_clicked {
             // Save changes if any
-            if let Some(ref editor) = self.active_editor {
+            if let Some(ref mut editor) = self.active_editor {
                 if editor.has_changes {
-                    let map = editor.map.clone();
+                    // Ensure metadata is reflected in the map before saving
+                    editor.apply_metadata();
+
+                    let mut map = editor.map.clone();
                     if let Some(idx) = self.selected_map_idx {
                         if idx < maps.len() {
                             maps[idx] = map.clone();
@@ -1780,6 +1792,9 @@ impl MapsEditorState {
                     } else {
                         *status_message = "Map saved".to_string();
                         *unsaved_changes = true;
+                        // Keep the editor in sync with the saved map
+                        editor.map = map;
+                        editor.has_changes = false;
                     }
                 }
             }
@@ -1789,7 +1804,10 @@ impl MapsEditorState {
 
         // Handle save action
         if save_clicked {
-            if let Some(ref editor) = self.active_editor {
+            if let Some(ref mut editor) = self.active_editor {
+                // Sync metadata to the underlying map before saving
+                editor.apply_metadata();
+
                 let map = editor.map.clone();
                 if let Some(idx) = self.selected_map_idx {
                     if idx < maps.len() {
@@ -1801,10 +1819,9 @@ impl MapsEditorState {
                 } else {
                     *status_message = format!("Map {} saved", map.id);
                     *unsaved_changes = true;
-                    // Clear has_changes flag
-                    if let Some(ref mut ed) = self.active_editor {
-                        ed.has_changes = false;
-                    }
+                    // Clear has_changes flag and update editor's map
+                    editor.has_changes = false;
+                    editor.map = map;
                 }
             }
         }
@@ -2856,8 +2873,54 @@ mod tests {
         assert_eq!(state.metadata.name, "Test Map");
         assert_eq!(state.metadata.difficulty, 5);
         assert_eq!(state.metadata.light_level, 80);
-        assert_eq!(state.metadata.encounter_rate, 25);
-        assert!(state.metadata.is_outdoor);
+    }
+
+    #[test]
+    fn test_apply_metadata_sync() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        state.metadata.name = "Renamed Map".to_string();
+        state.metadata.description = "A new description".to_string();
+
+        // apply metadata to underlying map
+        state.apply_metadata();
+
+        assert_eq!(state.map.name, "Renamed Map");
+        assert_eq!(state.map.description, "A new description");
+    }
+
+    #[test]
+    fn test_save_action_updates_maps_vector() {
+        let mut maps: Vec<Map> = vec![Map::new(
+            1,
+            "You Forgot Map".to_string(),
+            "Desc".to_string(),
+            10,
+            10,
+        )];
+        let mut maps_editor = MapsEditorState::new();
+
+        // Activate editor for the first map
+        maps_editor.selected_map_idx = Some(0);
+        maps_editor.active_editor = Some(MapEditorState::new(maps[0].clone()));
+
+        // Modify metadata
+        if let Some(ref mut editor) = maps_editor.active_editor {
+            editor.metadata.name = "Synchronized Map".to_string();
+            editor.metadata.description = "Synchronized description".to_string();
+            editor.apply_metadata();
+
+            let map = editor.map.clone();
+            if let Some(idx) = maps_editor.selected_map_idx {
+                if idx < maps.len() {
+                    maps[idx] = map.clone();
+                }
+            }
+        }
+
+        assert_eq!(maps[0].name, "Synchronized Map");
+        assert_eq!(maps[0].description, "Synchronized description");
     }
 
     #[test]

@@ -3316,20 +3316,20 @@
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
         (
-            x: 10,
-            y: 10,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
             x: 19,
             y: 7,
         ): Sign(
             name: "",
             description: "",
             text: "WARNING: Dungeon entrance ahead. Prepare for combat!",
+        ),
+        (
+            x: 10,
+            y: 10,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "Temple of Healing - The priests can restore your health.",
         ),
         (
             x: 15,

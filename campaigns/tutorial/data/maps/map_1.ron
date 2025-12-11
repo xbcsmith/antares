@@ -4413,15 +4413,7 @@
         ): Sign(
             name: "",
             description: "",
-            text: "WARNING: Dungeon Entrance Ahead. PREPARE FOR COMBAT!",
-        ),
-        (
-            x: 13,
-            y: 3,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Temple of Healing - The priests can restore your health.",
+            text: "To the Dark Forrest",
         ),
         (
             x: 5,
@@ -4438,6 +4430,26 @@
             name: "",
             description: "",
             text: "General Store - Buy and Sell items for your party!",
+        ),
+        (
+            x: 18,
+            y: 18,
+        ): Teleport(
+            name: "",
+            description: "",
+            destination: (
+                x: 0,
+                y: 7,
+            ),
+            map_id: 2,
+        ),
+        (
+            x: 13,
+            y: 3,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "Temple of Healing - The priests can restore your health.",
         ),
     },
     npcs: [
