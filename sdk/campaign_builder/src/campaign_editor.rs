@@ -821,7 +821,7 @@ impl CampaignMetadataEditorState {
                                     ui.label("Starting Direction:");
                                     let mut dir = self.buffer.starting_direction.clone();
                                     // Use `from_id_source` to avoid ID collisions with other ComboBoxes in the UI
-                                    egui::ComboBox::from_id_source("campaign_starting_direction")
+                                    egui::ComboBox::from_id_salt("campaign_starting_direction")
                                         .selected_text(dir.clone())
                                         .show_ui(ui, |ui| {
                                             for d in &["North", "East", "South", "West"] {
@@ -868,7 +868,7 @@ impl CampaignMetadataEditorState {
 
                                     ui.label("Difficulty:");
                                     // Use `from_id_source` to avoid ID collisions with other ComboBoxes in the UI
-                                    egui::ComboBox::from_id_source("campaign_difficulty")
+                                    egui::ComboBox::from_id_salt("campaign_difficulty")
                                         .selected_text(self.buffer.difficulty.as_str())
                                         .show_ui(ui, |ui| {
                                             for &diff in &crate::Difficulty::all() {

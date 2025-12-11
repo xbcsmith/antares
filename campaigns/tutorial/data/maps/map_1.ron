@@ -4409,6 +4409,14 @@
     events: {
         (
             x: 13,
+            y: 3,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "Temple of Healing - The priests can restore your health.",
+        ),
+        (
+            x: 13,
             y: 18,
         ): Sign(
             name: "",
@@ -4417,19 +4425,19 @@
         ),
         (
             x: 5,
-            y: 4,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
-        ),
-        (
-            x: 5,
             y: 10,
         ): Sign(
             name: "",
             description: "",
             text: "General Store - Buy and Sell items for your party!",
+        ),
+        (
+            x: 5,
+            y: 4,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
         (
             x: 18,
@@ -4442,14 +4450,6 @@
                 y: 7,
             ),
             map_id: 2,
-        ),
-        (
-            x: 13,
-            y: 3,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Temple of Healing - The priests can restore your health.",
         ),
     },
     npcs: [

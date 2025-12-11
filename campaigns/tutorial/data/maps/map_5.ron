@@ -3308,20 +3308,20 @@
     ],
     events: {
         (
-            x: 4,
-            y: 4,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
-        ),
-        (
             x: 19,
             y: 7,
         ): Sign(
             name: "",
             description: "",
             text: "WARNING: Dungeon entrance ahead. Prepare for combat!",
+        ),
+        (
+            x: 4,
+            y: 4,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
         (
             x: 10,

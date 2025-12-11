@@ -1302,7 +1302,7 @@ impl MapsEditorState {
         let search_lower = self.search_filter.to_lowercase();
 
         // Build filtered list snapshot
-        let filtered_maps: Vec<(usize, String, u32, u32, usize, usize)> = maps
+        let filtered_maps: Vec<(usize, MapId, String, u32, u32, usize, usize)> = maps
             .iter()
             .enumerate()
             .filter(|(_, m)| {
@@ -1313,6 +1313,7 @@ impl MapsEditorState {
             .map(|(idx, m)| {
                 (
                     idx,
+                    m.id,
                     m.name.clone(),
                     m.width,
                     m.height,
@@ -1333,11 +1334,11 @@ impl MapsEditorState {
                 left_ui.heading("Maps");
                 left_ui.separator();
 
-                for (idx, name, width, height, events, npcs) in &filtered_maps {
+                for (idx, id, name, width, height, events, npcs) in &filtered_maps {
                     let is_selected = selected == Some(*idx);
                     let label = format!(
-                        "#{} {} ({}x{}) E:{} N:{}",
-                        idx, name, width, height, events, npcs
+                        "[{}] {} ({}x{}) E:{} N:{}",
+                        id, name, width, height, events, npcs
                     );
                     if left_ui.selectable_label(is_selected, &label).clicked() {
                         new_selection = Some(*idx);
@@ -1775,26 +1776,36 @@ impl MapsEditorState {
         // Handle back action
         if back_clicked {
             // Save changes if any
-            if let Some(ref mut editor) = self.active_editor {
-                if editor.has_changes {
-                    // Ensure metadata is reflected in the map before saving
-                    editor.apply_metadata();
+            if self.active_editor.is_some() {
+                // Scoped mutable borrow to collect a map to save if any changes exist.
+                let map_opt: Option<Map> = self.active_editor.as_mut().and_then(|editor| {
+                    if editor.has_changes {
+                        // Ensure metadata is reflected in the map before saving
+                        editor.apply_metadata();
+                        Some(editor.map.clone())
+                    } else {
+                        None
+                    }
+                });
 
-                    let mut map = editor.map.clone();
+                if let Some(map) = map_opt {
                     if let Some(idx) = self.selected_map_idx {
                         if idx < maps.len() {
                             maps[idx] = map.clone();
                         }
                     }
-                    // Save to file
+
+                    // Save to file (mutable borrow released)
                     if let Err(e) = self.save_map(&map, campaign_dir, maps_dir) {
                         *status_message = format!("Failed to save map: {}", e);
                     } else {
                         *status_message = "Map saved".to_string();
                         *unsaved_changes = true;
-                        // Keep the editor in sync with the saved map
-                        editor.map = map;
-                        editor.has_changes = false;
+                        // Re-borrow to update the editor with the saved map and clear dirty flag
+                        if let Some(editor) = self.active_editor.as_mut() {
+                            editor.map = map;
+                            editor.has_changes = false;
+                        }
                     }
                 }
             }
@@ -1804,11 +1815,14 @@ impl MapsEditorState {
 
         // Handle save action
         if save_clicked {
-            if let Some(ref mut editor) = self.active_editor {
+            // Acquire a clone of the map to save while avoiding overlapping borrows
+            let map_opt: Option<Map> = self.active_editor.as_mut().map(|editor| {
                 // Sync metadata to the underlying map before saving
                 editor.apply_metadata();
+                editor.map.clone()
+            });
 
-                let map = editor.map.clone();
+            if let Some(map) = map_opt {
                 if let Some(idx) = self.selected_map_idx {
                     if idx < maps.len() {
                         maps[idx] = map.clone();
@@ -1819,9 +1833,11 @@ impl MapsEditorState {
                 } else {
                     *status_message = format!("Map {} saved", map.id);
                     *unsaved_changes = true;
-                    // Clear has_changes flag and update editor's map
-                    editor.has_changes = false;
-                    editor.map = map;
+                    // Re-borrow to clear flags and update editor's map
+                    if let Some(editor) = self.active_editor.as_mut() {
+                        editor.has_changes = false;
+                        editor.map = map;
+                    }
                 }
             }
         }
@@ -2541,6 +2557,10 @@ impl MapsEditorState {
                         }
 
                         if loaded_count > 0 {
+                            // Sort maps by ID so load order is deterministic and stable
+                            // across platforms and runs. This prevents filesystem iteration
+                            // order from confusing users when they expect map IDs to match.
+                            maps.sort_unstable_by_key(|m| m.id);
                             *status_message = format!("Loaded {} maps", loaded_count);
                         }
                     }
@@ -2921,6 +2941,61 @@ mod tests {
 
         assert_eq!(maps[0].name, "Synchronized Map");
         assert_eq!(maps[0].description, "Synchronized description");
+    }
+
+    #[test]
+    fn test_load_maps_sorts_by_id() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        // Create a temporary campaign directory with a `maps` subdirectory
+        let tmpdir = tempdir().expect("Failed to create tempdir");
+        let campaign_dir_buf = tmpdir.path().to_path_buf();
+        let maps_dir = "maps";
+        let maps_path = tmpdir.path().join(maps_dir);
+        fs::create_dir_all(&maps_path).expect("Failed to create maps dir");
+
+        // Create three maps with different IDs and write in non-sorted order (3,1,2)
+        let map3 = Map::new(3, "Map 3".to_string(), "Desc".to_string(), 10, 10);
+        let map1 = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
+        let map2 = Map::new(2, "Map 2".to_string(), "Desc".to_string(), 10, 10);
+
+        // Use ron pretty default config to serialize maps
+        let ron_cfg = ron::ser::PrettyConfig::default();
+
+        fs::write(
+            maps_path.join("map_3.ron"),
+            ron::ser::to_string_pretty(&map3, ron_cfg.clone()).expect("Serialize map3"),
+        )
+        .expect("Write map_3");
+
+        fs::write(
+            maps_path.join("map_1.ron"),
+            ron::ser::to_string_pretty(&map1, ron_cfg.clone()).expect("Serialize map1"),
+        )
+        .expect("Write map_1");
+
+        fs::write(
+            maps_path.join("map_2.ron"),
+            ron::ser::to_string_pretty(&map2, ron_cfg.clone()).expect("Serialize map2"),
+        )
+        .expect("Write map_2");
+
+        // Now load maps using the editor function and ensure they are sorted by id
+        let mut loaded_maps: Vec<Map> = Vec::new();
+        let mut status_message = String::new();
+        let state = MapsEditorState::new();
+        state.load_maps(
+            &mut loaded_maps,
+            Some(&campaign_dir_buf),
+            maps_dir,
+            &mut status_message,
+        );
+
+        assert_eq!(loaded_maps.len(), 3);
+        assert_eq!(loaded_maps[0].id, 1);
+        assert_eq!(loaded_maps[1].id, 2);
+        assert_eq!(loaded_maps[2].id, 3);
     }
 
     #[test]

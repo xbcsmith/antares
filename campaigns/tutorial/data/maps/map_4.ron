@@ -2,8 +2,8 @@
     id: 4,
     width: 20,
     height: 20,
-    name: "Ancient Ruins",
-    description: "Crumbling ruins from a forgotten civilization",
+    name: "Dark Forrest",
+    description: "A dense forest filled with danger and mystery",
     tiles: [
         (
             terrain: Forest,
@@ -4408,25 +4408,6 @@
     ],
     events: {
         (
-            x: 0,
-            y: 10,
-        ): Sign(
-            name: "",
-            description: "",
-            text: "Exit to town.",
-        ),
-        (
-            x: 17,
-            y: 16,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                6,
-                6,
-            ],
-        ),
-        (
             x: 7,
             y: 17,
         ): Trap(
@@ -4434,18 +4415,6 @@
             description: "",
             damage: 8,
             effect: None,
-        ),
-        (
-            x: 8,
-            y: 8,
-        ): Treasure(
-            name: "",
-            description: "",
-            loot: [
-                13,
-                23,
-                32,
-            ],
         ),
         (
             x: 10,
@@ -4461,14 +4430,14 @@
             ],
         ),
         (
-            x: 16,
-            y: 2,
-        ): Treasure(
+            x: 3,
+            y: 11,
+        ): Encounter(
             name: "",
             description: "",
-            loot: [
-                14,
-                24,
+            monster_group: [
+                6,
+                5,
             ],
         ),
         (
@@ -4483,17 +4452,6 @@
             ],
         ),
         (
-            x: 3,
-            y: 11,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                6,
-                5,
-            ],
-        ),
-        (
             x: 5,
             y: 3,
         ): Encounter(
@@ -4503,6 +4461,48 @@
                 4,
                 4,
             ],
+        ),
+        (
+            x: 8,
+            y: 8,
+        ): Treasure(
+            name: "",
+            description: "",
+            loot: [
+                13,
+                23,
+                32,
+            ],
+        ),
+        (
+            x: 16,
+            y: 2,
+        ): Treasure(
+            name: "",
+            description: "",
+            loot: [
+                14,
+                24,
+            ],
+        ),
+        (
+            x: 17,
+            y: 16,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                6,
+                6,
+            ],
+        ),
+        (
+            x: 0,
+            y: 10,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "Exit to town.",
         ),
     },
     npcs: [
