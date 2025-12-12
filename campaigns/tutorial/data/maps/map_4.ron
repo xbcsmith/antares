@@ -138,9 +138,9 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
-            wall_type: Normal,
-            blocked: true,
+            terrain: Ground,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -2415,9 +2415,9 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
-            wall_type: Normal,
-            blocked: true,
+            terrain: Ground,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -4296,9 +4296,9 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
-            wall_type: Normal,
-            blocked: true,
+            terrain: Ground,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -4408,6 +4408,79 @@
     ],
     events: {
         (
+            x: 3,
+            y: 11,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                6,
+                5,
+            ],
+        ),
+        (
+            x: 5,
+            y: 3,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                4,
+                4,
+            ],
+        ),
+        (
+            x: 16,
+            y: 2,
+        ): Treasure(
+            name: "",
+            description: "",
+            loot: [
+                14,
+                24,
+            ],
+        ),
+        (
+            x: 19,
+            y: 10,
+        ): Teleport(
+            name: "",
+            description: "",
+            destination: (
+                x: 19,
+                y: 17,
+            ),
+            map_id: 2,
+        ),
+        (
+            x: 10,
+            y: 18,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "To the Mountain Pass",
+        ),
+        (
+            x: 10,
+            y: 19,
+        ): Teleport(
+            name: "",
+            description: "",
+            destination: (
+                x: 19,
+                y: 6,
+            ),
+            map_id: 5,
+        ),
+        (
+            x: 0,
+            y: 10,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "Exit to town.",
+        ),
+        (
             x: 7,
             y: 17,
         ): Trap(
@@ -4415,6 +4488,60 @@
             description: "",
             damage: 8,
             effect: None,
+        ),
+        (
+            x: 18,
+            y: 10,
+        ): Sign(
+            name: "",
+            description: "",
+            text: "To the Wizard\'s Cave",
+        ),
+        (
+            x: 8,
+            y: 8,
+        ): Treasure(
+            name: "",
+            description: "",
+            loot: [
+                13,
+                23,
+                32,
+            ],
+        ),
+        (
+            x: 12,
+            y: 0,
+        ): Teleport(
+            name: "",
+            description: "",
+            destination: (
+                x: 0,
+                y: 7,
+            ),
+            map_id: 3,
+        ),
+        (
+            x: 17,
+            y: 16,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                6,
+                6,
+            ],
+        ),
+        (
+            x: 14,
+            y: 4,
+        ): Encounter(
+            name: "",
+            description: "",
+            monster_group: [
+                5,
+                4,
+            ],
         ),
         (
             x: 10,
@@ -4430,79 +4557,12 @@
             ],
         ),
         (
-            x: 3,
-            y: 11,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                6,
-                5,
-            ],
-        ),
-        (
-            x: 14,
-            y: 4,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                5,
-                4,
-            ],
-        ),
-        (
-            x: 5,
-            y: 3,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                4,
-                4,
-            ],
-        ),
-        (
-            x: 8,
-            y: 8,
-        ): Treasure(
-            name: "",
-            description: "",
-            loot: [
-                13,
-                23,
-                32,
-            ],
-        ),
-        (
-            x: 16,
-            y: 2,
-        ): Treasure(
-            name: "",
-            description: "",
-            loot: [
-                14,
-                24,
-            ],
-        ),
-        (
-            x: 17,
-            y: 16,
-        ): Encounter(
-            name: "",
-            description: "",
-            monster_group: [
-                6,
-                6,
-            ],
-        ),
-        (
-            x: 0,
-            y: 10,
+            x: 12,
+            y: 1,
         ): Sign(
             name: "",
             description: "",
-            text: "Exit to town.",
+            text: "To Ancient Ruins",
         ),
     },
     npcs: [

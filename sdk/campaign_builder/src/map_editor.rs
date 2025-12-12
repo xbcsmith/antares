@@ -37,7 +37,7 @@
 //! ```
 
 use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
-use antares::domain::types::{MapId, Position};
+use antares::domain::types::{EventId, MapId, Position};
 use antares::domain::world::{Map, MapEvent, Npc, TerrainType, Tile, WallType};
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -134,9 +134,17 @@ enum EditorAction {
         new_tile: Tile,
     },
     /// Event was added
-    EventAdded { position: Position, event: MapEvent },
+    EventAdded {
+        position: Position,
+        event: MapEvent,
+        event_id: Option<EventId>,
+    },
     /// Event was removed
-    EventRemoved { position: Position, event: MapEvent },
+    EventRemoved {
+        position: Position,
+        event: MapEvent,
+        event_id: Option<EventId>,
+    },
     /// NPC was added
     NpcAdded { npc: Npc },
     /// NPC was removed
@@ -417,26 +425,70 @@ impl MapEditorState {
         self.set_tile(pos, default_tile);
     }
 
+    /// Helper: Get next available EventId for this map (scans existing tile triggers)
+    ///
+    /// This is an editor-only helper used to auto-assign an EventId onto the tile's
+    /// `event_trigger` field without changing the core `Map` domain structure.
+    fn next_available_event_id(&self) -> EventId {
+        self.map
+            .tiles
+            .iter()
+            .filter_map(|t| t.event_trigger)
+            .max()
+            .unwrap_or(0)
+            + 1
+    }
+
     /// Adds an event at position
     pub fn add_event(&mut self, pos: Position, event: MapEvent) {
         if !self.map.is_valid_position(pos) {
             return;
         }
 
+        // Check for an existing event ID using an immutable borrow before we
+        // compute a new one or mutably borrow the tile to set a new ID.
+        let existing_id = if let Some(tile) = self.map.get_tile(pos) {
+            tile.event_trigger
+        } else {
+            // invalid pos
+            return;
+        };
+
+        // If no existing id, compute the next ID (immutably) and then set it via
+        // a separate mutable borrow to avoid borrow checker conflicts.
+        let event_id = if let Some(id) = existing_id {
+            id
+        } else {
+            let id = self.next_available_event_id();
+            if let Some(tile) = self.map.get_tile_mut(pos) {
+                tile.event_trigger = Some(id);
+            }
+            id
+        };
+
         self.map.add_event(pos, event.clone());
         self.undo_stack.push(EditorAction::EventAdded {
             position: pos,
             event,
+            event_id: Some(event_id),
         });
         self.has_changes = true;
     }
 
     /// Removes event at position
     pub fn remove_event(&mut self, pos: Position) {
+        // Grab and clear the tile's event ID (if present)
+        let event_id = if let Some(tile) = self.map.get_tile_mut(pos) {
+            tile.event_trigger.take()
+        } else {
+            None
+        };
+
         if let Some(event) = self.map.remove_event(pos) {
             self.undo_stack.push(EditorAction::EventRemoved {
                 position: pos,
                 event,
+                event_id,
             });
             self.has_changes = true;
         }
@@ -486,9 +538,21 @@ impl MapEditorState {
             }
             EditorAction::EventAdded { position, .. } => {
                 self.map.remove_event(position);
+                if let Some(tile) = self.map.get_tile_mut(position) {
+                    tile.event_trigger = None;
+                }
             }
-            EditorAction::EventRemoved { position, event } => {
+            EditorAction::EventRemoved {
+                position,
+                event,
+                event_id,
+            } => {
                 self.map.add_event(position, event);
+                if let Some(id) = event_id {
+                    if let Some(tile) = self.map.get_tile_mut(position) {
+                        tile.event_trigger = Some(id);
+                    }
+                }
             }
             EditorAction::NpcAdded { .. } => {
                 self.map.npcs.pop();
@@ -508,11 +572,23 @@ impl MapEditorState {
                     *tile = new_tile;
                 }
             }
-            EditorAction::EventAdded { position, event } => {
+            EditorAction::EventAdded {
+                position,
+                event,
+                event_id,
+            } => {
                 self.map.add_event(position, event);
+                if let Some(id) = event_id {
+                    if let Some(tile) = self.map.get_tile_mut(position) {
+                        tile.event_trigger = Some(id);
+                    }
+                }
             }
             EditorAction::EventRemoved { position, .. } => {
                 self.map.remove_event(position);
+                if let Some(tile) = self.map.get_tile_mut(position) {
+                    tile.event_trigger = None;
+                }
             }
             EditorAction::NpcAdded { npc } => {
                 self.map.add_npc(npc);
@@ -619,12 +695,16 @@ pub struct EventEditorState {
     pub teleport_x: String,
     pub teleport_y: String,
     pub teleport_map_id: String,
+    // Teleport helper fields
+    pub teleport_selected_map: Option<MapId>,
+    pub teleport_selected_pos: Option<Position>,
+    pub teleport_preview_enabled: bool,
     // Trap fields
     pub trap_damage: String,
     pub trap_effect: String,
     // Sign fields
     pub sign_text: String,
-    // NPC dialogue fields
+    // NPC Dialogue fields
     pub npc_id: String,
 }
 
@@ -640,6 +720,9 @@ impl Default for EventEditorState {
             teleport_x: String::new(),
             teleport_y: String::new(),
             teleport_map_id: String::new(),
+            teleport_selected_map: None,
+            teleport_selected_pos: None,
+            teleport_preview_enabled: false,
             trap_damage: String::new(),
             trap_effect: String::new(),
             sign_text: String::new(),
@@ -730,15 +813,37 @@ impl EventEditorState {
                 })
             }
             EventType::Teleport => {
-                let x = self
-                    .teleport_x
-                    .parse()
-                    .map_err(|_| "Invalid X coordinate")?;
-                let y = self
-                    .teleport_y
-                    .parse()
-                    .map_err(|_| "Invalid Y coordinate")?;
-                let map_id = self.teleport_map_id.parse().map_err(|_| "Invalid map ID")?;
+                // Try to parse X/Y from the textual fields first. If parsing fails, fall back
+                // to the selected preview position (if any) so users can pick positions from the
+                // target map preview instead of typing numeric values.
+                let (x, y) = match (
+                    self.teleport_x.parse::<i32>(),
+                    self.teleport_y.parse::<i32>(),
+                ) {
+                    (Ok(x), Ok(y)) => (x, y),
+                    _ => {
+                        // If we can't parse numeric coordinates, use the selected preview coordinate if set.
+                        if let Some(pos) = self.teleport_selected_pos.as_ref() {
+                            (pos.x, pos.y)
+                        } else {
+                            return Err("Invalid X or Y coordinate".to_string());
+                        }
+                    }
+                };
+
+                // Try parsing the target map ID from the text field. If that fails, fall back to the
+                // selected map from the UI preview component, if available.
+                let map_id = match self.teleport_map_id.parse::<MapId>() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        if let Some(id) = self.teleport_selected_map {
+                            id
+                        } else {
+                            return Err("Invalid map ID".to_string());
+                        }
+                    }
+                };
+
                 Ok(MapEvent::Teleport {
                     name: self.name.clone(),
                     description: self.description.clone(),
@@ -1034,6 +1139,126 @@ impl<'a> Widget for MapGridWidget<'a> {
     }
 }
 
+// Map Preview Widget: interactive preview of a map for selecting teleport destination.
+//
+// This widget is similar to the main grid, but it renders an arbitrary Map reference
+// and signals clicks back via a mutable Option<Position> passed in by the caller.
+pub struct MapPreviewWidget<'a> {
+    map: &'a Map,
+    selected_pos: &'a mut Option<Position>,
+    tile_size: f32,
+}
+
+impl<'a> MapPreviewWidget<'a> {
+    pub fn new(map: &'a Map, selected_pos: &'a mut Option<Position>) -> Self {
+        Self {
+            map,
+            selected_pos,
+            tile_size: 12.0,
+        }
+    }
+
+    pub fn tile_size(mut self, tile_size: f32) -> Self {
+        self.tile_size = tile_size;
+        self
+    }
+}
+
+impl<'a> Widget for MapPreviewWidget<'a> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let tile_size = self.tile_size;
+
+        let map_width_px = self.map.width as f32 * tile_size;
+        let map_height_px = self.map.height as f32 * tile_size;
+
+        let avail = ui.available_size();
+        let width = map_width_px.max(avail.x).max(1.0);
+        let height = map_height_px.max(avail.y).max(1.0);
+
+        let (response, painter) = ui.allocate_painter(Vec2::new(width, height), Sense::click());
+
+        let grid_offset = Vec2::new(
+            ((width - map_width_px) / 2.0).max(0.0),
+            ((height - map_height_px) / 2.0).max(0.0),
+        );
+
+        let to_screen = |x: i32, y: i32| -> Pos2 {
+            response.rect.min + grid_offset + Vec2::new(x as f32 * tile_size, y as f32 * tile_size)
+        };
+
+        for y in 0..self.map.height as i32 {
+            for x in 0..self.map.width as i32 {
+                let pos = Position::new(x, y);
+                if let Some(tile) = self.map.get_tile(pos) {
+                    let has_event = self.map.events.contains_key(&pos);
+                    let has_npc = self.map.npcs.iter().any(|n| n.position == pos);
+                    let color = MapGridWidget::tile_color(tile, has_event, has_npc);
+
+                    let rect =
+                        Rect::from_min_size(to_screen(x, y), Vec2::new(tile_size, tile_size));
+                    painter.rect_filled(rect, 0.0, color);
+
+                    painter.rect_stroke(
+                        rect,
+                        0.0,
+                        Stroke::new(1.0, Color32::WHITE),
+                        egui::StrokeKind::Outside,
+                    );
+
+                    if let Some(sel_pos) = self.selected_pos {
+                        if *sel_pos == pos {
+                            painter.rect_stroke(
+                                rect,
+                                0.0,
+                                Stroke::new(2.0, Color32::YELLOW),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if response.clicked() {
+            if let Some(click_pos) = response.interact_pointer_pos() {
+                let local_pos = click_pos - response.rect.min - grid_offset;
+                let x = (local_pos.x / tile_size) as i32;
+                let y = (local_pos.y / tile_size) as i32;
+                let pos = Position::new(x, y);
+                if self.map.is_valid_position(pos) {
+                    *self.selected_pos = Some(pos);
+                }
+            }
+        }
+
+        response
+    }
+}
+
+// ===== Main Maps Editor State =====
+
+/// Suggest maps by partial input (id or name)
+fn suggest_maps_for_partial(maps: &[Map], partial: &str) -> Vec<(MapId, String)> {
+    let partial_lower = partial.to_lowercase();
+
+    let mut suggestions: Vec<(MapId, String)> = maps
+        .iter()
+        .filter(|m| {
+            // Match against id text or name substring, case-insensitive
+            m.id.to_string().contains(&partial_lower)
+                || m.name.to_lowercase().contains(&partial_lower)
+        })
+        .map(|m| (m.id, m.name.clone()))
+        .take(10)
+        .collect();
+
+    // Sort by ID for deterministic ordering
+    suggestions.sort_unstable_by_key(|(id, _name)| *id);
+    suggestions
+}
+
+// ===== Main Maps Editor State =====
+
 // ===== Main Maps Editor State =====
 
 /// Main maps editor state following the standard SDK editor pattern.
@@ -1139,6 +1364,44 @@ impl MapsEditorState {
     /// Get the next available map ID
     fn next_available_map_id(maps: &[Map]) -> MapId {
         maps.iter().map(|m| m.id).max().unwrap_or(0) + 1
+    }
+
+    /// Build a filtered list snapshot of maps (preserve original indices) sorted by ID.
+    ///
+    /// This keeps the underlying `maps` vector untouched while producing a snapshot of the UI
+    /// list sorted by `MapId` and containing the original indices so that selection by index
+    /// into the `maps` vector remains valid.
+    fn build_filtered_maps_snapshot(
+        maps: &[Map],
+        search_filter: &str,
+    ) -> Vec<(usize, MapId, String, u32, u32, usize, usize)> {
+        let search_lower = search_filter.to_lowercase();
+
+        let mut filtered: Vec<(usize, MapId, String, u32, u32, usize, usize)> = maps
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| {
+                search_lower.is_empty()
+                    || m.name.to_lowercase().contains(&search_lower)
+                    || m.id.to_string().contains(&search_lower)
+            })
+            .map(|(idx, m)| {
+                (
+                    idx,
+                    m.id,
+                    m.name.clone(),
+                    m.width,
+                    m.height,
+                    m.events.len(),
+                    m.npcs.len(),
+                )
+            })
+            .collect();
+
+        // Sort by ID for deterministic ordering in the UI list
+        filtered.sort_unstable_by_key(|(_, id, ..)| *id);
+
+        filtered
     }
 
     /// Render the Maps Editor UI
@@ -1299,29 +1562,8 @@ impl MapsEditorState {
         unsaved_changes: &mut bool,
         status_message: &mut String,
     ) {
-        let search_lower = self.search_filter.to_lowercase();
-
-        // Build filtered list snapshot
-        let filtered_maps: Vec<(usize, MapId, String, u32, u32, usize, usize)> = maps
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| {
-                search_lower.is_empty()
-                    || m.name.to_lowercase().contains(&search_lower)
-                    || m.id.to_string().contains(&search_lower)
-            })
-            .map(|(idx, m)| {
-                (
-                    idx,
-                    m.id,
-                    m.name.clone(),
-                    m.width,
-                    m.height,
-                    m.events.len(),
-                    m.npcs.len(),
-                )
-            })
-            .collect();
+        // Build and sort filtered list snapshot for UI display
+        let filtered_maps = Self::build_filtered_maps_snapshot(maps, &self.search_filter);
 
         let selected = self.selected_map_idx;
         let mut new_selection = selected;
@@ -1761,7 +2003,7 @@ impl MapsEditorState {
                             egui::ScrollArea::vertical()
                                 .id_salt("map_editor_inspector_scroll")
                                 .show(right_ui, |ui| {
-                                    Self::show_inspector_panel(ui, editor_ref);
+                                    Self::show_inspector_panel(ui, editor_ref, maps);
                                 });
                         },
                     );
@@ -1849,7 +2091,7 @@ impl MapsEditorState {
         editor: &mut MapEditorState,
         current_zoom: f32,
     ) -> Option<ZoomAction> {
-        let mut action: Option<ZoomAction> = None;
+        let action: Option<ZoomAction> = None;
 
         ui.horizontal(|ui| {
             ui.label("Tools:");
@@ -1961,7 +2203,7 @@ impl MapsEditorState {
     }
 
     /// Show inspector panel
-    fn show_inspector_panel(ui: &mut egui::Ui, editor: &mut MapEditorState) {
+    fn show_inspector_panel(ui: &mut egui::Ui, editor: &mut MapEditorState, maps: &[Map]) {
         ui.heading("Inspector");
         ui.separator();
 
@@ -2052,7 +2294,7 @@ impl MapsEditorState {
         if matches!(editor.current_tool, EditorTool::PlaceEvent) {
             ui.group(|ui| {
                 ui.heading("Event Editor");
-                Self::show_event_editor(ui, editor);
+                Self::show_event_editor(ui, editor, maps);
             });
         }
 
@@ -2167,7 +2409,7 @@ impl MapsEditorState {
     }
 
     /// Show event editor
-    fn show_event_editor(ui: &mut egui::Ui, editor: &mut MapEditorState) {
+    fn show_event_editor(ui: &mut egui::Ui, editor: &mut MapEditorState, maps: &[Map]) {
         if let Some(ref mut event_editor) = editor.event_editor {
             egui::ComboBox::from_id_salt("map_event_type_combo")
                 .selected_text(event_editor.event_type.name())
@@ -2187,6 +2429,14 @@ impl MapsEditorState {
 
             ui.separator();
 
+            // Common event fields: name and description
+            ui.horizontal(|ui| {
+                ui.label("Name:");
+                ui.text_edit_singleline(&mut event_editor.name);
+            });
+            ui.label("Description:");
+            ui.text_edit_multiline(&mut event_editor.description);
+
             match event_editor.event_type {
                 EventType::Encounter => {
                     ui.label("Monster IDs (comma-separated):");
@@ -2197,12 +2447,115 @@ impl MapsEditorState {
                     ui.text_edit_singleline(&mut event_editor.treasure_items);
                 }
                 EventType::Teleport => {
-                    ui.label("Destination X:");
-                    ui.text_edit_singleline(&mut event_editor.teleport_x);
-                    ui.label("Destination Y:");
-                    ui.text_edit_singleline(&mut event_editor.teleport_y);
-                    ui.label("Target Map ID:");
-                    ui.text_edit_singleline(&mut event_editor.teleport_map_id);
+                    ui.label("Target Map:");
+                    ui.horizontal(|ui| {
+                        // Editable text input for map id or name
+                        let changed = ui
+                            .text_edit_singleline(&mut event_editor.teleport_map_id)
+                            .changed();
+                        if changed {
+                            // If user types, clear the previously selected map
+                            event_editor.teleport_selected_map = None;
+                            event_editor.teleport_preview_enabled = false;
+                        }
+                    });
+
+                    // Suggestions based on typed input (id or name)
+                    let suggestions = suggest_maps_for_partial(maps, &event_editor.teleport_map_id);
+                    if !suggestions.is_empty() {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Suggestions:");
+                            for (sid, sname) in suggestions.iter() {
+                                let label = format!("[{}] {}", sid, sname);
+                                // Use small button so UI remains compact
+                                if ui.small_button(&label).clicked() {
+                                    event_editor.teleport_map_id = sid.to_string();
+                                    event_editor.teleport_selected_map = Some(*sid);
+                                    event_editor.teleport_preview_enabled = true;
+                                }
+                            }
+                        });
+                    } else {
+                        // If empty input, provide quick selection of few maps (first 8)
+                        if event_editor.teleport_map_id.is_empty() && !maps.is_empty() {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Common:");
+                                for m in maps.iter().take(8) {
+                                    let label = format!("[{}] {}", m.id, m.name);
+                                    if ui.small_button(&label).clicked() {
+                                        event_editor.teleport_map_id = m.id.to_string();
+                                        event_editor.teleport_selected_map = Some(m.id);
+                                        event_editor.teleport_preview_enabled = true;
+                                    }
+                                }
+                            });
+                        }
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.label("Destination X:");
+                        if ui
+                            .text_edit_singleline(&mut event_editor.teleport_x)
+                            .changed()
+                        {
+                            if let (Ok(x), Ok(y)) = (
+                                event_editor.teleport_x.parse::<i32>(),
+                                event_editor.teleport_y.parse::<i32>(),
+                            ) {
+                                event_editor.teleport_selected_pos = Some(Position::new(x, y));
+                            }
+                        }
+
+                        ui.label("Destination Y:");
+                        if ui
+                            .text_edit_singleline(&mut event_editor.teleport_y)
+                            .changed()
+                        {
+                            if let (Ok(x), Ok(y)) = (
+                                event_editor.teleport_x.parse::<i32>(),
+                                event_editor.teleport_y.parse::<i32>(),
+                            ) {
+                                event_editor.teleport_selected_pos = Some(Position::new(x, y));
+                            }
+                        }
+                    });
+
+                    ui.checkbox(
+                        &mut event_editor.teleport_preview_enabled,
+                        "Show Target Map Preview",
+                    );
+
+                    if event_editor.teleport_preview_enabled {
+                        let map_id_opt = event_editor
+                            .teleport_selected_map
+                            .or_else(|| event_editor.teleport_map_id.parse::<MapId>().ok());
+
+                        if let Some(map_id) = map_id_opt {
+                            if let Some(target_map) = maps.iter().find(|m| m.id == map_id) {
+                                ui.label(format!(
+                                    "Preview: [{}] {}",
+                                    target_map.id, target_map.name
+                                ));
+
+                                // Draw interactive preview so the user can click to pick destination tile
+                                let selected_pos_ref = &mut event_editor.teleport_selected_pos;
+                                let preview_widget =
+                                    MapPreviewWidget::new(target_map, selected_pos_ref)
+                                        .tile_size(18.0);
+                                let resp = ui.add(preview_widget);
+                                if resp.clicked() {
+                                    if let Some(pos) = event_editor.teleport_selected_pos {
+                                        event_editor.teleport_x = pos.x.to_string();
+                                        event_editor.teleport_y = pos.y.to_string();
+                                    }
+                                }
+                            } else {
+                                ui.label("Selected map not found in campaign.");
+                            }
+                        } else {
+                            ui.label("Select a target map to enable preview");
+                        }
+                    }
                 }
                 EventType::Trap => {
                     ui.label("Damage:");
@@ -2533,7 +2886,30 @@ impl MapsEditorState {
                             if path.extension().and_then(|s| s.to_str()) == Some("ron") {
                                 match fs::read_to_string(&path) {
                                     Ok(contents) => match ron::from_str::<Map>(&contents) {
-                                        Ok(map) => {
+                                        Ok(mut map) => {
+                                            // Backfill missing event ids for older map formats
+                                            let mut next_id = map
+                                                .tiles
+                                                .iter()
+                                                .filter_map(|t| t.event_trigger)
+                                                .max()
+                                                .unwrap_or(0)
+                                                + 1;
+
+                                            // Collect positions to avoid holding an immutable borrow
+                                            // of `map.events` while mutably borrowing tiles later.
+                                            let event_positions: Vec<Position> =
+                                                map.events.keys().cloned().collect();
+
+                                            for pos in event_positions {
+                                                if let Some(tile) = map.get_tile_mut(pos) {
+                                                    if tile.event_trigger.is_none() {
+                                                        tile.event_trigger = Some(next_id);
+                                                        next_id += 1;
+                                                    }
+                                                }
+                                            }
+
                                             maps.push(map);
                                             loaded_count += 1;
                                         }
@@ -2824,10 +3200,57 @@ mod tests {
         let event = editor.to_map_event().unwrap();
         match event {
             MapEvent::Sign { text, .. } => {
-                assert_eq!(text, "Hello World");
+                assert_eq!(text, "Hello World".to_string());
             }
             _ => panic!("Expected Sign event"),
         }
+    }
+
+    #[test]
+    fn test_event_editor_state_to_teleport_with_selected_fallback() {
+        let editor = EventEditorState {
+            event_type: EventType::Teleport,
+            name: "Teleport".to_string(),
+            description: "Desc".to_string(),
+            // user didn't type numeric coordinates, selection fallback will be used
+            teleport_x: String::new(),
+            teleport_y: String::new(),
+            teleport_map_id: String::new(),
+            teleport_selected_map: Some(7),
+            teleport_selected_pos: Some(Position::new(4, 5)),
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().unwrap();
+        match event {
+            MapEvent::Teleport {
+                destination,
+                map_id,
+                ..
+            } => {
+                assert_eq!(destination, Position::new(4, 5));
+                assert_eq!(map_id, 7);
+            }
+            _ => panic!("Expected Teleport event"),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_state_to_teleport_invalid_no_fallback() {
+        let editor = EventEditorState {
+            event_type: EventType::Teleport,
+            name: "Teleport".to_string(),
+            description: "Desc".to_string(),
+            // no numeric coordinates and no preview selection -> should fail
+            teleport_x: String::new(),
+            teleport_y: String::new(),
+            teleport_map_id: String::new(),
+            teleport_selected_map: None,
+            teleport_selected_pos: None,
+            ..Default::default()
+        };
+
+        assert!(editor.to_map_event().is_err());
     }
 
     #[test]
@@ -2996,6 +3419,144 @@ mod tests {
         assert_eq!(loaded_maps[0].id, 1);
         assert_eq!(loaded_maps[1].id, 2);
         assert_eq!(loaded_maps[2].id, 3);
+    }
+
+    #[test]
+    fn test_undo_redo_event_id_preserved() {
+        // Should preserve tile.event_trigger across add -> undo -> redo
+        let mut state = MapEditorState::new(Map::new(
+            1,
+            "UndoRedo Map".to_string(),
+            "Desc".to_string(),
+            10,
+            10,
+        ));
+        let pos = Position::new(3, 3);
+        let event = MapEvent::Sign {
+            name: "Sign".to_string(),
+            description: "Desc".to_string(),
+            text: "Hello UndoRedo".to_string(),
+        };
+
+        // Add event and check tile has an event id
+        state.add_event(pos, event);
+        let id_opt = state.map.get_tile(pos).unwrap().event_trigger;
+        assert!(id_opt.is_some());
+        let assigned_id = id_opt.unwrap();
+
+        // Undo -> event removed and id cleared
+        state.undo();
+        assert!(state.map.get_event(pos).is_none());
+        assert!(state.map.get_tile(pos).unwrap().event_trigger.is_none());
+
+        // Redo -> event restored and id restored
+        state.redo();
+        assert!(state.map.get_event(pos).is_some());
+        assert_eq!(
+            state.map.get_tile(pos).unwrap().event_trigger,
+            Some(assigned_id)
+        );
+    }
+
+    #[test]
+    fn test_load_maps_backfills_event_ids() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        // Create a temporary campaign directory with a `maps` subdirectory
+        let tmpdir = tempdir().expect("Failed to create tempdir");
+        let campaign_dir_buf = tmpdir.path().to_path_buf();
+        let maps_dir = "maps";
+        let maps_path = tmpdir.path().join(maps_dir);
+        fs::create_dir_all(&maps_path).expect("Failed to create maps dir");
+
+        // Build a map in which we add an event but DO NOT set tile.event_trigger
+        let mut map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(5, 5);
+        map.add_event(
+            pos,
+            MapEvent::Sign {
+                name: "Sign".to_string(),
+                description: "Desc".to_string(),
+                text: "Test sign".to_string(),
+            },
+        );
+        // Intentionally keep event_trigger None (simulate older map files)
+        assert!(map.get_tile(pos).unwrap().event_trigger.is_none());
+
+        // Write it out to a file
+        let ron_cfg = ron::ser::PrettyConfig::default();
+        fs::write(
+            maps_path.join("map_noids.ron"),
+            ron::ser::to_string_pretty(&map, ron_cfg).expect("Serialize map"),
+        )
+        .expect("Write map");
+
+        // Load via MapsEditorState::load_maps - it should backfill event IDs
+        let mut loaded_maps: Vec<Map> = Vec::new();
+        let mut status_message = String::new();
+        let state = MapsEditorState::new();
+        state.load_maps(
+            &mut loaded_maps,
+            Some(&campaign_dir_buf),
+            maps_dir,
+            &mut status_message,
+        );
+
+        assert_eq!(loaded_maps.len(), 1);
+        let loaded = &loaded_maps[0];
+        // the tile for the event must now have an assigned event_trigger
+        let tid = loaded.get_tile(pos).unwrap().event_trigger;
+        assert!(tid.is_some());
+    }
+
+    #[test]
+    fn test_build_filtered_maps_snapshot_sorts_by_id() {
+        // Create maps in non-sorted order (3, 1, 2)
+        let maps = vec![
+            Map::new(3, "Map 3".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(2, "Map 2".to_string(), "Desc".to_string(), 10, 10),
+        ];
+
+        let snapshot = MapsEditorState::build_filtered_maps_snapshot(&maps, "");
+        assert_eq!(snapshot.len(), 3);
+
+        // Snapshot sorted by ID (1,2,3)
+        assert_eq!(snapshot[0].1, 1);
+        assert_eq!(snapshot[1].1, 2);
+        assert_eq!(snapshot[2].1, 3);
+
+        // Original indices preserved in snapshot mapping
+        assert_eq!(snapshot[0].0, 1); // map ID 1 was originally at index 1
+        assert_eq!(snapshot[1].0, 2); // map ID 2 was originally at index 2
+        assert_eq!(snapshot[2].0, 0); // map ID 3 was originally at index 0
+    }
+
+    #[test]
+    fn test_suggest_maps_for_partial() {
+        // Create a small set of maps to test suggestion behavior
+        let maps = vec![
+            Map::new(1, "Starter Town".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(2, "Dark Forest".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(3, "Ancient Ruins".to_string(), "Desc".to_string(), 10, 10),
+        ];
+
+        // Partial name match
+        let results = suggest_maps_for_partial(&maps, "Dark");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, 2);
+        assert!(results[0].1.to_lowercase().contains("dark"));
+
+        // Partial id match
+        let results = suggest_maps_for_partial(&maps, "1");
+        assert_eq!(results.len() >= 1, true);
+        assert!(results.iter().any(|(id, _)| *id == 1));
+
+        // Partial lowercase name fragment
+        let results = suggest_maps_for_partial(&maps, "anc");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, 3);
     }
 
     #[test]

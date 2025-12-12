@@ -1755,8 +1755,8 @@
             event_trigger: None,
         ),
         (
-            terrain: Stone,
-            wall_type: Door,
+            terrain: Ground,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3308,12 +3308,12 @@
     ],
     events: {
         (
-            x: 19,
+            x: 18,
             y: 7,
         ): Sign(
             name: "",
             description: "",
-            text: "WARNING: Dungeon entrance ahead. Prepare for combat!",
+            text: "To the Forrest",
         ),
         (
             x: 4,
@@ -3322,6 +3322,18 @@
             name: "",
             description: "",
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+        ),
+        (
+            x: 19,
+            y: 7,
+        ): Teleport(
+            name: "",
+            description: "",
+            destination: (
+                x: 10,
+                y: 19,
+            ),
+            map_id: 4,
         ),
         (
             x: 10,

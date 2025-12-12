@@ -3955,8 +3955,8 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
-            wall_type: Normal,
+            terrain: Ground,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4414,6 +4414,28 @@
             name: "",
             description: "",
             text: "The Cave of Fizban!",
+        ),
+        (
+            x: 2,
+            y: 2,
+        ): Encounter(
+            name: "Kobold Ambush",
+            description: "A group of kobolds jump out to attack!",
+            monster_group: [
+                2,2,2
+            ],
+        ),
+        (
+            x: 19,
+            y: 17,
+        ): Teleport(
+            name: "",
+            description: "",
+            destination: (
+                x: 19,
+                y: 10,
+            ),
+            map_id: 4,
         ),
     },
     npcs: [
