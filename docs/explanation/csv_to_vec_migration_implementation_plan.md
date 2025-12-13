@@ -1,11 +1,11 @@
 # CSV-to-Vec Migration Implementation Plan
 
-**Document**: CSV-to-Vec Migration & ComboBox Unification  
-**Version**: 3.0 (Unified AI-Optimized)  
-**Project**: Antares Turn-Based RPG  
-**Project Root**: `/home/bsmith/go/src/github.com/xbcsmith/antares`  
-**Status**: Ready for Execution  
-**Estimated Effort**: 15-25 person-hours across 6 phases  
+**Document**: CSV-to-Vec Migration & ComboBox Unification
+**Version**: 3.0 (Unified AI-Optimized)
+**Project**: Antares Turn-Based RPG
+**Project Root**: `/home/bsmith/go/src/github.com/xbcsmith/antares`
+**Status**: Ready for Execution
+**Estimated Effort**: 15-25 person-hours across 6 phases
 **Last Updated**: 2025-01-13
 
 ---
@@ -156,10 +156,10 @@ let monster_ids: Vec<u32> = event.encounter_monsters
 
 ### Phase 1: Discovery & Inventory
 
-**Phase ID**: PHASE-01  
-**Estimated Effort**: 4-6 person-hours  
-**Prerequisites**: None  
-**Dependencies**: None  
+**Phase ID**: PHASE-01
+**Estimated Effort**: 4-6 person-hours
+**Prerequisites**: None
+**Dependencies**: None
 **Blocks**: PHASE-02
 
 #### 1.1 Catalog CSV Usage
@@ -227,7 +227,7 @@ let monster_ids: Vec<u32> = event.encounter_monsters
 
 #### 1.3 Create Refactor Checklist
 
-**Task ID**: TASK-01.03  
+**Task ID**: TASK-01.03
 **Dependencies**: TASK-01.01, TASK-01.02
 
 **Objective**: Generate prioritized task list from inventories
@@ -280,15 +280,15 @@ test $? -eq 0 || echo "FAIL: No ComboBox patterns documented"
 
 ### Phase 2: UI Helper Foundation
 
-**Phase ID**: PHASE-02  
-**Estimated Effort**: 6-8 person-hours  
-**Prerequisites**: PHASE-01 complete  
-**Dependencies**: TASK-01.03  
+**Phase ID**: PHASE-02
+**Estimated Effort**: 6-8 person-hours
+**Prerequisites**: PHASE-01 complete
+**Dependencies**: TASK-01.03
 **Blocks**: PHASE-03
 
 #### 2.1 Implement searchable_selector_single
 
-**Task ID**: TASK-02.01  
+**Task ID**: TASK-02.01
 **File**: `antares/sdk/campaign_builder/src/ui_helpers.rs`
 
 **Objective**: Create single-selection searchable dropdown widget
@@ -327,7 +327,7 @@ where
 
 #### 2.2 Implement searchable_selector_multi
 
-**Task ID**: TASK-02.02  
+**Task ID**: TASK-02.02
 **File**: `antares/sdk/campaign_builder/src/ui_helpers.rs`
 
 **Objective**: Create multi-selection widget with chips UI
@@ -366,8 +366,8 @@ where
 
 #### 2.3 Add Conversion Helpers
 
-**Task ID**: TASK-02.03  
-**File**: `antares/sdk/campaign_builder/src/ui_helpers.rs`  
+**Task ID**: TASK-02.03
+**File**: `antares/sdk/campaign_builder/src/ui_helpers.rs`
 **Dependencies**: TASK-02.01, TASK-02.02
 
 **Objective**: Provide utilities for temporary CSV-to-Vec conversion during migration
@@ -403,8 +403,8 @@ where
 
 #### 2.4 Write ui_helpers Tests
 
-**Task ID**: TASK-02.04  
-**File**: `antares/sdk/campaign_builder/src/ui_helpers.rs`  
+**Task ID**: TASK-02.04
+**File**: `antares/sdk/campaign_builder/src/ui_helpers.rs`
 **Dependencies**: TASK-02.01, TASK-02.02, TASK-02.03
 
 **Objective**: Achieve 80%+ test coverage for new functions
@@ -491,16 +491,16 @@ cargo test --package campaign_builder ui_helpers::tests
 
 ### Phase 3: Core Editor Conversions
 
-**Phase ID**: PHASE-03  
-**Estimated Effort**: 5-8 person-hours  
-**Prerequisites**: PHASE-02 complete  
-**Dependencies**: TASK-02.04  
+**Phase ID**: PHASE-03
+**Estimated Effort**: 5-8 person-hours
+**Prerequisites**: PHASE-02 complete
+**Dependencies**: TASK-02.04
 **Blocks**: PHASE-04
 
 #### 3.1 Convert Map Editor (EventEditorState)
 
-**Task ID**: TASK-03.01  
-**File**: `antares/sdk/campaign_builder/src/map_editor.rs`  
+**Task ID**: TASK-03.01
+**File**: `antares/sdk/campaign_builder/src/map_editor.rs`
 **Dependencies**: TASK-02.04
 
 **Sub-Tasks**:
@@ -660,8 +660,8 @@ cargo test --package campaign_builder map_editor::tests
 
 #### 3.2 Convert Character Editor (CharacterEditBuffer)
 
-**Task ID**: TASK-03.02  
-**File**: `antares/sdk/campaign_builder/src/characters_editor.rs`  
+**Task ID**: TASK-03.02
+**File**: `antares/sdk/campaign_builder/src/characters_editor.rs`
 **Dependencies**: TASK-02.04
 
 **Sub-Tasks**: Similar pattern to TASK-03.01
@@ -708,8 +708,8 @@ cargo test --package campaign_builder characters_editor::tests
 
 #### 3.3 Convert Other Editors
 
-**Task ID**: TASK-03.03  
-**Files**: `classes_editor.rs`, `items_editor.rs`, `spells_editor.rs`  
+**Task ID**: TASK-03.03
+**Files**: `classes_editor.rs`, `items_editor.rs`, `spells_editor.rs`
 **Dependencies**: TASK-02.04
 
 **Targets**:
@@ -792,15 +792,15 @@ echo "✓ Phase 3 validation passed"
 
 ### Phase 4: Complete Sweep & Unification
 
-**Phase ID**: PHASE-04  
-**Estimated Effort**: 3-5 person-hours  
-**Prerequisites**: PHASE-03 complete  
-**Dependencies**: TASK-03.01, TASK-03.02, TASK-03.03  
+**Phase ID**: PHASE-04
+**Estimated Effort**: 3-5 person-hours
+**Prerequisites**: PHASE-03 complete
+**Dependencies**: TASK-03.01, TASK-03.02, TASK-03.03
 **Blocks**: PHASE-05
 
 #### 4.1 Sweep Remaining CSV Fields
 
-**Task ID**: TASK-04.01  
+**Task ID**: TASK-04.01
 **Dependencies**: TASK-03.03
 
 **Objective**: Find and convert any remaining CSV fields missed in Phase 3
@@ -838,7 +838,7 @@ test $CSV_COUNT -lt 5 || echo "WARN: $CSV_COUNT CSV usages remain"
 
 #### 4.2 Unify All ComboBox Usage
 
-**Task ID**: TASK-04.02  
+**Task ID**: TASK-04.02
 **Dependencies**: TASK-03.03
 
 **Objective**: Replace all remaining ComboBox instances with searchable selectors
@@ -905,15 +905,15 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ### Phase 5: Engine Integration & Domain Model
 
-**Phase ID**: PHASE-05  
-**Estimated Effort**: 2-4 person-hours  
-**Prerequisites**: PHASE-04 complete  
-**Dependencies**: TASK-04.01, TASK-04.02  
+**Phase ID**: PHASE-05
+**Estimated Effort**: 2-4 person-hours
+**Prerequisites**: PHASE-04 complete
+**Dependencies**: TASK-04.01, TASK-04.02
 **Blocks**: PHASE-06
 
 #### 5.1 Verify Domain Model Consistency
 
-**Task ID**: TASK-05.01  
+**Task ID**: TASK-05.01
 **Dependencies**: TASK-04.01, TASK-04.02
 
 **Objective**: Ensure domain types (`antares/domain/src/`) match editor buffer types
@@ -954,7 +954,7 @@ cargo test --package domain
 
 #### 5.2 Update Engine Consumers
 
-**Task ID**: TASK-05.02  
+**Task ID**: TASK-05.02
 **Dependencies**: TASK-04.01, TASK-04.02
 
 **Objective**: Verify game engine correctly handles Vec-based data
@@ -978,7 +978,7 @@ cargo test --package engine
 
 #### 5.3 Verify Packager and Export Tools
 
-**Task ID**: TASK-05.03  
+**Task ID**: TASK-05.03
 **Dependencies**: TASK-05.01, TASK-05.02
 
 **Objective**: Ensure campaign export/package tools work with Vec format
@@ -1034,15 +1034,15 @@ cargo test --all-features
 
 ### Phase 6: Documentation & Final Validation
 
-**Phase ID**: PHASE-06  
-**Estimated Effort**: 2-4 person-hours  
-**Prerequisites**: PHASE-05 complete  
-**Dependencies**: TASK-05.01, TASK-05.02, TASK-05.03  
+**Phase ID**: PHASE-06
+**Estimated Effort**: 2-4 person-hours
+**Prerequisites**: PHASE-05 complete
+**Dependencies**: TASK-05.01, TASK-05.02, TASK-05.03
 **Blocks**: None (final phase)
 
 #### 6.1 Update Documentation
 
-**Task ID**: TASK-06.01  
+**Task ID**: TASK-06.01
 **Dependencies**: TASK-05.03
 
 **Sub-Tasks**:
@@ -1099,7 +1099,7 @@ Use `searchable_selector_multi` for selecting multiple items...
 
 #### 6.2 Final QA and Validation
 
-**Task ID**: TASK-06.02  
+**Task ID**: TASK-06.02
 **Dependencies**: TASK-06.01
 
 **Sub-Tasks**:
@@ -1205,7 +1205,7 @@ cargo test --all-features
 
 ### RISK-01: Test Failures During Migration
 
-**Probability**: Medium (30%)  
+**Probability**: Medium (30%)
 **Impact**: 2-4 hours delay
 
 **Symptoms**:
@@ -1231,7 +1231,7 @@ cargo test --package campaign_builder
 
 ### RISK-02: Engine Expectation Mismatch
 
-**Probability**: Low (15%)  
+**Probability**: Low (15%)
 **Impact**: 4-6 hours delay
 
 **Symptoms**:
@@ -1258,7 +1258,7 @@ cargo test --package engine
 
 ### RISK-03: UI Performance Degradation
 
-**Probability**: Low (10%)  
+**Probability**: Low (10%)
 **Impact**: 2-4 hours optimization
 
 **Symptoms**:
@@ -1280,7 +1280,7 @@ cargo test --package engine
 
 ### RISK-04: Breaking Changes in Saved Data
 
-**Probability**: High (70%)  
+**Probability**: High (70%)
 **Impact**: User impact (acceptable for pre-1.0)
 
 **Symptoms**:

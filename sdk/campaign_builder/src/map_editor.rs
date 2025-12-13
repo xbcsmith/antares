@@ -36,8 +36,13 @@
 //! // state.show(ui, &mut maps, campaign_dir, ...);
 //! ```
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
-use antares::domain::types::{EventId, MapId, Position};
+use crate::ui_helpers::{
+    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
+    TwoColumnLayout,
+};
+use antares::domain::combat::database::MonsterDefinition;
+use antares::domain::items::types::Item;
+use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::{Map, MapEvent, Npc, TerrainType, Tile, WallType};
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -687,10 +692,14 @@ pub struct EventEditorState {
     pub position: Position,
     pub name: String,
     pub description: String,
-    // Encounter fields
-    pub encounter_monsters: String,
-    // Treasure fields
-    pub treasure_items: String,
+    // Encounter fields (typed)
+    pub encounter_monsters: Vec<MonsterId>,
+    // Search query for encounter monsters (persisted across frames)
+    pub encounter_monsters_query: String,
+    // Treasure fields (typed)
+    pub treasure_items: Vec<ItemId>,
+    // Search query for treasure items (persisted across frames)
+    pub treasure_items_query: String,
     // Teleport fields
     pub teleport_x: String,
     pub teleport_y: String,
@@ -715,8 +724,10 @@ impl Default for EventEditorState {
             position: Position::new(0, 0),
             name: String::new(),
             description: String::new(),
-            encounter_monsters: String::new(),
-            treasure_items: String::new(),
+            encounter_monsters: Vec::new(),
+            encounter_monsters_query: String::new(),
+            treasure_items: Vec::new(),
+            treasure_items_query: String::new(),
             teleport_x: String::new(),
             teleport_y: String::new(),
             teleport_map_id: String::new(),
@@ -786,11 +797,7 @@ impl EventEditorState {
     pub fn to_map_event(&self) -> Result<MapEvent, String> {
         match self.event_type {
             EventType::Encounter => {
-                let monsters: Vec<u8> = self
-                    .encounter_monsters
-                    .split(',')
-                    .filter_map(|s| s.trim().parse().ok())
-                    .collect();
+                let monsters: Vec<MonsterId> = self.encounter_monsters.clone();
                 if monsters.is_empty() {
                     return Err("Encounter must have at least one monster ID".to_string());
                 }
@@ -801,11 +808,7 @@ impl EventEditorState {
                 })
             }
             EventType::Treasure => {
-                let loot: Vec<u8> = self
-                    .treasure_items
-                    .split(',')
-                    .filter_map(|s| s.trim().parse().ok())
-                    .collect();
+                let loot: Vec<ItemId> = self.treasure_items.clone();
                 Ok(MapEvent::Treasure {
                     name: self.name.clone(),
                     description: self.description.clone(),
@@ -1413,6 +1416,8 @@ impl MapsEditorState {
         &mut self,
         ui: &mut egui::Ui,
         maps: &mut Vec<Map>,
+        monsters: &[MonsterDefinition],
+        items: &[Item],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -1537,6 +1542,8 @@ impl MapsEditorState {
                 self.show_editor(
                     ui,
                     maps,
+                    monsters,
+                    items,
                     campaign_dir,
                     maps_dir,
                     display_config,
@@ -1744,7 +1751,9 @@ impl MapsEditorState {
     fn show_editor(
         &mut self,
         ui: &mut egui::Ui,
-        maps: &mut [Map],
+        maps: &mut Vec<Map>,
+        monsters: &[MonsterDefinition],
+        items: &[Item],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -2003,7 +2012,9 @@ impl MapsEditorState {
                             egui::ScrollArea::vertical()
                                 .id_salt("map_editor_inspector_scroll")
                                 .show(right_ui, |ui| {
-                                    Self::show_inspector_panel(ui, editor_ref, maps);
+                                    Self::show_inspector_panel(
+                                        ui, editor_ref, maps, monsters, items,
+                                    );
                                 });
                         },
                     );
@@ -2203,7 +2214,13 @@ impl MapsEditorState {
     }
 
     /// Show inspector panel
-    fn show_inspector_panel(ui: &mut egui::Ui, editor: &mut MapEditorState, maps: &[Map]) {
+    fn show_inspector_panel(
+        ui: &mut egui::Ui,
+        editor: &mut MapEditorState,
+        maps: &[Map],
+        monsters: &[MonsterDefinition],
+        items: &[Item],
+    ) {
         ui.heading("Inspector");
         ui.separator();
 
@@ -2294,7 +2311,7 @@ impl MapsEditorState {
         if matches!(editor.current_tool, EditorTool::PlaceEvent) {
             ui.group(|ui| {
                 ui.heading("Event Editor");
-                Self::show_event_editor(ui, editor, maps);
+                Self::show_event_editor(ui, editor, maps, monsters, items);
             });
         }
 
@@ -2409,7 +2426,13 @@ impl MapsEditorState {
     }
 
     /// Show event editor
-    fn show_event_editor(ui: &mut egui::Ui, editor: &mut MapEditorState, maps: &[Map]) {
+    fn show_event_editor(
+        ui: &mut egui::Ui,
+        editor: &mut MapEditorState,
+        maps: &[Map],
+        monsters: &[MonsterDefinition],
+        items: &[Item],
+    ) {
         if let Some(ref mut event_editor) = editor.event_editor {
             egui::ComboBox::from_id_salt("map_event_type_combo")
                 .selected_text(event_editor.event_type.name())
@@ -2439,12 +2462,36 @@ impl MapsEditorState {
 
             match event_editor.event_type {
                 EventType::Encounter => {
-                    ui.label("Monster IDs (comma-separated):");
-                    ui.text_edit_singleline(&mut event_editor.encounter_monsters);
+                    // Multi-select searchable list for monsters (id+name)
+                    let changed = searchable_selector_multi(
+                        ui,
+                        "event_encounter_monsters",
+                        "Encounter Monsters",
+                        &mut event_editor.encounter_monsters,
+                        monsters,
+                        |m| m.id,
+                        |m| m.name.clone(),
+                        &mut event_editor.encounter_monsters_query,
+                    );
+                    if changed {
+                        editor.has_changes = true;
+                    }
                 }
                 EventType::Treasure => {
-                    ui.label("Item IDs (comma-separated):");
-                    ui.text_edit_singleline(&mut event_editor.treasure_items);
+                    // Multi-select searchable list for treasure items (id+name)
+                    let changed = searchable_selector_multi(
+                        ui,
+                        "event_treasure_items",
+                        "Treasure Items",
+                        &mut event_editor.treasure_items,
+                        items,
+                        |i| i.id,
+                        |i| i.name.clone(),
+                        &mut event_editor.treasure_items_query,
+                    );
+                    if changed {
+                        editor.has_changes = true;
+                    }
                 }
                 EventType::Teleport => {
                     ui.label("Target Map:");
@@ -3174,16 +3221,20 @@ mod tests {
             event_type: EventType::Encounter,
             name: "Encounter".to_string(),
             description: "Desc".to_string(),
-            encounter_monsters: "1, 2, 3".to_string(),
+            encounter_monsters: vec![1, 2, 3],
             ..Default::default()
         };
 
         let event = editor.to_map_event().unwrap();
         match event {
-            MapEvent::Encounter { monster_group, .. } => {
-                assert_eq!(monster_group, vec![1, 2, 3]);
+            MapEvent::Encounter {
+                name,
+                description,
+                monster_group,
+            } => {
+                assert_eq!(monster_group, vec![1u8, 2u8, 3u8]);
             }
-            _ => panic!("Expected Encounter event"),
+            _ => panic!("expected encounter event"),
         }
     }
 

@@ -7,7 +7,10 @@
 //! rendering via the `show()` method, following the standard editor pattern.
 //! Uses shared UI components for consistent layout.
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use crate::ui_helpers::{
+    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
+    TwoColumnLayout,
+};
 use antares::domain::character::{Alignment, Sex};
 use antares::domain::character_definition::{
     BaseStats, CharacterDefinition, CharacterDefinitionId, StartingEquipment,
@@ -89,8 +92,10 @@ pub struct CharacterEditBuffer {
     pub starting_food: String,
     pub description: String,
     pub is_premade: bool,
-    // Starting items as comma-separated IDs
-    pub starting_items: String,
+    // Starting items as typed vector of IDs
+    pub starting_items: Vec<ItemId>,
+    // Search query for starting items (persisted across frames)
+    pub starting_items_query: String,
     // Starting equipment
     pub weapon_id: String,
     pub armor_id: String,
@@ -123,7 +128,8 @@ impl Default for CharacterEditBuffer {
             starting_food: "10".to_string(),
             description: String::new(),
             is_premade: true,
-            starting_items: String::new(),
+            starting_items: Vec::new(),
+            starting_items_query: String::new(),
             weapon_id: String::new(),
             armor_id: String::new(),
             shield_id: String::new(),
@@ -191,12 +197,8 @@ impl CharactersEditorState {
                 starting_food: character.starting_food.to_string(),
                 description: character.description.clone(),
                 is_premade: character.is_premade,
-                starting_items: character
-                    .starting_items
-                    .iter()
-                    .map(|id| id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "),
+                starting_items: character.starting_items.clone(),
+                starting_items_query: String::new(),
                 weapon_id: character
                     .starting_equipment
                     .weapon
@@ -317,15 +319,8 @@ impl CharactersEditorState {
             .parse::<u8>()
             .map_err(|_| "Invalid Starting Food")?;
 
-        // Parse starting items
-        let starting_items: Vec<ItemId> = self
-            .buffer
-            .starting_items
-            .split(',')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| s.parse::<ItemId>().ok())
-            .collect();
+        // Starting items as typed Vec<ItemId> from the edit buffer
+        let starting_items: Vec<ItemId> = self.buffer.starting_items.clone();
 
         // Parse starting equipment
         let weapon = if self.buffer.weapon_id.trim().is_empty() {
@@ -1280,10 +1275,18 @@ impl CharactersEditorState {
                 ui.heading("Starting Items");
 
                 ui.label("Enter item IDs separated by commas:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.buffer.starting_items)
-                        .hint_text("1, 2, 3"),
-                );
+                if searchable_selector_multi(
+                    ui,
+                    "character_starting_items",
+                    "Starting Items",
+                    &mut self.buffer.starting_items,
+                    items,
+                    |i| i.id,
+                    |i| i.name.clone(),
+                    &mut self.buffer.starting_items_query,
+                ) {
+                    self.has_unsaved_changes = true;
+                }
 
                 // Show available items for reference
                 ui.collapsing("Available Items", |ui| {
@@ -1764,7 +1767,7 @@ mod tests {
         state.buffer.name = "Character With Items".to_string();
         state.buffer.race_id = "human".to_string();
         state.buffer.class_id = "knight".to_string();
-        state.buffer.starting_items = "1, 2, 3".to_string();
+        state.buffer.starting_items = vec![1u8, 2u8, 3u8];
 
         state.save_character().unwrap();
 

@@ -19,6 +19,8 @@
 
 use antares::domain::character::{AttributePair, AttributePair16};
 use eframe::egui;
+use std::fmt::Display;
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use thiserror::Error;
@@ -237,8 +239,246 @@ pub fn compute_left_column_width(
 }
 
 // =============================================================================
-// Toolbar Component
+/// Toolbar Component
 // =============================================================================
+
+/// Errors when parsing CSV-like ID lists
+#[derive(Debug, Error)]
+pub enum CsvParseError {
+    #[error("Invalid token '{token}': {error}")]
+    InvalidToken { token: String, error: String },
+}
+
+/// Parses a comma-separated list of IDs into a Vec<T>.
+///
+/// - Trims whitespace around elements
+/// - Ignores empty tokens
+/// - Returns a `CsvParseError` if any token fails to parse
+///
+/// # Examples
+///
+/// ```
+/// # use antares::sdk::campaign_builder::ui_helpers::parse_id_csv_to_vec;
+/// let parsed = parse_id_csv_to_vec::<u8>("1, 2, 3").unwrap();
+/// assert_eq!(parsed, vec![1, 2, 3u8]);
+/// ```
+pub fn parse_id_csv_to_vec<T>(csv: &str) -> Result<Vec<T>, CsvParseError>
+where
+    T: FromStr,
+    <T as FromStr>::Err: std::fmt::Display,
+{
+    if csv.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut ids = Vec::new();
+    for token in csv.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        match token.parse::<T>() {
+            Ok(v) => ids.push(v),
+            Err(e) => {
+                return Err(CsvParseError::InvalidToken {
+                    token: token.to_string(),
+                    error: e.to_string(),
+                })
+            }
+        }
+    }
+    Ok(ids)
+}
+
+/// Formats a Vec<T> into a user-friendly CSV string using `", "` separators.
+///
+/// # Examples
+///
+/// ```
+/// # use antares::sdk::campaign_builder::ui_helpers::format_vec_to_csv;
+/// let out = format_vec_to_csv(&[1u8, 2u8, 3u8]);
+/// assert_eq!(out, "1, 2, 3");
+/// ```
+pub fn format_vec_to_csv<T>(values: &[T]) -> String
+where
+    T: Display,
+{
+    values
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Returns indices of `items` whose label (provided by `label_fn`) contains `query` (case-insensitive).
+///
+/// Useful for building filtered lists or suggestions.
+///
+/// # Examples
+///
+/// ```
+/// # use antares::sdk::campaign_builder::ui_helpers::filter_items_by_query;
+/// struct Foo { name: String }
+/// let items = vec![Foo { name: "Goblin".to_string() }, Foo { name: "Orc".to_string() }];
+/// let idx = filter_items_by_query(&items, "gob", |f| f.name.clone());
+/// assert_eq!(idx, vec![0usize]);
+/// ```
+pub fn filter_items_by_query<T, F>(items: &[T], query: &str, label_fn: F) -> Vec<usize>
+where
+    F: Fn(&T) -> String,
+{
+    let q = query.to_lowercase();
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, it)| q.is_empty() || label_fn(it).to_lowercase().contains(&q))
+        .map(|(idx, _)| idx)
+        .collect()
+}
+
+/// Single-selection searchable selector UI helper.
+///
+/// - `ui`: egui UI reference
+/// - `id_salt`: Unique id salt (used for ComboBox id)
+/// - `label`: Label text shown before the widget
+/// - `selected`: Mutable reference to current selection (`Option<ID>`)
+/// - `items`, `id_fn`, `label_fn` describe the available values and how to extract id/label
+/// - `search_query`: Mutable reference that stores the current query string (persisted by caller)
+///
+/// Returns `true` if the selection changed.
+///
+/// This helper wraps `egui::ComboBox` and provides an inline search text field inside the
+/// ComboBox dropdown to filter options.
+pub fn searchable_selector_single<T, ID, FId, FLabel>(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected: &mut Option<ID>,
+    items: &[T],
+    id_fn: FId,
+    label_fn: FLabel,
+    search_query: &mut String,
+) -> bool
+where
+    ID: Clone + PartialEq + Display,
+    FId: Fn(&T) -> ID,
+    FLabel: Fn(&T) -> String,
+{
+    ui.label(label);
+    let mut changed = false;
+    let selected_text = selected
+        .as_ref()
+        .map_or("(None)".to_string(), |id| id.to_string());
+    egui::ComboBox::from_id_salt(id_salt)
+        .selected_text(selected_text)
+        .show_ui(ui, |ui| {
+            // Search input at the top
+            ui.text_edit_singleline(search_query);
+            let q = search_query.to_lowercase();
+
+            // Filtered list
+            for item in items.iter() {
+                let label_text = label_fn(item);
+                if q.is_empty() || label_text.to_lowercase().contains(&q) {
+                    let id = id_fn(item);
+                    let is_selected = selected.as_ref().map(|s| s == &id).unwrap_or(false);
+                    if ui
+                        .selectable_label(is_selected, label_text.clone())
+                        .clicked()
+                    {
+                        *selected = Some(id);
+                        changed = true;
+                    }
+                }
+            }
+        });
+    changed
+}
+
+/// Multi-selection searchable selector UI helper.
+///
+/// - `label`: user-visible label
+/// - `selection`: mutable vector of selected IDs (caller manages order/persistence)
+/// - `items`, `id_fn`, `label_fn` describe the available values
+/// - `search_query` is used to store the user's search input and is persisted by the caller
+///
+/// Returns `true` if the selection changed (items added or removed).
+pub fn searchable_selector_multi<T, ID, FId, FLabel>(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selection: &mut Vec<ID>,
+    items: &[T],
+    id_fn: FId,
+    label_fn: FLabel,
+    search_query: &mut String,
+) -> bool
+where
+    ID: Clone + PartialEq + Display,
+    FId: Fn(&T) -> ID,
+    FLabel: Fn(&T) -> String,
+{
+    ui.label(label);
+    let mut changed = false;
+
+    // Render chips for selected items with a small remove button.
+    ui.horizontal_wrapped(|ui| {
+        let mut idx_to_remove: Option<usize> = None;
+        for (idx, sel) in selection.iter().enumerate() {
+            let label_text = items
+                .iter()
+                .find(|it| id_fn(it) == *sel)
+                .map(|it| label_fn(it))
+                .unwrap_or_else(|| sel.to_string());
+            ui.horizontal(|ui| {
+                ui.label(label_text);
+                if ui.small_button("✖").clicked() {
+                    idx_to_remove = Some(idx);
+                }
+            });
+        }
+
+        if let Some(idx) = idx_to_remove {
+            selection.remove(idx);
+            changed = true;
+        }
+    });
+
+    // Add control: search box and Add button
+    ui.horizontal(|ui| {
+        ui.text_edit_singleline(search_query);
+        if ui.button("Add").clicked() {
+            let q = search_query.to_lowercase();
+            // Try to find the first match by label text
+            if let Some(item) = items
+                .iter()
+                .find(|it| label_fn(it).to_lowercase().contains(&q))
+            {
+                let id = id_fn(item);
+                if !selection.iter().any(|s| *s == id) {
+                    selection.push(id);
+                    changed = true;
+                }
+                *search_query = String::new();
+            }
+        }
+    });
+
+    // Suggestion buttons (compact)
+    let q = search_query.to_lowercase();
+    ui.horizontal_wrapped(|ui| {
+        for item in items {
+            let label_text = label_fn(item);
+            if q.is_empty() || label_text.to_lowercase().contains(&q) {
+                if ui.small_button(label_text.clone()).clicked() {
+                    let id = id_fn(item);
+                    if !selection.iter().any(|s| *s == id) {
+                        selection.push(id);
+                        changed = true;
+                    }
+                }
+            }
+        }
+    });
+
+    changed
+}
 
 /// Actions that can be triggered from the editor toolbar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1699,264 +1939,6 @@ pub fn handle_reload<T: serde::de::DeserializeOwned>(
     false
 }
 
-/// Simple CSV parsing error for ID parsing helpers
-#[derive(Error, Debug)]
-pub enum CsvParseError {
-    /// A parse failure for a specific token
-    #[error("Failed to parse '{input}': {message}")]
-    ParseError { input: String, message: String },
-}
-
-/// Parse a comma-separated string of IDs into a Vec<T>.
-///
-/// - Trims whitespace around tokens
-/// - Ignores empty tokens
-/// - Returns an error if any token fails to parse
-///
-/// # Examples
-///
-/// ```
-/// use antares::sdk::campaign_builder::ui_helpers::parse_id_csv_to_vec;
-///
-/// let parsed = parse_id_csv_to_vec::<u8>("1,2,3").unwrap();
-/// assert_eq!(parsed, vec![1u8, 2u8, 3u8]);
-/// ```
-pub fn parse_id_csv_to_vec<T>(csv: &str) -> Result<Vec<T>, CsvParseError>
-where
-    T: FromStr,
-    T::Err: std::fmt::Display,
-{
-    let csv_trimmed = csv.trim();
-    if csv_trimmed.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut result = Vec::new();
-    for token in csv_trimmed.split(',') {
-        let tok = token.trim();
-        if tok.is_empty() {
-            continue;
-        }
-        match tok.parse::<T>() {
-            Ok(value) => result.push(value),
-            Err(e) => {
-                return Err(CsvParseError::ParseError {
-                    input: tok.to_owned(),
-                    message: format!("{}", e),
-                });
-            }
-        }
-    }
-
-    Ok(result)
-}
-
-/// Formats a slice of values into a CSV string with a space after each comma.
-/// Example: `[1,2,3] -> "1, 2, 3"`.
-pub fn format_vec_to_csv<T>(values: &[T]) -> String
-where
-    T: ToString,
-{
-    values
-        .iter()
-        .map(|v| v.to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// Filters a slice of items by a query using a label function.
-/// Returns the indices (into `items`) matching the case-insensitive
-/// substring query. If `query` is empty, returns all indices.
-///
-/// This helper is pure and testable (no UI side-effects).
-pub fn filter_items_by_query<T, F>(items: &[T], query: &str, label_fn: &F) -> Vec<usize>
-where
-    F: Fn(&T) -> String,
-{
-    let q = query.trim().to_lowercase();
-    if q.is_empty() {
-        return (0..items.len()).collect();
-    }
-
-    items
-        .iter()
-        .enumerate()
-        .filter_map(|(i, it)| {
-            if label_fn(it).to_lowercase().contains(&q) {
-                Some(i)
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-/// Searchable single-selection widget.
-///
-/// - `id_salt`: egui id salt for widget uniqueness
-/// - `selected`: `Option<ID>` that stores the current selection (`None` = no selection)
-/// - `items`: slice of items of type `T`
-/// - `id_fn`: function mapping `&T -> ID`
-/// - `label_fn`: function mapping `&T -> String` used for display and search
-/// - `search_query`: `&mut String` to drive the filter
-///
-/// The selector renders a text query to filter available items (case-insensitive)
-/// and includes a 'None' entry to clear the selection. Selected items are displayed
-/// by label and selection changes update the `selected` reference.
-///
-/// Returns `true` when the selection changed.
-pub fn searchable_selector_single<T, ID, FId, FLabel>(
-    ui: &mut egui::Ui,
-    id_salt: &str,
-    selected: &mut Option<ID>,
-    items: &[T],
-    id_fn: FId,
-    label_fn: FLabel,
-    search_query: &mut String,
-) -> bool
-where
-    ID: Clone + Eq + PartialEq + ToString,
-    FId: Fn(&T) -> ID,
-    FLabel: Fn(&T) -> String,
-{
-    let mut changed = false;
-
-    let selected_text = if let Some(sid) = selected.as_ref() {
-        if let Some(item) = items.iter().find(|i| id_fn(i) == *sid) {
-            label_fn(item)
-        } else {
-            "Unknown".to_string()
-        }
-    } else {
-        "None".to_string()
-    };
-
-    egui::ComboBox::from_id_salt(id_salt)
-        .selected_text(selected_text)
-        .show_ui(ui, |ui| {
-            // Search input
-            ui.horizontal(|ui| {
-                ui.label("Search:");
-                ui.add(egui::TextEdit::singleline(search_query).desired_width(240.0));
-            });
-
-            // None -> clear selection
-            if ui.selectable_label(selected.is_none(), "None").clicked() {
-                *selected = None;
-                changed = true;
-            }
-
-            // Filter and show items
-            for idx in filter_items_by_query(items, search_query, &label_fn) {
-                let item = &items[idx];
-                let id = id_fn(item);
-                let label = label_fn(item);
-                let is_selected = selected.as_ref().map(|s| s == &id).unwrap_or(false);
-                if ui.selectable_label(is_selected, label).clicked() {
-                    *selected = Some(id.clone());
-                    changed = true;
-                }
-            }
-        });
-
-    changed
-}
-
-/// Searchable multi-selection widget with chips + add/remove.
-///
-/// - `selected`: `Vec<ID>` storing the current selection
-/// - `items`, `id_fn`, and `label_fn` match the behavior in `searchable_selector_single`
-/// - `search_query`: search term to filter available items
-///
-/// The widget displays chips for selected items with a small remove control,
-/// and a searchable combobox to add additional items that match the query (case-insensitive).
-/// When no items are selected, a friendly 'None' indicator is shown.
-///
-/// Returns `true` if the selection changed (item added or removed).
-pub fn searchable_selector_multi<T, ID, FId, FLabel>(
-    ui: &mut egui::Ui,
-    id_salt: &str,
-    selected: &mut Vec<ID>,
-    items: &[T],
-    id_fn: FId,
-    label_fn: FLabel,
-    search_query: &mut String,
-) -> bool
-where
-    ID: Clone + Eq + PartialEq + ToString,
-    FId: Fn(&T) -> ID,
-    FLabel: Fn(&T) -> String,
-{
-    let mut changed = false;
-
-    // Render chips for selected items with a small remove button
-    ui.horizontal_wrapped(|ui| {
-        let mut remove_index: Option<usize> = None;
-        for (i, id) in selected.iter().enumerate() {
-            let id_clone = id.clone();
-            let label = if let Some(it) = items.iter().find(|it| id_fn(it) == id_clone) {
-                label_fn(it)
-            } else {
-                id_clone.to_string()
-            };
-            ui.horizontal(|ui| {
-                ui.label(label);
-                if ui.small_button("x").on_hover_text("Remove").clicked() {
-                    remove_index = Some(i);
-                }
-            });
-        }
-        if let Some(idx) = remove_index {
-            selected.remove(idx);
-            changed = true;
-        }
-    });
-
-    // ComboBox to discover and add more items
-    let display_text = if selected.is_empty() {
-        "None".to_string()
-    } else {
-        let labels: Vec<String> = selected
-            .iter()
-            .map(|id| {
-                if let Some(it) = items.iter().find(|it| id_fn(it) == *id) {
-                    label_fn(it)
-                } else {
-                    id.to_string()
-                }
-            })
-            .collect();
-        labels.join(", ")
-    };
-
-    egui::ComboBox::from_id_salt(id_salt)
-        .selected_text(display_text)
-        .show_ui(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Search:");
-                ui.add(egui::TextEdit::singleline(search_query).desired_width(240.0));
-            });
-
-            for idx in filter_items_by_query(items, search_query, &label_fn) {
-                let item = &items[idx];
-                let id = id_fn(item);
-                let label = label_fn(item);
-                let is_already_selected = selected.iter().any(|s| s == &id);
-                if ui
-                    .selectable_label(!is_already_selected, label.clone())
-                    .clicked()
-                {
-                    if !is_already_selected {
-                        selected.push(id.clone());
-                        changed = true;
-                    }
-                }
-            }
-        });
-
-    changed
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2001,6 +1983,71 @@ mod tests {
         let size = Vec2::new(0.0, 0.0);
         let min = 100.0;
         assert_eq!(compute_panel_height_from_size(size, min), min);
+    }
+
+    // =========================================================================
+    // CSV/Filter/Format Helper Tests
+    // =========================================================================
+
+    #[test]
+    fn parse_id_csv_to_vec_simple() {
+        let parsed = parse_id_csv_to_vec::<u8>("1, 2, 3").unwrap();
+        assert_eq!(parsed, vec![1u8, 2u8, 3u8]);
+    }
+
+    #[test]
+    fn parse_id_csv_to_vec_empty() {
+        let parsed = parse_id_csv_to_vec::<u8>("").unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn parse_id_csv_to_vec_whitespace_and_commas() {
+        let parsed = parse_id_csv_to_vec::<u8>(" 1 ,  , 2 ,  3 ").unwrap();
+        assert_eq!(parsed, vec![1u8, 2u8, 3u8]);
+    }
+
+    #[test]
+    fn parse_id_csv_to_vec_invalid() {
+        let err = parse_id_csv_to_vec::<u8>("a, 2");
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn format_vec_to_csv_simple() {
+        assert_eq!(format_vec_to_csv(&[1u8, 2u8, 3u8]), "1, 2, 3");
+    }
+
+    #[test]
+    fn format_vec_to_csv_empty() {
+        assert_eq!(format_vec_to_csv::<u8>(&[]), "");
+    }
+
+    #[test]
+    fn filter_items_by_query_basic() {
+        struct Foo {
+            name: String,
+        }
+        let items = vec![
+            Foo {
+                name: "Goblin".to_string(),
+            },
+            Foo {
+                name: "Orc".to_string(),
+            },
+            Foo {
+                name: "Golem".to_string(),
+            },
+        ];
+
+        let idx = filter_items_by_query(&items, "gob", |f| f.name.clone());
+        assert_eq!(idx, vec![0usize]);
+
+        let idx_all = filter_items_by_query(&items, "", |f| f.name.clone());
+        assert_eq!(idx_all, vec![0usize, 1usize, 2usize]);
+
+        let idx_g = filter_items_by_query(&items, "g", |f| f.name.clone());
+        assert_eq!(idx_g, vec![0usize, 2usize]);
     }
 
     // =========================================================================

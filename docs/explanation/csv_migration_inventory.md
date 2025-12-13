@@ -1,9 +1,9 @@
 # CSV Migration Inventory (Phase 1: Discovery & Inventory)
 
-**Document**: CSV Migration Inventory — Phase 1  
-**Location**: `docs/explanation/csv_migration_inventory.md`  
-**Author**: Antares Engineering Team (AI-assisted)  
-**Date**: 2025-01-13  
+**Document**: CSV Migration Inventory — Phase 1
+**Location**: `docs/explanation/csv_migration_inventory.md`
+**Author**: Antares Engineering Team (AI-assisted)
+**Date**: 2025-01-13
 **Purpose**: Catalog all comma-separated (CSV) fields used in the SDK `campaign_builder` and related tooling that require conversion from `String` to strongly-typed `Vec<T>` fields as part of the CSV→Vec migration.
 
 ---
@@ -107,10 +107,10 @@ Notes:
 
 ## Phase 1 Deliverables (Checklist)
 
-- [x] CSV usage inventory (this file: `docs/explanation/csv_migration_inventory.md`)  
-- [x] ComboBox usage inventory (`docs/explanation/combobox_inventory.md`) — created alongside this effort  
-- [x] Refactor checklist (`docs/explanation/csv_migration_checklist.md`) linking items in this inventory with migration task owners and priorities  
-- [x] Scripts and `grep` command notes used to find occurrences (see Methodology)  
+- [x] CSV usage inventory (this file: `docs/explanation/csv_migration_inventory.md`)
+- [x] ComboBox usage inventory (`docs/explanation/combobox_inventory.md`) — created alongside this effort
+- [x] Refactor checklist (`docs/explanation/csv_migration_checklist.md`) linking items in this inventory with migration task owners and priorities
+- [x] Scripts and `grep` command notes used to find occurrences (see Methodology)
 - [x] Basic test plan for Phase 1 validation
 
 ---

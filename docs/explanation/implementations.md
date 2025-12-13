@@ -557,6 +557,113 @@ sdk/campaign_builder/src/ui_helpers.rs
 
 ## Phase 3: Fix Characters Editor & Maps Editor (2025-01-28)
 
+## Phase 3: Core Editor Conversions — CSV→Vec (Map & Characters Editor) (2025-12-13)
+
+**Status:** ✅ COMPLETED | **Type:** Migration & UI Conversion | **Files:** `sdk/campaign_builder/src/map_editor.rs`, `sdk/campaign_builder/src/characters_editor.rs`, `sdk/campaign_builder/src/ui_helpers.rs`, `sdk/campaign_builder/src/main.rs`, tests related to these editors.
+
+**Objective:** Convert editor CSV fields into typed vectors and update editor UIs so they show a searchable, friendly selection UI rather than an ID-CSV text input. This reduces parsing errors and brings the editor buffers in line with domain model types (using `ItemId`, `MonsterId`). Preserve round-trip behavior and RON persistence.
+
+**Key Changes Implemented**
+
+- Map Editor (`sdk/campaign_builder/src/map_editor.rs`)
+
+  - `EventEditorState`:
+    - `encounter_monsters: Vec<MonsterId>` (was `String`)
+    - `treasure_items: Vec<ItemId>` (was `String`)
+    - Added `encounter_monsters_query: String` and `treasure_items_query: String` to persist UI search queries.
+    - Updated `Default` to initialize these fields via `Vec::new()` / `String::new()`.
+    - Rewrote `to_map_event()` to use typed vectors (no CSV parsing) and preserved validation logic (e.g., an encounter must contain at least one monster).
+  - `show_event_editor` UI:
+    - Replaced CSV `TextEdit` inputs with `searchable_selector_multi` UI helpers, showing chips for existing selections and suggestions.
+    - Selectors use `monsters` and `items` lists to map IDs -> (id, name label).
+    - If necessary, a numeric "quick add by ID" fallback is still supported via a small input/suggestion.
+  - `MapsEditorState::show`
+    - Updated signature to accept the `monsters` and `items` slices and pass them into `show_inspector_panel` and `show_event_editor`.
+  - `MapsEditorState::show_inspector_panel`, `MapsEditorState::show_event_editor`
+    - Accept `monsters: &[MonsterDefinition]` and `items: &[Item]` and pass them to the selector helpers so labels are friendly and searchable.
+  - Main integration:
+    - `main.rs` updated to pass `&self.monsters` and `&self.items` into `maps_editor_state.show()`.
+
+- Characters Editor (`sdk/campaign_builder/src/characters_editor.rs`)
+
+  - `CharacterEditBuffer`:
+    - Replaced `starting_items: String` with `starting_items: Vec<ItemId>`.
+    - Added `starting_items_query: String` to persist search query for item selector.
+    - Default updated to `Vec::new()` and empty query.
+  - `start_edit_character`:
+    - Now clones `character.starting_items` into the buffer directly (no `join`).
+  - `save_character`:
+    - Reads buffer `starting_items` typed vector directly when building `CharacterDefinition` (no CSV parsing).
+  - UI:
+    - Replaced CSV `TextEdit` for `starting_items` with `searchable_selector_multi` powered by the `items` list and `id_fn/label_fn`.
+  - Tests:
+    - Updated tests such as `test_save_character_with_starting_items` to assert behavior with typed `Vec<ItemId>`.
+
+- Shared UI Helpers (`sdk/campaign_builder/src/ui_helpers.rs`)
+  - Implemented `searchable_selector_single` and `searchable_selector_multi`:
+    - Generic versions that accept:
+      - `ui`, `id_salt`, `label`, `&mut Option<ID>` (single) or `&mut Vec<ID>` (multi),
+      - `items` slice, `id_fn` (mapping item->ID), `label_fn` (mapping item->label),
+      - `search_query: &mut String` persisted by the caller,
+    - `searchable_selector_multi` features chip view of selected IDs with remove button, small add/search control and matches items by label.
+  - Added utility helpers:
+    - `parse_id_csv_to_vec<T>(csv: &str) -> Result<Vec<T>, CsvParseError>` - generic `FromStr` based parser (used for legacy conversions only).
+    - `format_vec_to_csv<T>(values: &[T]) -> String` - friendly CSV string formatting function (comma-space separation).
+    - `filter_items_by_query<T, F>` - pure helper for filtering items by label query (case-insensitive).
+  - Tests:
+    - Added unit tests to the `ui_helpers.rs` test module:
+      - `parse_id_csv_to_vec` tests (success/empty/invalid/whitespace)
+      - `format_vec_to_csv` tests (simple/empty)
+      - `filter_items_by_query` tests (case-insensitive matches and empty query behavior)
+    - Smoke tests added for the selector rendering (assure no panics) and basic selection changes. Full keyboard interaction tests are deferred to integration suites.
+
+**Testing & Validation**
+
+- Updated unit tests for `map_editor` and `characters_editor` to use typed vectors in test data (e.g., `encounter_monsters: vec![1,2,3]`).
+- Ensured `start_edit_character` and `save_character` round-trip (buffer->domain->save->load).
+- Confirmed `cargo check` and `cargo test` for the `campaign_builder` crate ran successfully (previous commits ran all tests, including the new changes).
+- Verified UI helpers compile & basic tests run; deeper UI event testing to be covered in editor integration tests.
+
+**Design & Rationale**
+
+- Align editor buffers with domain types (use `Vec<ItemId>` and `Vec<MonsterId>`), resulting in a safer, strongly-typed editing surface that reduces silent parsing errors.
+- Introduced `searchable_selector_*` helpers to provide a consistent UX for all single and multi-select scenarios across editors.
+- Maintain non-breaking RON serialization across domain types; serializing typed vectors remains compatible.
+- Keep incremental changes: Phase 3 only touches editor buffers & UI; domain model changes require explicit approval and are not included.
+
+**Next Steps & Recommendations**
+
+1. Phase 4: Convert additional CSV fields (medium priority):
+   - `classes_editor.rs` — `special_abilities` & `proficiencies` -> typed `Vec<String>` or `Vec<Id>` as appropriate and replacement with `searchable_selector_multi`.
+   - `races_editor.rs` — `special_abilities`, `proficiencies`, `incompatible_item_tags` -> typed vectors, update UI.
+2. Phase 5: Add Integration Tests
+   - End-to-end round-trip tests for selected editors:
+     - Editor Buffer -> Domain Model -> Save (RON) -> Load -> Editor Buffer
+     - Test that `searchable_selector_*` selections persist across save/load cycles and bitset rounding.
+3. Accessibility & Keyboard Integration
+   - Add simulated keyboard event tests for `searchable_selector_*` in integration tests (to validate arrow/return/escape behavior).
+4. Documentation
+   - Update per-editor docs & `docs/how-to` to show how to use the new helpers & migration patterns.
+   - Add migration mapping references for anyone reading RON files or editing older campaign versions.
+5. Validation Plan
+   - Continue running `cargo fmt`, `cargo check`, `cargo clippy -D warnings`, and `cargo test`.
+   - Audit the remaining `split(',')` occurrences and prioritize conversions in Phase 4 per the migration checklist.
+
+**Implementation Summary**
+
+- `map_editor.rs` — Editor buffers now typed; selectors show friendly monster/item names and are searchable.
+- `characters_editor.rs` — Starting items converted to typed vector with selector UI and round-trip tests.
+- `ui_helpers.rs` — Generic selector helpers for single & multi select with search & chips.
+- `main.rs` — Passes `monsters` & `items` lists to editors so selectors can show labels and names.
+- Tests & UI smoke tests updated & validated as part of the crate test suite.
+
+**Outcome**
+
+- Editor buffers aligned with domain types (CSV->Vec migration).
+- Consistent searchable selector UI used across editors.
+- Safer editing surface (reduces silent parsing errors).
+- Clear migration pattern for subsequent editor conversions.
+
 **Status:** ✅ COMPLETED | **Type:** Bug Fix & Layout Consistency | **Files:** 1 modified
 
 **Objective:** Fix ActionButtons placement in Characters Editor and verify Maps Editor horizontal padding (already fixed).

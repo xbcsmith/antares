@@ -108,7 +108,7 @@ Replace (or add, during migration) the map's event model from:
 to:
 
 - `things: Vec<Thing>` (or `HashMap<ThingId, Thing>` + `HashMap<Position, Vec<ThingId>>` for quick lookup).
-  
+
 A `Map` now looks conceptually like:
 
 ```dev/null/example_map.ron#L1-48

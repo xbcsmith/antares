@@ -2839,6 +2839,8 @@ impl eframe::App for CampaignBuilderApp {
             EditorTab::Maps => self.maps_editor_state.show(
                 ui,
                 &mut self.maps,
+                &self.monsters,
+                &self.items,
                 self.campaign_dir.as_ref(),
                 &self.campaign.maps_dir,
                 &self.tool_config.display,
