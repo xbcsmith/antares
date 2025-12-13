@@ -24,26 +24,26 @@ echo ""
 
 # Phase 2: Check ui_helpers implementation
 echo "=== Phase 2: UI Helpers Check ==="
-grep -q "pub fn searchable_selector_single" antares/sdk/campaign_builder/src/ui_helpers.rs && echo "✓ searchable_selector_single exists" || exit 1
-grep -q "pub fn searchable_selector_multi" antares/sdk/campaign_builder/src/ui_helpers.rs && echo "✓ searchable_selector_multi exists" || exit 1
-grep -q "pub fn parse_id_csv_to_vec" antares/sdk/campaign_builder/src/ui_helpers.rs && echo "✓ parse_id_csv_to_vec exists" || exit 1
-grep -q "pub fn format_vec_to_csv" antares/sdk/campaign_builder/src/ui_helpers.rs && echo "✓ format_vec_to_csv exists" || exit 1
+grep -q "pub fn searchable_selector_single" sdk/campaign_builder/src/ui_helpers.rs && echo "✓ searchable_selector_single exists" || exit 1
+grep -q "pub fn searchable_selector_multi" sdk/campaign_builder/src/ui_helpers.rs && echo "✓ searchable_selector_multi exists" || exit 1
+grep -q "pub fn parse_id_csv_to_vec" sdk/campaign_builder/src/ui_helpers.rs && echo "✓ parse_id_csv_to_vec exists" || exit 1
+grep -q "pub fn format_vec_to_csv" sdk/campaign_builder/src/ui_helpers.rs && echo "✓ format_vec_to_csv exists" || exit 1
 echo ""
 
 # Phase 3: Check core conversions
 echo "=== Phase 3: Core Conversions Check ==="
-grep -q "encounter_monsters: Vec<MonsterId>" antares/sdk/campaign_builder/src/map_editor.rs && echo "✓ EventEditorState converted" || exit 1
-grep -q "starting_items: Vec<ItemId>" antares/sdk/campaign_builder/src/characters_editor.rs && echo "✓ CharacterEditBuffer converted" || exit 1
+grep -q "encounter_monsters: Vec<MonsterId>" sdk/campaign_builder/src/map_editor.rs && echo "✓ EventEditorState converted" || exit 1
+grep -q "starting_items: Vec<ItemId>" sdk/campaign_builder/src/characters_editor.rs && echo "✓ CharacterEditBuffer converted" || exit 1
 echo ""
 
 # Phase 4: Check for unauthorized CSV usage
 echo "=== Phase 4: CSV Elimination Check ==="
-CSV_COUNT=$(grep -r "split.*['\"]," antares/sdk/campaign_builder/src/ | grep -v "test\|// Legitimate:" | wc -l)
+CSV_COUNT=$(grep -r "split.*['\"]," sdk/campaign_builder/src/ | grep -v "test\|// Legitimate:" | wc -l)
 if [ "$CSV_COUNT" -eq 0 ]; then
     echo "✓ No unauthorized CSV usage found"
 else
     echo "✗ Found $CSV_COUNT unauthorized CSV usages"
-    grep -rn "split.*['\"]," antares/sdk/campaign_builder/src/ | grep -v "test\|// Legitimate:"
+    grep -rn "split.*['\"]," sdk/campaign_builder/src/ | grep -v "test\|// Legitimate:"
     exit 1
 fi
 echo ""

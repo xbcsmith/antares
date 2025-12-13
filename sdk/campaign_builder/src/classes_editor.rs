@@ -969,8 +969,8 @@ impl ClassesEditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::classes::ClassDefinition;
-    use crate::domain::proficiency::ProficiencyId;
+    use antares::domain::classes::ClassDefinition;
+    use antares::domain::proficiency::ProficiencyId;
 
     #[test]
     fn test_class_special_abilities_and_proficiencies_roundtrip() {
@@ -1001,7 +1001,7 @@ mod tests {
         assert_eq!(saved.proficiencies, vec!["simple_weapon".to_string()]);
 
         // Serialize to RON and deserialize again to ensure Vec fields persist
-        let ron_str = ron::ser::to_string_pretty(&saved).expect("Failed to serialize class to RON");
+        let ron_str = ron::ser::to_string(&saved).expect("Failed to serialize class to RON");
         let parsed: ClassDefinition =
             ron::from_str(&ron_str).expect("Failed to deserialize class from RON");
 

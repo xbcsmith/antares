@@ -1821,9 +1821,8 @@ mod tests {
         assert_eq!(saved.starting_items, vec![50, 50]);
 
         // Serialization round-trip (RON) preserves Vec<ItemId>
-        let ron_str =
-            ron::ser::to_string_pretty(&saved).expect("Failed to serialize character to RON");
-        let parsed: crate::domain::character_definition::CharacterDefinition =
+        let ron_str = ron::ser::to_string(&saved).expect("Failed to serialize character to RON");
+        let parsed: antares::domain::character_definition::CharacterDefinition =
             ron::from_str(&ron_str).expect("Failed to deserialize character from RON");
 
         assert_eq!(parsed.starting_items, vec![50, 50]);

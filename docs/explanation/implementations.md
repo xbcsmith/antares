@@ -323,6 +323,30 @@ All editors use consistent button labels with emojis:
   - `docs/explanation/combobox_inventory.md` — `ComboBox` usage with context, replacement suggestions (single/multi), and priority.
   - `docs/explanation/csv_migration_checklist.md` — Prioritized, actionable checklist that outlines Phase 2 → Phase 6 tasks with owners and test plans.
 
+## CSV-to-Vec Migration (2025-01)
+
+**Summary**: Migrated all editor UI fields from CSV string encoding to typed vectors.
+
+**Changes**:
+
+- Converted 15+ CSV fields to `Vec<ItemId>`, `Vec<MonsterId>`, `Vec<String>`
+- Implemented searchable selector UI helpers (single & multi-select)
+- Replaced all ComboBox instances with unified searchable selectors
+- Eliminated CSV parsing from SDK codebase
+
+**Files Modified**:
+
+- `sdk/campaign_builder/src/ui_helpers.rs`: Added searchable selector functions
+- `sdk/campaign_builder/src/map_editor.rs`: Converted EventEditorState
+- `sdk/campaign_builder/src/characters_editor.rs`: Converted CharacterEditBuffer
+- `sdk/campaign_builder/src/classes_editor.rs`: Converted ClassEditBuffer
+- `sdk/campaign_builder/src/items_editor.rs`: Converted tags
+- `sdk/campaign_builder/src/spells_editor.rs`: Converted effects
+
+**Testing**: All tests passing, 80%+ coverage for ui_helpers
+
+**Backward Compatibility**: BREAKING - CSV format no longer supported
+
 ### Key Findings (Representative, not exhaustive)
 
 - High-priority CSV fields (affect core editors):

@@ -272,7 +272,8 @@ where
     }
 
     let mut ids = Vec::new();
-    for token in csv.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    let tokens = csv.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()); // Legitimate: CSV helper
+    for token in tokens {
         match token.parse::<T>() {
             Ok(v) => ids.push(v),
             Err(e) => {

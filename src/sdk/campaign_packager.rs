@@ -664,15 +664,12 @@ mod tests {
         let mut found_encounter = false;
         for map_id in db.maps.all_maps() {
             if let Some(map) = db.maps.get_map(map_id) {
-                for (_pos, event) in &map.events {
-                    match event {
-                        MapEvent::Encounter { monster_group, .. } => {
-                            if !monster_group.is_empty() {
-                                found_encounter = true;
-                                break;
-                            }
+                for event in map.events.values() {
+                    if let MapEvent::Encounter { monster_group, .. } = event {
+                        if !monster_group.is_empty() {
+                            found_encounter = true;
+                            break;
                         }
-                        _ => {}
                     }
                 }
             }
