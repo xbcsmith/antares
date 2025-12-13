@@ -2859,6 +2859,7 @@ impl eframe::App for CampaignBuilderApp {
             ),
             EditorTab::Races => self.races_editor_state.show(
                 ui,
+                &self.items,
                 self.campaign_dir.as_ref(),
                 &self.campaign.races_file,
                 &mut self.unsaved_changes,

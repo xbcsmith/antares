@@ -7,11 +7,17 @@
 //! rendering via the `show()` method, following the standard editor pattern.
 //! Uses shared UI components for consistent layout.
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use crate::ui_helpers::{
+    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
+    TwoColumnLayout,
+};
+use antares::domain::items::types::Item;
+use antares::domain::proficiency::{ProficiencyDatabase, ProficiencyDefinition, ProficiencyId};
 use antares::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Editor state for races
@@ -75,9 +81,18 @@ pub struct RaceEditBuffer {
     pub psychic_resist: String,
     // Other fields
     pub size: SizeCategory,
-    pub special_abilities: String,      // Comma-separated
-    pub proficiencies: String,          // Comma-separated
-    pub incompatible_item_tags: String, // Comma-separated
+    /// Typed vector of special ability ids (e.g., "infravision")
+    pub special_abilities: Vec<String>,
+    /// Persisted UI search query for special abilities selector
+    pub special_abilities_query: String,
+    /// Typed vector of proficiency IDs granted by the race
+    pub proficiencies: Vec<ProficiencyId>,
+    /// Persisted UI search query for proficiencies selector
+    pub proficiencies_query: String,
+    /// Typed vector of item tag IDs considered incompatible with the race
+    pub incompatible_item_tags: Vec<String>,
+    /// Persisted UI search query for incompatible item tags selector
+    pub incompatible_item_tags_query: String,
 }
 
 impl Default for RaceEditBuffer {
@@ -102,9 +117,12 @@ impl Default for RaceEditBuffer {
             poison_resist: "0".to_string(),
             psychic_resist: "0".to_string(),
             size: SizeCategory::Medium,
-            special_abilities: String::new(),
-            proficiencies: String::new(),
-            incompatible_item_tags: String::new(),
+            special_abilities: Vec::new(),
+            special_abilities_query: String::new(),
+            proficiencies: Vec::new(),
+            proficiencies_query: String::new(),
+            incompatible_item_tags: Vec::new(),
+            incompatible_item_tags_query: String::new(),
         }
     }
 }
@@ -163,9 +181,12 @@ impl RacesEditorState {
                 poison_resist: race.resistances.poison.to_string(),
                 psychic_resist: race.resistances.psychic.to_string(),
                 size: race.size,
-                special_abilities: race.special_abilities.join(", "),
-                proficiencies: race.proficiencies.join(", "),
-                incompatible_item_tags: race.incompatible_item_tags.join(", "),
+                special_abilities: race.special_abilities.clone(),
+                special_abilities_query: String::new(),
+                proficiencies: race.proficiencies.clone(),
+                proficiencies_query: String::new(),
+                incompatible_item_tags: race.incompatible_item_tags.clone(),
+                incompatible_item_tags_query: String::new(),
             };
         }
     }
@@ -264,15 +285,15 @@ impl RacesEditorState {
         let special_abilities: Vec<String> = self
             .buffer
             .special_abilities
-            .split(',')
+            .iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
 
-        let proficiencies: Vec<String> = self
+        let proficiencies: Vec<ProficiencyId> = self
             .buffer
             .proficiencies
-            .split(',')
+            .iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
@@ -280,7 +301,7 @@ impl RacesEditorState {
         let incompatible_item_tags: Vec<String> = self
             .buffer
             .incompatible_item_tags
-            .split(',')
+            .iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
@@ -417,6 +438,7 @@ impl RacesEditorState {
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
+        items: &[Item],
         campaign_dir: Option<&PathBuf>,
         races_file: &str,
         unsaved_changes: &mut bool,
@@ -813,7 +835,7 @@ impl RacesEditorState {
                 }
             }
             RacesEditorMode::Creating | RacesEditorMode::Editing => {
-                self.show_race_form(ui, unsaved_changes, status_message);
+                self.show_race_form(ui, items, campaign_dir, unsaved_changes, status_message);
             }
         }
     }
@@ -822,6 +844,8 @@ impl RacesEditorState {
     fn show_race_form(
         &mut self,
         ui: &mut egui::Ui,
+        items: &[Item],
+        campaign_dir: Option<&PathBuf>,
         unsaved_changes: &mut bool,
         status_message: &mut String,
     ) {
@@ -985,18 +1009,65 @@ impl RacesEditorState {
 
                 ui.add_space(10.0);
                 ui.heading("Special Abilities");
-                ui.label("Special Abilities (comma separated):");
-                ui.text_edit_singleline(&mut self.buffer.special_abilities);
+                // Build suggestion list from existing races (dedupe)
+                let mut abilities_list: Vec<String> = {
+                    let mut set = HashSet::new();
+                    let mut list = Vec::new();
+                    for r in &self.races {
+                        for ability in &r.special_abilities {
+                            if set.insert(ability.clone()) {
+                                list.push(ability.clone());
+                            }
+                        }
+                    }
+                    list
+                };
+                if searchable_selector_multi(
+                    ui,
+                    "race_special_abilities",
+                    "Special Abilities",
+                    &mut self.buffer.special_abilities,
+                    &abilities_list,
+                    |s| s.clone(),
+                    |s| s.clone(),
+                    &mut self.buffer.special_abilities_query,
+                ) {
+                    self.has_unsaved_changes = true;
+                }
                 ui.label("ℹ️").on_hover_text(
                     "Examples: infravision, magic_resistance, poison_immunity"
                 );
 
                 ui.add_space(10.0);
                 ui.heading("Proficiencies");
-                ui.label("Proficiency IDs (comma separated):");
-                ui.text_edit_singleline(&mut self.buffer.proficiencies);
+                // Load proficiency definitions for suggestions (best-effort)
+                let prof_defs: Vec<ProficiencyDefinition> = if let Some(dir) = campaign_dir {
+                    let path = dir.join("data/proficiencies.ron");
+                    match ProficiencyDatabase::load_from_file(&path) {
+                        Ok(db) => db.all().iter().map(|d| (*d).clone()).collect(),
+                        Err(_) => Vec::new(),
+                    }
+                } else {
+                    match ProficiencyDatabase::load_from_file("data/proficiencies.ron") {
+                        Ok(db) => db.all().iter().map(|d| (*d).clone()).collect(),
+                        Err(_) => Vec::new(),
+                    }
+                };
+
+                if searchable_selector_multi(
+                    ui,
+                    "race_proficiencies",
+                    "Proficiencies",
+                    &mut self.buffer.proficiencies,
+                    &prof_defs,
+                    |p| p.id.clone(),
+                    |p| p.name.clone(),
+                    &mut self.buffer.proficiencies_query,
+                ) {
+                    self.has_unsaved_changes = true;
+                }
                 ui.label("ℹ️").on_hover_text(
-                    "Races can grant proficiencies that combine with class proficiencies.\n\
+                    "Enter proficiency IDs separated by commas.\n\
                      Standard proficiencies:\n\
                      • Weapons: simple_weapon, martial_melee, martial_ranged, blunt_weapon, unarmed\n\
                      • Armor: light_armor, medium_armor, heavy_armor, shield\n\
@@ -1015,41 +1086,32 @@ impl RacesEditorState {
                         ("medium_armor", "Medium Armor"),
                         ("heavy_armor", "Heavy Armor"),
                         ("shield", "Shield"),
-                        ("arcane_item", "Arcane"),
-                        ("divine_item", "Divine"),
                     ];
 
                     for (prof_id, label) in proficiency_buttons {
-                        let current_profs: Vec<&str> = self.buffer.proficiencies
-                            .split(',')
-                            .map(|s| s.trim())
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                        let has_prof = current_profs.contains(&prof_id);
-
-                        if ui.selectable_label(has_prof, label).clicked() {
-                            if has_prof {
-                                // Remove proficiency
-                                let new_profs: Vec<&str> = current_profs
-                                    .into_iter()
-                                    .filter(|p| *p != prof_id)
-                                    .collect();
-                                self.buffer.proficiencies = new_profs.join(", ");
-                            } else {
-                                // Add proficiency
-                                if self.buffer.proficiencies.trim().is_empty() {
-                                    self.buffer.proficiencies = prof_id.to_string();
-                                } else {
-                                    self.buffer.proficiencies = format!("{}, {}", self.buffer.proficiencies, prof_id);
-                                }
+                        let has_prof = self.buffer.proficiencies.iter().any(|p| p == &prof_id.to_string());
+                        if has_prof {
+                            if ui.small_button(format!("{} ✓", label))
+                                .on_hover_text(format!("Click to remove {}", prof_id))
+                                .clicked()
+                            {
+                                self.buffer.proficiencies.retain(|p| p != &prof_id.to_string());
+                                self.has_unsaved_changes = true;
+                            }
+                        } else {
+                            if ui.small_button(label).clicked() {
+                                self.buffer.proficiencies.push(prof_id.to_string());
+                                self.has_unsaved_changes = true;
                             }
                         }
                     }
                 });
 
                 // Show current proficiency count
-                let current_profs: Vec<&str> = self.buffer.proficiencies
-                    .split(',')
+                let current_profs: Vec<&str> = self
+                    .buffer
+                    .proficiencies
+                    .iter()
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
                     .collect();
@@ -1059,8 +1121,33 @@ impl RacesEditorState {
 
                 ui.add_space(10.0);
                 ui.heading("Incompatible Item Tags");
-                ui.label("Incompatible Tags (comma separated):");
-                ui.text_edit_singleline(&mut self.buffer.incompatible_item_tags);
+                // Build a unique list of existing tags from all items
+                let mut tags_list: Vec<String> = {
+                    let mut set = HashSet::new();
+                    let mut list = Vec::new();
+                    for it in items.iter() {
+                        for t in &it.tags {
+                            if set.insert(t.clone()) {
+                                list.push(t.clone());
+                            }
+                        }
+                    }
+                    list
+                };
+
+                if searchable_selector_multi(
+                    ui,
+                    "race_incompatible_item_tags",
+                    "Incompatible Item Tags",
+                    &mut self.buffer.incompatible_item_tags,
+                    &tags_list,
+                    |s| s.clone(),
+                    |s| s.clone(),
+                    &mut self.buffer.incompatible_item_tags_query,
+                ) {
+                    self.has_unsaved_changes = true;
+                }
+
                 ui.label("ℹ️").on_hover_text(
                     "Items with these tags cannot be used by this race.\n\
                      Standard tags:\n\
@@ -1082,36 +1169,42 @@ impl RacesEditorState {
                     ];
 
                     for (tag_id, label) in tag_buttons {
-                        let current_tags: Vec<&str> = self.buffer.incompatible_item_tags
-                            .split(',')
-                            .map(|s| s.trim())
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                        let has_tag = current_tags.contains(&tag_id);
+                        // Check if current tag exists in the typed vector
+                        let has_tag = self
+                            .buffer
+                            .incompatible_item_tags
+                            .iter()
+                            .any(|t| t == &tag_id.to_string());
 
-                        if ui.selectable_label(has_tag, label).clicked() {
-                            if has_tag {
-                                // Remove tag
-                                let new_tags: Vec<&str> = current_tags
-                                    .into_iter()
-                                    .filter(|t| *t != tag_id)
-                                    .collect();
-                                self.buffer.incompatible_item_tags = new_tags.join(", ");
-                            } else {
-                                // Add tag
-                                if self.buffer.incompatible_item_tags.trim().is_empty() {
-                                    self.buffer.incompatible_item_tags = tag_id.to_string();
-                                } else {
-                                    self.buffer.incompatible_item_tags = format!("{}, {}", self.buffer.incompatible_item_tags, tag_id);
-                                }
+                        if has_tag {
+                            // Show a remove-style button for tags that are already present
+                            if ui
+                                .small_button(format!("{} ✓", label))
+                                .on_hover_text(format!("Click to remove {}", tag_id))
+                                .clicked()
+                            {
+                                self.buffer
+                                    .incompatible_item_tags
+                                    .retain(|t| t != &tag_id.to_string());
+                                self.has_unsaved_changes = true;
+                            }
+                        } else {
+                            // Show a simple add button for tags not yet present
+                            if ui.small_button(label).clicked() {
+                                self.buffer
+                                    .incompatible_item_tags
+                                    .push(tag_id.to_string());
+                                self.has_unsaved_changes = true;
                             }
                         }
                     }
                 });
 
                 // Show current tag count
-                let current_tags: Vec<&str> = self.buffer.incompatible_item_tags
-                    .split(',')
+                let current_tags: Vec<&str> = self
+                    .buffer
+                    .incompatible_item_tags
+                    .iter()
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
                     .collect();

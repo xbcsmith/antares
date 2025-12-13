@@ -7,10 +7,14 @@
 //! rendering via the `show()` method, following the standard editor pattern.
 //! Uses shared UI components for consistent layout.
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use crate::ui_helpers::{
+    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
+    TwoColumnLayout,
+};
 use antares::domain::classes::{ClassDefinition, SpellSchool, SpellStat};
 use antares::domain::items::types::Item;
-use antares::domain::types::DiceRoll;
+use antares::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
+use antares::domain::types::{DiceRoll, ItemId};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -56,12 +60,21 @@ pub struct ClassEditBuffer {
     pub spell_school: Option<SpellSchool>,
     pub is_pure_caster: bool,
     pub spell_stat: Option<SpellStat>,
-    pub special_abilities: String, // Comma-separated
+    /// Typed vector of special ability IDs (e.g., "backstab", "turn_undead")
+    pub special_abilities: Vec<String>,
+    /// Persisted UI search query for the special abilities selector
+    pub special_abilities_query: String,
     pub description: String,
     pub starting_weapon_id: String,
     pub starting_armor_id: String,
-    pub starting_items: Vec<String>,
-    pub proficiencies: String, // Comma-separated proficiency IDs
+    /// Typed vector of item IDs for starting items
+    pub starting_items: Vec<ItemId>,
+    /// Persisted UI search query for the starting items selector
+    pub starting_items_query: String,
+    /// Typed vector of proficiency IDs (ProficiencyId alias)
+    pub proficiencies: Vec<ProficiencyId>,
+    /// Persisted UI search query for proficiencies selector
+    pub proficiencies_query: String,
 }
 
 impl Default for ClassEditBuffer {
@@ -75,12 +88,15 @@ impl Default for ClassEditBuffer {
             spell_school: None,
             is_pure_caster: false,
             spell_stat: None,
-            special_abilities: String::new(),
+            special_abilities: Vec::new(),
+            special_abilities_query: String::new(),
             description: String::new(),
             starting_weapon_id: String::new(),
             starting_armor_id: String::new(),
             starting_items: Vec::new(),
-            proficiencies: String::new(),
+            starting_items_query: String::new(),
+            proficiencies: Vec::new(),
+            proficiencies_query: String::new(),
         }
     }
 }
@@ -126,7 +142,8 @@ impl ClassesEditorState {
                 spell_school: class.spell_school,
                 is_pure_caster: class.is_pure_caster,
                 spell_stat: class.spell_stat,
-                special_abilities: class.special_abilities.join(", "),
+                special_abilities: class.special_abilities.clone(),
+                special_abilities_query: String::new(),
                 description: class.description.clone(),
                 starting_weapon_id: class
                     .starting_weapon_id
@@ -136,12 +153,10 @@ impl ClassesEditorState {
                     .starting_armor_id
                     .map(|id| id.to_string())
                     .unwrap_or_default(),
-                starting_items: class
-                    .starting_items
-                    .iter()
-                    .map(|id| id.to_string())
-                    .collect(),
-                proficiencies: class.proficiencies.join(", "),
+                starting_items: class.starting_items.clone(),
+                starting_items_query: String::new(),
+                proficiencies: class.proficiencies.clone(),
+                proficiencies_query: String::new(),
             };
         }
     }
@@ -176,18 +191,19 @@ impl ClassesEditorState {
 
         // Legacy disablement_bit_index removed - now using proficiency system
 
+        // Ensure items are trimmed and filtered; buffer uses typed vectors now, so operate accordingly.
         let abilities: Vec<String> = self
             .buffer
             .special_abilities
-            .split(',')
+            .iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
 
-        let proficiencies: Vec<String> = self
+        let proficiencies: Vec<ProficiencyId> = self
             .buffer
             .proficiencies
-            .split(',')
+            .iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
@@ -204,12 +220,8 @@ impl ClassesEditorState {
             self.buffer.starting_armor_id.parse::<u8>().ok()
         };
 
-        let starting_items: Vec<u8> = self
-            .buffer
-            .starting_items
-            .iter()
-            .filter_map(|id| id.parse::<u8>().ok())
-            .collect();
+        // Starting items are typed Vec<ItemId> in the buffer; clone directly
+        let starting_items: Vec<ItemId> = self.buffer.starting_items.clone();
 
         let class_def = ClassDefinition {
             id: id.clone(),
@@ -601,13 +613,19 @@ impl ClassesEditorState {
                 }
             }
             ClassesEditorMode::Creating | ClassesEditorMode::Editing => {
-                self.show_class_form(ui, items, unsaved_changes);
+                self.show_class_form(ui, items, campaign_dir, unsaved_changes);
             }
         }
     }
 
     /// Shows the class edit form
-    fn show_class_form(&mut self, ui: &mut egui::Ui, items: &[Item], unsaved_changes: &mut bool) {
+    fn show_class_form(
+        &mut self,
+        ui: &mut egui::Ui,
+        items: &[Item],
+        campaign_dir: Option<&PathBuf>,
+        unsaved_changes: &mut bool,
+    ) {
         let is_creating = self.mode == ClassesEditorMode::Creating;
         ui.heading(if is_creating {
             "Create New Class"
@@ -722,7 +740,10 @@ impl ClassesEditorState {
                             .selected_text(current_weapon)
                             .show_ui(ui, |ui| {
                                 if ui
-                                    .selectable_label(self.buffer.starting_weapon_id.is_empty(), "None")
+                                    .selectable_label(
+                                        self.buffer.starting_weapon_id.is_empty(),
+                                        "None",
+                                    )
                                     .clicked()
                                 {
                                     self.buffer.starting_weapon_id = String::new();
@@ -762,7 +783,10 @@ impl ClassesEditorState {
                             .selected_text(current_armor)
                             .show_ui(ui, |ui| {
                                 if ui
-                                    .selectable_label(self.buffer.starting_armor_id.is_empty(), "None")
+                                    .selectable_label(
+                                        self.buffer.starting_armor_id.is_empty(),
+                                        "None",
+                                    )
                                     .clicked()
                                 {
                                     self.buffer.starting_armor_id = String::new();
@@ -785,28 +809,18 @@ impl ClassesEditorState {
                             });
                     });
 
-                    // Starting Items List
-                    ui.label("Starting Items:");
-                    let mut items_to_remove = Vec::new();
-                    for (idx, item_id) in self.buffer.starting_items.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            let item_name = items
-                                .iter()
-                                .find(|item| item.id.to_string() == *item_id)
-                                .map(|item| item.name.clone())
-                                .unwrap_or_else(|| format!("Unknown (ID: {})", item_id));
-                            ui.label(item_name);
-                            if ui.small_button("🗑️").clicked() {
-                                items_to_remove.push(idx);
-                            }
-                        });
-                    }
-                    for idx in items_to_remove.into_iter().rev() {
-                        self.buffer.starting_items.remove(idx);
-                    }
-
-                    if ui.button("➕ Add Starting Item").clicked() {
-                        self.buffer.starting_items.push(String::new());
+                    // Starting Items
+                    if searchable_selector_multi(
+                        ui,
+                        "class_starting_items",
+                        "Starting Items",
+                        &mut self.buffer.starting_items,
+                        items,
+                        |i| i.id,
+                        |i| i.name.clone(),
+                        &mut self.buffer.starting_items_query,
+                    ) {
+                        self.has_unsaved_changes = true;
                     }
                 });
 
@@ -814,17 +828,35 @@ impl ClassesEditorState {
 
                 ui.group(|ui| {
                     ui.label("Proficiencies");
-                    ui.label("Proficiency IDs (comma separated):");
-                    ui.text_edit_singleline(&mut self.buffer.proficiencies);
-                    ui.label("ℹ️").on_hover_text(
-                        "Enter proficiency IDs separated by commas.\n\
-                         Standard proficiencies:\n\
-                         • Weapons: simple_weapon, martial_melee, martial_ranged, blunt_weapon, unarmed\n\
-                         • Armor: light_armor, medium_armor, heavy_armor, shield\n\
-                         • Magic Items: arcane_item, divine_item"
-                    );
 
-                    // Show quick-add buttons for common proficiencies
+                    // Load proficiency definitions for suggestions (best-effort)
+                    let prof_defs: Vec<antares::domain::proficiency::ProficiencyDefinition> =
+                        if let Some(dir) = campaign_dir {
+                            let path = dir.join("data/proficiencies.ron");
+                            match ProficiencyDatabase::load_from_file(&path) {
+                                Ok(db) => db.all().iter().map(|d| (*d).clone()).collect(),
+                                Err(_) => Vec::new(),
+                            }
+                        } else {
+                            match ProficiencyDatabase::load_from_file("data/proficiencies.ron") {
+                                Ok(db) => db.all().iter().map(|d| (*d).clone()).collect(),
+                                Err(_) => Vec::new(),
+                            }
+                        };
+
+                    if searchable_selector_multi(
+                        ui,
+                        "class_proficiencies",
+                        "Proficiencies",
+                        &mut self.buffer.proficiencies,
+                        &prof_defs,
+                        |p| p.id.clone(),
+                        |p| p.name.clone(),
+                        &mut self.buffer.proficiencies_query,
+                    ) {
+                        self.has_unsaved_changes = true;
+                    }
+
                     ui.horizontal_wrapped(|ui| {
                         ui.label("Quick add:");
                         let proficiency_buttons = [
@@ -836,54 +868,80 @@ impl ClassesEditorState {
                             ("medium_armor", "Medium Armor"),
                             ("heavy_armor", "Heavy Armor"),
                             ("shield", "Shield"),
-                            ("arcane_item", "Arcane"),
-                            ("divine_item", "Divine"),
                         ];
 
                         for (prof_id, label) in proficiency_buttons {
-                            let current_profs: Vec<&str> = self.buffer.proficiencies
-                                .split(',')
-                                .map(|s| s.trim())
-                                .filter(|s| !s.is_empty())
-                                .collect();
-                            let has_prof = current_profs.contains(&prof_id);
+                            let has_prof = self
+                                .buffer
+                                .proficiencies
+                                .iter()
+                                .any(|p| p == &prof_id.to_string());
 
-                            if ui.selectable_label(has_prof, label).clicked() {
-                                if has_prof {
-                                    // Remove proficiency
-                                    let new_profs: Vec<&str> = current_profs
-                                        .into_iter()
-                                        .filter(|p| *p != prof_id)
-                                        .collect();
-                                    self.buffer.proficiencies = new_profs.join(", ");
-                                } else {
-                                    // Add proficiency
-                                    if self.buffer.proficiencies.trim().is_empty() {
-                                        self.buffer.proficiencies = prof_id.to_string();
-                                    } else {
-                                        self.buffer.proficiencies = format!("{}, {}", self.buffer.proficiencies, prof_id);
-                                    }
+                            if has_prof {
+                                if ui
+                                    .small_button(format!("{} ✓", label))
+                                    .on_hover_text(format!("Click to remove {}", prof_id))
+                                    .clicked()
+                                {
+                                    self.buffer
+                                        .proficiencies
+                                        .retain(|p| p != &prof_id.to_string());
+                                    self.has_unsaved_changes = true;
+                                }
+                            } else {
+                                if ui.small_button(label).clicked() {
+                                    self.buffer.proficiencies.push(prof_id.to_string());
+                                    self.has_unsaved_changes = true;
                                 }
                             }
                         }
                     });
 
                     // Show current proficiencies as derived info
-                    let current_profs: Vec<&str> = self.buffer.proficiencies
-                        .split(',')
+                    let current_profs: Vec<&str> = self
+                        .buffer
+                        .proficiencies
+                        .iter()
                         .map(|s| s.trim())
                         .filter(|s| !s.is_empty())
                         .collect();
                     if !current_profs.is_empty() {
-                        ui.label(format!("This class grants {} proficiencies", current_profs.len()));
+                        ui.label(format!(
+                            "This class grants {} proficiencies",
+                            current_profs.len()
+                        ));
                     }
                 });
 
                 ui.add_space(10.0);
 
                 ui.group(|ui| {
-                    ui.label("Special Abilities (comma separated):");
-                    ui.text_edit_multiline(&mut self.buffer.special_abilities);
+                    // Build suggestion list from existing classes (dedupe)
+                    let mut abilities_list: Vec<String> = {
+                        let mut set = std::collections::HashSet::new();
+                        let mut list = Vec::new();
+                        for c in &self.classes {
+                            for a in &c.special_abilities {
+                                if set.insert(a.clone()) {
+                                    list.push(a.clone());
+                                }
+                            }
+                        }
+                        list
+                    };
+
+                    if searchable_selector_multi(
+                        ui,
+                        "class_special_abilities",
+                        "Special Abilities",
+                        &mut self.buffer.special_abilities,
+                        &abilities_list,
+                        |s| s.clone(),
+                        |s| s.clone(),
+                        &mut self.buffer.special_abilities_query,
+                    ) {
+                        self.has_unsaved_changes = true;
+                    }
                 });
 
                 ui.add_space(20.0);
