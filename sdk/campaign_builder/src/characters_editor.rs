@@ -1786,10 +1786,47 @@ mod tests {
         state.buffer.armor_id = "2".to_string();
 
         state.save_character().unwrap();
-
+        assert!(state.characters.iter().any(|c| c.id == "with_equipment"));
         assert_eq!(state.characters[0].starting_equipment.weapon, Some(1));
         assert_eq!(state.characters[0].starting_equipment.armor, Some(2));
         assert!(state.characters[0].starting_equipment.shield.is_none());
+    }
+
+    /// Verify that starting_items in the Character edit buffer round-trips to
+    /// the domain `CharacterDefinition` and persists through RON serialization.
+    #[test]
+    fn test_character_starting_items_roundtrip() {
+        // Arrange: create an editor state and configure starting items
+        let mut state = CharactersEditorState::new();
+        state.start_new_character();
+        state.buffer.id = "items_rt".to_string();
+        state.buffer.name = "Items RoundTrip".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+
+        // Use item IDs that exist in sample data; values mirror tutorial campaign usage
+        state.buffer.starting_items = vec![50, 50];
+
+        // Act: persist via save_character()
+        state.save_character().unwrap();
+
+        // Assert: find saved character and verify starting_items
+        let saved = state
+            .characters
+            .iter()
+            .find(|c| c.id == "items_rt")
+            .expect("Saved character not found")
+            .clone();
+
+        assert_eq!(saved.starting_items, vec![50, 50]);
+
+        // Serialization round-trip (RON) preserves Vec<ItemId>
+        let ron_str =
+            ron::ser::to_string_pretty(&saved).expect("Failed to serialize character to RON");
+        let parsed: crate::domain::character_definition::CharacterDefinition =
+            ron::from_str(&ron_str).expect("Failed to deserialize character from RON");
+
+        assert_eq!(parsed.starting_items, vec![50, 50]);
     }
 
     #[test]

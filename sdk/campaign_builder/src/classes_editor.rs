@@ -969,6 +969,45 @@ impl ClassesEditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::classes::ClassDefinition;
+    use crate::domain::proficiency::ProficiencyId;
+
+    #[test]
+    fn test_class_special_abilities_and_proficiencies_roundtrip() {
+        // Arrange: create a new editor state for classes
+        let mut state = ClassesEditorState::new();
+        state.start_new_class();
+        state.buffer.id = "class_rt".to_string();
+        state.buffer.name = "Class RoundTrip".to_string();
+
+        // Populate typed vectors in the edit buffer
+        state.buffer.special_abilities = vec!["backstab".to_string()];
+        state.buffer.proficiencies = vec!["simple_weapon".to_string()];
+
+        // Act: save the class via the editor
+        state.save_class().expect("Failed to save class");
+
+        // Assert: find the saved class and verify fields round-trip correctly
+        assert!(state.classes.iter().any(|c| c.id == "class_rt"));
+
+        let saved = state
+            .classes
+            .iter()
+            .find(|c| c.id == "class_rt")
+            .expect("Saved class not found")
+            .clone();
+
+        assert_eq!(saved.special_abilities, vec!["backstab".to_string()]);
+        assert_eq!(saved.proficiencies, vec!["simple_weapon".to_string()]);
+
+        // Serialize to RON and deserialize again to ensure Vec fields persist
+        let ron_str = ron::ser::to_string_pretty(&saved).expect("Failed to serialize class to RON");
+        let parsed: ClassDefinition =
+            ron::from_str(&ron_str).expect("Failed to deserialize class from RON");
+
+        assert_eq!(parsed.special_abilities, vec!["backstab".to_string()]);
+        assert_eq!(parsed.proficiencies, vec!["simple_weapon".to_string()]);
+    }
 
     #[test]
     fn test_classes_editor_state_creation() {

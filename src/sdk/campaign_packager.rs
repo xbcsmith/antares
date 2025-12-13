@@ -608,4 +608,84 @@ mod tests {
         let packager = CampaignPackager::default();
         assert_eq!(packager.compression_level, 6);
     }
+
+    /// Recursively copy a directory (helper for tests)
+    fn copy_dir_all(src: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(dest)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let path = entry.path();
+            let dest_path = dest.join(entry.file_name());
+            if path.is_dir() {
+                copy_dir_all(&path, &dest_path)?;
+            } else {
+                std::fs::copy(&path, &dest_path)?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_package_and_install_preserves_vec_fields() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::domain::world::MapEvent;
+        use std::path::PathBuf;
+        use tempfile::tempdir;
+
+        // Source: sample tutorial campaign provided in repo
+        let src_campaign = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("campaigns/tutorial");
+        assert!(
+            src_campaign.exists(),
+            "expected sample campaign to exist at {:?}",
+            src_campaign
+        );
+
+        // Create a temporary directory and copy the campaign there
+        let tmp_dir = tempdir()?;
+        let campaign_dir = tmp_dir.path().join("tutorial");
+        copy_dir_all(&src_campaign, &campaign_dir)?;
+
+        // Create an output package path
+        let out_pkg = tmp_dir.path().join("tutorial_pkg.tar.gz");
+
+        // Use the packager to create a package
+        let packager = CampaignPackager::new();
+        let _manifest = packager.package_campaign(&campaign_dir, &out_pkg)?;
+
+        // Install the package to a fresh install directory
+        let install_dir = tmp_dir.path().join("installed");
+        std::fs::create_dir_all(&install_dir)?;
+        let installed_path = packager.install_package(&out_pkg, &install_dir)?;
+
+        // Load the installed campaign and its content database
+        let campaign = crate::sdk::campaign_loader::Campaign::load(&installed_path)?;
+        let db = campaign.load_content()?;
+
+        // Verify: At least one map contains an Encounter event with a non-empty monster_group Vec
+        let mut found_encounter = false;
+        for map_id in db.maps.all_maps() {
+            if let Some(map) = db.maps.get_map(map_id) {
+                for (_pos, event) in &map.events {
+                    match event {
+                        MapEvent::Encounter { monster_group, .. } => {
+                            if !monster_group.is_empty() {
+                                found_encounter = true;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if found_encounter {
+                break;
+            }
+        }
+
+        assert!(
+            found_encounter,
+            "Encounter with non-empty monster_group not found after pack/install"
+        );
+
+        Ok(())
+    }
 }
