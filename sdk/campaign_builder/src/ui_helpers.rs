@@ -20,6 +20,8 @@
 use antares::domain::character::{AttributePair, AttributePair16};
 use eframe::egui;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use thiserror::Error;
 
 // =============================================================================
 // Constants
@@ -1695,6 +1697,264 @@ pub fn handle_reload<T: serde::de::DeserializeOwned>(
         *status_message = "No campaign directory set".to_string();
     }
     false
+}
+
+/// Simple CSV parsing error for ID parsing helpers
+#[derive(Error, Debug)]
+pub enum CsvParseError {
+    /// A parse failure for a specific token
+    #[error("Failed to parse '{input}': {message}")]
+    ParseError { input: String, message: String },
+}
+
+/// Parse a comma-separated string of IDs into a Vec<T>.
+///
+/// - Trims whitespace around tokens
+/// - Ignores empty tokens
+/// - Returns an error if any token fails to parse
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::campaign_builder::ui_helpers::parse_id_csv_to_vec;
+///
+/// let parsed = parse_id_csv_to_vec::<u8>("1,2,3").unwrap();
+/// assert_eq!(parsed, vec![1u8, 2u8, 3u8]);
+/// ```
+pub fn parse_id_csv_to_vec<T>(csv: &str) -> Result<Vec<T>, CsvParseError>
+where
+    T: FromStr,
+    T::Err: std::fmt::Display,
+{
+    let csv_trimmed = csv.trim();
+    if csv_trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut result = Vec::new();
+    for token in csv_trimmed.split(',') {
+        let tok = token.trim();
+        if tok.is_empty() {
+            continue;
+        }
+        match tok.parse::<T>() {
+            Ok(value) => result.push(value),
+            Err(e) => {
+                return Err(CsvParseError::ParseError {
+                    input: tok.to_owned(),
+                    message: format!("{}", e),
+                });
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Formats a slice of values into a CSV string with a space after each comma.
+/// Example: `[1,2,3] -> "1, 2, 3"`.
+pub fn format_vec_to_csv<T>(values: &[T]) -> String
+where
+    T: ToString,
+{
+    values
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Filters a slice of items by a query using a label function.
+/// Returns the indices (into `items`) matching the case-insensitive
+/// substring query. If `query` is empty, returns all indices.
+///
+/// This helper is pure and testable (no UI side-effects).
+pub fn filter_items_by_query<T, F>(items: &[T], query: &str, label_fn: &F) -> Vec<usize>
+where
+    F: Fn(&T) -> String,
+{
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return (0..items.len()).collect();
+    }
+
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, it)| {
+            if label_fn(it).to_lowercase().contains(&q) {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Searchable single-selection widget.
+///
+/// - `id_salt`: egui id salt for widget uniqueness
+/// - `selected`: `Option<ID>` that stores the current selection (`None` = no selection)
+/// - `items`: slice of items of type `T`
+/// - `id_fn`: function mapping `&T -> ID`
+/// - `label_fn`: function mapping `&T -> String` used for display and search
+/// - `search_query`: `&mut String` to drive the filter
+///
+/// The selector renders a text query to filter available items (case-insensitive)
+/// and includes a 'None' entry to clear the selection. Selected items are displayed
+/// by label and selection changes update the `selected` reference.
+///
+/// Returns `true` when the selection changed.
+pub fn searchable_selector_single<T, ID, FId, FLabel>(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    selected: &mut Option<ID>,
+    items: &[T],
+    id_fn: FId,
+    label_fn: FLabel,
+    search_query: &mut String,
+) -> bool
+where
+    ID: Clone + Eq + PartialEq + ToString,
+    FId: Fn(&T) -> ID,
+    FLabel: Fn(&T) -> String,
+{
+    let mut changed = false;
+
+    let selected_text = if let Some(sid) = selected.as_ref() {
+        if let Some(item) = items.iter().find(|i| id_fn(i) == *sid) {
+            label_fn(item)
+        } else {
+            "Unknown".to_string()
+        }
+    } else {
+        "None".to_string()
+    };
+
+    egui::ComboBox::from_id_salt(id_salt)
+        .selected_text(selected_text)
+        .show_ui(ui, |ui| {
+            // Search input
+            ui.horizontal(|ui| {
+                ui.label("Search:");
+                ui.add(egui::TextEdit::singleline(search_query).desired_width(240.0));
+            });
+
+            // None -> clear selection
+            if ui.selectable_label(selected.is_none(), "None").clicked() {
+                *selected = None;
+                changed = true;
+            }
+
+            // Filter and show items
+            for idx in filter_items_by_query(items, search_query, &label_fn) {
+                let item = &items[idx];
+                let id = id_fn(item);
+                let label = label_fn(item);
+                let is_selected = selected.as_ref().map(|s| s == &id).unwrap_or(false);
+                if ui.selectable_label(is_selected, label).clicked() {
+                    *selected = Some(id.clone());
+                    changed = true;
+                }
+            }
+        });
+
+    changed
+}
+
+/// Searchable multi-selection widget with chips + add/remove.
+///
+/// - `selected`: `Vec<ID>` storing the current selection
+/// - `items`, `id_fn`, and `label_fn` match the behavior in `searchable_selector_single`
+/// - `search_query`: search term to filter available items
+///
+/// The widget displays chips for selected items with a small remove control,
+/// and a searchable combobox to add additional items that match the query (case-insensitive).
+/// When no items are selected, a friendly 'None' indicator is shown.
+///
+/// Returns `true` if the selection changed (item added or removed).
+pub fn searchable_selector_multi<T, ID, FId, FLabel>(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    selected: &mut Vec<ID>,
+    items: &[T],
+    id_fn: FId,
+    label_fn: FLabel,
+    search_query: &mut String,
+) -> bool
+where
+    ID: Clone + Eq + PartialEq + ToString,
+    FId: Fn(&T) -> ID,
+    FLabel: Fn(&T) -> String,
+{
+    let mut changed = false;
+
+    // Render chips for selected items with a small remove button
+    ui.horizontal_wrapped(|ui| {
+        let mut remove_index: Option<usize> = None;
+        for (i, id) in selected.iter().enumerate() {
+            let id_clone = id.clone();
+            let label = if let Some(it) = items.iter().find(|it| id_fn(it) == id_clone) {
+                label_fn(it)
+            } else {
+                id_clone.to_string()
+            };
+            ui.horizontal(|ui| {
+                ui.label(label);
+                if ui.small_button("x").on_hover_text("Remove").clicked() {
+                    remove_index = Some(i);
+                }
+            });
+        }
+        if let Some(idx) = remove_index {
+            selected.remove(idx);
+            changed = true;
+        }
+    });
+
+    // ComboBox to discover and add more items
+    let display_text = if selected.is_empty() {
+        "None".to_string()
+    } else {
+        let labels: Vec<String> = selected
+            .iter()
+            .map(|id| {
+                if let Some(it) = items.iter().find(|it| id_fn(it) == *id) {
+                    label_fn(it)
+                } else {
+                    id.to_string()
+                }
+            })
+            .collect();
+        labels.join(", ")
+    };
+
+    egui::ComboBox::from_id_salt(id_salt)
+        .selected_text(display_text)
+        .show_ui(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Search:");
+                ui.add(egui::TextEdit::singleline(search_query).desired_width(240.0));
+            });
+
+            for idx in filter_items_by_query(items, search_query, &label_fn) {
+                let item = &items[idx];
+                let id = id_fn(item);
+                let label = label_fn(item);
+                let is_already_selected = selected.iter().any(|s| s == &id);
+                if ui
+                    .selectable_label(!is_already_selected, label.clone())
+                    .clicked()
+                {
+                    if !is_already_selected {
+                        selected.push(id.clone());
+                        changed = true;
+                    }
+                }
+            }
+        });
+
+    changed
 }
 
 #[cfg(test)]

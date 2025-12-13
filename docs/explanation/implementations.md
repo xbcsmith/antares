@@ -309,6 +309,114 @@ All editors use consistent button labels with emojis:
 
 ## Phase 1: Foundation — Extraction & Module Setup (2025-xx-xx)
 
+## Phase 1: CSV-to-Vec Migration (2025-01-13)
+
+**Status:** ✅ COMPLETED | **Type:** Discovery & Inventory | **Files Created:** `docs/explanation/csv_migration_inventory.md`, `docs/explanation/combobox_inventory.md`, `docs/explanation/csv_migration_checklist.md`
+
+**Objective:** Identify all CSV-encoded fields and all `egui::ComboBox` uses in the SDK's campaign builder so we can plan a safe, staged migration from comma-separated string edit buffers to strongly-typed vectors (`Vec<ItemId>`, `Vec<MonsterId>`, `Vec<String>`, etc.) and unify selection UX by replacing ad-hoc `ComboBox` implementations with `searchable_selector_*` UI helpers.
+
+### Summary of Work Completed (Phase 1)
+
+- Performed a repository-wide discovery focused on `sdk/campaign_builder/src/` and relevant CLI editors in `antares/src/bin/`.
+- Generated inventories and a prioritized checklist capturing the CSV fields and ComboBox usage:
+  - `docs/explanation/csv_migration_inventory.md` — CSV fields and parsing usage (split/join) with suggested target types and priorities.
+  - `docs/explanation/combobox_inventory.md` — `ComboBox` usage with context, replacement suggestions (single/multi), and priority.
+  - `docs/explanation/csv_migration_checklist.md` — Prioritized, actionable checklist that outlines Phase 2 → Phase 6 tasks with owners and test plans.
+
+### Key Findings (Representative, not exhaustive)
+
+- High-priority CSV fields (affect core editors):
+
+  - `sdk/campaign_builder/src/map_editor.rs`
+    - `EventEditorState.encounter_monsters` (String CSV) → `Vec<MonsterId>` (HIGH)
+    - `EventEditorState.treasure_items` (String CSV) → `Vec<ItemId>` (HIGH)
+  - `sdk/campaign_builder/src/characters_editor.rs`
+    - `CharacterEditBuffer.starting_items` (String CSV) → `Vec<ItemId>` (HIGH)
+
+- Medium-priority CSV fields:
+
+  - `sdk/campaign_builder/src/classes_editor.rs`
+    - `ClassEditBuffer.special_abilities` (String CSV) → `Vec<String>` (MEDIUM)
+    - `ClassEditBuffer.proficiencies` (String CSV) → `Vec<String>` (MEDIUM)
+  - `sdk/campaign_builder/src/races_editor.rs`
+    - `RaceEditBuffer.special_abilities`, `proficiencies`, `incompatible_item_tags` (String CSV) → `Vec<String>` (MEDIUM)
+
+- Low-priority / already typed (UI-only):
+
+  - `sdk/campaign_builder/src/items_editor.rs` — `Item.tags` is already `Vec<String>` but the UI uses `tags_string` for editing; replace with `searchable_selector_multi` (LOW).
+
+- ComboBox replacements: Most `egui::ComboBox` usages are single-select and are good candidates for `searchable_selector_single`. Some filters and enum selectors would be replaced for consistency.
+
+### Deliverables
+
+- CSV inventory and ComboBox inventory documents created under `docs/explanation/`.
+- Prioritized refactor checklist created and merged into the migration plan.
+- Recommendations for Phase 2 (UI Helper Foundation) and Phase 3 (Core Editor Conversions) prepared and documented in the checklist.
+
+### Next Steps (Phase 2 → Phase 3)
+
+- Phase 2 (UI Helper Foundation) — COMPLETED:
+
+  - Implemented `searchable_selector_single<T, ID>` and `searchable_selector_multi<T, ID>` in `sdk/campaign_builder/src/ui_helpers.rs`. These provide a unified, searchable, and keyboard-friendly selection UI:
+
+    - `searchable_selector_single` supports a case-insensitive search field, a `None` option to clear selection, and accepts `id_fn` / `label_fn` to map items to IDs and display labels.
+    - `searchable_selector_multi` supports chips for selected items (with remove controls) and a searchable list to add/remove items. It ensures no duplicate selection and uses the same mapping functions.
+
+  - Implemented CSV helper functions to smooth the migration:
+
+    - `parse_id_csv_to_vec<T>(csv: &str) -> Result<Vec<T>, CsvParseError>`:
+      - Generic `FromStr`-based parser that trims whitespace, ignores empty tokens, and returns a clear `CsvParseError` when tokens fail to parse.
+    - `format_vec_to_csv<T>(values: &[T]) -> String`:
+      - Serializes a slice into a human-friendly CSV string using `", "` as the separator.
+    - `filter_items_by_query<T, F>(items: &[T], query: &str, label_fn: &F) -> Vec<usize>`:
+      - A pure helper function used by the UI selectors to perform case-insensitive filtering returning indices of matched items.
+
+  - Tests added to `sdk/campaign_builder/src/ui_helpers.rs`:
+
+    - `test_parse_id_csv_to_vec_simple`
+    - `test_parse_id_csv_to_vec_empty`
+    - `test_parse_id_csv_to_vec_whitespace`
+    - `test_parse_id_csv_to_vec_invalid`
+    - `test_format_vec_to_csv_simple`
+    - `test_format_vec_to_csv_empty`
+    - `test_filter_items_by_query`
+    - `test_searchable_selector_single_renders` (ensures UI rendering + initial state)
+    - `test_searchable_selector_multi_renders` (ensures UI rendering + initial state)
+    - Notes: Filtering logic is verified directly via `filter_items_by_query` (pure function), and UI rendering tests are included to confirm widgets render without panics (UI interactions such as clicks/keyboard navigation will be covered later when the selector is integrated into editors).
+
+  - Implementation details:
+
+    - `searchable_selector_*` accept `id_salt` for unique control IDs, `id_fn` and `label_fn` closures for mapping, and a `&mut String` `search_query` parameter which the caller can persist between frames.
+    - `parse_id_csv_to_vec` reports invalid tokens with human-friendly error messages to aid debugging during editor conversions.
+
+  - Next steps (Phase 3):
+    - Convert high-priority editors using these helpers:
+      - Map editor: convert `EventEditorState.encounter_monsters` and `EventEditorState.treasure_items` from CSV `String` to typed `Vec<MonsterId>` and `Vec<ItemId>` and replace the CSV inputs with `searchable_selector_multi`.
+      - Characters editor: convert `CharacterEditBuffer.starting_items` to `Vec<ItemId>` and replace UI with `searchable_selector_multi` (preserving quick-add-by-ID semantics as needed).
+    - Add integration tests to verify round-trip persistence (editor buffer → domain model → save → load → editor buffer) and maintain RON compatibility where required.
+
+- Phase 3 (Core Editor Conversions; high priority):
+  - Convert `EventEditorState` fields and `CharacterEditBuffer.starting_items` to typed vectors; update UI to use searchable selectors; update defaults and `to_*` conversions; add tests and ensure roundtrip persistence.
+
+### Testing & Validation (Phase 1)
+
+- The Phase 1 deliverables are primarily documentation; the validation for Phase 1 is:
+  - Inventory files exist at: `docs/explanation/csv_migration_inventory.md`, `docs/explanation/combobox_inventory.md`, `docs/explanation/csv_migration_checklist.md`.
+  - Basic grep-based validation commands documented in the migration plan confirm we captured CSV and ComboBox occurrences.
+
+### Notes & Caveats
+
+- Phase 1 included no code changes that affect domain structures. This is an inventory and planning phase only.
+- Many domain types are already using typed vectors; editor buffers are the primary targets for migration.
+- Backwards compatibility of RON files is a policy decision to be addressed as Phase 5 when needed. For the immediate migration tasks, we plan to maintain compatibility with existing RON files where feasible.
+- CLI editor utilities (`antares/src/bin`) were inventoried and classified as low priority; these should be updated in subsequent phases.
+
+**Reference**: For detailed entries, per-editor notes, and the precise grep hits from discovery, see the generated inventory documents:
+
+- `docs/explanation/csv_migration_inventory.md`
+- `docs/explanation/combobox_inventory.md`
+- `docs/explanation/csv_migration_checklist.md`
+
 **Status:** ✅ COMPLETED | **Type:** Feature Extraction + Module Setup | **Files:** 2 added/modified
 
 **Objective:** Create a dedicated campaign metadata editor module that extracts metadata UI and logic from `main.rs` into a single-responsibility module `sdk/campaign_builder/src/campaign_editor.rs`, add a `CampaignMetadataEditorState` (edit buffer + state), and wire it into the `CampaignBuilderApp` to allow a clean editing flow, tests, and a foundation for further UI and validation work.

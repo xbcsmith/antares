@@ -68,7 +68,7 @@ system rules:
 - ONLY write the plan, without unnecessary preamble or postamble
   </plan_style_guide>
 
-Write an phased approach implementation plan for implementing 1-5 in your list
+Write an phased approach implementation plan for implementing phases in your list
 of recommended implementation order. Write the plan to docs/explanations.
 
 ## Implementation Plan

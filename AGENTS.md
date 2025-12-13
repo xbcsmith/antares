@@ -422,6 +422,7 @@ Architecture defines many constants:
    }
    ````
 
+
 2. **Write Tests (MANDATORY)**
 
    ```rust
@@ -512,6 +513,8 @@ All four cargo commands MUST pass:
 ---
 
 ## Rust Coding Standards
+
+In Rust: 1000 lines is overkill. Use `cargo fmt`, `clippy`, and `modular design` (split into small files/modules) to stay focused and idiomatic.
 
 ### Error Handling (MANDATORY PATTERNS)
 
