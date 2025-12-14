@@ -4411,8 +4411,8 @@
             x: 3,
             y: 11,
         ): Encounter(
-            name: "",
-            description: "",
+            name: "Forest Ambush",
+            description: "A hidden ambush by hostile creatures in the forest.",
             monster_group: [
                 6,
                 5,
@@ -4422,8 +4422,8 @@
             x: 5,
             y: 3,
         ): Encounter(
-            name: "",
-            description: "",
+            name: "Bandit Patrol",
+            description: "A small band of foes patrolling this area.",
             monster_group: [
                 4,
                 4,
@@ -4433,8 +4433,8 @@
             x: 16,
             y: 2,
         ): Treasure(
-            name: "",
-            description: "",
+            name: "Hidden Supplies",
+            description: "A stash of supplies tucked away among the rocks.",
             loot: [
                 14,
                 24,
@@ -4444,8 +4444,8 @@
             x: 19,
             y: 10,
         ): Teleport(
-            name: "",
-            description: "",
+            name: "Mountain Portal",
+            description: "A portal that teleports the party to Fizban's Cave (map 2) at (19,17).",
             destination: (
                 x: 19,
                 y: 17,
@@ -4456,16 +4456,16 @@
             x: 10,
             y: 18,
         ): Sign(
-            name: "",
-            description: "",
+            name: "Mountain Pass Sign",
+            description: "A wooden sign indicating the way to the mountain pass.",
             text: "To the Mountain Pass",
         ),
         (
             x: 10,
             y: 19,
         ): Teleport(
-            name: "",
-            description: "",
+            name: "Pass Gate",
+            description: "A gate that transports the party to Mountain Pass (map 5) at (19,6).",
             destination: (
                 x: 19,
                 y: 6,
@@ -4476,16 +4476,16 @@
             x: 0,
             y: 10,
         ): Sign(
-            name: "",
-            description: "",
+            name: "Town Exit Sign",
+            description: "A sign directing travelers to the town exit.",
             text: "Exit to town.",
         ),
         (
             x: 7,
             y: 17,
         ): Trap(
-            name: "",
-            description: "",
+            name: "Hidden Pit Trap",
+            description: "A concealed pit trap that deals heavy damage when sprung.",
             damage: 8,
             effect: None,
         ),
@@ -4493,16 +4493,16 @@
             x: 18,
             y: 10,
         ): Sign(
-            name: "",
-            description: "",
+            name: "Wizard's Cave Sign",
+            description: "A sign pointing the way to the Wizard's Cave.",
             text: "To the Wizard\'s Cave",
         ),
         (
             x: 8,
             y: 8,
         ): Treasure(
-            name: "",
-            description: "",
+            name: "Buried Chest",
+            description: "A chest buried and hidden here containing useful items.",
             loot: [
                 13,
                 23,
@@ -4513,8 +4513,8 @@
             x: 12,
             y: 0,
         ): Teleport(
-            name: "",
-            description: "",
+            name: "Ancient Portal",
+            description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (0,7).",
             destination: (
                 x: 0,
                 y: 7,
@@ -4525,8 +4525,8 @@
             x: 17,
             y: 16,
         ): Encounter(
-            name: "",
-            description: "",
+            name: "Bandit Patrol",
+            description: "A patrol of bandits looking for easy victims.",
             monster_group: [
                 6,
                 6,
@@ -4536,8 +4536,8 @@
             x: 14,
             y: 4,
         ): Encounter(
-            name: "",
-            description: "",
+            name: "Hungry Wolves",
+            description: "A pack of wolves that hunts together in this region.",
             monster_group: [
                 5,
                 4,
@@ -4547,8 +4547,8 @@
             x: 10,
             y: 13,
         ): Treasure(
-            name: "",
-            description: "",
+            name: "Large Treasure Chest",
+            description: "A large and ornate chest containing valuable loot.",
             loot: [
                 15,
                 25,
@@ -4560,8 +4560,8 @@
             x: 12,
             y: 1,
         ): Sign(
-            name: "",
-            description: "",
+            name: "Ruins Direction Sign",
+            description: "A sign pointing the way to the Ancient Ruins.",
             text: "To Ancient Ruins",
         ),
     },
@@ -4569,7 +4569,7 @@
         (
             id: 5,
             name: "Lost Ranger",
-            description: "",
+            description: "A ranger who has lost his way and seeks guidance.",
             position: (
                 x: 2,
                 y: 2,

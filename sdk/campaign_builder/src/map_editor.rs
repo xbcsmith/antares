@@ -916,8 +916,10 @@ impl EventEditorState {
     /// assert_eq!(editor.event_type, EventType::Sign);
     /// ```
     pub fn from_map_event(position: Position, event: &MapEvent) -> Self {
-        let mut s = EventEditorState::default();
-        s.position = position;
+        let mut s = EventEditorState {
+            position,
+            ..Default::default()
+        };
         match event {
             MapEvent::Encounter {
                 name,
@@ -1206,7 +1208,12 @@ impl<'a> Widget for MapGridWidget<'a> {
                             self.state.erase_tile(pos);
                         }
                         EditorTool::PlaceEvent => {
-                            if self.state.event_editor.is_none() {
+                            // If there's already an event at this tile, load it into the editor
+                            // so the user can edit the existing event instead of only creating new ones.
+                            if let Some(ev) = self.state.map.get_event(pos).cloned() {
+                                self.state.event_editor =
+                                    Some(EventEditorState::from_map_event(pos, &ev));
+                            } else if self.state.event_editor.is_none() {
                                 self.state.event_editor = Some(EventEditorState {
                                     position: pos,
                                     ..Default::default()
@@ -2722,25 +2729,60 @@ impl MapsEditorState {
 
             ui.separator();
 
+            // Determine whether we are adding a new event or editing an existing one.
             let mut add_event = false;
+            let mut replace_event = false;
+            let mut remove_event_flag = false;
             let mut event_to_add: Option<MapEvent> = None;
-            let mut event_pos = Position::new(0, 0);
+            // Capture the position immediately so we do not hold the borrow on the editor while applying.
+            let event_pos = event_editor.position;
 
-            if ui.button("➕ Add Event").clicked() {
-                match event_editor.to_map_event() {
-                    Ok(event) => {
-                        event_pos = event_editor.position;
-                        event_to_add = Some(event);
-                        add_event = true;
+            // If there's an existing event at this position, show Save / Remove controls.
+            let existing_event = editor.map.get_event(event_pos).cloned();
+            if existing_event.is_some() {
+                if ui.button("💾 Save Changes").clicked() {
+                    match event_editor.to_map_event() {
+                        Ok(event) => {
+                            event_to_add = Some(event);
+                            replace_event = true;
+                        }
+                        Err(err) => {
+                            ui.label(format!("Error: {}", err));
+                        }
                     }
-                    Err(err) => {
-                        ui.label(format!("Error: {}", err));
+                }
+
+                if ui.button("🗑 Remove Event").clicked() {
+                    remove_event_flag = true;
+                }
+            } else {
+                // No existing event -> offer Add
+                if ui.button("➕ Add Event").clicked() {
+                    match event_editor.to_map_event() {
+                        Ok(event) => {
+                            event_to_add = Some(event);
+                            add_event = true;
+                        }
+                        Err(err) => {
+                            ui.label(format!("Error: {}", err));
+                        }
                     }
                 }
             }
 
-            // Apply after borrow ends
-            if add_event {
+            // Apply after borrow ends (mutating the map/editor)
+            if remove_event_flag {
+                editor.remove_event(event_pos);
+                editor.event_editor = None;
+            } else if replace_event {
+                if let Some(event) = event_to_add {
+                    // Replace the event in-place (preserve tile.event_trigger id).
+                    // This keeps the edit workflow simple and immediate for users.
+                    editor.map.add_event(event_pos, event);
+                    editor.has_changes = true;
+                    editor.event_editor = None;
+                }
+            } else if add_event {
                 if let Some(event) = event_to_add {
                     editor.add_event(event_pos, event);
                     editor.event_editor = None;
@@ -3734,6 +3776,61 @@ mod tests {
 
         state.event_editor = Some(EventEditorState::default());
         assert!(state.show_event_editor_ui());
+    }
+
+    #[test]
+    fn test_event_editor_state_from_map_event() {
+        let pos = Position::new(4, 4);
+        let event = MapEvent::Sign {
+            name: "Inn Sign".to_string(),
+            description: "Welcome".to_string(),
+            text: "Welcome to town".to_string(),
+        };
+
+        let editor = EventEditorState::from_map_event(pos, &event);
+        assert_eq!(editor.position, pos);
+        assert_eq!(editor.event_type, EventType::Sign);
+        assert_eq!(editor.sign_text, "Welcome to town");
+        assert_eq!(editor.name, "Inn Sign");
+    }
+
+    #[test]
+    fn test_edit_event_replaces_existing_event() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let pos = Position::new(5, 5);
+        let original = MapEvent::Sign {
+            name: "Sign".to_string(),
+            description: "Desc".to_string(),
+            text: "Original".to_string(),
+        };
+
+        // Add the original event (this assigns an event id on the tile)
+        state.add_event(pos, original.clone());
+        let assigned_id = state.map.get_tile(pos).unwrap().event_trigger.unwrap();
+
+        // Create editor from the existing event and change a field
+        let mut editor = EventEditorState::from_map_event(pos, state.map.get_event(pos).unwrap());
+        editor.name = "New Sign".to_string();
+        editor.sign_text = "Changed".to_string();
+        let new_event = editor.to_map_event().expect("valid event");
+
+        // Simulate the Save Changes path: replace in-place (preserve tile.event_trigger id)
+        state.map.add_event(pos, new_event);
+        state.has_changes = true;
+
+        // Verify updated event (by pattern matching its variant) and that the event id is preserved
+        if let MapEvent::Sign { name, text, .. } = state.map.get_event(pos).unwrap() {
+            assert_eq!(name, "New Sign");
+            assert_eq!(text, "Changed");
+        } else {
+            panic!("Expected Sign event");
+        }
+
+        assert_eq!(
+            state.map.get_tile(pos).unwrap().event_trigger,
+            Some(assigned_id)
+        );
     }
 
     #[test]

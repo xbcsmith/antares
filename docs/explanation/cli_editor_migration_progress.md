@@ -1,6 +1,6 @@
 # CLI Editor Migration — Progress Report
 
-Document path: `antares/docs/explanation/cli_editor_migration_progress.md`  
+Document path: `antares/docs/explanation/cli_editor_migration_progress.md`
 Purpose: Track CLI-specific tasks and progress for the CSV → Vec migration. This file documents what has been done, outstanding tasks, QA steps, and next actions required to complete the migration for CLI editors.
 
 ---

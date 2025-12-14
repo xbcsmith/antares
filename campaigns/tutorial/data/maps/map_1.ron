@@ -4411,8 +4411,8 @@
             x: 18,
             y: 18,
         ): Teleport(
-            name: "",
-            description: "",
+            name: "Town Exit Teleport",
+            description: "A teleport pad that transports the party to Dark Forrest (map 4) at (0,10).",
             destination: (
                 x: 0,
                 y: 10,
@@ -4423,32 +4423,32 @@
             x: 5,
             y: 4,
         ): Sign(
-            name: "",
-            description: "",
+            name: "Inn Sign",
+            description: "A sign outside the inn welcoming travelers and adventurers.",
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
         (
             x: 5,
             y: 10,
         ): Sign(
-            name: "",
-            description: "",
+            name: "General Store Sign",
+            description: "A sign advertising the general store's wares and services.",
             text: "General Store - Buy and Sell items for your party!",
         ),
         (
             x: 13,
             y: 3,
         ): Sign(
-            name: "",
-            description: "",
+            name: "Temple Sign",
+            description: "A notice outside the temple detailing its services.",
             text: "Temple of Healing - The priests can restore your health.",
         ),
         (
             x: 13,
             y: 18,
         ): Sign(
-            name: "",
-            description: "",
+            name: "Directional Sign",
+            description: "A wooden sign pointing toward the Dark Forrest.",
             text: "To the Dark Forrest",
         ),
     },
@@ -4456,7 +4456,7 @@
         (
             id: 1,
             name: "Village Elder",
-            description: "",
+            description: "The wise elder of the village who can provide quests and local lore.",
             position: (
                 x: 1,
                 y: 16,
@@ -4466,7 +4466,7 @@
         (
             id: 2,
             name: "InnKeeper",
-            description: "",
+            description: "The proprietor of the Cozy Inn who offers rooms and warm meals to travelers.",
             position: (
                 x: 1,
                 y: 3,
@@ -4476,7 +4476,7 @@
         (
             id: 3,
             name: "Merchant",
-            description: "",
+            description: "A traveling merchant offering goods and supplies to adventurers.",
             position: (
                 x: 1,
                 y: 9,
@@ -4485,8 +4485,8 @@
         ),
         (
             id: 4,
-            name: "High Preistess",
-            description: "",
+            name: "High Priestess",
+            description: "The head priestess of the temple who provides healing and blessings to the townsfolk.",
             position: (
                 x: 18,
                 y: 4,
