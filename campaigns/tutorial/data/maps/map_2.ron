@@ -4408,21 +4408,15 @@
     ],
     events: {
         (
-            x: 9,
-            y: 7,
-        ): Sign(
-            name: "Cave Entrance Sign",
-            description: "Sign marking the entrance to the Cave of Fizban.",
-            text: "The Cave of Fizban!",
-        ),
-        (
             x: 2,
             y: 2,
         ): Encounter(
             name: "Kobold Ambush",
             description: "A group of kobolds jump out to attack!",
             monster_group: [
-                2,2,2
+                2,
+                2,
+                2,
             ],
         ),
         (
@@ -4436,6 +4430,14 @@
                 y: 10,
             ),
             map_id: 4,
+        ),
+        (
+            x: 9,
+            y: 7,
+        ): Sign(
+            name: "Cave Entrance Sign",
+            description: "Sign marking the entrance to the Cave of Fizban.",
+            text: "The Cave of Fizban!",
         ),
     },
     npcs: [

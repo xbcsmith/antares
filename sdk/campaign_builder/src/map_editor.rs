@@ -2372,6 +2372,16 @@ impl MapsEditorState {
                 if let Some(event) = editor.map.get_event(pos) {
                     ui.separator();
                     ui.label("Event:");
+
+                    // Show Name and Description when present
+                    let (name, description) = Self::event_name_description(event);
+                    if !name.is_empty() {
+                        ui.label(format!("Name: {}", name));
+                    }
+                    if !description.is_empty() {
+                        ui.label(format!("Description: {}", description));
+                    }
+
                     match event {
                         MapEvent::Encounter { monster_group, .. } => {
                             ui.label(format!("Encounter: {:?}", monster_group));
@@ -2448,6 +2458,30 @@ impl MapsEditorState {
                     ui.label(error);
                 }
             });
+        }
+    }
+
+    /// Helper: extract name and description from any MapEvent variant
+    fn event_name_description(event: &MapEvent) -> (String, String) {
+        match event {
+            MapEvent::Encounter {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::Treasure {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::Teleport {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::Trap {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::Sign {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::NpcDialogue {
+                name, description, ..
+            } => (name.clone(), description.clone()),
         }
     }
 
@@ -3792,6 +3826,50 @@ mod tests {
         assert_eq!(editor.event_type, EventType::Sign);
         assert_eq!(editor.sign_text, "Welcome to town");
         assert_eq!(editor.name, "Inn Sign");
+    }
+
+    #[test]
+    fn test_event_name_description_helper() {
+        let event = MapEvent::Teleport {
+            name: "PortalName".to_string(),
+            description: "PortalDesc".to_string(),
+            destination: Position::new(1, 2),
+            map_id: 4,
+        };
+
+        let (name, description) = MapsEditorState::event_name_description(&event);
+        assert_eq!(name, "PortalName");
+        assert_eq!(description, "PortalDesc");
+    }
+
+    #[test]
+    fn test_inspector_panel_runs_with_event() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let pos = Position::new(2, 3);
+        let event = MapEvent::Sign {
+            name: "Inn Sign".to_string(),
+            description: "Welcome".to_string(),
+            text: "Welcome to town".to_string(),
+        };
+        state.add_event_at_position(pos.x, pos.y, event);
+        state.selected_position = Some(pos);
+
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(400.0, 300.0),
+        ));
+        ctx.begin_pass(raw_input);
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            // Should render the inspector without panicking (and include name/description)
+            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[]);
+        });
+
+        // Verify selection was preserved and the inspector invocation completed
+        assert_eq!(state.selected_position, Some(pos));
     }
 
     #[test]

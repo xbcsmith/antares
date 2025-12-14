@@ -24,6 +24,15 @@ Plans describe steps for the USER or another agent to execute later.
 <workflow>
 Comprehensive context gathering for planning following <plan_research>:
 
+## AI-Optimized Implementation Standards
+
+- Use explicit, unambiguous language with zero interpretation required
+- Structure all content as machine-parseable formats (tables, lists, structured data)
+- Include specific file paths, line numbers, and exact code references where applicable
+- Define all variables, constants, and configuration values explicitly
+- Provide complete context within each task description
+- Include validation criteria that can be automatically verified
+
 ## 1. Present a concise plan to the user for iteration
 
 1. Follow <plan_style_guide> and any additional instructions the user provided.

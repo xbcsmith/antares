@@ -2093,7 +2093,7 @@
             visited: false,
             x: 9,
             y: 9,
-            event_trigger: None,
+            event_trigger: Some(1),
         ),
         (
             terrain: Water,
@@ -4428,14 +4428,6 @@
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
         (
-            x: 5,
-            y: 10,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store's wares and services.",
-            text: "General Store - Buy and Sell items for your party!",
-        ),
-        (
             x: 13,
             y: 3,
         ): Sign(
@@ -4444,12 +4436,29 @@
             text: "Temple of Healing - The priests can restore your health.",
         ),
         (
+            x: 5,
+            y: 10,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store\'s wares and services.",
+            text: "General Store - Buy and Sell items for your party!",
+        ),
+        (
             x: 13,
             y: 18,
         ): Sign(
             name: "Directional Sign",
             description: "A wooden sign pointing toward the Dark Forrest.",
             text: "To the Dark Forrest",
+        ),
+        (
+            x: 9,
+            y: 9,
+        ): Trap(
+            name: "Water Trap",
+            description: "A trap in the town square fountain",
+            damage: 10,
+            effect: Some("Poison"),
         ),
     },
     npcs: [

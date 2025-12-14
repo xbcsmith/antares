@@ -160,6 +160,18 @@ All editors use consistent button labels with emojis:
 - All modified RON files remain valid and consistent.
 - `cargo check`, `cargo clippy` and the `campaign_builder` test suite were run locally and passed after the changes.
 
+## UI: Map Editor Inspector Shows Event Name & Description (2025-12-14)
+
+**Status:** ✅ COMPLETED | **Type:** UX / Data Hygiene | **Files modified:**
+
+- `sdk/campaign_builder/src/map_editor.rs` — the inspector panel now displays `Name` and `Description` lines for selected events in the left column preview. A small helper `event_name_description` was added and unit tests were included to validate the helper and exercise the inspector code path.
+
+**Summary:** When selecting a tile that contains an event, the left-column Inspector panel now shows the event `Name` and `Description` (when present) above the variant-specific details (e.g., "Teleport to map 4 at (x,y)"). This improves discoverability for level designers and reduces back-and-forth to inspect event payloads in the map data.
+
+**Verification:**
+
+- Unit tests added: `test_event_name_description_helper`, `test_inspector_panel_runs_with_event` in `sdk/campaign_builder/src/map_editor.rs` which exercise the new helper and ensure the inspector UI path runs without panicking.
+
 **3. Accessibility**
 
 - Keyboard navigation improves accessibility

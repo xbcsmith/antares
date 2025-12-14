@@ -4408,6 +4408,14 @@
     ],
     events: {
         (
+            x: 18,
+            y: 10,
+        ): Sign(
+            name: "Wizard\'s Cave Sign",
+            description: "A sign pointing the way to the Wizard\'s Cave.",
+            text: "To the Wizard\'s Cave",
+        ),
+        (
             x: 3,
             y: 11,
         ): Encounter(
@@ -4419,15 +4427,35 @@
             ],
         ),
         (
-            x: 5,
-            y: 3,
+            x: 8,
+            y: 8,
+        ): Treasure(
+            name: "Buried Chest",
+            description: "A chest buried and hidden here containing useful items.",
+            loot: [
+                13,
+                23,
+                32,
+            ],
+        ),
+        (
+            x: 17,
+            y: 16,
         ): Encounter(
             name: "Bandit Patrol",
-            description: "A small band of foes patrolling this area.",
+            description: "A patrol of bandits looking for easy victims.",
             monster_group: [
-                4,
-                4,
+                6,
+                6,
             ],
+        ),
+        (
+            x: 0,
+            y: 10,
+        ): Sign(
+            name: "Town Exit Sign",
+            description: "A sign directing travelers to the town exit.",
+            text: "Exit to town.",
         ),
         (
             x: 16,
@@ -4445,69 +4473,12 @@
             y: 10,
         ): Teleport(
             name: "Mountain Portal",
-            description: "A portal that teleports the party to Fizban's Cave (map 2) at (19,17).",
+            description: "A portal that teleports the party to Fizban\'s Cave (map 2) at (19,17).",
             destination: (
                 x: 19,
                 y: 17,
             ),
             map_id: 2,
-        ),
-        (
-            x: 10,
-            y: 18,
-        ): Sign(
-            name: "Mountain Pass Sign",
-            description: "A wooden sign indicating the way to the mountain pass.",
-            text: "To the Mountain Pass",
-        ),
-        (
-            x: 10,
-            y: 19,
-        ): Teleport(
-            name: "Pass Gate",
-            description: "A gate that transports the party to Mountain Pass (map 5) at (19,6).",
-            destination: (
-                x: 19,
-                y: 6,
-            ),
-            map_id: 5,
-        ),
-        (
-            x: 0,
-            y: 10,
-        ): Sign(
-            name: "Town Exit Sign",
-            description: "A sign directing travelers to the town exit.",
-            text: "Exit to town.",
-        ),
-        (
-            x: 7,
-            y: 17,
-        ): Trap(
-            name: "Hidden Pit Trap",
-            description: "A concealed pit trap that deals heavy damage when sprung.",
-            damage: 8,
-            effect: None,
-        ),
-        (
-            x: 18,
-            y: 10,
-        ): Sign(
-            name: "Wizard's Cave Sign",
-            description: "A sign pointing the way to the Wizard's Cave.",
-            text: "To the Wizard\'s Cave",
-        ),
-        (
-            x: 8,
-            y: 8,
-        ): Treasure(
-            name: "Buried Chest",
-            description: "A chest buried and hidden here containing useful items.",
-            loot: [
-                13,
-                23,
-                32,
-            ],
         ),
         (
             x: 12,
@@ -4522,14 +4493,39 @@
             map_id: 3,
         ),
         (
-            x: 17,
-            y: 16,
+            x: 7,
+            y: 17,
+        ): Trap(
+            name: "Hidden Pit Trap",
+            description: "A concealed pit trap that deals heavy damage when sprung.",
+            damage: 8,
+            effect: None,
+        ),
+        (
+            x: 10,
+            y: 18,
+        ): Sign(
+            name: "Mountain Pass Sign",
+            description: "A wooden sign indicating the way to the mountain pass.",
+            text: "To the Mountain Pass",
+        ),
+        (
+            x: 12,
+            y: 1,
+        ): Sign(
+            name: "Ruins Direction Sign",
+            description: "A sign pointing the way to the Ancient Ruins.",
+            text: "To Ancient Ruins",
+        ),
+        (
+            x: 5,
+            y: 3,
         ): Encounter(
             name: "Bandit Patrol",
-            description: "A patrol of bandits looking for easy victims.",
+            description: "A small band of foes patrolling this area.",
             monster_group: [
-                6,
-                6,
+                4,
+                4,
             ],
         ),
         (
@@ -4557,12 +4553,16 @@
             ],
         ),
         (
-            x: 12,
-            y: 1,
-        ): Sign(
-            name: "Ruins Direction Sign",
-            description: "A sign pointing the way to the Ancient Ruins.",
-            text: "To Ancient Ruins",
+            x: 10,
+            y: 19,
+        ): Teleport(
+            name: "Pass Gate",
+            description: "A gate that transports the party to Mountain Pass (map 5) at (19,6).",
+            destination: (
+                x: 19,
+                y: 6,
+            ),
+            map_id: 5,
         ),
     },
     npcs: [

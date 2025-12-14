@@ -1,4 +1,4 @@
-(
+CampaignMetadata(
     id: "42",
     name: "Tutorial",
     version: "1.0.0",
