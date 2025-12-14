@@ -364,6 +364,7 @@ impl ItemsEditorState {
     }
 
     #[allow(deprecated)]
+    #[allow(clippy::too_many_arguments)]
     fn show_list(
         &mut self,
         ui: &mut egui::Ui,
@@ -753,6 +754,7 @@ impl ItemsEditorState {
         self.show_import_dialog = open;
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_form(
         &mut self,
         ui: &mut egui::Ui,
@@ -937,7 +939,7 @@ impl ItemsEditorState {
                     ui.heading("Item Tags");
 
                     // Build a unique list of tags from all items as suggestions
-                    let mut tags_list: Vec<String> = {
+                    let tags_list: Vec<String> = {
                         let mut set = HashSet::new();
                         let mut list = Vec::new();
                         for it in items.iter() {

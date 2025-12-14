@@ -888,11 +888,9 @@ impl ClassesEditorState {
                                         .retain(|p| p != &prof_id.to_string());
                                     self.has_unsaved_changes = true;
                                 }
-                            } else {
-                                if ui.small_button(label).clicked() {
-                                    self.buffer.proficiencies.push(prof_id.to_string());
-                                    self.has_unsaved_changes = true;
-                                }
+                            } else if ui.small_button(label).clicked() {
+                                self.buffer.proficiencies.push(prof_id.to_string());
+                                self.has_unsaved_changes = true;
                             }
                         }
                     });
@@ -917,7 +915,7 @@ impl ClassesEditorState {
 
                 ui.group(|ui| {
                     // Build suggestion list from existing classes (dedupe)
-                    let mut abilities_list: Vec<String> = {
+                    let abilities_list: Vec<String> = {
                         let mut set = std::collections::HashSet::new();
                         let mut list = Vec::new();
                         for c in &self.classes {

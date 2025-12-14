@@ -1,11 +1,11 @@
-CampaignMetadata(
+(
     id: "42",
     name: "Tutorial",
     version: "1.0.0",
     author: "Brett Smith",
     description: "Tutorial Campaign",
     engine_version: "0.1.0",
-    starting_map: "starter_town",
+    starting_map: "1",
     starting_position: (10, 10),
     starting_direction: "North",
     starting_gold: 100,

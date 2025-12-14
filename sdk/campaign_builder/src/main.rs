@@ -1551,17 +1551,19 @@ impl CampaignBuilderApp {
             }
 
             // 2) map_N pattern (e.g., "map_1")
-            if !found && start_map_key.starts_with("map_") {
-                if let Ok(num) = start_map_key[4..].parse::<u16>() {
-                    found = self.maps.iter().any(|m| m.id == num);
+            if !found {
+                if let Some(stripped) = start_map_key.strip_prefix("map_") {
+                    if let Ok(num) = stripped.parse::<u16>() {
+                        found = self.maps.iter().any(|m| m.id == num);
+                    }
                 }
             }
 
             // 3) filename pattern with .ron (e.g., "map_1.ron" or "starter_town.ron")
             if !found && start_map_key.ends_with(".ron") {
                 let base = start_map_key.trim_end_matches(".ron");
-                if base.starts_with("map_") {
-                    if let Ok(num) = base[4..].parse::<u16>() {
+                if let Some(stripped) = base.strip_prefix("map_") {
+                    if let Ok(num) = stripped.parse::<u16>() {
                         found = self.maps.iter().any(|m| m.id == num);
                     }
                 }
@@ -3497,7 +3499,6 @@ impl CampaignBuilderApp {
     } // end of show_validation_panel
 
     /// Load dialogues from campaign file
-
     fn load_dialogues(&mut self) -> Result<(), CampaignError> {
         if let Some(dir) = &self.campaign_dir {
             let dialogue_path = dir.join(&self.campaign.dialogue_file);

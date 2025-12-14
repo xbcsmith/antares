@@ -239,7 +239,7 @@ pub fn compute_left_column_width(
 }
 
 // =============================================================================
-/// Toolbar Component
+// Toolbar Component
 // =============================================================================
 
 /// Errors when parsing CSV-like ID lists
@@ -346,6 +346,7 @@ where
 ///
 /// This helper wraps `egui::ComboBox` and provides an inline search text field inside the
 /// ComboBox dropdown to filter options.
+#[allow(clippy::too_many_arguments)]
 pub fn searchable_selector_single<T, ID, FId, FLabel>(
     ui: &mut egui::Ui,
     id_salt: &str,
@@ -400,6 +401,7 @@ where
 /// - `search_query` is used to store the user's search input and is persisted by the caller
 ///
 /// Returns `true` if the selection changed (items added or removed).
+#[allow(clippy::too_many_arguments)]
 pub fn searchable_selector_multi<T, ID, FId, FLabel>(
     ui: &mut egui::Ui,
     id_salt: &str,
@@ -425,7 +427,7 @@ where
             let label_text = items
                 .iter()
                 .find(|it| id_fn(it) == *sel)
-                .map(|it| label_fn(it))
+                .map(&label_fn)
                 .unwrap_or_else(|| sel.to_string());
             ui.horizontal(|ui| {
                 ui.label(label_text);
@@ -452,7 +454,7 @@ where
                 .find(|it| label_fn(it).to_lowercase().contains(&q))
             {
                 let id = id_fn(item);
-                if !selection.iter().any(|s| *s == id) {
+                if !selection.contains(&id) {
                     selection.push(id);
                     changed = true;
                 }
@@ -469,7 +471,7 @@ where
             if q.is_empty() || label_text.to_lowercase().contains(&q) {
                 if ui.small_button(label_text.clone()).clicked() {
                     let id = id_fn(item);
-                    if !selection.iter().any(|s| *s == id) {
+                    if !selection.contains(&id) {
                         selection.push(id);
                         changed = true;
                     }

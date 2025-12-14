@@ -891,6 +891,105 @@ impl EventEditorState {
             }
         }
     }
+
+    /// Initializes an `EventEditorState` from an existing `MapEvent` for editing.
+    ///
+    /// # Arguments
+    ///
+    /// * `position` - Position of the event on the map
+    /// * `event` - Reference to the existing `MapEvent`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::MapEvent;
+    /// use antares::domain::types::Position;
+    /// use campaign_builder::map_editor::{EventEditorState, EventType};
+    ///
+    /// let event = MapEvent::Sign {
+    ///     name: "Sign".to_string(),
+    ///     description: "Desc".to_string(),
+    ///     text: "Hello".to_string(),
+    /// };
+    ///
+    /// let editor = EventEditorState::from_map_event(Position::new(1, 1), &event);
+    /// assert_eq!(editor.event_type, EventType::Sign);
+    /// ```
+    pub fn from_map_event(position: Position, event: &MapEvent) -> Self {
+        let mut s = EventEditorState::default();
+        s.position = position;
+        match event {
+            MapEvent::Encounter {
+                name,
+                description,
+                monster_group,
+            } => {
+                s.event_type = EventType::Encounter;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.encounter_monsters = monster_group.clone();
+            }
+            MapEvent::Treasure {
+                name,
+                description,
+                loot,
+            } => {
+                s.event_type = EventType::Treasure;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.treasure_items = loot.clone();
+            }
+            MapEvent::Teleport {
+                name,
+                description,
+                destination,
+                map_id,
+            } => {
+                s.event_type = EventType::Teleport;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.teleport_x = destination.x.to_string();
+                s.teleport_y = destination.y.to_string();
+                s.teleport_map_id = map_id.to_string();
+                s.teleport_selected_map = Some(*map_id);
+                s.teleport_selected_pos = Some(*destination);
+                s.teleport_preview_enabled = true;
+            }
+            MapEvent::Trap {
+                name,
+                description,
+                damage,
+                effect,
+            } => {
+                s.event_type = EventType::Trap;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.trap_damage = damage.to_string();
+                s.trap_effect = effect.clone().unwrap_or_default();
+            }
+            MapEvent::Sign {
+                name,
+                description,
+                text,
+            } => {
+                s.event_type = EventType::Sign;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.sign_text = text.clone();
+            }
+            MapEvent::NpcDialogue {
+                name,
+                description,
+                npc_id,
+            } => {
+                s.event_type = EventType::NpcDialogue;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.npc_id = npc_id.to_string();
+            }
+        }
+        s
+    }
 }
 
 // ===== NPC Editor State =====
@@ -1748,6 +1847,7 @@ impl MapsEditorState {
     }
 
     /// Show the full map editor
+    #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
     fn show_editor(
         &mut self,
         ui: &mut egui::Ui,
@@ -3601,7 +3701,7 @@ mod tests {
 
         // Partial id match
         let results = suggest_maps_for_partial(&maps, "1");
-        assert_eq!(results.len() >= 1, true);
+        assert!(!results.is_empty());
         assert!(results.iter().any(|(id, _)| *id == 1));
 
         // Partial lowercase name fragment

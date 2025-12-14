@@ -548,34 +548,26 @@ impl ItemEditor {
 
         println!("\n📝 Tags are used for race restrictions (incompatible_item_tags).");
         println!("   Example: A halfling with 'large_weapon' incompatible cannot use items tagged 'large_weapon'.");
-        println!("\nEnter item tags (comma-separated, or leave empty):");
-        println!("   Example: large_weapon,two_handed");
+        println!("\nEnter item tags (one per line, or leave empty):");
+        println!("   Example: large_weapon");
 
-        let input = self.read_input("Tags: ");
-        let trimmed = input.trim();
+        let tags = self.input_multistring_values("", "Tag: ");
 
-        if trimmed.is_empty() {
+        if tags.is_empty() {
             return Vec::new();
         }
 
-        let tags: Vec<String> = trimmed
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        // Validate tags
-        let mut valid_tags = Vec::new();
-        for tag in tags {
-            if STANDARD_ITEM_TAGS.contains(&tag.as_str()) {
-                valid_tags.push(tag);
-            } else {
-                println!("⚠️  Warning: '{}' is not a standard item tag", tag);
-                println!("   Standard tags: {}", STANDARD_ITEM_TAGS.join(", "));
-                let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", tag));
-                if confirm.trim().eq_ignore_ascii_case("y") {
-                    valid_tags.push(tag);
-                }
+        // Validate tags (standard first; confirm unknown tags)
+        let mut valid_tags = filter_valid_tags(&tags);
+        for tag in &tags {
+            if valid_tags.contains(tag) {
+                continue;
+            }
+            println!("⚠️  Warning: '{}' is not a standard item tag", tag);
+            println!("   Standard tags: {}", STANDARD_ITEM_TAGS.join(", "));
+            let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", tag));
+            if confirm.trim().eq_ignore_ascii_case("y") {
+                valid_tags.push(tag.clone());
             }
         }
 
@@ -1233,6 +1225,28 @@ impl ItemEditor {
         input
     }
 
+    /// Inputs multiple string values (one per line).
+    ///
+    /// This helper allows entering multiple values in an interactive CLI:
+    ///  - Prompts with `label` repeatedly
+    ///  - Pressing Enter on a blank line finishes input
+    fn input_multistring_values(&self, prompt: &str, label: &str) -> Vec<String> {
+        if !prompt.is_empty() {
+            println!("\n{}", prompt);
+        }
+        println!("(Enter values one per line. Press Enter on an empty line to finish.)");
+        let mut values: Vec<String> = Vec::new();
+        loop {
+            let input = self.read_input(label);
+            let trimmed = input.trim();
+            if trimmed.is_empty() {
+                break;
+            }
+            values.push(trimmed.to_string());
+        }
+        values
+    }
+
     fn read_u8(&self, prompt: &str, default: u8) -> u8 {
         let input = self.read_input(prompt);
         input.trim().parse().unwrap_or(default)
@@ -1292,6 +1306,15 @@ impl ItemEditor {
         // Default
         DiceRoll::new(1, 6, 0)
     }
+}
+
+/// Filters tags to include only standard item tags
+fn filter_valid_tags(candidates: &[String]) -> Vec<String> {
+    candidates
+        .iter()
+        .filter(|t| STANDARD_ITEM_TAGS.contains(&t.as_str()))
+        .cloned()
+        .collect()
 }
 
 fn main() {
@@ -1611,5 +1634,19 @@ mod tests {
         assert_eq!(item.max_charges, 10);
         assert_eq!(item.spell_effect, Some(1));
         assert!(item.is_accessory());
+    }
+
+    #[test]
+    fn test_filter_valid_tags() {
+        let candidates = vec![
+            "large_weapon".to_string(),
+            "not_a_tag".to_string(),
+            "heavy_armor".to_string(),
+        ];
+        let filtered = filter_valid_tags(&candidates);
+        assert_eq!(
+            filtered,
+            vec!["large_weapon".to_string(), "heavy_armor".to_string()]
+        );
     }
 }

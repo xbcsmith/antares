@@ -841,6 +841,7 @@ impl RacesEditorState {
     }
 
     /// Shows the race editing form
+    #[allow(clippy::ptr_arg)]
     fn show_race_form(
         &mut self,
         ui: &mut egui::Ui,
@@ -1010,7 +1011,7 @@ impl RacesEditorState {
                 ui.add_space(10.0);
                 ui.heading("Special Abilities");
                 // Build suggestion list from existing races (dedupe)
-                let mut abilities_list: Vec<String> = {
+                let abilities_list: Vec<String> = {
                     let mut set = HashSet::new();
                     let mut list = Vec::new();
                     for r in &self.races {
@@ -1098,11 +1099,9 @@ impl RacesEditorState {
                                 self.buffer.proficiencies.retain(|p| p != &prof_id.to_string());
                                 self.has_unsaved_changes = true;
                             }
-                        } else {
-                            if ui.small_button(label).clicked() {
-                                self.buffer.proficiencies.push(prof_id.to_string());
-                                self.has_unsaved_changes = true;
-                            }
+                        } else if ui.small_button(label).clicked() {
+                            self.buffer.proficiencies.push(prof_id.to_string());
+                            self.has_unsaved_changes = true;
                         }
                     }
                 });
@@ -1122,7 +1121,7 @@ impl RacesEditorState {
                 ui.add_space(10.0);
                 ui.heading("Incompatible Item Tags");
                 // Build a unique list of existing tags from all items
-                let mut tags_list: Vec<String> = {
+                let tags_list: Vec<String> = {
                     let mut set = HashSet::new();
                     let mut list = Vec::new();
                     for it in items.iter() {
@@ -1239,6 +1238,7 @@ impl RacesEditorState {
     }
 
     /// Shows the import/export dialog for individual races
+    #[allow(clippy::ptr_arg)]
     fn show_import_dialog(
         &mut self,
         ctx: &egui::Context,

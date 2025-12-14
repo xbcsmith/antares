@@ -38,12 +38,33 @@ echo ""
 
 # Phase 4: Check for unauthorized CSV usage
 echo "=== Phase 4: CSV Elimination Check ==="
-CSV_COUNT=$(grep -r "split.*['\"]," sdk/campaign_builder/src/ | grep -v "test\|// Legitimate:" | wc -l)
-if [ "$CSV_COUNT" -eq 0 ]; then
-    echo "✓ No unauthorized CSV usage found"
+
+# Check SDK (campaign builder)
+CSV_SDK_COUNT=$(grep -rn --include="*.rs" "split.*['\"]," sdk/campaign_builder/src/ | grep -v "test\|// Legitimate:" | wc -l)
+# Check CLI bins (interactive & automation)
+CSV_CLI_COUNT=$(grep -rn --include="*.rs" "split.*['\"]," src/bin/ | grep -v "test\|// Legitimate:" | wc -l)
+# Check other Rust files under src/ (excluding sdk/campaign_builder and src/bin)
+CSV_OTHER_COUNT=$(grep -rn --include="*.rs" "split.*['\"]," src/ | grep -v "sdk/campaign_builder/src\|src/bin\|test\|// Legitimate:" | wc -l)
+
+if [ "$CSV_SDK_COUNT" -eq 0 ] && [ "$CSV_CLI_COUNT" -eq 0 ] && [ "$CSV_OTHER_COUNT" -eq 0 ]; then
+    echo "✓ No unauthorized CSV usage found (SDK / CLI / Other src)"
 else
-    echo "✗ Found $CSV_COUNT unauthorized CSV usages"
-    grep -rn "split.*['\"]," sdk/campaign_builder/src/ | grep -v "test\|// Legitimate:"
+    echo "✗ Found unauthorized CSV usage:"
+    if [ "$CSV_SDK_COUNT" -ne 0 ]; then
+        echo "  - SDK CSV occurrences: $CSV_SDK_COUNT"
+        grep -rn --include="*.rs" "split.*['\"]," sdk/campaign_builder/src/ | grep -v "test\|// Legitimate:"
+    fi
+
+    if [ "$CSV_CLI_COUNT" -ne 0 ]; then
+        echo "  - CLI CSV occurrences: $CSV_CLI_COUNT"
+        grep -rn --include="*.rs" "split.*['\"]," src/bin/ | grep -v "test\|// Legitimate:"
+    fi
+
+    if [ "$CSV_OTHER_COUNT" -ne 0 ]; then
+        echo "  - Other Rust CSV occurrences within src/: $CSV_OTHER_COUNT"
+        grep -rn --include="*.rs" "split.*['\"]," src/ | grep -v "sdk/campaign_builder/src\|src/bin\|test\|// Legitimate:"
+    fi
+
     exit 1
 fi
 echo ""
