@@ -447,7 +447,11 @@ mod tests {
             root_path: PathBuf::from("test_campaign"),
         };
 
-        let game_state = GameState::new_game(campaign);
+        let mut game_state = GameState::new();
+        game_state.campaign = Some(campaign);
+        // Mirror prior `new_game` behavior: apply starting resources from campaign config
+        game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
+        game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
         let save = SaveGame::new(game_state);
 
         assert!(save.campaign_reference.is_some());

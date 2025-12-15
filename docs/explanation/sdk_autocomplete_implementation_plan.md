@@ -48,7 +48,7 @@ This plan outlines the integration of the `egui_autocomplete` library into the C
 
 #### 2.2 Item Reference (Classes & Characters)
 **File**: `sdk/campaign_builder/src/classes_editor.rs`, `sdk/campaign_builder/src/characters_editor.rs`
-*   **Target**: 
+*   **Target**:
     *   `starting_items` (Vec<ItemId>)
     *   `starting_equipment` fields (Weapon, Armor, etc.)
 *   **Action**: Replace current ComboBox implementation with `AutocompleteInput` sourcing from `items.ron`.
@@ -56,10 +56,10 @@ This plan outlines the integration of the `egui_autocomplete` library into the C
 
 #### 2.3 Condition Reference (Traps & Spells)
 **File**: `sdk/campaign_builder/src/map_editor.rs` (Traps), `sdk/campaign_builder/src/spells_editor.rs` (Spells)
-*   **Target**: 
+*   **Target**:
     *   `MapEvent::Trap.effect` (Option<String>)
     *   `Spell.applied_conditions` (Vec<ConditionId>)
-*   **Action**: 
+*   **Action**:
     *   Load candidates from `conditions.ron`.
     *   Use `AutocompleteInput` to suggest Condition IDs (e.g., "Poison", "Sleep").
 

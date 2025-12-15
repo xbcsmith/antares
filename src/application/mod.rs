@@ -11,12 +11,14 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.1 for complete specifications.
 
+pub mod resources;
 pub mod save_game;
 
 use crate::domain::character::{Party, Roster};
 use crate::domain::types::GameTime;
 use crate::domain::world::World;
-use crate::sdk::campaign_loader::Campaign;
+use crate::sdk::campaign_loader::{Campaign, CampaignError};
+use crate::sdk::database::ContentDatabase;
 use serde::{Deserialize, Serialize};
 
 // ===== Game Mode =====
@@ -318,7 +320,27 @@ impl GameState {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new_game(campaign: Campaign) -> Self {
+    pub fn new_game(campaign: Campaign) -> Result<(Self, ContentDatabase), CampaignError> {
+        // Load campaign content (propagates CampaignError::DatabaseError or others)
+        let content_db = campaign.load_content()?;
+
+        // Basic Phase 1 validation: ensure core content groups are present
+        if content_db.classes.all_classes().count() == 0 {
+            return Err(CampaignError::DatabaseError(
+                "Classes database is empty".to_string(),
+            ));
+        }
+        if content_db.races.all_races().count() == 0 {
+            return Err(CampaignError::DatabaseError(
+                "Races database is empty".to_string(),
+            ));
+        }
+        if content_db.characters.all_characters().count() == 0 {
+            return Err(CampaignError::DatabaseError(
+                "Characters database is empty".to_string(),
+            ));
+        }
+
         let starting_gold = campaign.config.starting_gold;
         let starting_food = campaign.config.starting_food;
 
@@ -326,7 +348,7 @@ impl GameState {
         party.gold = starting_gold;
         party.food = starting_food;
 
-        Self {
+        let state = Self {
             campaign: Some(campaign),
             world: World::new(),
             roster: Roster::new(),
@@ -335,6 +357,23 @@ impl GameState {
             mode: GameMode::Exploration,
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
             quests: QuestLog::new(),
+        };
+
+        Ok((state, content_db))
+    }
+
+    /// Loads campaign content for the currently loaded campaign
+    ///
+    /// # Errors
+    ///
+    /// Returns `CampaignError` if no campaign is loaded or the campaign fails to load its content.
+    pub fn load_campaign_content(&self) -> Result<ContentDatabase, CampaignError> {
+        if let Some(campaign) = &self.campaign {
+            campaign.load_content()
+        } else {
+            Err(CampaignError::InvalidStructure(
+                "No campaign loaded".to_string(),
+            ))
         }
     }
 
@@ -415,6 +454,57 @@ mod tests {
         state.exit_combat();
         assert_eq!(state.mode, GameMode::Exploration);
         assert_eq!(state.party.size(), 1);
+    }
+
+    #[test]
+    fn test_game_content_resource_creation() {
+        // Ensure the GameContent resource can be created and wraps an empty DB
+        let db = crate::sdk::database::ContentDatabase::new();
+        let resource = crate::application::resources::GameContent::new(db);
+        assert_eq!(resource.db().classes.all_classes().count(), 0);
+    }
+
+    #[test]
+    fn test_load_campaign_content_success() {
+        // Uses the tutorial campaign (existing in repo) to validate loading
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        // GameState::new_game now returns (GameState, ContentDatabase)
+        let (_state, content_db) =
+            GameState::new_game(campaign).expect("Failed to initialize game with campaign");
+
+        assert!(content_db.classes.all_classes().count() > 0);
+        assert!(content_db.races.all_races().count() > 0);
+        assert!(content_db.characters.all_characters().count() > 0);
+    }
+
+    #[test]
+    fn test_load_campaign_content_missing_files_error() {
+        // Attempting to load a non-existent campaign directory should error
+        use tempfile::TempDir;
+        let t = TempDir::new().unwrap();
+        let p = t.path().join("nonexistent_campaign");
+        let res = crate::sdk::database::ContentDatabase::load_campaign(&p);
+        assert!(matches!(
+            res,
+            Err(crate::sdk::database::DatabaseError::CampaignNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn test_new_game_returns_content_database() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        let (state, content_db) = GameState::new_game(campaign).expect("new_game failed");
+
+        assert!(state.campaign.is_some());
+        assert!(content_db.classes.all_classes().count() > 0);
     }
 
     #[test]
