@@ -92,5 +92,9 @@ impl Plugin for AntaresPlugin {
         app.insert_resource(antares::application::resources::GameContent::new(
             content_db,
         ));
+
+        // Register dialogue and quest plugins so their systems are available
+        app.add_plugins(antares::game::systems::dialogue::DialoguePlugin);
+        app.add_plugins(antares::game::systems::quest::QuestPlugin);
     }
 }

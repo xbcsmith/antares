@@ -11,6 +11,8 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.1 for complete specifications.
 
+pub mod dialogue;
+pub mod quests;
 pub mod resources;
 pub mod save_game;
 
@@ -42,7 +44,7 @@ pub enum GameMode {
     /// Menu system (character management, inventory)
     Menu,
     /// NPC dialogue and interactions
-    Dialogue,
+    Dialogue(crate::application::dialogue::DialogueState),
 }
 
 // ===== Active Spell Effects =====
@@ -444,7 +446,7 @@ impl GameState {
 
     /// Enters dialogue mode
     pub fn enter_dialogue(&mut self) {
-        self.mode = GameMode::Dialogue;
+        self.mode = GameMode::Dialogue(crate::application::dialogue::DialogueState::new());
     }
 
     /// Returns to exploration mode
@@ -565,7 +567,7 @@ mod tests {
         assert_eq!(state.mode, GameMode::Menu);
 
         state.enter_dialogue();
-        assert_eq!(state.mode, GameMode::Dialogue);
+        assert!(matches!(state.mode, GameMode::Dialogue(_)));
 
         state.return_to_exploration();
         assert_eq!(state.mode, GameMode::Exploration);
