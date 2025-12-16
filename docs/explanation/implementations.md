@@ -292,6 +292,55 @@ Notes on tests:
   - Improve logging when content validation/instantiation fails to help campaign designers debug missing references
   - Consider a configurable startup mode that allows a "soft" roster load (populate only certain core characters) for scenarios where full campaign content may be partially missing
 
+## Phase 3: Dynamic Map System (2025-12-16)
+
+**Status:** ✅ COMPLETED | **Type:** Feature | **Files modified:** `src/game/systems/map.rs` (new map manager, components, tests), `src/game/systems/events.rs` (teleport → MapChangeEvent), `docs/explanation/implementations.md` (this entry).
+
+**Objective:** Implement a dynamic map system that supports runtime map transitions, centralizes map lifecycle (despawn old tiles and spawn new tiles and event triggers), and provides ECS-friendly event triggers for gameplay systems.
+
+### Implementation Details
+
+- Added `MapChangeEvent` (message) used to request map changes (target map id + target position). This centralizes map transitions and avoids ad-hoc direct mutations of `World`.
+- Added `MapEventType` enum (Teleport, NpcDialogue, CombatEncounter, TreasureChest) and an `EventTrigger` component for ECS trigger entities.
+- Implemented `MapManagerPlugin`:
+  - `map_change_handler` reads `MapChangeEvent` messages, validates the target map, and updates the `World` current map and party position (invalid map ids are ignored and logged).
+  - `spawn_map_markers` observes the current map, despawns previously spawned `MapEntity`-tagged entities, and spawns lightweight marker entities (`MapEntity` + `TileCoord`) and `EventTrigger` entities for supported domain `MapEvent`s.
+- Instrumented visuals: `MapRenderingPlugin` now tags visual entities with `MapEntity` and `TileCoord` so the same lifecycle logic despawns visual entities on map change.
+- `EventPlugin` was modified so that handling a `MapEvent::Teleport` emits a `MapChangeEvent` instead of directly mutating `World`. This keeps map lifecycle logic in a single place.
+- Implemented a conversion helper (`map_event_to_event_type`) that maps domain `MapEvent` variants into the compact `MapEventType` used by ECS triggers.
+- Tests added to validate map lifecycle and event trigger placement (see below).
+
+### Tests Added
+
+All tests added to the `src/game/systems/map.rs` test module:
+
+- `test_map_change_event_despawns_old_tiles` — verifies old map markers are removed on change
+- `test_map_change_event_spawns_new_tiles` — verifies new map markers are created (including at specific tile positions)
+- `test_map_change_event_invalid_map_id_no_crash` — invalid map change is ignored and doesn't crash or mutate existing state
+- `test_event_trigger_spawned_at_correct_position` — verifies event triggers are spawned at the expected position with the correct payload
+
+### Quality & Verification
+
+- Local quality gates executed successfully:
+  - `cargo fmt --all` — success
+  - `cargo check --all-targets --all-features` — success
+  - `cargo clippy --all-targets --all-features -- -D warnings` — success
+  - `cargo test --lib` — tests (including the new map tests) passed locally
+- Documentation: This implementation summary (Phase 3: Dynamic Map System) was added to `docs/explanation/implementations.md`.
+
+### Deliverables & Next Steps
+
+- Deliverables:
+  - `MapManagerPlugin` for map lifecycle
+  - `MapChangeEvent`, `MapEventType`, `EventTrigger`, `MapEntity`, `TileCoord`
+  - Event conversion helper and `EventPlugin` integration (teleport → `MapChangeEvent`)
+  - Unit tests and documentation entry
+- Suggested next steps:
+  - Wire triggers into dialogue/combat/inventory systems to actually execute gameplay actions when triggered
+  - Improve logging by including map and event identifiers for easier campaign debugging
+  - Add integration tests that simulate multi-step teleport sequences and verify visual + logic sync
+  - Consider support for multiple triggers per tile (future enhancement)
+
 ## Phase 5: Docs, Cleanup and Handoff — COMPLETED (2025-12-10)
 
 **Status:** ✅ COMPLETED | **Type:** Documentation, Test Coverage & Handoff | **Files Updated:** `sdk/campaign_builder/src/campaign_editor.rs`, `sdk/campaign_builder/src/main.rs`, `docs/explanation/implementations.md`, `docs/explanation/campaign_metadata_editor_implementation_plan.md`, `docs/how-to/edit_campaign_metadata.md`
