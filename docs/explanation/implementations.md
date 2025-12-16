@@ -231,6 +231,67 @@ All editors use consistent button labels with emojis:
 
 ## Phase 4: Main Refactoring — Extract Metadata Editor from `main.rs` (2025-12-10)
 
+## Phase 2: Character System Integration (2025-12-16)
+
+**Status:** ✅ COMPLETED | **Type:** Feature | **Files modified:** `src/application/mod.rs` (new `initialize_roster`, error type), tests added in `src/application/mod.rs`, documentation updated (this summary).
+
+**Objective:** Load premade characters from campaign `characters.ron` at game startup, instantiate runtime `Character` objects with race and class modifiers applied, and populate the game's roster so characters are available immediately after a new campaign is started.
+
+### Implementation Details
+
+- Added `GameState::initialize_roster(&mut self, &ContentDatabase) -> Result<(), RosterInitializationError>`:
+
+  - Iterates `content_db.characters.premade_characters()` and calls `CharacterDefinition::instantiate(&races, &classes, &items)` for each definition.
+  - Instantiated `Character` objects are added to `self.roster` using `Roster::add_character(character, None)?`.
+  - This centralizes character creation and ensures race-and-class modifiers, starting HP/SP, inventory, and equipment are applied consistently.
+
+- Integrated roster initialization into `GameState::new_game()`:
+
+  - After loading and validating campaign content, `new_game()` now calls `state.initialize_roster(&content_db)`.
+  - Initialization failures are mapped to `CampaignError::DatabaseError` to make startup failures explicit when content is invalid.
+
+- Introduced `RosterInitializationError` (application layer) using `thiserror`:
+  - Wraps `CharacterDefinitionError` (instantiation / invalid references) and `CharacterError` (roster full, etc.) to allow ergonomic `?` propagation and clear error messages.
+
+### Tests Added
+
+All tests were added to the application test module and cover both success and failure cases:
+
+- `test_initialize_roster_loads_all_characters` — roster length equals number of premade characters in the loaded content DB.
+- `test_initialize_roster_applies_class_modifiers` — verifies HP computed from class HP die and endurance modifier.
+- `test_initialize_roster_applies_race_modifiers` — verifies race stat modifiers are applied (example: elf intellect).
+- `test_initialize_roster_sets_initial_hp_sp` — verifies SP for pure casters is set correctly.
+- `test_initialize_roster_invalid_class_id_error` — ensures a missing class reference produces the correct error.
+- `test_initialize_roster_invalid_race_id_error` — ensures a missing race reference produces the correct error.
+
+Notes on tests:
+
+- Failure-case tests construct minimal `ContentDatabase` states (e.g., adding only a minimal `RaceDefinition` or `ClassDefinition`) and mark the problematic `CharacterDefinition` as `is_premade = true` to guarantee the roster initializer attempts instantiation and surfaces the intended error.
+- Tests follow the project's testing standards (success/failure/boundary cases) and use descriptive names.
+
+### Quality & Verification
+
+- Local quality gates were executed and passed:
+  - `cargo fmt --all`
+  - `cargo check --all-targets --all-features`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - `cargo nextest run --all-features` (tests passed)
+- Documentation: This implementation summary was added to `docs/explanation/implementations.md` and the new public API (`GameState::initialize_roster`) includes doc comments and examples.
+
+### Deliverables & Next Steps
+
+- Deliverables:
+
+  - `GameState::initialize_roster` implementation and unit tests
+  - Integration into `GameState::new_game()`
+  - `RosterInitializationError` error type
+  - Documentation entry (this section)
+
+- Suggested next steps:
+  - Add more tests for edge cases (e.g., roster capacity limits, duplicate names/IDs)
+  - Improve logging when content validation/instantiation fails to help campaign designers debug missing references
+  - Consider a configurable startup mode that allows a "soft" roster load (populate only certain core characters) for scenarios where full campaign content may be partially missing
+
 ## Phase 5: Docs, Cleanup and Handoff — COMPLETED (2025-12-10)
 
 **Status:** ✅ COMPLETED | **Type:** Documentation, Test Coverage & Handoff | **Files Updated:** `sdk/campaign_builder/src/campaign_editor.rs`, `sdk/campaign_builder/src/main.rs`, `docs/explanation/implementations.md`, `docs/explanation/campaign_metadata_editor_implementation_plan.md`, `docs/how-to/edit_campaign_metadata.md`

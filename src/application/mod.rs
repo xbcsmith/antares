@@ -267,18 +267,30 @@ pub struct GameState {
     pub quests: QuestLog,
 }
 
+/// Errors returned by `GameState::initialize_roster`.
+///
+/// Wraps lower-level `CharacterDefinitionError` and `CharacterError` to
+/// provide a single error type usable by the application layer.
+#[derive(thiserror::Error, Debug)]
+pub enum RosterInitializationError {
+    #[error("Character definition error: {0}")]
+    CharacterDefinition(#[from] crate::domain::character_definition::CharacterDefinitionError),
+
+    #[error("Character operation error: {0}")]
+    CharacterError(#[from] crate::domain::character::CharacterError),
+}
+
 impl GameState {
     /// Creates a new game state with default values (no campaign)
     ///
     /// # Examples
     ///
     /// ```
-    /// use antares::application::{GameState, GameMode};
+    /// use antares::application::GameState;
     ///
     /// let state = GameState::new();
-    /// assert_eq!(state.mode, GameMode::Exploration);
+    /// assert!(state.party.is_empty());
     /// assert_eq!(state.time.day, 1);
-    /// assert!(state.campaign.is_none());
     /// ```
     pub fn new() -> Self {
         Self {
@@ -348,7 +360,7 @@ impl GameState {
         party.gold = starting_gold;
         party.food = starting_food;
 
-        let state = Self {
+        let mut state = Self {
             campaign: Some(campaign),
             world: World::new(),
             roster: Roster::new(),
@@ -358,6 +370,11 @@ impl GameState {
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
             quests: QuestLog::new(),
         };
+
+        // Phase 2: Initialize roster from content database (premade characters)
+        state.initialize_roster(&content_db).map_err(|e| {
+            CampaignError::DatabaseError(format!("Roster initialization failed: {}", e))
+        })?;
 
         Ok((state, content_db))
     }
@@ -375,6 +392,39 @@ impl GameState {
                 "No campaign loaded".to_string(),
             ))
         }
+    }
+
+    /// Initializes the roster using premade character definitions from the given content database.
+    ///
+    /// This will instantiate each premade character using race and class definitions from the content
+    /// database (which applies race/class modifiers) and insert the resulting `Character` into the
+    /// game's roster. Returns an error if instantiation or roster insertion fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    /// use antares::sdk::campaign_loader::CampaignLoader;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = CampaignLoader::new("campaigns");
+    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let (mut state, content_db) = GameState::new_game(campaign)?;
+    /// // new_game calls initialize_roster internally; alternatively you may call:
+    /// // state.initialize_roster(&content_db)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn initialize_roster(
+        &mut self,
+        content_db: &ContentDatabase,
+    ) -> Result<(), RosterInitializationError> {
+        for def in content_db.characters.premade_characters() {
+            let character =
+                def.instantiate(&content_db.races, &content_db.classes, &content_db.items)?;
+            self.roster.add_character(character, None)?;
+        }
+        Ok(())
     }
 
     /// Enters combat mode
@@ -567,5 +617,155 @@ mod tests {
         state.advance_time(5);
         assert_eq!(state.active_spells.light, 5);
         assert_eq!(state.time.minute, 5);
+    }
+
+    #[test]
+    fn test_initialize_roster_loads_all_characters() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        let (state, content_db) = GameState::new_game(campaign).expect("new_game failed");
+
+        let expected = content_db.characters.premade_characters().count();
+        assert_eq!(state.roster.characters.len(), expected);
+    }
+
+    #[test]
+    fn test_initialize_roster_applies_class_modifiers() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        let (state, _content_db) = GameState::new_game(campaign).expect("new_game failed");
+
+        // Kira is a human knight in the tutorial data; her starting HP should be
+        // class hp_die.sides + endurance modifier: 10 + ((14 - 10) / 2) = 12
+        let kira = state
+            .roster
+            .characters
+            .iter()
+            .find(|c| c.name == "Kira")
+            .expect("Kira not found in roster");
+        assert_eq!(kira.hp.base, 12);
+    }
+
+    #[test]
+    fn test_initialize_roster_applies_race_modifiers() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        let (state, _content_db) = GameState::new_game(campaign).expect("new_game failed");
+
+        // Sage is an elf sorcerer with base intellect 16 and elf +2 modifier
+        let sage = state
+            .roster
+            .characters
+            .iter()
+            .find(|c| c.name == "Sage")
+            .expect("Sage not found in roster");
+        assert_eq!(sage.stats.intellect.base, 18);
+    }
+
+    #[test]
+    fn test_initialize_roster_sets_initial_hp_sp() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        let (state, _content_db) = GameState::new_game(campaign).expect("new_game failed");
+
+        let sage = state
+            .roster
+            .characters
+            .iter()
+            .find(|c| c.name == "Sage")
+            .expect("Sage not found in roster");
+
+        assert_eq!(sage.sp.base, 8); // 18 intellect -> 8 SP for a pure caster
+    }
+
+    #[test]
+    fn test_initialize_roster_invalid_class_id_error() {
+        use crate::domain::character_definition::CharacterDefinition;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        // Ensure race exists so class validation is exercised
+        let human = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human".to_string(),
+        );
+        db.races.add_race(human).unwrap();
+
+        let mut bad = CharacterDefinition::new(
+            "bad_class".to_string(),
+            "Bad Class".to_string(),
+            "human".to_string(),
+            "no_such_class".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        // Mark as premade so `initialize_roster` will attempt to instantiate it
+        bad.is_premade = true;
+
+        char_db.add_character(bad).unwrap();
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        let res = state.initialize_roster(&db);
+
+        assert!(matches!(
+            res,
+            Err(RosterInitializationError::CharacterDefinition(
+                crate::domain::character_definition::CharacterDefinitionError::InvalidClassId { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_initialize_roster_invalid_race_id_error() {
+        use crate::domain::character_definition::CharacterDefinition;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        // Ensure class exists so race validation is exercised
+        let knight = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight).unwrap();
+
+        let mut bad = CharacterDefinition::new(
+            "bad_race".to_string(),
+            "Bad Race".to_string(),
+            "no_such_race".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        // Mark as premade so `initialize_roster` will attempt to instantiate it
+        bad.is_premade = true;
+
+        char_db.add_character(bad).unwrap();
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        let res = state.initialize_roster(&db);
+
+        assert!(matches!(
+            res,
+            Err(RosterInitializationError::CharacterDefinition(
+                crate::domain::character_definition::CharacterDefinitionError::InvalidRaceId { .. }
+            ))
+        ));
     }
 }
