@@ -709,7 +709,7 @@ pub struct EventEditorState {
     pub teleport_selected_pos: Option<Position>,
     pub teleport_preview_enabled: bool,
     // Trap fields
-    pub trap_damage: String,
+    pub trap_damage: u16,
     pub trap_effect: String,
     // Sign fields
     pub sign_text: String,
@@ -734,7 +734,7 @@ impl Default for EventEditorState {
             teleport_selected_map: None,
             teleport_selected_pos: None,
             teleport_preview_enabled: false,
-            trap_damage: String::new(),
+            trap_damage: 0,
             trap_effect: String::new(),
             sign_text: String::new(),
             npc_id: String::new(),
@@ -855,10 +855,7 @@ impl EventEditorState {
                 })
             }
             EventType::Trap => {
-                let damage = self
-                    .trap_damage
-                    .parse()
-                    .map_err(|_| "Invalid damage value")?;
+                let damage = self.trap_damage;
                 let effect = if self.trap_effect.is_empty() {
                     None
                 } else {
@@ -966,7 +963,7 @@ impl EventEditorState {
                 s.event_type = EventType::Trap;
                 s.name = name.clone();
                 s.description = description.clone();
-                s.trap_damage = damage.to_string();
+                s.trap_damage = *damage;
                 s.trap_effect = effect.clone().unwrap_or_default();
             }
             MapEvent::Sign {
@@ -2746,8 +2743,15 @@ impl MapsEditorState {
                     }
                 }
                 EventType::Trap => {
-                    ui.label("Damage:");
-                    ui.text_edit_singleline(&mut event_editor.trap_damage);
+                    ui.horizontal(|ui| {
+                        ui.label("Damage:");
+                        ui.add(
+                            egui::DragValue::new(&mut event_editor.trap_damage)
+                                .range(0..=65535)
+                                .speed(1.0),
+                        )
+                        .on_hover_text("Valid range: 0-65535");
+                    });
                     ui.label("Effect (optional):");
                     ui.text_edit_singleline(&mut event_editor.trap_effect);
                 }

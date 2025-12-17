@@ -2562,6 +2562,276 @@ pub fn extract_proficiency_candidates(
     proficiencies.iter().map(|p| p.to_string()).collect()
 }
 
+// =============================================================================
+// Candidate Cache for Performance Optimization
+// =============================================================================
+
+/// Cache for autocomplete candidates to avoid regenerating on every frame.
+///
+/// This structure caches candidate lists and invalidates them only when
+/// the underlying data changes (add/delete/import operations).
+#[derive(Debug, Default)]
+pub struct AutocompleteCandidateCache {
+    /// Cached item candidates with generation counter
+    items: Option<(Vec<(String, antares::domain::types::ItemId)>, u64)>,
+    /// Cached monster candidates with generation counter
+    monsters: Option<(Vec<String>, u64)>,
+    /// Cached condition candidates with generation counter
+    conditions: Option<(Vec<(String, String)>, u64)>,
+    /// Cached spell candidates with generation counter
+    spells: Option<(Vec<(String, antares::domain::types::SpellId)>, u64)>,
+    /// Cached proficiency candidates with generation counter
+    proficiencies: Option<(Vec<String>, u64)>,
+    /// Generation counter for items (incremented on data changes)
+    items_generation: u64,
+    /// Generation counter for monsters
+    monsters_generation: u64,
+    /// Generation counter for conditions
+    conditions_generation: u64,
+    /// Generation counter for spells
+    spells_generation: u64,
+    /// Generation counter for proficiencies
+    proficiencies_generation: u64,
+}
+
+impl AutocompleteCandidateCache {
+    /// Creates a new empty candidate cache.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Invalidates the item candidates cache.
+    ///
+    /// Call this when items are added, deleted, or imported.
+    pub fn invalidate_items(&mut self) {
+        self.items_generation += 1;
+        self.items = None;
+    }
+
+    /// Invalidates the monster candidates cache.
+    ///
+    /// Call this when monsters are added, deleted, or imported.
+    pub fn invalidate_monsters(&mut self) {
+        self.monsters_generation += 1;
+        self.monsters = None;
+    }
+
+    /// Invalidates the condition candidates cache.
+    ///
+    /// Call this when conditions are added, deleted, or imported.
+    pub fn invalidate_conditions(&mut self) {
+        self.conditions_generation += 1;
+        self.conditions = None;
+    }
+
+    /// Invalidates the spell candidates cache.
+    ///
+    /// Call this when spells are added, deleted, or imported.
+    pub fn invalidate_spells(&mut self) {
+        self.spells_generation += 1;
+        self.spells = None;
+    }
+
+    /// Invalidates the proficiency candidates cache.
+    ///
+    /// Call this when proficiencies are added, deleted, or imported.
+    pub fn invalidate_proficiencies(&mut self) {
+        self.proficiencies_generation += 1;
+        self.proficiencies = None;
+    }
+
+    /// Invalidates all caches.
+    ///
+    /// Call this when loading a new campaign or resetting data.
+    pub fn invalidate_all(&mut self) {
+        self.invalidate_items();
+        self.invalidate_monsters();
+        self.invalidate_conditions();
+        self.invalidate_spells();
+        self.invalidate_proficiencies();
+    }
+
+    /// Gets or generates item candidates.
+    ///
+    /// Returns cached candidates if available and valid, otherwise generates
+    /// new candidates and caches them.
+    pub fn get_or_generate_items(
+        &mut self,
+        items: &[antares::domain::items::types::Item],
+    ) -> Vec<(String, antares::domain::types::ItemId)> {
+        // Check if cache is valid
+        if let Some((ref candidates, gen)) = &self.items {
+            if *gen == self.items_generation {
+                return candidates.clone();
+            }
+        }
+
+        // Generate new candidates
+        let candidates = extract_item_candidates(items);
+        self.items = Some((candidates.clone(), self.items_generation));
+        candidates
+    }
+
+    /// Gets or generates monster candidates.
+    pub fn get_or_generate_monsters(
+        &mut self,
+        monsters: &[antares::domain::combat::database::MonsterDefinition],
+    ) -> Vec<String> {
+        if let Some((ref candidates, gen)) = &self.monsters {
+            if *gen == self.monsters_generation {
+                return candidates.clone();
+            }
+        }
+
+        let candidates = extract_monster_candidates(monsters);
+        self.monsters = Some((candidates.clone(), self.monsters_generation));
+        candidates
+    }
+
+    /// Gets or generates condition candidates.
+    pub fn get_or_generate_conditions(
+        &mut self,
+        conditions: &[antares::domain::conditions::ConditionDefinition],
+    ) -> Vec<(String, String)> {
+        if let Some((ref candidates, gen)) = &self.conditions {
+            if *gen == self.conditions_generation {
+                return candidates.clone();
+            }
+        }
+
+        let candidates = extract_condition_candidates(conditions);
+        self.conditions = Some((candidates.clone(), self.conditions_generation));
+        candidates
+    }
+
+    /// Gets or generates spell candidates.
+    pub fn get_or_generate_spells(
+        &mut self,
+        spells: &[antares::domain::spell::Spell],
+    ) -> Vec<(String, antares::domain::types::SpellId)> {
+        if let Some((ref candidates, gen)) = &self.spells {
+            if *gen == self.spells_generation {
+                return candidates.clone();
+            }
+        }
+
+        let candidates = extract_spell_candidates(spells);
+        self.spells = Some((candidates.clone(), self.spells_generation));
+        candidates
+    }
+
+    /// Gets or generates proficiency candidates.
+    pub fn get_or_generate_proficiencies(
+        &mut self,
+        proficiencies: &[antares::domain::proficiency::ProficiencyId],
+    ) -> Vec<String> {
+        if let Some((ref candidates, gen)) = &self.proficiencies {
+            if *gen == self.proficiencies_generation {
+                return candidates.clone();
+            }
+        }
+
+        let candidates = extract_proficiency_candidates(proficiencies);
+        self.proficiencies = Some((candidates.clone(), self.proficiencies_generation));
+        candidates
+    }
+}
+
+// =============================================================================
+// Entity Validation Helpers
+// =============================================================================
+
+/// Displays a warning label if an entity ID is invalid (not found in the list).
+///
+/// This helper provides consistent user feedback when a selected entity
+/// reference doesn't exist in the current campaign data.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `entity_type` - Type of entity (e.g., "Item", "Monster", "Spell")
+/// * `id` - The entity ID being validated
+/// * `exists` - Whether the entity exists in the current data
+///
+/// # Examples
+///
+/// ```no_run
+/// use eframe::egui;
+/// use antares::sdk::campaign_builder::ui_helpers::show_entity_validation_warning;
+///
+/// fn example(ui: &mut egui::Ui, item_id: u32, items: &[Item]) {
+///     let exists = items.iter().any(|i| i.id == item_id);
+///     show_entity_validation_warning(ui, "Item", item_id, exists);
+/// }
+/// ```
+pub fn show_entity_validation_warning(
+    ui: &mut egui::Ui,
+    entity_type: &str,
+    id: impl std::fmt::Display,
+    exists: bool,
+) {
+    if !exists {
+        ui.colored_label(
+            egui::Color32::from_rgb(255, 200, 0),
+            format!("⚠ {} ID {} not found in campaign data", entity_type, id),
+        );
+    }
+}
+
+/// Displays a warning if an item ID is invalid.
+///
+/// Convenience wrapper around `show_entity_validation_warning` for items.
+pub fn show_item_validation_warning(
+    ui: &mut egui::Ui,
+    item_id: antares::domain::types::ItemId,
+    items: &[antares::domain::items::types::Item],
+) {
+    let exists = items.iter().any(|i| i.id == item_id);
+    show_entity_validation_warning(ui, "Item", item_id, exists);
+}
+
+/// Displays a warning if a monster name is invalid.
+///
+/// Convenience wrapper around `show_entity_validation_warning` for monsters.
+pub fn show_monster_validation_warning(
+    ui: &mut egui::Ui,
+    monster_name: &str,
+    monsters: &[antares::domain::combat::database::MonsterDefinition],
+) {
+    if monster_name.is_empty() {
+        return;
+    }
+    let exists = monsters.iter().any(|m| m.name == monster_name);
+    show_entity_validation_warning(ui, "Monster", monster_name, exists);
+}
+
+/// Displays a warning if a condition ID is invalid.
+///
+/// Convenience wrapper around `show_entity_validation_warning` for conditions.
+pub fn show_condition_validation_warning(
+    ui: &mut egui::Ui,
+    condition_id: &str,
+    conditions: &[antares::domain::conditions::ConditionDefinition],
+) {
+    if condition_id.is_empty() {
+        return;
+    }
+    let exists = conditions.iter().any(|c| c.id == condition_id);
+    show_entity_validation_warning(ui, "Condition", condition_id, exists);
+}
+
+/// Displays a warning if a spell ID is invalid.
+///
+/// Convenience wrapper around `show_entity_validation_warning` for spells.
+pub fn show_spell_validation_warning(
+    ui: &mut egui::Ui,
+    spell_id: antares::domain::types::SpellId,
+    spells: &[antares::domain::spell::Spell],
+) {
+    let exists = spells.iter().any(|s| s.id == spell_id);
+    show_entity_validation_warning(ui, "Spell", spell_id, exists);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3321,5 +3591,303 @@ mod tests {
         assert_eq!(candidates[0], "sword");
         assert_eq!(candidates[1], "shield");
         assert_eq!(candidates[2], "heavy_armor");
+    }
+
+    // =========================================================================
+    // Phase 3: Candidate Cache Tests
+    // =========================================================================
+
+    #[test]
+    fn candidate_cache_new_is_empty() {
+        let cache = AutocompleteCandidateCache::new();
+        assert!(cache.items.is_none());
+        assert!(cache.monsters.is_none());
+        assert!(cache.conditions.is_none());
+        assert!(cache.spells.is_none());
+        assert!(cache.proficiencies.is_none());
+    }
+
+    #[test]
+    fn candidate_cache_invalidate_items_clears_cache() {
+        let mut cache = AutocompleteCandidateCache::new();
+        // Simulate cached items
+        cache.items = Some((vec![("Test".to_string(), 1)], 0));
+
+        cache.invalidate_items();
+
+        assert!(cache.items.is_none());
+        assert_eq!(cache.items_generation, 1);
+    }
+
+    #[test]
+    fn candidate_cache_invalidate_all_clears_all_caches() {
+        let mut cache = AutocompleteCandidateCache::new();
+        cache.items = Some((vec![("Test".to_string(), 1)], 0));
+        cache.monsters = Some((vec!["Monster".to_string()], 0));
+
+        cache.invalidate_all();
+
+        assert!(cache.items.is_none());
+        assert!(cache.monsters.is_none());
+        assert!(cache.conditions.is_none());
+        assert!(cache.spells.is_none());
+        assert!(cache.proficiencies.is_none());
+        assert_eq!(cache.items_generation, 1);
+        assert_eq!(cache.monsters_generation, 1);
+    }
+
+    #[test]
+    fn candidate_cache_get_or_generate_items_caches_results() {
+        use antares::domain::items::types::{ArmorData, Item, ItemType};
+
+        let mut cache = AutocompleteCandidateCache::new();
+        #[allow(deprecated)]
+        let items = vec![Item {
+            id: 1,
+            name: "Sword".to_string(),
+            description: String::new(),
+            item_type: ItemType::Armor(ArmorData::default()),
+            value: 0,
+            weight: 0,
+            tags: Vec::new(),
+            disablement: antares::domain::items::types::Disablement::default(),
+            cursed: false,
+            charges: None,
+            max_charges: None,
+        }];
+
+        // First call generates and caches
+        let candidates1 = cache.get_or_generate_items(&items);
+        assert_eq!(candidates1.len(), 1);
+        assert_eq!(candidates1[0].1, 1);
+
+        // Second call returns cached results
+        let candidates2 = cache.get_or_generate_items(&items);
+        assert_eq!(candidates2.len(), 1);
+    }
+
+    #[test]
+    fn candidate_cache_invalidation_forces_regeneration() {
+        use antares::domain::items::types::{ArmorData, Item, ItemType};
+
+        let mut cache = AutocompleteCandidateCache::new();
+        #[allow(deprecated)]
+        let items_old = vec![Item {
+            id: 1,
+            name: "Sword".to_string(),
+            description: String::new(),
+            item_type: ItemType::Armor(ArmorData::default()),
+            value: 0,
+            weight: 0,
+            tags: Vec::new(),
+            disablement: antares::domain::items::types::Disablement::default(),
+            cursed: false,
+            charges: None,
+            max_charges: None,
+        }];
+
+        // Generate initial cache
+        let _candidates1 = cache.get_or_generate_items(&items_old);
+
+        // Invalidate cache
+        cache.invalidate_items();
+
+        // New data should be generated
+        #[allow(deprecated)]
+        let items_new = vec![Item {
+            id: 2,
+            name: "Axe".to_string(),
+            description: String::new(),
+            item_type: ItemType::Armor(ArmorData::default()),
+            value: 0,
+            weight: 0,
+            tags: Vec::new(),
+            disablement: antares::domain::items::types::Disablement::default(),
+            cursed: false,
+            charges: None,
+            max_charges: None,
+        }];
+        let candidates2 = cache.get_or_generate_items(&items_new);
+        assert_eq!(candidates2.len(), 1);
+        assert_eq!(candidates2[0].1, 2);
+    }
+
+    #[test]
+    fn candidate_cache_monsters_caches_correctly() {
+        use antares::domain::character::{AttributePair, AttributePair16, Stats};
+        use antares::domain::combat::database::MonsterDefinition;
+        use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
+
+        let mut cache = AutocompleteCandidateCache::new();
+        let monsters = vec![MonsterDefinition {
+            id: 1,
+            name: "Goblin".to_string(),
+            stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
+            hp: AttributePair16::new(10),
+            ac: AttributePair::new(10),
+            attacks: Vec::new(),
+            flee_threshold: 0,
+            regeneration: 0,
+            advance_count: 0,
+            experience: 10,
+            resistances: MonsterResistances::default(),
+            gold: 0,
+            gems: 0,
+            loot_table: LootTable::default(),
+            conditions: Vec::<MonsterCondition>::new(),
+            special_attack_chance: 0,
+            special_attack_description: None,
+        }];
+
+        let candidates = cache.get_or_generate_monsters(&monsters);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0], "Goblin");
+    }
+
+    #[test]
+    fn candidate_cache_performance_with_200_items() {
+        use antares::domain::items::types::{ArmorData, Item, ItemType};
+        use std::time::Instant;
+
+        let mut cache = AutocompleteCandidateCache::new();
+
+        // Generate 200 items
+        #[allow(deprecated)]
+        let items: Vec<Item> = (0..200)
+            .map(|i| Item {
+                id: i,
+                name: format!("Item{}", i),
+                description: String::new(),
+                item_type: ItemType::Armor(ArmorData::default()),
+                value: 0,
+                weight: 0,
+                tags: Vec::new(),
+                disablement: antares::domain::items::types::Disablement::default(),
+                cursed: false,
+                charges: None,
+                max_charges: None,
+            })
+            .collect();
+
+        // First call - measure generation time
+        let start = Instant::now();
+        let candidates1 = cache.get_or_generate_items(&items);
+        let gen_time = start.elapsed();
+        assert_eq!(candidates1.len(), 200);
+
+        // Second call - should be instant (cached)
+        let start = Instant::now();
+        let candidates2 = cache.get_or_generate_items(&items);
+        let cache_time = start.elapsed();
+        assert_eq!(candidates2.len(), 200);
+
+        // Cache retrieval should be significantly faster than generation
+        // (at least 10x faster, but we'll use 2x to be conservative)
+        assert!(
+            cache_time < gen_time / 2,
+            "Cache retrieval time ({:?}) should be much faster than generation time ({:?})",
+            cache_time,
+            gen_time
+        );
+    }
+
+    // =========================================================================
+    // Phase 3: Validation Warning Tests
+    // =========================================================================
+
+    #[test]
+    fn show_entity_validation_warning_displays_nothing_when_valid() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        ));
+        ctx.begin_pass(raw_input);
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            // Should not display warning when entity exists
+            show_entity_validation_warning(ui, "Item", 42, true);
+        });
+
+        let _ = ctx.end_pass();
+        // Test passes if no panic - UI functions don't return testable state
+    }
+
+    #[test]
+    fn show_item_validation_warning_checks_existence() {
+        use antares::domain::items::types::{ArmorData, Item, ItemType};
+
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        ));
+        ctx.begin_pass(raw_input);
+
+        #[allow(deprecated)]
+        let items = vec![Item {
+            id: 1,
+            name: "Sword".to_string(),
+            description: String::new(),
+            item_type: ItemType::Armor(ArmorData::default()),
+            value: 0,
+            weight: 0,
+            tags: Vec::new(),
+            disablement: antares::domain::items::types::Disablement::default(),
+            cursed: false,
+            charges: None,
+            max_charges: None,
+        }];
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            // Should show warning for non-existent item ID
+            show_item_validation_warning(ui, 999, &items);
+            // Should not show warning for existing item ID
+            show_item_validation_warning(ui, 1, &items);
+        });
+
+        let _ = ctx.end_pass();
+    }
+
+    #[test]
+    fn show_monster_validation_warning_handles_empty_name() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        ));
+        ctx.begin_pass(raw_input);
+
+        let monsters = vec![];
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            // Should not show warning for empty name
+            show_monster_validation_warning(ui, "", &monsters);
+        });
+
+        let _ = ctx.end_pass();
+    }
+
+    #[test]
+    fn show_condition_validation_warning_handles_empty_id() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        ));
+        ctx.begin_pass(raw_input);
+
+        let conditions = vec![];
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            // Should not show warning for empty condition ID
+            show_condition_validation_warning(ui, "", &conditions);
+        });
+
+        let _ = ctx.end_pass();
     }
 }
