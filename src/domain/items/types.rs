@@ -557,7 +557,6 @@ impl Item {
     ///
     /// # Examples
     ///
-    /// ```
     /// use antares::domain::items::{Item, ItemType, WeaponData, WeaponClassification};
     /// use antares::domain::types::DiceRoll;
     ///
@@ -584,7 +583,6 @@ impl Item {
     ///
     /// assert!(sword.is_weapon());
     /// assert!(!sword.is_armor());
-    /// ```
     ///
     /// // Holy weapon with alignment restriction
     /// let holy_avenger = Item {
@@ -611,7 +609,6 @@ impl Item {
     /// // Access item properties
     /// assert_eq!(sword.name, "Long Sword");
     /// assert_eq!(sword.base_cost, 15);
-    /// ```
     pub fn required_proficiency(&self) -> Option<ProficiencyId> {
         match &self.item_type {
             ItemType::Weapon(data) => Some(ProficiencyDatabase::proficiency_for_weapon(

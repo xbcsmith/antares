@@ -23,7 +23,7 @@
 //!   Avoid using `egui::ComboBox::from_label("")` with an empty label. Instead:
 //!   - Use `egui::ComboBox::from_id_source("unique_id")` when the UI label is displayed elsewhere (e.g., grid cell `ui.label("...")`).
 //!   - Or `egui::ComboBox::from_label("UniqueLabel")` with a unique label when you want the ComboBox to render its own label.
-//!   This ensures unique internal control IDs and avoids ID collisions when multiple ComboBoxes coexist in the same UI.
+//!     This ensures unique internal control IDs and avoids ID collisions when multiple ComboBoxes coexist in the same UI.
 //! - Extensibility checklist for adding a new metadata field:
 //!   1. Add the field to `CampaignMetadata` in `domain`.
 //!   2. Add a matching field to `CampaignMetadataEditBuffer`.
@@ -41,7 +41,6 @@ use crate::ui_helpers::{
 };
 use antares::domain::character::{FOOD_MAX, FOOD_MIN, PARTY_MAX_SIZE};
 use eframe::egui;
-use ron;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
 use std::fs;
@@ -402,22 +401,20 @@ impl CampaignMetadataEditorState {
                         // Request a validation run so the Validation panel reflects the saved changes
                         self.validate_requested = true;
                     }
-                } else {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_file_name("campaign.ron")
-                        .add_filter("RON", &["ron"])
-                        .save_file()
-                    {
-                        if let Err(e) = self.save_to_file(path.as_path()) {
-                            *status_message = format!("Save failed: {}", e);
-                        } else {
-                            *unsaved_changes = false;
-                            *status_message = format!("Saved campaign to: {}", path.display());
-                            *campaign_path = Some(path);
-                            // Also update the shared campaign metadata and request validation on Save As
-                            *metadata = self.metadata.clone();
-                            self.validate_requested = true;
-                        }
+                } else if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("campaign.ron")
+                    .add_filter("RON", &["ron"])
+                    .save_file()
+                {
+                    if let Err(e) = self.save_to_file(path.as_path()) {
+                        *status_message = format!("Save failed: {}", e);
+                    } else {
+                        *unsaved_changes = false;
+                        *status_message = format!("Saved campaign to: {}", path.display());
+                        *campaign_path = Some(path);
+                        // Also update the shared campaign metadata and request validation on Save As
+                        *metadata = self.metadata.clone();
+                        self.validate_requested = true;
                     }
                 }
             }
@@ -821,7 +818,7 @@ impl CampaignMetadataEditorState {
                                     ui.label("Starting Direction:");
                                     let mut dir = self.buffer.starting_direction.clone();
                                     // Use `from_id_source` to avoid ID collisions with other ComboBoxes in the UI
-                                    egui::ComboBox::from_id_source("campaign_starting_direction")
+                                    egui::ComboBox::from_id_salt("campaign_starting_direction")
                                         .selected_text(dir.clone())
                                         .show_ui(ui, |ui| {
                                             for d in &["North", "East", "South", "West"] {
@@ -868,7 +865,7 @@ impl CampaignMetadataEditorState {
 
                                     ui.label("Difficulty:");
                                     // Use `from_id_source` to avoid ID collisions with other ComboBoxes in the UI
-                                    egui::ComboBox::from_id_source("campaign_difficulty")
+                                    egui::ComboBox::from_id_salt("campaign_difficulty")
                                         .selected_text(self.buffer.difficulty.as_str())
                                         .show_ui(ui, |ui| {
                                             for &diff in &crate::Difficulty::all() {
@@ -1056,25 +1053,23 @@ impl CampaignMetadataEditorState {
                                     }
                                     Err(e) => *status_message = format!("Save failed: {}", e),
                                 }
-                            } else {
-                                if let Some(path) = rfd::FileDialog::new()
-                                    .set_file_name("campaign.ron")
-                                    .add_filter("RON", &["ron"])
-                                    .save_file()
-                                {
-                                    match self.save_to_file(path.as_path()) {
-                                        Ok(_) => {
-                                            *campaign_path = Some(path.clone());
-                                            *unsaved_changes = false;
-                                            *status_message =
-                                                format!("Saved campaign to {}", path.display());
-                                            *metadata = self.metadata.clone();
-                                            // Request a validation run after a successful Save As
-                                            // so the Validation panel shows updated results.
-                                            self.validate_requested = true;
-                                        }
-                                        Err(e) => *status_message = format!("Save failed: {}", e),
+                            } else if let Some(path) = rfd::FileDialog::new()
+                                .set_file_name("campaign.ron")
+                                .add_filter("RON", &["ron"])
+                                .save_file()
+                            {
+                                match self.save_to_file(path.as_path()) {
+                                    Ok(_) => {
+                                        *campaign_path = Some(path.clone());
+                                        *unsaved_changes = false;
+                                        *status_message =
+                                            format!("Saved campaign to {}", path.display());
+                                        *metadata = self.metadata.clone();
+                                        // Request a validation run after a successful Save As
+                                        // so the Validation panel shows updated results.
+                                        self.validate_requested = true;
                                     }
+                                    Err(e) => *status_message = format!("Save failed: {}", e),
                                 }
                             }
                         }
@@ -1196,13 +1191,13 @@ mod tests {
         let mut s = CampaignMetadataEditorState::new();
 
         // Initially, no validation requested
-        assert_eq!(s.consume_validate_request(), false);
+        assert!(!s.consume_validate_request());
 
         // Request validation and check that it is consumed
         s.validate_requested = true;
-        assert_eq!(s.consume_validate_request(), true);
+        assert!(s.consume_validate_request());
 
         // After consuming, it should be reset
-        assert_eq!(s.consume_validate_request(), false);
+        assert!(!s.consume_validate_request());
     }
 }

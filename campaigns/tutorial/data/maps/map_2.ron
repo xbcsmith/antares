@@ -3955,8 +3955,8 @@
             event_trigger: None,
         ),
         (
-            terrain: Forest,
-            wall_type: Normal,
+            terrain: Ground,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4408,11 +4408,35 @@
     ],
     events: {
         (
+            x: 2,
+            y: 2,
+        ): Encounter(
+            name: "Kobold Ambush",
+            description: "A group of kobolds jump out to attack!",
+            monster_group: [
+                2,
+                2,
+                2,
+            ],
+        ),
+        (
+            x: 19,
+            y: 17,
+        ): Teleport(
+            name: "Dungeon Portal",
+            description: "A portal that teleports the party to Dark Forrest (map 4) at (19,10).",
+            destination: (
+                x: 19,
+                y: 10,
+            ),
+            map_id: 4,
+        ),
+        (
             x: 9,
             y: 7,
         ): Sign(
-            name: "",
-            description: "",
+            name: "Cave Entrance Sign",
+            description: "Sign marking the entrance to the Cave of Fizban.",
             text: "The Cave of Fizban!",
         ),
     },
@@ -4420,17 +4444,17 @@
         (
             id: 10,
             name: "Fizban",
-            description: "",
+            description: "A seasoned local guide familiar with the cave and its dangers.",
             position: (
                 x: 13,
                 y: 4,
             ),
-            dialogue: "I am the great Fizban!",
+            dialogue: "Have you come to explore the cave? Be careful!",
         ),
         (
             id: 11,
             name: "Fizban Brother",
-            description: "",
+            description: "A local villager and brother to Fizban, known for his local knowledge and gossip.",
             position: (
                 x: 3,
                 y: 16,

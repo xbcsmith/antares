@@ -15,6 +15,8 @@ use crate::domain::combat::monster::Monster;
 use crate::domain::combat::types::{
     Attack, AttackType, CombatStatus, CombatantId, Handicap, SpecialEffect,
 };
+use crate::domain::magic::types::Spell;
+// Condition types referenced by fully-qualified paths where needed
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -56,7 +58,7 @@ pub enum CombatError {
 /// );
 /// let combatant = Combatant::Player(Box::new(character));
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Combatant {
     /// Player character
     Player(Box<Character>),
@@ -111,7 +113,7 @@ impl Combatant {
 /// let combat = CombatState::new(Handicap::Even);
 /// assert_eq!(combat.round, 1);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CombatState {
     /// All combatants in the battle
     pub participants: Vec<Combatant>,
@@ -238,6 +240,12 @@ impl CombatState {
                 Combatant::Player(character) => {
                     // Tick round-based conditions
                     character.tick_conditions_round();
+
+                    // Reconcile status flags based on active conditions and definitions
+                    crate::domain::combat::engine::reconcile_character_conditions(
+                        character,
+                        condition_defs,
+                    );
                 }
                 Combatant::Monster(monster) => {
                     // Tick round-based conditions
@@ -250,6 +258,12 @@ impl CombatState {
                     if self.monsters_regenerate && monster.can_regenerate {
                         monster.regenerate(1);
                     }
+
+                    // Reconcile monster status flags based on active conditions
+                    crate::domain::combat::engine::reconcile_monster_conditions(
+                        monster,
+                        condition_defs,
+                    );
                 }
             }
         }
@@ -569,6 +583,370 @@ pub fn apply_damage(
     Ok(died)
 }
 
+/// Selects an attack for a monster, honoring its `special_attack_threshold`.
+///
+/// If the threshold triggers and the monster has attacks that include a special
+/// effect, one of those special attacks will be returned. Otherwise a random
+/// attack from the monster's attack list is returned.
+pub fn choose_monster_attack<R: Rng>(monster: &Monster, rng: &mut R) -> Option<Attack> {
+    if monster.attacks.is_empty() {
+        return None;
+    }
+
+    // Try to use a special attack if threshold triggers
+    if monster.special_attack_threshold > 0 {
+        let roll = rng.random_range(1..=100);
+        if roll <= monster.special_attack_threshold {
+            let special_attacks: Vec<&Attack> = monster
+                .attacks
+                .iter()
+                .filter(|a| a.special_effect.is_some())
+                .collect();
+
+            if !special_attacks.is_empty() {
+                let idx = rng.random_range(0..special_attacks.len());
+                return Some(special_attacks[idx].clone());
+            }
+        }
+    }
+
+    // Fallback to a random attack
+    let idx = rng.random_range(0..monster.attacks.len());
+    Some(monster.attacks[idx].clone())
+}
+
+/// Rolls damage for a spell's damage dice (returns 0 if the spell has no damage).
+pub fn roll_spell_damage<R: Rng>(spell: &Spell, rng: &mut R) -> i32 {
+    if let Some(dice) = &spell.damage {
+        dice.roll(rng)
+    } else {
+        0
+    }
+}
+
+/// Apply a condition definition to a character.
+///
+/// Applies status flags (bitflags), attribute modifiers, and registers an
+/// `ActiveCondition` for DoT/HoT effects so that the existing combat tick
+/// machinery can handle duration-based effects.
+pub fn apply_condition_to_character(
+    target: &mut crate::domain::character::Character,
+    cond_def: &crate::domain::conditions::ConditionDefinition,
+) {
+    use crate::domain::character::Condition;
+    use crate::domain::conditions::{ActiveCondition, ConditionEffect};
+
+    for effect in &cond_def.effects {
+        match effect {
+            ConditionEffect::StatusEffect(name) => {
+                match name.to_lowercase().as_str() {
+                    "paralyzed" | "paralysis" | "paralyse" => {
+                        target.conditions.add(Condition::PARALYZED);
+                    }
+                    "silenced" | "silence" => {
+                        target.conditions.add(Condition::SILENCED);
+                    }
+                    "asleep" | "sleep" => {
+                        target.conditions.add(Condition::ASLEEP);
+                    }
+                    "blinded" | "blind" => {
+                        target.conditions.add(Condition::BLINDED);
+                    }
+                    "poisoned" | "poison" => {
+                        target.conditions.add(Condition::POISONED);
+                    }
+                    "unconscious" => {
+                        target.conditions.add(Condition::UNCONSCIOUS);
+                    }
+                    "dead" | "stone" => {
+                        target.conditions.add(Condition::DEAD);
+                    }
+                    _ => {
+                        // Unknown status - no-op for now
+                    }
+                }
+            }
+            ConditionEffect::AttributeModifier { attribute, value } => {
+                match attribute.to_lowercase().as_str() {
+                    "might" => target.stats.might.modify(*value),
+                    "intellect" => target.stats.intellect.modify(*value),
+                    "personality" => target.stats.personality.modify(*value),
+                    "endurance" => target.stats.endurance.modify(*value),
+                    "speed" => target.stats.speed.modify(*value),
+                    "accuracy" => target.stats.accuracy.modify(*value),
+                    "luck" => target.stats.luck.modify(*value),
+                    "ac" => target.ac.modify(*value),
+                    "hp" => target.hp.modify(*value as i32),
+                    "sp" => target.sp.modify(*value as i32),
+                    _ => {}
+                }
+            }
+            ConditionEffect::DamageOverTime { .. } | ConditionEffect::HealOverTime { .. } => {
+                // Register as active condition so DoT/HoT will be processed by CombatState
+                let active = ActiveCondition::new(cond_def.id.clone(), cond_def.default_duration);
+                target.add_condition(active);
+            }
+        }
+    }
+}
+
+/// Apply a condition definition to a monster.
+///
+/// Sets monster-level status (enum), applies attribute modifiers, and
+/// registers any DoT/HoT active conditions.
+pub fn apply_condition_to_monster(
+    monster: &mut Monster,
+    cond_def: &crate::domain::conditions::ConditionDefinition,
+) {
+    use crate::domain::combat::monster::MonsterCondition;
+    use crate::domain::conditions::{ActiveCondition, ConditionEffect};
+
+    for effect in &cond_def.effects {
+        match effect {
+            ConditionEffect::StatusEffect(name) => match name.to_lowercase().as_str() {
+                "paralyzed" | "paralysis" | "paralyse" => {
+                    monster.conditions = MonsterCondition::Paralyzed;
+                }
+                "silenced" | "silence" => {
+                    monster.conditions = MonsterCondition::Silenced;
+                }
+                "asleep" | "sleep" => {
+                    monster.conditions = MonsterCondition::Asleep;
+                }
+                "blinded" | "blind" => {
+                    monster.conditions = MonsterCondition::Blinded;
+                }
+                "afraid" | "fear" => {
+                    monster.conditions = MonsterCondition::Afraid;
+                }
+                "dead" | "stone" => {
+                    monster.conditions = MonsterCondition::Dead;
+                }
+                _ => {}
+            },
+            ConditionEffect::AttributeModifier { attribute, value } => {
+                match attribute.to_lowercase().as_str() {
+                    "might" => monster.stats.might.modify(*value),
+                    "intellect" => monster.stats.intellect.modify(*value),
+                    "endurance" => monster.stats.endurance.modify(*value),
+                    "speed" => monster.stats.speed.modify(*value),
+                    "accuracy" => monster.stats.accuracy.modify(*value),
+                    "ac" => monster.ac.modify(*value),
+                    "hp" => monster.hp.modify(*value as i32),
+                    _ => {}
+                }
+            }
+            ConditionEffect::DamageOverTime { .. } | ConditionEffect::HealOverTime { .. } => {
+                let active = ActiveCondition::new(cond_def.id.clone(), cond_def.default_duration);
+                monster.add_condition(active);
+            }
+        }
+    }
+}
+
+/// Errors that can occur while applying conditions by ID
+#[derive(thiserror::Error, Debug)]
+pub enum ConditionApplyError {
+    #[error("Condition not found: {0}")]
+    ConditionNotFound(String),
+}
+
+/// Look up a condition by ID in the content database and apply it to a character.
+///
+/// # Errors
+///
+/// Returns `ConditionApplyError::ConditionNotFound` if the condition ID is not
+/// present in the provided `ContentDatabase`.
+pub fn apply_condition_to_character_by_id(
+    target: &mut crate::domain::character::Character,
+    condition_id: &str,
+    content: &crate::sdk::database::ContentDatabase,
+) -> Result<(), ConditionApplyError> {
+    if let Some(def) = content.conditions.get_condition(&condition_id.to_string()) {
+        apply_condition_to_character(target, def);
+        Ok(())
+    } else {
+        Err(ConditionApplyError::ConditionNotFound(
+            condition_id.to_string(),
+        ))
+    }
+}
+
+/// Look up a condition by ID in the content database and apply it to a monster.
+///
+/// # Errors
+///
+/// Returns `ConditionApplyError::ConditionNotFound` if the condition ID is not
+/// present in the provided `ContentDatabase`.
+pub fn apply_condition_to_monster_by_id(
+    monster: &mut Monster,
+    condition_id: &str,
+    content: &crate::sdk::database::ContentDatabase,
+) -> Result<(), ConditionApplyError> {
+    if let Some(def) = content.conditions.get_condition(&condition_id.to_string()) {
+        apply_condition_to_monster(monster, def);
+        Ok(())
+    } else {
+        Err(ConditionApplyError::ConditionNotFound(
+            condition_id.to_string(),
+        ))
+    }
+}
+
+/// Initialize a combat encounter from an explicit monster group (list of MonsterId).
+///
+/// This fetches each monster definition from the `ContentDatabase` and converts it
+/// into a runtime `Monster` instance, then inserts into the provided `CombatState`.
+///
+/// Returns an error if any monster ID in the group is not found.
+pub fn initialize_combat_from_group(
+    combat: &mut CombatState,
+    content: &crate::sdk::database::ContentDatabase,
+    group: &[crate::domain::types::MonsterId],
+) -> Result<(), crate::domain::combat::database::MonsterDatabaseError> {
+    for id in group {
+        if let Some(m) = content.monsters.get_monster(*id) {
+            combat.add_monster(m.clone());
+        } else {
+            return Err(
+                crate::domain::combat::database::MonsterDatabaseError::MonsterNotFound(*id),
+            );
+        }
+    }
+
+    // Initialize turn order and flags for combat
+    start_combat(combat);
+    Ok(())
+}
+
+pub fn reconcile_character_conditions(
+    target: &mut crate::domain::character::Character,
+    condition_defs: &[crate::domain::conditions::ConditionDefinition],
+) {
+    use crate::domain::character::Condition;
+    use crate::domain::conditions::ConditionEffect;
+
+    // Build the set of flags to consider from condition definitions
+    let mut flags_to_consider: u8 = 0;
+    for def in condition_defs {
+        for effect in &def.effects {
+            if let ConditionEffect::StatusEffect(name) = effect {
+                if let Some(flag) = status_str_to_flag(name) {
+                    flags_to_consider |= flag;
+                }
+            }
+        }
+    }
+
+    // Determine desired flags from active conditions
+    let mut desired_flags: u8 = 0;
+    for active in &target.active_conditions {
+        if let Some(def) = condition_defs.iter().find(|d| d.id == active.condition_id) {
+            for effect in &def.effects {
+                if let ConditionEffect::StatusEffect(name) = effect {
+                    if let Some(flag) = status_str_to_flag(name) {
+                        desired_flags |= flag;
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply or remove flags based on desired state
+    let flag_list = [
+        Condition::ASLEEP,
+        Condition::BLINDED,
+        Condition::SILENCED,
+        Condition::DISEASED,
+        Condition::POISONED,
+        Condition::PARALYZED,
+        Condition::UNCONSCIOUS,
+        Condition::DEAD,
+        Condition::STONE,
+    ];
+
+    for &flag in &flag_list {
+        if flags_to_consider & flag != 0 {
+            if desired_flags & flag != 0 {
+                target.conditions.add(flag);
+            } else {
+                target.conditions.remove(flag);
+            }
+        }
+    }
+}
+
+pub fn reconcile_monster_conditions(
+    monster: &mut Monster,
+    condition_defs: &[crate::domain::conditions::ConditionDefinition],
+) {
+    use crate::domain::combat::monster::MonsterCondition;
+    use crate::domain::conditions::ConditionEffect;
+
+    // Do not override a dead monster
+    if monster.conditions.is_dead() {
+        return;
+    }
+
+    // Find the first matching status effect (simple priority)
+    let mut desired: Option<MonsterCondition> = None;
+    for active in &monster.active_conditions {
+        if let Some(def) = condition_defs.iter().find(|d| d.id == active.condition_id) {
+            for effect in &def.effects {
+                if let ConditionEffect::StatusEffect(name) = effect {
+                    if let Some(mc) = status_str_to_monster_condition(name) {
+                        desired = Some(mc);
+                        break;
+                    }
+                }
+            }
+        }
+        if desired.is_some() {
+            break;
+        }
+    }
+
+    monster.conditions = desired.unwrap_or(MonsterCondition::Normal);
+}
+
+/// Helper to map status names to character flags
+fn status_str_to_flag(name: &str) -> Option<u8> {
+    match name.to_lowercase().as_str() {
+        "asleep" | "sleep" => Some(crate::domain::character::Condition::ASLEEP),
+        "blinded" | "blind" => Some(crate::domain::character::Condition::BLINDED),
+        "silenced" | "silence" => Some(crate::domain::character::Condition::SILENCED),
+        "diseased" | "disease" => Some(crate::domain::character::Condition::DISEASED),
+        "poisoned" | "poison" => Some(crate::domain::character::Condition::POISONED),
+        "paralyzed" | "paralysis" | "paralyse" => {
+            Some(crate::domain::character::Condition::PARALYZED)
+        }
+        "unconscious" => Some(crate::domain::character::Condition::UNCONSCIOUS),
+        "dead" => Some(crate::domain::character::Condition::DEAD),
+        "stone" => Some(crate::domain::character::Condition::STONE),
+        _ => None,
+    }
+}
+
+/// Helper to map status names to monster conditions
+fn status_str_to_monster_condition(
+    name: &str,
+) -> Option<crate::domain::combat::monster::MonsterCondition> {
+    match name.to_lowercase().as_str() {
+        "paralyzed" | "paralysis" | "paralyse" => {
+            Some(crate::domain::combat::monster::MonsterCondition::Paralyzed)
+        }
+        "webbed" => Some(crate::domain::combat::monster::MonsterCondition::Webbed),
+        "held" => Some(crate::domain::combat::monster::MonsterCondition::Held),
+        "asleep" | "sleep" => Some(crate::domain::combat::monster::MonsterCondition::Asleep),
+        "mindless" => Some(crate::domain::combat::monster::MonsterCondition::Mindless),
+        "silenced" | "silence" => Some(crate::domain::combat::monster::MonsterCondition::Silenced),
+        "blinded" | "blind" => Some(crate::domain::combat::monster::MonsterCondition::Blinded),
+        "afraid" | "fear" => Some(crate::domain::combat::monster::MonsterCondition::Afraid),
+        "dead" => Some(crate::domain::combat::monster::MonsterCondition::Dead),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -817,6 +1195,229 @@ mod tests {
 
         if let Some(Combatant::Monster(m)) = combat.participants.first() {
             assert_eq!(m.hp.current, 6); // Regenerated 1 HP
+        }
+    }
+
+    #[test]
+    fn test_combat_monster_special_ability_applied() {
+        let mut monster = create_test_monster("Special", 10);
+
+        // Give the monster two attacks, one of which is special
+        monster.attacks = vec![
+            Attack::physical(crate::domain::types::DiceRoll::new(1, 4, 0)),
+            Attack::new(
+                crate::domain::types::DiceRoll::new(1, 6, 0),
+                AttackType::Physical,
+                Some(SpecialEffect::Paralysis),
+            ),
+        ];
+        monster.special_attack_threshold = 100; // Always trigger special attack
+
+        let mut rng = rand::rng();
+        let chosen = choose_monster_attack(&monster, &mut rng);
+        assert!(chosen.is_some());
+        assert!(chosen.unwrap().special_effect.is_some());
+    }
+
+    #[test]
+    fn test_spell_effect_applies_damage() {
+        let mut combat = CombatState::new(Handicap::Even);
+
+        // Add a test monster
+        let monster = create_test_monster("FireTest", 8);
+        combat.add_monster(monster);
+
+        // Create a simple damage spell (1d6)
+        let spell = crate::domain::magic::types::Spell::new(
+            0x0201,
+            "Test Fire",
+            crate::domain::magic::types::SpellSchool::Sorcerer,
+            1,
+            1,
+            0,
+            crate::domain::magic::types::SpellContext::CombatOnly,
+            crate::domain::magic::types::SpellTarget::SingleMonster,
+            "Deals 1d6 damage",
+            Some(crate::domain::types::DiceRoll::new(1, 6, 0)),
+            0,
+            false,
+        );
+
+        let mut rng = rand::rng();
+        let dmg = roll_spell_damage(&spell, &mut rng);
+        assert!(dmg >= 0);
+
+        let target = CombatantId::Monster(0);
+        let res = apply_damage(&mut combat, target, dmg as u16);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_apply_condition_sets_flag() {
+        // Character
+        let mut character = create_test_character("Affected", 10);
+
+        let cond = crate::domain::conditions::ConditionDefinition {
+            id: "silence".to_string(),
+            name: "Silence".to_string(),
+            description: "Silences target".to_string(),
+            effects: vec![crate::domain::conditions::ConditionEffect::StatusEffect(
+                "silenced".to_string(),
+            )],
+            default_duration: crate::domain::conditions::ConditionDuration::Rounds(2),
+            icon_id: None,
+        };
+
+        apply_condition_to_character(&mut character, &cond);
+        assert!(character.conditions.is_silenced());
+
+        // Monster
+        let mut monster = create_test_monster("Silent Gob", 8);
+        apply_condition_to_monster(&mut monster, &cond);
+        assert_eq!(
+            monster.conditions,
+            crate::domain::combat::monster::MonsterCondition::Silenced
+        );
+    }
+
+    #[test]
+    fn test_condition_duration_decrements_per_turn() {
+        let mut character = create_test_character("Timer", 10);
+
+        let cond = crate::domain::conditions::ConditionDefinition {
+            id: "poison".to_string(),
+            name: "Poison".to_string(),
+            description: "Toxic damage over time".to_string(),
+            effects: vec![crate::domain::conditions::ConditionEffect::DamageOverTime {
+                damage: crate::domain::types::DiceRoll::new(1, 4, 0),
+                element: "poison".to_string(),
+            }],
+            default_duration: crate::domain::conditions::ConditionDuration::Rounds(2),
+            icon_id: None,
+        };
+
+        apply_condition_to_character(&mut character, &cond);
+        assert_eq!(character.active_conditions.len(), 1);
+
+        // Tick once
+        character.tick_conditions_round();
+        assert_eq!(character.active_conditions.len(), 1);
+
+        // Tick second time - should expire
+        character.tick_conditions_round();
+        assert_eq!(character.active_conditions.len(), 0);
+    }
+
+    #[test]
+    fn test_paralyzed_condition_prevents_action() {
+        let mut character = create_test_character("Stunned", 10);
+
+        let cond = crate::domain::conditions::ConditionDefinition {
+            id: "paralyze".to_string(),
+            name: "Paralyze".to_string(),
+            description: "Cannot act".to_string(),
+            effects: vec![crate::domain::conditions::ConditionEffect::StatusEffect(
+                "paralyzed".to_string(),
+            )],
+            default_duration: crate::domain::conditions::ConditionDuration::Rounds(1),
+            icon_id: None,
+        };
+
+        apply_condition_to_character(&mut character, &cond);
+        assert!(!character.can_act());
+    }
+
+    #[test]
+    fn test_apply_condition_by_id_sets_flag() {
+        let mut content = crate::sdk::database::ContentDatabase::new();
+
+        let cond_def = crate::domain::conditions::ConditionDefinition {
+            id: "silence".to_string(),
+            name: "Silence".to_string(),
+            description: "Silences target".to_string(),
+            effects: vec![crate::domain::conditions::ConditionEffect::StatusEffect(
+                "silenced".to_string(),
+            )],
+            default_duration: crate::domain::conditions::ConditionDuration::Rounds(2),
+            icon_id: None,
+        };
+
+        content.conditions.add_condition(cond_def);
+
+        let mut character = create_test_character("Affected", 10);
+        assert!(apply_condition_to_character_by_id(&mut character, "silence", &content).is_ok());
+        assert!(character.conditions.is_silenced());
+
+        // Monster test
+        let stats = crate::domain::character::Stats::new(10, 8, 6, 10, 8, 7, 5);
+        let attacks = vec![crate::domain::combat::types::Attack::physical(
+            crate::domain::types::DiceRoll::new(1, 4, 0),
+        )];
+        let mut monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "M".to_string(),
+            stats,
+            10,
+            5,
+            attacks,
+            crate::domain::combat::monster::LootTable::none(),
+        );
+
+        assert!(apply_condition_to_monster_by_id(&mut monster, "silence", &content).is_ok());
+        assert_eq!(
+            monster.conditions,
+            crate::domain::combat::monster::MonsterCondition::Silenced
+        );
+    }
+
+    #[test]
+    fn test_combat_loads_monster_stats_from_db() {
+        // Build a small content DB and add a monster definition
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        use crate::domain::character::{AttributePair, AttributePair16, Stats};
+        use crate::domain::combat::database::MonsterDefinition;
+        use crate::domain::combat::monster::MonsterResistances;
+        use crate::domain::combat::types::Attack;
+        use crate::domain::types::DiceRoll;
+
+        let monster_def = MonsterDefinition {
+            id: crate::domain::types::MonsterId::from(42u8),
+            name: "TestMonster".to_string(),
+            stats: Stats::new(12, 8, 6, 10, 9, 7, 5),
+            hp: AttributePair16::new(30),
+            ac: AttributePair::new(8),
+            attacks: vec![Attack::physical(DiceRoll::new(1, 6, 0))],
+            flee_threshold: 0,
+            special_attack_threshold: 0,
+            resistances: MonsterResistances::new(),
+            can_regenerate: false,
+            can_advance: false,
+            is_undead: false,
+            magic_resistance: 0,
+            loot: crate::domain::combat::monster::LootTable::none(),
+            conditions: crate::domain::combat::monster::MonsterCondition::Normal,
+            active_conditions: Vec::new(),
+            has_acted: false,
+        };
+
+        db.monsters.add_monster(monster_def).unwrap();
+
+        let mut combat = CombatState::new(crate::domain::combat::types::Handicap::Even);
+        let group = vec![42u8];
+
+        // Initialize combat from group
+        let res = initialize_combat_from_group(&mut combat, &db, &group);
+        assert!(res.is_ok());
+
+        // Verify monster present and stats loaded
+        assert_eq!(combat.participants.len(), 1);
+        if let crate::domain::combat::engine::Combatant::Monster(m) = &combat.participants[0] {
+            assert_eq!(m.name, "TestMonster");
+            assert_eq!(m.hp.base, 30);
+            assert_eq!(m.ac.base, 8);
+        } else {
+            panic!("Expected a monster participant");
         }
     }
 

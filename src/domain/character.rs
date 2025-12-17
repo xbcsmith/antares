@@ -285,7 +285,7 @@ impl<'de> serde::Deserialize<'de> for AttributePair16 {
 /// assert_eq!(stats.might.base, 15);
 /// assert_eq!(stats.intellect.base, 10);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Stats {
     /// Physical strength, melee damage
     pub might: AttributePair,
@@ -340,7 +340,7 @@ impl Stats {
 // ===== Resistances =====
 
 /// Resistances to various damage types and effects
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Resistances {
     /// Generic magic resistance
     pub magic: AttributePair,
@@ -504,7 +504,7 @@ impl Default for Condition {
 // ===== Inventory =====
 
 /// Inventory slot with item ID and charges
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InventorySlot {
     pub item_id: ItemId,
     /// Charges remaining for magical items (0 = useless)
@@ -522,7 +522,7 @@ pub struct InventorySlot {
 /// assert!(inventory.has_space());
 /// assert!(!inventory.is_full());
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Inventory {
     pub items: Vec<InventorySlot>,
 }
@@ -585,7 +585,7 @@ impl Default for Inventory {
 /// let mut equipment = Equipment::new();
 /// assert_eq!(equipment.equipped_count(), 0);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Equipment {
     pub weapon: Option<ItemId>,
     pub armor: Option<ItemId>,
@@ -638,7 +638,7 @@ impl Default for Equipment {
 // ===== SpellBook =====
 
 /// Character's known spells organized by school and level
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpellBook {
     /// Cleric spells by level (1-7)
     pub cleric_spells: [Vec<SpellId>; 7],
@@ -813,7 +813,7 @@ impl Default for SpellBook {
 // ===== QuestFlags =====
 
 /// Per-character quest and event tracking
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QuestFlags {
     /// Indexed flags for game events
     pub flags: Vec<bool>,
@@ -866,7 +866,7 @@ impl Default for QuestFlags {
 /// assert_eq!(hero.class_id, "knight");
 /// assert_eq!(hero.level, 1);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Character {
     pub name: String,
     /// Data-driven race identifier (e.g., "human", "elf")

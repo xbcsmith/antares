@@ -77,7 +77,7 @@ fn test_game_mode_transitions() {
     assert_eq!(game_state.mode, GameMode::Exploration);
 
     game_state.enter_combat();
-    assert_eq!(game_state.mode, GameMode::Combat);
+    assert!(matches!(game_state.mode, GameMode::Combat(_)));
     assert_eq!(game_state.party.size(), 1); // Party preserved
 
     game_state.exit_combat();
@@ -93,7 +93,7 @@ fn test_game_mode_transitions() {
 
     // Test: Exploration -> Dialogue -> Exploration
     game_state.enter_dialogue();
-    assert_eq!(game_state.mode, GameMode::Dialogue);
+    assert!(matches!(game_state.mode, GameMode::Dialogue(_)));
 
     game_state.return_to_exploration();
     assert_eq!(game_state.mode, GameMode::Exploration);

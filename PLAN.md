@@ -24,6 +24,15 @@ Plans describe steps for the USER or another agent to execute later.
 <workflow>
 Comprehensive context gathering for planning following <plan_research>:
 
+## AI-Optimized Implementation Standards
+
+- Use explicit, unambiguous language with zero interpretation required
+- Structure all content as machine-parseable formats (tables, lists, structured data)
+- Include specific file paths, line numbers, and exact code references where applicable
+- Define all variables, constants, and configuration values explicitly
+- Provide complete context within each task description
+- Include validation criteria that can be automatically verified
+
 ## 1. Present a concise plan to the user for iteration
 
 1. Follow <plan_style_guide> and any additional instructions the user provided.
@@ -68,7 +77,7 @@ system rules:
 - ONLY write the plan, without unnecessary preamble or postamble
   </plan_style_guide>
 
-Write an phased approach implementation plan for implementing 1-5 in your list
+Write an phased approach implementation plan for implementing phases in your list
 of recommended implementation order. Write the plan to docs/explanations.
 
 ## Implementation Plan
@@ -107,6 +116,11 @@ Implementation Phases sections follow the following pattern:
 #### 1.4 Testing Requirements
 
 #### 1.5 Deliverables
+
+Update the deliverables list as they are completed.
+
+- [] Deliverable 1
+- [] Deliverable 2
 
 #### 1.6 Success Criteria
 
