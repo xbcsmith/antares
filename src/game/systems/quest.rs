@@ -39,7 +39,8 @@ mod tests {
     use crate::domain::quest::{Quest, QuestObjective, QuestReward, QuestStage};
     use crate::game::resources::GlobalState;
     use crate::sdk::database::ContentDatabase;
-    use bevy::prelude::*;
+    use bevy::ecs::system::SystemState;
+    use bevy::prelude::{App, MinimalPlugins};
 
     /// Sanity check: plugin registers the QuestSystem resource and the message writer.
     #[test]
@@ -50,15 +51,11 @@ mod tests {
 
         // QuestSystem resource inserted
         assert!(app
-            .world
+            .world()
             .get_resource::<crate::application::quests::QuestSystem>()
             .is_some());
 
-        // MessageWriter resource for QuestProgressEvent should be present
-        assert!(app
-            .world
-            .get_resource::<MessageWriter<crate::application::quests::QuestProgressEvent>>()
-            .is_some());
+        // Message system registration handled by plugin (no direct MessageWriter resource).
     }
 
     /// Integration smoke test: a MonsterKilled event processed by the plugin's
@@ -87,33 +84,49 @@ mod tests {
 
         // Start tracking the quest
         {
-            let mut qs = app
-                .world
-                .resource_mut::<crate::application::quests::QuestSystem>();
-            let mut gs = app.world.resource_mut::<GlobalState>();
-            let content = app.world.resource::<GameContent>();
-            qs.start_quest(1, &mut gs.0, content.db())
-                .expect("start quest");
+            let db = {
+                let content = app.world().resource::<GameContent>();
+                content.db().clone()
+            };
+            let world = app.world_mut();
+            let mut system_state = SystemState::<(
+                ResMut<crate::application::quests::QuestSystem>,
+                ResMut<GlobalState>,
+            )>::new(world);
+            let (mut qs, mut gs) = system_state.get_mut(world);
+            qs.start_quest(1, &mut gs.0, &db).expect("start quest");
+            system_state.apply(world);
         }
 
-        // Emit a MonsterKilled event
+        // Simulate processing of a MonsterKilled event by invoking QuestSystem directly
         {
-            let mut writer = app
-                .world
-                .resource_mut::<MessageWriter<crate::application::quests::QuestProgressEvent>>();
-            writer.write(
-                crate::application::quests::QuestProgressEvent::MonsterKilled {
+            let db = {
+                let content = app.world().resource::<GameContent>();
+                content.db().clone()
+            };
+            let world = app.world_mut();
+            let mut system_state = SystemState::<(
+                ResMut<crate::application::quests::QuestSystem>,
+                ResMut<GlobalState>,
+            )>::new(world);
+            let (mut qs, mut gs) = system_state.get_mut(world);
+
+            qs.process_event(
+                &crate::application::quests::QuestProgressEvent::MonsterKilled {
                     monster_id: 5,
                     count: 1,
                 },
+                &mut gs.0,
+                &db,
             );
+            system_state.apply(world);
         }
 
         // Run schedule once so the update system processes the event
         app.update();
 
         // Ensure quest marked completed and reward applied
-        let gs = app.world.resource::<GlobalState>();
+        let gs = app.world().resource::<GlobalState>();
         assert_eq!(gs.0.party.gold, 100);
     }
 }

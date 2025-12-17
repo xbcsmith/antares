@@ -117,6 +117,11 @@ Implementation Phases sections follow the following pattern:
 
 #### 1.5 Deliverables
 
+Update the deliverables list as they are completed.
+
+- [] Deliverable 1
+- [] Deliverable 2
+
 #### 1.6 Success Criteria
 
 ### Phase 2: Feature Implementation

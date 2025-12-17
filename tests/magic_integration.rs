@@ -187,8 +187,16 @@ fn test_context_restrictions() {
         );
 
         // Assert: Can cast in combat (if enough SP)
-        let result_in_combat =
-            can_cast_spell(&cleric, combat_spell, &GameMode::Combat, true, false);
+        let combat_state = antares::domain::combat::engine::CombatState::new(
+            antares::domain::combat::types::Handicap::Even,
+        );
+        let result_in_combat = can_cast_spell(
+            &cleric,
+            combat_spell,
+            &GameMode::Combat(combat_state),
+            true,
+            false,
+        );
         // Either succeeds or fails due to SP, but context should be valid
         assert!(
             result_in_combat.is_ok() || !matches!(result_in_combat, Err(SpellError::CombatOnly)),

@@ -27,10 +27,9 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::application::resources::GameContent;
-use crate::domain::character::{Alignment, Character, Sex};
+
 use crate::domain::quest::{
     Quest as DomainQuest, QuestId as DomainQuestId, QuestObjective, QuestProgress, QuestReward,
-    QuestStage,
 };
 use crate::domain::types::{ItemId, MapId, MonsterId, Position};
 use crate::game::resources::GlobalState;
@@ -277,13 +276,10 @@ impl QuestSystem {
     /// - `Items` → added to the first party member's inventory (single slot with charges)
     /// - `SetFlag`/`Reputation`/`UnlockQuest` are handled conservatively
     fn apply_rewards(&self, quest: &DomainQuest, game_state: &mut crate::application::GameState) {
-        // Ensure a party member exists to receive direct item/experience rewards
-        let maybe_char = game_state.party.members.get_mut(0);
-
         for reward in &quest.rewards {
             match reward {
                 QuestReward::Experience(amount) => {
-                    if let Some(ch) = maybe_char {
+                    if let Some(ch) = game_state.party.members.get_mut(0) {
                         ch.experience = ch.experience.saturating_add(*amount as u64);
                     }
                 }
@@ -291,7 +287,7 @@ impl QuestSystem {
                     game_state.party.gold = game_state.party.gold.saturating_add(*amount);
                 }
                 QuestReward::Items(items) => {
-                    if let Some(ch) = maybe_char {
+                    if let Some(ch) = game_state.party.members.get_mut(0) {
                         for (item_id, qty) in items {
                             // Use single slot with charges = qty (domain Inventory supports charges)
                             let _ = ch.inventory.add_item(*item_id, *qty as u8);
@@ -342,7 +338,7 @@ pub fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::Character;
+    use crate::domain::character::{Alignment, Character, Sex};
     use crate::domain::quest::{Quest, QuestStage};
     use crate::sdk::database::ContentDatabase;
 

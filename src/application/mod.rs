@@ -35,12 +35,12 @@ use serde::{Deserialize, Serialize};
 /// let mode = GameMode::Exploration;
 /// assert!(matches!(mode, GameMode::Exploration));
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GameMode {
     /// Exploring the world, moving through maps
     Exploration,
-    /// Turn-based tactical combat
-    Combat,
+    /// Turn-based tactical combat containing full combat state
+    Combat(crate::domain::combat::engine::CombatState),
     /// Menu system (character management, inventory)
     Menu,
     /// NPC dialogue and interactions
@@ -282,6 +282,18 @@ pub enum RosterInitializationError {
     CharacterError(#[from] crate::domain::character::CharacterError),
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum MoveHandleError {
+    #[error("Movement error: {0}")]
+    Movement(#[from] crate::domain::world::MovementError),
+
+    #[error("Event error: {0}")]
+    Event(#[from] crate::domain::world::EventError),
+
+    #[error("Combat initialization error: {0}")]
+    CombatInit(#[from] crate::domain::combat::database::MonsterDatabaseError),
+}
+
 impl GameState {
     /// Creates a new game state with default values (no campaign)
     ///
@@ -429,9 +441,69 @@ impl GameState {
         Ok(())
     }
 
-    /// Enters combat mode
+    /// Enters combat mode (default handicap: Even)
+    ///
+    /// This creates a default `CombatState` and places the game into combat mode.
     pub fn enter_combat(&mut self) {
-        self.mode = GameMode::Combat;
+        let cs = crate::domain::combat::engine::CombatState::new(
+            crate::domain::combat::types::Handicap::Even,
+        );
+        self.mode = GameMode::Combat(cs);
+    }
+
+    /// Enters combat mode with a provided `CombatState`.
+    pub fn enter_combat_with_state(&mut self, cs: crate::domain::combat::engine::CombatState) {
+        self.mode = GameMode::Combat(cs);
+    }
+
+    /* MoveHandleError moved to module scope (see above impl) */
+
+    /// Move the party in the given direction, trigger any tile event, and handle
+    /// the result. Encounters will initialize a combat from the content database
+    /// and transition the game into combat mode.
+    pub fn move_party_and_handle_events(
+        &mut self,
+        direction: crate::domain::types::Direction,
+        content: &ContentDatabase,
+    ) -> Result<(), MoveHandleError> {
+        // Perform the move (may return MovementError)
+        let position = crate::domain::world::move_party(&mut self.world, direction)
+            .map_err(MoveHandleError::Movement)?;
+
+        // Trigger the map event at the resulting position
+        let ev = crate::domain::world::trigger_event(&mut self.world, position)
+            .map_err(MoveHandleError::Event)?;
+
+        match ev {
+            crate::domain::world::EventResult::Encounter { monster_group } => {
+                // Build combat state and initialize from the monster group
+                let mut cs = crate::domain::combat::engine::CombatState::new(
+                    crate::domain::combat::types::Handicap::Even,
+                );
+
+                crate::domain::combat::engine::initialize_combat_from_group(
+                    &mut cs,
+                    content,
+                    &monster_group,
+                )
+                .map_err(MoveHandleError::CombatInit)?;
+
+                // Enter combat with prepared combat state
+                self.mode = GameMode::Combat(cs);
+            }
+
+            crate::domain::world::EventResult::NpcDialogue { npc_id } => {
+                // Start dialogue mode (dialogue state may need NPC context)
+                let _ = npc_id; // TODO: pass npc_id into dialogue state when implemented
+                self.mode = GameMode::Dialogue(crate::application::dialogue::DialogueState::new());
+            }
+
+            _ => {
+                // Other events (treasure, teleport, trap, etc.) are handled elsewhere or are no-ops here
+            }
+        }
+
+        Ok(())
     }
 
     /// Exits combat mode and returns to exploration
@@ -478,7 +550,7 @@ mod tests {
     #[test]
     fn test_game_state_creation() {
         let state = GameState::new();
-        assert_eq!(state.mode, GameMode::Exploration);
+        assert!(matches!(state.mode, GameMode::Exploration));
         assert!(state.party.is_empty());
         assert_eq!(state.time.day, 1);
     }
@@ -497,14 +569,14 @@ mod tests {
         );
         state.party.add_member(hero).unwrap();
 
-        // Transition to combat
+        // Transition to combat (default combat state created)
         state.enter_combat();
-        assert_eq!(state.mode, GameMode::Combat);
+        assert!(matches!(state.mode, GameMode::Combat(_)));
         assert_eq!(state.party.size(), 1);
 
         // Exit combat
         state.exit_combat();
-        assert_eq!(state.mode, GameMode::Exploration);
+        assert!(matches!(state.mode, GameMode::Exploration));
         assert_eq!(state.party.size(), 1);
     }
 
@@ -564,13 +636,13 @@ mod tests {
         let mut state = GameState::new();
 
         state.enter_menu();
-        assert_eq!(state.mode, GameMode::Menu);
+        assert!(matches!(state.mode, GameMode::Menu));
 
         state.enter_dialogue();
         assert!(matches!(state.mode, GameMode::Dialogue(_)));
 
         state.return_to_exploration();
-        assert_eq!(state.mode, GameMode::Exploration);
+        assert!(matches!(state.mode, GameMode::Exploration));
     }
 
     #[test]

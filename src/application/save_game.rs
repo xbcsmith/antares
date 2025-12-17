@@ -500,7 +500,14 @@ mod tests {
 
         let loaded_state = manager.load("test_save").unwrap();
 
-        assert_eq!(loaded_state.mode, game_state.mode);
+        assert!(matches!(
+            loaded_state.mode,
+            crate::application::GameMode::Exploration
+        ));
+        assert!(matches!(
+            game_state.mode,
+            crate::application::GameMode::Exploration
+        ));
         assert_eq!(loaded_state.time.day, game_state.time.day);
     }
 

@@ -39,7 +39,7 @@ use crate::domain::dialogue::{DialogueId, NodeId};
 /// * `active_tree_id` - Optional active dialogue tree identifier.
 /// * `current_node_id` - Node ID currently being displayed/processed.
 /// * `dialogue_history` - Ordered list of node IDs visited (root .. current).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Resource)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Resource, Default)]
 pub struct DialogueState {
     /// The active dialogue tree ID (None if no dialogue is active)
     pub active_tree_id: Option<DialogueId>,
@@ -136,16 +136,6 @@ impl DialogueState {
     /// Returns true if a dialogue is currently active.
     pub fn is_active(&self) -> bool {
         self.active_tree_id.is_some()
-    }
-}
-
-impl Default for DialogueState {
-    fn default() -> Self {
-        Self {
-            active_tree_id: None,
-            current_node_id: 0,
-            dialogue_history: Vec::new(),
-        }
     }
 }
 
