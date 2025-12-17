@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 ///     sleep: true,
 /// };
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonsterResistances {
     /// Immune to physical damage
     pub physical: bool,
@@ -188,7 +188,7 @@ impl MonsterCondition {
 ///     experience: 100,
 /// };
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LootTable {
     /// Minimum gold dropped
     pub gold_min: u32,
@@ -268,7 +268,7 @@ impl Default for LootTable {
 ///     has_acted: false,
 /// };
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Monster {
     /// Monster identifier
     pub id: MonsterId,

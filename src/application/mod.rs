@@ -11,12 +11,16 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.1 for complete specifications.
 
+pub mod dialogue;
+pub mod quests;
+pub mod resources;
 pub mod save_game;
 
 use crate::domain::character::{Party, Roster};
 use crate::domain::types::GameTime;
 use crate::domain::world::World;
-use crate::sdk::campaign_loader::Campaign;
+use crate::sdk::campaign_loader::{Campaign, CampaignError};
+use crate::sdk::database::ContentDatabase;
 use serde::{Deserialize, Serialize};
 
 // ===== Game Mode =====
@@ -31,16 +35,16 @@ use serde::{Deserialize, Serialize};
 /// let mode = GameMode::Exploration;
 /// assert!(matches!(mode, GameMode::Exploration));
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GameMode {
     /// Exploring the world, moving through maps
     Exploration,
-    /// Turn-based tactical combat
-    Combat,
+    /// Turn-based tactical combat containing full combat state
+    Combat(crate::domain::combat::engine::CombatState),
     /// Menu system (character management, inventory)
     Menu,
     /// NPC dialogue and interactions
-    Dialogue,
+    Dialogue(crate::application::dialogue::DialogueState),
 }
 
 // ===== Active Spell Effects =====
@@ -265,18 +269,42 @@ pub struct GameState {
     pub quests: QuestLog,
 }
 
+/// Errors returned by `GameState::initialize_roster`.
+///
+/// Wraps lower-level `CharacterDefinitionError` and `CharacterError` to
+/// provide a single error type usable by the application layer.
+#[derive(thiserror::Error, Debug)]
+pub enum RosterInitializationError {
+    #[error("Character definition error: {0}")]
+    CharacterDefinition(#[from] crate::domain::character_definition::CharacterDefinitionError),
+
+    #[error("Character operation error: {0}")]
+    CharacterError(#[from] crate::domain::character::CharacterError),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum MoveHandleError {
+    #[error("Movement error: {0}")]
+    Movement(#[from] crate::domain::world::MovementError),
+
+    #[error("Event error: {0}")]
+    Event(#[from] crate::domain::world::EventError),
+
+    #[error("Combat initialization error: {0}")]
+    CombatInit(#[from] crate::domain::combat::database::MonsterDatabaseError),
+}
+
 impl GameState {
     /// Creates a new game state with default values (no campaign)
     ///
     /// # Examples
     ///
     /// ```
-    /// use antares::application::{GameState, GameMode};
+    /// use antares::application::GameState;
     ///
     /// let state = GameState::new();
-    /// assert_eq!(state.mode, GameMode::Exploration);
+    /// assert!(state.party.is_empty());
     /// assert_eq!(state.time.day, 1);
-    /// assert!(state.campaign.is_none());
     /// ```
     pub fn new() -> Self {
         Self {
@@ -318,7 +346,27 @@ impl GameState {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new_game(campaign: Campaign) -> Self {
+    pub fn new_game(campaign: Campaign) -> Result<(Self, ContentDatabase), CampaignError> {
+        // Load campaign content (propagates CampaignError::DatabaseError or others)
+        let content_db = campaign.load_content()?;
+
+        // Basic Phase 1 validation: ensure core content groups are present
+        if content_db.classes.all_classes().count() == 0 {
+            return Err(CampaignError::DatabaseError(
+                "Classes database is empty".to_string(),
+            ));
+        }
+        if content_db.races.all_races().count() == 0 {
+            return Err(CampaignError::DatabaseError(
+                "Races database is empty".to_string(),
+            ));
+        }
+        if content_db.characters.all_characters().count() == 0 {
+            return Err(CampaignError::DatabaseError(
+                "Characters database is empty".to_string(),
+            ));
+        }
+
         let starting_gold = campaign.config.starting_gold;
         let starting_food = campaign.config.starting_food;
 
@@ -326,7 +374,7 @@ impl GameState {
         party.gold = starting_gold;
         party.food = starting_food;
 
-        Self {
+        let mut state = Self {
             campaign: Some(campaign),
             world: World::new(),
             roster: Roster::new(),
@@ -335,12 +383,127 @@ impl GameState {
             mode: GameMode::Exploration,
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
             quests: QuestLog::new(),
+        };
+
+        // Phase 2: Initialize roster from content database (premade characters)
+        state.initialize_roster(&content_db).map_err(|e| {
+            CampaignError::DatabaseError(format!("Roster initialization failed: {}", e))
+        })?;
+
+        Ok((state, content_db))
+    }
+
+    /// Loads campaign content for the currently loaded campaign
+    ///
+    /// # Errors
+    ///
+    /// Returns `CampaignError` if no campaign is loaded or the campaign fails to load its content.
+    pub fn load_campaign_content(&self) -> Result<ContentDatabase, CampaignError> {
+        if let Some(campaign) = &self.campaign {
+            campaign.load_content()
+        } else {
+            Err(CampaignError::InvalidStructure(
+                "No campaign loaded".to_string(),
+            ))
         }
     }
 
-    /// Enters combat mode
+    /// Initializes the roster using premade character definitions from the given content database.
+    ///
+    /// This will instantiate each premade character using race and class definitions from the content
+    /// database (which applies race/class modifiers) and insert the resulting `Character` into the
+    /// game's roster. Returns an error if instantiation or roster insertion fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameState;
+    /// use antares::sdk::campaign_loader::CampaignLoader;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = CampaignLoader::new("campaigns");
+    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let (mut state, content_db) = GameState::new_game(campaign)?;
+    /// // new_game calls initialize_roster internally; alternatively you may call:
+    /// // state.initialize_roster(&content_db)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn initialize_roster(
+        &mut self,
+        content_db: &ContentDatabase,
+    ) -> Result<(), RosterInitializationError> {
+        for def in content_db.characters.premade_characters() {
+            let character =
+                def.instantiate(&content_db.races, &content_db.classes, &content_db.items)?;
+            self.roster.add_character(character, None)?;
+        }
+        Ok(())
+    }
+
+    /// Enters combat mode (default handicap: Even)
+    ///
+    /// This creates a default `CombatState` and places the game into combat mode.
     pub fn enter_combat(&mut self) {
-        self.mode = GameMode::Combat;
+        let cs = crate::domain::combat::engine::CombatState::new(
+            crate::domain::combat::types::Handicap::Even,
+        );
+        self.mode = GameMode::Combat(cs);
+    }
+
+    /// Enters combat mode with a provided `CombatState`.
+    pub fn enter_combat_with_state(&mut self, cs: crate::domain::combat::engine::CombatState) {
+        self.mode = GameMode::Combat(cs);
+    }
+
+    /* MoveHandleError moved to module scope (see above impl) */
+
+    /// Move the party in the given direction, trigger any tile event, and handle
+    /// the result. Encounters will initialize a combat from the content database
+    /// and transition the game into combat mode.
+    pub fn move_party_and_handle_events(
+        &mut self,
+        direction: crate::domain::types::Direction,
+        content: &ContentDatabase,
+    ) -> Result<(), MoveHandleError> {
+        // Perform the move (may return MovementError)
+        let position = crate::domain::world::move_party(&mut self.world, direction)
+            .map_err(MoveHandleError::Movement)?;
+
+        // Trigger the map event at the resulting position
+        let ev = crate::domain::world::trigger_event(&mut self.world, position)
+            .map_err(MoveHandleError::Event)?;
+
+        match ev {
+            crate::domain::world::EventResult::Encounter { monster_group } => {
+                // Build combat state and initialize from the monster group
+                let mut cs = crate::domain::combat::engine::CombatState::new(
+                    crate::domain::combat::types::Handicap::Even,
+                );
+
+                crate::domain::combat::engine::initialize_combat_from_group(
+                    &mut cs,
+                    content,
+                    &monster_group,
+                )
+                .map_err(MoveHandleError::CombatInit)?;
+
+                // Enter combat with prepared combat state
+                self.mode = GameMode::Combat(cs);
+            }
+
+            crate::domain::world::EventResult::NpcDialogue { npc_id } => {
+                // Start dialogue mode (dialogue state may need NPC context)
+                let _ = npc_id; // TODO: pass npc_id into dialogue state when implemented
+                self.mode = GameMode::Dialogue(crate::application::dialogue::DialogueState::new());
+            }
+
+            _ => {
+                // Other events (treasure, teleport, trap, etc.) are handled elsewhere or are no-ops here
+            }
+        }
+
+        Ok(())
     }
 
     /// Exits combat mode and returns to exploration
@@ -355,7 +518,7 @@ impl GameState {
 
     /// Enters dialogue mode
     pub fn enter_dialogue(&mut self) {
-        self.mode = GameMode::Dialogue;
+        self.mode = GameMode::Dialogue(crate::application::dialogue::DialogueState::new());
     }
 
     /// Returns to exploration mode
@@ -387,7 +550,7 @@ mod tests {
     #[test]
     fn test_game_state_creation() {
         let state = GameState::new();
-        assert_eq!(state.mode, GameMode::Exploration);
+        assert!(matches!(state.mode, GameMode::Exploration));
         assert!(state.party.is_empty());
         assert_eq!(state.time.day, 1);
     }
@@ -406,15 +569,66 @@ mod tests {
         );
         state.party.add_member(hero).unwrap();
 
-        // Transition to combat
+        // Transition to combat (default combat state created)
         state.enter_combat();
-        assert_eq!(state.mode, GameMode::Combat);
+        assert!(matches!(state.mode, GameMode::Combat(_)));
         assert_eq!(state.party.size(), 1);
 
         // Exit combat
         state.exit_combat();
-        assert_eq!(state.mode, GameMode::Exploration);
+        assert!(matches!(state.mode, GameMode::Exploration));
         assert_eq!(state.party.size(), 1);
+    }
+
+    #[test]
+    fn test_game_content_resource_creation() {
+        // Ensure the GameContent resource can be created and wraps an empty DB
+        let db = crate::sdk::database::ContentDatabase::new();
+        let resource = crate::application::resources::GameContent::new(db);
+        assert_eq!(resource.db().classes.all_classes().count(), 0);
+    }
+
+    #[test]
+    fn test_load_campaign_content_success() {
+        // Uses the tutorial campaign (existing in repo) to validate loading
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        // GameState::new_game now returns (GameState, ContentDatabase)
+        let (_state, content_db) =
+            GameState::new_game(campaign).expect("Failed to initialize game with campaign");
+
+        assert!(content_db.classes.all_classes().count() > 0);
+        assert!(content_db.races.all_races().count() > 0);
+        assert!(content_db.characters.all_characters().count() > 0);
+    }
+
+    #[test]
+    fn test_load_campaign_content_missing_files_error() {
+        // Attempting to load a non-existent campaign directory should error
+        use tempfile::TempDir;
+        let t = TempDir::new().unwrap();
+        let p = t.path().join("nonexistent_campaign");
+        let res = crate::sdk::database::ContentDatabase::load_campaign(&p);
+        assert!(matches!(
+            res,
+            Err(crate::sdk::database::DatabaseError::CampaignNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn test_new_game_returns_content_database() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        let (state, content_db) = GameState::new_game(campaign).expect("new_game failed");
+
+        assert!(state.campaign.is_some());
+        assert!(content_db.classes.all_classes().count() > 0);
     }
 
     #[test]
@@ -422,13 +636,13 @@ mod tests {
         let mut state = GameState::new();
 
         state.enter_menu();
-        assert_eq!(state.mode, GameMode::Menu);
+        assert!(matches!(state.mode, GameMode::Menu));
 
         state.enter_dialogue();
-        assert_eq!(state.mode, GameMode::Dialogue);
+        assert!(matches!(state.mode, GameMode::Dialogue(_)));
 
         state.return_to_exploration();
-        assert_eq!(state.mode, GameMode::Exploration);
+        assert!(matches!(state.mode, GameMode::Exploration));
     }
 
     #[test]
@@ -477,5 +691,155 @@ mod tests {
         state.advance_time(5);
         assert_eq!(state.active_spells.light, 5);
         assert_eq!(state.time.minute, 5);
+    }
+
+    #[test]
+    fn test_initialize_roster_loads_all_characters() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        let (state, content_db) = GameState::new_game(campaign).expect("new_game failed");
+
+        let expected = content_db.characters.premade_characters().count();
+        assert_eq!(state.roster.characters.len(), expected);
+    }
+
+    #[test]
+    fn test_initialize_roster_applies_class_modifiers() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        let (state, _content_db) = GameState::new_game(campaign).expect("new_game failed");
+
+        // Kira is a human knight in the tutorial data; her starting HP should be
+        // class hp_die.sides + endurance modifier: 10 + ((14 - 10) / 2) = 12
+        let kira = state
+            .roster
+            .characters
+            .iter()
+            .find(|c| c.name == "Kira")
+            .expect("Kira not found in roster");
+        assert_eq!(kira.hp.base, 12);
+    }
+
+    #[test]
+    fn test_initialize_roster_applies_race_modifiers() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        let (state, _content_db) = GameState::new_game(campaign).expect("new_game failed");
+
+        // Sage is an elf sorcerer with base intellect 16 and elf +2 modifier
+        let sage = state
+            .roster
+            .characters
+            .iter()
+            .find(|c| c.name == "Sage")
+            .expect("Sage not found in roster");
+        assert_eq!(sage.stats.intellect.base, 18);
+    }
+
+    #[test]
+    fn test_initialize_roster_sets_initial_hp_sp() {
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        let (state, _content_db) = GameState::new_game(campaign).expect("new_game failed");
+
+        let sage = state
+            .roster
+            .characters
+            .iter()
+            .find(|c| c.name == "Sage")
+            .expect("Sage not found in roster");
+
+        assert_eq!(sage.sp.base, 8); // 18 intellect -> 8 SP for a pure caster
+    }
+
+    #[test]
+    fn test_initialize_roster_invalid_class_id_error() {
+        use crate::domain::character_definition::CharacterDefinition;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        // Ensure race exists so class validation is exercised
+        let human = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human".to_string(),
+        );
+        db.races.add_race(human).unwrap();
+
+        let mut bad = CharacterDefinition::new(
+            "bad_class".to_string(),
+            "Bad Class".to_string(),
+            "human".to_string(),
+            "no_such_class".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        // Mark as premade so `initialize_roster` will attempt to instantiate it
+        bad.is_premade = true;
+
+        char_db.add_character(bad).unwrap();
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        let res = state.initialize_roster(&db);
+
+        assert!(matches!(
+            res,
+            Err(RosterInitializationError::CharacterDefinition(
+                crate::domain::character_definition::CharacterDefinitionError::InvalidClassId { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_initialize_roster_invalid_race_id_error() {
+        use crate::domain::character_definition::CharacterDefinition;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        // Ensure class exists so race validation is exercised
+        let knight = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight).unwrap();
+
+        let mut bad = CharacterDefinition::new(
+            "bad_race".to_string(),
+            "Bad Race".to_string(),
+            "no_such_race".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        // Mark as premade so `initialize_roster` will attempt to instantiate it
+        bad.is_premade = true;
+
+        char_db.add_character(bad).unwrap();
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        let res = state.initialize_roster(&db);
+
+        assert!(matches!(
+            res,
+            Err(RosterInitializationError::CharacterDefinition(
+                crate::domain::character_definition::CharacterDefinitionError::InvalidRaceId { .. }
+            ))
+        ));
     }
 }

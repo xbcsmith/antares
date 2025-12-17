@@ -572,11 +572,325 @@ fn calculate_sp_from_stat(stat: u8, level: i16) -> u16 {
     base_sp + stat_bonus
 }
 
+/// Checks if a character can cast a spell referenced by ID using the campaign ContentDatabase.
+///
+/// This performs the same validation as `can_cast_spell` but looks up the spell
+/// definition from the provided `ContentDatabase` first.
+///
+/// # Arguments
+///
+/// * `character` - Character attempting to cast
+/// * `spell_id` - Spell identifier
+/// * `content` - Campaign content database containing spells
+/// * `game_mode` - Current game mode (used for context checks)
+/// * `in_combat` - Whether the party is currently in combat
+/// * `is_outdoor` - Whether the party is in an outdoor area
+///
+/// # Errors
+///
+/// Returns `SpellError::SpellNotFound` if the spell is not present in the database.
+/// Propagates other `SpellError` variants from `can_cast_spell`.
+pub fn can_cast_spell_by_id(
+    character: &crate::domain::character::Character,
+    spell_id: crate::domain::types::SpellId,
+    content: &crate::sdk::database::ContentDatabase,
+    game_mode: &crate::domain::types::GameMode,
+    in_combat: bool,
+    is_outdoor: bool,
+) -> Result<(), crate::domain::magic::types::SpellError> {
+    let Some(spell) = content.spells.get_spell(spell_id) else {
+        return Err(crate::domain::magic::types::SpellError::SpellNotFound(
+            spell_id,
+        ));
+    };
+
+    // Reuse existing validation logic
+    can_cast_spell(character, spell, game_mode, in_combat, is_outdoor)
+}
+
+/// Casts a spell (by ID) in a combat context: consumes resources and applies
+/// damage and conditions to a set of target monsters.
+///
+/// This function:
+/// * Looks up the spell via `content.spells`
+/// * Validates casting rules (delegates to `can_cast_spell`)
+/// * Calls `cast_spell` to consume SP and gems
+/// * Rolls damage (if any) and applies the resulting damage to the provided
+///   `targets` slice according to the spell's `target`
+/// * Applies data-driven conditions (if present) using the condition database
+///
+/// # Arguments
+///
+/// * `caster` - Character casting the spell (will be modified: SP/gems consumed)
+/// * `spell_id` - The ID of the spell to cast
+/// * `content` - The campaign `ContentDatabase` (for spells & conditions)
+/// * `targets` - Mutable slice of monsters participating in the encounter
+/// * `rng` - Random number generator used for dice rolls
+///
+/// # Returns
+///
+/// Returns a `SpellResult` describing what happened on success, or a `SpellError`.
+pub fn cast_spell_by_id_in_combat<R: rand::Rng>(
+    caster: &mut crate::domain::character::Character,
+    spell_id: crate::domain::types::SpellId,
+    content: &crate::sdk::database::ContentDatabase,
+    targets: &mut [crate::domain::combat::monster::Monster],
+    rng: &mut R,
+) -> Result<crate::domain::magic::types::SpellResult, crate::domain::magic::types::SpellError> {
+    use crate::domain::magic::types::SpellTarget;
+
+    // Lookup spell definition
+    let spell = content.spells.get_spell(spell_id).ok_or(
+        crate::domain::magic::types::SpellError::SpellNotFound(spell_id),
+    )?;
+
+    // Validate casting rules for combat context
+    let gm =
+        crate::domain::types::GameMode::Combat(crate::domain::combat::engine::CombatState::new(
+            crate::domain::combat::types::Handicap::Even,
+        ));
+    can_cast_spell(caster, spell, &gm, true, false)?;
+
+    // Consume resources
+    let mut result = cast_spell(caster, spell);
+
+    // Prepare condition definitions for application (clone referenced defs)
+    let mut cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = Vec::new();
+    for cond_id in &spell.applied_conditions {
+        if let Some(def) = content.conditions.get_condition(cond_id) {
+            cond_defs.push(def.clone());
+        }
+    }
+
+    // Apply damage according to target type
+    let mut affected: Vec<usize> = Vec::new();
+    let mut total_damage: i32 = 0;
+
+    if let Some(dice) = &spell.damage {
+        match spell.target {
+            // Single target: first monster in the slice (if present)
+            SpellTarget::SingleMonster => {
+                if let Some(monster) = targets.get_mut(0) {
+                    let base = dice.roll(rng);
+                    let bonus = (caster.stats.intellect.current as i32 - 10) / 2; // caster scaling
+                    let dmg = (base + bonus).max(0) as u16;
+
+                    monster.take_damage(dmg);
+                    affected.push(0);
+                    total_damage += dmg as i32;
+
+                    if !cond_defs.is_empty() {
+                        crate::domain::magic::apply_spell_conditions_to_monster(
+                            spell,
+                            monster,
+                            &cond_defs,
+                            spell.saving_throw,
+                        );
+                    }
+                }
+            }
+
+            // Group / All monsters: apply to each monster in the slice
+            SpellTarget::MonsterGroup | SpellTarget::AllMonsters => {
+                for (i, monster) in targets.iter_mut().enumerate() {
+                    let base = dice.roll(rng);
+                    let bonus = (caster.stats.intellect.current as i32 - 10) / 2;
+                    let dmg = (base + bonus).max(0) as u16;
+
+                    monster.take_damage(dmg);
+                    affected.push(i);
+                    total_damage += dmg as i32;
+
+                    if !cond_defs.is_empty() {
+                        crate::domain::magic::apply_spell_conditions_to_monster(
+                            spell,
+                            monster,
+                            &cond_defs,
+                            spell.saving_throw,
+                        );
+                    }
+                }
+            }
+
+            // Not a monster-targeting spell (ignored here)
+            _ => {}
+        }
+    }
+
+    if total_damage != 0 {
+        result = result.with_damage(total_damage, affected);
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::character::{Alignment, Sex};
-    use crate::domain::magic::types::{SpellContext, SpellTarget};
+    use crate::domain::character::Stats;
+    use crate::domain::character::{Alignment, Character, Sex};
+    use crate::domain::combat::monster::{LootTable, Monster};
+    use crate::domain::magic::types::{Spell, SpellContext, SpellError, SpellSchool, SpellTarget};
+    use crate::domain::types::DiceRoll;
+    use crate::sdk::database::ContentDatabase;
+    use rand::rng;
+
+    fn create_test_caster(name: &str, level: u32, sp: u16, gems: u32) -> Character {
+        let mut c = Character::new(
+            name.to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        c.level = level;
+        c.sp.current = sp;
+        c.gems = gems;
+        c
+    }
+
+    #[test]
+    fn test_can_cast_spell_by_id_succeeds() {
+        let mut content = ContentDatabase::new();
+        let spell = Spell::new(
+            0x0201,
+            "Test Blast",
+            SpellSchool::Sorcerer,
+            1,
+            2,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::SingleMonster,
+            "Test damage",
+            Some(DiceRoll::new(1, 4, 0)),
+            0,
+            false,
+        );
+        content.spells = crate::sdk::database::SpellDatabase::new();
+        content.spells.add_spell(spell.clone()).unwrap();
+
+        let caster = create_test_caster("Caster", 5, 10, 0);
+        let gm = crate::domain::types::GameMode::Combat(
+            crate::domain::combat::engine::CombatState::new(
+                crate::domain::combat::types::Handicap::Even,
+            ),
+        );
+        let res = can_cast_spell_by_id(&caster, spell.id, &content, &gm, true, false);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_cannot_cast_spell_by_id_insufficient_sp() {
+        let mut content = ContentDatabase::new();
+        let spell = Spell::new(
+            0x0202,
+            "Expensive Spell",
+            SpellSchool::Sorcerer,
+            3,
+            20,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::SingleMonster,
+            "Expensive",
+            Some(DiceRoll::new(3, 6, 0)),
+            0,
+            false,
+        );
+        content.spells = crate::sdk::database::SpellDatabase::new();
+        content.spells.add_spell(spell.clone()).unwrap();
+
+        let caster = create_test_caster("LowSP", 5, 1, 0);
+        let gm = crate::domain::types::GameMode::Combat(
+            crate::domain::combat::engine::CombatState::new(
+                crate::domain::combat::types::Handicap::Even,
+            ),
+        );
+        let res = can_cast_spell_by_id(&caster, spell.id, &content, &gm, true, false);
+        assert!(matches!(res, Err(SpellError::NotEnoughSP { .. })));
+    }
+
+    #[test]
+    fn test_silenced_character_cannot_cast_by_id() {
+        let mut content = ContentDatabase::new();
+        let spell = Spell::new(
+            0x0203,
+            "Cure",
+            SpellSchool::Cleric,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Heals",
+            None,
+            0,
+            false,
+        );
+        content.spells = crate::sdk::database::SpellDatabase::new();
+        content.spells.add_spell(spell.clone()).unwrap();
+
+        let mut caster = create_test_caster("Silenced", 5, 10, 0);
+        caster
+            .conditions
+            .add(crate::domain::character::Condition::SILENCED);
+        let res = can_cast_spell_by_id(
+            &caster,
+            spell.id,
+            &content,
+            &crate::domain::types::GameMode::Exploration,
+            false,
+            false,
+        );
+        assert!(matches!(res, Err(SpellError::Silenced)));
+    }
+
+    #[test]
+    fn test_cast_spell_by_id_applies_damage_to_monster() {
+        let mut content = ContentDatabase::new();
+        let spell = Spell::new(
+            0x0204,
+            "Firebolt",
+            SpellSchool::Sorcerer,
+            1,
+            2,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::SingleMonster,
+            "Deals 1d6 fire damage",
+            Some(DiceRoll::new(1, 6, 0)),
+            0,
+            false,
+        );
+        content.spells = crate::sdk::database::SpellDatabase::new();
+        content.spells.add_spell(spell.clone()).unwrap();
+
+        let mut caster = create_test_caster("Mage", 5, 10, 0);
+
+        // Build a simple monster
+        let stats = Stats::new(10, 8, 6, 10, 10, 10, 10);
+        let attacks = vec![crate::domain::combat::types::Attack::physical(
+            DiceRoll::new(1, 4, 0),
+        )];
+        let monster = Monster::new(
+            1,
+            "Goblin".to_string(),
+            stats,
+            15,
+            5,
+            attacks,
+            LootTable::none(),
+        );
+        let initial_hp = monster.hp.current;
+
+        let mut monsters = vec![monster];
+
+        let mut rng = rng();
+        let res =
+            cast_spell_by_id_in_combat(&mut caster, spell.id, &content, &mut monsters, &mut rng)
+                .expect("Cast failed");
+        assert!(res.damage.is_some());
+        assert!(monsters[0].hp.current < initial_hp);
+    }
 
     fn create_test_character(class_id: &str, level: u32, sp: u16, gems: u32) -> Character {
         let mut character = Character::new(
@@ -667,7 +981,12 @@ mod tests {
         let sorcerer = create_test_character("sorcerer", 5, 10, 5);
         let spell = create_test_spell(SpellSchool::Sorcerer, 1, 3, 0, SpellContext::CombatOnly);
 
-        let result = can_cast_spell(&sorcerer, &spell, &GameMode::Combat, true, false);
+        let gm = crate::domain::types::GameMode::Combat(
+            crate::domain::combat::engine::CombatState::new(
+                crate::domain::combat::types::Handicap::Even,
+            ),
+        );
+        let result = can_cast_spell(&sorcerer, &spell, &gm, true, false);
         assert!(result.is_ok());
     }
 

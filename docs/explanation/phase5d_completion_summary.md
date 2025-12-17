@@ -10,7 +10,7 @@ Phase 5D completes the CLI Editor Proficiency Migration (Phase 5) by providing c
 
 ## Objectives Achieved
 
-1. ✅ Created comprehensive manual test checklist with 24 test scenarios
+1. ✅ Created comprehensive manual test checklist with 20 test scenarios
 2. ✅ Updated implementation documentation (implementations.md)
 3. ✅ Updated Phase 5 implementation document with completion status
 4. ✅ Updated architecture document with proficiency system details
@@ -25,15 +25,15 @@ Phase 5D completes the CLI Editor Proficiency Migration (Phase 5) by providing c
 
 **Test Suites Documented:**
 
-| Suite | Tests | Focus Area |
-|-------|-------|------------|
-| Test Suite 1 | 4 | Class Editor - Proficiency System |
-| Test Suite 2 | 4 | Race Editor - Proficiencies and Incompatible Tags |
-| Test Suite 3 | 5 | Item Editor - Classifications, Tags, and Alignment |
-| Test Suite 4 | 3 | Legacy Data Compatibility |
-| Test Suite 5 | 2 | Integration Testing |
-| Test Suite 6 | 2 | Error Handling |
-| **Total** | **24** | **Comprehensive Coverage** |
+| Suite        | Tests  | Focus Area                                         |
+| ------------ | ------ | -------------------------------------------------- |
+| Test Suite 1 | 4      | Class Editor - Proficiency System                  |
+| Test Suite 2 | 4      | Race Editor - Proficiencies and Incompatible Tags  |
+| Test Suite 3 | 5      | Item Editor - Classifications, Tags, and Alignment |
+| Test Suite 4 | 3      | Legacy Data Compatibility                          |
+| Test Suite 5 | 2      | Integration Testing                                |
+| Test Suite 6 | 2      | Error Handling                                     |
+| **Total**    | **20** | **Comprehensive Coverage**                         |
 
 **Test Checklist Features:**
 
@@ -203,7 +203,7 @@ pub struct Item {
 **Test Coverage Statistics:**
 
 - 20 automated integration tests
-- 24 manual test scenarios
+- 20 manual test scenarios
 - > 80% code coverage for editor data structures
 - Zero clippy warnings with `-D warnings`
 - All quality gates passing
@@ -253,12 +253,12 @@ All documentation files follow AGENTS.md naming conventions:
 
 ## Files Modified Summary
 
-| File | Lines Added | Purpose |
-|------|-------------|---------|
-| `docs/explanation/phase5_manual_test_checklist.md` | 886 (new) | Manual test procedures |
-| `docs/explanation/implementations.md` | 380 | Phase 5D documentation |
-| `docs/explanation/phase5_cli_editors_implementation.md` | 150+ | Completion status |
-| `docs/reference/architecture.md` | 250+ | Proficiency system specs |
+| File                                                    | Lines Added | Purpose                  |
+| ------------------------------------------------------- | ----------- | ------------------------ |
+| `docs/explanation/phase5_manual_test_checklist.md`      | 886 (new)   | Manual test procedures   |
+| `docs/explanation/implementations.md`                   | 380         | Phase 5D documentation   |
+| `docs/explanation/phase5_cli_editors_implementation.md` | 150+        | Completion status        |
+| `docs/reference/architecture.md`                        | 250+        | Proficiency system specs |
 
 **Total Documentation**: 1,666+ lines added/updated
 
@@ -329,7 +329,7 @@ mkdir -p test_data
 **Test Coverage Section:**
 
 - Automated round-trip tests (20 tests)
-- Manual test checklist (24 scenarios)
+- Manual test checklist (20 scenarios)
 - Test pattern documentation
 - Test execution commands
 - Test results reporting
@@ -398,11 +398,13 @@ mkdir -p test_data
 ### Immediate (Post Phase 5D)
 
 1. **Execute Manual Tests**
-   - Run through all 24 manual test scenarios
+
+   - Run through all 20 manual test scenarios
    - Record pass/fail status for each test
    - Document any issues discovered
 
 2. **Address Issues (if any)**
+
    - Fix bugs discovered during manual testing
    - Re-run quality gates after fixes
 
@@ -413,11 +415,13 @@ mkdir -p test_data
 ### Future Work (Phase 6)
 
 1. **Data File Migration Tool**
+
    - Create automated conversion script
    - Convert legacy disablement masks to classifications/tags
    - Update all campaign data files
 
 2. **Remove Deprecated Fields**
+
    - Remove `disablement_bit_index` from ClassDefinition/RaceDefinition
    - Remove `disablements` from Item
    - Remove legacy code paths
@@ -430,11 +434,13 @@ mkdir -p test_data
 ### Long-Term Enhancements
 
 1. **Runtime Proficiency Checks**
+
    - Implement character-can-use-item validation
    - Use proficiency checks in equip logic
    - Display proficiency requirements in UI
 
 2. **Alignment Restriction Enforcement**
+
    - Prevent equipping misaligned items
    - Display alignment requirements in UI
 
@@ -446,7 +452,7 @@ mkdir -p test_data
 
 ### Phase 5D Success Criteria ✅
 
-- [x] Manual test checklist created with 24 comprehensive test scenarios
+- [x] Manual test checklist created with 20 comprehensive test scenarios
 - [x] All test scenarios include detailed steps and expected results
 - [x] Pass/fail tracking mechanism included
 - [x] Test environment setup documented
@@ -475,7 +481,7 @@ mkdir -p test_data
 
 ## Conclusion
 
-Phase 5D successfully completes the CLI Editor Proficiency Migration by providing comprehensive documentation updates and manual testing procedures. The manual test checklist enables thorough end-to-end verification of all three editors (class, race, item) with 24 detailed test scenarios covering functional, validation, legacy compatibility, integration, and error handling cases.
+Phase 5D successfully completes the CLI Editor Proficiency Migration by providing comprehensive documentation updates and manual testing procedures. The manual test checklist enables thorough end-to-end verification of all three editors (class, race, item) with 20 detailed test scenarios covering functional, validation, legacy compatibility, integration, and error handling cases.
 
 Architecture documentation has been updated to accurately reflect the implemented proficiency system, including correct field names, classification enums, consumable effects, and test coverage. All documentation follows the Diataxis framework and AGENTS.md guidelines.
 

@@ -1010,7 +1010,7 @@ mod tests {
             name.to_lowercase(),
             name.to_lowercase()
         );
-        SourceFile::new(&format!("{}_editor.rs", name.to_lowercase()), &content)
+        SourceFile::new(format!("{}_editor.rs", name.to_lowercase()), &content)
     }
 
     /// Creates mock source representing an editor missing some patterns
@@ -1035,7 +1035,7 @@ mod tests {
             "#,
             name, name
         );
-        SourceFile::new(&format!("{}_editor.rs", name.to_lowercase()), &content)
+        SourceFile::new(format!("{}_editor.rs", name.to_lowercase()), &content)
     }
 
     #[test]

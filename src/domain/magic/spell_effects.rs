@@ -73,6 +73,9 @@ pub fn apply_spell_conditions_to_character(
 
             let active = ActiveCondition::new(condition_id.clone(), def.default_duration);
             target.add_condition(active);
+
+            // Apply immediate status/attribute effects via engine helper (sets flags like silenced/paralyzed)
+            crate::domain::combat::engine::apply_condition_to_character(target, def);
         }
     }
 }
@@ -123,6 +126,9 @@ pub fn apply_spell_conditions_to_monster(
 
             let active = ActiveCondition::new(condition_id.clone(), def.default_duration);
             target.add_condition(active);
+
+            // Apply immediate status/attribute effects via engine helper (sets monster conditions like Paralyzed)
+            crate::domain::combat::engine::apply_condition_to_monster(target, def);
         }
     }
 }

@@ -62,14 +62,9 @@ struct AntaresPlugin {
 
 impl Plugin for AntaresPlugin {
     fn build(&self, app: &mut App) {
-        // Load campaign content
-        let content_db = self
-            .campaign
-            .load_content()
-            .expect("Failed to load campaign content");
-
-        // Initialize game state with campaign
-        let mut game_state = GameState::new_game(self.campaign.clone());
+        // Initialize game state and load campaign content (new_game returns (GameState, ContentDatabase))
+        let (mut game_state, content_db) = GameState::new_game(self.campaign.clone())
+            .expect("Failed to initialize game with campaign");
 
         // Load all maps from campaign
         for map_id in content_db.maps.all_maps() {
@@ -92,6 +87,14 @@ impl Plugin for AntaresPlugin {
             .set_party_position(self.campaign.config.starting_position);
         game_state.world.party_facing = self.campaign.config.starting_direction;
 
+        // Insert global state and content DB as a resource
         app.insert_resource(GlobalState(game_state));
+        app.insert_resource(antares::application::resources::GameContent::new(
+            content_db,
+        ));
+
+        // Register dialogue and quest plugins so their systems are available
+        app.add_plugins(antares::game::systems::dialogue::DialoguePlugin);
+        app.add_plugins(antares::game::systems::quest::QuestPlugin);
     }
 }

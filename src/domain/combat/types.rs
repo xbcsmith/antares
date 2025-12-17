@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 ///     None,
 /// );
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Attack {
     /// Damage roll for this attack
     pub damage: DiceRoll,

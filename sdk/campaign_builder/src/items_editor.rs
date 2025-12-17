@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use crate::ui_helpers::{
+    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
+    TwoColumnLayout,
+};
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
     AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
@@ -10,6 +13,7 @@ use antares::domain::items::types::{
 };
 use antares::domain::types::DiceRoll;
 use eframe::egui;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Editor mode for items
@@ -75,6 +79,7 @@ pub struct ItemsEditorState {
     pub edit_buffer: Item,
     pub show_import_dialog: bool,
     pub import_export_buffer: String,
+    pub tags_query: String,
 
     // Filters
     pub filter_type: Option<ItemTypeFilter>,
@@ -92,6 +97,7 @@ impl Default for ItemsEditorState {
             edit_buffer: Self::default_item(),
             show_import_dialog: false,
             import_export_buffer: String::new(),
+            tags_query: String::new(),
             filter_type: None,
             filter_magical: None,
             filter_cursed: None,
@@ -358,6 +364,7 @@ impl ItemsEditorState {
     }
 
     #[allow(deprecated)]
+    #[allow(clippy::too_many_arguments)]
     fn show_list(
         &mut self,
         ui: &mut egui::Ui,
@@ -747,6 +754,7 @@ impl ItemsEditorState {
         self.show_import_dialog = open;
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_form(
         &mut self,
         ui: &mut egui::Ui,
@@ -929,14 +937,32 @@ impl ItemsEditorState {
 
                 ui.group(|ui| {
                     ui.heading("Item Tags");
-                    ui.label("Tags (comma separated):");
-                    let mut tags_string = self.edit_buffer.tags.join(", ");
-                    if ui.text_edit_singleline(&mut tags_string).changed() {
-                        self.edit_buffer.tags = tags_string
-                            .split(',')
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                            .collect();
+
+                    // Build a unique list of tags from all items as suggestions
+                    let tags_list: Vec<String> = {
+                        let mut set = HashSet::new();
+                        let mut list = Vec::new();
+                        for it in items.iter() {
+                            for t in &it.tags {
+                                if set.insert(t.clone()) {
+                                    list.push(t.clone());
+                                }
+                            }
+                        }
+                        list
+                    };
+
+                    if searchable_selector_multi(
+                        ui,
+                        "item_tags",
+                        "Tags",
+                        &mut self.edit_buffer.tags,
+                        &tags_list,
+                        |t: &String| t.clone(),
+                        |t: &String| t.clone(),
+                        &mut self.tags_query,
+                    ) {
+                        *unsaved_changes = true;
                     }
                     ui.label("ℹ️").on_hover_text(
                         "Tags allow fine-grained item restrictions.\n\

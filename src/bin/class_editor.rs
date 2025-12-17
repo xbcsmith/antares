@@ -478,6 +478,29 @@ impl ClassEditor {
         input
     }
 
+    /// Inputs multiple string values (one per line).
+    ///
+    /// This helper allows entering multiple values in an interactive CLI:
+    ///  - Prompts with `label` repeatedly
+    ///  - Pressing Enter on a blank line finishes input
+    fn input_multistring_values(&self, prompt: &str, label: &str) -> Vec<String> {
+        if !prompt.is_empty() {
+            println!("\n{}", prompt);
+        }
+        println!("(Enter values one per line. Press Enter on an empty line to finish.)");
+
+        let mut values: Vec<String> = Vec::new();
+        loop {
+            let input = self.read_input(label);
+            let trimmed = input.trim();
+            if trimmed.is_empty() {
+                break;
+            }
+            values.push(trimmed.to_string());
+        }
+        values
+    }
+
     /// Selects HP die from menu
     fn select_hp_die(&self) -> DiceRoll {
         println!("\nHP Gain Die:");
@@ -546,26 +569,17 @@ impl ClassEditor {
         }
     }
 
-    /// Inputs special abilities
+    /// Inputs special abilities (one per line; blank line to finish)
     fn input_special_abilities(&self) -> Vec<String> {
-        println!("\nSpecial Abilities (comma-separated, or leave empty):");
+        println!(
+            "\nSpecial Abilities (enter one per line; press Enter on an empty line to finish):"
+        );
         println!("  Examples: backstab, disarm_trap, multiple_attacks, turn_undead");
 
-        let input = self.read_input("Abilities: ");
-        let trimmed = input.trim();
-
-        if trimmed.is_empty() {
-            return Vec::new();
-        }
-
-        trimmed
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
+        self.input_multistring_values("Special Abilities:", "Ability: ")
     }
 
-    /// Inputs proficiencies with validation
+    /// Inputs proficiencies with validation (one per line)
     fn input_proficiencies(&self) -> Vec<String> {
         println!("\n╔════════════════════════════════════════╗");
         println!("║        PROFICIENCY SELECTION           ║");
@@ -586,34 +600,16 @@ impl ClassEditor {
         println!("    • arcane_item        - Arcane magic items (wands, staves)");
         println!("    • divine_item        - Divine magic items (holy symbols, relics)");
 
-        println!("\n📝 Enter proficiencies (comma-separated, or leave empty):");
-        println!("   Example: simple_weapon,light_armor,shield");
+        println!("\nEnter proficiencies (one per line; leave empty to finish):");
+        println!("  Example: simple_weapon");
 
-        let input = self.read_input("Proficiencies: ");
-        let trimmed = input.trim();
+        let candidates = self.input_multistring_values("", "Proficiency: ");
 
-        if trimmed.is_empty() {
-            return Vec::new();
-        }
-
-        let proficiencies: Vec<String> = trimmed
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        // Validate proficiencies
-        let mut valid_proficiencies = Vec::new();
-        for prof in proficiencies {
-            if STANDARD_PROFICIENCY_IDS.contains(&prof.as_str()) {
-                valid_proficiencies.push(prof);
-            } else {
-                println!("⚠️  Warning: '{}' is not a standard proficiency ID", prof);
-                println!("   Standard IDs: {}", STANDARD_PROFICIENCY_IDS.join(", "));
-                let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", prof));
-                if confirm.trim().eq_ignore_ascii_case("y") {
-                    valid_proficiencies.push(prof);
-                }
+        // Validate proficiencies and warn about invalid ones
+        let valid_proficiencies = filter_valid_proficiencies(&candidates);
+        for prof in &candidates {
+            if !valid_proficiencies.contains(prof) {
+                println!("⚠ Invalid proficiency '{}'; ignoring", prof);
             }
         }
 
@@ -634,6 +630,42 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len.saturating_sub(3)])
     }
+}
+
+// NOTE: `parse_multistring_input` is a helper used only in unit tests.
+// It has been moved into the `#[cfg(test)] mod tests` module below so it is only
+// compiled during test builds and won't trigger dead-code warnings in release builds.
+
+/// Filter valid proficiencies from a list of candidate strings.
+///
+/// This function is a pure helper that checks whether each provided string
+/// exists in the `STANDARD_PROFICIENCY_IDS` set and returns the subset that
+/// are valid proficiency IDs.
+///
+/// # Arguments
+///
+/// * `candidates` - Slice of candidate proficiency strings.
+///
+/// # Returns
+///
+/// A `Vec<String>` containing only the valid proficiencies.
+///
+/// # Examples
+///
+/// ```
+/// let candidates = vec![
+///     "simple_weapon".to_string(),
+///     "invalid_tag".to_string(),
+/// ];
+/// let filtered = filter_valid_proficiencies(&candidates);
+/// assert_eq!(filtered, vec!["simple_weapon".to_string()]);
+/// ```
+fn filter_valid_proficiencies(candidates: &[String]) -> Vec<String> {
+    candidates
+        .iter()
+        .filter(|p| STANDARD_PROFICIENCY_IDS.contains(&p.as_str()))
+        .cloned()
+        .collect()
 }
 
 // ===== Main Entry Point =====
@@ -669,10 +701,68 @@ fn main() {
 mod tests {
     use super::*;
 
+    // Test-only helper for parsing newline-separated inputs. Defined inside the
+    // tests module so it is only compiled for tests and doesn't cause dead-code
+    // warnings during normal builds.
+    fn parse_multistring_input(input: &str) -> Vec<String> {
+        input
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .map(|l| l.to_string())
+            .collect()
+    }
+
     #[test]
     fn test_truncate() {
         assert_eq!(truncate("short", 10), "short");
         assert_eq!(truncate("this is a very long string", 10), "this is...");
         assert_eq!(truncate("exactly10c", 10), "exactly10c");
+    }
+
+    #[test]
+    fn test_parse_multistring_input_basic() {
+        let input = "alpha\nbeta\n\n  gamma  \n";
+        let parsed = parse_multistring_input(input);
+        assert_eq!(
+            parsed,
+            vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_multistring_input_empty() {
+        let input = "";
+        let parsed = parse_multistring_input(input);
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn test_parse_multistring_input_with_whitespace() {
+        let input = "\n   \n   one  \n two \n\nthree\n";
+        let parsed = parse_multistring_input(input);
+        assert_eq!(
+            parsed,
+            vec!["one".to_string(), "two".to_string(), "three".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_filter_valid_proficiencies() {
+        let candidates = vec![
+            "simple_weapon".to_string(),
+            "invalid_tag".to_string(),
+            "martial_melee".to_string(),
+        ];
+        let filtered = filter_valid_proficiencies(&candidates);
+        assert_eq!(
+            filtered,
+            vec!["simple_weapon".to_string(), "martial_melee".to_string()]
+        );
+
+        // Ensure unknown entries are removed
+        let candidates2 = vec!["not_a_proficiency".to_string()];
+        let filtered2 = filter_valid_proficiencies(&candidates2);
+        assert!(filtered2.is_empty());
     }
 }

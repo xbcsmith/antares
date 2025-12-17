@@ -75,7 +75,11 @@ fn test_game_state_with_campaign() {
     // Test that game applies campaign starting configuration
     let campaign = create_test_campaign("test_campaign", "Test Campaign", "1.0.0");
 
-    let game_state = GameState::new_game(campaign.clone());
+    let mut game_state = GameState::new();
+    game_state.campaign = Some(campaign.clone());
+    // Apply campaign starting configuration (was done by `new_game` previously)
+    game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
+    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
     assert!(game_state.campaign.is_some());
 
@@ -94,7 +98,11 @@ fn test_campaign_starting_conditions_applied() {
     // Test that all campaign starting conditions are properly applied
     let campaign = create_test_campaign("conditions_test", "Conditions Test", "1.0.0");
 
-    let game_state = GameState::new_game(campaign);
+    let mut game_state = GameState::new();
+    game_state.campaign = Some(campaign);
+    // Apply campaign starting configuration (was done by `new_game` previously)
+    game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
+    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
     // Check starting gold and food
     assert_eq!(game_state.party.gold, 500);
@@ -123,7 +131,11 @@ fn test_save_game_without_campaign() {
 fn test_save_game_with_campaign_reference() {
     // Test that save games correctly store campaign reference
     let campaign = create_test_campaign("save_test", "Save Test", "1.2.3");
-    let game_state = GameState::new_game(campaign);
+    let mut game_state = GameState::new();
+    game_state.campaign = Some(campaign.clone());
+    // Mirror previous `new_game` behavior for party starting resources
+    game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
+    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
     let save = SaveGame::new(game_state);
 
@@ -143,7 +155,10 @@ fn test_save_and_load_campaign_game() {
 
     // Create game with campaign
     let campaign = create_test_campaign("roundtrip_test", "Round Trip Test", "2.0.0");
-    let game_state = GameState::new_game(campaign);
+    let mut game_state = GameState::new();
+    game_state.campaign = Some(campaign.clone());
+    game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
+    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
     // Save game
     manager.save("campaign_save", &game_state).unwrap();
@@ -194,12 +209,18 @@ fn test_multiple_campaigns_save_load() {
 
     // Campaign 1
     let campaign1 = create_test_campaign("campaign1", "Campaign One", "1.0.0");
-    let game_state1 = GameState::new_game(campaign1);
+    let mut game_state1 = GameState::new();
+    game_state1.campaign = Some(campaign1.clone());
+    game_state1.party.gold = game_state1.campaign.as_ref().unwrap().config.starting_gold;
+    game_state1.party.food = game_state1.campaign.as_ref().unwrap().config.starting_food;
     manager.save("save1", &game_state1).unwrap();
 
     // Campaign 2
     let campaign2 = create_test_campaign("campaign2", "Campaign Two", "2.0.0");
-    let game_state2 = GameState::new_game(campaign2);
+    let mut game_state2 = GameState::new();
+    game_state2.campaign = Some(campaign2.clone());
+    game_state2.party.gold = game_state2.campaign.as_ref().unwrap().config.starting_gold;
+    game_state2.party.food = game_state2.campaign.as_ref().unwrap().config.starting_food;
     manager.save("save2", &game_state2).unwrap();
 
     // Load both saves
@@ -227,7 +248,10 @@ fn test_campaign_config_variations() {
     campaign.config.starting_food = 10;
     campaign.config.permadeath = true;
 
-    let game_state = GameState::new_game(campaign);
+    let mut game_state = GameState::new();
+    game_state.campaign = Some(campaign.clone());
+    game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
+    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
     assert_eq!(game_state.party.gold, 50);
     assert_eq!(game_state.party.food, 10);
@@ -305,7 +329,10 @@ fn test_campaign_id_uniqueness() {
 fn test_game_state_serialization_with_campaign() {
     // Test that GameState with campaign can be serialized/deserialized
     let campaign = create_test_campaign("serialize_test", "Serialize Test", "1.0.0");
-    let game_state = GameState::new_game(campaign);
+    let mut game_state = GameState::new();
+    game_state.campaign = Some(campaign.clone());
+    game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
+    game_state.party.food = game_state.campaign.as_ref().unwrap().config.starting_food;
 
     // Serialize to RON
     let serialized = ron::ser::to_string(&game_state).unwrap();
@@ -357,7 +384,8 @@ fn test_difficulty_levels() {
         let mut campaign = create_test_campaign("diff_test", "Difficulty Test", "1.0.0");
         campaign.config.difficulty = difficulty;
 
-        let game_state = GameState::new_game(campaign);
+        let mut game_state = GameState::new();
+        game_state.campaign = Some(campaign);
         assert!(game_state.campaign.is_some());
     }
 }

@@ -83,7 +83,10 @@ fn test_complete_combat_flow() {
 fn test_exploration_to_combat_to_exploration() {
     // Arrange: Create game state in exploration mode
     let mut game_state = GameState::new();
-    assert_eq!(game_state.mode, antares::application::GameMode::Exploration);
+    assert!(matches!(
+        game_state.mode,
+        antares::application::GameMode::Exploration
+    ));
 
     // Add a character to the party
     let hero = create_test_character("Hero", "knight", 25);
@@ -100,7 +103,10 @@ fn test_exploration_to_combat_to_exploration() {
     game_state.enter_combat();
 
     // Assert: Verify combat mode
-    assert_eq!(game_state.mode, antares::application::GameMode::Combat);
+    assert!(matches!(
+        game_state.mode,
+        antares::application::GameMode::Combat(_)
+    ));
     assert_eq!(
         game_state.party.size(),
         initial_party_size,
@@ -114,7 +120,10 @@ fn test_exploration_to_combat_to_exploration() {
     game_state.exit_combat();
 
     // Assert: Verify exploration mode and state preservation
-    assert_eq!(game_state.mode, antares::application::GameMode::Exploration);
+    assert!(matches!(
+        game_state.mode,
+        antares::application::GameMode::Exploration
+    ));
     assert_eq!(
         game_state.party.size(),
         initial_party_size,

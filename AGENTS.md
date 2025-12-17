@@ -14,6 +14,7 @@ Non-compliance will result in rejected code.
 ```bash
 rustup component add clippy rustfmt
 cargo install cargo-audit  # Optional but recommended
+cargo install nextest
 ```
 
 #### Step 2: MANDATORY - Consult Architecture Document FIRST
@@ -46,7 +47,7 @@ Deviation = violation.
 cargo fmt --all
 cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
+cargo nextest run --all-features
 ```
 
 **Expected**: Zero errors, zero warnings, all tests pass.
@@ -196,7 +197,7 @@ cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 
 # 4. Tests (must have >80% coverage)
-cargo test --all-features
+cargo nextest run --all-features
 ```
 
 **Expected Results:**
@@ -205,7 +206,7 @@ cargo test --all-features
 ✅ cargo fmt         → No output (all files formatted)
 ✅ cargo check       → "Finished" with 0 errors
 ✅ cargo clippy      → "Finished" with 0 warnings
-✅ cargo test        → "test result: ok. X passed; 0 failed"
+✅ cargo nextest run        → "test result: ok. X passed; 0 failed"
 ```
 
 **IF ANY FAIL**: Stop immediately and fix before proceeding.
@@ -217,7 +218,7 @@ cargo test --all-features
 **YOU MUST:**
 
 - Add `///` doc comments to EVERY public function, struct, enum, module
-- Include runnable examples in doc comments (tested by `cargo test`)
+- Include runnable examples in doc comments (tested by `cargo nextest run`)
 - Update `docs/explanation/implementations.md` for EVERY feature/task
 
 **DO NOT:**
@@ -422,6 +423,7 @@ Architecture defines many constants:
    }
    ````
 
+
 2. **Write Tests (MANDATORY)**
 
    ```rust
@@ -477,13 +479,13 @@ Architecture defines many constants:
    cargo clippy --all-targets --all-features -- -D warnings
 
    # After writing tests
-   cargo test --all-features
+   cargo nextest run --all-features
 
    # Before committing - verify all checks pass
    cargo fmt --all
    cargo check --all-targets --all-features
    cargo clippy --all-targets --all-features -- -D warnings
-   cargo test --all-features
+   cargo nextest run --all-features
    ```
 
 #### Phase 3: Documentation
@@ -503,7 +505,7 @@ All four cargo commands MUST pass:
 - `cargo fmt --all`
 - `cargo check --all-targets --all-features`
 - `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo test --all-features`
+- `cargo nextest run --all-features`
 
 **THEN** verify the complete "Validation Checklist" section near the end of this document.
 
@@ -512,6 +514,8 @@ All four cargo commands MUST pass:
 ---
 
 ## Rust Coding Standards
+
+In Rust: 1000 lines is overkill. Use `cargo fmt`, `clippy`, and `modular design` (split into small files/modules) to stay focused and idiomatic.
 
 ### Error Handling (MANDATORY PATTERNS)
 
@@ -872,7 +876,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 # Repeat until zero warnings
 
 # Step 4: Fix failing tests
-cargo test --all-features -- --nocapture
+cargo nextest run --all-features -- --nocapture
 # Read test failure output
 # Fix failing tests or update expectations
 # Re-run tests
@@ -881,7 +885,7 @@ cargo test --all-features -- --nocapture
 cargo fmt --all
 cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
+cargo nextest run --all-features
 ````
 
 ### When Tests Fail
@@ -890,19 +894,19 @@ cargo test --all-features
 
 ```bash
 # Run with detailed output
-cargo test -- --nocapture --test-threads=1
+cargo nextest run -- --nocapture --test-threads=1
 
 # Run specific test
-cargo test test_name -- --nocapture
+cargo nextest run test_name -- --nocapture
 
 # Run tests in specific module
-cargo test module::tests:: -- --nocapture
+cargo nextest run module::tests:: -- --nocapture
 
 # Show backtrace on panic
-RUST_BACKTRACE=1 cargo test
+RUST_BACKTRACE=1 cargo nextest run
 
 # Run with debug logging
-RUST_LOG=debug cargo test
+RUST_LOG=debug cargo nextest run
 ```
 
 **DEBUGGING STRATEGY:**
@@ -954,7 +958,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [ ] `cargo check --all-targets --all-features` passes with zero errors
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings` shows zero
       warnings
-- [ ] `cargo test --all-features` passes with >80% coverage
+- [ ] `cargo nextest run --all-features` passes with >80% coverage
 - [ ] No `unwrap()` or `expect()` without justification
 - [ ] All public items have doc comments with examples
 - [ ] All functions have at least 3 tests (success, failure, edge case)
@@ -963,7 +967,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 - [ ] Unit tests added for ALL new functions
 - [ ] Integration tests added if needed
-- [ ] Test count increased from before (verify with `cargo test --lib`)
+- [ ] Test count increased from before (verify with `cargo nextest run --lib`)
 - [ ] Both success and failure cases tested
 - [ ] Edge cases and boundaries covered
 - [ ] All tests use descriptive names: `test_{function}_{condition}_{expected}`
@@ -1020,11 +1024,11 @@ cargo fmt --all -- --check                       # Check formatting
 cargo clippy --all-targets --all-features -- -D warnings  # Lint
 
 # Testing
-cargo test                                       # Run all tests
-cargo test --lib                                 # Library tests only
-cargo test --all-features                        # With all features
-cargo test -- --nocapture                        # Show output
-cargo test test_name                             # Specific test
+cargo nextest run                                       # Run all tests
+cargo nextest run --lib                                 # Library tests only
+cargo nextest run --all-features                        # With all features
+cargo nextest run -- --nocapture                        # Show output
+cargo nextest run test_name                             # Specific test
 
 # Documentation
 cargo doc --open                                 # Generate and open docs
@@ -1044,7 +1048,7 @@ cargo audit                                      # Security check
 cargo fmt --all                                  # Format code
 cargo check --all-targets --all-features         # Check compilation
 cargo clippy --all-targets --all-features -- -D warnings  # Lint
-cargo test --all-features                        # Run tests
+cargo nextest run --all-features                        # Run tests
 
 # Additional make commands (if available)
 make test                                        # Run tests
@@ -1100,7 +1104,7 @@ All four cargo commands MUST pass before claiming done:
 - cargo fmt --all
 - cargo check --all-targets --all-features
 - cargo clippy --all-targets --all-features -- -D warnings
-- cargo test --all-features
+- cargo nextest run --all-features
 ```
 
 ---
@@ -1119,7 +1123,7 @@ All four cargo commands MUST pass before claiming done:
 7. Run: cargo fmt --all
 8. Run: cargo check --all-targets --all-features
 9. Run: cargo clippy --all-targets --all-features -- -D warnings
-10. Run: cargo test --all-features
+10. Run: cargo nextest run --all-features
 11. Update: docs/explanation/implementations.md
 12. Verify: No architectural deviations from architecture.md
 13. Commit with proper format: <type>(<scope>): <description> (JIRA-ISSUE)

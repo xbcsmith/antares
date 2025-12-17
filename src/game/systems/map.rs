@@ -5,15 +5,185 @@ use crate::domain::types;
 use crate::domain::world;
 use crate::game::resources::GlobalState;
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
+/// Plugin that renders the current map using Bevy meshes/materials.
+///
+/// Note: The visual rendering plugin remains focused on rendering. The map
+/// management (spawning/despawning event trigger and marker entities as maps
+/// change) is implemented alongside it to enable a dynamic map system.
 pub struct MapRenderingPlugin;
 
-impl Plugin for MapRenderingPlugin {
+/// Component tagging an entity as belonging to a specific map
+#[derive(bevy::prelude::Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MapEntity(pub types::MapId);
+
+/// Component that stores the position of a spawned tile/entity
+#[derive(bevy::prelude::Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TileCoord(pub types::Position);
+
+/// Event trigger component - attached to entities that represent in-world event triggers
+#[derive(bevy::prelude::Component, Debug, Clone)]
+pub struct EventTrigger {
+    /// The trigger's event type
+    pub event_type: MapEventType,
+    /// Position on the map for which this trigger is placed
+    pub position: types::Position,
+}
+
+/// Lightweight event type used by ECS triggers (converts from domain MapEvent)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MapEventType {
+    Teleport {
+        target_map: types::MapId,
+        target_pos: types::Position,
+    },
+    NpcDialogue {
+        npc_id: u16,
+    },
+    CombatEncounter {
+        monster_group_id: u8,
+    },
+    TreasureChest {
+        loot_table_id: u8,
+    },
+}
+
+/// Message used to request a map change (teleportation, portal, etc.)
+#[derive(Message, Clone)]
+pub struct MapChangeEvent {
+    pub target_map: types::MapId,
+    pub target_pos: types::Position,
+}
+
+/// Plugin responsible for dynamic map management (spawning/despawning marker
+/// entities and event triggers when the current map changes).
+pub struct MapManagerPlugin;
+
+impl Plugin for MapManagerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_map);
+        // Register the map change message and the handler + spawn systems
+        app.add_message::<MapChangeEvent>()
+            // Process explicit map change requests first, then let the marker
+            // spawner observe the changed world state and spawn/despawn accordingly.
+            .add_systems(Update, (map_change_handler, spawn_map_markers));
     }
 }
 
+impl Plugin for MapRenderingPlugin {
+    fn build(&self, app: &mut App) {
+        // Keep the visual spawn on startup (original behavior), and add the
+        // map manager plugin so dynamic changes are handled at runtime.
+        app.add_systems(Startup, spawn_map)
+            .add_plugins(MapManagerPlugin);
+    }
+}
+
+/// Converts a domain MapEvent into a lightweight MapEventType (if supported)
+fn map_event_to_event_type(ev: &world::MapEvent) -> Option<MapEventType> {
+    match ev {
+        world::MapEvent::Teleport {
+            destination,
+            map_id,
+            ..
+        } => Some(MapEventType::Teleport {
+            target_map: *map_id,
+            target_pos: *destination,
+        }),
+        world::MapEvent::NpcDialogue { npc_id, .. } => {
+            Some(MapEventType::NpcDialogue { npc_id: *npc_id })
+        }
+        world::MapEvent::Encounter { monster_group, .. } => {
+            // For the lightweight form we store the primary group id (if any)
+            let gid = *monster_group.first().unwrap_or(&0);
+            Some(MapEventType::CombatEncounter {
+                monster_group_id: gid,
+            })
+        }
+        world::MapEvent::Treasure { loot, .. } => {
+            let lid = *loot.first().unwrap_or(&0);
+            Some(MapEventType::TreasureChest { loot_table_id: lid })
+        }
+        _ => None,
+    }
+}
+
+/// System that handles explicit MapChangeEvent messages by updating the world
+/// current map and party position. Invalid map ids are ignored (no panic).
+fn map_change_handler(
+    mut ev_reader: MessageReader<MapChangeEvent>,
+    mut global_state: ResMut<GlobalState>,
+) {
+    for ev in ev_reader.read() {
+        if global_state.0.world.get_map(ev.target_map).is_some() {
+            global_state.0.world.set_current_map(ev.target_map);
+            global_state.0.world.set_party_position(ev.target_pos);
+        } else {
+            // Gracefully ignore invalid map changes
+            println!(
+                "Warning: MapChangeEvent target_map {} not found; ignoring",
+                ev.target_map
+            );
+        }
+    }
+}
+
+/// System that observes the world's current map and spawns marker entities
+/// (tiles and event triggers) for the active map. When the active map changes
+/// it despawns previously spawned map entities.
+fn spawn_map_markers(
+    mut commands: Commands,
+    global_state: Res<GlobalState>,
+    query_existing: Query<Entity, With<MapEntity>>,
+    mut last_map: Local<Option<types::MapId>>,
+) {
+    let current = global_state.0.world.current_map;
+
+    // If map hasn't changed, nothing to do
+    if Some(current) == *last_map {
+        return;
+    }
+
+    // Despawn old map entities
+    for entity in query_existing.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    // Spawn markers for the new map (if it exists)
+    if let Some(map) = global_state.0.world.get_current_map() {
+        let map_id = map.id;
+
+        // Spawn a lightweight marker entity for every tile (useful for logic & tests)
+        for y in 0..map.height {
+            for x in 0..map.width {
+                let pos = types::Position::new(x as i32, y as i32);
+                commands.spawn((MapEntity(map_id), TileCoord(pos)));
+            }
+        }
+
+        // Spawn EventTrigger entities for each map event that we support
+        for (pos, event) in map.events.iter() {
+            if let Some(evt_type) = map_event_to_event_type(event) {
+                commands.spawn((
+                    MapEntity(map_id),
+                    EventTrigger {
+                        event_type: evt_type,
+                        position: *pos,
+                    },
+                ));
+            }
+        }
+    } else {
+        // Current map id is set to an unknown map - leave the world empty
+        println!("Warning: Current map {} not present in world", current);
+    }
+
+    *last_map = Some(current);
+}
+
+/// Original visual map spawner - keeps previous behavior (renders meshes)
+/// but also tags spawned visual entities with `MapEntity` and `TileCoord` so
+/// they are part of the dynamic despawn/spawn lifecycle.
 fn spawn_map(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -110,6 +280,8 @@ fn spawn_map(
                                 Mesh3d(water_mesh.clone()),
                                 MeshMaterial3d(water_material.clone()),
                                 Transform::from_xyz(x as f32, -0.1, y as f32),
+                                MapEntity(map.id),
+                                TileCoord(pos),
                             ));
                         }
                         world::TerrainType::Mountain => {
@@ -118,6 +290,8 @@ fn spawn_map(
                                 Mesh3d(mountain_mesh.clone()),
                                 MeshMaterial3d(mountain_material.clone()),
                                 Transform::from_xyz(x as f32, 0.75, y as f32),
+                                MapEntity(map.id),
+                                TileCoord(pos),
                             ));
                         }
                         world::TerrainType::Forest => {
@@ -126,12 +300,16 @@ fn spawn_map(
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(grass_material.clone()),
                                 Transform::from_xyz(x as f32, 0.0, y as f32),
+                                MapEntity(map.id),
+                                TileCoord(pos),
                             ));
                             // Then tree on top
                             commands.spawn((
                                 Mesh3d(forest_mesh.clone()),
                                 MeshMaterial3d(forest_material.clone()),
                                 Transform::from_xyz(x as f32, 0.6, y as f32),
+                                MapEntity(map.id),
+                                TileCoord(pos),
                             ));
                         }
                         world::TerrainType::Grass => {
@@ -140,6 +318,8 @@ fn spawn_map(
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(grass_material.clone()),
                                 Transform::from_xyz(x as f32, 0.0, y as f32),
+                                MapEntity(map.id),
+                                TileCoord(pos),
                             ));
                         }
                         _ => {
@@ -148,6 +328,8 @@ fn spawn_map(
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(floor_material.clone()),
                                 Transform::from_xyz(x as f32, 0.0, y as f32),
+                                MapEntity(map.id),
+                                TileCoord(pos),
                             ));
                         }
                     }
@@ -159,6 +341,8 @@ fn spawn_map(
                             Mesh3d(wall_mesh.clone()),
                             MeshMaterial3d(wall_material.clone()),
                             Transform::from_xyz(x as f32, 0.5, y as f32),
+                            MapEntity(map.id),
+                            TileCoord(pos),
                         ));
                     } else {
                         match tile.wall_type {
@@ -188,6 +372,8 @@ fn spawn_map(
                                     Mesh3d(wall_mesh.clone()),
                                     MeshMaterial3d(tile_wall_material.clone()),
                                     Transform::from_xyz(x as f32, 0.5, y as f32),
+                                    MapEntity(map.id),
+                                    TileCoord(pos),
                                 ));
                             }
                             world::WallType::Door => {
@@ -195,12 +381,29 @@ fn spawn_map(
                                     Mesh3d(door_mesh.clone()),
                                     MeshMaterial3d(door_material.clone()),
                                     Transform::from_xyz(x as f32, 0.5, y as f32),
+                                    MapEntity(map.id),
+                                    TileCoord(pos),
                                 ));
                             }
                             _ => {}
                         }
                     }
                 }
+            }
+        }
+
+        // Also spawn lightweight event trigger entities for any map events (so the
+        // visual + logic are both represented at load time). We only spawn
+        // triggers for event types we convert.
+        for (pos, event) in map.events.iter() {
+            if let Some(evt_type) = map_event_to_event_type(event) {
+                commands.spawn((
+                    MapEntity(map.id),
+                    EventTrigger {
+                        event_type: evt_type,
+                        position: *pos,
+                    },
+                ));
             }
         }
     }

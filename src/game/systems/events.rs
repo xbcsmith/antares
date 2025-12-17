@@ -3,6 +3,7 @@
 
 use crate::domain::world::MapEvent;
 use crate::game::resources::GlobalState;
+use crate::game::systems::map::MapChangeEvent;
 use bevy::prelude::*;
 
 pub struct EventPlugin;
@@ -47,7 +48,7 @@ fn check_for_events(
 /// System to handle triggered events
 fn handle_events(
     mut event_reader: MessageReader<MapEventTriggered>,
-    mut global_state: ResMut<GlobalState>,
+    mut map_change_writer: MessageWriter<MapChangeEvent>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
 ) {
     for trigger in event_reader.read() {
@@ -63,14 +64,12 @@ fn handle_events(
                     log.add(msg);
                 }
 
-                let game_state = &mut global_state.0;
-
-                // TODO: Load the new map if it's different
-                // For now, just update position and map ID
-                game_state.world.set_current_map(*map_id);
-                game_state.world.set_party_position(*destination);
-
-                // Note: Real implementation needs to handle map loading/unloading
+                // Emit a MapChangeEvent so the MapManagerPlugin can handle the
+                // full lifecycle (despawn old tiles, spawn new ones, set position).
+                map_change_writer.write(MapChangeEvent {
+                    target_map: *map_id,
+                    target_pos: *destination,
+                });
             }
             MapEvent::Sign { text, .. } => {
                 let msg = format!("Sign reads: {}", text);

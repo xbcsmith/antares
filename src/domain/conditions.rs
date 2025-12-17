@@ -62,7 +62,7 @@ pub struct ConditionDefinition {
 }
 
 /// An active instance of a condition on an entity
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActiveCondition {
     /// ID of the condition definition
     pub condition_id: ConditionId,

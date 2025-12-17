@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod camera;
+pub mod dialogue;
 pub mod events;
 pub mod input;
 pub mod map;
+pub mod quest;
 pub mod ui;

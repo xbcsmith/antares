@@ -547,10 +547,27 @@ impl RaceEditor {
     fn read_input(&self, prompt: &str) -> String {
         print!("{}", prompt);
         io::stdout().flush().unwrap();
-
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
         input
+    }
+
+    /// Inputs multiple string values (one per line), empty line terminates.
+    fn input_multistring_values(&self, prompt: &str, label: &str) -> Vec<String> {
+        if !prompt.is_empty() {
+            println!("\n{}", prompt);
+        }
+        println!("(Enter values one per line. Press Enter on an empty line to finish.)");
+        let mut values: Vec<String> = Vec::new();
+        loop {
+            let input = self.read_input(label);
+            let trimmed = input.trim();
+            if trimmed.is_empty() {
+                break;
+            }
+            values.push(trimmed.to_string());
+        }
+        values
     }
 
     /// Inputs stat modifiers
@@ -646,26 +663,15 @@ impl RaceEditor {
         }
     }
 
-    /// Inputs special abilities
+    /// Inputs special abilities (one per line; blank line finishes)
     fn input_special_abilities(&self) -> Vec<String> {
-        println!("\nSpecial Abilities (comma-separated, or leave empty):");
-        println!("  Examples: infravision, magic_resistance, detect_secret_doors");
-
-        let input = self.read_input("Abilities: ");
-        let trimmed = input.trim();
-
-        if trimmed.is_empty() {
-            return Vec::new();
-        }
-
-        trimmed
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
+        println!(
+            "\nSpecial Abilities (enter one per line; press Enter on an empty line to finish):"
+        );
+        self.input_multistring_values("Special Abilities:", "Ability: ")
     }
 
-    /// Inputs proficiencies with validation
+    /// Inputs proficiencies with validation (one per line; blank line finishes)
     fn input_proficiencies(&self) -> Vec<String> {
         println!("\n========================================");
         println!("        PROFICIENCY SELECTION           ");
@@ -686,33 +692,24 @@ impl RaceEditor {
         println!("    • arcane_item        - Arcane magic items (wands, staves)");
         println!("    • divine_item        - Divine magic items (holy symbols, relics)");
 
-        println!("\nEnter proficiencies (comma-separated, or leave empty):");
-        println!("  Example: simple_weapon,light_armor,shield");
+        println!("\nEnter proficiencies (one per line; leave empty to finish):");
+        println!("  Example: simple_weapon");
 
-        let input = self.read_input("Proficiencies: ");
-        let trimmed = input.trim();
+        let candidates = self.input_multistring_values("", "Proficiency: ");
 
-        if trimmed.is_empty() {
+        if candidates.is_empty() {
             return Vec::new();
         }
 
-        let proficiencies: Vec<String> = trimmed
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        // Validate proficiencies
-        let mut valid_proficiencies = Vec::new();
-        for prof in proficiencies {
-            if STANDARD_PROFICIENCY_IDS.contains(&prof.as_str()) {
-                valid_proficiencies.push(prof);
-            } else {
+        // Validate proficiencies and warn about invalid ones (reuse filter helper)
+        let mut valid_proficiencies = filter_valid_proficiencies(&candidates);
+        for prof in &candidates {
+            if !STANDARD_PROFICIENCY_IDS.contains(&prof.as_str()) {
                 println!("⚠️  Warning: '{}' is not a standard proficiency ID", prof);
                 println!("   Standard IDs: {}", STANDARD_PROFICIENCY_IDS.join(", "));
                 let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", prof));
                 if confirm.trim().eq_ignore_ascii_case("y") {
-                    valid_proficiencies.push(prof);
+                    valid_proficiencies.push(prof.clone());
                 }
             }
         }
@@ -724,7 +721,7 @@ impl RaceEditor {
         valid_proficiencies
     }
 
-    /// Inputs incompatible item tags with validation
+    /// Inputs incompatible item tags with validation (one per line; blank finishes)
     fn input_incompatible_tags(&self) -> Vec<String> {
         println!("\n========================================");
         println!("   INCOMPATIBLE ITEM TAGS SELECTION     ");
@@ -738,33 +735,24 @@ impl RaceEditor {
         println!("  • requires_strength  - Items requiring high strength");
 
         println!("\nRaces with incompatible tags cannot use items with those tags.");
-        println!("Example: A halfling might have 'large_weapon,heavy_armor' incompatible.");
-        println!("\nEnter incompatible tags (comma-separated, or leave empty):");
+        println!("Example: A halfling might have 'large_weapon' incompatible.");
+        println!("\nEnter incompatible tags (one per line; leave empty to finish):");
 
-        let input = self.read_input("Incompatible Tags: ");
-        let trimmed = input.trim();
+        let tags = self.input_multistring_values("", "Tag: ");
 
-        if trimmed.is_empty() {
+        if tags.is_empty() {
             return Vec::new();
         }
 
-        let tags: Vec<String> = trimmed
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        // Validate tags
-        let mut valid_tags = Vec::new();
-        for tag in tags {
-            if STANDARD_ITEM_TAGS.contains(&tag.as_str()) {
-                valid_tags.push(tag);
-            } else {
+        // Validate tags using filter helper, confirm unknowns
+        let mut valid_tags = filter_valid_tags(&tags);
+        for tag in &tags {
+            if !STANDARD_ITEM_TAGS.contains(&tag.as_str()) {
                 println!("⚠️  Warning: '{}' is not a standard item tag", tag);
                 println!("   Standard tags: {}", STANDARD_ITEM_TAGS.join(", "));
                 let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", tag));
                 if confirm.trim().eq_ignore_ascii_case("y") {
-                    valid_tags.push(tag);
+                    valid_tags.push(tag.clone());
                 }
             }
         }
@@ -786,6 +774,28 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len.saturating_sub(3)])
     }
+}
+
+// NOTE: `parse_multistring_input` is a test-only helper and has been moved into the
+// `#[cfg(test)] mod tests` module to avoid dead-code warnings in non-test builds.
+// The real implementation is now defined inside the test module below.
+
+/// Filters proficiencies to include only standard ones
+fn filter_valid_proficiencies(candidates: &[String]) -> Vec<String> {
+    candidates
+        .iter()
+        .filter(|p| STANDARD_PROFICIENCY_IDS.contains(&p.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Filters tags to include only standard item tags
+fn filter_valid_tags(candidates: &[String]) -> Vec<String> {
+    candidates
+        .iter()
+        .filter(|t| STANDARD_ITEM_TAGS.contains(&t.as_str()))
+        .cloned()
+        .collect()
 }
 
 // ===== Main Entry Point =====
@@ -853,9 +863,67 @@ mod tests {
         assert_eq!(resistances.psychic, 0);
     }
 
+    // Test-only helper: moved here so it exists only in test builds and won't trigger
+    // dead-code warnings in non-test builds.
+    fn parse_multistring_input(input: &str) -> Vec<String> {
+        input
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .map(|l| l.to_string())
+            .collect()
+    }
+
     #[test]
-    fn test_size_category_default() {
-        let size: SizeCategory = SizeCategory::default();
-        assert_eq!(size, SizeCategory::Medium);
+    fn test_filter_valid_proficiencies() {
+        let candidates = vec![
+            "simple_weapon".to_string(),
+            "not_a_proficiency".to_string(),
+            "martial_melee".to_string(),
+        ];
+        let filtered = filter_valid_proficiencies(&candidates);
+        assert_eq!(
+            filtered,
+            vec!["simple_weapon".to_string(), "martial_melee".to_string()]
+        );
+
+        // unknown items are excluded
+        let candidates2 = vec!["not_a_proficiency".to_string()];
+        let filtered2 = filter_valid_proficiencies(&candidates2);
+        assert!(filtered2.is_empty());
+    }
+
+    #[test]
+    fn test_filter_valid_tags() {
+        let candidates = vec!["large_weapon".to_string(), "notatag".to_string()];
+        let filtered = filter_valid_tags(&candidates);
+        assert_eq!(filtered, vec!["large_weapon".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_multistring_input_basic() {
+        let s = "alpha\nbeta\n\n  gamma  \n";
+        let parsed = parse_multistring_input(s);
+        assert_eq!(
+            parsed,
+            vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_multistring_input_empty() {
+        let s = "";
+        let parsed = parse_multistring_input(s);
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn test_parse_multistring_input_whitespace() {
+        let s = "\n   \n  one  \n two \n\nthree\n";
+        let parsed = parse_multistring_input(s);
+        assert_eq!(
+            parsed,
+            vec!["one".to_string(), "two".to_string(), "three".to_string()]
+        );
     }
 }

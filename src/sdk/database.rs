@@ -120,6 +120,15 @@ impl SpellDatabase {
         }
     }
 
+    /// Adds a spell to the database
+    ///
+    /// This helper is used by tooling and tests that build up a content database
+    /// programmatically. It inserts or replaces the spell entry keyed by ID.
+    pub fn add_spell(&mut self, spell: Spell) -> Result<(), DatabaseError> {
+        self.spells.insert(spell.id, spell);
+        Ok(())
+    }
+
     /// Loads spells from a RON file
     ///
     /// # Arguments
@@ -299,6 +308,17 @@ impl MonsterDatabase {
     /// Checks if a monster exists in the database
     pub fn has_monster(&self, id: &MonsterId) -> bool {
         self.monsters.contains_key(id)
+    }
+
+    /// Adds a monster definition to the SDK database by converting it into a runtime
+    /// `Monster` instance. This helper is intended for tests and tooling that
+    /// construct content databases programmatically.
+    pub fn add_monster(
+        &mut self,
+        def: crate::domain::combat::database::MonsterDefinition,
+    ) -> Result<(), DatabaseError> {
+        self.monsters.insert(def.id, def.to_monster());
+        Ok(())
     }
 
     /// Gets a monster by name (case-insensitive)

@@ -46,7 +46,7 @@ sdk: ; $(info $(M) running  cargo run --package campaign_builder --bin campaign-
 
 # Run tests
 test: ; $(info $(M) running cargo test...) @ ## Runs a cargo test
-	$Q $(CARGO) test
+	$Q $(CARGO) nextest run --all-features
 
 # Clean the project
 clean: ; $(info $(M) running cargo clean...) @ ## Runs a cargo clean

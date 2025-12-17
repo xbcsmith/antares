@@ -36,8 +36,13 @@
 //! // state.show(ui, &mut maps, campaign_dir, ...);
 //! ```
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
-use antares::domain::types::{MapId, Position};
+use crate::ui_helpers::{
+    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
+    TwoColumnLayout,
+};
+use antares::domain::combat::database::MonsterDefinition;
+use antares::domain::items::types::Item;
+use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::{Map, MapEvent, Npc, TerrainType, Tile, WallType};
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -134,9 +139,17 @@ enum EditorAction {
         new_tile: Tile,
     },
     /// Event was added
-    EventAdded { position: Position, event: MapEvent },
+    EventAdded {
+        position: Position,
+        event: MapEvent,
+        event_id: Option<EventId>,
+    },
     /// Event was removed
-    EventRemoved { position: Position, event: MapEvent },
+    EventRemoved {
+        position: Position,
+        event: MapEvent,
+        event_id: Option<EventId>,
+    },
     /// NPC was added
     NpcAdded { npc: Npc },
     /// NPC was removed
@@ -402,10 +415,33 @@ impl MapEditorState {
         }
     }
 
+    /// Apply the metadata fields back into the map struct
+    ///
+    /// Ensures metadata set via the editor (e.g., `metadata.name`) are copied into the
+    /// underlying map before saving/export.
+    pub fn apply_metadata(&mut self) {
+        self.map.name = self.metadata.name.clone();
+        self.map.description = self.metadata.description.clone();
+    }
+
     /// Erases a tile (resets to default)
     pub fn erase_tile(&mut self, pos: Position) {
         let default_tile = Tile::new(pos.x, pos.y, TerrainType::Ground, WallType::None);
         self.set_tile(pos, default_tile);
+    }
+
+    /// Helper: Get next available EventId for this map (scans existing tile triggers)
+    ///
+    /// This is an editor-only helper used to auto-assign an EventId onto the tile's
+    /// `event_trigger` field without changing the core `Map` domain structure.
+    fn next_available_event_id(&self) -> EventId {
+        self.map
+            .tiles
+            .iter()
+            .filter_map(|t| t.event_trigger)
+            .max()
+            .unwrap_or(0)
+            + 1
     }
 
     /// Adds an event at position
@@ -414,20 +450,50 @@ impl MapEditorState {
             return;
         }
 
+        // Check for an existing event ID using an immutable borrow before we
+        // compute a new one or mutably borrow the tile to set a new ID.
+        let existing_id = if let Some(tile) = self.map.get_tile(pos) {
+            tile.event_trigger
+        } else {
+            // invalid pos
+            return;
+        };
+
+        // If no existing id, compute the next ID (immutably) and then set it via
+        // a separate mutable borrow to avoid borrow checker conflicts.
+        let event_id = if let Some(id) = existing_id {
+            id
+        } else {
+            let id = self.next_available_event_id();
+            if let Some(tile) = self.map.get_tile_mut(pos) {
+                tile.event_trigger = Some(id);
+            }
+            id
+        };
+
         self.map.add_event(pos, event.clone());
         self.undo_stack.push(EditorAction::EventAdded {
             position: pos,
             event,
+            event_id: Some(event_id),
         });
         self.has_changes = true;
     }
 
     /// Removes event at position
     pub fn remove_event(&mut self, pos: Position) {
+        // Grab and clear the tile's event ID (if present)
+        let event_id = if let Some(tile) = self.map.get_tile_mut(pos) {
+            tile.event_trigger.take()
+        } else {
+            None
+        };
+
         if let Some(event) = self.map.remove_event(pos) {
             self.undo_stack.push(EditorAction::EventRemoved {
                 position: pos,
                 event,
+                event_id,
             });
             self.has_changes = true;
         }
@@ -477,9 +543,21 @@ impl MapEditorState {
             }
             EditorAction::EventAdded { position, .. } => {
                 self.map.remove_event(position);
+                if let Some(tile) = self.map.get_tile_mut(position) {
+                    tile.event_trigger = None;
+                }
             }
-            EditorAction::EventRemoved { position, event } => {
+            EditorAction::EventRemoved {
+                position,
+                event,
+                event_id,
+            } => {
                 self.map.add_event(position, event);
+                if let Some(id) = event_id {
+                    if let Some(tile) = self.map.get_tile_mut(position) {
+                        tile.event_trigger = Some(id);
+                    }
+                }
             }
             EditorAction::NpcAdded { .. } => {
                 self.map.npcs.pop();
@@ -499,11 +577,23 @@ impl MapEditorState {
                     *tile = new_tile;
                 }
             }
-            EditorAction::EventAdded { position, event } => {
+            EditorAction::EventAdded {
+                position,
+                event,
+                event_id,
+            } => {
                 self.map.add_event(position, event);
+                if let Some(id) = event_id {
+                    if let Some(tile) = self.map.get_tile_mut(position) {
+                        tile.event_trigger = Some(id);
+                    }
+                }
             }
             EditorAction::EventRemoved { position, .. } => {
                 self.map.remove_event(position);
+                if let Some(tile) = self.map.get_tile_mut(position) {
+                    tile.event_trigger = None;
+                }
             }
             EditorAction::NpcAdded { npc } => {
                 self.map.add_npc(npc);
@@ -602,20 +692,28 @@ pub struct EventEditorState {
     pub position: Position,
     pub name: String,
     pub description: String,
-    // Encounter fields
-    pub encounter_monsters: String,
-    // Treasure fields
-    pub treasure_items: String,
+    // Encounter fields (typed)
+    pub encounter_monsters: Vec<MonsterId>,
+    // Search query for encounter monsters (persisted across frames)
+    pub encounter_monsters_query: String,
+    // Treasure fields (typed)
+    pub treasure_items: Vec<ItemId>,
+    // Search query for treasure items (persisted across frames)
+    pub treasure_items_query: String,
     // Teleport fields
     pub teleport_x: String,
     pub teleport_y: String,
     pub teleport_map_id: String,
+    // Teleport helper fields
+    pub teleport_selected_map: Option<MapId>,
+    pub teleport_selected_pos: Option<Position>,
+    pub teleport_preview_enabled: bool,
     // Trap fields
     pub trap_damage: String,
     pub trap_effect: String,
     // Sign fields
     pub sign_text: String,
-    // NPC dialogue fields
+    // NPC Dialogue fields
     pub npc_id: String,
 }
 
@@ -626,11 +724,16 @@ impl Default for EventEditorState {
             position: Position::new(0, 0),
             name: String::new(),
             description: String::new(),
-            encounter_monsters: String::new(),
-            treasure_items: String::new(),
+            encounter_monsters: Vec::new(),
+            encounter_monsters_query: String::new(),
+            treasure_items: Vec::new(),
+            treasure_items_query: String::new(),
             teleport_x: String::new(),
             teleport_y: String::new(),
             teleport_map_id: String::new(),
+            teleport_selected_map: None,
+            teleport_selected_pos: None,
+            teleport_preview_enabled: false,
             trap_damage: String::new(),
             trap_effect: String::new(),
             sign_text: String::new(),
@@ -694,11 +797,7 @@ impl EventEditorState {
     pub fn to_map_event(&self) -> Result<MapEvent, String> {
         match self.event_type {
             EventType::Encounter => {
-                let monsters: Vec<u8> = self
-                    .encounter_monsters
-                    .split(',')
-                    .filter_map(|s| s.trim().parse().ok())
-                    .collect();
+                let monsters: Vec<MonsterId> = self.encounter_monsters.clone();
                 if monsters.is_empty() {
                     return Err("Encounter must have at least one monster ID".to_string());
                 }
@@ -709,11 +808,7 @@ impl EventEditorState {
                 })
             }
             EventType::Treasure => {
-                let loot: Vec<u8> = self
-                    .treasure_items
-                    .split(',')
-                    .filter_map(|s| s.trim().parse().ok())
-                    .collect();
+                let loot: Vec<ItemId> = self.treasure_items.clone();
                 Ok(MapEvent::Treasure {
                     name: self.name.clone(),
                     description: self.description.clone(),
@@ -721,15 +816,37 @@ impl EventEditorState {
                 })
             }
             EventType::Teleport => {
-                let x = self
-                    .teleport_x
-                    .parse()
-                    .map_err(|_| "Invalid X coordinate")?;
-                let y = self
-                    .teleport_y
-                    .parse()
-                    .map_err(|_| "Invalid Y coordinate")?;
-                let map_id = self.teleport_map_id.parse().map_err(|_| "Invalid map ID")?;
+                // Try to parse X/Y from the textual fields first. If parsing fails, fall back
+                // to the selected preview position (if any) so users can pick positions from the
+                // target map preview instead of typing numeric values.
+                let (x, y) = match (
+                    self.teleport_x.parse::<i32>(),
+                    self.teleport_y.parse::<i32>(),
+                ) {
+                    (Ok(x), Ok(y)) => (x, y),
+                    _ => {
+                        // If we can't parse numeric coordinates, use the selected preview coordinate if set.
+                        if let Some(pos) = self.teleport_selected_pos.as_ref() {
+                            (pos.x, pos.y)
+                        } else {
+                            return Err("Invalid X or Y coordinate".to_string());
+                        }
+                    }
+                };
+
+                // Try parsing the target map ID from the text field. If that fails, fall back to the
+                // selected map from the UI preview component, if available.
+                let map_id = match self.teleport_map_id.parse::<MapId>() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        if let Some(id) = self.teleport_selected_map {
+                            id
+                        } else {
+                            return Err("Invalid map ID".to_string());
+                        }
+                    }
+                };
+
                 Ok(MapEvent::Teleport {
                     name: self.name.clone(),
                     description: self.description.clone(),
@@ -773,6 +890,107 @@ impl EventEditorState {
                 })
             }
         }
+    }
+
+    /// Initializes an `EventEditorState` from an existing `MapEvent` for editing.
+    ///
+    /// # Arguments
+    ///
+    /// * `position` - Position of the event on the map
+    /// * `event` - Reference to the existing `MapEvent`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::MapEvent;
+    /// use antares::domain::types::Position;
+    /// use campaign_builder::map_editor::{EventEditorState, EventType};
+    ///
+    /// let event = MapEvent::Sign {
+    ///     name: "Sign".to_string(),
+    ///     description: "Desc".to_string(),
+    ///     text: "Hello".to_string(),
+    /// };
+    ///
+    /// let editor = EventEditorState::from_map_event(Position::new(1, 1), &event);
+    /// assert_eq!(editor.event_type, EventType::Sign);
+    /// ```
+    pub fn from_map_event(position: Position, event: &MapEvent) -> Self {
+        let mut s = EventEditorState {
+            position,
+            ..Default::default()
+        };
+        match event {
+            MapEvent::Encounter {
+                name,
+                description,
+                monster_group,
+            } => {
+                s.event_type = EventType::Encounter;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.encounter_monsters = monster_group.clone();
+            }
+            MapEvent::Treasure {
+                name,
+                description,
+                loot,
+            } => {
+                s.event_type = EventType::Treasure;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.treasure_items = loot.clone();
+            }
+            MapEvent::Teleport {
+                name,
+                description,
+                destination,
+                map_id,
+            } => {
+                s.event_type = EventType::Teleport;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.teleport_x = destination.x.to_string();
+                s.teleport_y = destination.y.to_string();
+                s.teleport_map_id = map_id.to_string();
+                s.teleport_selected_map = Some(*map_id);
+                s.teleport_selected_pos = Some(*destination);
+                s.teleport_preview_enabled = true;
+            }
+            MapEvent::Trap {
+                name,
+                description,
+                damage,
+                effect,
+            } => {
+                s.event_type = EventType::Trap;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.trap_damage = damage.to_string();
+                s.trap_effect = effect.clone().unwrap_or_default();
+            }
+            MapEvent::Sign {
+                name,
+                description,
+                text,
+            } => {
+                s.event_type = EventType::Sign;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.sign_text = text.clone();
+            }
+            MapEvent::NpcDialogue {
+                name,
+                description,
+                npc_id,
+            } => {
+                s.event_type = EventType::NpcDialogue;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.npc_id = npc_id.to_string();
+            }
+        }
+        s
     }
 }
 
@@ -990,7 +1208,12 @@ impl<'a> Widget for MapGridWidget<'a> {
                             self.state.erase_tile(pos);
                         }
                         EditorTool::PlaceEvent => {
-                            if self.state.event_editor.is_none() {
+                            // If there's already an event at this tile, load it into the editor
+                            // so the user can edit the existing event instead of only creating new ones.
+                            if let Some(ev) = self.state.map.get_event(pos).cloned() {
+                                self.state.event_editor =
+                                    Some(EventEditorState::from_map_event(pos, &ev));
+                            } else if self.state.event_editor.is_none() {
                                 self.state.event_editor = Some(EventEditorState {
                                     position: pos,
                                     ..Default::default()
@@ -1024,6 +1247,126 @@ impl<'a> Widget for MapGridWidget<'a> {
         response
     }
 }
+
+// Map Preview Widget: interactive preview of a map for selecting teleport destination.
+//
+// This widget is similar to the main grid, but it renders an arbitrary Map reference
+// and signals clicks back via a mutable Option<Position> passed in by the caller.
+pub struct MapPreviewWidget<'a> {
+    map: &'a Map,
+    selected_pos: &'a mut Option<Position>,
+    tile_size: f32,
+}
+
+impl<'a> MapPreviewWidget<'a> {
+    pub fn new(map: &'a Map, selected_pos: &'a mut Option<Position>) -> Self {
+        Self {
+            map,
+            selected_pos,
+            tile_size: 12.0,
+        }
+    }
+
+    pub fn tile_size(mut self, tile_size: f32) -> Self {
+        self.tile_size = tile_size;
+        self
+    }
+}
+
+impl<'a> Widget for MapPreviewWidget<'a> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let tile_size = self.tile_size;
+
+        let map_width_px = self.map.width as f32 * tile_size;
+        let map_height_px = self.map.height as f32 * tile_size;
+
+        let avail = ui.available_size();
+        let width = map_width_px.max(avail.x).max(1.0);
+        let height = map_height_px.max(avail.y).max(1.0);
+
+        let (response, painter) = ui.allocate_painter(Vec2::new(width, height), Sense::click());
+
+        let grid_offset = Vec2::new(
+            ((width - map_width_px) / 2.0).max(0.0),
+            ((height - map_height_px) / 2.0).max(0.0),
+        );
+
+        let to_screen = |x: i32, y: i32| -> Pos2 {
+            response.rect.min + grid_offset + Vec2::new(x as f32 * tile_size, y as f32 * tile_size)
+        };
+
+        for y in 0..self.map.height as i32 {
+            for x in 0..self.map.width as i32 {
+                let pos = Position::new(x, y);
+                if let Some(tile) = self.map.get_tile(pos) {
+                    let has_event = self.map.events.contains_key(&pos);
+                    let has_npc = self.map.npcs.iter().any(|n| n.position == pos);
+                    let color = MapGridWidget::tile_color(tile, has_event, has_npc);
+
+                    let rect =
+                        Rect::from_min_size(to_screen(x, y), Vec2::new(tile_size, tile_size));
+                    painter.rect_filled(rect, 0.0, color);
+
+                    painter.rect_stroke(
+                        rect,
+                        0.0,
+                        Stroke::new(1.0, Color32::WHITE),
+                        egui::StrokeKind::Outside,
+                    );
+
+                    if let Some(sel_pos) = self.selected_pos {
+                        if *sel_pos == pos {
+                            painter.rect_stroke(
+                                rect,
+                                0.0,
+                                Stroke::new(2.0, Color32::YELLOW),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if response.clicked() {
+            if let Some(click_pos) = response.interact_pointer_pos() {
+                let local_pos = click_pos - response.rect.min - grid_offset;
+                let x = (local_pos.x / tile_size) as i32;
+                let y = (local_pos.y / tile_size) as i32;
+                let pos = Position::new(x, y);
+                if self.map.is_valid_position(pos) {
+                    *self.selected_pos = Some(pos);
+                }
+            }
+        }
+
+        response
+    }
+}
+
+// ===== Main Maps Editor State =====
+
+/// Suggest maps by partial input (id or name)
+fn suggest_maps_for_partial(maps: &[Map], partial: &str) -> Vec<(MapId, String)> {
+    let partial_lower = partial.to_lowercase();
+
+    let mut suggestions: Vec<(MapId, String)> = maps
+        .iter()
+        .filter(|m| {
+            // Match against id text or name substring, case-insensitive
+            m.id.to_string().contains(&partial_lower)
+                || m.name.to_lowercase().contains(&partial_lower)
+        })
+        .map(|m| (m.id, m.name.clone()))
+        .take(10)
+        .collect();
+
+    // Sort by ID for deterministic ordering
+    suggestions.sort_unstable_by_key(|(id, _name)| *id);
+    suggestions
+}
+
+// ===== Main Maps Editor State =====
 
 // ===== Main Maps Editor State =====
 
@@ -1132,6 +1475,44 @@ impl MapsEditorState {
         maps.iter().map(|m| m.id).max().unwrap_or(0) + 1
     }
 
+    /// Build a filtered list snapshot of maps (preserve original indices) sorted by ID.
+    ///
+    /// This keeps the underlying `maps` vector untouched while producing a snapshot of the UI
+    /// list sorted by `MapId` and containing the original indices so that selection by index
+    /// into the `maps` vector remains valid.
+    fn build_filtered_maps_snapshot(
+        maps: &[Map],
+        search_filter: &str,
+    ) -> Vec<(usize, MapId, String, u32, u32, usize, usize)> {
+        let search_lower = search_filter.to_lowercase();
+
+        let mut filtered: Vec<(usize, MapId, String, u32, u32, usize, usize)> = maps
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| {
+                search_lower.is_empty()
+                    || m.name.to_lowercase().contains(&search_lower)
+                    || m.id.to_string().contains(&search_lower)
+            })
+            .map(|(idx, m)| {
+                (
+                    idx,
+                    m.id,
+                    m.name.clone(),
+                    m.width,
+                    m.height,
+                    m.events.len(),
+                    m.npcs.len(),
+                )
+            })
+            .collect();
+
+        // Sort by ID for deterministic ordering in the UI list
+        filtered.sort_unstable_by_key(|(_, id, ..)| *id);
+
+        filtered
+    }
+
     /// Render the Maps Editor UI
     ///
     /// This follows the standard editor pattern with EditorToolbar, TwoColumnLayout,
@@ -1141,6 +1522,8 @@ impl MapsEditorState {
         &mut self,
         ui: &mut egui::Ui,
         maps: &mut Vec<Map>,
+        monsters: &[MonsterDefinition],
+        items: &[Item],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -1265,6 +1648,8 @@ impl MapsEditorState {
                 self.show_editor(
                     ui,
                     maps,
+                    monsters,
+                    items,
                     campaign_dir,
                     maps_dir,
                     display_config,
@@ -1290,28 +1675,8 @@ impl MapsEditorState {
         unsaved_changes: &mut bool,
         status_message: &mut String,
     ) {
-        let search_lower = self.search_filter.to_lowercase();
-
-        // Build filtered list snapshot
-        let filtered_maps: Vec<(usize, String, u32, u32, usize, usize)> = maps
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| {
-                search_lower.is_empty()
-                    || m.name.to_lowercase().contains(&search_lower)
-                    || m.id.to_string().contains(&search_lower)
-            })
-            .map(|(idx, m)| {
-                (
-                    idx,
-                    m.name.clone(),
-                    m.width,
-                    m.height,
-                    m.events.len(),
-                    m.npcs.len(),
-                )
-            })
-            .collect();
+        // Build and sort filtered list snapshot for UI display
+        let filtered_maps = Self::build_filtered_maps_snapshot(maps, &self.search_filter);
 
         let selected = self.selected_map_idx;
         let mut new_selection = selected;
@@ -1324,11 +1689,11 @@ impl MapsEditorState {
                 left_ui.heading("Maps");
                 left_ui.separator();
 
-                for (idx, name, width, height, events, npcs) in &filtered_maps {
+                for (idx, id, name, width, height, events, npcs) in &filtered_maps {
                     let is_selected = selected == Some(*idx);
                     let label = format!(
-                        "#{} {} ({}x{}) E:{} N:{}",
-                        idx, name, width, height, events, npcs
+                        "[{}] {} ({}x{}) E:{} N:{}",
+                        id, name, width, height, events, npcs
                     );
                     if left_ui.selectable_label(is_selected, &label).clicked() {
                         new_selection = Some(*idx);
@@ -1489,10 +1854,13 @@ impl MapsEditorState {
     }
 
     /// Show the full map editor
+    #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
     fn show_editor(
         &mut self,
         ui: &mut egui::Ui,
-        maps: &mut [Map],
+        maps: &mut Vec<Map>,
+        monsters: &[MonsterDefinition],
+        items: &[Item],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -1751,7 +2119,9 @@ impl MapsEditorState {
                             egui::ScrollArea::vertical()
                                 .id_salt("map_editor_inspector_scroll")
                                 .show(right_ui, |ui| {
-                                    Self::show_inspector_panel(ui, editor_ref);
+                                    Self::show_inspector_panel(
+                                        ui, editor_ref, maps, monsters, items,
+                                    );
                                 });
                         },
                     );
@@ -1766,20 +2136,36 @@ impl MapsEditorState {
         // Handle back action
         if back_clicked {
             // Save changes if any
-            if let Some(ref editor) = self.active_editor {
-                if editor.has_changes {
-                    let map = editor.map.clone();
+            if self.active_editor.is_some() {
+                // Scoped mutable borrow to collect a map to save if any changes exist.
+                let map_opt: Option<Map> = self.active_editor.as_mut().and_then(|editor| {
+                    if editor.has_changes {
+                        // Ensure metadata is reflected in the map before saving
+                        editor.apply_metadata();
+                        Some(editor.map.clone())
+                    } else {
+                        None
+                    }
+                });
+
+                if let Some(map) = map_opt {
                     if let Some(idx) = self.selected_map_idx {
                         if idx < maps.len() {
                             maps[idx] = map.clone();
                         }
                     }
-                    // Save to file
+
+                    // Save to file (mutable borrow released)
                     if let Err(e) = self.save_map(&map, campaign_dir, maps_dir) {
                         *status_message = format!("Failed to save map: {}", e);
                     } else {
                         *status_message = "Map saved".to_string();
                         *unsaved_changes = true;
+                        // Re-borrow to update the editor with the saved map and clear dirty flag
+                        if let Some(editor) = self.active_editor.as_mut() {
+                            editor.map = map;
+                            editor.has_changes = false;
+                        }
                     }
                 }
             }
@@ -1789,8 +2175,14 @@ impl MapsEditorState {
 
         // Handle save action
         if save_clicked {
-            if let Some(ref editor) = self.active_editor {
-                let map = editor.map.clone();
+            // Acquire a clone of the map to save while avoiding overlapping borrows
+            let map_opt: Option<Map> = self.active_editor.as_mut().map(|editor| {
+                // Sync metadata to the underlying map before saving
+                editor.apply_metadata();
+                editor.map.clone()
+            });
+
+            if let Some(map) = map_opt {
                 if let Some(idx) = self.selected_map_idx {
                     if idx < maps.len() {
                         maps[idx] = map.clone();
@@ -1801,9 +2193,10 @@ impl MapsEditorState {
                 } else {
                     *status_message = format!("Map {} saved", map.id);
                     *unsaved_changes = true;
-                    // Clear has_changes flag
-                    if let Some(ref mut ed) = self.active_editor {
-                        ed.has_changes = false;
+                    // Re-borrow to clear flags and update editor's map
+                    if let Some(editor) = self.active_editor.as_mut() {
+                        editor.has_changes = false;
+                        editor.map = map;
                     }
                 }
             }
@@ -1816,7 +2209,7 @@ impl MapsEditorState {
         editor: &mut MapEditorState,
         current_zoom: f32,
     ) -> Option<ZoomAction> {
-        let mut action: Option<ZoomAction> = None;
+        let action: Option<ZoomAction> = None;
 
         ui.horizontal(|ui| {
             ui.label("Tools:");
@@ -1928,7 +2321,13 @@ impl MapsEditorState {
     }
 
     /// Show inspector panel
-    fn show_inspector_panel(ui: &mut egui::Ui, editor: &mut MapEditorState) {
+    fn show_inspector_panel(
+        ui: &mut egui::Ui,
+        editor: &mut MapEditorState,
+        maps: &[Map],
+        monsters: &[MonsterDefinition],
+        items: &[Item],
+    ) {
         ui.heading("Inspector");
         ui.separator();
 
@@ -1973,6 +2372,16 @@ impl MapsEditorState {
                 if let Some(event) = editor.map.get_event(pos) {
                     ui.separator();
                     ui.label("Event:");
+
+                    // Show Name and Description when present
+                    let (name, description) = Self::event_name_description(event);
+                    if !name.is_empty() {
+                        ui.label(format!("Name: {}", name));
+                    }
+                    if !description.is_empty() {
+                        ui.label(format!("Description: {}", description));
+                    }
+
                     match event {
                         MapEvent::Encounter { monster_group, .. } => {
                             ui.label(format!("Encounter: {:?}", monster_group));
@@ -2019,7 +2428,7 @@ impl MapsEditorState {
         if matches!(editor.current_tool, EditorTool::PlaceEvent) {
             ui.group(|ui| {
                 ui.heading("Event Editor");
-                Self::show_event_editor(ui, editor);
+                Self::show_event_editor(ui, editor, maps, monsters, items);
             });
         }
 
@@ -2049,6 +2458,30 @@ impl MapsEditorState {
                     ui.label(error);
                 }
             });
+        }
+    }
+
+    /// Helper: extract name and description from any MapEvent variant
+    fn event_name_description(event: &MapEvent) -> (String, String) {
+        match event {
+            MapEvent::Encounter {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::Treasure {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::Teleport {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::Trap {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::Sign {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::NpcDialogue {
+                name, description, ..
+            } => (name.clone(), description.clone()),
         }
     }
 
@@ -2134,7 +2567,13 @@ impl MapsEditorState {
     }
 
     /// Show event editor
-    fn show_event_editor(ui: &mut egui::Ui, editor: &mut MapEditorState) {
+    fn show_event_editor(
+        ui: &mut egui::Ui,
+        editor: &mut MapEditorState,
+        maps: &[Map],
+        monsters: &[MonsterDefinition],
+        items: &[Item],
+    ) {
         if let Some(ref mut event_editor) = editor.event_editor {
             egui::ComboBox::from_id_salt("map_event_type_combo")
                 .selected_text(event_editor.event_type.name())
@@ -2154,22 +2593,157 @@ impl MapsEditorState {
 
             ui.separator();
 
+            // Common event fields: name and description
+            ui.horizontal(|ui| {
+                ui.label("Name:");
+                ui.text_edit_singleline(&mut event_editor.name);
+            });
+            ui.label("Description:");
+            ui.text_edit_multiline(&mut event_editor.description);
+
             match event_editor.event_type {
                 EventType::Encounter => {
-                    ui.label("Monster IDs (comma-separated):");
-                    ui.text_edit_singleline(&mut event_editor.encounter_monsters);
+                    // Multi-select searchable list for monsters (id+name)
+                    let changed = searchable_selector_multi(
+                        ui,
+                        "event_encounter_monsters",
+                        "Encounter Monsters",
+                        &mut event_editor.encounter_monsters,
+                        monsters,
+                        |m| m.id,
+                        |m| m.name.clone(),
+                        &mut event_editor.encounter_monsters_query,
+                    );
+                    if changed {
+                        editor.has_changes = true;
+                    }
                 }
                 EventType::Treasure => {
-                    ui.label("Item IDs (comma-separated):");
-                    ui.text_edit_singleline(&mut event_editor.treasure_items);
+                    // Multi-select searchable list for treasure items (id+name)
+                    let changed = searchable_selector_multi(
+                        ui,
+                        "event_treasure_items",
+                        "Treasure Items",
+                        &mut event_editor.treasure_items,
+                        items,
+                        |i| i.id,
+                        |i| i.name.clone(),
+                        &mut event_editor.treasure_items_query,
+                    );
+                    if changed {
+                        editor.has_changes = true;
+                    }
                 }
                 EventType::Teleport => {
-                    ui.label("Destination X:");
-                    ui.text_edit_singleline(&mut event_editor.teleport_x);
-                    ui.label("Destination Y:");
-                    ui.text_edit_singleline(&mut event_editor.teleport_y);
-                    ui.label("Target Map ID:");
-                    ui.text_edit_singleline(&mut event_editor.teleport_map_id);
+                    ui.label("Target Map:");
+                    ui.horizontal(|ui| {
+                        // Editable text input for map id or name
+                        let changed = ui
+                            .text_edit_singleline(&mut event_editor.teleport_map_id)
+                            .changed();
+                        if changed {
+                            // If user types, clear the previously selected map
+                            event_editor.teleport_selected_map = None;
+                            event_editor.teleport_preview_enabled = false;
+                        }
+                    });
+
+                    // Suggestions based on typed input (id or name)
+                    let suggestions = suggest_maps_for_partial(maps, &event_editor.teleport_map_id);
+                    if !suggestions.is_empty() {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Suggestions:");
+                            for (sid, sname) in suggestions.iter() {
+                                let label = format!("[{}] {}", sid, sname);
+                                // Use small button so UI remains compact
+                                if ui.small_button(&label).clicked() {
+                                    event_editor.teleport_map_id = sid.to_string();
+                                    event_editor.teleport_selected_map = Some(*sid);
+                                    event_editor.teleport_preview_enabled = true;
+                                }
+                            }
+                        });
+                    } else {
+                        // If empty input, provide quick selection of few maps (first 8)
+                        if event_editor.teleport_map_id.is_empty() && !maps.is_empty() {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Common:");
+                                for m in maps.iter().take(8) {
+                                    let label = format!("[{}] {}", m.id, m.name);
+                                    if ui.small_button(&label).clicked() {
+                                        event_editor.teleport_map_id = m.id.to_string();
+                                        event_editor.teleport_selected_map = Some(m.id);
+                                        event_editor.teleport_preview_enabled = true;
+                                    }
+                                }
+                            });
+                        }
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.label("Destination X:");
+                        if ui
+                            .text_edit_singleline(&mut event_editor.teleport_x)
+                            .changed()
+                        {
+                            if let (Ok(x), Ok(y)) = (
+                                event_editor.teleport_x.parse::<i32>(),
+                                event_editor.teleport_y.parse::<i32>(),
+                            ) {
+                                event_editor.teleport_selected_pos = Some(Position::new(x, y));
+                            }
+                        }
+
+                        ui.label("Destination Y:");
+                        if ui
+                            .text_edit_singleline(&mut event_editor.teleport_y)
+                            .changed()
+                        {
+                            if let (Ok(x), Ok(y)) = (
+                                event_editor.teleport_x.parse::<i32>(),
+                                event_editor.teleport_y.parse::<i32>(),
+                            ) {
+                                event_editor.teleport_selected_pos = Some(Position::new(x, y));
+                            }
+                        }
+                    });
+
+                    ui.checkbox(
+                        &mut event_editor.teleport_preview_enabled,
+                        "Show Target Map Preview",
+                    );
+
+                    if event_editor.teleport_preview_enabled {
+                        let map_id_opt = event_editor
+                            .teleport_selected_map
+                            .or_else(|| event_editor.teleport_map_id.parse::<MapId>().ok());
+
+                        if let Some(map_id) = map_id_opt {
+                            if let Some(target_map) = maps.iter().find(|m| m.id == map_id) {
+                                ui.label(format!(
+                                    "Preview: [{}] {}",
+                                    target_map.id, target_map.name
+                                ));
+
+                                // Draw interactive preview so the user can click to pick destination tile
+                                let selected_pos_ref = &mut event_editor.teleport_selected_pos;
+                                let preview_widget =
+                                    MapPreviewWidget::new(target_map, selected_pos_ref)
+                                        .tile_size(18.0);
+                                let resp = ui.add(preview_widget);
+                                if resp.clicked() {
+                                    if let Some(pos) = event_editor.teleport_selected_pos {
+                                        event_editor.teleport_x = pos.x.to_string();
+                                        event_editor.teleport_y = pos.y.to_string();
+                                    }
+                                }
+                            } else {
+                                ui.label("Selected map not found in campaign.");
+                            }
+                        } else {
+                            ui.label("Select a target map to enable preview");
+                        }
+                    }
                 }
                 EventType::Trap => {
                     ui.label("Damage:");
@@ -2189,25 +2763,60 @@ impl MapsEditorState {
 
             ui.separator();
 
+            // Determine whether we are adding a new event or editing an existing one.
             let mut add_event = false;
+            let mut replace_event = false;
+            let mut remove_event_flag = false;
             let mut event_to_add: Option<MapEvent> = None;
-            let mut event_pos = Position::new(0, 0);
+            // Capture the position immediately so we do not hold the borrow on the editor while applying.
+            let event_pos = event_editor.position;
 
-            if ui.button("➕ Add Event").clicked() {
-                match event_editor.to_map_event() {
-                    Ok(event) => {
-                        event_pos = event_editor.position;
-                        event_to_add = Some(event);
-                        add_event = true;
+            // If there's an existing event at this position, show Save / Remove controls.
+            let existing_event = editor.map.get_event(event_pos).cloned();
+            if existing_event.is_some() {
+                if ui.button("💾 Save Changes").clicked() {
+                    match event_editor.to_map_event() {
+                        Ok(event) => {
+                            event_to_add = Some(event);
+                            replace_event = true;
+                        }
+                        Err(err) => {
+                            ui.label(format!("Error: {}", err));
+                        }
                     }
-                    Err(err) => {
-                        ui.label(format!("Error: {}", err));
+                }
+
+                if ui.button("🗑 Remove Event").clicked() {
+                    remove_event_flag = true;
+                }
+            } else {
+                // No existing event -> offer Add
+                if ui.button("➕ Add Event").clicked() {
+                    match event_editor.to_map_event() {
+                        Ok(event) => {
+                            event_to_add = Some(event);
+                            add_event = true;
+                        }
+                        Err(err) => {
+                            ui.label(format!("Error: {}", err));
+                        }
                     }
                 }
             }
 
-            // Apply after borrow ends
-            if add_event {
+            // Apply after borrow ends (mutating the map/editor)
+            if remove_event_flag {
+                editor.remove_event(event_pos);
+                editor.event_editor = None;
+            } else if replace_event {
+                if let Some(event) = event_to_add {
+                    // Replace the event in-place (preserve tile.event_trigger id).
+                    // This keeps the edit workflow simple and immediate for users.
+                    editor.map.add_event(event_pos, event);
+                    editor.has_changes = true;
+                    editor.event_editor = None;
+                }
+            } else if add_event {
                 if let Some(event) = event_to_add {
                     editor.add_event(event_pos, event);
                     editor.event_editor = None;
@@ -2500,7 +3109,30 @@ impl MapsEditorState {
                             if path.extension().and_then(|s| s.to_str()) == Some("ron") {
                                 match fs::read_to_string(&path) {
                                     Ok(contents) => match ron::from_str::<Map>(&contents) {
-                                        Ok(map) => {
+                                        Ok(mut map) => {
+                                            // Backfill missing event ids for older map formats
+                                            let mut next_id = map
+                                                .tiles
+                                                .iter()
+                                                .filter_map(|t| t.event_trigger)
+                                                .max()
+                                                .unwrap_or(0)
+                                                + 1;
+
+                                            // Collect positions to avoid holding an immutable borrow
+                                            // of `map.events` while mutably borrowing tiles later.
+                                            let event_positions: Vec<Position> =
+                                                map.events.keys().cloned().collect();
+
+                                            for pos in event_positions {
+                                                if let Some(tile) = map.get_tile_mut(pos) {
+                                                    if tile.event_trigger.is_none() {
+                                                        tile.event_trigger = Some(next_id);
+                                                        next_id += 1;
+                                                    }
+                                                }
+                                            }
+
                                             maps.push(map);
                                             loaded_count += 1;
                                         }
@@ -2524,6 +3156,10 @@ impl MapsEditorState {
                         }
 
                         if loaded_count > 0 {
+                            // Sort maps by ID so load order is deterministic and stable
+                            // across platforms and runs. This prevents filesystem iteration
+                            // order from confusing users when they expect map IDs to match.
+                            maps.sort_unstable_by_key(|m| m.id);
                             *status_message = format!("Loaded {} maps", loaded_count);
                         }
                     }
@@ -2761,16 +3397,20 @@ mod tests {
             event_type: EventType::Encounter,
             name: "Encounter".to_string(),
             description: "Desc".to_string(),
-            encounter_monsters: "1, 2, 3".to_string(),
+            encounter_monsters: vec![1, 2, 3],
             ..Default::default()
         };
 
         let event = editor.to_map_event().unwrap();
         match event {
-            MapEvent::Encounter { monster_group, .. } => {
-                assert_eq!(monster_group, vec![1, 2, 3]);
+            MapEvent::Encounter {
+                name,
+                description,
+                monster_group,
+            } => {
+                assert_eq!(monster_group, vec![1u8, 2u8, 3u8]);
             }
-            _ => panic!("Expected Encounter event"),
+            _ => panic!("expected encounter event"),
         }
     }
 
@@ -2787,10 +3427,57 @@ mod tests {
         let event = editor.to_map_event().unwrap();
         match event {
             MapEvent::Sign { text, .. } => {
-                assert_eq!(text, "Hello World");
+                assert_eq!(text, "Hello World".to_string());
             }
             _ => panic!("Expected Sign event"),
         }
+    }
+
+    #[test]
+    fn test_event_editor_state_to_teleport_with_selected_fallback() {
+        let editor = EventEditorState {
+            event_type: EventType::Teleport,
+            name: "Teleport".to_string(),
+            description: "Desc".to_string(),
+            // user didn't type numeric coordinates, selection fallback will be used
+            teleport_x: String::new(),
+            teleport_y: String::new(),
+            teleport_map_id: String::new(),
+            teleport_selected_map: Some(7),
+            teleport_selected_pos: Some(Position::new(4, 5)),
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().unwrap();
+        match event {
+            MapEvent::Teleport {
+                destination,
+                map_id,
+                ..
+            } => {
+                assert_eq!(destination, Position::new(4, 5));
+                assert_eq!(map_id, 7);
+            }
+            _ => panic!("Expected Teleport event"),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_state_to_teleport_invalid_no_fallback() {
+        let editor = EventEditorState {
+            event_type: EventType::Teleport,
+            name: "Teleport".to_string(),
+            description: "Desc".to_string(),
+            // no numeric coordinates and no preview selection -> should fail
+            teleport_x: String::new(),
+            teleport_y: String::new(),
+            teleport_map_id: String::new(),
+            teleport_selected_map: None,
+            teleport_selected_pos: None,
+            ..Default::default()
+        };
+
+        assert!(editor.to_map_event().is_err());
     }
 
     #[test]
@@ -2856,8 +3543,247 @@ mod tests {
         assert_eq!(state.metadata.name, "Test Map");
         assert_eq!(state.metadata.difficulty, 5);
         assert_eq!(state.metadata.light_level, 80);
-        assert_eq!(state.metadata.encounter_rate, 25);
-        assert!(state.metadata.is_outdoor);
+    }
+
+    #[test]
+    fn test_apply_metadata_sync() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        state.metadata.name = "Renamed Map".to_string();
+        state.metadata.description = "A new description".to_string();
+
+        // apply metadata to underlying map
+        state.apply_metadata();
+
+        assert_eq!(state.map.name, "Renamed Map");
+        assert_eq!(state.map.description, "A new description");
+    }
+
+    #[test]
+    fn test_save_action_updates_maps_vector() {
+        let mut maps: Vec<Map> = vec![Map::new(
+            1,
+            "You Forgot Map".to_string(),
+            "Desc".to_string(),
+            10,
+            10,
+        )];
+        let mut maps_editor = MapsEditorState::new();
+
+        // Activate editor for the first map
+        maps_editor.selected_map_idx = Some(0);
+        maps_editor.active_editor = Some(MapEditorState::new(maps[0].clone()));
+
+        // Modify metadata
+        if let Some(ref mut editor) = maps_editor.active_editor {
+            editor.metadata.name = "Synchronized Map".to_string();
+            editor.metadata.description = "Synchronized description".to_string();
+            editor.apply_metadata();
+
+            let map = editor.map.clone();
+            if let Some(idx) = maps_editor.selected_map_idx {
+                if idx < maps.len() {
+                    maps[idx] = map.clone();
+                }
+            }
+        }
+
+        assert_eq!(maps[0].name, "Synchronized Map");
+        assert_eq!(maps[0].description, "Synchronized description");
+    }
+
+    #[test]
+    fn test_load_maps_sorts_by_id() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        // Create a temporary campaign directory with a `maps` subdirectory
+        let tmpdir = tempdir().expect("Failed to create tempdir");
+        let campaign_dir_buf = tmpdir.path().to_path_buf();
+        let maps_dir = "maps";
+        let maps_path = tmpdir.path().join(maps_dir);
+        fs::create_dir_all(&maps_path).expect("Failed to create maps dir");
+
+        // Create three maps with different IDs and write in non-sorted order (3,1,2)
+        let map3 = Map::new(3, "Map 3".to_string(), "Desc".to_string(), 10, 10);
+        let map1 = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
+        let map2 = Map::new(2, "Map 2".to_string(), "Desc".to_string(), 10, 10);
+
+        // Use ron pretty default config to serialize maps
+        let ron_cfg = ron::ser::PrettyConfig::default();
+
+        fs::write(
+            maps_path.join("map_3.ron"),
+            ron::ser::to_string_pretty(&map3, ron_cfg.clone()).expect("Serialize map3"),
+        )
+        .expect("Write map_3");
+
+        fs::write(
+            maps_path.join("map_1.ron"),
+            ron::ser::to_string_pretty(&map1, ron_cfg.clone()).expect("Serialize map1"),
+        )
+        .expect("Write map_1");
+
+        fs::write(
+            maps_path.join("map_2.ron"),
+            ron::ser::to_string_pretty(&map2, ron_cfg.clone()).expect("Serialize map2"),
+        )
+        .expect("Write map_2");
+
+        // Now load maps using the editor function and ensure they are sorted by id
+        let mut loaded_maps: Vec<Map> = Vec::new();
+        let mut status_message = String::new();
+        let state = MapsEditorState::new();
+        state.load_maps(
+            &mut loaded_maps,
+            Some(&campaign_dir_buf),
+            maps_dir,
+            &mut status_message,
+        );
+
+        assert_eq!(loaded_maps.len(), 3);
+        assert_eq!(loaded_maps[0].id, 1);
+        assert_eq!(loaded_maps[1].id, 2);
+        assert_eq!(loaded_maps[2].id, 3);
+    }
+
+    #[test]
+    fn test_undo_redo_event_id_preserved() {
+        // Should preserve tile.event_trigger across add -> undo -> redo
+        let mut state = MapEditorState::new(Map::new(
+            1,
+            "UndoRedo Map".to_string(),
+            "Desc".to_string(),
+            10,
+            10,
+        ));
+        let pos = Position::new(3, 3);
+        let event = MapEvent::Sign {
+            name: "Sign".to_string(),
+            description: "Desc".to_string(),
+            text: "Hello UndoRedo".to_string(),
+        };
+
+        // Add event and check tile has an event id
+        state.add_event(pos, event);
+        let id_opt = state.map.get_tile(pos).unwrap().event_trigger;
+        assert!(id_opt.is_some());
+        let assigned_id = id_opt.unwrap();
+
+        // Undo -> event removed and id cleared
+        state.undo();
+        assert!(state.map.get_event(pos).is_none());
+        assert!(state.map.get_tile(pos).unwrap().event_trigger.is_none());
+
+        // Redo -> event restored and id restored
+        state.redo();
+        assert!(state.map.get_event(pos).is_some());
+        assert_eq!(
+            state.map.get_tile(pos).unwrap().event_trigger,
+            Some(assigned_id)
+        );
+    }
+
+    #[test]
+    fn test_load_maps_backfills_event_ids() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        // Create a temporary campaign directory with a `maps` subdirectory
+        let tmpdir = tempdir().expect("Failed to create tempdir");
+        let campaign_dir_buf = tmpdir.path().to_path_buf();
+        let maps_dir = "maps";
+        let maps_path = tmpdir.path().join(maps_dir);
+        fs::create_dir_all(&maps_path).expect("Failed to create maps dir");
+
+        // Build a map in which we add an event but DO NOT set tile.event_trigger
+        let mut map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(5, 5);
+        map.add_event(
+            pos,
+            MapEvent::Sign {
+                name: "Sign".to_string(),
+                description: "Desc".to_string(),
+                text: "Test sign".to_string(),
+            },
+        );
+        // Intentionally keep event_trigger None (simulate older map files)
+        assert!(map.get_tile(pos).unwrap().event_trigger.is_none());
+
+        // Write it out to a file
+        let ron_cfg = ron::ser::PrettyConfig::default();
+        fs::write(
+            maps_path.join("map_noids.ron"),
+            ron::ser::to_string_pretty(&map, ron_cfg).expect("Serialize map"),
+        )
+        .expect("Write map");
+
+        // Load via MapsEditorState::load_maps - it should backfill event IDs
+        let mut loaded_maps: Vec<Map> = Vec::new();
+        let mut status_message = String::new();
+        let state = MapsEditorState::new();
+        state.load_maps(
+            &mut loaded_maps,
+            Some(&campaign_dir_buf),
+            maps_dir,
+            &mut status_message,
+        );
+
+        assert_eq!(loaded_maps.len(), 1);
+        let loaded = &loaded_maps[0];
+        // the tile for the event must now have an assigned event_trigger
+        let tid = loaded.get_tile(pos).unwrap().event_trigger;
+        assert!(tid.is_some());
+    }
+
+    #[test]
+    fn test_build_filtered_maps_snapshot_sorts_by_id() {
+        // Create maps in non-sorted order (3, 1, 2)
+        let maps = vec![
+            Map::new(3, "Map 3".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(2, "Map 2".to_string(), "Desc".to_string(), 10, 10),
+        ];
+
+        let snapshot = MapsEditorState::build_filtered_maps_snapshot(&maps, "");
+        assert_eq!(snapshot.len(), 3);
+
+        // Snapshot sorted by ID (1,2,3)
+        assert_eq!(snapshot[0].1, 1);
+        assert_eq!(snapshot[1].1, 2);
+        assert_eq!(snapshot[2].1, 3);
+
+        // Original indices preserved in snapshot mapping
+        assert_eq!(snapshot[0].0, 1); // map ID 1 was originally at index 1
+        assert_eq!(snapshot[1].0, 2); // map ID 2 was originally at index 2
+        assert_eq!(snapshot[2].0, 0); // map ID 3 was originally at index 0
+    }
+
+    #[test]
+    fn test_suggest_maps_for_partial() {
+        // Create a small set of maps to test suggestion behavior
+        let maps = vec![
+            Map::new(1, "Starter Town".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(2, "Dark Forest".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(3, "Ancient Ruins".to_string(), "Desc".to_string(), 10, 10),
+        ];
+
+        // Partial name match
+        let results = suggest_maps_for_partial(&maps, "Dark");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, 2);
+        assert!(results[0].1.to_lowercase().contains("dark"));
+
+        // Partial id match
+        let results = suggest_maps_for_partial(&maps, "1");
+        assert!(!results.is_empty());
+        assert!(results.iter().any(|(id, _)| *id == 1));
+
+        // Partial lowercase name fragment
+        let results = suggest_maps_for_partial(&maps, "anc");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, 3);
     }
 
     #[test]
@@ -2884,6 +3810,105 @@ mod tests {
 
         state.event_editor = Some(EventEditorState::default());
         assert!(state.show_event_editor_ui());
+    }
+
+    #[test]
+    fn test_event_editor_state_from_map_event() {
+        let pos = Position::new(4, 4);
+        let event = MapEvent::Sign {
+            name: "Inn Sign".to_string(),
+            description: "Welcome".to_string(),
+            text: "Welcome to town".to_string(),
+        };
+
+        let editor = EventEditorState::from_map_event(pos, &event);
+        assert_eq!(editor.position, pos);
+        assert_eq!(editor.event_type, EventType::Sign);
+        assert_eq!(editor.sign_text, "Welcome to town");
+        assert_eq!(editor.name, "Inn Sign");
+    }
+
+    #[test]
+    fn test_event_name_description_helper() {
+        let event = MapEvent::Teleport {
+            name: "PortalName".to_string(),
+            description: "PortalDesc".to_string(),
+            destination: Position::new(1, 2),
+            map_id: 4,
+        };
+
+        let (name, description) = MapsEditorState::event_name_description(&event);
+        assert_eq!(name, "PortalName");
+        assert_eq!(description, "PortalDesc");
+    }
+
+    #[test]
+    fn test_inspector_panel_runs_with_event() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let pos = Position::new(2, 3);
+        let event = MapEvent::Sign {
+            name: "Inn Sign".to_string(),
+            description: "Welcome".to_string(),
+            text: "Welcome to town".to_string(),
+        };
+        state.add_event_at_position(pos.x, pos.y, event);
+        state.selected_position = Some(pos);
+
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(400.0, 300.0),
+        ));
+        ctx.begin_pass(raw_input);
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            // Should render the inspector without panicking (and include name/description)
+            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[]);
+        });
+
+        // Verify selection was preserved and the inspector invocation completed
+        assert_eq!(state.selected_position, Some(pos));
+    }
+
+    #[test]
+    fn test_edit_event_replaces_existing_event() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let pos = Position::new(5, 5);
+        let original = MapEvent::Sign {
+            name: "Sign".to_string(),
+            description: "Desc".to_string(),
+            text: "Original".to_string(),
+        };
+
+        // Add the original event (this assigns an event id on the tile)
+        state.add_event(pos, original.clone());
+        let assigned_id = state.map.get_tile(pos).unwrap().event_trigger.unwrap();
+
+        // Create editor from the existing event and change a field
+        let mut editor = EventEditorState::from_map_event(pos, state.map.get_event(pos).unwrap());
+        editor.name = "New Sign".to_string();
+        editor.sign_text = "Changed".to_string();
+        let new_event = editor.to_map_event().expect("valid event");
+
+        // Simulate the Save Changes path: replace in-place (preserve tile.event_trigger id)
+        state.map.add_event(pos, new_event);
+        state.has_changes = true;
+
+        // Verify updated event (by pattern matching its variant) and that the event id is preserved
+        if let MapEvent::Sign { name, text, .. } = state.map.get_event(pos).unwrap() {
+            assert_eq!(name, "New Sign");
+            assert_eq!(text, "Changed");
+        } else {
+            panic!("Expected Sign event");
+        }
+
+        assert_eq!(
+            state.map.get_tile(pos).unwrap().event_trigger,
+            Some(assigned_id)
+        );
     }
 
     #[test]

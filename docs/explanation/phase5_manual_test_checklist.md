@@ -4,6 +4,23 @@
 
 This document provides step-by-step manual testing scenarios to verify the Phase 5 CLI editor implementations. Each test includes detailed steps, expected results, and pass/fail checkboxes.
 
+Quick index
+
+- Test Suite 1: Class Editor - Proficiency System (Tests 1.1 - 1.4)
+- Test Suite 2: Race Editor - Proficiencies and Incompatible Tags (Tests 2.1 - 2.4)
+- Test Suite 3: Item Editor - Classifications, Tags, and Alignment (Tests 3.1 - 3.5)
+- Test Suite 4: Legacy Data Compatibility (Tests 4.1 - 4.3)
+- Test Suite 5: Integration Testing (Tests 5.1 - 5.2)
+- Test Suite 6: Error Handling (Tests 6.1 - 6.2)
+
+Test artifacts and references:
+
+- Test data directory: `test_data/` (created by the environment setup below)
+- Implementation reference: `docs/explanation/phase5_cli_editors_implementation.md`
+- Architecture reference: `docs/reference/architecture.md`
+
+Use this quick index to jump to the appropriate test suite for focused verification.
+
 ## Test Execution Guidelines
 
 - Execute tests in order (dependencies exist between tests)
@@ -14,6 +31,22 @@ This document provides step-by-step manual testing scenarios to verify the Phase
 
 ## Test Environment Setup
 
+Pre-test checklist (run BEFORE starting manual tests)
+
+- Ensure Rust toolchain components and tools are installed:
+  - `rustup component add clippy rustfmt`
+  - `cargo install nextest` (recommended)
+  - `cargo install cargo-audit` (optional, recommended)
+- Verify quality gates succeed before running manual tests:
+  - `cargo fmt --all`
+  - `cargo check --all-targets --all-features`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - `cargo nextest run --all-features` (optional but recommended)
+- Use a clean test data area for repeatable runs:
+  - `rm -rf test_data/*` (run between test passes if re-running)
+
+Commands to build editors and prepare test data:
+
 ```bash
 # Build all editors
 cargo build --release --bin class_editor
@@ -23,6 +56,11 @@ cargo build --release --bin item_editor
 # Create test data directory
 mkdir -p test_data
 ```
+
+Notes:
+
+- If any build or test step fails, address compilation/lint/test issues before performing manual scenarios.
+- Keep a copy of failing `test_data/*.ron` artifacts for triage and issue reports.
 
 ---
 
@@ -35,6 +73,7 @@ mkdir -p test_data
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin class_editor`
 2. Select option `1` (Add New Class)
 3. Enter the following values:
@@ -49,17 +88,20 @@ mkdir -p test_data
 7. Save to: `test_data/test_classes.ron`
 
 **Expected Results**:
+
 - No errors or warnings displayed
 - Success messages shown with checkmarks
 - File `test_data/test_classes.ron` created
 - File contains `proficiencies: ["simple_weapon", "martial_melee", "heavy_armor", "shield"]`
 
 **Verification**:
+
 ```bash
 cat test_data/test_classes.ron | grep -A 1 "proficiencies"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -74,6 +116,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin class_editor`
 2. Select option `1` (Add New Class)
 3. Enter values:
@@ -88,17 +131,20 @@ _____________________________________________________________________________
 7. Save to: `test_data/test_classes.ron`
 
 **Expected Results**:
+
 - Warning message displayed with ⚠️ symbol
 - Confirmation prompt shown
 - Class created after confirmation
 - Custom proficiency saved in RON file
 
 **Verification**:
+
 ```bash
 cat test_data/test_classes.ron | grep "custom_psychic_weapon"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -113,6 +159,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin class_editor`
 2. Select option `3` (Load from File)
 3. Load: `test_data/test_classes.ron`
@@ -126,16 +173,19 @@ _____________________________________________________________________________
 11. Select option `4` (Save to File)
 
 **Expected Results**:
+
 - Current proficiencies shown in edit menu: `(simple_weapon, martial_melee, heavy_armor, shield)`
 - New proficiencies accepted
 - Updated proficiencies saved to file
 
 **Verification**:
+
 ```bash
 cat test_data/test_classes.ron | grep -A 2 "test_knight"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -150,6 +200,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin class_editor`
 2. Select option `1` (Add New Class)
 3. Enter values:
@@ -162,16 +213,19 @@ _____________________________________________________________________________
 5. Save to: `test_data/test_classes.ron`
 
 **Expected Results**:
+
 - No error for empty proficiency list
 - Class created successfully
 - RON file contains `proficiencies: []`
 
 **Verification**:
+
 ```bash
 cat test_data/test_classes.ron | grep -B 1 -A 1 "test_commoner"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -188,6 +242,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin race_editor`
 2. Select option `1` (Add New Race)
 3. Enter values:
@@ -201,17 +256,20 @@ _____________________________________________________________________________
 5. Save to: `test_data/test_races.ron`
 
 **Expected Results**:
+
 - Success for proficiencies: `✅ Added proficiencies: simple_weapon, light_armor`
 - Success for tags: `✅ Added incompatible tags: large_weapon, heavy_armor`
 - Race created successfully
 - File contains both fields correctly
 
 **Verification**:
+
 ```bash
 cat test_data/test_races.ron | grep -A 5 "test_halfling"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -226,6 +284,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin race_editor`
 2. Select option `1` (Add New Race)
 3. Enter values:
@@ -239,17 +298,20 @@ _____________________________________________________________________________
 6. Save to: `test_data/test_races.ron`
 
 **Expected Results**:
+
 - Warning shown: `⚠️  Warning: The following item tags are not standard: custom_iron_allergy`
 - Confirmation prompt displayed
 - Race created after confirmation
 - Custom tag saved in file
 
 **Verification**:
+
 ```bash
 cat test_data/test_races.ron | grep "custom_iron_allergy"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -264,6 +326,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin race_editor`
 2. Load: `test_data/test_races.ron`
 3. Select option `2` (Edit Existing Race)
@@ -275,16 +338,19 @@ _____________________________________________________________________________
 9. Save to file
 
 **Expected Results**:
+
 - Current tags displayed correctly
 - New tags accepted and saved
 - File updated with three tags
 
 **Verification**:
+
 ```bash
 cat test_data/test_races.ron | grep -A 6 "test_halfling" | grep "incompatible_item_tags"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -299,6 +365,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin race_editor`
 2. Select option `1` (Add New Race)
 3. Enter values:
@@ -311,16 +378,19 @@ _____________________________________________________________________________
 5. Save to: `test_data/test_races.ron`
 
 **Expected Results**:
+
 - Both fields can be empty
 - Race created successfully
 - RON file contains empty arrays: `proficiencies: []` and `incompatible_item_tags: []`
 
 **Verification**:
+
 ```bash
 cat test_data/test_races.ron | grep -A 6 "test_human"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -337,6 +407,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin item_editor`
 2. Select option `1` (Add New Item)
 3. Enter values:
@@ -358,17 +429,20 @@ _____________________________________________________________________________
 6. Save to: `test_data/test_items.ron`
 
 **Expected Results**:
+
 - Classification correctly mapped to proficiency requirement
 - Tags displayed in preview
 - Alignment shown as "Any"
 - All fields saved correctly
 
 **Verification**:
+
 ```bash
 cat test_data/test_items.ron | grep -A 10 "Test Greatsword"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -383,6 +457,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin item_editor`
 2. Select option `1` (Add New Item)
 3. Enter values:
@@ -400,16 +475,19 @@ _____________________________________________________________________________
 6. Save to: `test_data/test_items.ron`
 
 **Expected Results**:
+
 - Heavy armor classification saved
 - Proficiency requirement shown as `heavy_armor`
 - Weight field saved correctly
 
 **Verification**:
+
 ```bash
 cat test_data/test_items.ron | grep -A 8 "Test Plate Mail"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -424,43 +502,50 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin item_editor`
 2. Create three items with different alignment restrictions:
 
 **Item A - Good Only**:
-   - **Item ID**: `100`
-   - **Name**: `Test Holy Sword`
-   - **Type**: Weapon (Simple Melee)
-   - **Alignment**: `2` (Good Only)
-   - **Preview**: Shows `Alignment: Good Only`
+
+- **Item ID**: `100`
+- **Name**: `Test Holy Sword`
+- **Type**: Weapon (Simple Melee)
+- **Alignment**: `2` (Good Only)
+- **Preview**: Shows `Alignment: Good Only`
 
 **Item B - Evil Only**:
-   - **Item ID**: `101`
-   - **Name**: `Test Cursed Blade`
-   - **Type**: Weapon (Simple Melee)
-   - **Alignment**: `3` (Evil Only)
-   - **Preview**: Shows `Alignment: Evil Only`
+
+- **Item ID**: `101`
+- **Name**: `Test Cursed Blade`
+- **Type**: Weapon (Simple Melee)
+- **Alignment**: `3` (Evil Only)
+- **Preview**: Shows `Alignment: Evil Only`
 
 **Item C - Any**:
-   - **Item ID**: `102`
-   - **Name**: `Test Iron Sword`
-   - **Type**: Weapon (Simple Melee)
-   - **Alignment**: `1` (None/Any)
-   - **Preview**: Shows `Alignment: Any`
+
+- **Item ID**: `102`
+- **Name**: `Test Iron Sword`
+- **Type**: Weapon (Simple Melee)
+- **Alignment**: `1` (None/Any)
+- **Preview**: Shows `Alignment: Any`
 
 4. Save to: `test_data/test_items.ron`
 
 **Expected Results**:
+
 - All three alignment options work correctly
 - Preview displays correct alignment text
 - RON file contains correct `alignment_restriction` field
 
 **Verification**:
+
 ```bash
 cat test_data/test_items.ron | grep -B 2 "alignment_restriction"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -475,6 +560,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin item_editor`
 2. Select option `1` (Add New Item)
 3. Enter values:
@@ -489,16 +575,19 @@ _____________________________________________________________________________
 6. Save to: `test_data/test_items.ron`
 
 **Expected Results**:
+
 - Arcane classification saved correctly
 - Proficiency shown as `arcane_item`
 - Accessory slot saved
 
 **Verification**:
+
 ```bash
 cat test_data/test_items.ron | grep -A 6 "Test Arcane Ring"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -513,6 +602,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Run: `cargo run --bin item_editor`
 2. Create item with custom tag:
    - **Item ID**: `300`
@@ -525,17 +615,20 @@ _____________________________________________________________________________
 6. Save to: `test_data/test_items.ron`
 
 **Expected Results**:
+
 - Warning displayed for custom tags
 - Confirmation prompt shown
 - Item created after confirmation
 - Custom tags saved in file
 
 **Verification**:
+
 ```bash
 cat test_data/test_items.ron | grep "custom_unstable"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -552,6 +645,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Create legacy class file: `test_data/legacy_classes.ron`
    ```ron
    {
@@ -573,17 +667,20 @@ _____________________________________________________________________________
 9. Save file
 
 **Expected Results**:
+
 - Legacy file loads successfully
 - Missing `proficiencies` field defaults to empty array
 - Can add proficiencies to legacy class
 - Saved file includes new field
 
 **Verification**:
+
 ```bash
 cat test_data/legacy_classes.ron | grep "proficiencies"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -598,6 +695,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Create legacy race file: `test_data/legacy_races.ron`
    ```ron
    {
@@ -617,17 +715,20 @@ _____________________________________________________________________________
 7. Add values and save
 
 **Expected Results**:
+
 - Legacy file loads successfully
 - Missing fields default to empty arrays
 - Can add new fields
 - File saves with new structure
 
 **Verification**:
+
 ```bash
 cat test_data/legacy_races.ron | grep -E "(proficiencies|incompatible_item_tags)"
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -642,6 +743,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Create legacy item file: `test_data/legacy_items.ron`
    ```ron
    {
@@ -666,6 +768,7 @@ _____________________________________________________________________________
 8. Save file
 
 **Expected Results**:
+
 - Legacy file loads successfully
 - Missing `alignment_restriction` defaults
 - Missing `tags` defaults to empty
@@ -674,11 +777,13 @@ _____________________________________________________________________________
 - File saves with mixed old/new fields
 
 **Verification**:
+
 ```bash
 cat test_data/legacy_items.ron
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -695,22 +800,26 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Create full set of test data:
 
 **Class**: Create "test_battle_mage"
-   - Proficiencies: `simple_weapon,martial_melee,light_armor,arcane_item`
-   - Save to: `test_data/integration_classes.ron`
+
+- Proficiencies: `simple_weapon,martial_melee,light_armor,arcane_item`
+- Save to: `test_data/integration_classes.ron`
 
 **Race**: Create "test_wood_elf"
-   - Proficiencies: `simple_weapon,martial_ranged,light_armor`
-   - Incompatible Tags: `heavy_armor`
-   - Save to: `test_data/integration_races.ron`
+
+- Proficiencies: `simple_weapon,martial_ranged,light_armor`
+- Incompatible Tags: `heavy_armor`
+- Save to: `test_data/integration_races.ron`
 
 **Item**: Create "test_elven_longbow"
-   - Classification: Martial Ranged
-   - Tags: `elven_crafted,two_handed`
-   - Alignment: Any
-   - Save to: `test_data/integration_items.ron`
+
+- Classification: Martial Ranged
+- Tags: `elven_crafted,two_handed`
+- Alignment: Any
+- Save to: `test_data/integration_items.ron`
 
 2. Verify all files created
 3. Verify cross-references make sense:
@@ -721,12 +830,14 @@ _____________________________________________________________________________
    - Elven Longbow has `elven_crafted` tag (no race restriction against it)
 
 **Expected Results**:
+
 - All three files created successfully
 - Data is internally consistent
 - Proficiency requirements align across editors
 - Tag system properly restricts items
 
 **Verification**:
+
 ```bash
 ls -l test_data/integration_*.ron
 cat test_data/integration_classes.ron
@@ -735,6 +846,7 @@ cat test_data/integration_items.ron
 ```
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -749,6 +861,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Use files from Test 5.1
 2. Verify references:
    - Item `test_elven_longbow` requires proficiency `martial_ranged`
@@ -758,11 +871,13 @@ _____________________________________________________________________________
    - Verify proficiency/tag consistency
 
 **Expected Results**:
+
 - Proficiency IDs match across editors
 - Tag IDs match across editors
 - Data relationships are logically sound
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -779,6 +894,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Test each editor with invalid inputs:
    - Non-numeric values for numeric fields
    - Out-of-range menu selections
@@ -786,12 +902,14 @@ _____________________________________________________________________________
    - Malformed RON syntax in loaded files
 
 **Expected Results**:
+
 - Clear error messages displayed
 - Editor doesn't crash
 - User can retry input
 - No data corruption
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -806,6 +924,7 @@ _____________________________________________________________________________
 **Status**: [ ] PASS / [ ] FAIL
 
 **Steps**:
+
 1. Test error scenarios:
    - Load non-existent file
    - Save to read-only directory
@@ -813,11 +932,13 @@ _____________________________________________________________________________
    - Save with no data entered
 
 **Expected Results**:
+
 - Errors reported clearly
 - Editor remains stable
 - User can continue after error
 
 **Notes**:
+
 ```
 _____________________________________________________________________________
 _____________________________________________________________________________
@@ -827,20 +948,20 @@ _____________________________________________________________________________
 
 ## Test Summary
 
-**Total Tests**: 24
+**Total Tests**: 20
 
-**Passed**: _______
+**Passed**: **\_\_\_**
 
-**Failed**: _______
+**Failed**: **\_\_\_**
 
-**Success Rate**: _______%
+**Success Rate**: **\_\_\_**%
 
 ---
 
 ## Issues Found
 
 | Test ID | Issue Description | Severity | Notes |
-|---------|-------------------|----------|-------|
+| ------- | ----------------- | -------- | ----- |
 |         |                   |          |       |
 |         |                   |          |       |
 |         |                   |          |       |
@@ -850,26 +971,83 @@ _____________________________________________________________________________
 ## Recommendations
 
 Based on manual testing results, list any recommendations for:
+
 - Bug fixes needed
 - UX improvements
 - Additional validation
 - Documentation updates
 - Edge cases to handle
 
+## Reporting & Automation Guidance
+
+Reporting issues (recommended contents)
+
+- Create an issue in the repository (label: `phase5-manual-test`) and include:
+  - Test ID (e.g., `Test 3.1`) and test title
+  - Exact reproduction steps (copy the "Steps" section from the checklist)
+  - Expected result and actual output (attach screenshots or copy/paste text)
+  - A copy of any produced RON files (e.g., `test_data/test_items.ron`) and relevant stdout/stderr
+  - Environment details (OS, Rust version, commit hash)
+  - Severity (Critical / Major / Minor / Trivial) and suggested priority
+- If multiple tests fail with the same root cause, link them from a single parent issue to avoid duplication.
+
+Automation tips (optional)
+
+- Interactive CLI editors can often be automated for repeatable acceptance tests using `expect` / `pexpect` or other CLI-driving tools. Example `expect` skeleton (adapt to the editor's exact prompts and timing):
+
+```bash
+#!/usr/bin/expect -f
+set timeout -1
+spawn cargo run --bin class_editor
+expect "Select option" { send "1\r" }
+expect "Class ID" { send "test_knight\r" }
+expect "Display Name" { send "Test Knight\r" }
+expect "Enter proficiencies" { send "simple_weapon,martial_melee\r" }
+expect "Continue with these proficiencies? (y/n)" { send "y\r" }
+expect "Save to File" { send "test_data/test_classes.ron\r" }
+expect eof
+```
+
+- Use automation as a complement to manual verification; interactive prompts can vary and should be validated manually at least once.
+
+Test data cleanup and retest workflow
+
+- After fixing issues, rerun the failing tests and update the Test Summary and Issues table.
+- Keep failing artifacts in `test_data/fails/<test-id>/...` for triage.
+
 ---
 
-## Tester Information
+## Tester Information & Sign-off
 
-**Tester Name**: _______________________
+**Tester Name**: **********\_\_\_**********
 
-**Test Date**: _______________________
+**Test Date**: **********\_\_\_**********
 
 **Environment**:
-- OS: _______________________
-- Rust Version: _______________________
-- Commit Hash: _______________________
 
-**Sign-off**: _______________________
+- OS: **********\_\_\_**********
+- Rust Version: **********\_\_\_**********
+- Commit Hash: **********\_\_\_**********
+
+**Final Status**: [ ] PASS / [ ] FAIL
+
+**All critical issues opened**: [ ] Yes / [ ] No
+
+**Notes**:
+
+```
+_____________________________________________________________________________
+_____________________________________________________________________________
+```
+
+**Sign-off (name & date)**: **********\_\_\_**********
+
+Sign-off Guidelines:
+
+- All tests have been executed and recorded in the Test Summary.
+- All failing tests have associated issues documented in the Issues Found table (include issue number).
+- Critical regressions are either fixed and re-tested or have an agreed mitigation plan.
+- Build/commit hash is recorded for traceability.
 
 ---
 
