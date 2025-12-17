@@ -65,8 +65,8 @@ pub struct ClassEditBuffer {
     /// Persisted UI search query for the special abilities selector
     pub special_abilities_query: String,
     pub description: String,
-    pub starting_weapon_id: String,
-    pub starting_armor_id: String,
+    pub starting_weapon_id: Option<ItemId>,
+    pub starting_armor_id: Option<ItemId>,
     /// Typed vector of item IDs for starting items
     pub starting_items: Vec<ItemId>,
     /// Persisted UI search query for the starting items selector
@@ -91,8 +91,8 @@ impl Default for ClassEditBuffer {
             special_abilities: Vec::new(),
             special_abilities_query: String::new(),
             description: String::new(),
-            starting_weapon_id: String::new(),
-            starting_armor_id: String::new(),
+            starting_weapon_id: None,
+            starting_armor_id: None,
             starting_items: Vec::new(),
             starting_items_query: String::new(),
             proficiencies: Vec::new(),
@@ -145,14 +145,8 @@ impl ClassesEditorState {
                 special_abilities: class.special_abilities.clone(),
                 special_abilities_query: String::new(),
                 description: class.description.clone(),
-                starting_weapon_id: class
-                    .starting_weapon_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                starting_armor_id: class
-                    .starting_armor_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
+                starting_weapon_id: class.starting_weapon_id,
+                starting_armor_id: class.starting_armor_id,
                 starting_items: class.starting_items.clone(),
                 starting_items_query: String::new(),
                 proficiencies: class.proficiencies.clone(),
@@ -208,17 +202,9 @@ impl ClassesEditorState {
             .filter(|s| !s.is_empty())
             .collect();
 
-        let starting_weapon_id = if self.buffer.starting_weapon_id.is_empty() {
-            None
-        } else {
-            self.buffer.starting_weapon_id.parse::<u8>().ok()
-        };
-
-        let starting_armor_id = if self.buffer.starting_armor_id.is_empty() {
-            None
-        } else {
-            self.buffer.starting_armor_id.parse::<u8>().ok()
-        };
+        // Starting weapon and armor are now Option<ItemId> in the buffer
+        let starting_weapon_id = self.buffer.starting_weapon_id;
+        let starting_armor_id = self.buffer.starting_armor_id;
 
         // Starting items are typed Vec<ItemId> in the buffer; clone directly
         let starting_items: Vec<ItemId> = self.buffer.starting_items.clone();
@@ -721,104 +707,46 @@ impl ClassesEditorState {
                 ui.group(|ui| {
                     ui.label("Starting Equipment");
 
-                    // Starting Weapon
-                    ui.horizontal(|ui| {
-                        ui.label("Starting Weapon:");
-                        let current_weapon = if self.buffer.starting_weapon_id.is_empty() {
-                            "None".to_string()
+                    // Starting Weapon - use autocomplete
+                    let weapons: Vec<_> = items.iter().filter(|i| i.is_weapon()).cloned().collect();
+                    let mut weapon_id = self.buffer.starting_weapon_id.unwrap_or(0);
+                    if crate::ui_helpers::autocomplete_item_selector(
+                        ui,
+                        "class_starting_weapon",
+                        "Starting Weapon:",
+                        &mut weapon_id,
+                        &weapons,
+                    ) {
+                        self.buffer.starting_weapon_id = if weapon_id == 0 {
+                            None
                         } else {
-                            items
-                                .iter()
-                                .find(|item| item.id.to_string() == self.buffer.starting_weapon_id)
-                                .map(|item| format!("{} (ID: {})", item.name, item.id))
-                                .unwrap_or_else(|| {
-                                    format!("ID: {}", self.buffer.starting_weapon_id)
-                                })
+                            Some(weapon_id)
                         };
+                        self.has_unsaved_changes = true;
+                    }
 
-                        egui::ComboBox::from_id_salt("starting_weapon")
-                            .selected_text(current_weapon)
-                            .show_ui(ui, |ui| {
-                                if ui
-                                    .selectable_label(
-                                        self.buffer.starting_weapon_id.is_empty(),
-                                        "None",
-                                    )
-                                    .clicked()
-                                {
-                                    self.buffer.starting_weapon_id = String::new();
-                                }
-                                for item in items {
-                                    if item.is_weapon() {
-                                        let is_selected =
-                                            item.id.to_string() == self.buffer.starting_weapon_id;
-                                        if ui
-                                            .selectable_label(
-                                                is_selected,
-                                                format!("{} (ID: {})", item.name, item.id),
-                                            )
-                                            .clicked()
-                                        {
-                                            self.buffer.starting_weapon_id = item.id.to_string();
-                                        }
-                                    }
-                                }
-                            });
-                    });
+                    // Starting Armor - use autocomplete
+                    let armor: Vec<_> = items.iter().filter(|i| i.is_armor()).cloned().collect();
+                    let mut armor_id = self.buffer.starting_armor_id.unwrap_or(0);
+                    if crate::ui_helpers::autocomplete_item_selector(
+                        ui,
+                        "class_starting_armor",
+                        "Starting Armor:",
+                        &mut armor_id,
+                        &armor,
+                    ) {
+                        self.buffer.starting_armor_id =
+                            if armor_id == 0 { None } else { Some(armor_id) };
+                        self.has_unsaved_changes = true;
+                    }
 
-                    // Starting Armor
-                    ui.horizontal(|ui| {
-                        ui.label("Starting Armor:");
-                        let current_armor = if self.buffer.starting_armor_id.is_empty() {
-                            "None".to_string()
-                        } else {
-                            items
-                                .iter()
-                                .find(|item| item.id.to_string() == self.buffer.starting_armor_id)
-                                .map(|item| format!("{} (ID: {})", item.name, item.id))
-                                .unwrap_or_else(|| format!("ID: {}", self.buffer.starting_armor_id))
-                        };
-
-                        egui::ComboBox::from_id_salt("starting_armor")
-                            .selected_text(current_armor)
-                            .show_ui(ui, |ui| {
-                                if ui
-                                    .selectable_label(
-                                        self.buffer.starting_armor_id.is_empty(),
-                                        "None",
-                                    )
-                                    .clicked()
-                                {
-                                    self.buffer.starting_armor_id = String::new();
-                                }
-                                for item in items {
-                                    if item.is_armor() {
-                                        let is_selected =
-                                            item.id.to_string() == self.buffer.starting_armor_id;
-                                        if ui
-                                            .selectable_label(
-                                                is_selected,
-                                                format!("{} (ID: {})", item.name, item.id),
-                                            )
-                                            .clicked()
-                                        {
-                                            self.buffer.starting_armor_id = item.id.to_string();
-                                        }
-                                    }
-                                }
-                            });
-                    });
-
-                    // Starting Items
-                    if searchable_selector_multi(
+                    // Starting Items - use autocomplete
+                    if crate::ui_helpers::autocomplete_item_list_selector(
                         ui,
                         "class_starting_items",
                         "Starting Items",
                         &mut self.buffer.starting_items,
                         items,
-                        |i| i.id,
-                        |i| i.name.clone(),
-                        &mut self.buffer.starting_items_query,
                     ) {
                         self.has_unsaved_changes = true;
                     }

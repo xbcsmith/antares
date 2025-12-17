@@ -1,5 +1,145 @@
 # Implementation Summary
 
+## SDK Campaign Builder: Autocomplete Integration - Phase 2 (2025-01-29)
+
+**Status:** ✅ COMPLETED | **Type:** UI/UX Enhancement | **Files:** `sdk/campaign_builder/src/ui_helpers.rs`, `sdk/campaign_builder/src/classes_editor.rs`
+
+**Objective:** Integrate autocomplete entity reference selectors into editors to replace manual ID entry and basic dropdowns with intelligent autocomplete for entity references (Items, Monsters, Conditions, Spells, Proficiencies).
+
+### Implementation Overview
+
+Successfully implemented Phase 2 of the SDK Autocomplete Integration plan by creating helper functions to extract entity candidates from data collections and adding autocomplete-based selector widgets. Integrated autocomplete into the Classes Editor for item selection (starting weapon, starting armor, and starting items list), replacing ComboBox widgets with intelligent autocomplete inputs.
+
+### Changes Implemented
+
+#### 2.1 Entity Candidate Extraction Functions
+
+**File:** `sdk/campaign_builder/src/ui_helpers.rs`
+
+Added helper functions to extract autocomplete candidates from domain entities:
+
+- `extract_monster_candidates(&[MonsterDefinition]) -> Vec<String>` - Extracts monster names
+- `extract_item_candidates(&[Item]) -> Vec<(String, ItemId)>` - Extracts items with display format "{name} (ID: {id})"
+- `extract_condition_candidates(&[ConditionDefinition]) -> Vec<(String, String)>` - Extracts condition names and IDs
+- `extract_spell_candidates(&[Spell]) -> Vec<(String, SpellId)>` - Extracts spells with display format
+- `extract_proficiency_candidates(&[ProficiencyId]) -> Vec<String>` - Extracts proficiency ID strings
+
+Each function includes comprehensive doc comments with examples.
+
+#### 2.2 Autocomplete Selector Widgets
+
+**File:** `sdk/campaign_builder/src/ui_helpers.rs`
+
+Added high-level autocomplete selector widgets for common entity reference patterns:
+
+- `autocomplete_item_selector(ui, id_salt, label, selected_item_id, items) -> bool` - Single item selection with clear button
+- `autocomplete_monster_selector(ui, id_salt, label, selected_monster_name, monsters) -> bool` - Monster name selection
+- `autocomplete_condition_selector(ui, id_salt, label, selected_condition_id, conditions) -> bool` - Condition selection
+- `autocomplete_item_list_selector(ui, id_salt, label, selected_items, items) -> bool` - Multi-item selection with add/remove UI
+
+All selectors:
+
+- Return `true` when selection changes
+- Display current selection
+- Include clear/remove buttons
+- Use `AutocompleteInput` widget internally
+- Follow consistent UI patterns
+
+#### 2.3 Classes Editor Integration
+
+**File:** `sdk/campaign_builder/src/classes_editor.rs`
+
+Updated `ClassEditBuffer` to use `Option<ItemId>` instead of `String` for weapon/armor fields:
+
+- Changed `starting_weapon_id: String` to `starting_weapon_id: Option<ItemId>`
+- Changed `starting_armor_id: String` to `starting_armor_id: Option<ItemId>`
+
+Replaced ComboBox widgets with autocomplete selectors in `show_class_form`:
+
+- **Starting Weapon**: Uses `autocomplete_item_selector` filtered to weapons only
+- **Starting Armor**: Uses `autocomplete_item_selector` filtered to armor only
+- **Starting Items**: Uses `autocomplete_item_list_selector` for multi-item selection
+
+Benefits:
+
+- Faster item lookup via typing instead of scrolling through long dropdowns
+- Clear visual feedback with "(ID: X)" display format
+- Consistent UX across all item selection points
+- Type-safe ItemId handling (no string parsing errors)
+
+#### 2.4 Testing
+
+**File:** `sdk/campaign_builder/src/ui_helpers.rs`
+
+Added unit tests:
+
+- `extract_monster_candidates_empty_list` - Tests empty list handling
+- `extract_item_candidates_empty_list` - Tests empty list handling
+- `extract_condition_candidates_empty_list` - Tests empty list handling
+- `extract_spell_candidates_empty_list` - Tests empty list handling
+- `extract_proficiency_candidates_empty_list` - Tests empty list handling
+- `extract_proficiency_candidates_returns_string_ids` - Tests proficiency extraction
+
+All quality checks pass:
+
+- ✅ `cargo fmt --all` - Applied
+- ✅ `cargo check --all-targets --all-features` - Passed
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - Zero warnings
+- ✅ `cargo nextest run --all-features` - 787 tests passed
+
+### Technical Details
+
+**Architecture Compliance:**
+
+- Used exact type aliases: `ItemId`, `SpellId`, `MonsterId` (Golden Rule 3)
+- No magic numbers or hardcoded values
+- Followed existing UI helper patterns
+- Proper error handling via `Option<T>` types
+- No architectural deviations
+
+**Code Organization:**
+
+- Entity extraction functions grouped together
+- Selector widgets follow consistent naming: `autocomplete_<entity>_selector`
+- All public functions have comprehensive doc comments with examples
+- Proper separation: extraction logic separate from UI logic
+
+**Data Flow:**
+
+```
+Domain Entities (Vec<Item>, Vec<Monster>, etc.)
+    ↓
+extract_*_candidates() → Vec<String> or Vec<(String, Id)>
+    ↓
+AutocompleteInput widget (Phase 1)
+    ↓
+autocomplete_*_selector() → bool (changed)
+    ↓
+Editor state update (ItemId, MonsterId, etc.)
+```
+
+### Future Work (Phase 2 Extensions)
+
+Ready for integration into additional editors:
+
+1. **Monsters Editor** - Monster name autocomplete for special attacks that summon/reference other monsters
+2. **Characters Editor** - Item autocomplete for inventory and equipment
+3. **Spells Editor** - Condition autocomplete for `applied_conditions` field
+4. **Map Editor** - Condition autocomplete for trap effects
+5. **Races Editor** - Proficiency autocomplete for racial proficiencies
+6. **Quest Editor** - Entity reference autocomplete for quest objectives
+7. **Dialogue Editor** - Entity reference autocomplete for dialogue conditions/actions
+
+All extraction and selector functions are now available for reuse across all editors.
+
+### References
+
+- Implementation Plan: `docs/explanation/sdk_autocomplete_implementation_plan.md`
+- Architecture: `docs/reference/architecture.md` Section 4 (Type Aliases)
+- Phase 1 Implementation: See below
+
+---
+
 ## SDK Campaign Builder: Autocomplete Integration - Phase 1 (2025-01-29)
 
 **Status:** ✅ COMPLETED | **Type:** UI/UX Enhancement | **Files:** `sdk/campaign_builder/Cargo.toml`, `sdk/campaign_builder/src/ui_helpers.rs`, `sdk/campaign_builder/src/map_editor.rs`, `sdk/campaign_builder/tests/map_data_validation.rs`
