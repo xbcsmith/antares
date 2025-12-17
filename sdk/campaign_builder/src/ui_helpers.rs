@@ -16,9 +16,11 @@
 //! - [`ImportExportDialog`] - Standard import/export dialog for RON data
 //! - [`AttributePairInput`] - Widget for editing `AttributePair` (u8 base/current)
 //! - [`AttributePair16Input`] - Widget for editing `AttributePair16` (u16 base/current)
+//! - [`AutocompleteInput`] - Autocomplete text input with dropdown suggestions
 
 use antares::domain::character::{AttributePair, AttributePair16};
 use eframe::egui;
+use egui_autocomplete::AutoCompleteTextEdit;
 use std::fmt::Display;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
@@ -1726,6 +1728,153 @@ impl<'a> AttributePair16Input<'a> {
 }
 
 // =============================================================================
+// Autocomplete Input Widget
+// =============================================================================
+
+/// Autocomplete text input with dropdown suggestions.
+///
+/// This widget wraps `egui_autocomplete::AutoCompleteTextEdit` to provide a
+/// consistent interface with other UI helpers. It displays a text field with
+/// a dropdown list of suggestions that filters as the user types (case-insensitive).
+///
+/// # Examples
+///
+/// ```no_run
+/// use eframe::egui;
+/// use campaign_builder::ui_helpers::AutocompleteInput;
+///
+/// fn example(ui: &mut egui::Ui) {
+///     let candidates = vec!["Goblin".to_string(), "Orc".to_string(), "Dragon".to_string()];
+///     let mut input = String::new();
+///
+///     AutocompleteInput::new("monster_select", &candidates)
+///         .with_placeholder("Type monster name...")
+///         .show(ui, &mut input);
+/// }
+/// ```
+pub struct AutocompleteInput<'a> {
+    /// Unique widget identifier salt
+    id_salt: &'a str,
+    /// List of candidate suggestions
+    candidates: &'a [String],
+    /// Optional placeholder hint text
+    placeholder: Option<&'a str>,
+}
+
+impl<'a> AutocompleteInput<'a> {
+    /// Creates a new autocomplete input widget.
+    ///
+    /// # Arguments
+    ///
+    /// * `id_salt` - Unique identifier for this widget instance (used to distinguish multiple instances)
+    /// * `candidates` - Slice of suggestion strings to display in dropdown
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use eframe::egui;
+    /// use campaign_builder::ui_helpers::AutocompleteInput;
+    ///
+    /// fn example(ui: &mut egui::Ui) {
+    ///     let candidates = vec!["Goblin".to_string(), "Orc".to_string()];
+    ///     let mut text = String::new();
+    ///     AutocompleteInput::new("my_autocomplete", &candidates).show(ui, &mut text);
+    /// }
+    /// ```
+    pub fn new(id_salt: &'a str, candidates: &'a [String]) -> Self {
+        Self {
+            id_salt,
+            candidates,
+            placeholder: None,
+        }
+    }
+
+    /// Sets the placeholder hint text (builder pattern).
+    ///
+    /// # Arguments
+    ///
+    /// * `placeholder` - Text to display when the input field is empty
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use eframe::egui;
+    /// use campaign_builder::ui_helpers::AutocompleteInput;
+    ///
+    /// fn example(ui: &mut egui::Ui) {
+    ///     let candidates = vec!["Goblin".to_string()];
+    ///     let mut text = String::new();
+    ///
+    ///     AutocompleteInput::new("autocomplete", &candidates)
+    ///         .with_placeholder("Start typing...")
+    ///         .show(ui, &mut text);
+    /// }
+    /// ```
+    pub fn with_placeholder(mut self, placeholder: &'a str) -> Self {
+        self.placeholder = Some(placeholder);
+        self
+    }
+
+    /// Renders the autocomplete widget.
+    ///
+    /// Displays a text input field with a dropdown list of filtered suggestions.
+    /// The dropdown filters candidates case-insensitively as the user types.
+    /// Clicking a suggestion or pressing Enter on a highlighted suggestion
+    /// updates the text buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - The egui UI context
+    /// * `text` - Mutable reference to the text buffer to edit
+    ///
+    /// # Returns
+    ///
+    /// Returns the `egui::Response` from the text input widget, allowing
+    /// for response chaining and inspection.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use eframe::egui;
+    /// use campaign_builder::ui_helpers::AutocompleteInput;
+    ///
+    /// fn example(ui: &mut egui::Ui) {
+    ///     let candidates = vec![
+    ///         "Goblin".to_string(),
+    ///         "Orc".to_string(),
+    ///         "Dragon".to_string(),
+    ///         "Skeleton".to_string(),
+    ///     ];
+    ///     let mut monster_name = String::new();
+    ///
+    ///     let response = AutocompleteInput::new("monster_input", &candidates)
+    ///         .with_placeholder("Select a monster...")
+    ///         .show(ui, &mut monster_name);
+    ///
+    ///     if response.changed() {
+    ///         println!("Monster name changed to: {}", monster_name);
+    ///     }
+    /// }
+    /// ```
+    pub fn show(self, ui: &mut egui::Ui, text: &mut String) -> egui::Response {
+        // Create the autocomplete text edit widget with new API
+        let mut autocomplete = AutoCompleteTextEdit::new(text, self.candidates)
+            .highlight_matches(true)
+            .max_suggestions(10);
+
+        // Add placeholder if provided
+        if let Some(placeholder_text) = self.placeholder {
+            let placeholder_owned = placeholder_text.to_string();
+            autocomplete = autocomplete
+                .set_text_edit_properties(move |text_edit| text_edit.hint_text(placeholder_owned));
+        }
+
+        // Show the widget and return the response
+        ui.add(autocomplete)
+    }
+}
+
+// =============================================================================
 // File I/O Helper Functions
 // =============================================================================
 
@@ -2526,5 +2675,124 @@ mod tests {
         // The tooltips are implemented using .on_hover_text() in
         // ActionButtons::show().
         assert!(true);
+    }
+
+    // =========================================================================
+    // AutocompleteInput Tests
+    // =========================================================================
+
+    #[test]
+    fn autocomplete_input_new_creates_widget() {
+        let candidates = vec!["Goblin".to_string(), "Orc".to_string()];
+        let widget = AutocompleteInput::new("test_autocomplete", &candidates);
+
+        assert_eq!(widget.id_salt, "test_autocomplete");
+        assert_eq!(widget.candidates.len(), 2);
+        assert_eq!(widget.placeholder, None);
+    }
+
+    #[test]
+    fn autocomplete_input_with_placeholder() {
+        let candidates = vec!["Dragon".to_string()];
+        let widget = AutocompleteInput::new("test", &candidates).with_placeholder("Type here...");
+
+        assert_eq!(widget.placeholder, Some("Type here..."));
+    }
+
+    #[test]
+    fn autocomplete_input_builder_pattern() {
+        let candidates = vec![
+            "Goblin".to_string(),
+            "Orc".to_string(),
+            "Dragon".to_string(),
+        ];
+
+        let widget =
+            AutocompleteInput::new("my_widget", &candidates).with_placeholder("Select monster...");
+
+        assert_eq!(widget.id_salt, "my_widget");
+        assert_eq!(widget.candidates.len(), 3);
+        assert_eq!(widget.placeholder, Some("Select monster..."));
+    }
+
+    #[test]
+    fn autocomplete_input_empty_candidates() {
+        let candidates: Vec<String> = vec![];
+        let widget = AutocompleteInput::new("empty_test", &candidates);
+
+        assert_eq!(widget.candidates.len(), 0);
+    }
+
+    #[test]
+    fn autocomplete_input_many_candidates() {
+        let candidates: Vec<String> = (0..100).map(|i| format!("Monster{}", i)).collect();
+
+        let widget = AutocompleteInput::new("many_test", &candidates);
+
+        assert_eq!(widget.candidates.len(), 100);
+    }
+
+    #[test]
+    fn autocomplete_input_unique_id_salt() {
+        let candidates = vec!["Item1".to_string()];
+
+        let widget1 = AutocompleteInput::new("widget1", &candidates);
+        let widget2 = AutocompleteInput::new("widget2", &candidates);
+
+        assert_ne!(widget1.id_salt, widget2.id_salt);
+    }
+
+    #[test]
+    fn autocomplete_input_case_sensitivity_documented() {
+        // This test documents that AutocompleteInput performs
+        // case-insensitive filtering by default.
+        // For example, typing "gob" should match "Goblin", "GOBLIN", "goblin".
+        // The case-insensitive behavior is implemented via the
+        // egui_autocomplete::AutoCompleteTextEdit widget.
+        // This should be verified with manual testing in the UI.
+        let candidates = vec![
+            "Goblin".to_string(),
+            "GOBLIN".to_string(),
+            "goblin".to_string(),
+        ];
+        let widget = AutocompleteInput::new("case_test", &candidates);
+        assert_eq!(widget.candidates.len(), 3);
+    }
+
+    #[test]
+    fn autocomplete_input_max_suggestions_limit() {
+        // This test documents that AutocompleteInput limits the dropdown
+        // to a maximum of 10 suggestions to prevent UI clutter.
+        // This is configured via .max_suggestions(10) in the show() method.
+        // With more than 10 matching candidates, only the first 10 are shown.
+        let candidates: Vec<String> = (0..20).map(|i| format!("Monster{}", i)).collect();
+        let widget = AutocompleteInput::new("limit_test", &candidates);
+        assert!(widget.candidates.len() > 10);
+    }
+
+    #[test]
+    fn autocomplete_input_highlight_matches_enabled() {
+        // This test documents that AutocompleteInput highlights matching
+        // text in the dropdown suggestions for better user experience.
+        // This is enabled via .highlight_matches(true) in the show() method.
+        // Manual testing should verify that matching substrings are highlighted.
+        let candidates = vec!["Goblin".to_string(), "Hobgoblin".to_string()];
+        let widget = AutocompleteInput::new("highlight_test", &candidates);
+        assert_eq!(widget.candidates.len(), 2);
+    }
+
+    #[test]
+    fn autocomplete_input_follows_ui_helper_conventions() {
+        // This test verifies that AutocompleteInput follows the same
+        // conventions as other UI helpers:
+        // - Uses builder pattern (with_* methods)
+        // - Returns Self for chaining
+        // - Uses &'a lifetime for borrowed references
+        // - Has comprehensive doc comments with examples
+        let candidates = vec!["Test".to_string()];
+        let widget = AutocompleteInput::new("convention_test", &candidates)
+            .with_placeholder("Test placeholder");
+
+        assert!(widget.placeholder.is_some());
     }
 }

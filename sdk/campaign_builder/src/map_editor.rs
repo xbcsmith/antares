@@ -3852,7 +3852,7 @@ mod tests {
             description: "Welcome".to_string(),
             text: "Welcome to town".to_string(),
         };
-        state.add_event_at_position(pos.x, pos.y, event);
+        state.add_event_at_position(pos.x as u32, pos.y as u32, event);
         state.selected_position = Some(pos);
 
         let ctx = egui::Context::default();

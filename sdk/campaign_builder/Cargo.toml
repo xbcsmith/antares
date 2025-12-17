@@ -15,6 +15,7 @@ eframe = { version = "0.33", default-features = false, features = [
     "x11",               # X11 support as fallback
 ] }
 egui = "0.33"
+egui_autocomplete = "12.0"
 serde = { version = "1.0", features = ["derive"] }
 ron = "0.12"
 thiserror = "2.0"
