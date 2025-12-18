@@ -715,6 +715,11 @@ pub struct EventEditorState {
     pub sign_text: String,
     // NPC Dialogue fields
     pub npc_id: String,
+
+    // Autocomplete input buffers
+    pub trap_effect_input_buffer: String,
+    pub teleport_map_input_buffer: String,
+    pub npc_id_input_buffer: String,
 }
 
 impl Default for EventEditorState {
@@ -738,6 +743,9 @@ impl Default for EventEditorState {
             trap_effect: String::new(),
             sign_text: String::new(),
             npc_id: String::new(),
+            trap_effect_input_buffer: String::new(),
+            teleport_map_input_buffer: String::new(),
+            npc_id_input_buffer: String::new(),
         }
     }
 }
@@ -1521,6 +1529,7 @@ impl MapsEditorState {
         maps: &mut Vec<Map>,
         monsters: &[MonsterDefinition],
         items: &[Item],
+        conditions: &[antares::domain::conditions::ConditionDefinition],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -1647,6 +1656,7 @@ impl MapsEditorState {
                     maps,
                     monsters,
                     items,
+                    conditions,
                     campaign_dir,
                     maps_dir,
                     display_config,
@@ -1858,6 +1868,7 @@ impl MapsEditorState {
         maps: &mut Vec<Map>,
         monsters: &[MonsterDefinition],
         items: &[Item],
+        conditions: &[antares::domain::conditions::ConditionDefinition],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -2117,7 +2128,7 @@ impl MapsEditorState {
                                 .id_salt("map_editor_inspector_scroll")
                                 .show(right_ui, |ui| {
                                     Self::show_inspector_panel(
-                                        ui, editor_ref, maps, monsters, items,
+                                        ui, editor_ref, maps, monsters, items, conditions,
                                     );
                                 });
                         },
@@ -2324,6 +2335,7 @@ impl MapsEditorState {
         maps: &[Map],
         monsters: &[MonsterDefinition],
         items: &[Item],
+        conditions: &[antares::domain::conditions::ConditionDefinition],
     ) {
         ui.heading("Inspector");
         ui.separator();
@@ -2425,7 +2437,7 @@ impl MapsEditorState {
         if matches!(editor.current_tool, EditorTool::PlaceEvent) {
             ui.group(|ui| {
                 ui.heading("Event Editor");
-                Self::show_event_editor(ui, editor, maps, monsters, items);
+                Self::show_event_editor(ui, editor, maps, monsters, items, conditions);
             });
         }
 
@@ -2570,6 +2582,7 @@ impl MapsEditorState {
         maps: &[Map],
         monsters: &[MonsterDefinition],
         items: &[Item],
+        conditions: &[antares::domain::conditions::ConditionDefinition],
     ) {
         if let Some(ref mut event_editor) = editor.event_editor {
             egui::ComboBox::from_id_salt("map_event_type_combo")
@@ -2632,50 +2645,35 @@ impl MapsEditorState {
                     }
                 }
                 EventType::Teleport => {
-                    ui.label("Target Map:");
+                    // Use autocomplete for map selection
+                    use crate::ui_helpers::autocomplete_map_selector;
+
+                    if autocomplete_map_selector(
+                        ui,
+                        "event_teleport_map",
+                        "Target Map:",
+                        &mut event_editor.teleport_map_id,
+                        maps,
+                    ) {
+                        // Update selected map when autocomplete changes
+                        if let Ok(map_id) = event_editor.teleport_map_id.parse::<MapId>() {
+                            event_editor.teleport_selected_map = Some(map_id);
+                            event_editor.teleport_preview_enabled = true;
+                        }
+                        editor.has_changes = true;
+                    }
+
+                    // Also allow direct text editing for manual ID entry
                     ui.horizontal(|ui| {
-                        // Editable text input for map id or name
-                        let changed = ui
+                        ui.label("Or enter Map ID manually:");
+                        if ui
                             .text_edit_singleline(&mut event_editor.teleport_map_id)
-                            .changed();
-                        if changed {
-                            // If user types, clear the previously selected map
+                            .changed()
+                        {
                             event_editor.teleport_selected_map = None;
                             event_editor.teleport_preview_enabled = false;
                         }
                     });
-
-                    // Suggestions based on typed input (id or name)
-                    let suggestions = suggest_maps_for_partial(maps, &event_editor.teleport_map_id);
-                    if !suggestions.is_empty() {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Suggestions:");
-                            for (sid, sname) in suggestions.iter() {
-                                let label = format!("[{}] {}", sid, sname);
-                                // Use small button so UI remains compact
-                                if ui.small_button(&label).clicked() {
-                                    event_editor.teleport_map_id = sid.to_string();
-                                    event_editor.teleport_selected_map = Some(*sid);
-                                    event_editor.teleport_preview_enabled = true;
-                                }
-                            }
-                        });
-                    } else {
-                        // If empty input, provide quick selection of few maps (first 8)
-                        if event_editor.teleport_map_id.is_empty() && !maps.is_empty() {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label("Common:");
-                                for m in maps.iter().take(8) {
-                                    let label = format!("[{}] {}", m.id, m.name);
-                                    if ui.small_button(&label).clicked() {
-                                        event_editor.teleport_map_id = m.id.to_string();
-                                        event_editor.teleport_selected_map = Some(m.id);
-                                        event_editor.teleport_preview_enabled = true;
-                                    }
-                                }
-                            });
-                        }
-                    }
 
                     ui.horizontal(|ui| {
                         ui.label("Destination X:");
@@ -2752,16 +2750,57 @@ impl MapsEditorState {
                         )
                         .on_hover_text("Valid range: 0-65535");
                     });
+
+                    // Use autocomplete for trap effect (condition-based)
+                    use crate::ui_helpers::autocomplete_condition_selector;
+
                     ui.label("Effect (optional):");
-                    ui.text_edit_singleline(&mut event_editor.trap_effect);
+                    if autocomplete_condition_selector(
+                        ui,
+                        "event_trap_effect",
+                        "Condition:",
+                        &mut event_editor.trap_effect,
+                        conditions,
+                    ) {
+                        editor.has_changes = true;
+                    }
+
+                    // Also allow freeform text for custom effects
+                    ui.horizontal(|ui| {
+                        ui.label("Or custom effect:");
+                        if ui
+                            .text_edit_singleline(&mut event_editor.trap_effect)
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    });
                 }
                 EventType::Sign => {
                     ui.label("Sign Text:");
                     ui.text_edit_multiline(&mut event_editor.sign_text);
                 }
                 EventType::NpcDialogue => {
-                    ui.label("NPC ID:");
-                    ui.text_edit_singleline(&mut event_editor.npc_id);
+                    // Use autocomplete for NPC selection
+                    use crate::ui_helpers::autocomplete_npc_selector;
+
+                    if autocomplete_npc_selector(
+                        ui,
+                        "event_npc_dialogue",
+                        "NPC:",
+                        &mut event_editor.npc_id,
+                        maps,
+                    ) {
+                        editor.has_changes = true;
+                    }
+
+                    // Also allow direct text editing for manual entry
+                    ui.horizontal(|ui| {
+                        ui.label("Or enter NPC ID manually:");
+                        if ui.text_edit_singleline(&mut event_editor.npc_id).changed() {
+                            editor.has_changes = true;
+                        }
+                    });
                 }
             }
 
@@ -3869,7 +3908,7 @@ mod tests {
 
         egui::CentralPanel::default().show(&ctx, |ui| {
             // Should render the inspector without panicking (and include name/description)
-            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[]);
+            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[], &[]);
         });
 
         // Verify selection was preserved and the inspector invocation completed
@@ -4079,5 +4118,80 @@ mod tests {
 
         state.mode = MapsEditorMode::List;
         assert_eq!(state.mode, MapsEditorMode::List);
+    }
+
+    // =========================================================================
+    // EventEditorState Autocomplete Buffer Tests
+    // =========================================================================
+
+    #[test]
+    fn test_event_editor_state_autocomplete_buffers_initialization() {
+        let state = EventEditorState::default();
+        assert!(
+            state.trap_effect_input_buffer.is_empty(),
+            "Trap effect input buffer should be empty on initialization"
+        );
+        assert!(
+            state.teleport_map_input_buffer.is_empty(),
+            "Teleport map input buffer should be empty on initialization"
+        );
+        assert!(
+            state.npc_id_input_buffer.is_empty(),
+            "NPC ID input buffer should be empty on initialization"
+        );
+    }
+
+    #[test]
+    fn test_event_editor_state_trap_effect_buffer() {
+        let mut state = EventEditorState::default();
+        state.event_type = EventType::Trap;
+
+        // Simulate setting trap effect via autocomplete
+        state.trap_effect_input_buffer = "Poison".to_string();
+        state.trap_effect = state.trap_effect_input_buffer.clone();
+
+        assert_eq!(state.trap_effect, "Poison");
+        assert_eq!(state.trap_effect_input_buffer, "Poison");
+    }
+
+    #[test]
+    fn test_event_editor_state_teleport_map_buffer() {
+        let mut state = EventEditorState::default();
+        state.event_type = EventType::Teleport;
+
+        // Simulate setting teleport map via autocomplete
+        state.teleport_map_input_buffer = "Town Square (ID: 1)".to_string();
+        state.teleport_map_id = "1".to_string();
+
+        assert_eq!(state.teleport_map_id, "1");
+        assert!(state.teleport_map_input_buffer.contains("Town Square"));
+    }
+
+    #[test]
+    fn test_event_editor_state_npc_id_buffer() {
+        let mut state = EventEditorState::default();
+        state.event_type = EventType::NpcDialogue;
+
+        // Simulate setting NPC ID via autocomplete (format: "map_id:npc_id")
+        state.npc_id_input_buffer = "Merchant (Map: Town, NPC ID: 1)".to_string();
+        state.npc_id = "1:1".to_string();
+
+        assert_eq!(state.npc_id, "1:1");
+        assert!(state.npc_id_input_buffer.contains("Merchant"));
+    }
+
+    #[test]
+    fn test_event_editor_state_buffer_persistence() {
+        let mut state = EventEditorState::default();
+
+        // Set buffers
+        state.trap_effect_input_buffer = "Paralysis".to_string();
+        state.teleport_map_input_buffer = "Dark Forest (ID: 2)".to_string();
+        state.npc_id_input_buffer = "Guard (Map: Castle, NPC ID: 5)".to_string();
+
+        // Verify all buffers are set
+        assert_eq!(state.trap_effect_input_buffer, "Paralysis");
+        assert_eq!(state.teleport_map_input_buffer, "Dark Forest (ID: 2)");
+        assert_eq!(state.npc_id_input_buffer, "Guard (Map: Castle, NPC ID: 5)");
     }
 }

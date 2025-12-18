@@ -35,6 +35,9 @@ pub struct MonstersEditorState {
     pub show_stats_editor: bool,
     pub show_attacks_editor: bool,
     pub show_loot_editor: bool,
+
+    // Autocomplete input buffers
+    pub monster_name_input_buffer: String,
 }
 
 impl Default for MonstersEditorState {
@@ -50,6 +53,7 @@ impl Default for MonstersEditorState {
             show_stats_editor: false,
             show_attacks_editor: false,
             show_loot_editor: false,
+            monster_name_input_buffer: String::new(),
         }
     }
 }
@@ -85,6 +89,17 @@ impl MonstersEditorState {
         }
     }
 
+    /// Shows the monsters editor UI
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - The egui UI context
+    /// * `monsters` - Mutable reference to the monsters list for editing
+    /// * `campaign_dir` - Optional campaign directory path for file operations
+    /// * `monsters_file` - Name of the monsters file
+    /// * `unsaved_changes` - Flag to track if there are unsaved changes
+    /// * `status_message` - Status message to display to user
+    /// * `file_load_merge_mode` - Whether to merge or replace when loading files
     #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
@@ -238,14 +253,21 @@ impl MonstersEditorState {
                 campaign_dir,
                 monsters_file,
             ),
-            MonstersEditorMode::Add | MonstersEditorMode::Edit => self.show_form(
-                ui,
-                monsters,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                monsters_file,
-            ),
+            MonstersEditorMode::Add | MonstersEditorMode::Edit => {
+                // Initialize autocomplete buffer with current monster name when entering edit mode
+                if self.monster_name_input_buffer.is_empty() && !self.edit_buffer.name.is_empty() {
+                    self.monster_name_input_buffer = self.edit_buffer.name.clone();
+                }
+
+                self.show_form(
+                    ui,
+                    monsters,
+                    unsaved_changes,
+                    status_message,
+                    campaign_dir,
+                    monsters_file,
+                )
+            }
         }
     }
 
@@ -599,6 +621,10 @@ impl MonstersEditorState {
         self.show_import_dialog = open;
     }
 
+    /// Shows the monster creation/edit form
+    ///
+    /// Displays fields for editing monster properties including name (with autocomplete),
+    /// stats, abilities, attacks, and loot tables.
     fn show_form(
         &mut self,
         ui: &mut egui::Ui,
@@ -630,9 +656,31 @@ impl MonstersEditorState {
                         );
                     });
 
+                    // Use autocomplete for monster name to help with consistency
+                    use crate::ui_helpers::autocomplete_monster_selector;
+
+                    if autocomplete_monster_selector(
+                        ui,
+                        "monster_name_autocomplete",
+                        "Name:",
+                        &mut self.monster_name_input_buffer,
+                        monsters,
+                    ) {
+                        // Update edit buffer when selection changes
+                        self.edit_buffer.name = self.monster_name_input_buffer.clone();
+                        *unsaved_changes = true;
+                    }
+
+                    // Also allow direct text editing for new names
                     ui.horizontal(|ui| {
-                        ui.label("Name:");
-                        ui.text_edit_singleline(&mut self.edit_buffer.name);
+                        ui.label("Custom Name:");
+                        if ui
+                            .text_edit_singleline(&mut self.edit_buffer.name)
+                            .changed()
+                        {
+                            self.monster_name_input_buffer = self.edit_buffer.name.clone();
+                            *unsaved_changes = true;
+                        }
                     });
 
                     ui.checkbox(&mut self.edit_buffer.is_undead, "💀 Undead");
@@ -764,11 +812,13 @@ impl MonstersEditorState {
                             status_message,
                         );
                         self.mode = MonstersEditorMode::List;
+                        self.monster_name_input_buffer.clear();
                         *status_message = "Monster saved".to_string();
                     }
 
                     if ui.button("❌ Cancel").clicked() {
                         self.mode = MonstersEditorMode::List;
+                        self.monster_name_input_buffer.clear();
                     }
                 });
             });
@@ -1216,5 +1266,78 @@ mod tests {
 
         state.show_preview = false;
         assert!(!state.show_preview);
+    }
+
+    // =========================================================================
+    // Autocomplete Buffer Tests
+    // =========================================================================
+
+    #[test]
+    fn test_monster_name_input_buffer_initialization() {
+        let state = MonstersEditorState::new();
+        assert!(
+            state.monster_name_input_buffer.is_empty(),
+            "Monster name input buffer should be empty on initialization"
+        );
+    }
+
+    #[test]
+    fn test_monster_name_input_buffer_default() {
+        let state = MonstersEditorState::default();
+        assert!(
+            state.monster_name_input_buffer.is_empty(),
+            "Monster name input buffer should be empty by default"
+        );
+    }
+
+    #[test]
+    fn test_autocomplete_buffer_synchronization() {
+        let mut state = MonstersEditorState::new();
+        let test_name = "Goblin Warrior";
+
+        // Simulate setting the buffer (as autocomplete would)
+        state.monster_name_input_buffer = test_name.to_string();
+        assert_eq!(state.monster_name_input_buffer, test_name);
+
+        // Simulate syncing to edit buffer
+        state.edit_buffer.name = state.monster_name_input_buffer.clone();
+        assert_eq!(state.edit_buffer.name, test_name);
+        assert_eq!(state.edit_buffer.name, state.monster_name_input_buffer);
+    }
+
+    #[test]
+    fn test_autocomplete_buffer_cleared_on_mode_transition() {
+        let mut state = MonstersEditorState::new();
+        state.mode = MonstersEditorMode::Edit;
+        state.monster_name_input_buffer = "Test Monster".to_string();
+
+        // Simulate clearing buffer when returning to list mode
+        state.mode = MonstersEditorMode::List;
+        state.monster_name_input_buffer.clear();
+
+        assert!(state.monster_name_input_buffer.is_empty());
+        assert_eq!(state.mode, MonstersEditorMode::List);
+    }
+
+    #[test]
+    fn test_monster_name_persistence_between_buffers() {
+        let mut state = MonstersEditorState::new();
+        let original_name = "Dragon";
+
+        // Set edit buffer name
+        state.edit_buffer.name = original_name.to_string();
+
+        // Simulate initializing autocomplete buffer from edit buffer
+        state.monster_name_input_buffer = state.edit_buffer.name.clone();
+
+        assert_eq!(state.monster_name_input_buffer, original_name);
+        assert_eq!(state.edit_buffer.name, original_name);
+
+        // Modify via autocomplete buffer
+        state.monster_name_input_buffer = "Ancient Dragon".to_string();
+        state.edit_buffer.name = state.monster_name_input_buffer.clone();
+
+        assert_eq!(state.edit_buffer.name, "Ancient Dragon");
+        assert_eq!(state.monster_name_input_buffer, "Ancient Dragon");
     }
 }

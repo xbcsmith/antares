@@ -148,6 +148,11 @@ pub struct ObjectiveEditBuffer {
     pub npc_id: String,
     pub flag_name: String,
     pub flag_value: bool,
+    // Autocomplete input buffers
+    pub monster_input_buffer: String,
+    pub item_input_buffer: String,
+    pub map_input_buffer: String,
+    pub npc_input_buffer: String,
 }
 
 /// Objective type selector
@@ -190,6 +195,10 @@ impl Default for ObjectiveEditBuffer {
             npc_id: String::new(),
             flag_name: String::new(),
             flag_value: false,
+            monster_input_buffer: String::new(),
+            item_input_buffer: String::new(),
+            map_input_buffer: String::new(),
+            npc_input_buffer: String::new(),
         }
     }
 }
@@ -1977,89 +1986,95 @@ impl QuestEditorState {
                     // Type-specific fields
                     match self.objective_buffer.objective_type {
                         crate::quest_editor::ObjectiveType::KillMonsters => {
-                            ui.horizontal(|ui| {
-                                ui.label("Monster:");
-                                egui::ComboBox::from_id_salt("monster_selector")
-                                    .selected_text(
-                                        monsters
-                                            .iter()
-                                            .find(|m| {
-                                                m.id.to_string() == self.objective_buffer.monster_id
-                                            })
-                                            .map(|m| format!("{} - {}", m.id, m.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.monster_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for monster in monsters {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.monster_id,
-                                                monster.id.to_string(),
-                                                format!("{} - {}", monster.id, monster.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for monster selection
+                            use crate::ui_helpers::{
+                                extract_monster_candidates, AutocompleteInput,
+                            };
+
+                            ui.label("Monster:");
+
+                            // Build candidates
+                            let candidates: Vec<String> = extract_monster_candidates(monsters);
+
+                            // Get current monster name for display
+                            let current_name = if let Ok(monster_id) =
+                                self.objective_buffer.monster_id.parse::<u8>()
+                            {
+                                monsters
+                                    .iter()
+                                    .find(|m| m.id == monster_id)
+                                    .map(|m| m.name.clone())
+                                    .unwrap_or_else(|| self.objective_buffer.monster_id.clone())
+                            } else {
+                                self.objective_buffer.monster_id.clone()
+                            };
+
+                            if self.objective_buffer.monster_input_buffer.is_empty()
+                                && !current_name.is_empty()
+                            {
+                                self.objective_buffer.monster_input_buffer = current_name.clone();
+                            }
+
+                            let response =
+                                AutocompleteInput::new("quest_objective_monster", &candidates)
+                                    .with_placeholder("Start typing monster name...")
+                                    .show(ui, &mut self.objective_buffer.monster_input_buffer);
+
+                            if response.changed()
+                                && !self.objective_buffer.monster_input_buffer.is_empty()
+                            {
+                                // Find monster by name and update ID
+                                if let Some(monster) = monsters
+                                    .iter()
+                                    .find(|m| m.name == self.objective_buffer.monster_input_buffer)
+                                {
+                                    self.objective_buffer.monster_id = monster.id.to_string();
+                                    *unsaved_changes = true;
+                                }
+                            }
+
                             ui.horizontal(|ui| {
                                 ui.label("Quantity:");
                                 ui.text_edit_singleline(&mut self.objective_buffer.quantity);
                             });
                         }
                         crate::quest_editor::ObjectiveType::CollectItems => {
-                            ui.horizontal(|ui| {
-                                ui.label("Item:");
-                                egui::ComboBox::from_id_salt("item_selector")
-                                    .selected_text(
-                                        items
-                                            .iter()
-                                            .find(|i| {
-                                                i.id.to_string() == self.objective_buffer.item_id
-                                            })
-                                            .map(|i| format!("{} - {}", i.id, i.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.item_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for item in items {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.item_id,
-                                                item.id.to_string(),
-                                                format!("{} - {}", item.id, item.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for item selection
+                            use crate::ui_helpers::autocomplete_item_selector;
+
+                            let mut item_id_num =
+                                self.objective_buffer.item_id.parse::<u8>().unwrap_or(0);
+
+                            if autocomplete_item_selector(
+                                ui,
+                                "quest_objective_item",
+                                "Item:",
+                                &mut item_id_num,
+                                items,
+                            ) {
+                                self.objective_buffer.item_id = item_id_num.to_string();
+                                *unsaved_changes = true;
+                            }
+
                             ui.horizontal(|ui| {
                                 ui.label("Quantity:");
                                 ui.text_edit_singleline(&mut self.objective_buffer.quantity);
                             });
                         }
                         crate::quest_editor::ObjectiveType::ReachLocation => {
-                            ui.horizontal(|ui| {
-                                ui.label("Map:");
-                                egui::ComboBox::from_id_salt("map_selector")
-                                    .selected_text(
-                                        maps.iter()
-                                            .find(|m| {
-                                                m.id.to_string() == self.objective_buffer.map_id
-                                            })
-                                            .map(|m| format!("{} - {}", m.id, m.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.map_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for map in maps {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.map_id,
-                                                map.id.to_string(),
-                                                format!("{} - {}", map.id, map.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for map selection
+                            use crate::ui_helpers::autocomplete_map_selector;
+
+                            if autocomplete_map_selector(
+                                ui,
+                                "quest_objective_map",
+                                "Map:",
+                                &mut self.objective_buffer.map_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
+
                             ui.horizontal(|ui| {
                                 ui.label("X:");
                                 ui.text_edit_singleline(&mut self.objective_buffer.location_x);
@@ -2072,94 +2087,62 @@ impl QuestEditorState {
                             });
                         }
                         crate::quest_editor::ObjectiveType::TalkToNpc => {
-                            ui.horizontal(|ui| {
-                                ui.label("Map:");
-                                egui::ComboBox::from_id_salt("map_selector_npc")
-                                    .selected_text(
-                                        maps.iter()
-                                            .find(|m| {
-                                                m.id.to_string() == self.objective_buffer.map_id
-                                            })
-                                            .map(|m| format!("{} - {}", m.id, m.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.map_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for map in maps {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.map_id,
-                                                map.id.to_string(),
-                                                format!("{} - {}", map.id, map.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for map selection
+                            use crate::ui_helpers::autocomplete_map_selector;
 
-                            // Filter NPCs based on selected map
-                            let selected_map_id =
-                                self.objective_buffer.map_id.parse::<u16>().unwrap_or(0);
-                            let map_npcs: Vec<_> = maps
-                                .iter()
-                                .find(|m| m.id == selected_map_id)
-                                .map(|m| m.npcs.clone())
-                                .unwrap_or_default();
+                            if autocomplete_map_selector(
+                                ui,
+                                "quest_objective_npc_map",
+                                "Map:",
+                                &mut self.objective_buffer.map_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
 
-                            ui.horizontal(|ui| {
-                                ui.label("NPC:");
-                                egui::ComboBox::from_id_salt("npc_selector")
-                                    .selected_text(
-                                        map_npcs
-                                            .iter()
-                                            .find(|n| {
-                                                n.id.to_string() == self.objective_buffer.npc_id
-                                            })
-                                            .map(|n| format!("{} - {}", n.id, n.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.npc_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for npc in &map_npcs {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.npc_id,
-                                                npc.id.to_string(),
-                                                format!("{} - {}", npc.id, npc.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for NPC selection (cross-map aware)
+                            use crate::ui_helpers::autocomplete_npc_selector;
+
+                            if autocomplete_npc_selector(
+                                ui,
+                                "quest_objective_npc",
+                                "NPC:",
+                                &mut self.objective_buffer.npc_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
                         }
                         crate::quest_editor::ObjectiveType::DeliverItem => {
-                            ui.horizontal(|ui| {
-                                ui.label("Item:");
-                                egui::ComboBox::from_id_salt("item_selector_deliver")
-                                    .selected_text(
-                                        items
-                                            .iter()
-                                            .find(|i| {
-                                                i.id.to_string() == self.objective_buffer.item_id
-                                            })
-                                            .map(|i| format!("{} - {}", i.id, i.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.item_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for item in items {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.item_id,
-                                                item.id.to_string(),
-                                                format!("{} - {}", item.id, item.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for item selection
+                            use crate::ui_helpers::autocomplete_item_selector;
 
-                            ui.horizontal(|ui| {
-                                ui.label("NPC ID:");
-                                ui.text_edit_singleline(&mut self.objective_buffer.npc_id);
-                            });
+                            let mut item_id_num =
+                                self.objective_buffer.item_id.parse::<u8>().unwrap_or(0);
+
+                            if autocomplete_item_selector(
+                                ui,
+                                "quest_objective_deliver_item",
+                                "Item:",
+                                &mut item_id_num,
+                                items,
+                            ) {
+                                self.objective_buffer.item_id = item_id_num.to_string();
+                                *unsaved_changes = true;
+                            }
+
+                            // Use autocomplete for NPC selection
+                            use crate::ui_helpers::autocomplete_npc_selector;
+
+                            if autocomplete_npc_selector(
+                                ui,
+                                "quest_objective_deliver_npc",
+                                "Deliver to NPC:",
+                                &mut self.objective_buffer.npc_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
 
                             ui.horizontal(|ui| {
                                 ui.label("Quantity:");
@@ -2167,63 +2150,31 @@ impl QuestEditorState {
                             });
                         }
                         crate::quest_editor::ObjectiveType::EscortNpc => {
-                            ui.horizontal(|ui| {
-                                ui.label("Map:");
-                                egui::ComboBox::from_id_salt("map_selector_escort")
-                                    .selected_text(
-                                        maps.iter()
-                                            .find(|m| {
-                                                m.id.to_string() == self.objective_buffer.map_id
-                                            })
-                                            .map(|m| format!("{} - {}", m.id, m.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.map_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for map in maps {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.map_id,
-                                                map.id.to_string(),
-                                                format!("{} - {}", map.id, map.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for map selection
+                            use crate::ui_helpers::autocomplete_map_selector;
 
-                            // Filter NPCs based on selected map
-                            let selected_map_id =
-                                self.objective_buffer.map_id.parse::<u16>().unwrap_or(0);
-                            let map_npcs: Vec<_> = maps
-                                .iter()
-                                .find(|m| m.id == selected_map_id)
-                                .map(|m| m.npcs.clone())
-                                .unwrap_or_default();
+                            if autocomplete_map_selector(
+                                ui,
+                                "quest_objective_escort_map",
+                                "Map:",
+                                &mut self.objective_buffer.map_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
 
-                            ui.horizontal(|ui| {
-                                ui.label("NPC:");
-                                egui::ComboBox::from_id_salt("npc_selector_escort")
-                                    .selected_text(
-                                        map_npcs
-                                            .iter()
-                                            .find(|n| {
-                                                n.id.to_string() == self.objective_buffer.npc_id
-                                            })
-                                            .map(|n| format!("{} - {}", n.id, n.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.npc_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for npc in &map_npcs {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.npc_id,
-                                                npc.id.to_string(),
-                                                format!("{} - {}", npc.id, npc.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for NPC selection
+                            use crate::ui_helpers::autocomplete_npc_selector;
+
+                            if autocomplete_npc_selector(
+                                ui,
+                                "quest_objective_escort_npc",
+                                "NPC:",
+                                &mut self.objective_buffer.npc_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
 
                             ui.horizontal(|ui| {
                                 ui.label("Destination X:");
@@ -2808,5 +2759,102 @@ mod tests {
             }
             _ => panic!("Expected KillMonsters objective"),
         }
+    }
+
+    // =========================================================================
+    // ObjectiveEditBuffer Autocomplete Buffer Tests
+    // =========================================================================
+
+    #[test]
+    fn test_objective_buffer_autocomplete_fields_initialization() {
+        let buffer = ObjectiveEditBuffer::default();
+        assert!(
+            buffer.monster_input_buffer.is_empty(),
+            "Monster input buffer should be empty on initialization"
+        );
+        assert!(
+            buffer.item_input_buffer.is_empty(),
+            "Item input buffer should be empty on initialization"
+        );
+        assert!(
+            buffer.map_input_buffer.is_empty(),
+            "Map input buffer should be empty on initialization"
+        );
+        assert!(
+            buffer.npc_input_buffer.is_empty(),
+            "NPC input buffer should be empty on initialization"
+        );
+    }
+
+    #[test]
+    fn test_objective_buffer_monster_autocomplete() {
+        let mut buffer = ObjectiveEditBuffer::default();
+        buffer.objective_type = ObjectiveType::KillMonsters;
+
+        // Simulate autocomplete selection
+        buffer.monster_input_buffer = "Goblin Warrior".to_string();
+        buffer.monster_id = "5".to_string();
+
+        assert_eq!(buffer.monster_input_buffer, "Goblin Warrior");
+        assert_eq!(buffer.monster_id, "5");
+    }
+
+    #[test]
+    fn test_objective_buffer_item_autocomplete() {
+        let mut buffer = ObjectiveEditBuffer::default();
+        buffer.objective_type = ObjectiveType::CollectItems;
+
+        // Simulate autocomplete selection
+        buffer.item_input_buffer = "Magic Sword".to_string();
+        buffer.item_id = "42".to_string();
+
+        assert_eq!(buffer.item_input_buffer, "Magic Sword");
+        assert_eq!(buffer.item_id, "42");
+    }
+
+    #[test]
+    fn test_objective_buffer_map_autocomplete() {
+        let mut buffer = ObjectiveEditBuffer::default();
+        buffer.objective_type = ObjectiveType::ReachLocation;
+
+        // Simulate autocomplete selection
+        buffer.map_input_buffer = "Dark Forest (ID: 3)".to_string();
+        buffer.map_id = "3".to_string();
+
+        assert_eq!(buffer.map_input_buffer, "Dark Forest (ID: 3)");
+        assert_eq!(buffer.map_id, "3");
+    }
+
+    #[test]
+    fn test_objective_buffer_npc_autocomplete() {
+        let mut buffer = ObjectiveEditBuffer::default();
+        buffer.objective_type = ObjectiveType::TalkToNpc;
+
+        // Simulate autocomplete selection (composite ID format)
+        buffer.npc_input_buffer = "Merchant (Map: Town, NPC ID: 1)".to_string();
+        buffer.npc_id = "1:1".to_string();
+
+        assert_eq!(buffer.npc_input_buffer, "Merchant (Map: Town, NPC ID: 1)");
+        assert_eq!(buffer.npc_id, "1:1");
+    }
+
+    #[test]
+    fn test_objective_buffer_multiple_types_preserve_buffers() {
+        let mut buffer = ObjectiveEditBuffer::default();
+
+        // Set buffers for different objective types
+        buffer.monster_input_buffer = "Dragon".to_string();
+        buffer.item_input_buffer = "Healing Potion".to_string();
+        buffer.map_input_buffer = "Castle".to_string();
+        buffer.npc_input_buffer = "King".to_string();
+
+        // Change objective type
+        buffer.objective_type = ObjectiveType::CollectItems;
+
+        // Verify all buffers are still present (not cleared on type change)
+        assert_eq!(buffer.monster_input_buffer, "Dragon");
+        assert_eq!(buffer.item_input_buffer, "Healing Potion");
+        assert_eq!(buffer.map_input_buffer, "Castle");
+        assert_eq!(buffer.npc_input_buffer, "King");
     }
 }

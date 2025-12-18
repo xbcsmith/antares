@@ -29,6 +29,9 @@
 //! - [`autocomplete_monster_selector`] - Pre-configured autocomplete for Monster selection
 //! - [`autocomplete_condition_selector`] - Pre-configured autocomplete for Condition selection
 //! - [`autocomplete_item_list_selector`] - Multi-select autocomplete for Item lists
+//! - [`autocomplete_proficiency_list_selector`] - Multi-select autocomplete for Proficiency lists
+//! - [`autocomplete_tag_list_selector`] - Multi-select autocomplete for Item Tag lists
+//! - [`autocomplete_ability_list_selector`] - Multi-select autocomplete for Special Ability lists
 //!
 //! ## Candidate Extraction & Caching (Phase 2-3)
 //!
@@ -37,6 +40,8 @@
 //! - [`extract_condition_candidates`] - Extracts searchable condition candidates
 //! - [`extract_spell_candidates`] - Extracts searchable spell candidates
 //! - [`extract_proficiency_candidates`] - Extracts searchable proficiency candidates
+//! - [`extract_item_tag_candidates`] - Extracts unique item tags from items
+//! - [`extract_special_ability_candidates`] - Extracts special abilities from races
 //! - [`AutocompleteCandidateCache`] - Performance cache for candidate lists (invalidate on data changes)
 //!
 //! ## Entity Validation Warnings (Phase 3)
@@ -2233,6 +2238,94 @@ pub fn autocomplete_item_selector(
     changed
 }
 
+/// Shows an autocomplete input for selecting a quest by name.
+///
+/// Returns `true` if the selection changed.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `id_salt` - Unique ID salt for this widget
+/// * `label` - Label to display before the input
+/// * `selected_quest_id_str` - Mutable reference to the selected quest ID as String
+/// * `quests` - Slice of available quests
+///
+/// # Returns
+///
+/// `true` if the user selected a quest, `false` otherwise
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::quest::Quest;
+/// use eframe::egui;
+///
+/// let mut quest_id_str = String::new();
+/// let quests = vec![Quest { id: 1, name: "Quest 1".to_string(), /* ... */ }];
+///
+/// // In UI code:
+/// // let changed = autocomplete_quest_selector(ui, "quest_sel", "Quest:", &mut quest_id_str, &quests);
+/// ```
+pub fn autocomplete_quest_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_quest_id_str: &mut String,
+    quests: &[antares::domain::quest::Quest],
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        ui.label(label);
+
+        // Get current quest name based on ID string
+        let current_name = if selected_quest_id_str.is_empty() {
+            String::new()
+        } else {
+            // Parse the ID and find the quest
+            selected_quest_id_str
+                .parse::<antares::domain::quest::QuestId>()
+                .ok()
+                .and_then(|id| quests.iter().find(|q| q.id == id))
+                .map(|q| q.name.clone())
+                .unwrap_or_default()
+        };
+
+        let mut text_buffer = current_name.clone();
+
+        // Build candidates
+        let candidates: Vec<String> = quests.iter().map(|q| q.name.clone()).collect();
+
+        let response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder("Start typing quest name...")
+            .show(ui, &mut text_buffer);
+
+        // Check if user selected something from autocomplete
+        if response.changed() && !text_buffer.is_empty() && text_buffer != current_name {
+            // Try to find the quest by name
+            if let Some(quest) = quests.iter().find(|q| q.name == text_buffer) {
+                *selected_quest_id_str = quest.id.to_string();
+                changed = true;
+            }
+        }
+
+        // Show clear button if something is selected
+        if !selected_quest_id_str.is_empty()
+            && ui
+                .small_button("✖")
+                .on_hover_text("Clear selection")
+                .clicked()
+        {
+            selected_quest_id_str.clear();
+            changed = true;
+        }
+    });
+
+    changed
+}
+
 /// Shows an autocomplete input for selecting a monster by name.
 ///
 /// Returns `true` if the selection changed.
@@ -2364,6 +2457,180 @@ pub fn autocomplete_condition_selector(
     changed
 }
 
+/// Shows an autocomplete input for selecting a map by ID.
+///
+/// Returns `true` if the selection changed.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `id_salt` - Unique ID salt for this widget
+/// * `label` - Label to display before the input
+/// * `selected_map_id` - Mutable reference to the selected map ID string
+/// * `maps` - Slice of available maps
+///
+/// # Returns
+///
+/// `true` if the user selected a map, `false` otherwise
+pub fn autocomplete_map_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_map_id: &mut String,
+    maps: &[antares::domain::world::Map],
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        ui.label(label);
+
+        // Get current map name
+        let current_map_name =
+            if let Ok(map_id) = selected_map_id.parse::<antares::domain::types::MapId>() {
+                maps.iter()
+                    .find(|m| m.id == map_id)
+                    .map(|m| format!("{} (ID: {})", m.name, m.id))
+                    .unwrap_or_else(|| selected_map_id.clone())
+            } else {
+                selected_map_id.clone()
+            };
+
+        let mut text_buffer = current_map_name.clone();
+
+        // Build candidates
+        let candidates: Vec<String> = extract_map_candidates(maps)
+            .into_iter()
+            .map(|(display, _)| display)
+            .collect();
+
+        let response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder("Start typing map name...")
+            .show(ui, &mut text_buffer);
+
+        // Check if user selected something from autocomplete
+        if response.changed() && !text_buffer.is_empty() && text_buffer != current_map_name {
+            // Try to extract map ID from the selected text (format: "Name (ID: X)")
+            if let Some(id_start) = text_buffer.rfind("(ID: ") {
+                if let Some(id_end) = text_buffer[id_start..].find(')') {
+                    let id_str = &text_buffer[id_start + 5..id_start + id_end];
+                    *selected_map_id = id_str.to_string();
+                    changed = true;
+                }
+            }
+        }
+
+        // Show clear button if something is selected
+        if !selected_map_id.is_empty()
+            && ui
+                .small_button("✖")
+                .on_hover_text("Clear selection")
+                .clicked()
+        {
+            selected_map_id.clear();
+            changed = true;
+        }
+    });
+
+    changed
+}
+
+/// Shows an autocomplete input for selecting an NPC by ID.
+///
+/// Returns `true` if the selection changed.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `id_salt` - Unique ID salt for this widget
+/// * `label` - Label to display before the input
+/// * `selected_npc_id` - Mutable reference to the selected NPC ID string (format: "map_id:npc_id")
+/// * `maps` - Slice of available maps containing NPCs
+///
+/// # Returns
+///
+/// `true` if the user selected an NPC, `false` otherwise
+pub fn autocomplete_npc_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_npc_id: &mut String,
+    maps: &[antares::domain::world::Map],
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        ui.label(label);
+
+        // Get current NPC display name
+        let current_display = if !selected_npc_id.is_empty() {
+            // Parse map_id:npc_id format
+            if let Some((map_id_str, npc_id_str)) = selected_npc_id.split_once(':') {
+                if let (Ok(map_id), Ok(npc_id)) = (
+                    map_id_str.parse::<antares::domain::types::MapId>(),
+                    npc_id_str.parse::<u16>(),
+                ) {
+                    // Find the NPC
+                    maps.iter()
+                        .find(|m| m.id == map_id)
+                        .and_then(|m| m.npcs.iter().find(|n| n.id == npc_id))
+                        .map(|npc| {
+                            format!("{} (Map: {}, NPC ID: {})", npc.name, map_id_str, npc.id)
+                        })
+                        .unwrap_or_else(|| selected_npc_id.clone())
+                } else {
+                    selected_npc_id.clone()
+                }
+            } else {
+                selected_npc_id.clone()
+            }
+        } else {
+            String::new()
+        };
+
+        let mut text_buffer = current_display.clone();
+
+        // Build candidates
+        let candidates: Vec<String> = extract_npc_candidates(maps)
+            .into_iter()
+            .map(|(display, _)| display)
+            .collect();
+
+        let response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder("Start typing NPC name...")
+            .show(ui, &mut text_buffer);
+
+        // Check if user selected something from autocomplete
+        if response.changed() && !text_buffer.is_empty() && text_buffer != current_display {
+            // Try to find the NPC by reconstructing the ID from the display text
+            // Format: "Name (Map: MapName, NPC ID: X)"
+            for (display, npc_id) in extract_npc_candidates(maps) {
+                if display == text_buffer {
+                    *selected_npc_id = npc_id;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        // Show clear button if something is selected
+        if !selected_npc_id.is_empty()
+            && ui
+                .small_button("✖")
+                .on_hover_text("Clear selection")
+                .clicked()
+        {
+            selected_npc_id.clear();
+            changed = true;
+        }
+    });
+
+    changed
+}
+
 /// Shows an autocomplete input for adding items to a list.
 ///
 /// Returns `true` if an item was added to the list.
@@ -2441,6 +2708,223 @@ pub fn autocomplete_item_list_selector(
     changed
 }
 
+/// Shows an autocomplete list selector for proficiencies.
+///
+/// Returns `true` if the selection changed.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `id_salt` - Unique ID salt for this widget
+/// * `label` - Label to display
+/// * `selected_proficiencies` - Mutable reference to selected proficiency IDs
+/// * `proficiencies` - Slice of available proficiency definitions
+///
+/// # Returns
+///
+/// `true` if the user changed the selection, `false` otherwise
+pub fn autocomplete_proficiency_list_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_proficiencies: &mut Vec<String>,
+    proficiencies: &[antares::domain::proficiency::ProficiencyDefinition],
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.group(|ui| {
+        ui.label(label);
+
+        // Show current proficiencies
+        let mut remove_idx: Option<usize> = None;
+        for (idx, prof_id) in selected_proficiencies.iter().enumerate() {
+            ui.horizontal(|ui| {
+                if let Some(prof) = proficiencies.iter().find(|p| p.id == *prof_id) {
+                    ui.label(&prof.name);
+                } else {
+                    ui.label(format!("Unknown proficiency (ID: {})", prof_id));
+                }
+                if ui.small_button("✖").clicked() {
+                    remove_idx = Some(idx);
+                }
+            });
+        }
+
+        if let Some(idx) = remove_idx {
+            selected_proficiencies.remove(idx);
+            changed = true;
+        }
+
+        ui.separator();
+
+        // Add new proficiency input
+        let mut text_buffer = String::new();
+        let candidates: Vec<String> = proficiencies.iter().map(|p| p.name.clone()).collect();
+
+        ui.horizontal(|ui| {
+            ui.label("Add proficiency:");
+            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
+                .with_placeholder("Start typing proficiency name...")
+                .show(ui, &mut text_buffer);
+
+            // Check if user selected something from autocomplete
+            if response.changed() && !text_buffer.is_empty() {
+                // Try to find the proficiency by name
+                if let Some(prof) = proficiencies.iter().find(|p| p.name == text_buffer) {
+                    if !selected_proficiencies.contains(&prof.id) {
+                        selected_proficiencies.push(prof.id.clone());
+                        changed = true;
+                    }
+                }
+            }
+        });
+    });
+
+    changed
+}
+
+/// Shows an autocomplete list selector for item tags.
+///
+/// Returns `true` if the selection changed.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `id_salt` - Unique ID salt for this widget
+/// * `label` - Label to display
+/// * `selected_tags` - Mutable reference to selected tag strings
+/// * `available_tags` - Slice of available tag strings
+///
+/// # Returns
+///
+/// `true` if the user changed the selection, `false` otherwise
+pub fn autocomplete_tag_list_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_tags: &mut Vec<String>,
+    available_tags: &[String],
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.group(|ui| {
+        ui.label(label);
+
+        // Show current tags
+        let mut remove_idx: Option<usize> = None;
+        for (idx, tag) in selected_tags.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(tag);
+                if ui.small_button("✖").clicked() {
+                    remove_idx = Some(idx);
+                }
+            });
+        }
+
+        if let Some(idx) = remove_idx {
+            selected_tags.remove(idx);
+            changed = true;
+        }
+
+        ui.separator();
+
+        // Add new tag input
+        let mut text_buffer = String::new();
+        let candidates: Vec<String> = available_tags.to_vec();
+
+        ui.horizontal(|ui| {
+            ui.label("Add tag:");
+            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
+                .with_placeholder("Start typing tag name...")
+                .show(ui, &mut text_buffer);
+
+            // Check if user selected something from autocomplete
+            if response.changed() && !text_buffer.is_empty() {
+                if !selected_tags.contains(&text_buffer) {
+                    selected_tags.push(text_buffer.clone());
+                    changed = true;
+                }
+            }
+        });
+    });
+
+    changed
+}
+
+/// Shows an autocomplete list selector for special abilities.
+///
+/// Returns `true` if the selection changed.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `id_salt` - Unique ID salt for this widget
+/// * `label` - Label to display
+/// * `selected_abilities` - Mutable reference to selected ability strings
+/// * `available_abilities` - Slice of available ability strings
+///
+/// # Returns
+///
+/// `true` if the user changed the selection, `false` otherwise
+pub fn autocomplete_ability_list_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_abilities: &mut Vec<String>,
+    available_abilities: &[String],
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.group(|ui| {
+        ui.label(label);
+
+        // Show current abilities
+        let mut remove_idx: Option<usize> = None;
+        for (idx, ability) in selected_abilities.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(ability);
+                if ui.small_button("✖").clicked() {
+                    remove_idx = Some(idx);
+                }
+            });
+        }
+
+        if let Some(idx) = remove_idx {
+            selected_abilities.remove(idx);
+            changed = true;
+        }
+
+        ui.separator();
+
+        // Add new ability input
+        let mut text_buffer = String::new();
+        let candidates: Vec<String> = available_abilities.to_vec();
+
+        ui.horizontal(|ui| {
+            ui.label("Add ability:");
+            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
+                .with_placeholder("Start typing ability name...")
+                .show(ui, &mut text_buffer);
+
+            // Check if user selected something from autocomplete
+            if response.changed() && !text_buffer.is_empty() {
+                if !selected_abilities.contains(&text_buffer) {
+                    selected_abilities.push(text_buffer.clone());
+                    changed = true;
+                }
+            }
+        });
+    });
+
+    changed
+}
+
 /// Extracts monster name candidates from a list of monster definitions.
 ///
 /// Returns a vector of monster names suitable for autocomplete widgets.
@@ -2506,6 +2990,54 @@ pub fn extract_item_candidates(
     items
         .iter()
         .map(|item| (format!("{} (ID: {})", item.name, item.id), item.id))
+        .collect()
+}
+
+/// Extracts quest candidates from a list of quests.
+///
+/// Returns a vector of tuples mapping quest display name to QuestId.
+///
+/// # Arguments
+///
+/// * `quests` - Slice of quests to extract candidates from
+///
+/// # Returns
+///
+/// A vector of tuples (display_name, QuestId)
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::quest::{Quest, QuestId};
+///
+/// let quests = vec![
+///     Quest {
+///         id: 1,
+///         name: "Save the Village".to_string(),
+///         description: "Help save the village from bandits".to_string(),
+///         stages: vec![],
+///         rewards: vec![],
+///         prerequisites: vec![],
+///         min_level: 1,
+///         max_level: None,
+///         repeatable: false,
+///         is_main_quest: true,
+///         quest_giver_npc: None,
+///         quest_giver_location: None,
+///     },
+/// ];
+///
+/// let candidates = extract_quest_candidates(&quests);
+/// assert_eq!(candidates.len(), 1);
+/// assert_eq!(candidates[0].0, "Save the Village (ID: 1)");
+/// assert_eq!(candidates[0].1, 1);
+/// ```
+pub fn extract_quest_candidates(
+    quests: &[antares::domain::quest::Quest],
+) -> Vec<(String, antares::domain::quest::QuestId)> {
+    quests
+        .iter()
+        .map(|quest| (format!("{} (ID: {})", quest.name, quest.id), quest.id))
         .collect()
 }
 
@@ -2596,20 +3128,182 @@ pub fn extract_spell_candidates(
 /// # Examples
 ///
 /// ```no_run
-/// use antares::domain::proficiency::ProficiencyId;
+/// use antares::domain::proficiency::{ProficiencyDefinition, ProficiencyId, ProficiencyCategory};
 /// use antares::sdk::campaign_builder::ui_helpers::extract_proficiency_candidates;
 ///
 /// let proficiencies = vec![
-///     ProficiencyId::from("sword"),
-///     ProficiencyId::from("shield"),
+///     ProficiencyDefinition {
+///         id: "sword".to_string(),
+///         name: "Sword".to_string(),
+///         category: ProficiencyCategory::Weapon,
+///         description: "Sword proficiency".to_string(),
+///     },
 /// ];
 /// let candidates = extract_proficiency_candidates(&proficiencies);
-/// assert_eq!(candidates.len(), 2);
+/// assert_eq!(candidates.len(), 1);
 /// ```
 pub fn extract_proficiency_candidates(
-    proficiencies: &[antares::domain::proficiency::ProficiencyId],
+    proficiencies: &[antares::domain::proficiency::ProficiencyDefinition],
+) -> Vec<(String, String)> {
+    proficiencies
+        .iter()
+        .map(|p| (format!("{} ({})", p.name, p.id), p.id.clone()))
+        .collect()
+}
+
+/// Extracts item tag candidates from a list of items.
+///
+/// Returns a vector of unique item tags suitable for autocomplete widgets.
+///
+/// # Arguments
+///
+/// * `items` - Slice of items to extract tags from
+///
+/// # Returns
+///
+/// A vector of unique tag strings sorted alphabetically
+///
+/// # Examples
+///
+/// ```no_run
+/// use antares::domain::items::types::Item;
+/// use antares::sdk::campaign_builder::ui_helpers::extract_item_tag_candidates;
+///
+/// let items = vec![]; // Items with tags
+/// let candidates = extract_item_tag_candidates(&items);
+/// ```
+pub fn extract_item_tag_candidates(items: &[antares::domain::items::types::Item]) -> Vec<String> {
+    use std::collections::HashSet;
+
+    let mut tags = HashSet::new();
+    for item in items {
+        for tag in &item.tags {
+            tags.insert(tag.clone());
+        }
+    }
+
+    let mut result: Vec<String> = tags.into_iter().collect();
+    result.sort();
+    result
+}
+
+/// Extracts special ability candidates from existing race definitions.
+///
+/// Returns a vector of unique special abilities suitable for autocomplete widgets.
+///
+/// # Arguments
+///
+/// * `races` - Slice of race definitions to extract abilities from
+///
+/// # Returns
+///
+/// A vector of unique special ability strings sorted alphabetically
+///
+/// # Examples
+///
+/// ```no_run
+/// use antares::domain::races::RaceDefinition;
+/// use antares::sdk::campaign_builder::ui_helpers::extract_special_ability_candidates;
+///
+/// let races = vec![]; // Races with special abilities
+/// let candidates = extract_special_ability_candidates(&races);
+/// ```
+pub fn extract_special_ability_candidates(
+    races: &[antares::domain::races::RaceDefinition],
 ) -> Vec<String> {
-    proficiencies.iter().map(|p| p.to_string()).collect()
+    use std::collections::HashSet;
+
+    let mut abilities = HashSet::new();
+    for race in races {
+        for ability in &race.special_abilities {
+            abilities.insert(ability.clone());
+        }
+    }
+
+    // Add common standard abilities
+    let standard_abilities = vec![
+        "infravision",
+        "magic_resistance",
+        "poison_immunity",
+        "disease_immunity",
+        "keen_senses",
+        "darkvision",
+        "lucky",
+        "brave",
+        "stonecunning",
+        "trance",
+    ];
+
+    for ability in standard_abilities {
+        abilities.insert(ability.to_string());
+    }
+
+    let mut result: Vec<String> = abilities.into_iter().collect();
+    result.sort();
+    result
+}
+
+/// Extracts map candidates for autocomplete from a slice of maps.
+///
+/// Returns a list of tuples containing display string and map ID.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::Map;
+/// use antares::sdk::campaign_builder::ui_helpers::extract_map_candidates;
+///
+/// let maps = vec![
+///     Map::new(1, "Town Square".to_string(), "Starting area".to_string(), 20, 20),
+///     Map::new(2, "Dark Forest".to_string(), "Dangerous woods".to_string(), 30, 30),
+/// ];
+/// let candidates = extract_map_candidates(&maps);
+/// assert_eq!(candidates.len(), 2);
+/// assert_eq!(candidates[0].0, "Town Square (ID: 1)");
+/// ```
+pub fn extract_map_candidates(
+    maps: &[antares::domain::world::Map],
+) -> Vec<(String, antares::domain::types::MapId)> {
+    maps.iter()
+        .map(|map| (format!("{} (ID: {})", map.name, map.id), map.id))
+        .collect()
+}
+
+/// Extracts NPC candidates for autocomplete from all NPCs in all maps.
+///
+/// Returns a list of tuples containing display string and NPC ID.
+/// NPC IDs are formatted as "{map_id}:{npc_id}" to ensure uniqueness across maps.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::{Map, Npc};
+/// use antares::domain::types::Position;
+/// use antares::sdk::campaign_builder::ui_helpers::extract_npc_candidates;
+///
+/// let mut map = Map::new(1, "Town".to_string(), "Desc".to_string(), 10, 10);
+/// map.npcs.push(Npc {
+///     id: 1,
+///     name: "Merchant".to_string(),
+///     description: "Sells goods".to_string(),
+///     position: Position::new(5, 5),
+///     dialogue_id: None,
+/// });
+///
+/// let candidates = extract_npc_candidates(&[map]);
+/// assert_eq!(candidates.len(), 1);
+/// assert!(candidates[0].0.contains("Merchant"));
+/// ```
+pub fn extract_npc_candidates(maps: &[antares::domain::world::Map]) -> Vec<(String, String)> {
+    let mut candidates = Vec::new();
+    for map in maps {
+        for npc in &map.npcs {
+            let display = format!("{} (Map: {}, NPC ID: {})", npc.name, map.name, npc.id);
+            let npc_id = format!("{}:{}", map.id, npc.id);
+            candidates.push((display, npc_id));
+        }
+    }
+    candidates
 }
 
 // =============================================================================
@@ -2631,7 +3325,7 @@ pub struct AutocompleteCandidateCache {
     /// Cached spell candidates with generation counter
     spells: Option<(Vec<(String, antares::domain::types::SpellId)>, u64)>,
     /// Cached proficiency candidates with generation counter
-    proficiencies: Option<(Vec<String>, u64)>,
+    proficiencies: Option<(Vec<(String, String)>, u64)>,
     /// Generation counter for items (incremented on data changes)
     items_generation: u64,
     /// Generation counter for monsters
@@ -2757,7 +3451,7 @@ impl AutocompleteCandidateCache {
     /// Gets or generates spell candidates.
     pub fn get_or_generate_spells(
         &mut self,
-        spells: &[antares::domain::spell::Spell],
+        spells: &[antares::domain::magic::types::Spell],
     ) -> Vec<(String, antares::domain::types::SpellId)> {
         if let Some((ref candidates, gen)) = &self.spells {
             if *gen == self.spells_generation {
@@ -2773,8 +3467,8 @@ impl AutocompleteCandidateCache {
     /// Gets or generates proficiency candidates.
     pub fn get_or_generate_proficiencies(
         &mut self,
-        proficiencies: &[antares::domain::proficiency::ProficiencyId],
-    ) -> Vec<String> {
+        proficiencies: &[antares::domain::proficiency::ProficiencyDefinition],
+    ) -> Vec<(String, String)> {
         if let Some((ref candidates, gen)) = &self.proficiencies {
             if *gen == self.proficiencies_generation {
                 return candidates.clone();
@@ -2876,7 +3570,7 @@ pub fn show_condition_validation_warning(
 pub fn show_spell_validation_warning(
     ui: &mut egui::Ui,
     spell_id: antares::domain::types::SpellId,
-    spells: &[antares::domain::spell::Spell],
+    spells: &[antares::domain::magic::types::Spell],
 ) {
     let exists = spells.iter().any(|s| s.id == spell_id);
     show_entity_validation_warning(ui, "Spell", spell_id, exists);
@@ -3613,6 +4307,157 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_proficiency_candidates() {
+        use antares::domain::proficiency::{ProficiencyCategory, ProficiencyDefinition};
+
+        let proficiencies = vec![
+            ProficiencyDefinition {
+                id: "simple_weapon".to_string(),
+                name: "Simple Weapons".to_string(),
+                category: ProficiencyCategory::Weapon,
+                description: "Basic weapons".to_string(),
+            },
+            ProficiencyDefinition {
+                id: "light_armor".to_string(),
+                name: "Light Armor".to_string(),
+                category: ProficiencyCategory::Armor,
+                description: "Light armor proficiency".to_string(),
+            },
+        ];
+
+        let candidates = extract_proficiency_candidates(&proficiencies);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates[0],
+            (
+                "Simple Weapons (simple_weapon)".to_string(),
+                "simple_weapon".to_string()
+            )
+        );
+        assert_eq!(
+            candidates[1],
+            (
+                "Light Armor (light_armor)".to_string(),
+                "light_armor".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_extract_proficiency_candidates_empty() {
+        let proficiencies = vec![];
+        let candidates = extract_proficiency_candidates(&proficiencies);
+        assert_eq!(candidates.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_item_tag_candidates() {
+        use antares::domain::items::types::{ConsumableData, Item, ItemType};
+
+        let items = vec![
+            Item {
+                id: 1,
+                name: "Sword".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: String::new(),
+                    uses: 1,
+                }),
+                base_cost: 10,
+                sell_cost: 5,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec!["large_weapon".to_string(), "two_handed".to_string()],
+            },
+            Item {
+                id: 2,
+                name: "Armor".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: String::new(),
+                    uses: 1,
+                }),
+                base_cost: 50,
+                sell_cost: 25,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec!["heavy_armor".to_string(), "two_handed".to_string()],
+            },
+        ];
+
+        let candidates = extract_item_tag_candidates(&items);
+        assert_eq!(candidates.len(), 3); // unique tags: heavy_armor, large_weapon, two_handed
+        assert!(candidates.contains(&"large_weapon".to_string()));
+        assert!(candidates.contains(&"two_handed".to_string()));
+        assert!(candidates.contains(&"heavy_armor".to_string()));
+    }
+
+    #[test]
+    fn test_extract_item_tag_candidates_empty() {
+        let items = vec![];
+        let candidates = extract_item_tag_candidates(&items);
+        assert_eq!(candidates.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_special_ability_candidates() {
+        use antares::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
+
+        let races = vec![
+            RaceDefinition {
+                id: "human".to_string(),
+                name: "Human".to_string(),
+                description: String::new(),
+                stat_modifiers: StatModifiers::default(),
+                resistances: Resistances::default(),
+                size: SizeCategory::Medium,
+                special_abilities: vec!["lucky".to_string(), "brave".to_string()],
+                proficiencies: vec![],
+                incompatible_item_tags: vec![],
+            },
+            RaceDefinition {
+                id: "elf".to_string(),
+                name: "Elf".to_string(),
+                description: String::new(),
+                stat_modifiers: StatModifiers::default(),
+                resistances: Resistances::default(),
+                size: SizeCategory::Medium,
+                special_abilities: vec!["infravision".to_string(), "keen_senses".to_string()],
+                proficiencies: vec![],
+                incompatible_item_tags: vec![],
+            },
+        ];
+
+        let candidates = extract_special_ability_candidates(&races);
+        // Should include race abilities + standard abilities
+        assert!(candidates.len() >= 4);
+        assert!(candidates.contains(&"lucky".to_string()));
+        assert!(candidates.contains(&"brave".to_string()));
+        assert!(candidates.contains(&"infravision".to_string()));
+        assert!(candidates.contains(&"keen_senses".to_string()));
+        // Check that standard abilities are included
+        assert!(candidates.contains(&"magic_resistance".to_string()));
+        assert!(candidates.contains(&"darkvision".to_string()));
+    }
+
+    #[test]
+    fn test_extract_special_ability_candidates_empty() {
+        let races = vec![];
+        let candidates = extract_special_ability_candidates(&races);
+        // Should still have standard abilities
+        assert!(candidates.len() > 0);
+        assert!(candidates.contains(&"infravision".to_string()));
+    }
+
+    #[test]
     fn extract_spell_candidates_empty_list() {
         let spells = vec![];
         let candidates = extract_spell_candidates(&spells);
@@ -3939,5 +4784,210 @@ mod tests {
         });
 
         let _ = ctx.end_pass();
+    }
+
+    // =========================================================================
+    // Map and NPC Candidate Extraction Tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_map_candidates() {
+        use antares::domain::world::Map;
+
+        let maps = vec![
+            Map::new(
+                1,
+                "Town Square".to_string(),
+                "Starting area".to_string(),
+                20,
+                20,
+            ),
+            Map::new(
+                2,
+                "Dark Forest".to_string(),
+                "Dangerous woods".to_string(),
+                30,
+                30,
+            ),
+            Map::new(5, "Castle".to_string(), "Royal palace".to_string(), 40, 40),
+        ];
+
+        let candidates = extract_map_candidates(&maps);
+
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates[0].0, "Town Square (ID: 1)");
+        assert_eq!(candidates[0].1, 1);
+        assert_eq!(candidates[1].0, "Dark Forest (ID: 2)");
+        assert_eq!(candidates[1].1, 2);
+        assert_eq!(candidates[2].0, "Castle (ID: 5)");
+        assert_eq!(candidates[2].1, 5);
+    }
+
+    #[test]
+    fn test_extract_map_candidates_empty() {
+        let maps: Vec<antares::domain::world::Map> = vec![];
+        let candidates = extract_map_candidates(&maps);
+        assert_eq!(candidates.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_npc_candidates() {
+        use antares::domain::types::Position;
+        use antares::domain::world::{Map, Npc};
+
+        let mut map1 = Map::new(1, "Town".to_string(), "Desc".to_string(), 10, 10);
+        map1.npcs.push(Npc {
+            id: 1,
+            name: "Merchant".to_string(),
+            description: "Sells goods".to_string(),
+            position: Position::new(5, 5),
+            dialogue_id: None,
+        });
+        map1.npcs.push(Npc {
+            id: 2,
+            name: "Guard".to_string(),
+            description: "Protects the town".to_string(),
+            position: Position::new(7, 3),
+            dialogue_id: None,
+        });
+
+        let mut map2 = Map::new(2, "Castle".to_string(), "Desc".to_string(), 15, 15);
+        map2.npcs.push(Npc {
+            id: 1,
+            name: "King".to_string(),
+            description: "Rules the land".to_string(),
+            position: Position::new(8, 8),
+            dialogue_id: None,
+        });
+
+        let candidates = extract_npc_candidates(&[map1, map2]);
+
+        assert_eq!(candidates.len(), 3);
+        assert!(candidates[0].0.contains("Merchant"));
+        assert!(candidates[0].0.contains("Town"));
+        assert_eq!(candidates[0].1, "1:1");
+        assert!(candidates[1].0.contains("Guard"));
+        assert_eq!(candidates[1].1, "1:2");
+        assert!(candidates[2].0.contains("King"));
+        assert!(candidates[2].0.contains("Castle"));
+        assert_eq!(candidates[2].1, "2:1");
+    }
+
+    #[test]
+    fn test_extract_npc_candidates_empty_maps() {
+        let maps: Vec<antares::domain::world::Map> = vec![];
+        let candidates = extract_npc_candidates(&maps);
+        assert_eq!(candidates.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_npc_candidates_maps_with_no_npcs() {
+        use antares::domain::world::Map;
+
+        let maps = vec![
+            Map::new(1, "Town".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(2, "Forest".to_string(), "Desc".to_string(), 20, 20),
+        ];
+
+        let candidates = extract_npc_candidates(&maps);
+        assert_eq!(candidates.len(), 0);
+    }
+
+    // =========================================================================
+    // Quest Candidate Extraction Tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_quest_candidates() {
+        use antares::domain::quest::{Quest, QuestId};
+
+        let quests = vec![
+            Quest {
+                id: 1,
+                name: "Save the Village".to_string(),
+                description: "Help save the village from bandits".to_string(),
+                stages: vec![],
+                rewards: vec![],
+                prerequisites: vec![],
+                min_level: 1,
+                max_level: None,
+                repeatable: false,
+                is_main_quest: true,
+                quest_giver_npc: None,
+                quest_giver_location: None,
+            },
+            Quest {
+                id: 2,
+                name: "Find the Lost Sword".to_string(),
+                description: "Recover the legendary sword".to_string(),
+                stages: vec![],
+                rewards: vec![],
+                prerequisites: vec![],
+                min_level: 5,
+                max_level: Some(10),
+                repeatable: false,
+                is_main_quest: false,
+                quest_giver_npc: None,
+                quest_giver_location: None,
+            },
+        ];
+
+        let candidates = extract_quest_candidates(&quests);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].0, "Save the Village (ID: 1)");
+        assert_eq!(candidates[0].1, 1);
+        assert_eq!(candidates[1].0, "Find the Lost Sword (ID: 2)");
+        assert_eq!(candidates[1].1, 2);
+    }
+
+    #[test]
+    fn test_extract_quest_candidates_empty() {
+        use antares::domain::quest::Quest;
+
+        let quests: Vec<Quest> = vec![];
+        let candidates = extract_quest_candidates(&quests);
+        assert_eq!(candidates.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_quest_candidates_maintains_order() {
+        use antares::domain::quest::Quest;
+
+        let quests = vec![
+            Quest {
+                id: 10,
+                name: "Quest Alpha".to_string(),
+                description: "First quest".to_string(),
+                stages: vec![],
+                rewards: vec![],
+                prerequisites: vec![],
+                min_level: 1,
+                max_level: None,
+                repeatable: false,
+                is_main_quest: false,
+                quest_giver_npc: None,
+                quest_giver_location: None,
+            },
+            Quest {
+                id: 5,
+                name: "Quest Beta".to_string(),
+                description: "Second quest".to_string(),
+                stages: vec![],
+                rewards: vec![],
+                prerequisites: vec![],
+                min_level: 1,
+                max_level: None,
+                repeatable: false,
+                is_main_quest: false,
+                quest_giver_npc: None,
+                quest_giver_location: None,
+            },
+        ];
+
+        let candidates = extract_quest_candidates(&quests);
+        assert_eq!(candidates.len(), 2);
+        // Should maintain input order
+        assert_eq!(candidates[0].1, 10);
+        assert_eq!(candidates[1].1, 5);
     }
 }

@@ -2798,6 +2798,7 @@ impl eframe::App for CampaignBuilderApp {
             EditorTab::Spells => self.spells_editor_state.show(
                 ui,
                 &mut self.spells,
+                &self.conditions,
                 self.campaign_dir.as_ref(),
                 &self.campaign.spells_file,
                 &mut self.unsaved_changes,
@@ -2843,6 +2844,7 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.maps,
                 &self.monsters,
                 &self.items,
+                &self.conditions,
                 self.campaign_dir.as_ref(),
                 &self.campaign.maps_dir,
                 &self.tool_config.display,
@@ -2882,6 +2884,8 @@ impl eframe::App for CampaignBuilderApp {
             EditorTab::Dialogues => self.dialogue_editor_state.show(
                 ui,
                 &mut self.dialogues,
+                &self.quests,
+                &self.items,
                 self.campaign_dir.as_ref(),
                 &self.campaign.dialogue_file,
                 &mut self.unsaved_changes,
