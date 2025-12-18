@@ -10,13 +10,63 @@
 //!
 //! # Components
 //!
+//! ## Core Layout Components
+//!
 //! - [`EditorToolbar`] - Standard toolbar with New, Save, Load, Import, Export buttons
 //! - [`ActionButtons`] - Standard action buttons for detail panels (Edit, Delete, Duplicate, Export)
 //! - [`TwoColumnLayout`] - Standard two-column list/detail layout
 //! - [`ImportExportDialog`] - Standard import/export dialog for RON data
+//!
+//! ## Attribute Widgets
+//!
 //! - [`AttributePairInput`] - Widget for editing `AttributePair` (u8 base/current)
 //! - [`AttributePair16Input`] - Widget for editing `AttributePair16` (u16 base/current)
-//! - [`AutocompleteInput`] - Autocomplete text input with dropdown suggestions
+//!
+//! ## Autocomplete System (Phase 1-3)
+//!
+//! - [`AutocompleteInput`] - Autocomplete text input widget with dropdown suggestions
+//! - [`autocomplete_item_selector`] - Pre-configured autocomplete for Item selection
+//! - [`autocomplete_monster_selector`] - Pre-configured autocomplete for Monster selection
+//! - [`autocomplete_condition_selector`] - Pre-configured autocomplete for Condition selection
+//! - [`autocomplete_item_list_selector`] - Multi-select autocomplete for Item lists
+//!
+//! ## Candidate Extraction & Caching (Phase 2-3)
+//!
+//! - [`extract_item_candidates`] - Extracts searchable item candidates
+//! - [`extract_monster_candidates`] - Extracts searchable monster candidates
+//! - [`extract_condition_candidates`] - Extracts searchable condition candidates
+//! - [`extract_spell_candidates`] - Extracts searchable spell candidates
+//! - [`extract_proficiency_candidates`] - Extracts searchable proficiency candidates
+//! - [`AutocompleteCandidateCache`] - Performance cache for candidate lists (invalidate on data changes)
+//!
+//! ## Entity Validation Warnings (Phase 3)
+//!
+//! - [`show_entity_validation_warning`] - Generic validation warning display
+//! - [`show_item_validation_warning`] - Item-specific validation warning
+//! - [`show_monster_validation_warning`] - Monster-specific validation warning
+//! - [`show_condition_validation_warning`] - Condition-specific validation warning
+//! - [`show_spell_validation_warning`] - Spell-specific validation warning
+//!
+//! # Performance Optimization
+//!
+//! Use [`AutocompleteCandidateCache`] to avoid regenerating candidate lists every frame.
+//! Cache instances should be stored in editor state and invalidated when data changes
+//! (add/delete/import operations).
+//!
+//! # Examples
+//!
+//! ```rust,ignore
+//! // Using autocomplete with caching
+//! let mut cache = AutocompleteCandidateCache::new();
+//! let candidates = cache.get_or_generate_items(&items);
+//! autocomplete_item_selector(ui, &mut selected_id, &candidates, &items);
+//!
+//! // Invalidate cache after data mutation
+//! cache.invalidate_items();
+//!
+//! // Show validation warning for missing entity
+//! show_item_validation_warning(ui, selected_id, &items);
+//! ```
 
 use antares::domain::character::{AttributePair, AttributePair16};
 use eframe::egui;

@@ -6,6 +6,12 @@
 //! This module provides a visual editor for character classes with full UI
 //! rendering via the `show()` method, following the standard editor pattern.
 //! Uses shared UI components for consistent layout.
+//!
+//! # Autocomplete Integration (Phase 2)
+//!
+//! - Starting weapon/armor selection uses `autocomplete_item_selector`
+//! - Proficiency selection uses multi-select autocomplete with quick-add buttons
+//! - Entity validation warnings display for missing item/proficiency references
 
 use crate::ui_helpers::{
     searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
