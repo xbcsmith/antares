@@ -155,4 +155,14 @@
         default_duration: Minutes(10),
         icon_id: Some("icon_poison_resistance"),
     ),
+    (
+        id: "awake",
+        name: "Awake",
+        description: "Awakens a sleeping character or monster",
+        effects: [
+            StatusEffect("Awake"),
+        ],
+        default_duration: Instant,
+        icon_id: Some("1"),
+    ),
 ]

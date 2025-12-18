@@ -2824,52 +2824,6 @@
     ],
     events: {
         (
-            x: 0,
-            y: 7,
-        ): Teleport(
-            name: "Forest Portal",
-            description: "A portal that teleports the party to Dark Forrest (map 4) at (12,0).",
-            destination: (
-                x: 12,
-                y: 0,
-            ),
-            map_id: 4,
-        ),
-        (
-            x: 2,
-            y: 6,
-        ): Encounter(
-            name: "Monster Ambush",
-            description: "A group of monsters lying in wait to ambush unsuspecting travelers.",
-            monster_group: [
-                2,
-                1,
-            ],
-        ),
-        (
-            x: 3,
-            y: 2,
-        ): Encounter(
-            name: "Monster Patrol",
-            description: "A small patrol of monsters crossing this area.",
-            monster_group: [
-                1,
-                2,
-            ],
-        ),
-        (
-            x: 10,
-            y: 12,
-        ): Treasure(
-            name: "Worn Chest",
-            description: "A small chest containing assorted loot and coins.",
-            loot: [
-                12,
-                22,
-                31,
-            ],
-        ),
-        (
             x: 14,
             y: 14,
         ): Encounter(
@@ -2891,6 +2845,18 @@
             effect: None,
         ),
         (
+            x: 6,
+            y: 2,
+        ): Treasure(
+            name: "Buried Stash",
+            description: "A stash hidden in a crevice containing valuable items.",
+            loot: [
+                10,
+                20,
+                30,
+            ],
+        ),
+        (
             x: 1,
             y: 7,
         ): Sign(
@@ -2899,14 +2865,15 @@
             text: "Exit to Town",
         ),
         (
-            x: 13,
-            y: 2,
+            x: 10,
+            y: 12,
         ): Treasure(
-            name: "Hidden Cache",
-            description: "A tucked-away cache of items and supplies.",
+            name: "Worn Chest",
+            description: "A small chest containing assorted loot and coins.",
             loot: [
-                11,
-                21,
+                12,
+                22,
+                31,
             ],
         ),
         (
@@ -2921,15 +2888,48 @@
             ],
         ),
         (
-            x: 6,
+            x: 13,
             y: 2,
         ): Treasure(
-            name: "Buried Stash",
-            description: "A stash hidden in a crevice containing valuable items.",
+            name: "Hidden Cache",
+            description: "A tucked-away cache of items and supplies.",
             loot: [
-                10,
-                20,
-                30,
+                11,
+                21,
+            ],
+        ),
+        (
+            x: 3,
+            y: 2,
+        ): Encounter(
+            name: "Monster Patrol",
+            description: "A small patrol of monsters crossing this area.",
+            monster_group: [
+                1,
+                2,
+            ],
+        ),
+        (
+            x: 0,
+            y: 7,
+        ): Teleport(
+            name: "Forest Portal",
+            description: "A portal that teleports the party to Dark Forrest (map 4) at (12,0).",
+            destination: (
+                x: 12,
+                y: 0,
+            ),
+            map_id: 4,
+        ),
+        (
+            x: 2,
+            y: 6,
+        ): Encounter(
+            name: "Monster Ambush",
+            description: "A group of monsters lying in wait to ambush unsuspecting travelers.",
+            monster_group: [
+                2,
+                1,
             ],
         ),
     },

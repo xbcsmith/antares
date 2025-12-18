@@ -2050,44 +2050,37 @@ mod tests {
 
     #[test]
     fn test_dialogue_editor_loads_quests_and_items() {
+        use antares::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
         use antares::domain::quest::Quest;
 
         let mut editor = DialogueEditorState::new();
 
-        let quests = vec![Quest {
-            id: 1,
-            name: "Save the Village".to_string(),
-            description: "Help save the village".to_string(),
-            stages: vec![],
-            rewards: vec![],
-            prerequisites: vec![],
-            min_level: 1,
-            max_level: None,
-            repeatable: false,
-            is_main_quest: true,
-            quest_giver_npc: None,
-            quest_giver_location: None,
-        }];
+        // Create a quest using the up-to-date Quest API
+        let mut quest = Quest::new(1, "Save the Village", "Help save the village");
+        quest.min_level = Some(1);
+        quest.repeatable = false;
+        quest.is_main_quest = true;
 
         let items = vec![Item {
             id: 42,
             name: "Healing Potion".to_string(),
-            description: "Restores health".to_string(),
-            item_type: antares::domain::items::types::ItemType::Consumable(
-                antares::domain::items::types::ConsumableData {
-                    consumable_type: antares::domain::items::types::ConsumableType::Potion,
-                    effect: antares::domain::items::types::ConsumableEffect::HealHP,
-                    power: 50,
-                    charges: 1,
-                },
-            ),
-            value: 50,
-            weight: 1,
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(50),
+                is_combat_usable: true,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
             tags: vec!["healing".to_string()],
-            disablement: antares::domain::items::types::Disablement::default(),
         }];
 
-        editor.quests = quests.clone();
+        editor.quests = vec![quest.clone()];
         editor.items = items.clone();
 
         assert_eq!(editor.quests.len(), 1);
@@ -2100,20 +2093,13 @@ mod tests {
     fn test_dialogue_buffer_with_quest_reference() {
         let mut editor = DialogueEditorState::new();
 
-        let quest = Quest {
-            id: 5,
-            name: "Find the Artifact".to_string(),
-            description: "Locate the ancient artifact".to_string(),
-            stages: vec![],
-            rewards: vec![],
-            prerequisites: vec![],
-            min_level: 3,
-            max_level: None,
-            repeatable: false,
-            is_main_quest: false,
-            quest_giver_npc: None,
-            quest_giver_location: None,
-        };
+        let mut quest = Quest::new(5, "Find the Artifact", "Locate the ancient artifact");
+        quest.min_level = Some(3);
+        quest.repeatable = false;
+        quest.is_main_quest = false;
+        quest.quest_giver_npc = None;
+        quest.quest_giver_map = None;
+        quest.quest_giver_position = None;
 
         editor.quests = vec![quest];
         editor.dialogue_buffer.associated_quest = "5".to_string();

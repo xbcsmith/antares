@@ -978,12 +978,25 @@ Updated module-level doc comment to document all autocomplete components:
 - Added "Performance Optimization" section with cache usage guidance
 - Added examples showing cache integration and validation warning usage
 
-**Benefits:**
+\*\*Benefits:
 
 - Complete API documentation for autocomplete system
 - Clear guidance on performance optimization with caching
 - Examples demonstrate proper usage patterns
 - Integrated into cargo doc output
+- Autocomplete input buffers now persist in egui's per-UI Memory (via `mem.data`). This replaces the previous process-global buffer map (`AUTOCOMPLETE_TEXT_BUFFERS`) with the egui-backed approach (for example: `ui.ctx().memory_mut(|mem| mem.data.get_temp_mut_or_insert_with::<String>(id, || default))`). The change ties buffer lifetime to the UI context, removes the global mutex, and reduces cross-module global state.
+- Tests were updated to read and manipulate the buffer from egui Memory (e.g., `ui.ctx().memory_mut(|mem| ...)`) instead of relying on a global map; this ensures test behavior matches runtime usage patterns.
+
+#### 4.3 Autocomplete Buffer Helper Utilities
+
+To centralize per-widget buffer management and avoid repeated read/clone/writeback logic, the following helper functions were introduced in `sdk/campaign_builder/src/ui_helpers.rs`:
+
+- `make_autocomplete_id(ui: &egui::Ui, prefix: &str, id_salt: &str) -> egui::Id` — Generates a stable, namespaced `egui::Id` for autocomplete widgets (uses `ui.id().with("autocomplete").with(prefix).with(id_salt)`).
+- `load_autocomplete_buffer(ctx: &egui::Context, id: egui::Id, default: impl FnOnce() -> String) -> String` — Reads and returns a cloned buffer from egui Memory or uses the provided default.
+- `store_autocomplete_buffer(ctx: &egui::Context, id: egui::Id, buffer: &str)` — Stores/overwrites the buffer into egui Memory.
+- `remove_autocomplete_buffer(ctx: &egui::Context, id: egui::Id)` — Removes a persisted buffer if present.
+
+These helpers standardize the access pattern and avoid nested mutable borrows by using `ctx.memory(...)` for reads and `ctx.memory_mut(...)` for writes inside the helpers. All existing autocomplete selectors were refactored to use these helpers. A unit test (`autocomplete_buffer_helpers_work`) was added to validate the `load/store/remove` behavior via an `egui::Context`.
 
 #### 4.2 Editor Documentation Updates
 

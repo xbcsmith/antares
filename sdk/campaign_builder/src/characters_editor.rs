@@ -1409,14 +1409,14 @@ fn item_name_by_id(items: &[Item], item_id: ItemId) -> String {
 /// Helper function for tests - creates a test item
 #[cfg(test)]
 fn create_test_item(id: ItemId, name: &str) -> Item {
-    use antares::domain::items::types::{ConsumableData, ItemType};
+    use antares::domain::items::types::{ConsumableData, ConsumableEffect, ItemType};
 
     Item {
         id,
         name: name.to_string(),
         item_type: ItemType::Consumable(ConsumableData {
-            effect: String::new(),
-            uses: 1,
+            effect: ConsumableEffect::HealHp(0),
+            is_combat_usable: false,
         }),
         base_cost: 10,
         sell_cost: 5,

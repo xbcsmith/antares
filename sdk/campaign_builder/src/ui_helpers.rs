@@ -109,6 +109,66 @@ pub const MIN_SAFE_LEFT_COLUMN_WIDTH: f32 = 250.0;
 /// the computed available region is very small.
 pub const DEFAULT_PANEL_MIN_HEIGHT: f32 = 100.0;
 
+// NOTE: Per-widget transient autocomplete buffers are stored in egui `Memory::data`.
+// Use `ui.memory_mut(|mem| mem.data.get_temp_mut_or_insert_with::<String>(id, || default))`
+// to obtain a `&mut String` tied to the UI context instead of a process-global map.
+///
+/// Helper utilities for loading/storing/removing autocomplete buffers in egui Memory.
+/// These functions centralize the read/clone/writeback pattern used across
+/// autocomplete widgets to avoid overlapping mutable borrows of egui internals.
+///
+/// Examples:
+///
+/// ```no_run
+/// // Construct an id and use the helpers from a UI context:
+/// let id = autocomplete_buffer_id("item", "my_widget");
+/// let mut buf = load_autocomplete_buffer(ui.ctx(), id, || String::new());
+/// // ... render widget with &mut buf ...
+/// store_autocomplete_buffer(ui.ctx(), id, &buf);
+/// // or remove:
+/// remove_autocomplete_buffer(ui.ctx(), id);
+/// ```
+fn make_autocomplete_id(_ui: &egui::Ui, prefix: &str, id_salt: &str) -> egui::Id {
+    // Stable autocomplete id: deterministic and independent of UI nesting
+    egui::Id::new(format!("autocomplete:{}:{}", prefix, id_salt))
+}
+
+/// Load an autocomplete buffer from egui Memory.
+///
+/// Returns an owned `String` initialized from the stored buffer or `default()`
+/// if no entry exists.
+///
+/// # Arguments
+///
+/// * `ctx` - the `egui::Context` (e.g. `ui.ctx()`)
+/// * `id` - the `egui::Id` identifying the buffer
+/// * `default` - fallback factory invoked when no buffer exists
+pub fn load_autocomplete_buffer(
+    ctx: &egui::Context,
+    id: egui::Id,
+    default: impl FnOnce() -> String,
+) -> String {
+    ctx.memory(|mem| mem.data.get_temp::<String>(id).map(|s| s.clone()))
+        .unwrap_or_else(default)
+}
+
+/// Store (insert/replace) an autocomplete buffer into egui Memory.
+///
+/// Overwrites any existing value for `id`.
+pub fn store_autocomplete_buffer(ctx: &egui::Context, id: egui::Id, buffer: &str) {
+    ctx.memory_mut(|mem| {
+        *mem.data
+            .get_temp_mut_or_insert_with::<String>(id, || buffer.to_string()) = buffer.to_string();
+    });
+}
+
+/// Remove an autocomplete buffer from egui Memory (if present).
+pub fn remove_autocomplete_buffer(ctx: &egui::Context, id: egui::Id) {
+    ctx.memory_mut(|mem| {
+        mem.data.remove::<String>(id);
+    });
+}
+
 /// Renders a bold header row inside an `egui::Grid`.
 ///
 /// This should be called from within a `egui::Grid::show(...)` closure and will
@@ -2191,6 +2251,9 @@ pub fn autocomplete_item_selector(
 
     let mut changed = false;
 
+    // Build candidates (cloned list)
+    let candidates: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
+
     ui.horizontal(|ui| {
         ui.label(label);
 
@@ -2205,18 +2268,20 @@ pub fn autocomplete_item_selector(
                 .unwrap_or_default()
         };
 
-        let mut text_buffer = current_name.clone();
+        // Persist the per-widget text buffer in egui Memory so typed text survives frames.
+        let buffer_id = make_autocomplete_id(ui, "item", id_salt);
 
-        // Build candidates
-        let candidates: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
+        // Read the persistent buffer into a local owned `String` so we don't hold a long-lived borrow.
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
 
+        // Render the widget using the local buffer. After the widget returns, write the buffer back to memory.
         let response = AutocompleteInput::new(id_salt, &candidates)
             .with_placeholder("Start typing item name...")
             .show(ui, &mut text_buffer);
 
-        // Check if user selected something from autocomplete
+        // Commit valid selections
         if response.changed() && !text_buffer.is_empty() && text_buffer != current_name {
-            // Try to find the item by name
             if let Some(item) = items.iter().find(|i| i.name == text_buffer) {
                 *selected_item_id = item.id;
                 changed = true;
@@ -2231,8 +2296,13 @@ pub fn autocomplete_item_selector(
                 .clicked()
         {
             *selected_item_id = 0;
+            // Remove the persisted buffer entry
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
             changed = true;
         }
+
+        // Persist buffer back into egui memory so it survives frames.
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
     changed
@@ -2293,23 +2363,33 @@ pub fn autocomplete_quest_selector(
                 .unwrap_or_default()
         };
 
-        let mut text_buffer = current_name.clone();
-
         // Build candidates
         let candidates: Vec<String> = quests.iter().map(|q| q.name.clone()).collect();
+
+        // Persist the per-widget text buffer in egui memory by reading a cloned
+        // value into a local `String`, letting the widget edit it, and writing
+        // the value back into Memory after the edit. This avoids overlapping
+        // mutable borrows of egui internals while still providing persistent state.
+        let buffer_id = make_autocomplete_id(ui, "quest", id_salt);
+
+        // Initialize local buffer from memory (or fallback to the current name)
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
 
         let response = AutocompleteInput::new(id_salt, &candidates)
             .with_placeholder("Start typing quest name...")
             .show(ui, &mut text_buffer);
 
-        // Check if user selected something from autocomplete
+        // Commit selection immediately
         if response.changed() && !text_buffer.is_empty() && text_buffer != current_name {
-            // Try to find the quest by name
             if let Some(quest) = quests.iter().find(|q| q.name == text_buffer) {
                 *selected_quest_id_str = quest.id.to_string();
                 changed = true;
             }
         }
+
+        // Persist buffer back into egui memory so it survives frames.
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
 
         // Show clear button if something is selected
         if !selected_quest_id_str.is_empty()
@@ -2319,6 +2399,8 @@ pub fn autocomplete_quest_selector(
                 .clicked()
         {
             selected_quest_id_str.clear();
+            // Remove the persisted buffer entry
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
             changed = true;
         }
     });
@@ -2355,20 +2437,23 @@ pub fn autocomplete_monster_selector(
     ui.horizontal(|ui| {
         ui.label(label);
 
-        let mut text_buffer = selected_monster_name.clone();
+        // Use the provided persistent buffer directly so typed text persists
+        let original = selected_monster_name.clone();
 
         // Build candidates
         let candidates: Vec<String> = extract_monster_candidates(monsters);
 
         let response = AutocompleteInput::new(id_salt, &candidates)
             .with_placeholder("Start typing monster name...")
-            .show(ui, &mut text_buffer);
+            .show(ui, selected_monster_name);
 
         // Check if user selected something from autocomplete
-        if response.changed() && !text_buffer.is_empty() && text_buffer != *selected_monster_name {
+        if response.changed()
+            && !selected_monster_name.is_empty()
+            && selected_monster_name != &original
+        {
             // Validate the monster exists
-            if monsters.iter().any(|m| m.name == text_buffer) {
-                *selected_monster_name = text_buffer;
+            if monsters.iter().any(|m| m.name == *selected_monster_name) {
                 changed = true;
             }
         }
@@ -2424,24 +2509,31 @@ pub fn autocomplete_condition_selector(
             .map(|c| c.name.clone())
             .unwrap_or_default();
 
-        let mut text_buffer = current_name.clone();
+        let buffer_id = make_autocomplete_id(ui, "condition", id_salt);
 
         // Build candidates from condition names
         let candidates: Vec<String> = conditions.iter().map(|c| c.name.clone()).collect();
+
+        // Read the persistent buffer into a local `String`, allow the widget to edit it,
+        // and then write it back into egui `Memory` after the widget runs. This avoids
+        // holding long-lived mutable borrows into egui internals while still persisting
+        // the user's typed text across frames.
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
 
         let response = AutocompleteInput::new(id_salt, &candidates)
             .with_placeholder("Start typing condition name...")
             .show(ui, &mut text_buffer);
 
-        // Check if user selected something from autocomplete
         if response.changed() && !text_buffer.is_empty() && text_buffer != current_name {
-            // Try to find the condition by name
             if let Some(condition) = conditions.iter().find(|c| c.name == text_buffer) {
                 *selected_condition_id = condition.id.clone();
                 changed = true;
             }
         }
 
+        // Show clear button if something is selected. If cleared, remove the persisted buffer.
+        let mut cleared = false;
         // Show clear button if something is selected
         if !selected_condition_id.is_empty()
             && ui
@@ -2450,7 +2542,14 @@ pub fn autocomplete_condition_selector(
                 .clicked()
         {
             selected_condition_id.clear();
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
             changed = true;
+            cleared = true;
+        }
+
+        // Persist the edited buffer back into egui memory unless the user cleared it.
+        if !cleared {
+            store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
         }
     });
 
@@ -2497,19 +2596,27 @@ pub fn autocomplete_map_selector(
                 selected_map_id.clone()
             };
 
-        let mut text_buffer = current_map_name.clone();
+        // Persist the per-widget text buffer in egui Memory and render the widget with a mutable reference.
+        // This ensures edits persist across frames and are tied to the egui UI context.
+        let buffer_id = make_autocomplete_id(ui, "map", id_salt);
 
-        // Build candidates
-        let candidates: Vec<String> = extract_map_candidates(maps)
-            .into_iter()
-            .map(|(display, _)| display)
+        // Build candidate display strings as "Name (ID: X)"
+        let candidates: Vec<String> = maps
+            .iter()
+            .map(|m| format!("{} (ID: {})", m.name, m.id))
             .collect();
+
+        // Read the persistent buffer into a local `String` so we can safely pass
+        // a mutable reference into the widget without holding a long-lived
+        // mutable borrow of egui internals. After the widget returns, write the
+        // updated buffer back into Memory.
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_map_name.clone());
 
         let response = AutocompleteInput::new(id_salt, &candidates)
             .with_placeholder("Start typing map name...")
             .show(ui, &mut text_buffer);
 
-        // Check if user selected something from autocomplete
         if response.changed() && !text_buffer.is_empty() && text_buffer != current_map_name {
             // Try to extract map ID from the selected text (format: "Name (ID: X)")
             if let Some(id_start) = text_buffer.rfind("(ID: ") {
@@ -2521,7 +2628,8 @@ pub fn autocomplete_map_selector(
             }
         }
 
-        // Show clear button if something is selected
+        // Show clear button if something is selected. If cleared, remove the persisted buffer.
+        let mut cleared = false;
         if !selected_map_id.is_empty()
             && ui
                 .small_button("✖")
@@ -2529,7 +2637,14 @@ pub fn autocomplete_map_selector(
                 .clicked()
         {
             selected_map_id.clear();
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
             changed = true;
+            cleared = true;
+        }
+
+        // Persist edits back into egui Memory unless the user cleared the field.
+        if !cleared {
+            store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
         }
     });
 
@@ -2591,7 +2706,12 @@ pub fn autocomplete_npc_selector(
             String::new()
         };
 
-        let mut text_buffer = current_display.clone();
+        let buffer_id = make_autocomplete_id(ui, "npc", id_salt);
+
+        // Read persistent buffer into a local String so the widget can mutate it
+        // without holding a long-lived borrow into egui Memory, then write it back.
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_display.clone());
 
         // Build candidates
         let candidates: Vec<String> = extract_npc_candidates(maps)
@@ -2603,7 +2723,6 @@ pub fn autocomplete_npc_selector(
             .with_placeholder("Start typing NPC name...")
             .show(ui, &mut text_buffer);
 
-        // Check if user selected something from autocomplete
         if response.changed() && !text_buffer.is_empty() && text_buffer != current_display {
             // Try to find the NPC by reconstructing the ID from the display text
             // Format: "Name (Map: MapName, NPC ID: X)"
@@ -2617,6 +2736,7 @@ pub fn autocomplete_npc_selector(
         }
 
         // Show clear button if something is selected
+        let mut cleared = false;
         if !selected_npc_id.is_empty()
             && ui
                 .small_button("✖")
@@ -2624,7 +2744,14 @@ pub fn autocomplete_npc_selector(
                 .clicked()
         {
             selected_npc_id.clear();
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
             changed = true;
+            cleared = true;
+        }
+
+        // Persist edits back into egui Memory unless the user cleared the buffer.
+        if !cleared {
+            store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
         }
     });
 
@@ -2682,9 +2809,13 @@ pub fn autocomplete_item_list_selector(
 
         ui.separator();
 
-        // Add new item input
-        let mut text_buffer = String::new();
+        // Add new item input (persistent buffer keyed by widget)
+        let buffer_id = make_autocomplete_id(ui, "item_add", id_salt);
         let candidates: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
+
+        // Read persistent add buffer into a local String, render the Autocomplete widget
+        // with it, then persist the edited buffer back into egui Memory so it survives frames.
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || String::new());
 
         ui.horizontal(|ui| {
             ui.label("Add item:");
@@ -2692,17 +2823,20 @@ pub fn autocomplete_item_list_selector(
                 .with_placeholder("Start typing item name...")
                 .show(ui, &mut text_buffer);
 
-            // Check if user selected something from autocomplete
             if response.changed() && !text_buffer.is_empty() {
-                // Try to find the item by name
                 if let Some(item) = items.iter().find(|i| i.name == text_buffer) {
                     if !selected_items.contains(&item.id) {
                         selected_items.push(item.id);
                         changed = true;
                     }
                 }
+                // Clear the add buffer after successful add
+                text_buffer.clear();
             }
         });
+
+        // Persist the edited add buffer back into egui Memory
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
     changed
@@ -2759,27 +2893,34 @@ pub fn autocomplete_proficiency_list_selector(
 
         ui.separator();
 
-        // Add new proficiency input
-        let mut text_buffer = String::new();
+        let buffer_id = make_autocomplete_id(ui, "prof_add", id_salt);
         let candidates: Vec<String> = proficiencies.iter().map(|p| p.name.clone()).collect();
+
+        // Read the persisted add buffer into a local String so the widget can
+        // mutate it without holding a long-lived mutable borrow of egui Memory.
+        // After rendering, write the updated buffer back into Memory.
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || String::new());
 
         ui.horizontal(|ui| {
             ui.label("Add proficiency:");
             let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
-                .with_placeholder("Start typing proficiency name...")
+                .with_placeholder("Start typing proficiency...")
                 .show(ui, &mut text_buffer);
 
-            // Check if user selected something from autocomplete
             if response.changed() && !text_buffer.is_empty() {
-                // Try to find the proficiency by name
                 if let Some(prof) = proficiencies.iter().find(|p| p.name == text_buffer) {
                     if !selected_proficiencies.contains(&prof.id) {
                         selected_proficiencies.push(prof.id.clone());
                         changed = true;
                     }
+                    // Clear the add buffer after successful add
+                    text_buffer.clear();
                 }
             }
         });
+
+        // Persist the edited add buffer back into egui Memory so it survives frames.
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
     changed
@@ -2832,24 +2973,32 @@ pub fn autocomplete_tag_list_selector(
 
         ui.separator();
 
-        // Add new tag input
-        let mut text_buffer = String::new();
+        // Add new tag input (persistent buffer)
+        let buffer_id = make_autocomplete_id(ui, "tag_add", id_salt);
         let candidates: Vec<String> = available_tags.to_vec();
+
+        // Read persistent add buffer into a local String so the widget can mutate it
+        // without holding a long-lived borrow into egui Memory. After rendering, write the updated value back.
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || String::new());
 
         ui.horizontal(|ui| {
             ui.label("Add tag:");
             let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
-                .with_placeholder("Start typing tag name...")
+                .with_placeholder("Start typing tag...")
                 .show(ui, &mut text_buffer);
 
-            // Check if user selected something from autocomplete
             if response.changed() && !text_buffer.is_empty() {
                 if !selected_tags.contains(&text_buffer) {
                     selected_tags.push(text_buffer.clone());
                     changed = true;
                 }
+                // Clear buffer after successful add
+                text_buffer.clear();
             }
         });
+
+        // Persist the edited add buffer back into egui Memory
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
     changed
@@ -2902,24 +3051,31 @@ pub fn autocomplete_ability_list_selector(
 
         ui.separator();
 
-        // Add new ability input
-        let mut text_buffer = String::new();
+        let buffer_id = make_autocomplete_id(ui, "ability_add", id_salt);
         let candidates: Vec<String> = available_abilities.to_vec();
+
+        // Read persistent add buffer into a local String so the widget can mutate it
+        // without holding a long-lived borrow into egui Memory. After rendering, write the updated value back.
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || String::new());
 
         ui.horizontal(|ui| {
             ui.label("Add ability:");
             let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
-                .with_placeholder("Start typing ability name...")
+                .with_placeholder("Start typing ability...")
                 .show(ui, &mut text_buffer);
 
-            // Check if user selected something from autocomplete
             if response.changed() && !text_buffer.is_empty() {
                 if !selected_abilities.contains(&text_buffer) {
                     selected_abilities.push(text_buffer.clone());
                     changed = true;
                 }
+                // Clear buffer after successful add
+                text_buffer.clear();
             }
         });
+
+        // Persist the edited add buffer back into egui Memory so it survives frames.
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
     changed
@@ -4240,8 +4396,176 @@ mod tests {
             "GOBLIN".to_string(),
             "goblin".to_string(),
         ];
-        let widget = AutocompleteInput::new("case_test", &candidates);
-        assert_eq!(widget.candidates.len(), 3);
+        // Sanity check - ensure our candidates are present
+        assert_eq!(candidates.len(), 3);
+    }
+
+    #[test]
+    fn autocomplete_monster_selector_preserves_passed_buffer() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        ));
+        ctx.begin_pass(raw_input);
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            use antares::domain::character::{AttributePair, AttributePair16, Stats};
+            use antares::domain::combat::database::MonsterDefinition;
+            use antares::domain::combat::{
+                monster::MonsterCondition, LootTable, MonsterResistances,
+            };
+
+            let monsters = vec![MonsterDefinition {
+                id: 1,
+                name: "Goblin".to_string(),
+                stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
+                hp: AttributePair16::new(15),
+                ac: AttributePair::new(6),
+                attacks: vec![],
+                flee_threshold: 5,
+                special_attack_threshold: 0,
+                resistances: MonsterResistances::new(),
+                can_regenerate: false,
+                can_advance: true,
+                is_undead: false,
+                magic_resistance: 0,
+                loot: LootTable::new(1, 10, 0, 0, 10),
+                conditions: MonsterCondition::Normal,
+                active_conditions: vec![],
+                has_acted: false,
+            }];
+
+            let mut buffer = String::from("Go");
+            let original = buffer.clone();
+            // The selector should not reset a passed-in buffer on render
+            let _changed =
+                autocomplete_monster_selector(ui, "monster_test", "Name:", &mut buffer, &monsters);
+            assert_eq!(
+                buffer, original,
+                "Passed in buffer should not be reset by the selector"
+            );
+        });
+    }
+
+    #[test]
+    fn autocomplete_item_selector_persists_buffer() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        ));
+        ctx.begin_pass(raw_input);
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            use crate::items_editor::ItemsEditorState;
+
+            let mut item = ItemsEditorState::default_item();
+            item.id = 42;
+            item.name = "Sword".to_string();
+            let items = vec![item];
+
+            let mut selected_item_id: antares::domain::types::ItemId = 0;
+            // First call should initialize persistent buffer
+            let _ =
+                autocomplete_item_selector(ui, "item_test", "Item:", &mut selected_item_id, &items);
+
+            // Confirm memory has an entry
+            ui.horizontal(|ui| {
+                let id = make_autocomplete_id(ui, "item", "item_test");
+                let val = ui.ctx().memory(|mem| mem.data.get_temp::<String>(id));
+                assert!(val.is_some(), "Buffer map should contain entry for widget");
+
+                // Simulate typing by modifying the buffer
+                ui.ctx().memory_mut(|mem| {
+                    let buf = mem
+                        .data
+                        .get_temp_mut_or_insert_with::<String>(id, || String::new());
+                    *buf = "Sw".to_string();
+                });
+            });
+
+            // Second call should not overwrite the typed content
+            let _ =
+                autocomplete_item_selector(ui, "item_test", "Item:", &mut selected_item_id, &items);
+
+            let val2 = ui.ctx().memory_mut(|mem| {
+                mem.data
+                    .get_temp::<String>(make_autocomplete_id(ui, "item", "item_test"))
+            });
+            assert_eq!(val2.as_deref(), Some("Sw"));
+        });
+
+        #[test]
+        fn autocomplete_map_selector_persists_buffer() {
+            let ctx = egui::Context::default();
+            let mut raw_input = egui::RawInput::default();
+            raw_input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            ));
+            ctx.begin_pass(raw_input);
+
+            egui::CentralPanel::default().show(&ctx, |ui| {
+                let mut selected_map_id: String = String::new();
+                let maps: Vec<antares::domain::world::Map> = vec![];
+                // First call should initialize persistent buffer
+                let _ =
+                    autocomplete_map_selector(ui, "map_test", "Map:", &mut selected_map_id, &maps);
+
+                // Confirm memory has an entry
+                let id = make_autocomplete_id(ui, "map", "map_test");
+                let val = ui.ctx().memory(|mem| mem.data.get_temp::<String>(id));
+                assert!(val.is_some(), "Buffer map should contain entry for widget");
+
+                // Simulate typing by modifying the buffer
+                ui.ctx().memory_mut(|mem| {
+                    let buf = mem
+                        .data
+                        .get_temp_mut_or_insert_with::<String>(id, || String::new());
+                    *buf = "Over".to_string();
+                });
+
+                // Second call should not overwrite the typed content
+                let _ =
+                    autocomplete_map_selector(ui, "map_test", "Map:", &mut selected_map_id, &maps);
+
+                let val2 = ui.ctx().memory_mut(|mem| mem.data.get_temp::<String>(id));
+                assert_eq!(val2.as_deref(), Some("Over"));
+            });
+        }
+    }
+
+    #[test]
+    fn autocomplete_buffer_helpers_work() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        ));
+        ctx.begin_pass(raw_input);
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            // Use the same ID pattern as widgets use so we validate the helpers operate on the same keys.
+            let id = make_autocomplete_id(ui, "test", "helper_test");
+
+            // When no buffer exists, the default factory should be used.
+            let v = load_autocomplete_buffer(ui.ctx(), id, || "def".to_string());
+            assert_eq!(v, "def");
+
+            // Store a value and ensure it is returned by the loader.
+            store_autocomplete_buffer(ui.ctx(), id, "abc");
+            let v2 = load_autocomplete_buffer(ui.ctx(), id, || "def".to_string());
+            assert_eq!(v2, "abc");
+
+            // Remove the buffer and ensure memory no longer contains it.
+            remove_autocomplete_buffer(ui.ctx(), id);
+            let maybe = ui.ctx().memory(|mem| mem.data.get_temp::<String>(id));
+            assert!(maybe.is_none());
+        });
     }
 
     #[test]
@@ -4352,15 +4676,15 @@ mod tests {
 
     #[test]
     fn test_extract_item_tag_candidates() {
-        use antares::domain::items::types::{ConsumableData, Item, ItemType};
+        use antares::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
 
         let items = vec![
             Item {
                 id: 1,
                 name: "Sword".to_string(),
                 item_type: ItemType::Consumable(ConsumableData {
-                    effect: String::new(),
-                    uses: 1,
+                    effect: ConsumableEffect::HealHp(0),
+                    is_combat_usable: false,
                 }),
                 base_cost: 10,
                 sell_cost: 5,
@@ -4377,8 +4701,8 @@ mod tests {
                 id: 2,
                 name: "Armor".to_string(),
                 item_type: ItemType::Consumable(ConsumableData {
-                    effect: String::new(),
-                    uses: 1,
+                    effect: ConsumableEffect::HealHp(0),
+                    is_combat_usable: false,
                 }),
                 base_cost: 50,
                 sell_cost: 25,
@@ -4473,19 +4797,46 @@ mod tests {
 
     #[test]
     fn extract_proficiency_candidates_returns_string_ids() {
-        use antares::domain::proficiency::ProficiencyId;
+        use antares::domain::proficiency::{ProficiencyCategory, ProficiencyDefinition};
 
         let proficiencies = vec![
-            ProficiencyId::from("sword"),
-            ProficiencyId::from("shield"),
-            ProficiencyId::from("heavy_armor"),
+            ProficiencyDefinition {
+                id: "sword".to_string(),
+                name: "Sword".to_string(),
+                category: ProficiencyCategory::Weapon,
+                description: String::new(),
+            },
+            ProficiencyDefinition {
+                id: "shield".to_string(),
+                name: "Shield".to_string(),
+                category: ProficiencyCategory::Armor,
+                description: String::new(),
+            },
+            ProficiencyDefinition {
+                id: "heavy_armor".to_string(),
+                name: "Heavy Armor".to_string(),
+                category: ProficiencyCategory::Armor,
+                description: String::new(),
+            },
         ];
 
         let candidates = extract_proficiency_candidates(&proficiencies);
         assert_eq!(candidates.len(), 3);
-        assert_eq!(candidates[0], "sword");
-        assert_eq!(candidates[1], "shield");
-        assert_eq!(candidates[2], "heavy_armor");
+        assert_eq!(
+            candidates[0],
+            ("Sword (sword)".to_string(), "sword".to_string())
+        );
+        assert_eq!(
+            candidates[1],
+            ("Shield (shield)".to_string(), "shield".to_string())
+        );
+        assert_eq!(
+            candidates[2],
+            (
+                "Heavy Armor (heavy_armor)".to_string(),
+                "heavy_armor".to_string()
+            )
+        );
     }
 
     // =========================================================================
@@ -4533,22 +4884,27 @@ mod tests {
 
     #[test]
     fn candidate_cache_get_or_generate_items_caches_results() {
-        use antares::domain::items::types::{ArmorData, Item, ItemType};
+        use antares::domain::items::types::{ArmorClassification, ArmorData, Item, ItemType};
 
         let mut cache = AutocompleteCandidateCache::new();
-        #[allow(deprecated)]
         let items = vec![Item {
             id: 1,
             name: "Sword".to_string(),
-            description: String::new(),
-            item_type: ItemType::Armor(ArmorData::default()),
-            value: 0,
-            weight: 0,
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 0,
+                weight: 0,
+                classification: ArmorClassification::Light,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
             tags: Vec::new(),
-            disablement: antares::domain::items::types::Disablement::default(),
-            cursed: false,
-            charges: None,
-            max_charges: None,
         }];
 
         // First call generates and caches
@@ -4563,22 +4919,27 @@ mod tests {
 
     #[test]
     fn candidate_cache_invalidation_forces_regeneration() {
-        use antares::domain::items::types::{ArmorData, Item, ItemType};
+        use antares::domain::items::types::{ArmorClassification, ArmorData, Item, ItemType};
 
         let mut cache = AutocompleteCandidateCache::new();
-        #[allow(deprecated)]
         let items_old = vec![Item {
             id: 1,
             name: "Sword".to_string(),
-            description: String::new(),
-            item_type: ItemType::Armor(ArmorData::default()),
-            value: 0,
-            weight: 0,
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 0,
+                weight: 0,
+                classification: ArmorClassification::Light,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
             tags: Vec::new(),
-            disablement: antares::domain::items::types::Disablement::default(),
-            cursed: false,
-            charges: None,
-            max_charges: None,
         }];
 
         // Generate initial cache
@@ -4588,19 +4949,24 @@ mod tests {
         cache.invalidate_items();
 
         // New data should be generated
-        #[allow(deprecated)]
         let items_new = vec![Item {
             id: 2,
             name: "Axe".to_string(),
-            description: String::new(),
-            item_type: ItemType::Armor(ArmorData::default()),
-            value: 0,
-            weight: 0,
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 0,
+                weight: 0,
+                classification: ArmorClassification::Light,
+            }),
+            base_cost: 12,
+            sell_cost: 6,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
             tags: Vec::new(),
-            disablement: antares::domain::items::types::Disablement::default(),
-            cursed: false,
-            charges: None,
-            max_charges: None,
         }];
         let candidates2 = cache.get_or_generate_items(&items_new);
         assert_eq!(candidates2.len(), 1);
@@ -4622,16 +4988,16 @@ mod tests {
             ac: AttributePair::new(10),
             attacks: Vec::new(),
             flee_threshold: 0,
-            regeneration: 0,
-            advance_count: 0,
-            experience: 10,
+            special_attack_threshold: 0,
             resistances: MonsterResistances::default(),
-            gold: 0,
-            gems: 0,
-            loot_table: LootTable::default(),
-            conditions: Vec::<MonsterCondition>::new(),
-            special_attack_chance: 0,
-            special_attack_description: None,
+            can_regenerate: false,
+            can_advance: false,
+            is_undead: false,
+            magic_resistance: 0,
+            loot: LootTable::default(),
+            conditions: MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
         }];
 
         let candidates = cache.get_or_generate_monsters(&monsters);
@@ -4641,26 +5007,31 @@ mod tests {
 
     #[test]
     fn candidate_cache_performance_with_200_items() {
-        use antares::domain::items::types::{ArmorData, Item, ItemType};
+        use antares::domain::items::types::{ArmorClassification, ArmorData, Item, ItemType};
         use std::time::Instant;
 
         let mut cache = AutocompleteCandidateCache::new();
 
         // Generate 200 items
-        #[allow(deprecated)]
         let items: Vec<Item> = (0..200)
             .map(|i| Item {
                 id: i,
                 name: format!("Item{}", i),
-                description: String::new(),
-                item_type: ItemType::Armor(ArmorData::default()),
-                value: 0,
-                weight: 0,
+                item_type: ItemType::Armor(ArmorData {
+                    ac_bonus: 0,
+                    weight: 0,
+                    classification: ArmorClassification::Light,
+                }),
+                base_cost: 0,
+                sell_cost: 0,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
                 tags: Vec::new(),
-                disablement: antares::domain::items::types::Disablement::default(),
-                cursed: false,
-                charges: None,
-                max_charges: None,
             })
             .collect();
 
@@ -4711,7 +5082,7 @@ mod tests {
 
     #[test]
     fn show_item_validation_warning_checks_existence() {
-        use antares::domain::items::types::{ArmorData, Item, ItemType};
+        use antares::domain::items::types::{ArmorClassification, ArmorData, Item, ItemType};
 
         let ctx = egui::Context::default();
         let mut raw_input = egui::RawInput::default();
@@ -4725,20 +5096,26 @@ mod tests {
         let items = vec![Item {
             id: 1,
             name: "Sword".to_string(),
-            description: String::new(),
-            item_type: ItemType::Armor(ArmorData::default()),
-            value: 0,
-            weight: 0,
+            item_type: ItemType::Armor(ArmorData {
+                ac_bonus: 0,
+                weight: 0,
+                classification: ArmorClassification::Light,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
             tags: Vec::new(),
-            disablement: antares::domain::items::types::Disablement::default(),
-            cursed: false,
-            charges: None,
-            max_charges: None,
         }];
 
         egui::CentralPanel::default().show(&ctx, |ui| {
-            // Should show warning for non-existent item ID
-            show_item_validation_warning(ui, 999, &items);
+            // Should show warning for non-existent item ID (use a valid u8 value)
+            show_item_validation_warning(ui, 255, &items);
             // Should not show warning for existing item ID
             show_item_validation_warning(ui, 1, &items);
         });
@@ -4841,14 +5218,14 @@ mod tests {
             name: "Merchant".to_string(),
             description: "Sells goods".to_string(),
             position: Position::new(5, 5),
-            dialogue_id: None,
+            dialogue: String::new(),
         });
         map1.npcs.push(Npc {
             id: 2,
             name: "Guard".to_string(),
             description: "Protects the town".to_string(),
             position: Position::new(7, 3),
-            dialogue_id: None,
+            dialogue: String::new(),
         });
 
         let mut map2 = Map::new(2, "Castle".to_string(), "Desc".to_string(), 15, 15);
@@ -4857,7 +5234,7 @@ mod tests {
             name: "King".to_string(),
             description: "Rules the land".to_string(),
             position: Position::new(8, 8),
-            dialogue_id: None,
+            dialogue: String::new(),
         });
 
         let candidates = extract_npc_candidates(&[map1, map2]);
@@ -4901,36 +5278,24 @@ mod tests {
     fn test_extract_quest_candidates() {
         use antares::domain::quest::{Quest, QuestId};
 
-        let quests = vec![
-            Quest {
-                id: 1,
-                name: "Save the Village".to_string(),
-                description: "Help save the village from bandits".to_string(),
-                stages: vec![],
-                rewards: vec![],
-                prerequisites: vec![],
-                min_level: 1,
-                max_level: None,
-                repeatable: false,
-                is_main_quest: true,
-                quest_giver_npc: None,
-                quest_giver_location: None,
-            },
-            Quest {
-                id: 2,
-                name: "Find the Lost Sword".to_string(),
-                description: "Recover the legendary sword".to_string(),
-                stages: vec![],
-                rewards: vec![],
-                prerequisites: vec![],
-                min_level: 5,
-                max_level: Some(10),
-                repeatable: false,
-                is_main_quest: false,
-                quest_giver_npc: None,
-                quest_giver_location: None,
-            },
-        ];
+        let mut q1 = Quest::new(1, "Save the Village", "Help save the village from bandits");
+        q1.min_level = Some(1);
+        q1.repeatable = false;
+        q1.is_main_quest = true;
+        q1.quest_giver_npc = None;
+        q1.quest_giver_map = None;
+        q1.quest_giver_position = None;
+
+        let mut q2 = Quest::new(2, "Find the Lost Sword", "Recover the legendary sword");
+        q2.min_level = Some(5);
+        q2.max_level = Some(10);
+        q2.repeatable = false;
+        q2.is_main_quest = false;
+        q2.quest_giver_npc = None;
+        q2.quest_giver_map = None;
+        q2.quest_giver_position = None;
+
+        let quests = vec![q1, q2];
 
         let candidates = extract_quest_candidates(&quests);
         assert_eq!(candidates.len(), 2);
@@ -4953,36 +5318,23 @@ mod tests {
     fn test_extract_quest_candidates_maintains_order() {
         use antares::domain::quest::Quest;
 
-        let quests = vec![
-            Quest {
-                id: 10,
-                name: "Quest Alpha".to_string(),
-                description: "First quest".to_string(),
-                stages: vec![],
-                rewards: vec![],
-                prerequisites: vec![],
-                min_level: 1,
-                max_level: None,
-                repeatable: false,
-                is_main_quest: false,
-                quest_giver_npc: None,
-                quest_giver_location: None,
-            },
-            Quest {
-                id: 5,
-                name: "Quest Beta".to_string(),
-                description: "Second quest".to_string(),
-                stages: vec![],
-                rewards: vec![],
-                prerequisites: vec![],
-                min_level: 1,
-                max_level: None,
-                repeatable: false,
-                is_main_quest: false,
-                quest_giver_npc: None,
-                quest_giver_location: None,
-            },
-        ];
+        let mut q1 = Quest::new(10, "Quest Alpha", "First quest");
+        q1.min_level = Some(1);
+        q1.repeatable = false;
+        q1.is_main_quest = false;
+        q1.quest_giver_npc = None;
+        q1.quest_giver_map = None;
+        q1.quest_giver_position = None;
+
+        let mut q2 = Quest::new(5, "Quest Beta", "Second quest");
+        q2.min_level = Some(1);
+        q2.repeatable = false;
+        q2.is_main_quest = false;
+        q2.quest_giver_npc = None;
+        q2.quest_giver_map = None;
+        q2.quest_giver_position = None;
+
+        let quests = vec![q1, q2];
 
         let candidates = extract_quest_candidates(&quests);
         assert_eq!(candidates.len(), 2);
