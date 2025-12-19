@@ -2987,12 +2987,28 @@ pub fn autocomplete_tag_list_selector(
                 .with_placeholder("Start typing tag...")
                 .show(ui, &mut text_buffer);
 
-            if response.changed() && !text_buffer.is_empty() {
-                if !selected_tags.contains(&text_buffer) {
-                    selected_tags.push(text_buffer.clone());
+            // Use a trimmed buffer for comparisons so accidental whitespace doesn't create tags.
+            let tb = text_buffer.trim().to_string();
+
+            // 1) If the text changed and matches an existing candidate exactly, add it.
+            if response.changed() && !tb.is_empty() {
+                if candidates.iter().any(|c| c == &tb) {
+                    if !selected_tags.contains(&tb) {
+                        selected_tags.push(tb.clone());
+                        changed = true;
+                    }
+                    // Clear buffer after successful selection
+                    text_buffer.clear();
+                }
+            }
+
+            // 2) If Enter was pressed while this widget had focus, commit the typed text
+            //    (even if it's not an existing candidate). This avoids adding on partial typing.
+            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if !tb.is_empty() && !selected_tags.contains(&tb) {
+                    selected_tags.push(tb.clone());
                     changed = true;
                 }
-                // Clear buffer after successful add
                 text_buffer.clear();
             }
         });

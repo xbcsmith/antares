@@ -296,6 +296,37 @@ All Phase 2 deliverables except 2.8 are now complete!
 
 ---
 
+## SDK Campaign Builder: Autocomplete Integration - Items Editor (2025-02-18)
+
+### Implementation Overview
+
+This small update improves the Items Editor UX by replacing the legacy searchable multi-selector for item tags with the multi-select autocomplete widget and by using the canonical tag extraction helper. The change lets users start typing to complete existing tags and creates a new tag if the typed value doesn't exist.
+
+### Changes Implemented
+
+- Replaced `searchable_selector_multi` usage for item tags with `autocomplete_tag_list_selector`.
+- Switched tag candidate extraction to use `extract_item_tag_candidates(items)` (single source of tag candidates).
+- Removed `tags_query` buffer from `ItemsEditorState` (no longer required).
+- Included standard tags in candidate list so they appear in autocomplete even if unused.
+- Removed Quick-add buttons in favor of autocomplete (autocomplete now provides standard + typed additions).
+- Replaced multi-line hover text literals with `concat!()` to avoid formatting issues.
+- Kept behavior for import/export/preview unchanged.
+
+**Files Modified**
+
+- `sdk/campaign_builder/src/items_editor.rs` — replaced tag selector, removed `tags_query`, included standard tags in candidates, removed Quick-add buttons, and fixed hover text formatting
+- `sdk/campaign_builder/src/ui_helpers.rs` — no API changes required (reused `autocomplete_tag_list_selector` and `extract_item_tag_candidates`)
+
+**Testing**
+
+- Confirmed all quality checks pass locally:
+  - `cargo fmt --all` ✓
+  - `cargo check --all-targets --all-features` ✓
+  - `cargo clippy --all-targets --all-features -- -D warnings` ✓
+  - `cargo nextest run --all-features` ✓ (all tests passed)
+
+---
+
 ## SDK Campaign Builder: Autocomplete Integration - Phase 2.3 Characters Editor (2025-01-29)
 
 ### Implementation Overview
