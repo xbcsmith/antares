@@ -98,6 +98,133 @@ All tests verify:
 
 - Color calculation logic with floating-point comparison
 - HP display formatting
+- Condition priority logic
+- Multiple condition handling
+
+### Quality Gates
+
+```bash
+✅ cargo fmt --all                                      # Passed
+✅ cargo check --all-targets --all-features             # Passed
+✅ cargo clippy --all-targets --all-features -- -D warnings  # Passed (0 warnings)
+✅ cargo nextest run --all-features                     # Passed (827 tests)
+```
+
+### Architecture Compliance
+
+- ✅ Used type-safe bitflag pattern for conditions
+- ✅ No magic numbers - all priorities use named constants
+- ✅ No modifications to core data structures
+- ✅ All public functions have doc comments with examples
+- ✅ Used `is_fatal()` helper method for compound flag detection
+
+### Files Modified
+
+- **Modified**: `src/game/systems/hud.rs` - Added priority constants, helper functions, and tests
+
+### Lessons Learned
+
+**Bitflag Compound Values**: When working with bitflags that have compound values (e.g., `ERADICATED = 255`), using `has()` can give false positives. Use dedicated helper methods like `is_fatal()` that understand the semantic meaning of compound flags.
+
+### Next Steps
+
+- Phase 3: Compass display (show party facing direction N/E/S/W)
+- Phase 4: Portrait support (deferred)
+
+---
+
+## HUD Feature - Phase 2: Enhanced Condition Display (2025-01-29)
+
+### Overview
+
+Implemented Phase 2 of the HUD feature, enhancing the condition display system with explicit priority constants, numeric priority function, and multiple condition counting. When a character has multiple active conditions, the HUD now displays the most severe condition with a "+N" counter showing additional conditions.
+
+### Implementation Details
+
+#### 1. Priority Constants Added
+
+Added explicit priority values to `src/game/systems/hud.rs`:
+
+```rust
+pub const PRIORITY_DEAD: u8 = 100;
+pub const PRIORITY_UNCONSCIOUS: u8 = 90;
+pub const PRIORITY_PARALYZED: u8 = 80;
+pub const PRIORITY_POISONED: u8 = 70;
+pub const PRIORITY_DISEASED: u8 = 60;
+pub const PRIORITY_BLINDED: u8 = 50;
+pub const PRIORITY_SILENCED: u8 = 40;
+pub const PRIORITY_ASLEEP: u8 = 30;
+pub const PRIORITY_BUFFED: u8 = 10;
+pub const PRIORITY_FINE: u8 = 0;
+```
+
+These replace magic numbers and provide clear severity ordering for condition display.
+
+#### 2. New Helper Functions
+
+**`get_condition_priority(conditions: &Condition) -> u8`**
+
+Returns numeric priority value (0-100) for a character's condition state. Uses `is_fatal()` method to correctly detect DEAD/STONE/ERADICATED compound flags.
+
+**`count_conditions(conditions: &Condition) -> u8`**
+
+Counts the number of active negative conditions on a character (0-8). Used to display "+N" suffix when multiple conditions are active.
+
+#### 3. Enhanced Update System
+
+Modified `update_hud()` system to display multiple condition count:
+
+```rust
+let count = count_conditions(&character.conditions);
+
+// If multiple conditions, append count
+let display_text = if count > 1 {
+    format!("{} +{}", cond_str, count - 1)
+} else {
+    cond_str
+};
+```
+
+This produces displays like:
+
+- "☠️ Poisoned +2" (poisoned plus 2 other conditions)
+- "⚡ Paralyzed +1" (paralyzed plus 1 other condition)
+- "✓ OK" (no conditions)
+
+### Bug Fix: Compound Condition Flag Handling
+
+**Issue**: Initial implementation used `has(Condition::ERADICATED)` which returned true for ANY condition because ERADICATED = 255 (all bits set).
+
+**Root Cause**: The `has()` method checks if ANY bits from the flag are present:
+
+- `(16 & 255) != 0` → `16 != 0` → true (incorrect)
+
+**Solution**: Use `is_fatal()` method instead, which checks `self.0 >= Self::DEAD` to correctly identify fatal states.
+
+This demonstrates the importance of using helper methods for compound bitflag values rather than direct `has()` checks.
+
+### Testing
+
+**Test Coverage: 20 tests total (7 new), all passing**
+
+New tests added:
+
+```
+✅ test_get_condition_priority_dead
+✅ test_get_condition_priority_poisoned
+✅ test_get_condition_priority_fine
+✅ test_count_conditions_none
+✅ test_count_conditions_single
+✅ test_count_conditions_multiple
+✅ test_count_conditions_all
+```
+
+All tests verify:
+
+- Priority value calculation for each condition type
+- Correct priority ordering (dead > unconscious > paralyzed > etc.)
+- Condition counting logic (0-8 conditions)
+- Multiple condition display format
 - Condition priority ordering
 - Edge cases (full HP, zero HP, multiple conditions)
 

@@ -40,6 +40,18 @@ pub const CHARACTER_CARD_WIDTH: Val = Val::Px(120.0);
 pub const HP_BAR_HEIGHT: Val = Val::Px(16.0);
 pub const CARD_PADDING: Val = Val::Px(8.0);
 
+// Condition priority values (higher = more severe)
+pub const PRIORITY_DEAD: u8 = 100;
+pub const PRIORITY_UNCONSCIOUS: u8 = 90;
+pub const PRIORITY_PARALYZED: u8 = 80;
+pub const PRIORITY_POISONED: u8 = 70;
+pub const PRIORITY_DISEASED: u8 = 60;
+pub const PRIORITY_BLINDED: u8 = 50;
+pub const PRIORITY_SILENCED: u8 = 40;
+pub const PRIORITY_ASLEEP: u8 = 30;
+pub const PRIORITY_BUFFED: u8 = 10;
+pub const PRIORITY_FINE: u8 = 0;
+
 // ===== Marker Components =====
 
 /// Marker component for the HUD root container
@@ -245,7 +257,16 @@ fn update_hud(
         if let Some(character) = party.members.get(condition_text.party_index) {
             let (cond_str, color) =
                 get_priority_condition(&character.conditions, &character.active_conditions);
-            **text = cond_str;
+            let count = count_conditions(&character.conditions);
+
+            // If multiple conditions, append count
+            let display_text = if count > 1 {
+                format!("{} +{}", cond_str, count - 1)
+            } else {
+                cond_str
+            };
+
+            **text = display_text;
             *text_color = TextColor(color);
         } else {
             **text = String::new();
@@ -382,6 +403,105 @@ pub fn get_priority_condition(
     ("✓ OK".to_string(), HP_HEALTHY_COLOR)
 }
 
+/// Returns numeric priority for a condition
+///
+/// Higher values = more severe conditions displayed first
+///
+/// # Arguments
+/// * `conditions` - Character's condition bitflags
+///
+/// # Returns
+/// Priority value (0-100)
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::Condition;
+/// use antares::game::systems::hud::{get_condition_priority, PRIORITY_DEAD};
+///
+/// let mut conditions = Condition::new();
+/// conditions.add(Condition::DEAD);
+/// assert_eq!(get_condition_priority(&conditions), PRIORITY_DEAD);
+/// ```
+pub fn get_condition_priority(conditions: &Condition) -> u8 {
+    // Use is_fatal() to detect DEAD/STONE/ERADICATED correctly
+    if conditions.is_fatal() {
+        return PRIORITY_DEAD;
+    }
+    if conditions.has(Condition::UNCONSCIOUS) {
+        return PRIORITY_UNCONSCIOUS;
+    }
+    if conditions.has(Condition::PARALYZED) {
+        return PRIORITY_PARALYZED;
+    }
+    if conditions.has(Condition::POISONED) {
+        return PRIORITY_POISONED;
+    }
+    if conditions.has(Condition::DISEASED) {
+        return PRIORITY_DISEASED;
+    }
+    if conditions.has(Condition::BLINDED) {
+        return PRIORITY_BLINDED;
+    }
+    if conditions.has(Condition::SILENCED) {
+        return PRIORITY_SILENCED;
+    }
+    if conditions.has(Condition::ASLEEP) {
+        return PRIORITY_ASLEEP;
+    }
+    PRIORITY_FINE
+}
+
+/// Counts number of active negative conditions
+///
+/// Used to display "+N conditions" when multiple exist
+///
+/// # Arguments
+/// * `conditions` - Character's condition bitflags
+///
+/// # Returns
+/// Count of active conditions (0-8)
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::Condition;
+/// use antares::game::systems::hud::count_conditions;
+///
+/// let mut conditions = Condition::new();
+/// conditions.add(Condition::POISONED);
+/// conditions.add(Condition::BLINDED);
+/// assert_eq!(count_conditions(&conditions), 2);
+/// ```
+pub fn count_conditions(conditions: &Condition) -> u8 {
+    let mut count = 0;
+    if conditions.has(Condition::ASLEEP) {
+        count += 1;
+    }
+    if conditions.has(Condition::BLINDED) {
+        count += 1;
+    }
+    if conditions.has(Condition::SILENCED) {
+        count += 1;
+    }
+    if conditions.has(Condition::DISEASED) {
+        count += 1;
+    }
+    if conditions.has(Condition::POISONED) {
+        count += 1;
+    }
+    if conditions.has(Condition::PARALYZED) {
+        count += 1;
+    }
+    if conditions.has(Condition::UNCONSCIOUS) {
+        count += 1;
+    }
+    if conditions.has(Condition::DEAD) {
+        count += 1;
+    }
+    count
+}
+
 // ===== Tests =====
 
 #[cfg(test)]
@@ -488,5 +608,61 @@ mod tests {
         conditions.add(Condition::POISONED);
         let (text, _) = get_priority_condition(&conditions, &[]);
         assert!(text.contains("Dead"));
+    }
+
+    #[test]
+    fn test_get_condition_priority_dead() {
+        let mut conditions = Condition::new();
+        conditions.add(Condition::DEAD);
+        assert_eq!(get_condition_priority(&conditions), PRIORITY_DEAD);
+    }
+
+    #[test]
+    fn test_get_condition_priority_poisoned() {
+        let mut conditions = Condition::new();
+        conditions.add(Condition::POISONED);
+        assert_eq!(get_condition_priority(&conditions), PRIORITY_POISONED);
+    }
+
+    #[test]
+    fn test_get_condition_priority_fine() {
+        let conditions = Condition::new();
+        assert_eq!(get_condition_priority(&conditions), PRIORITY_FINE);
+    }
+
+    #[test]
+    fn test_count_conditions_none() {
+        let conditions = Condition::new();
+        assert_eq!(count_conditions(&conditions), 0);
+    }
+
+    #[test]
+    fn test_count_conditions_single() {
+        let mut conditions = Condition::new();
+        conditions.add(Condition::POISONED);
+        assert_eq!(count_conditions(&conditions), 1);
+    }
+
+    #[test]
+    fn test_count_conditions_multiple() {
+        let mut conditions = Condition::new();
+        conditions.add(Condition::POISONED);
+        conditions.add(Condition::BLINDED);
+        conditions.add(Condition::SILENCED);
+        assert_eq!(count_conditions(&conditions), 3);
+    }
+
+    #[test]
+    fn test_count_conditions_all() {
+        let mut conditions = Condition::new();
+        conditions.add(Condition::ASLEEP);
+        conditions.add(Condition::BLINDED);
+        conditions.add(Condition::SILENCED);
+        conditions.add(Condition::DISEASED);
+        conditions.add(Condition::POISONED);
+        conditions.add(Condition::PARALYZED);
+        conditions.add(Condition::UNCONSCIOUS);
+        conditions.add(Condition::DEAD);
+        assert_eq!(count_conditions(&conditions), 8);
     }
 }
