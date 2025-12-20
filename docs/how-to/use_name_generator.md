@@ -104,7 +104,7 @@ use antares::sdk::name_generator::{NameGenerator, NameTheme};
 
 fn main() {
     let generator = NameGenerator::new();
-    
+
     // Generate a single name
     let npc_name = generator.generate(NameTheme::Fantasy);
     println!("NPC: {}", npc_name);
@@ -271,7 +271,7 @@ use antares::sdk::name_generator::{NameGenerator, NameTheme};
 
 fn on_generate_name_button_clicked(&mut self, race_id: &str) {
     let generator = NameGenerator::new();
-    
+
     // Choose theme based on race or class
     let theme = match race_id {
         "elf" => NameTheme::Star,      // Elves get celestial names
@@ -279,7 +279,7 @@ fn on_generate_name_button_clicked(&mut self, race_id: &str) {
         "human" => NameTheme::Fantasy,  // Humans get standard names
         _ => NameTheme::Fantasy,
     };
-    
+
     self.character_name = generator.generate_with_title(theme);
 }
 ```

@@ -42,15 +42,15 @@ Theme: Red Supergiant | Rival to Mars | Heart of Scorpius
 Provider: Random Generation
 
 1. Crimsonus the Wanderer
-   The blood-red light of Antares illuminated Crimsonus the Wanderer's birth, 
+   The blood-red light of Antares illuminated Crimsonus the Wanderer's birth,
    granting them the strength of the cosmos.
 
 2. Scorpiusar
-   Born under the scorpion's heart, Scorpiusar carries the fierce legacy of 
+   Born under the scorpion's heart, Scorpiusar carries the fierce legacy of
    Antares within.
 
 3. Marsheart the Eternal
-   Marked by the red star Antares, Marsheart the Eternal walks the path 
+   Marked by the red star Antares, Marsheart the Eternal walks the path
    between light and shadow.
 ```
 
@@ -63,19 +63,19 @@ use antares::sdk::name_generator::{NameGenerator, NameTheme};
 
 fn main() {
     let generator = NameGenerator::new();
-    
+
     // Generate a name
     let npc_name = generator.generate(NameTheme::Fantasy);
     println!("NPC: {}", npc_name);
-    
+
     // Generate with a title (40% chance)
     let hero = generator.generate_with_title(NameTheme::Star);
     println!("Hero: {}", hero);
-    
+
     // Generate with backstory
     let (name, lore) = generator.generate_with_lore(NameTheme::Antares);
     println!("{}: {}", name, lore);
-    
+
     // Generate multiple names
     let npcs = generator.generate_multiple(10, NameTheme::Fantasy);
     for name in npcs {
