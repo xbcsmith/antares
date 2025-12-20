@@ -1019,19 +1019,9 @@ impl RacesEditorState {
 
                 ui.add_space(10.0);
                 ui.heading("Proficiencies");
-                // Load proficiency definitions for suggestions (best-effort)
-                let prof_defs: Vec<ProficiencyDefinition> = if let Some(dir) = campaign_dir {
-                    let path = dir.join("data/proficiencies.ron");
-                    match ProficiencyDatabase::load_from_file(&path) {
-                        Ok(db) => db.all().iter().map(|d| (*d).clone()).collect(),
-                        Err(_) => Vec::new(),
-                    }
-                } else {
-                    match ProficiencyDatabase::load_from_file("data/proficiencies.ron") {
-                        Ok(db) => db.all().iter().map(|d| (*d).clone()).collect(),
-                        Err(_) => Vec::new(),
-                    }
-                };
+                // Load proficiency definitions with tri-stage fallback
+                let prof_defs = crate::ui_helpers::load_proficiencies(campaign_dir, items);
+
 
                 if autocomplete_proficiency_list_selector(
                     ui,

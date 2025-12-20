@@ -37,8 +37,8 @@
 //! ```
 
 use crate::ui_helpers::{
-    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
-    TwoColumnLayout,
+    autocomplete_item_list_selector, autocomplete_monster_list_selector, ActionButtons,
+    EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
@@ -48,6 +48,27 @@ use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
 use std::fs;
 use std::path::PathBuf;
+
+// One Dark Theme Color Constants for Event Types
+// Reference: https://github.com/joshdick/onedark.vim
+
+/// Red for Encounter events - rgb(224, 108, 117) / #e06c75
+const EVENT_COLOR_ENCOUNTER: Color32 = Color32::from_rgb(224, 108, 117);
+
+/// Green for Treasure events - rgb(152, 195, 121) / #98c379
+const EVENT_COLOR_TREASURE: Color32 = Color32::from_rgb(152, 195, 121);
+
+/// Blue for Teleport events - rgb(97, 175, 239) / #61afef
+const EVENT_COLOR_TELEPORT: Color32 = Color32::from_rgb(97, 175, 239);
+
+/// Dark Yellow for Trap events - rgb(209, 154, 102) / #d19a66
+const EVENT_COLOR_TRAP: Color32 = Color32::from_rgb(209, 154, 102);
+
+/// Cyan for Sign events - rgb(86, 182, 194) / #56b6c2
+const EVENT_COLOR_SIGN: Color32 = Color32::from_rgb(86, 182, 194);
+
+/// Magenta for NPC Dialogue events - rgb(198, 120, 221) / #c678dd
+const EVENT_COLOR_NPC_DIALOGUE: Color32 = Color32::from_rgb(198, 120, 221);
 
 // ===== Editor Mode =====
 
@@ -789,6 +810,31 @@ impl EventType {
         }
     }
 
+    /// Returns the One Dark theme color for this event type
+    ///
+    /// # Returns
+    /// Color32 from One Dark theme palette matching the event's semantic meaning
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::map_editor::EventType;
+    ///
+    /// let encounter = EventType::Encounter;
+    /// let color = encounter.color();
+    /// // Returns red color for combat encounters
+    /// ```
+    pub fn color(&self) -> Color32 {
+        match self {
+            EventType::Encounter => EVENT_COLOR_ENCOUNTER,
+            EventType::Treasure => EVENT_COLOR_TREASURE,
+            EventType::Teleport => EVENT_COLOR_TELEPORT,
+            EventType::Trap => EVENT_COLOR_TRAP,
+            EventType::Sign => EVENT_COLOR_SIGN,
+            EventType::NpcDialogue => EVENT_COLOR_NPC_DIALOGUE,
+        }
+    }
+
     pub fn all() -> &'static [EventType] {
         &[
             EventType::Encounter,
@@ -1068,7 +1114,7 @@ impl<'a> MapGridWidget<'a> {
         self
     }
 
-    fn tile_color(tile: &Tile, has_event: bool, has_npc: bool) -> Color32 {
+    fn tile_color(tile: &Tile, event_type: Option<&EventType>, has_npc: bool) -> Color32 {
         if has_npc {
             return Color32::from_rgb(255, 200, 0); // Yellow for NPCs
         }
@@ -1086,8 +1132,8 @@ impl<'a> MapGridWidget<'a> {
             TerrainType::Mountain => Color32::from_rgb(105, 105, 105), // Dim Gray
         };
 
-        if has_event {
-            return Color32::from_rgb(255, 100, 100); // Red for events
+        if let Some(event_type) = event_type {
+            return event_type.color();
         }
 
         if tile.wall_type != WallType::None {
@@ -1152,12 +1198,22 @@ impl<'a> Widget for MapGridWidget<'a> {
             for x in 0..self.state.map.width as i32 {
                 let pos = Position::new(x, y);
                 if let Some(tile) = self.state.map.get_tile(pos) {
-                    let has_event =
-                        self.state.show_events && self.state.map.events.contains_key(&pos);
+                    let event_type = if self.state.show_events {
+                        self.state.map.events.get(&pos).map(|event| match event {
+                            MapEvent::Encounter { .. } => EventType::Encounter,
+                            MapEvent::Treasure { .. } => EventType::Treasure,
+                            MapEvent::Teleport { .. } => EventType::Teleport,
+                            MapEvent::Trap { .. } => EventType::Trap,
+                            MapEvent::Sign { .. } => EventType::Sign,
+                            MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
+                        })
+                    } else {
+                        None
+                    };
                     let has_npc = self.state.show_npcs
                         && self.state.map.npcs.iter().any(|npc| npc.position == pos);
 
-                    let color = Self::tile_color(tile, has_event, has_npc);
+                    let color = Self::tile_color(tile, event_type.as_ref(), has_npc);
 
                     let rect = Rect::from_min_size(
                         to_screen(x, y),
@@ -1304,9 +1360,16 @@ impl<'a> Widget for MapPreviewWidget<'a> {
             for x in 0..self.map.width as i32 {
                 let pos = Position::new(x, y);
                 if let Some(tile) = self.map.get_tile(pos) {
-                    let has_event = self.map.events.contains_key(&pos);
+                    let event_type = self.map.events.get(&pos).map(|event| match event {
+                        MapEvent::Encounter { .. } => EventType::Encounter,
+                        MapEvent::Treasure { .. } => EventType::Treasure,
+                        MapEvent::Teleport { .. } => EventType::Teleport,
+                        MapEvent::Trap { .. } => EventType::Trap,
+                        MapEvent::Sign { .. } => EventType::Sign,
+                        MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
+                    });
                     let has_npc = self.map.npcs.iter().any(|n| n.position == pos);
-                    let color = MapGridWidget::tile_color(tile, has_event, has_npc);
+                    let color = MapGridWidget::tile_color(tile, event_type.as_ref(), has_npc);
 
                     let rect =
                         Rect::from_min_size(to_screen(x, y), Vec2::new(tile_size, tile_size));
@@ -2614,15 +2677,12 @@ impl MapsEditorState {
             match event_editor.event_type {
                 EventType::Encounter => {
                     // Multi-select searchable list for monsters (id+name)
-                    let changed = searchable_selector_multi(
+                    let changed = autocomplete_monster_list_selector(
                         ui,
                         "event_encounter_monsters",
                         "Encounter Monsters",
                         &mut event_editor.encounter_monsters,
                         monsters,
-                        |m| m.id,
-                        |m| m.name.clone(),
-                        &mut event_editor.encounter_monsters_query,
                     );
                     if changed {
                         editor.has_changes = true;
@@ -2630,15 +2690,12 @@ impl MapsEditorState {
                 }
                 EventType::Treasure => {
                     // Multi-select searchable list for treasure items (id+name)
-                    let changed = searchable_selector_multi(
+                    let changed = autocomplete_item_list_selector(
                         ui,
                         "event_treasure_items",
                         "Treasure Items",
                         &mut event_editor.treasure_items,
                         items,
-                        |i| i.id,
-                        |i| i.name.clone(),
-                        &mut event_editor.treasure_items_query,
                     );
                     if changed {
                         editor.has_changes = true;

@@ -3140,7 +3140,6 @@ impl CampaignBuilderApp {
                         match ron::from_str::<Vec<antares::domain::quest::Quest>>(&contents) {
                             Ok(quests) => {
                                 self.quests = quests;
-                                self.quest_editor_state.load_quests(self.quests.clone());
                                 self.status_message =
                                     format!("Loaded {} quests", self.quests.len());
                             }
@@ -4736,12 +4735,11 @@ mod tests {
             quest_giver_position: None,
         };
 
-        app.quests.push(quest.clone());
-        app.quest_editor_state.quests.push(quest);
+        app.quests.push(quest);
         app.quest_editor_state.selected_quest = Some(0);
 
         // Test edit stage
-        let result = app.quest_editor_state.edit_stage(0, 0);
+        let result = app.quest_editor_state.edit_stage(&app.quests, 0, 0);
         assert!(result.is_ok());
         assert_eq!(app.quest_editor_state.selected_stage, Some(0));
         assert_eq!(app.quest_editor_state.stage_buffer.name, "Stage 1");
@@ -4752,12 +4750,9 @@ mod tests {
 
         // Test save stage
         app.quest_editor_state.stage_buffer.name = "Updated Stage".to_string();
-        let result = app.quest_editor_state.save_stage(0, 0);
+        let result = app.quest_editor_state.save_stage(&mut app.quests, 0, 0);
         assert!(result.is_ok());
-        assert_eq!(
-            app.quest_editor_state.quests[0].stages[0].name,
-            "Updated Stage"
-        );
+        assert_eq!(app.quests[0].stages[0].name, "Updated Stage");
         assert_eq!(app.quest_editor_state.selected_stage, None);
         assert!(app.quest_editor_state.has_unsaved_changes);
     }
@@ -4792,12 +4787,11 @@ mod tests {
             quest_giver_position: None,
         };
 
-        app.quests.push(quest.clone());
-        app.quest_editor_state.quests.push(quest);
+        app.quests.push(quest);
         app.quest_editor_state.selected_quest = Some(0);
 
         // Test edit objective
-        let result = app.quest_editor_state.edit_objective(0, 0, 0);
+        let result = app.quest_editor_state.edit_objective(&app.quests, 0, 0, 0);
         assert!(result.is_ok());
         assert_eq!(app.quest_editor_state.selected_objective, Some(0));
         assert_eq!(
@@ -4809,13 +4803,15 @@ mod tests {
 
         // Test save objective
         app.quest_editor_state.objective_buffer.quantity = "10".to_string();
-        let result = app.quest_editor_state.save_objective(0, 0, 0);
+        let result = app
+            .quest_editor_state
+            .save_objective(&mut app.quests, 0, 0, 0);
         assert!(result.is_ok());
 
         if let antares::domain::quest::QuestObjective::KillMonsters {
             monster_id,
             quantity,
-        } = &app.quest_editor_state.quests[0].stages[0].objectives[0]
+        } = &app.quests[0].stages[0].objectives[0]
         {
             assert_eq!(*quantity, 10);
         } else {
@@ -4862,16 +4858,15 @@ mod tests {
             quest_giver_position: None,
         };
 
-        app.quests.push(quest.clone());
-        app.quest_editor_state.quests.push(quest);
+        app.quests.push(quest);
         app.quest_editor_state.selected_quest = Some(0);
 
         // Delete first stage
-        assert_eq!(app.quest_editor_state.quests[0].stages.len(), 2);
-        let result = app.quest_editor_state.delete_stage(0, 0);
+        assert_eq!(app.quests[0].stages.len(), 2);
+        let result = app.quest_editor_state.delete_stage(&mut app.quests, 0, 0);
         assert!(result.is_ok());
-        assert_eq!(app.quest_editor_state.quests[0].stages.len(), 1);
-        assert_eq!(app.quest_editor_state.quests[0].stages[0].name, "Stage 2");
+        assert_eq!(app.quests[0].stages.len(), 1);
+        assert_eq!(app.quests[0].stages[0].name, "Stage 2");
         assert!(app.quest_editor_state.has_unsaved_changes);
     }
 
@@ -4911,25 +4906,20 @@ mod tests {
             quest_giver_position: None,
         };
 
-        app.quests.push(quest.clone());
-        app.quest_editor_state.quests.push(quest);
+        app.quests.push(quest);
         app.quest_editor_state.selected_quest = Some(0);
 
         // Delete first objective
-        assert_eq!(
-            app.quest_editor_state.quests[0].stages[0].objectives.len(),
-            2
-        );
-        let result = app.quest_editor_state.delete_objective(0, 0, 0);
+        assert_eq!(app.quests[0].stages[0].objectives.len(), 2);
+        let result = app
+            .quest_editor_state
+            .delete_objective(&mut app.quests, 0, 0, 0);
         assert!(result.is_ok());
-        assert_eq!(
-            app.quest_editor_state.quests[0].stages[0].objectives.len(),
-            1
-        );
+        assert_eq!(app.quests[0].stages[0].objectives.len(), 1);
 
         // Verify remaining objective is CollectItems
         if let antares::domain::quest::QuestObjective::CollectItems { item_id, quantity } =
-            &app.quest_editor_state.quests[0].stages[0].objectives[0]
+            &app.quests[0].stages[0].objectives[0]
         {
             assert_eq!(*item_id, 200);
             assert_eq!(*quantity, 3);
@@ -4970,11 +4960,10 @@ mod tests {
             quest_giver_position: None,
         };
 
-        app.quests.push(quest.clone());
-        app.quest_editor_state.quests.push(quest);
+        app.quests.push(quest);
 
         // Edit objective and change type to CollectItems
-        let result = app.quest_editor_state.edit_objective(0, 0, 0);
+        let result = app.quest_editor_state.edit_objective(&app.quests, 0, 0, 0);
         assert!(result.is_ok());
 
         app.quest_editor_state.objective_buffer.objective_type =
@@ -4982,12 +4971,14 @@ mod tests {
         app.quest_editor_state.objective_buffer.item_id = "250".to_string();
         app.quest_editor_state.objective_buffer.quantity = "7".to_string();
 
-        let result = app.quest_editor_state.save_objective(0, 0, 0);
+        let result = app
+            .quest_editor_state
+            .save_objective(&mut app.quests, 0, 0, 0);
         assert!(result.is_ok());
 
         // Verify objective type changed
         if let antares::domain::quest::QuestObjective::CollectItems { item_id, quantity } =
-            &app.quest_editor_state.quests[0].stages[0].objectives[0]
+            &app.quests[0].stages[0].objectives[0]
         {
             assert_eq!(*item_id, 250);
             assert_eq!(*quantity, 7);
@@ -5001,16 +4992,18 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
 
         // Test with no quests
-        let result = app.quest_editor_state.edit_stage(0, 0);
+        let result = app.quest_editor_state.edit_stage(&app.quests, 0, 0);
         assert!(result.is_err());
 
-        let result = app.quest_editor_state.edit_objective(0, 0, 0);
+        let result = app.quest_editor_state.edit_objective(&app.quests, 0, 0, 0);
         assert!(result.is_err());
 
-        let result = app.quest_editor_state.delete_stage(0, 0);
+        let result = app.quest_editor_state.delete_stage(&mut app.quests, 0, 0);
         assert!(result.is_err());
 
-        let result = app.quest_editor_state.delete_objective(0, 0, 0);
+        let result = app
+            .quest_editor_state
+            .delete_objective(&mut app.quests, 0, 0, 0);
         assert!(result.is_err());
     }
 
@@ -7005,11 +6998,10 @@ mod tests {
         app.quests.push(quest1);
         app.quests.push(quest2);
         app.quests.push(quest3);
-        app.quest_editor_state.quests = app.quests.clone();
 
         // Filter by "dragon"
         app.quest_editor_state.search_filter = "dragon".to_string();
-        let filtered = app.quest_editor_state.filtered_quests();
+        let filtered = app.quest_editor_state.filtered_quests(&app.quests);
 
         assert_eq!(filtered.len(), 2);
         assert!(filtered.iter().any(|(_, q)| q.id == 1));
@@ -7171,14 +7163,15 @@ mod tests {
 
         // Transition to creating
         let next_id = app.next_available_quest_id();
-        app.quest_editor_state.start_new_quest(next_id.to_string());
+        app.quest_editor_state
+            .start_new_quest(&mut app.quests, next_id.to_string());
         assert_eq!(
             app.quest_editor_state.mode,
             quest_editor::QuestEditorMode::Creating
         );
 
         // Cancel back to list
-        app.quest_editor_state.cancel_edit();
+        app.quest_editor_state.cancel_edit(&mut app.quests);
         assert_eq!(
             app.quest_editor_state.mode,
             quest_editor::QuestEditorMode::List

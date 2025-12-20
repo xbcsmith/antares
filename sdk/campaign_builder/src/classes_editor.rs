@@ -13,10 +13,7 @@
 //! - Proficiency selection uses multi-select autocomplete with quick-add buttons
 //! - Entity validation warnings display for missing item/proficiency references
 
-use crate::ui_helpers::{
-    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
-    TwoColumnLayout,
-};
+use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
 use antares::domain::classes::{ClassDefinition, SpellSchool, SpellStat};
 use antares::domain::items::types::Item;
 use antares::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
@@ -763,30 +760,15 @@ impl ClassesEditorState {
                 ui.group(|ui| {
                     ui.label("Proficiencies");
 
-                    // Load proficiency definitions for suggestions (best-effort)
-                    let prof_defs: Vec<antares::domain::proficiency::ProficiencyDefinition> =
-                        if let Some(dir) = campaign_dir {
-                            let path = dir.join("data/proficiencies.ron");
-                            match ProficiencyDatabase::load_from_file(&path) {
-                                Ok(db) => db.all().iter().map(|d| (*d).clone()).collect(),
-                                Err(_) => Vec::new(),
-                            }
-                        } else {
-                            match ProficiencyDatabase::load_from_file("data/proficiencies.ron") {
-                                Ok(db) => db.all().iter().map(|d| (*d).clone()).collect(),
-                                Err(_) => Vec::new(),
-                            }
-                        };
+                    // Load proficiency definitions with tri-stage fallback
+                    let prof_defs = crate::ui_helpers::load_proficiencies(campaign_dir, items);
 
-                    if searchable_selector_multi(
+                    if crate::ui_helpers::autocomplete_proficiency_list_selector(
                         ui,
                         "class_proficiencies",
                         "Proficiencies",
                         &mut self.buffer.proficiencies,
                         &prof_defs,
-                        |p| p.id.clone(),
-                        |p| p.name.clone(),
-                        &mut self.buffer.proficiencies_query,
                     ) {
                         self.has_unsaved_changes = true;
                     }
@@ -862,15 +844,12 @@ impl ClassesEditorState {
                         list
                     };
 
-                    if searchable_selector_multi(
+                    if crate::ui_helpers::autocomplete_ability_list_selector(
                         ui,
                         "class_special_abilities",
                         "Special Abilities",
                         &mut self.buffer.special_abilities,
                         &abilities_list,
-                        |s| s.clone(),
-                        |s| s.clone(),
-                        &mut self.buffer.special_abilities_query,
                     ) {
                         self.has_unsaved_changes = true;
                     }

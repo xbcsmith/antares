@@ -19,23 +19,29 @@ impl Plugin for CameraPlugin {
 pub struct MainCamera;
 
 fn setup_camera(mut commands: Commands) {
-    // Spawn a 3D camera
+    debug!("Setting up camera at (0, 1.7, 0)");
+
+    // Spawn a 3D camera - Bevy 0.17 uses required components pattern
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 1.7, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
         MainCamera,
     ));
 
-    // Add a light source attached to the camera (or just global for now)
+    debug!("Adding point light at (0, 5, 0) with intensity 1.5M lumens");
+
+    // Add a light source - much brighter intensity for Bevy 0.17 physically-based rendering
     commands.spawn((
         PointLight {
-            intensity: 1500.0,
+            intensity: 1_500_000.0, // Bevy 0.17 uses lumen-based lighting
             shadows_enabled: true,
-            range: 20.0,
+            range: 50.0,
             ..default()
         },
         Transform::from_xyz(0.0, 5.0, 0.0),
     ));
+
+    debug!("Camera setup complete");
 }
 
 fn update_camera(

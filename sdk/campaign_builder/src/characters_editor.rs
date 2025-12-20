@@ -8,8 +8,9 @@
 //! Uses shared UI components for consistent layout.
 
 use crate::ui_helpers::{
-    autocomplete_item_list_selector, autocomplete_item_selector, ActionButtons, EditorToolbar,
-    ItemAction, ToolbarAction, TwoColumnLayout,
+    autocomplete_class_selector, autocomplete_item_list_selector, autocomplete_item_selector,
+    autocomplete_race_selector, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
+    TwoColumnLayout,
 };
 use antares::domain::character::{Alignment, Sex};
 use antares::domain::character_definition::{
@@ -1067,47 +1068,27 @@ impl CharactersEditorState {
                         ui.end_row();
 
                         ui.label("Race:");
-                        egui::ComboBox::from_id_salt("race_select")
-                            .selected_text(if self.buffer.race_id.is_empty() {
-                                "Select Race"
-                            } else {
-                                &self.buffer.race_id
-                            })
-                            .show_ui(ui, |ui| {
-                                for race in races {
-                                    if ui
-                                        .selectable_label(
-                                            self.buffer.race_id == race.id,
-                                            &race.name,
-                                        )
-                                        .clicked()
-                                    {
-                                        self.buffer.race_id = race.id.clone();
-                                    }
-                                }
-                            });
+                        if autocomplete_race_selector(
+                            ui,
+                            "race_select",
+                            "",
+                            &mut self.buffer.race_id,
+                            races,
+                        ) {
+                            // Selection changed
+                        }
                         ui.end_row();
 
                         ui.label("Class:");
-                        egui::ComboBox::from_id_salt("class_select")
-                            .selected_text(if self.buffer.class_id.is_empty() {
-                                "Select Class"
-                            } else {
-                                &self.buffer.class_id
-                            })
-                            .show_ui(ui, |ui| {
-                                for class in classes {
-                                    if ui
-                                        .selectable_label(
-                                            self.buffer.class_id == class.id,
-                                            &class.name,
-                                        )
-                                        .clicked()
-                                    {
-                                        self.buffer.class_id = class.id.clone();
-                                    }
-                                }
-                            });
+                        if autocomplete_class_selector(
+                            ui,
+                            "class_select",
+                            "",
+                            &mut self.buffer.class_id,
+                            classes,
+                        ) {
+                            // Selection changed
+                        }
                         ui.end_row();
 
                         ui.label("Sex:");

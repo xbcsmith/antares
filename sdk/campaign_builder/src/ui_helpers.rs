@@ -74,6 +74,10 @@
 //! ```
 
 use antares::domain::character::{AttributePair, AttributePair16};
+use antares::domain::items::Item;
+use antares::domain::proficiency::{
+    ProficiencyCategory, ProficiencyDatabase, ProficiencyDefinition,
+};
 use eframe::egui;
 use egui_autocomplete::AutoCompleteTextEdit;
 use std::fmt::Display;
@@ -2823,15 +2827,30 @@ pub fn autocomplete_item_list_selector(
                 .with_placeholder("Start typing item name...")
                 .show(ui, &mut text_buffer);
 
-            if response.changed() && !text_buffer.is_empty() {
-                if let Some(item) = items.iter().find(|i| i.name == text_buffer) {
+            let tb = text_buffer.trim().to_string();
+
+            // 1) If the text changed and matches an existing candidate exactly, add it.
+            if response.changed() && !tb.is_empty() {
+                if let Some(item) = items.iter().find(|i| i.name == tb) {
                     if !selected_items.contains(&item.id) {
                         selected_items.push(item.id);
                         changed = true;
                     }
+                    // Clear the add buffer after successful add
+                    text_buffer.clear();
                 }
-                // Clear the add buffer after successful add
-                text_buffer.clear();
+            }
+
+            // 2) If Enter was pressed while this widget had focus, commit the typed text
+            //    (if it matches an item).
+            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if let Some(item) = items.iter().find(|i| i.name == tb) {
+                    if !selected_items.contains(&item.id) {
+                        selected_items.push(item.id);
+                        changed = true;
+                    }
+                    text_buffer.clear();
+                }
             }
         });
 
@@ -2907,13 +2926,28 @@ pub fn autocomplete_proficiency_list_selector(
                 .with_placeholder("Start typing proficiency...")
                 .show(ui, &mut text_buffer);
 
-            if response.changed() && !text_buffer.is_empty() {
-                if let Some(prof) = proficiencies.iter().find(|p| p.name == text_buffer) {
+            let tb = text_buffer.trim().to_string();
+
+            // 1) If the text changed and matches an existing candidate exactly, add it.
+            if response.changed() && !tb.is_empty() {
+                if let Some(prof) = proficiencies.iter().find(|p| p.name == tb) {
                     if !selected_proficiencies.contains(&prof.id) {
                         selected_proficiencies.push(prof.id.clone());
                         changed = true;
                     }
                     // Clear the add buffer after successful add
+                    text_buffer.clear();
+                }
+            }
+
+            // 2) If Enter was pressed while this widget had focus, commit the typed text
+            //    (if it matches a proficiency).
+            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if let Some(prof) = proficiencies.iter().find(|p| p.name == tb) {
+                    if !selected_proficiencies.contains(&prof.id) {
+                        selected_proficiencies.push(prof.id.clone());
+                        changed = true;
+                    }
                     text_buffer.clear();
                 }
             }
@@ -3080,17 +3114,240 @@ pub fn autocomplete_ability_list_selector(
                 .with_placeholder("Start typing ability...")
                 .show(ui, &mut text_buffer);
 
-            if response.changed() && !text_buffer.is_empty() {
-                if !selected_abilities.contains(&text_buffer) {
-                    selected_abilities.push(text_buffer.clone());
+            let tb = text_buffer.trim().to_string();
+
+            // 1) If the text changed and matches an existing candidate exactly, add it.
+            if response.changed() && !tb.is_empty() {
+                if candidates.iter().any(|c| c == &tb) {
+                    if !selected_abilities.contains(&tb) {
+                        selected_abilities.push(tb.clone());
+                        changed = true;
+                    }
+                    // Clear buffer after successful add
+                    text_buffer.clear();
+                }
+            }
+
+            // 2) If Enter was pressed while this widget had focus, commit the typed text.
+            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if !tb.is_empty() && !selected_abilities.contains(&tb) {
+                    selected_abilities.push(tb.clone());
                     changed = true;
                 }
-                // Clear buffer after successful add
                 text_buffer.clear();
             }
         });
 
         // Persist the edited add buffer back into egui Memory so it survives frames.
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+    });
+
+    changed
+}
+
+/// Shows an autocomplete input for selecting a race by name.
+///
+/// Returns `true` if the selection changed.
+pub fn autocomplete_race_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_race_id: &mut String,
+    races: &[antares::domain::races::RaceDefinition],
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        ui.label(label);
+
+        // Get current race name based on ID
+        let current_name = races
+            .iter()
+            .find(|r| r.id == *selected_race_id)
+            .map(|r| r.name.clone())
+            .unwrap_or_default();
+
+        let buffer_id = make_autocomplete_id(ui, "race", id_salt);
+
+        // Build candidates
+        let candidates: Vec<String> = races.iter().map(|r| r.name.clone()).collect();
+
+        // Persistent buffer logic
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
+
+        let response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder("Start typing race name...")
+            .show(ui, &mut text_buffer);
+
+        if response.changed() && !text_buffer.is_empty() && text_buffer != current_name {
+            if let Some(race) = races.iter().find(|r| r.name == text_buffer) {
+                *selected_race_id = race.id.clone();
+                changed = true;
+            }
+        }
+
+        // Show clear button
+        if !selected_race_id.is_empty()
+            && ui
+                .small_button("✖")
+                .on_hover_text("Clear selection")
+                .clicked()
+        {
+            selected_race_id.clear();
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
+            changed = true;
+        }
+
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+    });
+
+    changed
+}
+
+/// Shows an autocomplete input for selecting a class by name.
+///
+/// Returns `true` if the selection changed.
+pub fn autocomplete_class_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_class_id: &mut String,
+    classes: &[antares::domain::classes::ClassDefinition],
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        ui.label(label);
+
+        // Get current class name based on ID
+        let current_name = classes
+            .iter()
+            .find(|c| c.id == *selected_class_id)
+            .map(|c| c.name.clone())
+            .unwrap_or_default();
+
+        let buffer_id = make_autocomplete_id(ui, "class", id_salt);
+
+        // Build candidates
+        let candidates: Vec<String> = classes.iter().map(|c| c.name.clone()).collect();
+
+        // Persistent buffer logic
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
+
+        let response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder("Start typing class name...")
+            .show(ui, &mut text_buffer);
+
+        if response.changed() && !text_buffer.is_empty() && text_buffer != current_name {
+            if let Some(class) = classes.iter().find(|c| c.name == text_buffer) {
+                *selected_class_id = class.id.clone();
+                changed = true;
+            }
+        }
+
+        // Show clear button
+        if !selected_class_id.is_empty()
+            && ui
+                .small_button("✖")
+                .on_hover_text("Clear selection")
+                .clicked()
+        {
+            selected_class_id.clear();
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
+            changed = true;
+        }
+
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+    });
+
+    changed
+}
+
+/// Shows an autocomplete input for adding monsters to a list.
+///
+/// Returns `true` if a monster was added to the list.
+pub fn autocomplete_monster_list_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_monsters: &mut Vec<antares::domain::types::MonsterId>,
+    monsters: &[antares::domain::combat::database::MonsterDefinition],
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.group(|ui| {
+        ui.label(label);
+
+        // Show current monsters
+        let mut remove_idx: Option<usize> = None;
+        for (idx, monster_id) in selected_monsters.iter().enumerate() {
+            ui.horizontal(|ui| {
+                if let Some(monster) = monsters.iter().find(|m| m.id == *monster_id) {
+                    ui.label(&monster.name);
+                } else {
+                    ui.label(format!("Unknown monster (ID: {})", monster_id));
+                }
+                if ui.small_button("✖").clicked() {
+                    remove_idx = Some(idx);
+                }
+            });
+        }
+
+        if let Some(idx) = remove_idx {
+            selected_monsters.remove(idx);
+            changed = true;
+        }
+
+        ui.separator();
+
+        // Add new monster input
+        let buffer_id = make_autocomplete_id(ui, "monster_add", id_salt);
+        let candidates: Vec<String> = monsters.iter().map(|m| m.name.clone()).collect();
+
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || String::new());
+
+        ui.horizontal(|ui| {
+            ui.label("Add monster:");
+            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
+                .with_placeholder("Start typing monster name...")
+                .show(ui, &mut text_buffer);
+
+            let tb = text_buffer.trim().to_string();
+
+            // 1) If the text changed and matches an existing candidate exactly, add it.
+            if response.changed() && !tb.is_empty() {
+                if let Some(monster) = monsters.iter().find(|m| m.name == tb) {
+                    if !selected_monsters.contains(&monster.id) {
+                        selected_monsters.push(monster.id);
+                        changed = true;
+                    }
+                    // Clear the add buffer after successful add
+                    text_buffer.clear();
+                }
+            }
+
+            // 2) If Enter was pressed while this widget had focus, commit the typed text
+            //    (if it matches a monster).
+            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if let Some(monster) = monsters.iter().find(|m| m.name == tb) {
+                    if !selected_monsters.contains(&monster.id) {
+                        selected_monsters.push(monster.id);
+                        changed = true;
+                    }
+                    text_buffer.clear();
+                }
+            }
+        });
+
+        // Persist the edited add buffer back into egui Memory
         store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
@@ -3126,6 +3383,18 @@ pub fn extract_monster_candidates(
     monsters: &[antares::domain::combat::database::MonsterDefinition],
 ) -> Vec<String> {
     monsters.iter().map(|m| m.name.clone()).collect()
+}
+
+/// Extracts race name candidates from a list of race definitions.
+pub fn extract_race_candidates(races: &[antares::domain::races::RaceDefinition]) -> Vec<String> {
+    races.iter().map(|r| r.name.clone()).collect()
+}
+
+/// Extracts class name candidates from a list of class definitions.
+pub fn extract_class_candidates(
+    classes: &[antares::domain::classes::ClassDefinition],
+) -> Vec<String> {
+    classes.iter().map(|c| c.name.clone()).collect()
 }
 
 /// Extracts item candidates from a list of items.
@@ -3321,6 +3590,127 @@ pub fn extract_proficiency_candidates(
         .iter()
         .map(|p| (format!("{} ({})", p.name, p.id), p.id.clone()))
         .collect()
+}
+
+/// Loads proficiency definitions with a tri-stage fallback:
+/// 1. Campaign directory RON file
+/// 2. Global data directory RON file
+/// 3. Synthetic generation based on item classifications
+pub fn load_proficiencies(
+    campaign_dir: Option<&PathBuf>,
+    items: &[Item],
+) -> Vec<ProficiencyDefinition> {
+    // Stage 1: Try campaign directory
+    if let Some(dir) = campaign_dir {
+        let path = dir.join("data/proficiencies.ron");
+        if path.exists() {
+            if let Ok(db) = ProficiencyDatabase::load_from_file(&path) {
+                return db.all().into_iter().cloned().collect();
+            }
+        }
+    }
+
+    // Stage 2: Try global data directory
+    if let Ok(db) = ProficiencyDatabase::load_from_file("data/proficiencies.ron") {
+        return db.all().into_iter().cloned().collect();
+    }
+
+    // Stage 3: Synthetic Fallback
+    generate_synthetic_proficiencies(items)
+}
+
+fn generate_synthetic_proficiencies(items: &[Item]) -> Vec<ProficiencyDefinition> {
+    let mut profs = std::collections::HashMap::new();
+
+    // Standard proficiencies that should always be available
+    let standard = vec![
+        (
+            "simple_weapon",
+            "Simple Weapons",
+            ProficiencyCategory::Weapon,
+        ),
+        (
+            "martial_melee",
+            "Martial Melee Weapons",
+            ProficiencyCategory::Weapon,
+        ),
+        (
+            "martial_ranged",
+            "Martial Ranged Weapons",
+            ProficiencyCategory::Weapon,
+        ),
+        ("blunt_weapon", "Blunt Weapons", ProficiencyCategory::Weapon),
+        ("unarmed", "Unarmed Combat", ProficiencyCategory::Weapon),
+        ("light_armor", "Light Armor", ProficiencyCategory::Armor),
+        ("medium_armor", "Medium Armor", ProficiencyCategory::Armor),
+        ("heavy_armor", "Heavy Armor", ProficiencyCategory::Armor),
+        ("shield", "Shield", ProficiencyCategory::Shield),
+        (
+            "arcane_item",
+            "Arcane Magic Items",
+            ProficiencyCategory::MagicItem,
+        ),
+        (
+            "divine_item",
+            "Divine Magic Items",
+            ProficiencyCategory::MagicItem,
+        ),
+    ];
+
+    for (id, name, cat) in standard {
+        profs.insert(
+            id.to_string(),
+            ProficiencyDefinition::with_description(
+                id.to_string(),
+                name.to_string(),
+                cat,
+                format!("Standard {} proficiency", name),
+            ),
+        );
+    }
+
+    // Scan items for any classifications not in standard
+    for item in items {
+        if let Some(prof_id) = item.required_proficiency() {
+            if !profs.contains_key(&prof_id) {
+                let name = prof_id
+                    .replace('_', " ")
+                    .split_whitespace()
+                    .map(|w| {
+                        let mut c = w.chars();
+                        match c.next() {
+                            None => String::new(),
+                            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                let category = match &item.item_type {
+                    antares::domain::items::ItemType::Weapon(_) => ProficiencyCategory::Weapon,
+                    antares::domain::items::ItemType::Armor(_) => ProficiencyCategory::Armor,
+                    antares::domain::items::ItemType::Accessory(_) => {
+                        ProficiencyCategory::MagicItem
+                    }
+                    _ => ProficiencyCategory::Weapon,
+                };
+
+                profs.insert(
+                    prof_id.clone(),
+                    ProficiencyDefinition::with_description(
+                        prof_id.clone(),
+                        name,
+                        category,
+                        "Derived from campaign items".to_string(),
+                    ),
+                );
+            }
+        }
+    }
+
+    let mut result: Vec<_> = profs.into_values().collect();
+    result.sort_by(|a, b| a.id.cmp(&b.id));
+    result
 }
 
 /// Extracts item tag candidates from a list of items.
@@ -4688,6 +5078,87 @@ mod tests {
         let proficiencies = vec![];
         let candidates = extract_proficiency_candidates(&proficiencies);
         assert_eq!(candidates.len(), 0);
+    }
+
+    #[test]
+    fn test_load_proficiencies_synthetic_fallback() {
+        use antares::domain::items::types::{
+            ArmorClassification, ArmorData, Item, ItemType, WeaponClassification, WeaponData,
+        };
+        use antares::domain::types::DiceRoll;
+
+        // Create test items with various classifications
+        let items = vec![
+            Item {
+                id: 1,
+                name: "Sword".to_string(),
+                item_type: ItemType::Weapon(WeaponData {
+                    damage: DiceRoll::new(1, 8, 0),
+                    bonus: 0,
+                    hands_required: 1,
+                    classification: WeaponClassification::MartialMelee,
+                }),
+                base_cost: 10,
+                sell_cost: 5,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+            },
+            Item {
+                id: 2,
+                name: "Plate Mail".to_string(),
+                item_type: ItemType::Armor(ArmorData {
+                    ac_bonus: 8,
+                    weight: 50,
+                    classification: ArmorClassification::Heavy,
+                }),
+                base_cost: 100,
+                sell_cost: 50,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+            },
+        ];
+
+        // Test with no campaign dir (will fall back to synthetic)
+        let profs = load_proficiencies(None, &items);
+
+        // Should have standard proficiencies
+        assert!(!profs.is_empty());
+        assert!(profs.iter().any(|p| p.id == "simple_weapon"));
+        assert!(profs.iter().any(|p| p.id == "martial_melee"));
+        assert!(profs.iter().any(|p| p.id == "heavy_armor"));
+        assert!(profs.iter().any(|p| p.id == "light_armor"));
+    }
+
+    #[test]
+    fn test_generate_synthetic_proficiencies_standard() {
+        // Test that standard proficiencies are always generated
+        let profs = generate_synthetic_proficiencies(&[]);
+
+        // Should have all 11 standard proficiencies
+        assert_eq!(profs.len(), 11);
+        assert!(profs.iter().any(|p| p.id == "simple_weapon"));
+        assert!(profs.iter().any(|p| p.id == "martial_melee"));
+        assert!(profs.iter().any(|p| p.id == "martial_ranged"));
+        assert!(profs.iter().any(|p| p.id == "blunt_weapon"));
+        assert!(profs.iter().any(|p| p.id == "unarmed"));
+        assert!(profs.iter().any(|p| p.id == "light_armor"));
+        assert!(profs.iter().any(|p| p.id == "medium_armor"));
+        assert!(profs.iter().any(|p| p.id == "heavy_armor"));
+        assert!(profs.iter().any(|p| p.id == "shield"));
+        assert!(profs.iter().any(|p| p.id == "arcane_item"));
+        assert!(profs.iter().any(|p| p.id == "divine_item"));
     }
 
     #[test]

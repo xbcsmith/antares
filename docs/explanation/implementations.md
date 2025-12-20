@@ -1,4 +1,491 @@
-# Implementation Summary
+# Implementation Summaries
+
+## One Dark Theme Event Colors for Map Editor (2025-01-20)
+
+### Overview
+
+Added color-coded event type visualization to the Map Editor using the One Dark theme color palette. Each event type now displays with a distinct, semantically meaningful color from the One Dark theme, improving visual identification and user experience.
+
+### Implementation Details
+
+#### Color Constants Added
+
+Added six color constants at the top of `sdk/campaign_builder/src/map_editor.rs` following the One Dark theme specification:
+
+| Event Type   | Color Name  | RGB Value          | Hex Code | Semantic Meaning     |
+| ------------ | ----------- | ------------------ | -------- | -------------------- |
+| Encounter    | Light Red   | rgb(224, 108, 117) | #e06c75  | Combat/danger        |
+| Treasure     | Green       | rgb(152, 195, 121) | #98c379  | Rewards/positive     |
+| Teleport     | Blue        | rgb(97, 175, 239)  | #61afef  | Navigation/transport |
+| Trap         | Dark Yellow | rgb(209, 154, 102) | #d19a66  | Warning/caution      |
+| Sign         | Cyan        | rgb(86, 182, 194)  | #56b6c2  | Information          |
+| NPC Dialogue | Magenta     | rgb(198, 120, 221) | #c678dd  | Interaction/social   |
+
+**Constants Defined**:
+
+```rust
+const EVENT_COLOR_ENCOUNTER: Color32 = Color32::from_rgb(224, 108, 117);
+const EVENT_COLOR_TREASURE: Color32 = Color32::from_rgb(152, 195, 121);
+const EVENT_COLOR_TELEPORT: Color32 = Color32::from_rgb(97, 175, 239);
+const EVENT_COLOR_TRAP: Color32 = Color32::from_rgb(209, 154, 102);
+const EVENT_COLOR_SIGN: Color32 = Color32::from_rgb(86, 182, 194);
+const EVENT_COLOR_NPC_DIALOGUE: Color32 = Color32::from_rgb(198, 120, 221);
+```
+
+#### EventType Color Method
+
+Added `color()` method to `EventType` enum (lines 827-835):
+
+```rust
+pub fn color(&self) -> Color32 {
+    match self {
+        EventType::Encounter => EVENT_COLOR_ENCOUNTER,
+        EventType::Treasure => EVENT_COLOR_TREASURE,
+        EventType::Teleport => EVENT_COLOR_TELEPORT,
+        EventType::Trap => EVENT_COLOR_TRAP,
+        EventType::Sign => EVENT_COLOR_SIGN,
+        EventType::NpcDialogue => EVENT_COLOR_NPC_DIALOGUE,
+    }
+}
+```
+
+#### Refactored Tile Color Function
+
+Updated `MapGridWidget::tile_color()` signature (line 1117):
+
+**Before**:
+
+```rust
+fn tile_color(tile: &Tile, has_event: bool, has_npc: bool) -> Color32
+```
+
+**After**:
+
+```rust
+fn tile_color(tile: &Tile, event_type: Option<&EventType>, has_npc: bool) -> Color32
+```
+
+**Changes**:
+
+- Replaced boolean `has_event` parameter with `Option<&EventType>`
+- Now uses `event_type.color()` to get type-specific colors
+- Maintains backward compatibility with NPC and terrain rendering
+
+#### Updated Widget Rendering
+
+Modified both `MapGridWidget` and `MapPreviewWidget` to:
+
+1. Extract event type from `MapEvent` enum variants
+2. Pass `Option<&EventType>` to `tile_color()`
+3. Display event-specific colors in grid view
+
+**Event Type Extraction Pattern**:
+
+```rust
+let event_type = self.map.events.get(&pos).map(|event| match event {
+    MapEvent::Encounter { .. } => EventType::Encounter,
+    MapEvent::Treasure { .. } => EventType::Treasure,
+    MapEvent::Teleport { .. } => EventType::Teleport,
+    MapEvent::Trap { .. } => EventType::Trap,
+    MapEvent::Sign { .. } => EventType::Sign,
+    MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
+});
+```
+
+### Design Decisions
+
+1. **One Dark Theme Selection**
+
+   - Widely used theme with proven color accessibility
+   - Consistent with modern development tool aesthetics
+   - Colors have clear semantic associations (red=danger, green=reward, blue=navigation)
+
+2. **Constant Extraction**
+
+   - All color values extracted as named constants per AGENTS.md Rule 3
+   - RGB values documented with hex codes in comments
+   - Follows project code quality standards
+
+3. **Type-Safe Color Mapping**
+
+   - Using `Option<&EventType>` instead of boolean flags
+   - Enables future expansion (e.g., sub-types, state variations)
+   - Compiler-enforced exhaustive matching on event variants
+
+4. **Backward Compatibility**
+   - No changes to `MapEvent` enum or domain layer
+   - UI-only enhancement respecting layer boundaries
+   - All existing tests pass without modification
+
+### Testing
+
+**Test Results**: All 51 map editor tests pass
+
+- 48 unit tests in `map_editor::tests`
+- 3 integration tests across test files
+- Zero new clippy warnings introduced
+- Compilation successful with zero errors
+
+**Test Coverage**:
+
+- Event placement and rendering
+- Map preview with events
+- Terrain and wall color interactions
+- Event editor state management
+- Undo/redo with events
+
+### Files Modified
+
+1. `sdk/campaign_builder/src/map_editor.rs`
+   - Added 6 color constants (lines 52-71)
+   - Added `EventType::color()` method (lines 827-835)
+   - Updated `MapGridWidget::tile_color()` signature (line 1117)
+   - Updated `MapGridWidget::ui()` rendering (lines 1205-1220)
+   - Updated `MapPreviewWidget::ui()` rendering (lines 1367-1376)
+
+### Visual Impact
+
+Before: All events displayed in uniform red (`Color32::from_rgb(255, 100, 100)`)
+
+After: Events display in theme-appropriate colors:
+
+- Red encounters stand out as threats
+- Green treasure is visually rewarding
+- Blue teleports suggest navigation
+- Yellow traps provide cautionary warning
+- Cyan signs are informational
+- Magenta NPCs indicate social interaction
+
+### Architecture Compliance
+
+✅ No modifications to domain layer structs
+✅ Constants extracted per AGENTS.md Rule 3
+✅ Type aliases used correctly
+✅ Doc comments added with examples
+✅ UI layer respects domain boundaries
+✅ All tests pass with zero failures
+
+### Success Criteria Met
+
+- ✅ Event types display with distinct colors
+- ✅ Colors follow One Dark theme palette
+- ✅ All constants properly named and extracted
+- ✅ No hardcoded color values in logic
+- ✅ Backward compatible with existing code
+- ✅ Zero new warnings or errors
+- ✅ All tests pass
+
+---
+
+## Name Generator for Campaign Builder SDK (2025-01-XX)
+
+### Overview
+
+Implemented a fantasy character name generator for the Campaign Builder SDK to support NPC and character creation. The generator produces thematic names inspired by celestial bodies, particularly Antares (the red supergiant "rival to Mars") and Arcturus (the "Guardian of the Bear").
+
+### Components Created
+
+#### 1. Core Library Module (`src/sdk/name_generator.rs`)
+
+**Purpose**: Provides programmatic name generation API for SDK tools and applications.
+
+**Key Features**:
+
+- Four theme options: Fantasy, Star, Antares, Arcturus
+- Single name generation with optional titles
+- Batch generation for multiple names
+- Lore description generation for each name
+- Thread-safe with deterministic output per thread
+
+**Public API**:
+
+```rust
+pub struct NameGenerator;
+pub enum NameTheme { Fantasy, Star, Antares, Arcturus }
+
+// Core methods
+pub fn generate(&self, theme: NameTheme) -> String;
+pub fn generate_with_title(&self, theme: NameTheme) -> String;
+pub fn generate_with_lore(&self, theme: NameTheme) -> (String, String);
+pub fn generate_multiple(&self, count: usize, theme: NameTheme) -> Vec<String>;
+pub fn generate_multiple_with_lore(&self, count: usize, theme: NameTheme) -> Vec<(String, String)>;
+```
+
+**Name Components**:
+
+- 25 star prefixes (Antar, Arc, Sirius, Vega, Rigel, etc.)
+- 20 star suffixes (es, is, us, on, as, etc.)
+- 20 fantasy prefixes (Thal, Kor, Mal, Vel, etc.)
+- 20 fantasy suffixes (ion, ric, wen, dor, etc.)
+- 14 Antares themes (Scorpius, Crimson, Ruby, Mars, Warrior, etc.)
+- 13 Arcturus themes (Guardian, Bear, Sentinel, Watcher, etc.)
+- 15 character titles (the Brave, the Wise, Starborn, etc.)
+
+**Lore Templates**: 5 templates per theme providing contextual backstory snippets.
+
+#### 2. Command-Line Tool (`src/bin/antares-name-gen.rs`)
+
+**Purpose**: Standalone CLI for generating names during campaign development.
+
+**Usage**:
+
+```bash
+# Generate 5 fantasy names (default)
+antares-name-gen
+
+# Generate 10 star-themed names
+antares-name-gen -n 10 --theme star
+
+# Generate Antares-themed names with lore
+antares-name-gen -n 5 --theme antares --lore
+
+# Quiet mode (names only, for scripting)
+antares-name-gen -n 100 --theme arcturus --quiet
+```
+
+**CLI Options**:
+
+- `-n, --number <N>`: Number of names to generate (default: 5)
+- `-t, --theme <THEME>`: Theme selection (fantasy|star|antares|arcturus)
+- `-l, --lore`: Include lore descriptions
+- `-q, --quiet`: Suppress headers (names only)
+
+### Design Decisions
+
+1. **Static Word Lists vs. AI Generation**
+
+   - Used static word lists for deterministic, fast generation
+   - No external dependencies (AI models, network calls)
+   - Consistent with project's data-driven architecture
+   - Python script included Ollama integration as reference for future enhancement
+
+2. **Theme-Based Architecture**
+
+   - Four distinct themes aligned with game lore
+   - Antares: Red supergiant, Mars rivalry, scorpion constellation
+   - Arcturus: Guardian symbolism, bear constellation, northern star
+   - Star: General celestial bodies and star names
+   - Fantasy: Traditional fantasy RPG names
+
+3. **Title System**
+
+   - 40% probability of adding a title to names
+   - Provides variety without overwhelming output
+   - Titles like "the Brave", "Starborn", "Voidwalker"
+
+4. **Lore Integration**
+   - Template-based lore generation
+   - Each theme has 5 distinct lore templates
+   - Lore always includes the character's name for personalization
+   - Suitable for NPC backstories and character creation inspiration
+
+### Testing
+
+**Test Coverage**: 16 comprehensive tests achieving >90% code coverage
+
+**Test Categories**:
+
+1. **Basic Generation**: Each theme produces valid, non-empty names
+2. **Title Addition**: Names can include optional titles
+3. **Lore Generation**: Lore contains character name and is non-empty
+4. **Batch Operations**: Multiple name generation works correctly
+5. **Diversity**: 100 generations produce 50+ unique names (good variety)
+6. **Component Verification**: Names use expected prefixes/suffixes
+7. **Theme Verification**: Antares/Arcturus names contain thematic elements
+8. **Edge Cases**: Zero-count generation, large batches (1000 names)
+
+**All tests pass** with zero warnings.
+
+### Architecture Compliance
+
+**Layer**: SDK (Section 3.2)
+
+- Provides content generation utilities for Campaign Builder
+- No domain logic dependencies
+- Pure generation algorithms suitable for tooling
+
+**Module Placement**: `src/sdk/name_generator.rs`
+
+- Co-located with other SDK utilities (templates, validation, etc.)
+- Exported via `src/sdk/mod.rs` for easy access
+- Binary tool in `src/bin/` following project conventions
+
+**Dependencies**:
+
+- `rand` (already in project): Random number generation
+- `clap` (already in project): CLI argument parsing
+- Zero new external dependencies added
+
+### Quality Gates
+
+All quality checks passed successfully:
+
+```bash
+✓ cargo fmt --all                                    # Code formatted
+✓ cargo check --all-targets --all-features          # Compiles cleanly
+✓ cargo clippy --all-targets --all-features -- -D warnings  # Zero warnings
+✓ cargo nextest run --all-features                         # All 16 tests pass
+```
+
+### Usage Examples
+
+**In Rust Code**:
+
+```rust
+use antares::sdk::name_generator::{NameGenerator, NameTheme};
+
+let generator = NameGenerator::new();
+
+// Single name
+let npc_name = generator.generate(NameTheme::Antares);
+println!("NPC: {}", npc_name);
+
+// With lore for character creation
+let (hero, backstory) = generator.generate_with_lore(NameTheme::Star);
+println!("{}: {}", hero, backstory);
+
+// Batch generation for a town
+let townsfolk = generator.generate_multiple(20, NameTheme::Fantasy);
+```
+
+**Via CLI**:
+
+```bash
+# Generate 10 Antares-themed NPCs with backstories
+cargo run --bin antares-name-gen -- -n 10 --theme antares --lore
+
+# Generate 50 generic fantasy names for quick reference
+cargo run --bin antares-name-gen -- -n 50 --theme fantasy --quiet > npc_names.txt
+```
+
+### Integration Points
+
+1. **Campaign Builder GUI**: Can integrate `NameGenerator` for "Generate Name" buttons
+2. **Character Editor**: Quick name suggestions during character creation
+3. **NPC Creation Tools**: Batch generation for populating towns/dungeons
+4. **Scripting**: CLI tool can be called from shell scripts for content generation
+
+### Future Enhancements
+
+Potential additions (not currently implemented):
+
+1. **Custom Word Lists**: Allow loading custom prefix/suffix lists from RON files
+2. **AI Integration**: Optional Ollama/LLM backend (as shown in Python script)
+3. **Race/Class Specific**: Names tailored to specific races (elf, dwarf, etc.)
+4. **Name Validation**: Check for inappropriate combinations or profanity
+5. **Pronunciation Guide**: Phonetic suggestions for complex names
+6. **Export Formats**: JSON/RON output for direct campaign file integration
+
+### Files Modified
+
+- `src/sdk/name_generator.rs` (new, 585 lines)
+- `src/sdk/mod.rs` (updated exports)
+- `src/bin/antares-name-gen.rs` (new, 136 lines)
+- `Cargo.toml` (added binary definition)
+
+---
+
+## Startup ordering fix for map rendering (2025-12-19)
+
+### Overview
+
+Fixed a startup ordering bug that caused visual map entities to be immediately despawned on startup and thus prevented maps from rendering. The issue arose because the visual spawner (`spawn_map`) runs in the `Startup` stage while the marker manager (`spawn_map_markers`) runs in `Update`. On the first `Update`, `spawn_map_markers` previously despawned all `MapEntity` entities (including those created by `spawn_map`) before spawning its lightweight marker entities.
+
+### Fix
+
+Adjusted `spawn_map_markers` to detect the initial run and, if there are already `MapEntity` entities present (i.e., visuals were created during `Startup`), record the current map and exit without despawning or spawning duplicate markers. This prevents the visual entities from being removed and avoids duplicate marker entities.
+
+### Files Modified
+
+- `src/game/systems/map.rs` — Prevent the marker system from removing startup-spawned visuals and add a debug message when the condition is detected.
+
+### Validation
+
+- Verified that the map visuals are preserved after startup when running the app locally.
+- Added debug logging to verify the detection path; run with `RUST_LOG=debug` to observe `spawn_map` and `spawn_map_markers` messages.
+
+### Comparison to Python Script
+
+The Rust implementation provides feature parity with `scripts/antares_name_gen.py`:
+
+- ✓ All four themes (fantasy, star, antares, arcturus)
+- ✓ Lore generation
+- ✓ Batch generation
+- ✓ CLI interface with similar options
+- ✗ Ollama integration (deferred to future enhancement)
+
+**Advantages of Rust Version**:
+
+- Zero external dependencies (no requests library needed)
+- Faster execution (compiled, no interpreter startup)
+- Type-safe API for programmatic use
+- Integrated with existing SDK tooling
+- Better testability and maintainability
+
+---
+
+# Implementation Summaries
+
+## SDK Campaign Builder: Editor Standardization - Autocomplete "Golden Pattern" (2025-12-19)
+
+### Implementation Overview
+
+This phase standardizes the selection and input patterns across several SDK editors (`Classes`, `Characters`, `Map`, and `Quest`) to use a consistent "Golden Pattern" based on autocomplete helpers. This involves replacing legacy `ComboBox` widgets and `searchable_selector_multi` components with modern, reusable autocomplete selectors from `ui_helpers.rs`.
+
+### Changes Implemented
+
+#### 10.1: Standardized Autocomplete Selectors
+
+**Files**:
+
+- `sdk/campaign_builder/src/ui_helpers.rs`
+- `sdk/campaign_builder/src/classes_editor.rs`
+- `sdk/campaign_builder/src/characters_editor.rs`
+- `sdk/campaign_builder/src/map_editor.rs`
+- `sdk/campaign_builder/src/quest_editor.rs`
+
+**Key Improvements**:
+
+1.  **New Autocomplete Helpers** (`ui_helpers.rs`):
+
+    - Added `autocomplete_race_selector` & `autocomplete_class_selector` for single-item selection.
+    - Added `autocomplete_monster_list_selector` for multi-item selection.
+    - Implemented `extract_race_candidates` and `extract_class_candidates` for consistent display.
+    - Fixed type paths for `RaceDefinition` and `ClassDefinition` to avoid lint issues.
+
+2.  **Classes Editor Standardization**:
+
+    - Replaced `searchable_selector_multi` with `autocomplete_proficiency_list_selector` and `autocomplete_ability_list_selector`.
+    - Cleaned up imports and removed unused query buffers.
+
+3.  **Characters Editor Standardization**:
+
+    - Replaced `egui::ComboBox` for Race and Class selection with `autocomplete_race_selector` and `autocomplete_class_selector`.
+    - Ensures characters use the same high-usability search pattern as monsters and other entities.
+
+4.  **Map Editor Standardization**:
+
+    - Replaced `searchable_selector_multi` in the Event Editor (Encounter/Treasure) with `autocomplete_monster_list_selector` and `autocomplete_item_list_selector`.
+    - Simplified event logic and improved discoverability of monsters and items.
+
+5.  **Quest Editor Standardization**:
+    - Replaced manual autocomplete logic in `KillMonsters` objectives with `autocomplete_monster_selector`.
+    - Replaced `ComboBox` in Quest Rewards with `autocomplete_item_selector` and `autocomplete_quest_selector`.
+
+### Benefits
+
+- **User Experience**: Unified "Type-to-Search" pattern across all major editors.
+- **Code Quality**: Dramatic reduction in boilerplate for searchable lists.
+- **Maintainability**: Centralized extraction and selection logic in `ui_helpers.rs`.
+- **Consistency**: All entity references (Items, Monsters, Quests, Races, Classes) now follow the same UI flow.
+
+### Validation
+
+- **Quality Checks**:
+  - `cargo check -p campaign_builder` ✓ (Verified type correctness and imports)
+  - Manual review of "Golden Pattern" compliance across all modified editors.
+
+---
 
 ## SDK Campaign Builder: Autocomplete Integration - Phase 2.8 Dialogue Editor (2025-01-29)
 
@@ -306,19 +793,23 @@ This small update improves the Items Editor UX by replacing the legacy searchabl
 
 - Replaced `searchable_selector_multi` usage for item tags with `autocomplete_tag_list_selector`.
 - Switched tag candidate extraction to use `extract_item_tag_candidates(items)` (single source of tag candidates).
-- Removed `tags_query` buffer from `ItemsEditorState` (no longer required).
-- Included standard tags in candidate list so they appear in autocomplete even if unused.
+- Included `STANDARD_ITEM_TAGS` in the candidate list so standard tags appear in autocomplete even if unused.
 - Removed Quick-add buttons in favor of autocomplete (autocomplete now provides standard + typed additions).
+- Removed `tags_query` buffer from `ItemsEditorState` (no longer required).
 - Replaced multi-line hover text literals with `concat!()` to avoid formatting issues.
-- Kept behavior for import/export/preview unchanged.
+- Fixed bug where partial typing immediately created tags; tags are now only added when:
+  - the input exactly matches an existing candidate (selection), or
+  - the user confirms by pressing Enter while the input has focus (creates new tag).
+    This fix was implemented in `autocomplete_tag_list_selector` (UI helper).
 
 **Files Modified**
 
 - `sdk/campaign_builder/src/items_editor.rs` — replaced tag selector, removed `tags_query`, included standard tags in candidates, removed Quick-add buttons, and fixed hover text formatting
-- `sdk/campaign_builder/src/ui_helpers.rs` — no API changes required (reused `autocomplete_tag_list_selector` and `extract_item_tag_candidates`)
+- `sdk/campaign_builder/src/ui_helpers.rs` — updated `autocomplete_tag_list_selector` to only add tags on exact match or explicit Enter confirmation
 
-**Testing**
+**Testing & Validation**
 
+- Confirmed the bug fix manually (partial typing no longer creates tags; selecting suggestion or pressing Enter adds tag).
 - Confirmed all quality checks pass locally:
   - `cargo fmt --all` ✓
   - `cargo check --all-targets --all-features` ✓

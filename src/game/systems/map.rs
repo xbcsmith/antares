@@ -120,8 +120,8 @@ fn map_change_handler(
             global_state.0.world.set_party_position(ev.target_pos);
         } else {
             // Gracefully ignore invalid map changes
-            println!(
-                "Warning: MapChangeEvent target_map {} not found; ignoring",
+            warn!(
+                "MapChangeEvent target_map {} not found; ignoring",
                 ev.target_map
             );
         }
@@ -144,9 +144,21 @@ fn spawn_map_markers(
         return;
     }
 
-    // Despawn old map entities
-    for entity in query_existing.iter() {
-        commands.entity(entity).despawn();
+    // If this is the first time this system runs and there are already map
+    // entities present (spawned by `spawn_map` in `Startup`), don't
+    // despawn them and don't spawn duplicate markers either. Instead, just
+    // record the current map and exit.
+    if should_skip_marker_spawn(&last_map, query_existing.iter().next().is_some()) {
+        *last_map = Some(current);
+        debug!(
+            "spawn_map_markers: existing map entities present on first run; leaving visuals intact"
+        );
+        return;
+    } else {
+        // We have a previously recorded map and it changed; despawn old map entities
+        for entity in query_existing.iter() {
+            commands.entity(entity).despawn();
+        }
     }
 
     // Spawn markers for the new map (if it exists)
@@ -175,10 +187,17 @@ fn spawn_map_markers(
         }
     } else {
         // Current map id is set to an unknown map - leave the world empty
-        println!("Warning: Current map {} not present in world", current);
+        warn!("Current map {} not present in world", current);
     }
 
     *last_map = Some(current);
+}
+
+fn should_skip_marker_spawn(
+    last_map: &Option<types::MapId>,
+    has_existing_map_entities: bool,
+) -> bool {
+    last_map.is_none() && has_existing_map_entities
 }
 
 /// Original visual map spawner - keeps previous behavior (renders meshes)
@@ -190,9 +209,14 @@ fn spawn_map(
     mut materials: ResMut<Assets<StandardMaterial>>,
     global_state: Res<GlobalState>,
 ) {
+    debug!("spawn_map system called");
     let game_state = &global_state.0;
 
     if let Some(map) = game_state.world.get_current_map() {
+        debug!(
+            "Found current map: {} (size: {}x{})",
+            map.name, map.width, map.height
+        );
         // Materials (base colors)
         // RGB tuples are kept to allow per-tile tinting of walls based on terrain
         let floor_rgb = (0.3_f32, 0.3_f32, 0.3_f32);
@@ -280,6 +304,8 @@ fn spawn_map(
                                 Mesh3d(water_mesh.clone()),
                                 MeshMaterial3d(water_material.clone()),
                                 Transform::from_xyz(x as f32, -0.1, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
@@ -290,6 +316,8 @@ fn spawn_map(
                                 Mesh3d(mountain_mesh.clone()),
                                 MeshMaterial3d(mountain_material.clone()),
                                 Transform::from_xyz(x as f32, 0.75, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
@@ -300,6 +328,8 @@ fn spawn_map(
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(grass_material.clone()),
                                 Transform::from_xyz(x as f32, 0.0, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
@@ -308,6 +338,8 @@ fn spawn_map(
                                 Mesh3d(forest_mesh.clone()),
                                 MeshMaterial3d(forest_material.clone()),
                                 Transform::from_xyz(x as f32, 0.6, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
@@ -318,6 +350,8 @@ fn spawn_map(
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(grass_material.clone()),
                                 Transform::from_xyz(x as f32, 0.0, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
@@ -328,6 +362,8 @@ fn spawn_map(
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(floor_material.clone()),
                                 Transform::from_xyz(x as f32, 0.0, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
@@ -341,6 +377,8 @@ fn spawn_map(
                             Mesh3d(wall_mesh.clone()),
                             MeshMaterial3d(wall_material.clone()),
                             Transform::from_xyz(x as f32, 0.5, y as f32),
+                            GlobalTransform::default(),
+                            Visibility::default(),
                             MapEntity(map.id),
                             TileCoord(pos),
                         ));
@@ -372,6 +410,8 @@ fn spawn_map(
                                     Mesh3d(wall_mesh.clone()),
                                     MeshMaterial3d(tile_wall_material.clone()),
                                     Transform::from_xyz(x as f32, 0.5, y as f32),
+                                    GlobalTransform::default(),
+                                    Visibility::default(),
                                     MapEntity(map.id),
                                     TileCoord(pos),
                                 ));
@@ -381,6 +421,8 @@ fn spawn_map(
                                     Mesh3d(door_mesh.clone()),
                                     MeshMaterial3d(door_material.clone()),
                                     Transform::from_xyz(x as f32, 0.5, y as f32),
+                                    GlobalTransform::default(),
+                                    Visibility::default(),
                                     MapEntity(map.id),
                                     TileCoord(pos),
                                 ));
@@ -406,5 +448,33 @@ fn spawn_map(
                 ));
             }
         }
+
+        debug!(
+            "Map spawning complete with {} tiles",
+            map.width * map.height
+        );
+    } else {
+        warn!("No current map found during spawn_map!");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_skip_marker_spawn_first_run_with_entities() {
+        assert!(should_skip_marker_spawn(&None, true));
+    }
+
+    #[test]
+    fn test_should_skip_marker_spawn_first_run_without_entities() {
+        assert!(!should_skip_marker_spawn(&None, false));
+    }
+
+    #[test]
+    fn test_should_not_skip_when_last_map_some() {
+        let some_map: Option<types::MapId> = Some(1u16);
+        assert!(!should_skip_marker_spawn(&some_map, true));
     }
 }
