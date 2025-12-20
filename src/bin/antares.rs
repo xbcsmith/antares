@@ -44,8 +44,9 @@ fn main() {
 
     println!("Successfully loaded campaign: {}", campaign.name);
 
-    // Extract camera config before moving campaign
+    // Extract camera config and controls config before moving campaign
     let camera_config = campaign.game_config.camera.clone();
+    let controls_config = campaign.game_config.controls.clone();
 
     App::new()
         .add_plugins(DefaultPlugins)
@@ -54,7 +55,9 @@ fn main() {
         .add_plugins(MapRenderingPlugin)
         .add_plugins(CameraPlugin::new(camera_config))
         .add_plugins(HudPlugin)
-        .add_plugins(antares::game::systems::input::InputPlugin)
+        .add_plugins(antares::game::systems::input::InputPlugin::new(
+            controls_config,
+        ))
         .add_plugins(antares::game::systems::events::EventPlugin)
         // .add_plugins(antares::game::systems::ui::UiPlugin) // Temporarily disabled due to egui context issue
         .run();
