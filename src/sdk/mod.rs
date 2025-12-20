@@ -49,6 +49,7 @@ pub mod database;
 pub mod dialogue_editor;
 pub mod error_formatter;
 pub mod map_editor;
+pub mod name_generator;
 pub mod quest_editor;
 pub mod serialization;
 pub mod templates;
@@ -72,6 +73,7 @@ pub use map_editor::{
     is_valid_monster_id, is_valid_spell_id, suggest_item_ids, suggest_map_ids, suggest_monster_ids,
     suggest_spell_ids, validate_map,
 };
+pub use name_generator::{NameGenerator, NameTheme};
 pub use quest_editor::{
     generate_quest_summary, get_quest_dependencies, validate_quest, QuestValidationError,
 };

@@ -339,7 +339,8 @@ impl GameState {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let loader = CampaignLoader::new("campaigns");
     /// let campaign = loader.load_campaign("tutorial")?;
-    /// let state = GameState::new_game(campaign);
+    /// // `new_game` returns a Result<(GameState, ContentDatabase), CampaignError>
+    /// let (state, _content_db) = GameState::new_game(campaign)?;
     ///
     /// assert!(state.campaign.is_some());
     /// assert_eq!(state.party.gold, state.campaign.as_ref().unwrap().config.starting_gold);

@@ -3308,6 +3308,14 @@
     ],
     events: {
         (
+            x: 15,
+            y: 4,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store where adventurers can buy and sell goods.",
+            text: "General Store - Buy and sell items for your adventures.",
+        ),
+        (
             x: 4,
             y: 4,
         ): Sign(
@@ -3324,12 +3332,12 @@
             text: "Temple of Healing - The priests can restore your health.",
         ),
         (
-            x: 15,
-            y: 4,
+            x: 18,
+            y: 7,
         ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store where adventurers can buy and sell goods.",
-            text: "General Store - Buy and sell items for your adventures.",
+            name: "Forest Direction Sign",
+            description: "A directional sign pointing to the nearby forest.",
+            text: "To the Forrest",
         ),
         (
             x: 19,
@@ -3342,14 +3350,6 @@
                 y: 19,
             ),
             map_id: 4,
-        ),
-        (
-            x: 18,
-            y: 7,
-        ): Sign(
-            name: "Forest Direction Sign",
-            description: "A directional sign pointing to the nearby forest.",
-            text: "To the Forrest",
         ),
     },
     npcs: [

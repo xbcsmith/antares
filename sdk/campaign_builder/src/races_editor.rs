@@ -8,7 +8,9 @@
 //! Uses shared UI components for consistent layout.
 
 use crate::ui_helpers::{
-    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
+    autocomplete_ability_list_selector, autocomplete_proficiency_list_selector,
+    autocomplete_tag_list_selector, extract_item_tag_candidates, extract_proficiency_candidates,
+    extract_special_ability_candidates, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
     TwoColumnLayout,
 };
 use antares::domain::items::types::Item;
@@ -83,16 +85,10 @@ pub struct RaceEditBuffer {
     pub size: SizeCategory,
     /// Typed vector of special ability ids (e.g., "infravision")
     pub special_abilities: Vec<String>,
-    /// Persisted UI search query for special abilities selector
-    pub special_abilities_query: String,
     /// Typed vector of proficiency IDs granted by the race
     pub proficiencies: Vec<ProficiencyId>,
-    /// Persisted UI search query for proficiencies selector
-    pub proficiencies_query: String,
     /// Typed vector of item tag IDs considered incompatible with the race
     pub incompatible_item_tags: Vec<String>,
-    /// Persisted UI search query for incompatible item tags selector
-    pub incompatible_item_tags_query: String,
 }
 
 impl Default for RaceEditBuffer {
@@ -118,11 +114,8 @@ impl Default for RaceEditBuffer {
             psychic_resist: "0".to_string(),
             size: SizeCategory::Medium,
             special_abilities: Vec::new(),
-            special_abilities_query: String::new(),
             proficiencies: Vec::new(),
-            proficiencies_query: String::new(),
             incompatible_item_tags: Vec::new(),
-            incompatible_item_tags_query: String::new(),
         }
     }
 }
@@ -182,11 +175,8 @@ impl RacesEditorState {
                 psychic_resist: race.resistances.psychic.to_string(),
                 size: race.size,
                 special_abilities: race.special_abilities.clone(),
-                special_abilities_query: String::new(),
                 proficiencies: race.proficiencies.clone(),
-                proficiencies_query: String::new(),
                 incompatible_item_tags: race.incompatible_item_tags.clone(),
-                incompatible_item_tags_query: String::new(),
             };
         }
     }
@@ -1010,28 +1000,16 @@ impl RacesEditorState {
 
                 ui.add_space(10.0);
                 ui.heading("Special Abilities");
-                // Build suggestion list from existing races (dedupe)
-                let abilities_list: Vec<String> = {
-                    let mut set = HashSet::new();
-                    let mut list = Vec::new();
-                    for r in &self.races {
-                        for ability in &r.special_abilities {
-                            if set.insert(ability.clone()) {
-                                list.push(ability.clone());
-                            }
-                        }
-                    }
-                    list
-                };
-                if searchable_selector_multi(
+
+                // Build suggestion list from existing races
+                let abilities_list = extract_special_ability_candidates(&self.races);
+
+                if autocomplete_ability_list_selector(
                     ui,
                     "race_special_abilities",
                     "Special Abilities",
                     &mut self.buffer.special_abilities,
                     &abilities_list,
-                    |s| s.clone(),
-                    |s| s.clone(),
-                    &mut self.buffer.special_abilities_query,
                 ) {
                     self.has_unsaved_changes = true;
                 }
@@ -1041,29 +1019,16 @@ impl RacesEditorState {
 
                 ui.add_space(10.0);
                 ui.heading("Proficiencies");
-                // Load proficiency definitions for suggestions (best-effort)
-                let prof_defs: Vec<ProficiencyDefinition> = if let Some(dir) = campaign_dir {
-                    let path = dir.join("data/proficiencies.ron");
-                    match ProficiencyDatabase::load_from_file(&path) {
-                        Ok(db) => db.all().iter().map(|d| (*d).clone()).collect(),
-                        Err(_) => Vec::new(),
-                    }
-                } else {
-                    match ProficiencyDatabase::load_from_file("data/proficiencies.ron") {
-                        Ok(db) => db.all().iter().map(|d| (*d).clone()).collect(),
-                        Err(_) => Vec::new(),
-                    }
-                };
+                // Load proficiency definitions with tri-stage fallback
+                let prof_defs = crate::ui_helpers::load_proficiencies(campaign_dir, items);
 
-                if searchable_selector_multi(
+
+                if autocomplete_proficiency_list_selector(
                     ui,
                     "race_proficiencies",
                     "Proficiencies",
                     &mut self.buffer.proficiencies,
                     &prof_defs,
-                    |p| p.id.clone(),
-                    |p| p.name.clone(),
-                    &mut self.buffer.proficiencies_query,
                 ) {
                     self.has_unsaved_changes = true;
                 }
@@ -1120,29 +1085,16 @@ impl RacesEditorState {
 
                 ui.add_space(10.0);
                 ui.heading("Incompatible Item Tags");
-                // Build a unique list of existing tags from all items
-                let tags_list: Vec<String> = {
-                    let mut set = HashSet::new();
-                    let mut list = Vec::new();
-                    for it in items.iter() {
-                        for t in &it.tags {
-                            if set.insert(t.clone()) {
-                                list.push(t.clone());
-                            }
-                        }
-                    }
-                    list
-                };
 
-                if searchable_selector_multi(
+                // Build a unique list of existing tags from all items
+                let tags_list = extract_item_tag_candidates(items);
+
+                if autocomplete_tag_list_selector(
                     ui,
                     "race_incompatible_item_tags",
                     "Incompatible Item Tags",
                     &mut self.buffer.incompatible_item_tags,
                     &tags_list,
-                    |s| s.clone(),
-                    |s| s.clone(),
-                    &mut self.buffer.incompatible_item_tags_query,
                 ) {
                     self.has_unsaved_changes = true;
                 }
@@ -1654,5 +1606,129 @@ mod tests {
         state.buffer.name = "Updated".to_string();
         state.save_race().unwrap();
         assert_eq!(state.mode, RacesEditorMode::List);
+    }
+
+    #[test]
+    fn test_autocomplete_proficiencies_buffer_initialization() {
+        let mut state = RacesEditorState::new();
+        state.start_new_race();
+
+        // Verify proficiencies list is empty by default
+        assert!(state.buffer.proficiencies.is_empty());
+    }
+
+    #[test]
+    fn test_autocomplete_proficiencies_persistence() {
+        let mut state = RacesEditorState::new();
+        state.start_new_race();
+        state.buffer.id = "test_prof".to_string();
+        state.buffer.name = "Test Proficiency Race".to_string();
+        state.buffer.proficiencies = vec!["simple_weapon".to_string(), "light_armor".to_string()];
+
+        state.save_race().unwrap();
+
+        let saved = &state.races[0];
+        assert_eq!(saved.proficiencies, vec!["simple_weapon", "light_armor"]);
+
+        // Edit and verify proficiencies are loaded back
+        state.start_edit_race(0);
+        assert_eq!(
+            state.buffer.proficiencies,
+            vec!["simple_weapon", "light_armor"]
+        );
+    }
+
+    #[test]
+    fn test_autocomplete_incompatible_tags_buffer_initialization() {
+        let mut state = RacesEditorState::new();
+        state.start_new_race();
+
+        // Verify incompatible tags list is empty by default
+        assert!(state.buffer.incompatible_item_tags.is_empty());
+    }
+
+    #[test]
+    fn test_autocomplete_incompatible_tags_persistence() {
+        let mut state = RacesEditorState::new();
+        state.start_new_race();
+        state.buffer.id = "test_tags".to_string();
+        state.buffer.name = "Test Tags Race".to_string();
+        state.buffer.incompatible_item_tags =
+            vec!["large_weapon".to_string(), "heavy_armor".to_string()];
+
+        state.save_race().unwrap();
+
+        let saved = &state.races[0];
+        assert_eq!(
+            saved.incompatible_item_tags,
+            vec!["large_weapon", "heavy_armor"]
+        );
+
+        // Edit and verify tags are loaded back
+        state.start_edit_race(0);
+        assert_eq!(
+            state.buffer.incompatible_item_tags,
+            vec!["large_weapon", "heavy_armor"]
+        );
+    }
+
+    #[test]
+    fn test_autocomplete_special_abilities_buffer_initialization() {
+        let mut state = RacesEditorState::new();
+        state.start_new_race();
+
+        // Verify special abilities list is empty by default
+        assert!(state.buffer.special_abilities.is_empty());
+    }
+
+    #[test]
+    fn test_autocomplete_special_abilities_persistence() {
+        let mut state = RacesEditorState::new();
+        state.start_new_race();
+        state.buffer.id = "test_abilities".to_string();
+        state.buffer.name = "Test Abilities Race".to_string();
+        state.buffer.special_abilities =
+            vec!["infravision".to_string(), "magic_resistance".to_string()];
+
+        state.save_race().unwrap();
+
+        let saved = &state.races[0];
+        assert_eq!(
+            saved.special_abilities,
+            vec!["infravision", "magic_resistance"]
+        );
+
+        // Edit and verify abilities are loaded back
+        state.start_edit_race(0);
+        assert_eq!(
+            state.buffer.special_abilities,
+            vec!["infravision", "magic_resistance"]
+        );
+    }
+
+    #[test]
+    fn test_autocomplete_all_fields_roundtrip() {
+        let mut state = RacesEditorState::new();
+        state.start_new_race();
+        state.buffer.id = "comprehensive".to_string();
+        state.buffer.name = "Comprehensive Test".to_string();
+        state.buffer.proficiencies = vec!["martial_melee".to_string()];
+        state.buffer.incompatible_item_tags = vec!["two_handed".to_string()];
+        state.buffer.special_abilities = vec!["darkvision".to_string()];
+
+        state.save_race().unwrap();
+
+        // Edit and verify all fields are loaded
+        state.start_edit_race(0);
+        assert_eq!(state.buffer.proficiencies, vec!["martial_melee"]);
+        assert_eq!(state.buffer.incompatible_item_tags, vec!["two_handed"]);
+        assert_eq!(state.buffer.special_abilities, vec!["darkvision"]);
+
+        // Modify and save again
+        state.buffer.proficiencies.push("shield".to_string());
+        state.save_race().unwrap();
+
+        let saved = &state.races[0];
+        assert_eq!(saved.proficiencies, vec!["martial_melee", "shield"]);
     }
 }

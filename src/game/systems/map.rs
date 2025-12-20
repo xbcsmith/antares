@@ -56,6 +56,12 @@ pub struct MapChangeEvent {
     pub target_pos: types::Position,
 }
 
+/// Message sent when a door is opened - triggers map visual refresh
+#[derive(Message, Clone)]
+pub struct DoorOpenedEvent {
+    pub position: types::Position,
+}
+
 /// Plugin responsible for dynamic map management (spawning/despawning marker
 /// entities and event triggers when the current map changes).
 pub struct MapManagerPlugin;
@@ -64,9 +70,13 @@ impl Plugin for MapManagerPlugin {
     fn build(&self, app: &mut App) {
         // Register the map change message and the handler + spawn systems
         app.add_message::<MapChangeEvent>()
+            .add_message::<DoorOpenedEvent>()
             // Process explicit map change requests first, then let the marker
             // spawner observe the changed world state and spawn/despawn accordingly.
-            .add_systems(Update, (map_change_handler, spawn_map_markers));
+            .add_systems(
+                Update,
+                (map_change_handler, spawn_map_markers, handle_door_opened),
+            );
     }
 }
 
@@ -77,6 +87,32 @@ impl Plugin for MapRenderingPlugin {
         app.add_systems(Startup, spawn_map)
             .add_plugins(MapManagerPlugin);
     }
+}
+
+/// System that handles door opened messages by refreshing map visuals
+#[allow(unused_mut)] // spawn_map requires mut even though clippy doesn't detect it
+fn handle_door_opened(
+    mut door_messages: MessageReader<DoorOpenedEvent>,
+    mut commands: Commands,
+    query_existing: Query<Entity, With<MapEntity>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    global_state: Res<GlobalState>,
+) {
+    // Only refresh if a door was actually opened
+    if door_messages.read().count() == 0 {
+        return;
+    }
+
+    info!("Door opened - refreshing map visuals");
+
+    // Despawn all existing map entities
+    for entity in query_existing.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    // Respawn the map with updated door states
+    spawn_map(commands, meshes, materials, global_state);
 }
 
 /// Converts a domain MapEvent into a lightweight MapEventType (if supported)
@@ -120,8 +156,8 @@ fn map_change_handler(
             global_state.0.world.set_party_position(ev.target_pos);
         } else {
             // Gracefully ignore invalid map changes
-            println!(
-                "Warning: MapChangeEvent target_map {} not found; ignoring",
+            warn!(
+                "MapChangeEvent target_map {} not found; ignoring",
                 ev.target_map
             );
         }
@@ -144,9 +180,21 @@ fn spawn_map_markers(
         return;
     }
 
-    // Despawn old map entities
-    for entity in query_existing.iter() {
-        commands.entity(entity).despawn();
+    // If this is the first time this system runs and there are already map
+    // entities present (spawned by `spawn_map` in `Startup`), don't
+    // despawn them and don't spawn duplicate markers either. Instead, just
+    // record the current map and exit.
+    if should_skip_marker_spawn(&last_map, query_existing.iter().next().is_some()) {
+        *last_map = Some(current);
+        debug!(
+            "spawn_map_markers: existing map entities present on first run; leaving visuals intact"
+        );
+        return;
+    } else {
+        // We have a previously recorded map and it changed; despawn old map entities
+        for entity in query_existing.iter() {
+            commands.entity(entity).despawn();
+        }
     }
 
     // Spawn markers for the new map (if it exists)
@@ -175,10 +223,17 @@ fn spawn_map_markers(
         }
     } else {
         // Current map id is set to an unknown map - leave the world empty
-        println!("Warning: Current map {} not present in world", current);
+        warn!("Current map {} not present in world", current);
     }
 
     *last_map = Some(current);
+}
+
+fn should_skip_marker_spawn(
+    last_map: &Option<types::MapId>,
+    has_existing_map_entities: bool,
+) -> bool {
+    last_map.is_none() && has_existing_map_entities
 }
 
 /// Original visual map spawner - keeps previous behavior (renders meshes)
@@ -190,9 +245,14 @@ fn spawn_map(
     mut materials: ResMut<Assets<StandardMaterial>>,
     global_state: Res<GlobalState>,
 ) {
+    debug!("spawn_map system called");
     let game_state = &global_state.0;
 
     if let Some(map) = game_state.world.get_current_map() {
+        debug!(
+            "Found current map: {} (size: {}x{})",
+            map.name, map.width, map.height
+        );
         // Materials (base colors)
         // RGB tuples are kept to allow per-tile tinting of walls based on terrain
         let floor_rgb = (0.3_f32, 0.3_f32, 0.3_f32);
@@ -255,13 +315,16 @@ fn spawn_map(
             ..default()
         });
 
-        // Meshes
+        // Meshes with proper scale for first-person view: 1 unit ≈ 10 feet
+        // Camera at 0.6 units (6 feet eye level), so walls must be much taller to loom above
+        // Walls are 2.5 units tall (25 feet) - towering above the 6-foot viewpoint
+        // Doors are 2.5 units tall and fill the tile (1.0 thick) so no gaps
         let floor_mesh = meshes.add(Plane3d::default().mesh().size(1.0, 1.0));
-        let wall_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-        let door_mesh = meshes.add(Cuboid::new(1.0, 1.0, 0.2)); // Thinner
+        let wall_mesh = meshes.add(Cuboid::new(1.0, 2.5, 1.0)); // 10x25x10 feet
+        let door_mesh = meshes.add(Cuboid::new(1.0, 2.5, 1.0)); // Same as wall, fills tile
         let water_mesh = meshes.add(Plane3d::default().mesh().size(1.0, 1.0));
-        let mountain_mesh = meshes.add(Cuboid::new(1.0, 1.5, 1.0)); // Taller
-        let forest_mesh = meshes.add(Cuboid::new(0.8, 1.2, 0.8)); // Tree-like
+        let mountain_mesh = meshes.add(Cuboid::new(1.0, 3.0, 1.0)); // Mountains even taller (30 feet)
+        let forest_mesh = meshes.add(Cuboid::new(0.8, 2.2, 0.8)); // Trees taller (22 feet)
 
         // Iterate over tiles
         for y in 0..map.height {
@@ -280,16 +343,21 @@ fn spawn_map(
                                 Mesh3d(water_mesh.clone()),
                                 MeshMaterial3d(water_material.clone()),
                                 Transform::from_xyz(x as f32, -0.1, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
                         }
                         world::TerrainType::Mountain => {
-                            // Render mountain as tall block
+                            // Render mountain as tall block (3.0 units = 30 feet)
+                            // Center at y=1.5 (bottom at 0, top at 3.0)
                             commands.spawn((
                                 Mesh3d(mountain_mesh.clone()),
                                 MeshMaterial3d(mountain_material.clone()),
-                                Transform::from_xyz(x as f32, 0.75, y as f32),
+                                Transform::from_xyz(x as f32, 1.5, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
@@ -300,14 +368,19 @@ fn spawn_map(
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(grass_material.clone()),
                                 Transform::from_xyz(x as f32, 0.0, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
-                            // Then tree on top
+                            // Then tree on top (2.2 units = 22 feet tall)
+                            // Center at y=1.1 (bottom at 0, top at 2.2)
                             commands.spawn((
                                 Mesh3d(forest_mesh.clone()),
                                 MeshMaterial3d(forest_material.clone()),
-                                Transform::from_xyz(x as f32, 0.6, y as f32),
+                                Transform::from_xyz(x as f32, 1.1, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
@@ -318,6 +391,8 @@ fn spawn_map(
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(grass_material.clone()),
                                 Transform::from_xyz(x as f32, 0.0, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
@@ -328,6 +403,8 @@ fn spawn_map(
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(floor_material.clone()),
                                 Transform::from_xyz(x as f32, 0.0, y as f32),
+                                GlobalTransform::default(),
+                                Visibility::default(),
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
@@ -336,11 +413,14 @@ fn spawn_map(
 
                     // Spawn wall/door based on wall_type or perimeter
                     if is_perimeter && tile.wall_type == world::WallType::None {
-                        // Add perimeter walls where none exist using the default wall material
+                        // Add perimeter walls where none exist (2.5 units = 25 feet tall)
+                        // Center at y=1.25 (bottom at 0, top at 2.5)
                         commands.spawn((
                             Mesh3d(wall_mesh.clone()),
                             MeshMaterial3d(wall_material.clone()),
-                            Transform::from_xyz(x as f32, 0.5, y as f32),
+                            Transform::from_xyz(x as f32, 1.25, y as f32),
+                            GlobalTransform::default(),
+                            Visibility::default(),
                             MapEntity(map.id),
                             TileCoord(pos),
                         ));
@@ -371,16 +451,22 @@ fn spawn_map(
                                 commands.spawn((
                                     Mesh3d(wall_mesh.clone()),
                                     MeshMaterial3d(tile_wall_material.clone()),
-                                    Transform::from_xyz(x as f32, 0.5, y as f32),
+                                    Transform::from_xyz(x as f32, 1.25, y as f32), // Center at 1.25 (25 feet tall)
+                                    GlobalTransform::default(),
+                                    Visibility::default(),
                                     MapEntity(map.id),
                                     TileCoord(pos),
                                 ));
                             }
                             world::WallType::Door => {
+                                // Door now fills tile (1.0x2.5x1.0) - same dimensions as wall
+                                // Center at y=1.25 (25 feet tall, fills entire tile space)
                                 commands.spawn((
                                     Mesh3d(door_mesh.clone()),
                                     MeshMaterial3d(door_material.clone()),
-                                    Transform::from_xyz(x as f32, 0.5, y as f32),
+                                    Transform::from_xyz(x as f32, 1.25, y as f32),
+                                    GlobalTransform::default(),
+                                    Visibility::default(),
                                     MapEntity(map.id),
                                     TileCoord(pos),
                                 ));
@@ -406,5 +492,33 @@ fn spawn_map(
                 ));
             }
         }
+
+        debug!(
+            "Map spawning complete with {} tiles",
+            map.width * map.height
+        );
+    } else {
+        warn!("No current map found during spawn_map!");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_skip_marker_spawn_first_run_with_entities() {
+        assert!(should_skip_marker_spawn(&None, true));
+    }
+
+    #[test]
+    fn test_should_skip_marker_spawn_first_run_without_entities() {
+        assert!(!should_skip_marker_spawn(&None, false));
+    }
+
+    #[test]
+    fn test_should_not_skip_when_last_map_some() {
+        let some_map: Option<types::MapId> = Some(1u16);
+        assert!(!should_skip_marker_spawn(&some_map, true));
     }
 }

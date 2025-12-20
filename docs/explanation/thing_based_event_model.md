@@ -1,4 +1,3 @@
-antares/docs/explanation/thing_based_event_model.md#L1-400
 # Thing-based Event Model — Design & Migration Plan
 
 ## Purpose

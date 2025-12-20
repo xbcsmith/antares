@@ -248,4 +248,53 @@
         quest_giver_map: None,
         quest_giver_position: None,
     ),
+    (
+        id: 5,
+        name: "The Lich\'s Tomb",
+        description: "Journey to the Harow Downs to face the Lich",
+        stages: [
+            (
+                stage_number: 1,
+                name: "",
+                description: "",
+                objectives: [
+                    ReachLocation(
+                        map_id: 6,
+                        position: (
+                            x: 1,
+                            y: 1,
+                        ),
+                        radius: 1,
+                    ),
+                    KillMonsters(
+                        monster_id: 31,
+                        quantity: 1,
+                    ),
+                    TalkToNpc(
+                        npc_id: 0,
+                        map_id: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Experience(1000),
+            Gold(500),
+            Items([
+                (11, 1),
+            ]),
+        ],
+        min_level: Some(5),
+        max_level: Some(255),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: true,
+        quest_giver_npc: None,
+        quest_giver_map: Some(1),
+        quest_giver_position: Some((
+            x: 1,
+            y: 16,
+        )),
+    ),
 ]

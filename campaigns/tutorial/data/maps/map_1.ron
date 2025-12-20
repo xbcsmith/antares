@@ -4428,14 +4428,6 @@
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
         (
-            x: 13,
-            y: 3,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice outside the temple detailing its services.",
-            text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
             x: 5,
             y: 10,
         ): Sign(
@@ -4445,11 +4437,11 @@
         ),
         (
             x: 13,
-            y: 18,
+            y: 3,
         ): Sign(
-            name: "Directional Sign",
-            description: "A wooden sign pointing toward the Dark Forrest.",
-            text: "To the Dark Forrest",
+            name: "Temple Sign",
+            description: "A notice outside the temple detailing its services.",
+            text: "Temple of Healing - The priests can restore your health.",
         ),
         (
             x: 9,
@@ -4459,6 +4451,14 @@
             description: "A trap in the town square fountain",
             damage: 10,
             effect: Some("Poison"),
+        ),
+        (
+            x: 13,
+            y: 18,
+        ): Sign(
+            name: "Directional Sign",
+            description: "A wooden sign pointing toward the Dark Forrest.",
+            text: "To the Dark Forrest",
         ),
     },
     npcs: [

@@ -83,14 +83,20 @@ pub enum EquipError {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character::Character;
+/// use antares::domain::character::{Character, Sex, Alignment};
 /// use antares::domain::items::can_equip_item;
 /// use antares::domain::classes::ClassDatabase;
 /// use antares::domain::races::RaceDatabase;
 /// use antares::domain::items::ItemDatabase;
 ///
 /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let character = Character::new("Hero", "human".to_string(), "knight".to_string());
+/// let character = Character::new(
+///     "Hero".to_string(),
+///     "human".to_string(),
+///     "knight".to_string(),
+///     Sex::Male,
+///     Alignment::Good,
+/// );
 /// let items = ItemDatabase::new();
 /// let classes = ClassDatabase::new();
 /// let races = RaceDatabase::new();

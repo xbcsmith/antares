@@ -37,8 +37,8 @@
 //! ```
 
 use crate::ui_helpers::{
-    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
-    TwoColumnLayout,
+    autocomplete_item_list_selector, autocomplete_monster_list_selector, ActionButtons,
+    EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
@@ -48,6 +48,27 @@ use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
 use std::fs;
 use std::path::PathBuf;
+
+// One Dark Theme Color Constants for Event Types
+// Reference: https://github.com/joshdick/onedark.vim
+
+/// Red for Encounter events - rgb(224, 108, 117) / #e06c75
+const EVENT_COLOR_ENCOUNTER: Color32 = Color32::from_rgb(224, 108, 117);
+
+/// Green for Treasure events - rgb(152, 195, 121) / #98c379
+const EVENT_COLOR_TREASURE: Color32 = Color32::from_rgb(152, 195, 121);
+
+/// Blue for Teleport events - rgb(97, 175, 239) / #61afef
+const EVENT_COLOR_TELEPORT: Color32 = Color32::from_rgb(97, 175, 239);
+
+/// Dark Yellow for Trap events - rgb(209, 154, 102) / #d19a66
+const EVENT_COLOR_TRAP: Color32 = Color32::from_rgb(209, 154, 102);
+
+/// Cyan for Sign events - rgb(86, 182, 194) / #56b6c2
+const EVENT_COLOR_SIGN: Color32 = Color32::from_rgb(86, 182, 194);
+
+/// Magenta for NPC Dialogue events - rgb(198, 120, 221) / #c678dd
+const EVENT_COLOR_NPC_DIALOGUE: Color32 = Color32::from_rgb(198, 120, 221);
 
 // ===== Editor Mode =====
 
@@ -709,12 +730,17 @@ pub struct EventEditorState {
     pub teleport_selected_pos: Option<Position>,
     pub teleport_preview_enabled: bool,
     // Trap fields
-    pub trap_damage: String,
+    pub trap_damage: u16,
     pub trap_effect: String,
     // Sign fields
     pub sign_text: String,
     // NPC Dialogue fields
     pub npc_id: String,
+
+    // Autocomplete input buffers
+    pub trap_effect_input_buffer: String,
+    pub teleport_map_input_buffer: String,
+    pub npc_id_input_buffer: String,
 }
 
 impl Default for EventEditorState {
@@ -734,10 +760,13 @@ impl Default for EventEditorState {
             teleport_selected_map: None,
             teleport_selected_pos: None,
             teleport_preview_enabled: false,
-            trap_damage: String::new(),
+            trap_damage: 0,
             trap_effect: String::new(),
             sign_text: String::new(),
             npc_id: String::new(),
+            trap_effect_input_buffer: String::new(),
+            teleport_map_input_buffer: String::new(),
+            npc_id_input_buffer: String::new(),
         }
     }
 }
@@ -778,6 +807,31 @@ impl EventType {
             EventType::Trap => "🪤",
             EventType::Sign => "📜",
             EventType::NpcDialogue => "💬",
+        }
+    }
+
+    /// Returns the One Dark theme color for this event type
+    ///
+    /// # Returns
+    /// Color32 from One Dark theme palette matching the event's semantic meaning
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::map_editor::EventType;
+    ///
+    /// let encounter = EventType::Encounter;
+    /// let color = encounter.color();
+    /// // Returns red color for combat encounters
+    /// ```
+    pub fn color(&self) -> Color32 {
+        match self {
+            EventType::Encounter => EVENT_COLOR_ENCOUNTER,
+            EventType::Treasure => EVENT_COLOR_TREASURE,
+            EventType::Teleport => EVENT_COLOR_TELEPORT,
+            EventType::Trap => EVENT_COLOR_TRAP,
+            EventType::Sign => EVENT_COLOR_SIGN,
+            EventType::NpcDialogue => EVENT_COLOR_NPC_DIALOGUE,
         }
     }
 
@@ -855,10 +909,7 @@ impl EventEditorState {
                 })
             }
             EventType::Trap => {
-                let damage = self
-                    .trap_damage
-                    .parse()
-                    .map_err(|_| "Invalid damage value")?;
+                let damage = self.trap_damage;
                 let effect = if self.trap_effect.is_empty() {
                     None
                 } else {
@@ -966,7 +1017,7 @@ impl EventEditorState {
                 s.event_type = EventType::Trap;
                 s.name = name.clone();
                 s.description = description.clone();
-                s.trap_damage = damage.to_string();
+                s.trap_damage = *damage;
                 s.trap_effect = effect.clone().unwrap_or_default();
             }
             MapEvent::Sign {
@@ -1063,7 +1114,7 @@ impl<'a> MapGridWidget<'a> {
         self
     }
 
-    fn tile_color(tile: &Tile, has_event: bool, has_npc: bool) -> Color32 {
+    fn tile_color(tile: &Tile, event_type: Option<&EventType>, has_npc: bool) -> Color32 {
         if has_npc {
             return Color32::from_rgb(255, 200, 0); // Yellow for NPCs
         }
@@ -1081,8 +1132,8 @@ impl<'a> MapGridWidget<'a> {
             TerrainType::Mountain => Color32::from_rgb(105, 105, 105), // Dim Gray
         };
 
-        if has_event {
-            return Color32::from_rgb(255, 100, 100); // Red for events
+        if let Some(event_type) = event_type {
+            return event_type.color();
         }
 
         if tile.wall_type != WallType::None {
@@ -1147,12 +1198,22 @@ impl<'a> Widget for MapGridWidget<'a> {
             for x in 0..self.state.map.width as i32 {
                 let pos = Position::new(x, y);
                 if let Some(tile) = self.state.map.get_tile(pos) {
-                    let has_event =
-                        self.state.show_events && self.state.map.events.contains_key(&pos);
+                    let event_type = if self.state.show_events {
+                        self.state.map.events.get(&pos).map(|event| match event {
+                            MapEvent::Encounter { .. } => EventType::Encounter,
+                            MapEvent::Treasure { .. } => EventType::Treasure,
+                            MapEvent::Teleport { .. } => EventType::Teleport,
+                            MapEvent::Trap { .. } => EventType::Trap,
+                            MapEvent::Sign { .. } => EventType::Sign,
+                            MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
+                        })
+                    } else {
+                        None
+                    };
                     let has_npc = self.state.show_npcs
                         && self.state.map.npcs.iter().any(|npc| npc.position == pos);
 
-                    let color = Self::tile_color(tile, has_event, has_npc);
+                    let color = Self::tile_color(tile, event_type.as_ref(), has_npc);
 
                     let rect = Rect::from_min_size(
                         to_screen(x, y),
@@ -1299,9 +1360,16 @@ impl<'a> Widget for MapPreviewWidget<'a> {
             for x in 0..self.map.width as i32 {
                 let pos = Position::new(x, y);
                 if let Some(tile) = self.map.get_tile(pos) {
-                    let has_event = self.map.events.contains_key(&pos);
+                    let event_type = self.map.events.get(&pos).map(|event| match event {
+                        MapEvent::Encounter { .. } => EventType::Encounter,
+                        MapEvent::Treasure { .. } => EventType::Treasure,
+                        MapEvent::Teleport { .. } => EventType::Teleport,
+                        MapEvent::Trap { .. } => EventType::Trap,
+                        MapEvent::Sign { .. } => EventType::Sign,
+                        MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
+                    });
                     let has_npc = self.map.npcs.iter().any(|n| n.position == pos);
-                    let color = MapGridWidget::tile_color(tile, has_event, has_npc);
+                    let color = MapGridWidget::tile_color(tile, event_type.as_ref(), has_npc);
 
                     let rect =
                         Rect::from_min_size(to_screen(x, y), Vec2::new(tile_size, tile_size));
@@ -1524,6 +1592,7 @@ impl MapsEditorState {
         maps: &mut Vec<Map>,
         monsters: &[MonsterDefinition],
         items: &[Item],
+        conditions: &[antares::domain::conditions::ConditionDefinition],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -1650,6 +1719,7 @@ impl MapsEditorState {
                     maps,
                     monsters,
                     items,
+                    conditions,
                     campaign_dir,
                     maps_dir,
                     display_config,
@@ -1861,6 +1931,7 @@ impl MapsEditorState {
         maps: &mut Vec<Map>,
         monsters: &[MonsterDefinition],
         items: &[Item],
+        conditions: &[antares::domain::conditions::ConditionDefinition],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -2120,7 +2191,7 @@ impl MapsEditorState {
                                 .id_salt("map_editor_inspector_scroll")
                                 .show(right_ui, |ui| {
                                     Self::show_inspector_panel(
-                                        ui, editor_ref, maps, monsters, items,
+                                        ui, editor_ref, maps, monsters, items, conditions,
                                     );
                                 });
                         },
@@ -2327,6 +2398,7 @@ impl MapsEditorState {
         maps: &[Map],
         monsters: &[MonsterDefinition],
         items: &[Item],
+        conditions: &[antares::domain::conditions::ConditionDefinition],
     ) {
         ui.heading("Inspector");
         ui.separator();
@@ -2428,7 +2500,7 @@ impl MapsEditorState {
         if matches!(editor.current_tool, EditorTool::PlaceEvent) {
             ui.group(|ui| {
                 ui.heading("Event Editor");
-                Self::show_event_editor(ui, editor, maps, monsters, items);
+                Self::show_event_editor(ui, editor, maps, monsters, items, conditions);
             });
         }
 
@@ -2573,6 +2645,7 @@ impl MapsEditorState {
         maps: &[Map],
         monsters: &[MonsterDefinition],
         items: &[Item],
+        conditions: &[antares::domain::conditions::ConditionDefinition],
     ) {
         if let Some(ref mut event_editor) = editor.event_editor {
             egui::ComboBox::from_id_salt("map_event_type_combo")
@@ -2604,15 +2677,12 @@ impl MapsEditorState {
             match event_editor.event_type {
                 EventType::Encounter => {
                     // Multi-select searchable list for monsters (id+name)
-                    let changed = searchable_selector_multi(
+                    let changed = autocomplete_monster_list_selector(
                         ui,
                         "event_encounter_monsters",
                         "Encounter Monsters",
                         &mut event_editor.encounter_monsters,
                         monsters,
-                        |m| m.id,
-                        |m| m.name.clone(),
-                        &mut event_editor.encounter_monsters_query,
                     );
                     if changed {
                         editor.has_changes = true;
@@ -2620,65 +2690,47 @@ impl MapsEditorState {
                 }
                 EventType::Treasure => {
                     // Multi-select searchable list for treasure items (id+name)
-                    let changed = searchable_selector_multi(
+                    let changed = autocomplete_item_list_selector(
                         ui,
                         "event_treasure_items",
                         "Treasure Items",
                         &mut event_editor.treasure_items,
                         items,
-                        |i| i.id,
-                        |i| i.name.clone(),
-                        &mut event_editor.treasure_items_query,
                     );
                     if changed {
                         editor.has_changes = true;
                     }
                 }
                 EventType::Teleport => {
-                    ui.label("Target Map:");
+                    // Use autocomplete for map selection
+                    use crate::ui_helpers::autocomplete_map_selector;
+
+                    if autocomplete_map_selector(
+                        ui,
+                        "event_teleport_map",
+                        "Target Map:",
+                        &mut event_editor.teleport_map_id,
+                        maps,
+                    ) {
+                        // Update selected map when autocomplete changes
+                        if let Ok(map_id) = event_editor.teleport_map_id.parse::<MapId>() {
+                            event_editor.teleport_selected_map = Some(map_id);
+                            event_editor.teleport_preview_enabled = true;
+                        }
+                        editor.has_changes = true;
+                    }
+
+                    // Also allow direct text editing for manual ID entry
                     ui.horizontal(|ui| {
-                        // Editable text input for map id or name
-                        let changed = ui
+                        ui.label("Or enter Map ID manually:");
+                        if ui
                             .text_edit_singleline(&mut event_editor.teleport_map_id)
-                            .changed();
-                        if changed {
-                            // If user types, clear the previously selected map
+                            .changed()
+                        {
                             event_editor.teleport_selected_map = None;
                             event_editor.teleport_preview_enabled = false;
                         }
                     });
-
-                    // Suggestions based on typed input (id or name)
-                    let suggestions = suggest_maps_for_partial(maps, &event_editor.teleport_map_id);
-                    if !suggestions.is_empty() {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Suggestions:");
-                            for (sid, sname) in suggestions.iter() {
-                                let label = format!("[{}] {}", sid, sname);
-                                // Use small button so UI remains compact
-                                if ui.small_button(&label).clicked() {
-                                    event_editor.teleport_map_id = sid.to_string();
-                                    event_editor.teleport_selected_map = Some(*sid);
-                                    event_editor.teleport_preview_enabled = true;
-                                }
-                            }
-                        });
-                    } else {
-                        // If empty input, provide quick selection of few maps (first 8)
-                        if event_editor.teleport_map_id.is_empty() && !maps.is_empty() {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label("Common:");
-                                for m in maps.iter().take(8) {
-                                    let label = format!("[{}] {}", m.id, m.name);
-                                    if ui.small_button(&label).clicked() {
-                                        event_editor.teleport_map_id = m.id.to_string();
-                                        event_editor.teleport_selected_map = Some(m.id);
-                                        event_editor.teleport_preview_enabled = true;
-                                    }
-                                }
-                            });
-                        }
-                    }
 
                     ui.horizontal(|ui| {
                         ui.label("Destination X:");
@@ -2746,18 +2798,66 @@ impl MapsEditorState {
                     }
                 }
                 EventType::Trap => {
-                    ui.label("Damage:");
-                    ui.text_edit_singleline(&mut event_editor.trap_damage);
+                    ui.horizontal(|ui| {
+                        ui.label("Damage:");
+                        ui.add(
+                            egui::DragValue::new(&mut event_editor.trap_damage)
+                                .range(0..=65535)
+                                .speed(1.0),
+                        )
+                        .on_hover_text("Valid range: 0-65535");
+                    });
+
+                    // Use autocomplete for trap effect (condition-based)
+                    use crate::ui_helpers::autocomplete_condition_selector;
+
                     ui.label("Effect (optional):");
-                    ui.text_edit_singleline(&mut event_editor.trap_effect);
+                    if autocomplete_condition_selector(
+                        ui,
+                        "event_trap_effect",
+                        "Condition:",
+                        &mut event_editor.trap_effect,
+                        conditions,
+                    ) {
+                        editor.has_changes = true;
+                    }
+
+                    // Also allow freeform text for custom effects
+                    ui.horizontal(|ui| {
+                        ui.label("Or custom effect:");
+                        if ui
+                            .text_edit_singleline(&mut event_editor.trap_effect)
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    });
                 }
                 EventType::Sign => {
                     ui.label("Sign Text:");
                     ui.text_edit_multiline(&mut event_editor.sign_text);
                 }
                 EventType::NpcDialogue => {
-                    ui.label("NPC ID:");
-                    ui.text_edit_singleline(&mut event_editor.npc_id);
+                    // Use autocomplete for NPC selection
+                    use crate::ui_helpers::autocomplete_npc_selector;
+
+                    if autocomplete_npc_selector(
+                        ui,
+                        "event_npc_dialogue",
+                        "NPC:",
+                        &mut event_editor.npc_id,
+                        maps,
+                    ) {
+                        editor.has_changes = true;
+                    }
+
+                    // Also allow direct text editing for manual entry
+                    ui.horizontal(|ui| {
+                        ui.label("Or enter NPC ID manually:");
+                        if ui.text_edit_singleline(&mut event_editor.npc_id).changed() {
+                            editor.has_changes = true;
+                        }
+                    });
                 }
             }
 
@@ -3852,7 +3952,7 @@ mod tests {
             description: "Welcome".to_string(),
             text: "Welcome to town".to_string(),
         };
-        state.add_event_at_position(pos.x, pos.y, event);
+        state.add_event_at_position(pos.x as u32, pos.y as u32, event);
         state.selected_position = Some(pos);
 
         let ctx = egui::Context::default();
@@ -3865,7 +3965,7 @@ mod tests {
 
         egui::CentralPanel::default().show(&ctx, |ui| {
             // Should render the inspector without panicking (and include name/description)
-            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[]);
+            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[], &[]);
         });
 
         // Verify selection was preserved and the inspector invocation completed
@@ -4075,5 +4175,80 @@ mod tests {
 
         state.mode = MapsEditorMode::List;
         assert_eq!(state.mode, MapsEditorMode::List);
+    }
+
+    // =========================================================================
+    // EventEditorState Autocomplete Buffer Tests
+    // =========================================================================
+
+    #[test]
+    fn test_event_editor_state_autocomplete_buffers_initialization() {
+        let state = EventEditorState::default();
+        assert!(
+            state.trap_effect_input_buffer.is_empty(),
+            "Trap effect input buffer should be empty on initialization"
+        );
+        assert!(
+            state.teleport_map_input_buffer.is_empty(),
+            "Teleport map input buffer should be empty on initialization"
+        );
+        assert!(
+            state.npc_id_input_buffer.is_empty(),
+            "NPC ID input buffer should be empty on initialization"
+        );
+    }
+
+    #[test]
+    fn test_event_editor_state_trap_effect_buffer() {
+        let mut state = EventEditorState::default();
+        state.event_type = EventType::Trap;
+
+        // Simulate setting trap effect via autocomplete
+        state.trap_effect_input_buffer = "Poison".to_string();
+        state.trap_effect = state.trap_effect_input_buffer.clone();
+
+        assert_eq!(state.trap_effect, "Poison");
+        assert_eq!(state.trap_effect_input_buffer, "Poison");
+    }
+
+    #[test]
+    fn test_event_editor_state_teleport_map_buffer() {
+        let mut state = EventEditorState::default();
+        state.event_type = EventType::Teleport;
+
+        // Simulate setting teleport map via autocomplete
+        state.teleport_map_input_buffer = "Town Square (ID: 1)".to_string();
+        state.teleport_map_id = "1".to_string();
+
+        assert_eq!(state.teleport_map_id, "1");
+        assert!(state.teleport_map_input_buffer.contains("Town Square"));
+    }
+
+    #[test]
+    fn test_event_editor_state_npc_id_buffer() {
+        let mut state = EventEditorState::default();
+        state.event_type = EventType::NpcDialogue;
+
+        // Simulate setting NPC ID via autocomplete (format: "map_id:npc_id")
+        state.npc_id_input_buffer = "Merchant (Map: Town, NPC ID: 1)".to_string();
+        state.npc_id = "1:1".to_string();
+
+        assert_eq!(state.npc_id, "1:1");
+        assert!(state.npc_id_input_buffer.contains("Merchant"));
+    }
+
+    #[test]
+    fn test_event_editor_state_buffer_persistence() {
+        let mut state = EventEditorState::default();
+
+        // Set buffers
+        state.trap_effect_input_buffer = "Paralysis".to_string();
+        state.teleport_map_input_buffer = "Dark Forest (ID: 2)".to_string();
+        state.npc_id_input_buffer = "Guard (Map: Castle, NPC ID: 5)".to_string();
+
+        // Verify all buffers are set
+        assert_eq!(state.trap_effect_input_buffer, "Paralysis");
+        assert_eq!(state.teleport_map_input_buffer, "Dark Forest (ID: 2)");
+        assert_eq!(state.npc_id_input_buffer, "Guard (Map: Castle, NPC ID: 5)");
     }
 }

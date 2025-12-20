@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{
-    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
-    TwoColumnLayout,
+    autocomplete_tag_list_selector, extract_item_tag_candidates, ActionButtons, EditorToolbar,
+    ItemAction, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
@@ -13,7 +13,6 @@ use antares::domain::items::types::{
 };
 use antares::domain::types::DiceRoll;
 use eframe::egui;
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Editor mode for items
@@ -79,7 +78,6 @@ pub struct ItemsEditorState {
     pub edit_buffer: Item,
     pub show_import_dialog: bool,
     pub import_export_buffer: String,
-    pub tags_query: String,
 
     // Filters
     pub filter_type: Option<ItemTypeFilter>,
@@ -97,7 +95,6 @@ impl Default for ItemsEditorState {
             edit_buffer: Self::default_item(),
             show_import_dialog: false,
             import_export_buffer: String::new(),
-            tags_query: String::new(),
             filter_type: None,
             filter_magical: None,
             filter_cursed: None,
@@ -924,12 +921,12 @@ impl ItemsEditorState {
                                         Some(AlignmentRestriction::EvilOnly);
                                 }
                             });
-                        ui.label("ℹ️").on_hover_text(
-                            "Alignment restriction limits who can use the item:\n\
-                             • None: Any alignment can use\n\
-                             • Good Only: Only good-aligned characters\n\
-                             • Evil Only: Only evil-aligned characters",
-                        );
+                        ui.label("ℹ️").on_hover_text(concat!(
+                            "Alignment restriction limits who can use the item:\n",
+                            "                             • None: Any alignment can use\n",
+                            "                             • Good Only: Only good-aligned characters\n",
+                            "                             • Evil Only: Only evil-aligned characters",
+                        ));
                     });
                 });
 
@@ -938,69 +935,33 @@ impl ItemsEditorState {
                 ui.group(|ui| {
                     ui.heading("Item Tags");
 
-                    // Build a unique list of tags from all items as suggestions
-                    let tags_list: Vec<String> = {
-                        let mut set = HashSet::new();
-                        let mut list = Vec::new();
-                        for it in items.iter() {
-                            for t in &it.tags {
-                                if set.insert(t.clone()) {
-                                    list.push(t.clone());
-                                }
-                            }
-                        }
-                        list
-                    };
+                    // Build a unique list of tags from all items as suggestions and include standard tags
+                    let mut tags_list = extract_item_tag_candidates(items);
 
-                    if searchable_selector_multi(
+                    for &std_tag in crate::validation::STANDARD_ITEM_TAGS.iter() {
+                        if !tags_list.contains(&std_tag.to_string()) {
+                            tags_list.push(std_tag.to_string());
+                        }
+                    }
+
+                    // Ensure deterministic ordering for the candidate list
+                    tags_list.sort();
+
+                    if autocomplete_tag_list_selector(
                         ui,
                         "item_tags",
                         "Tags",
                         &mut self.edit_buffer.tags,
                         &tags_list,
-                        |t: &String| t.clone(),
-                        |t: &String| t.clone(),
-                        &mut self.tags_query,
                     ) {
                         *unsaved_changes = true;
                     }
-                    ui.label("ℹ️").on_hover_text(
-                        "Tags allow fine-grained item restrictions.\n\
-                         Standard tags:\n\
-                         • large_weapon - Too big for small races\n\
-                         • two_handed - Requires both hands\n\
-                         • heavy_armor - Encumbering armor\n\
-                         • elven_crafted - Made by elves\n\
-                         • dwarven_crafted - Made by dwarves\n\
-                         • requires_strength - Needs high strength",
-                    );
 
-                    // Quick-add buttons for common tags
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Quick add:");
-                        let tag_buttons = [
-                            ("large_weapon", "Large Weapon"),
-                            ("two_handed", "Two-Handed"),
-                            ("heavy_armor", "Heavy Armor"),
-                            ("elven_crafted", "Elven Crafted"),
-                            ("dwarven_crafted", "Dwarven Crafted"),
-                            ("requires_strength", "Req. Strength"),
-                        ];
-
-                        for (tag_id, label) in tag_buttons {
-                            let has_tag = self.edit_buffer.tags.iter().any(|t| t == tag_id);
-
-                            if ui.selectable_label(has_tag, label).clicked() {
-                                if has_tag {
-                                    // Remove tag
-                                    self.edit_buffer.tags.retain(|t| t != tag_id);
-                                } else {
-                                    // Add tag
-                                    self.edit_buffer.tags.push(tag_id.to_string());
-                                }
-                            }
-                        }
-                    });
+                    ui.label("ℹ️").on_hover_text(concat!(
+                        "Tags allow fine-grained item restrictions.\n",
+                        "Standard tags include: large_weapon, two_handed, heavy_armor,\n",
+                        "elven_crafted, dwarven_crafted, requires_strength",
+                    ));
 
                     if !self.edit_buffer.tags.is_empty() {
                         ui.label(format!("Current tags: {}", self.edit_buffer.tags.len()));
@@ -1101,14 +1062,14 @@ impl ItemsEditorState {
                                 "Unarmed",
                             );
                         });
-                    ui.label("ℹ️").on_hover_text(
-                        "Weapon classification determines proficiency requirement:\n\
-                         • Simple: Clubs, daggers, staffs (anyone)\n\
-                         • Martial Melee: Swords, axes (fighters)\n\
-                         • Martial Ranged: Bows, crossbows (archers)\n\
-                         • Blunt: Maces, hammers (clerics)\n\
-                         • Unarmed: Martial arts (monks)",
-                    );
+                    ui.label("ℹ️").on_hover_text(concat!(
+                        "Weapon classification determines proficiency requirement:\n",
+                        "• Simple: Clubs, daggers, staffs (anyone)\n",
+                        "• Martial Melee: Swords, axes (fighters)\n",
+                        "• Martial Ranged: Bows, crossbows (archers)\n",
+                        "• Blunt: Maces, hammers (clerics)\n",
+                        "• Unarmed: Martial arts (monks)",
+                    ));
                 });
                 // Show derived proficiency
                 let prof_id =
@@ -1153,13 +1114,13 @@ impl ItemsEditorState {
                                 "Shield",
                             );
                         });
-                    ui.label("ℹ️").on_hover_text(
-                        "Armor classification determines proficiency requirement:\n\
-                         • Light: Leather, padded armor\n\
-                         • Medium: Chain mail, scale mail\n\
-                         • Heavy: Plate mail, full plate\n\
-                         • Shield: All shield types",
-                    );
+                    ui.label("ℹ️").on_hover_text(concat!(
+                        "Armor classification determines proficiency requirement:\n",
+                        "• Light: Leather, padded armor\n",
+                        "• Medium: Chain mail, scale mail\n",
+                        "• Heavy: Plate mail, full plate\n",
+                        "• Shield: All shield types",
+                    ));
                 });
                 // Show derived proficiency
                 let prof_id =
@@ -1226,13 +1187,13 @@ impl ItemsEditorState {
                                 data.classification = Some(MagicItemClassification::Universal);
                             }
                         });
-                    ui.label("ℹ️").on_hover_text(
-                        "Magic item classification determines proficiency requirement:\n\
-                         • None (Mundane): Anyone can use\n\
-                         • Arcane: Wands, arcane scrolls (sorcerers)\n\
-                         • Divine: Holy symbols, divine scrolls (clerics)\n\
-                         • Universal: Potions, rings (anyone)",
-                    );
+                    ui.label("ℹ️").on_hover_text(concat!(
+                        "Magic item classification determines proficiency requirement:\n",
+                        "• None (Mundane): Anyone can use\n",
+                        "• Arcane: Wands, arcane scrolls (sorcerers)\n",
+                        "• Divine: Holy symbols, divine scrolls (clerics)\n",
+                        "• Universal: Potions, rings (anyone)",
+                    ));
                 });
                 // Show derived proficiency
                 if let Some(classification) = data.classification {
