@@ -48,6 +48,7 @@ pub mod campaign_packager;
 pub mod database;
 pub mod dialogue_editor;
 pub mod error_formatter;
+pub mod game_config;
 pub mod map_editor;
 pub mod name_generator;
 pub mod quest_editor;
@@ -68,6 +69,10 @@ pub use dialogue_editor::{
     DialogueValidationError,
 };
 pub use error_formatter::{ErrorContext, ErrorFormatter, ProgressReporter};
+pub use game_config::{
+    AudioConfig, CameraConfig, CameraMode, ConfigError, ControlsConfig, GameConfig, GraphicsConfig,
+    ShadowQuality,
+};
 pub use map_editor::{
     browse_items, browse_maps, browse_monsters, browse_spells, is_valid_item_id, is_valid_map_id,
     is_valid_monster_id, is_valid_spell_id, suggest_item_ids, suggest_map_ids, suggest_monster_ids,

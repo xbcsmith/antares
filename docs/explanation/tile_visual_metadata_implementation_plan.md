@@ -84,21 +84,21 @@ pub struct TileVisualMetadata {
     /// Height of wall/terrain feature (Y-axis dimension)
     /// Default: wall=2.5, mountain=3.0, tree=2.2, door=2.5
     pub height: Option<f32>,
-    
+
     /// Width in X-axis (default: 1.0 for full tile)
     pub width_x: Option<f32>,
-    
+
     /// Depth in Z-axis (default: 1.0 for full tile)
     pub width_z: Option<f32>,
-    
+
     /// Color tint (RGB, 0.0-1.0 range)
     /// Applied multiplicatively to base material color
     pub color_tint: Option<(f32, f32, f32)>,
-    
+
     /// Scale multiplier (default: 1.0)
     /// Applied uniformly to all dimensions
     pub scale: Option<f32>,
-    
+
     /// Vertical offset from ground (default: 0.0)
     /// Positive = raised, negative = sunken
     pub y_offset: Option<f32>,
@@ -124,7 +124,7 @@ impl TileVisualMetadata {
         if let Some(h) = self.height {
             return h;
         }
-        
+
         // Default heights matching current hardcoded values
         match wall_type {
             WallType::Normal | WallType::Door => 2.5,
@@ -136,27 +136,27 @@ impl TileVisualMetadata {
             }
         }
     }
-    
+
     /// Get effective width_x (defaults to 1.0)
     pub fn effective_width_x(&self) -> f32 {
         self.width_x.unwrap_or(1.0)
     }
-    
+
     /// Get effective width_z (defaults to 1.0)
     pub fn effective_width_z(&self) -> f32 {
         self.width_z.unwrap_or(1.0)
     }
-    
+
     /// Get effective scale (defaults to 1.0)
     pub fn effective_scale(&self) -> f32 {
         self.scale.unwrap_or(1.0)
     }
-    
+
     /// Get effective y_offset (defaults to 0.0)
     pub fn effective_y_offset(&self) -> f32 {
         self.y_offset.unwrap_or(0.0)
     }
-    
+
     /// Calculate mesh dimensions (width_x, height, width_z) with scale applied
     pub fn mesh_dimensions(&self, terrain: TerrainType, wall_type: WallType) -> (f32, f32, f32) {
         let scale = self.effective_scale();
@@ -166,7 +166,7 @@ impl TileVisualMetadata {
             self.effective_width_z() * scale,
         )
     }
-    
+
     /// Calculate Y-position for mesh center
     pub fn mesh_y_position(&self, terrain: TerrainType, wall_type: WallType) -> f32 {
         let height = self.effective_height(terrain, wall_type);
@@ -193,7 +193,7 @@ pub struct Tile {
     pub x: i32,
     pub y: i32,
     pub event_trigger: Option<EventId>,
-    
+
     /// Optional visual rendering metadata
     #[serde(default)]
     pub visual: TileVisualMetadata,
@@ -220,19 +220,19 @@ impl Tile {
         self.visual.height = Some(height);
         self
     }
-    
+
     pub fn with_dimensions(mut self, width_x: f32, height: f32, width_z: f32) -> Self {
         self.visual.width_x = Some(width_x);
         self.visual.height = Some(height);
         self.visual.width_z = Some(width_z);
         self
     }
-    
+
     pub fn with_color_tint(mut self, r: f32, g: f32, b: f32) -> Self {
         self.visual.color_tint = Some((r, g, b));
         self
     }
-    
+
     pub fn with_scale(mut self, scale: f32) -> Self {
         self.visual.scale = Some(scale);
         self
@@ -368,7 +368,7 @@ fn get_or_create_mesh(
 ) -> Handle<Mesh> {
     use ordered_float::OrderedFloat;
     let key = (OrderedFloat(width_x), OrderedFloat(height), OrderedFloat(width_z));
-    
+
     cache.entry(key).or_insert_with(|| {
         meshes.add(Cuboid::new(width_x, height, width_z))
     }).clone()
@@ -651,7 +651,7 @@ Add rotation field to `TileVisualMetadata`:
 ```rust
 pub struct TileVisualMetadata {
     // ... existing fields ...
-    
+
     /// Rotation around Y-axis in degrees (default: 0.0)
     /// Useful for angled walls, rotated props
     pub rotation_y: Option<f32>,
@@ -667,7 +667,7 @@ Add material override field:
 ```rust
 pub struct TileVisualMetadata {
     // ... existing fields ...
-    
+
     /// Override material name (references campaign asset)
     /// If None, uses default material for terrain/wall type
     pub material_override: Option<String>,
@@ -683,7 +683,7 @@ Add custom mesh support:
 ```rust
 pub struct TileVisualMetadata {
     // ... existing fields ...
-    
+
     /// Custom mesh asset path (relative to campaign)
     /// If None, uses default cuboid mesh
     pub custom_mesh: Option<String>,
@@ -699,10 +699,10 @@ Add animation metadata:
 ```rust
 pub struct TileVisualMetadata {
     // ... existing fields ...
-    
+
     /// Animation type (None, Bobbing, Rotating, Pulsing, etc.)
     pub animation: Option<AnimationType>,
-    
+
     /// Animation speed multiplier (default: 1.0)
     pub animation_speed: Option<f32>,
 }
@@ -826,7 +826,7 @@ Use case: Water ripples, torch flames, tree swaying, magical effects
 - **Phase 4** (Campaign Builder GUI): 5-7 hours
 - **Phase 5** (Advanced Features): 6-10 hours (optional)
 
-**Total (Phases 1-4)**: 19-26 hours  
+**Total (Phases 1-4)**: 19-26 hours
 **Total (All Phases)**: 25-36 hours
 
 **Recommended Approach**: Implement Phases 1-2 first (domain + rendering), validate with manual testing and example maps, then proceed to Phases 3-4 for authoring tools. Phase 5 can be deferred or implemented incrementally based on user feedback.
