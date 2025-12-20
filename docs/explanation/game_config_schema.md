@@ -1,6 +1,6 @@
 # Game Configuration Schema
 
-**Category**: Explanation  
+**Category**: Explanation
 **Audience**: Campaign authors, game designers, developers
 
 This document explains the game configuration system (`config.ron`) used by Antares campaigns to customize graphics, audio, controls, and camera settings.
