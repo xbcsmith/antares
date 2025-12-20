@@ -1,5 +1,261 @@
 # Implementation Summaries
 
+## Game Configuration System - Phase 2: Camera System Integration (2025-01-30)
+
+### Overview
+
+Phase 2 integrates the camera configuration system with the actual camera plugin, replacing
+hardcoded camera values with configuration-driven behavior and adding support for multiple
+camera modes.
+
+### Implementation Details
+
+#### 1. Updated Camera Plugin (`src/game/systems/camera.rs`)
+
+**Major Changes:**
+
+- Converted `CameraPlugin` from zero-sized struct to configuration-aware plugin
+- Added `CameraConfigResource` as a Bevy resource to hold camera configuration
+- Replaced all hardcoded values with configuration-driven values
+- Added support for smooth camera rotation (configurable)
+- Implemented camera mode system (FirstPerson/Tactical/Isometric)
+- Added light source tracking to follow camera position
+
+**Key Components:**
+
+```rust
+pub struct CameraPlugin {
+    pub config: CameraConfig,
+}
+
+impl CameraPlugin {
+    pub fn new(config: CameraConfig) -> Self
+}
+
+#[derive(Resource, Clone)]
+pub struct CameraConfigResource(pub CameraConfig);
+```
+
+**Camera Modes:**
+
+- **FirstPerson**: Classic Might and Magic 1 style (fully implemented)
+- **Tactical**: Overhead tactical view (stub - falls back to first-person)
+- **Isometric**: Isometric view (stub - falls back to first-person)
+
+#### 2. Updated Main Binary (`src/bin/antares.rs`)
+
+Modified to pass camera configuration from campaign to camera plugin:
+
+```rust
+// Extract camera config before moving campaign
+let camera_config = campaign.game_config.camera.clone();
+
+App::new()
+    .add_plugins(CameraPlugin::new(camera_config))
+    // ...
+```
+
+#### 3. Configuration-Driven Values
+
+All hardcoded camera values replaced with config fields:
+
+| Hardcoded Value                 | Configuration Field      | Default       |
+| ------------------------------- | ------------------------ | ------------- |
+| `0.6` (eye height)              | `camera.eye_height`      | `0.6`         |
+| `70.0` (FOV)                    | `camera.fov`             | `70.0`        |
+| `0.1` (near clip)               | `camera.near_clip`       | `0.1`         |
+| `1000.0` (far clip)             | `camera.far_clip`        | `1000.0`      |
+| `5.0` (light height)            | `camera.light_height`    | `5.0`         |
+| `2_000_000.0` (light intensity) | `camera.light_intensity` | `2_000_000.0` |
+| `60.0` (light range)            | `camera.light_range`     | `60.0`        |
+| `true` (shadows)                | `camera.shadows_enabled` | `true`        |
+
+#### 4. Smooth Rotation Feature
+
+Added optional smooth camera rotation:
+
+```rust
+if config.smooth_rotation {
+    // Interpolate rotation over time based on rotation_speed
+    let max_rotation_delta = config.rotation_speed.to_radians() * delta_time;
+    transform.rotation = current_rotation.slerp(target_rotation, t);
+} else {
+    // Instant rotation (classic behavior)
+    transform.rotation = Quat::from_rotation_y(target_y_rotation);
+}
+```
+
+- Controlled by `camera.smooth_rotation` (default: `false`)
+- Speed controlled by `camera.rotation_speed` (default: `180.0` degrees/sec)
+
+#### 5. Light Following System
+
+Light source now follows camera position horizontally while maintaining configured height:
+
+```rust
+light_transform.translation = Vec3::new(
+    camera_transform.translation.x,
+    camera_config.light_height,
+    camera_transform.translation.z,
+);
+```
+
+### Design Decisions
+
+**Why clone the camera config?**
+
+- Campaign is moved into `AntaresPlugin`, but `CameraPlugin` needs config independently
+- Cloning is cheap (all config values are simple types) and avoids lifetime issues
+
+**Why support camera modes now if only FirstPerson is implemented?**
+
+- Establishes the architectural pattern for future implementations
+- Makes it clear where tactical/isometric code should go
+- Allows campaigns to specify desired camera mode in advance
+
+**Why keep instant rotation as default?**
+
+- Preserves classic Might and Magic 1 behavior
+- Smooth rotation is a modern enhancement, optional for campaigns
+
+**Why resource wrapper instead of direct config?**
+
+- Follows Bevy best practices for plugin-managed resources
+- Allows future extension (e.g., runtime camera config changes)
+
+### Testing
+
+#### Unit Tests (11 tests in `src/game/systems/camera.rs`)
+
+**Camera Setup Tests:**
+
+- `test_camera_plugin_creation` - Verify plugin creation with config
+- `test_camera_config_resource` - Verify resource wrapping
+- `test_default_camera_config_values` - Verify defaults match Phase 1
+
+**Camera Rotation Tests:**
+
+- `test_first_person_camera_rotation_north` - North direction (0 rotation)
+- `test_first_person_camera_rotation_south` - South direction (PI rotation)
+- `test_first_person_camera_rotation_east` - East direction (-PI/2 rotation)
+- `test_first_person_camera_rotation_west` - West direction (PI/2 rotation)
+
+**Camera Position Tests:**
+
+- `test_camera_position_centering` - Verify tile centering (+0.5 offset)
+- `test_camera_eye_height_configuration` - Verify configurable eye height
+
+**Smooth Rotation Tests:**
+
+- `test_smooth_rotation_enabled` - Verify partial rotation with smooth mode
+- `test_smooth_rotation_disabled` - Verify instant rotation with classic mode
+
+### Quality Gates - ALL PASSED ✅
+
+```bash
+cargo fmt --all                                    # ✅ PASS
+cargo check --all-targets --all-features           # ✅ PASS
+cargo clippy --all-targets --all-features -- -D warnings  # ✅ PASS
+cargo nextest run --all-features                   # ✅ PASS (873/873 tests)
+```
+
+### Architecture Compliance ✅
+
+- ✅ No modifications to core domain data structures
+- ✅ Used existing `CameraConfig` from Phase 1 without changes
+- ✅ Followed Bevy plugin patterns and resource management
+- ✅ Maintained separation: SDK config → Game plugin → Bevy systems
+- ✅ Used proper type system (no raw floats where constants exist)
+- ✅ Added comprehensive documentation with examples
+- ✅ All public items have doc comments
+
+### Files Modified
+
+**Core Implementation:**
+
+- `src/game/systems/camera.rs` - Replaced entire implementation with config-driven version
+- `src/bin/antares.rs` - Updated to pass camera config to plugin
+
+**No new files created** - This phase purely integrates existing config with existing camera system.
+
+### Success Criteria Met
+
+✅ **Camera config integration**: All hardcoded values replaced with config fields
+✅ **Plugin pattern**: CameraPlugin accepts and uses CameraConfig
+✅ **Resource management**: Config accessible via Bevy resource
+✅ **Backward compatibility**: Default values match previous hardcoded behavior
+✅ **Camera modes**: Architecture supports multiple modes (FirstPerson implemented)
+✅ **Smooth rotation**: Optional smooth rotation feature implemented
+✅ **Light tracking**: Light follows camera horizontally
+✅ **Testing**: 11 unit tests covering all camera behavior
+✅ **Quality gates**: All checks pass (format, check, clippy, tests)
+✅ **Documentation**: Module and function docs with examples
+
+### Benefits
+
+**For Campaign Authors:**
+
+- Can customize camera behavior per campaign via `config.ron`
+- Can adjust FOV, clipping planes, eye height, lighting
+- Can enable smooth rotation for modern feel
+- Future: Can specify preferred camera mode (tactical/isometric)
+
+**For Players:**
+
+- Consistent camera behavior across different campaigns
+- Better lighting (configurable intensity, range, shadows)
+- Optional smooth rotation for less jarring turns
+
+**For Developers:**
+
+- Single source of truth for camera configuration
+- Easy to add new camera modes (stubs already in place)
+- Clear separation between config and implementation
+- Comprehensive test coverage for camera behavior
+
+### Next Steps (Phase 3)
+
+**Phase 3: Input System Integration**
+
+- Implement `KeyMap` translation from `ControlsConfig`
+- Connect input handling to campaign `game_config.controls`
+- Replace hardcoded key bindings with config-driven input
+- Add movement cooldown support
+
+**Future Camera Enhancements:**
+
+- Implement tactical overhead camera mode
+- Implement isometric camera mode
+- Add runtime camera mode switching
+- Add camera zoom/distance controls
+- Add camera pitch/tilt for tactical mode
+
+### References
+
+- Implementation Plan: `docs/explanation/game_config_implementation_plan.md`
+- Architecture: `docs/reference/architecture.md`
+- Phase 1 Summary: See "Game Configuration System - Phase 1" above
+- Camera Config: `src/sdk/game_config.rs` (CameraConfig, CameraMode)
+
+### Lessons Learned
+
+**Bevy API Changes:**
+
+- Bevy 0.17 renamed `Query::get_single_mut()` to `Query::single_mut()`
+- Caught and fixed during compilation
+
+**Test Strategy:**
+
+- Testing smooth rotation requires measuring angle differences, not exact values
+- Used `angle_between()` to verify rotation occurred without reaching target
+
+**Plugin Initialization:**
+
+- Extract config before moving campaign into plugin to avoid borrow issues
+- Cloning config is acceptable for small configuration structs
+
+---
+
 ## Game Configuration System - Phase 1: Core Configuration Infrastructure (2025-01-30)
 
 ### Overview

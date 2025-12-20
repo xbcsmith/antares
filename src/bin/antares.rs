@@ -44,12 +44,15 @@ fn main() {
 
     println!("Successfully loaded campaign: {}", campaign.name);
 
+    // Extract camera config before moving campaign
+    let camera_config = campaign.game_config.camera.clone();
+
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
         .add_plugins(AntaresPlugin { campaign })
         .add_plugins(MapRenderingPlugin)
-        .add_plugins(CameraPlugin)
+        .add_plugins(CameraPlugin::new(camera_config))
         .add_plugins(HudPlugin)
         .add_plugins(antares::game::systems::input::InputPlugin)
         .add_plugins(antares::game::systems::events::EventPlugin)
