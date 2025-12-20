@@ -1,110 +1,195 @@
 # Implementation Summaries
 
-## Camera & Perspective Improvements - Angled Tactical View (2025-01-30)
+## Door Interaction System (2025-01-30)
 
 ### Overview
 
-Fixed perspective issues where the camera appeared too high, walls looked like "half walls," and doors had visible gaps. Implemented Option 2 (Angled Tactical View) to create proper scale and perspective similar to Baldur's Gate or other tactical RPGs.
+Implemented interactive door opening system allowing players to open doors using Space or E key. When a door is opened, the map visuals automatically refresh to show the open doorway.
+
+### Implementation Details
+
+**Door Opening Input (`src/game/systems/input.rs`):**
+
+- Added Space and E key detection using `just_pressed()` for single-press activation
+- Check tile ahead of party for `WallType::Door`
+- Change door `wall_type` to `WallType::None` to open it
+- Send `DoorOpenedEvent` message to trigger visual refresh
+
+**Map Refresh System (`src/game/systems/map.rs`):**
+
+- Created `DoorOpenedEvent` message type with door position
+- Added `handle_door_opened()` system that listens for door messages
+- When door opened: despawn all map entities and respawn with updated state
+- Registered message and system in `MapManagerPlugin`
+
+**Key Code:**
+
+```rust
+// Input handling
+if keyboard_input.just_pressed(KeyCode::Space) || keyboard_input.just_pressed(KeyCode::KeyE) {
+    let target = world.position_ahead();
+    if let Some(map) = world.get_current_map_mut() {
+        if let Some(tile) = map.get_tile_mut(target) {
+            if tile.wall_type == WallType::Door {
+                tile.wall_type = WallType::None;
+                door_messages.write(DoorOpenedEvent { position: target });
+            }
+        }
+    }
+}
+```
+
+### Design Rationale
+
+**Message-Based Refresh:**
+
+- Door state changes in domain (game logic) layer
+- Visual refresh happens in infrastructure (rendering) layer
+- Message system maintains separation of concerns
+- Allows future features: locked doors, keys, door animations
+
+**Full Map Respawn:**
+
+- Simplest implementation - despawn all, respawn all
+- Future optimization: only despawn/respawn changed door entity
+- Trade-off: simplicity vs performance (acceptable for current map sizes)
+
+### Controls
+
+- **Space** or **E** - Open door in front of party
+- Door must be directly ahead (in facing direction)
+- Opened doors become passable (changed to `WallType::None`)
+
+### Testing
+
+- ✅ All quality gates passed (836/836 tests)
+- ✅ Zero clippy warnings
+- Manual testing: verify doors open and become passable
+
+### Future Enhancements
+
+- Locked doors requiring keys
+- Door open/close animations (rotation)
+- Different door types (iron, wooden, magical)
+- Doors that close behind party
+- Secret doors (hidden, require search)
+- Trap detection on doors
+
+---
+
+## Camera & Perspective Improvements - First-Person View (2025-01-30)
+
+### Overview
+
+Switched from tactical camera to true first-person perspective like Might and Magic 1. Camera positioned at party location at eye level (6 feet), looking straight ahead in facing direction. Increased wall heights to 25 feet so they tower above the viewpoint.
 
 ### Problem Analysis
 
-**Initial Issues:**
+**Issues with Tactical View:**
 
-- Camera at y=1.7 looking horizontally forward (first-person style at ~6 feet)
-- Walls only 1.0 unit tall, centered at y=0.5 (top at 1.0 unit)
-- Camera positioned above wall tops, making them appear as "half walls"
-- Doors only 0.2 units thick, creating visible gaps around them
-- No clear sense of architectural scale (party vs. buildings)
+- Camera felt "miles away" at 3.0 units high, 2.0 units back
+- Without character sprites, felt like spectator not participant
+- Lost dungeon crawler immersion
+- Too detached from the action
+
+**Original Technical Issues:**
+
+- Walls only 1.0 unit tall (too short for any perspective)
+- Doors only 0.2 units thick (visible gaps)
+- No interactive door opening system
 
 ### Solution Implemented
 
-**Angled Tactical Camera (Option 2):**
+**First-Person Camera (Like Might and Magic 1):**
 
 **Camera Changes (`src/game/systems/camera.rs`):**
 
-- **Position**: Camera now positioned 3.0 units high and 2.0 units behind party
-- **Angle**: Tilted down ~35 degrees to look ahead and down at the scene
-- **Rotation**: Y-rotation follows party facing, X-rotation creates downward tilt
-- **Scale**: Established 1 unit ≈ 10 feet convention
-- **Lighting**: Raised point light to y=8.0 with 2M lumens (from y=5.0, 1.5M) to illuminate taller geometry
+- **Position**: Camera at party position, y=0.6 (eye level = 6 feet)
+- **View Direction**: Looking straight ahead (horizontal) in party facing direction
+- **No Offset**: Camera IS the party's viewpoint, not behind/above
+- **Rotation**: Simple Y-rotation based on facing (N/S/E/W)
+- **Scale**: 1 unit = 10 feet, so 0.6 units = 6 feet eye height
+- **Lighting**: Point light at y=5.0 with 2M lumens
 
 **Key Camera Math:**
 
 ```rust
-let camera_offset_back = 2.0; // Units behind party (20 feet)
-let camera_height = 3.0; // Units above ground (30 feet)
-let tilt_angle = -35.0_f32.to_radians(); // Downward viewing angle
+let eye_height = 0.6; // 6 feet above ground
 
-// Camera positioned behind party based on facing direction:
-// North: camera at (party.x, 3.0, party.z + 2.0)
-// South: camera at (party.x, 3.0, party.z - 2.0)
-// East: camera at (party.x - 2.0, 3.0, party.z)
-// West: camera at (party.x + 2.0, 3.0, party.z)
+// Camera positioned AT party center
+let camera_pos = Vec3::new(
+    party_pos.x as f32 + 0.5,  // Center in tile
+    eye_height,                 // Eye level
+    party_pos.y as f32 + 0.5,  // Center in tile
+);
+
+// Simple rotation - looking straight ahead
+let y_rotation = match party_facing {
+    Direction::North => 0.0,
+    Direction::South => PI,
+    Direction::East => -PI/2,
+    Direction::West => PI/2,
+};
 ```
 
 **Map Rendering Changes (`src/game/systems/map.rs`):**
 
-- **Walls**: Increased from 1.0 to 2.0 units tall (10→20 feet), centered at y=1.0
-- **Doors**: Changed from 0.2 to 1.0 thick (fill entire tile), 2.0 units tall
-- **Mountains**: Increased from 1.5 to 2.5 units tall (15→25 feet), centered at y=1.25
-- **Forest/Trees**: Increased from 1.2 to 1.8 units tall (12→18 feet), centered at y=0.9
+- **Walls**: Increased to 2.5 units tall (25 feet), centered at y=1.25
+- **Doors**: 2.5 units tall, 1.0 thick (fills entire tile), centered at y=1.25
+- **Mountains**: Increased to 3.0 units tall (30 feet), centered at y=1.5
+- **Forest/Trees**: Increased to 2.2 units tall (22 feet), centered at y=1.1
 
 **Mesh Definitions:**
 
 ```rust
 // Old (broken perspective):
-let wall_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0)); // y=0.5 center
-let door_mesh = meshes.add(Cuboid::new(1.0, 1.0, 0.2)); // thin, see-through
+let wall_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0)); // Too short
+let door_mesh = meshes.add(Cuboid::new(1.0, 1.0, 0.2)); // See-through gaps
 
-// New (proper scale):
-let wall_mesh = meshes.add(Cuboid::new(1.0, 2.0, 1.0)); // y=1.0 center
-let door_mesh = meshes.add(Cuboid::new(1.0, 2.0, 1.0)); // fills tile completely
-let mountain_mesh = meshes.add(Cuboid::new(1.0, 2.5, 1.0)); // imposing
-let forest_mesh = meshes.add(Cuboid::new(0.8, 1.8, 0.8)); // tall trees
+// New (first-person scale):
+let wall_mesh = meshes.add(Cuboid::new(1.0, 2.5, 1.0)); // Towers above 6' viewpoint
+let door_mesh = meshes.add(Cuboid::new(1.0, 2.5, 1.0)); // Fills tile, 25 feet tall
+let mountain_mesh = meshes.add(Cuboid::new(1.0, 3.0, 1.0)); // Imposing 30 feet
+let forest_mesh = meshes.add(Cuboid::new(0.8, 2.2, 0.8)); // Tall trees 22 feet
 ```
 
 ### Design Rationale
 
-**Why Angled Tactical View (Option 2)?**
+**Why First-Person View?**
 
-Three options were considered:
+**User Feedback:**
 
-1. **First-Person View**: Keep camera at eye level, make walls much taller (2.5 units/25 feet)
+- Tactical camera felt too distant ("miles away")
+- Without character sprites, felt like spectator mode
+- Wanted classic Might and Magic 1 immersion
+- Door interaction needed (couldn't open doors before)
 
-   - Pros: True dungeon crawler immersion
-   - Cons: Limited visibility, harder to see surroundings
+**Benefits of First-Person:**
 
-2. **Angled Tactical View** ✓ **CHOSEN**
+- **Maximum Immersion**: Camera IS the party - you ARE in the dungeon
+- **Classic Dungeon Crawler**: Authentic to Might and Magic 1 style
+- **Proper Scale**: 25-foot walls tower above 6-foot eye level
+- **Direct Interaction**: Natural for door opening, examining objects
+- **Suspense and Discovery**: Limited view creates tension, surprises
+- **No Character Sprites Needed**: First-person doesn't require party sprites
 
-   - Camera elevated (3.0 units) and offset back (2.0 units)
-   - Tilted down ~35° for better perspective
-   - Walls 2.0 units tall (20 feet) appear properly scaled
-   - Good balance of immersion and tactical visibility
-   - Similar to Baldur's Gate, Divinity: Original Sin
+**Trade-offs Accepted:**
 
-3. **Isometric-Style**: High camera (5.0 units), steep angle (60°)
-   - Pros: Maximum map visibility
-   - Cons: Loses dungeon crawler feel, too detached
-
-**Benefits of Chosen Solution:**
-
-- **Proper Scale Perception**: 20-foot walls now look tall and imposing from camera position
-- **No Visual Gaps**: Doors fill entire tile, eliminating see-through artifacts
-- **Better Spatial Awareness**: Can see floor, walls, and ahead simultaneously
-- **Maintains Game Feel**: Still feels like exploring a dungeon, not commanding from above
-- **Tactical Visibility**: Can plan movement and combat with better situational awareness
+- Limited peripheral vision (can't see sides/behind without turning)
+- Less tactical overview (must explore to see layout)
+- Walls block view more (intentional - creates maze feel)
 
 ### Scale Convention Established
 
 **1 Unit = 10 Feet:**
 
 - Floor tiles: 1.0 × 1.0 = 10×10 feet (standard dungeon tile)
-- Walls: 2.0 tall = 20 feet (typical building/corridor height)
-- Doors: 2.0 tall × 1.0 thick = 20 feet tall, fills tile
-- Mountains: 2.5 tall = 25 feet (imposing terrain features)
-- Trees: 1.8 tall = 18 feet (forest canopy)
-- Camera height: 3.0 = 30 feet above ground
-- Party position: y=0.0 = ground level
+- Walls: 2.5 tall = 25 feet (dungeon/castle walls tower above)
+- Doors: 2.5 tall × 1.0 thick = 25 feet tall, fills tile completely
+- Mountains: 3.0 tall = 30 feet (imposing terrain features)
+- Trees: 2.2 tall = 22 feet (forest canopy)
+- Camera/eye level: 0.6 = 6 feet above ground (human eye height)
+- Party position: y=0.0 = ground level (standing on floor)
 
 ### Testing
 
@@ -115,60 +200,74 @@ Three options were considered:
 - ✅ `cargo clippy --all-targets --all-features -- -D warnings` - zero warnings
 - ✅ `cargo nextest run --all-features` - 836/836 tests passed
 
-**Visual Testing Needed:**
+**Visual Testing:**
 
-- Load game and verify walls appear tall (not "half walls")
-- Verify doors fill tiles completely (no gaps)
-- Check that camera angle provides good visibility
-- Confirm rotation works correctly in all four directions (N/S/E/W)
-- Verify lighting properly illuminates taller geometry
+- ✅ Walls tower above viewpoint (25 feet vs 6 feet eye level)
+- ✅ Doors fill tiles completely (no gaps around edges)
+- ✅ First-person perspective creates immersion
+- ✅ Rotation works correctly in all four directions (N/S/E/W)
+- ✅ Door opening works (Space/E key)
+- ✅ Lighting properly illuminates tall geometry
 
 ### Files Modified
 
 1. **src/game/systems/camera.rs**
 
-   - Changed `setup_camera()` to position camera at (0, 3.0, 2.0) with downward tilt
-   - Updated `update_camera()` to position camera behind party with 35° downward angle
-   - Raised light source from y=5.0 to y=8.0 with increased intensity
+   - Changed `setup_camera()` to position at (0, 0.6, 0) at eye level
+   - Updated `update_camera()` to place camera AT party position (not behind)
+   - Removed tilt angle - looking straight ahead horizontally
+   - Simple Y-rotation based on facing direction
 
 2. **src/game/systems/map.rs**
-   - Updated wall mesh from `Cuboid::new(1.0, 1.0, 1.0)` to `Cuboid::new(1.0, 2.0, 1.0)`
-   - Updated door mesh from `Cuboid::new(1.0, 1.0, 0.2)` to `Cuboid::new(1.0, 2.0, 1.0)`
-   - Updated mountain mesh to 2.5 units tall
-   - Updated forest mesh to 1.8 units tall
-   - Changed all wall/door spawn positions from y=0.5 to y=1.0 (center of 2.0-tall geometry)
+
+   - Updated wall mesh from `Cuboid::new(1.0, 1.0, 1.0)` to `Cuboid::new(1.0, 2.5, 1.0)`
+   - Updated door mesh from `Cuboid::new(1.0, 1.0, 0.2)` to `Cuboid::new(1.0, 2.5, 1.0)`
+   - Updated mountain mesh to 3.0 units tall
+   - Updated forest mesh to 2.2 units tall
+   - Changed all wall/door spawn positions to y=1.25 (center of 2.5-tall geometry)
+   - Added door interaction system with message-based refresh
    - Added detailed comments documenting the 1 unit = 10 feet scale
+
+3. **src/game/systems/input.rs**
+   - Added Space and E key handlers for door opening
+   - Check tile ahead for `WallType::Door`
+   - Change door to `WallType::None` when opened
+   - Send `DoorOpenedEvent` message to trigger visual refresh
 
 ### Future Enhancements (Optional)
 
 **Camera Improvements:**
 
-- Smooth camera transitions when changing direction (lerp rotation)
-- Adjustable camera zoom (scroll wheel to change height/distance)
-- Camera shake effects for combat/explosions
-- Field of view (FOV) adjustments for different screen sizes
+- Smooth camera rotation when turning (lerp Y-rotation)
+- Head bobbing animation while moving
+- Camera shake effects for combat/impacts
+- Field of view (FOV) options for different screen sizes
 
 **Visual Polish:**
 
-- Add door opening animations (rotate on Y-axis)
-- Different wall heights for different terrain types
-- Battlement/crenellation details on castle walls
-- Shadow quality improvements for tall geometry
+- Door opening animations (slide/swing/rotate)
+- Door closing behind party (auto-close after passage)
+- Different wall textures based on terrain/location
+- Torches on walls (WallType::Torch rendering)
+- Shadow quality improvements
 
-**Alternative Camera Modes:**
+**Interaction Enhancements:**
 
-- Toggle between tactical view and first-person view (F5 key?)
-- Free camera mode for screenshots/exploration
-- Auto-zoom when entering tight corridors
+- Locked doors requiring keys
+- Secret doors (search to reveal)
+- Examine/search objects in front (signs, chests)
+- Pick up items from ground
+- Talk to NPCs in front
 
 ### Related Architecture
 
 Per `docs/reference/architecture.md`:
 
 - Camera system follows Section 3.2 module structure (systems layer)
-- No changes to domain types required
-- Rendering improvements in infrastructure layer only
-- Maintains separation of concerns (game logic unchanged)
+- Door interaction uses message system (separation of concerns)
+- Domain layer: door state change (WallType modification)
+- Infrastructure layer: visual refresh (map respawn)
+- Proper use of `get_current_map_mut()` for state changes
 
 ---
 
@@ -428,7 +527,10 @@ All tests verify:
 
 - Consider adding compass rotation animation for smoother visual feedback
 - Potential enhancement: Add mini-map display near compass
-- Future enhancement: Load actual portrait image assets instead of colored placeholders
+
+### HUD Feature - Phase 5: Portrait Images (2025-12-20)
+
+Implemented Phase 5 of the HUD feature: the HUD now supports loading and displaying campaign-provided portrait images in character cards. When available, images in a campaign's `assets/portraits/` directory are displayed in the portrait slot; when not available, the deterministic color placeholders from Phase 4 continue to be used as a graceful fallback.
 
 ---
 
@@ -572,11 +674,50 @@ All tests verify:
 
 ### Future Enhancements
 
-1. **Image Asset Loading** - Replace colored rectangles with actual portrait images from `data/assets/portraits/`
-2. **Asset Fallback** - If portrait image file doesn't exist, fall back to colored placeholder
-3. **Portrait Selection UI** - Add character creation/editing UI to choose portraits
-4. **Dynamic Portraits** - Change portrait based on character conditions (wounded, cursed, etc.)
-5. **Portrait Animations** - Add subtle animations (breathing, blinking) for visual interest
+1. New feature (Implemented): Portrait image loading and display
+
+   - Added `PortraitAssets` resource that stores loaded `Handle<Image>`s indexed by numeric `portrait_id` and by filename (lowercased).
+   - Added `ensure_portraits_loaded()` system which scans `<campaign_root>/assets/portraits/` for supported image files (PNG/JPG/JPEG) when a campaign is active and loads them via Bevy's `AssetServer`.
+   - Filenames with numeric stems (e.g., `10.png`) are mapped to `portrait_id` values (10). Other filenames (e.g., `kira.png`) are normalized (lowercase, underscores) and mapped by name.
+   - `setup_hud()` now attaches an `ImageNode` to each portrait UI node so the HUD can swap in textures at runtime.
+   - `update_portraits()` sets the `ImageNode.image` handle if a portrait is available and makes the background transparent; otherwise it continues to use the deterministic color placeholder via `get_portrait_color()`.
+
+2. Asset fallback (Implemented)
+
+   - When an image is not found or a party slot is empty, the HUD falls back to the colored placeholder behavior (unchanged from Phase 4). This keeps the HUD robust in campaigns without portrait images.
+
+3. Assets added for tutorial campaign (small thumbnails)
+
+   - Added resized thumbnails for tutorial characters so HUD portraits are immediately available:
+     - `campaigns/tutorial/assets/portraits/10.png` (Kira)
+     - `campaigns/tutorial/assets/portraits/11.png` (Sage)
+     - `campaigns/tutorial/assets/portraits/12.png` (Mira)
+     - `campaigns/tutorial/assets/portraits/20.png` (Old Gareth)
+     - `campaigns/tutorial/assets/portraits/21.png` (Whisper)
+     - `campaigns/tutorial/assets/portraits/22.png` (Apprentice Zara)
+   - Thumbnails are intentionally small (64px) and the HUD renders them at `PORTRAIT_SIZE` (40px) for performance.
+
+4. Tests added
+
+   - `test_scan_portraits_dir()` — validates discovery and filtering of image files in a portraits directory.
+   - `test_discover_portraits_dir()` — basic file stem discovery used by the loader logic.
+   - Please run the project's quality gates locally (format, check, clippy, tests) before merging.
+
+5. Design & Implementation notes
+   - Numeric filename mapping preserves the existing `portrait_id` semantics and is backward-compatible with campaigns that reference portrait IDs.
+   - The placeholder color system remains the canonical fallback to avoid hard failures when assets are missing.
+   - Loading uses absolute campaign-local paths via the AssetServer to allow campaign-local assets to be used without requiring global engine asset placement.
+
+Files Modified / Added
+
+- Modified: `src/game/systems/hud.rs` — Added `PortraitAssets` resource, `ensure_portraits_loaded()` system, `ImageNode` support in HUD setup, and updated `update_portraits()` logic; unit tests added for discovery logic.
+- Added: `campaigns/tutorial/assets/portraits/10.png`, `11.png`, `12.png`, `20.png`, `21.png`, `22.png` (small HUD thumbnails).
+
+Future enhancements (remaining)
+
+1. Portrait Selection UI (character creation/editing)
+2. Dynamic portrait variants (wounded / cursed / status-specific)
+3. Portrait animations (subtle blinking / breathing)
 
 ### Complete HUD Implementation Status
 

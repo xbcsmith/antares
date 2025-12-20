@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::domain::world::WallType;
 use crate::game::resources::GlobalState;
+use crate::game::systems::map::DoorOpenedEvent;
 use bevy::prelude::*;
 
 pub struct InputPlugin;
@@ -15,6 +17,7 @@ impl Plugin for InputPlugin {
 fn handle_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut global_state: ResMut<GlobalState>,
+    mut door_messages: MessageWriter<DoorOpenedEvent>,
     time: Res<Time>,
     mut last_move_time: Local<f32>,
 ) {
@@ -28,7 +31,22 @@ fn handle_input(
     let world = &mut game_state.world;
     let mut moved = false;
 
-    if keyboard_input.pressed(KeyCode::ArrowUp) || keyboard_input.pressed(KeyCode::KeyW) {
+    // Door interaction - Space or E to open door in front of party
+    if keyboard_input.just_pressed(KeyCode::Space) || keyboard_input.just_pressed(KeyCode::KeyE) {
+        let target = world.position_ahead();
+        if let Some(map) = world.get_current_map_mut() {
+            if let Some(tile) = map.get_tile_mut(target) {
+                if tile.wall_type == WallType::Door {
+                    // Open the door by changing it to None
+                    tile.wall_type = WallType::None;
+                    info!("Opened door at {:?}", target);
+                    // Send message to trigger map visual refresh
+                    door_messages.write(DoorOpenedEvent { position: target });
+                    moved = true; // Trigger time update
+                }
+            }
+        }
+    } else if keyboard_input.pressed(KeyCode::ArrowUp) || keyboard_input.pressed(KeyCode::KeyW) {
         let target = world.position_ahead();
         if let Some(map) = world.get_current_map() {
             if !map.is_blocked(target) {
