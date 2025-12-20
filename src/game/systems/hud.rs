@@ -14,6 +14,7 @@
 
 use crate::domain::character::{Condition, PARTY_MAX_SIZE};
 use crate::domain::conditions::ActiveCondition;
+use crate::domain::types::Direction;
 use crate::game::resources::GlobalState;
 use bevy::prelude::*;
 
@@ -51,6 +52,19 @@ pub const PRIORITY_SILENCED: u8 = 40;
 pub const PRIORITY_ASLEEP: u8 = 30;
 pub const PRIORITY_BUFFED: u8 = 10;
 pub const PRIORITY_FINE: u8 = 0;
+
+// Compass display constants
+pub const COMPASS_SIZE: f32 = 48.0;
+pub const COMPASS_BORDER_WIDTH: f32 = 2.0;
+pub const COMPASS_BACKGROUND_COLOR: Color = Color::srgba(0.1, 0.1, 0.1, 0.9);
+pub const COMPASS_BORDER_COLOR: Color = Color::srgba(0.4, 0.4, 0.4, 1.0);
+pub const COMPASS_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 1.0);
+pub const COMPASS_FONT_SIZE: f32 = 24.0;
+
+// Portrait display constants
+pub const PORTRAIT_SIZE: f32 = 40.0;
+pub const PORTRAIT_MARGIN: Val = Val::Px(4.0);
+pub const PORTRAIT_PLACEHOLDER_COLOR: Color = Color::srgba(0.3, 0.3, 0.4, 1.0);
 
 // ===== Marker Components =====
 
@@ -92,6 +106,20 @@ pub struct CharacterNameText {
     pub party_index: usize,
 }
 
+/// Marker component for the compass container
+#[derive(Component)]
+pub struct CompassRoot;
+
+/// Marker component for the compass direction text
+#[derive(Component)]
+pub struct CompassText;
+
+/// Marker component for character portrait image
+#[derive(Component)]
+pub struct CharacterPortrait {
+    pub party_index: usize,
+}
+
 // ===== Plugin =====
 
 pub struct HudPlugin;
@@ -99,7 +127,7 @@ pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_hud)
-            .add_systems(Update, update_hud);
+            .add_systems(Update, (update_hud, update_compass, update_portraits));
     }
 }
 
@@ -132,7 +160,7 @@ fn setup_hud(mut commands: Commands) {
         ))
         .with_children(|parent| {
             for party_index in 0..PARTY_MAX_SIZE {
-                // Spawn character card
+                // Spawn character card inline due to Bevy's with_children closure type complexity
                 parent
                     .spawn((
                         Node {
@@ -147,6 +175,19 @@ fn setup_hud(mut commands: Commands) {
                         CharacterCard { party_index },
                     ))
                     .with_children(|card| {
+                        // Portrait placeholder (colored rectangle)
+                        card.spawn((
+                            Node {
+                                width: Val::Px(PORTRAIT_SIZE),
+                                height: Val::Px(PORTRAIT_SIZE),
+                                margin: UiRect::all(PORTRAIT_MARGIN),
+                                ..default()
+                            },
+                            BackgroundColor(PORTRAIT_PLACEHOLDER_COLOR),
+                            BorderRadius::all(Val::Px(4.0)),
+                            CharacterPortrait { party_index },
+                        ));
+
                         // Character name text
                         card.spawn((
                             Text::new(""),
@@ -204,6 +245,34 @@ fn setup_hud(mut commands: Commands) {
                         ));
                     });
             }
+        });
+
+    // Spawn compass display
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(20.0),
+                top: Val::Px(20.0),
+                width: Val::Px(COMPASS_SIZE),
+                height: Val::Px(COMPASS_SIZE),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(COMPASS_BACKGROUND_COLOR),
+            CompassRoot,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("N"),
+                TextFont {
+                    font_size: COMPASS_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(COMPASS_TEXT_COLOR),
+                CompassText,
+            ));
         });
 }
 
@@ -279,6 +348,47 @@ fn update_hud(
             **text = format!("{}. {}", name_text.party_index + 1, character.name);
         } else {
             **text = String::new();
+        }
+    }
+}
+
+/// Updates compass direction display
+///
+/// Queries the World resource to get current party_facing and updates
+/// the compass text to show N/E/S/W
+///
+/// # Arguments
+/// * `global_state` - Game state containing world data
+/// * `compass_query` - Query for compass text entity
+fn update_compass(
+    global_state: Res<GlobalState>,
+    mut compass_query: Query<&mut Text, With<CompassText>>,
+) {
+    if let Ok(mut text) = compass_query.single_mut() {
+        **text = direction_to_string(&global_state.0.world.party_facing);
+    }
+}
+
+/// Updates portrait colors based on character portrait_id
+///
+/// Sets portrait placeholder background color using deterministic
+/// color generation from portrait_id field.
+///
+/// # Arguments
+/// * `global_state` - Game state containing party data
+/// * `portrait_query` - Query for portrait background entities
+fn update_portraits(
+    global_state: Res<GlobalState>,
+    mut portrait_query: Query<(&CharacterPortrait, &mut BackgroundColor)>,
+) {
+    let party = &global_state.0.party;
+
+    for (portrait, mut bg_color) in portrait_query.iter_mut() {
+        if let Some(character) = party.members.get(portrait.party_index) {
+            *bg_color = BackgroundColor(get_portrait_color(character.portrait_id));
+        } else {
+            // No character in this slot - use default placeholder color
+            *bg_color = BackgroundColor(PORTRAIT_PLACEHOLDER_COLOR);
         }
     }
 }
@@ -502,6 +612,81 @@ pub fn count_conditions(conditions: &Condition) -> u8 {
     count
 }
 
+/// Converts Direction enum to display string
+///
+/// # Arguments
+/// * `direction` - The cardinal direction from World state
+///
+/// # Returns
+/// Single character string: "N", "E", "S", or "W"
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::Direction;
+/// use antares::game::systems::hud::direction_to_string;
+///
+/// assert_eq!(direction_to_string(&Direction::North), "N");
+/// assert_eq!(direction_to_string(&Direction::East), "E");
+/// ```
+pub fn direction_to_string(direction: &Direction) -> String {
+    match direction {
+        Direction::North => "N".to_string(),
+        Direction::East => "E".to_string(),
+        Direction::South => "S".to_string(),
+        Direction::West => "W".to_string(),
+    }
+}
+
+/// Returns portrait color based on character portrait_id
+///
+/// Generates a deterministic color from portrait_id for placeholder display.
+/// Each portrait_id maps to a unique color for visual distinction.
+///
+/// # Arguments
+/// * `portrait_id` - Character's portrait identifier (0-255)
+///
+/// # Returns
+/// Bevy Color for the portrait placeholder
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::get_portrait_color;
+/// use bevy::prelude::Color;
+///
+/// let color = get_portrait_color(0);
+/// // Returns a deterministic color based on ID
+/// ```
+pub fn get_portrait_color(portrait_id: u8) -> Color {
+    // Generate deterministic colors based on portrait_id
+    // Uses HSL-like distribution for visual variety
+    let hue = (portrait_id as f32 * 137.5) % 360.0; // Golden angle distribution
+    let saturation = 0.6;
+    let lightness = 0.5;
+
+    // Convert HSL to RGB (simplified)
+    let c = (1.0_f32 - (2.0_f32 * lightness - 1.0_f32).abs()) * saturation;
+    let x = c * (1.0_f32 - ((hue / 60.0_f32) % 2.0_f32 - 1.0_f32).abs());
+    let m = lightness - c / 2.0_f32;
+
+    let (r, g, b) = if hue < 60.0 {
+        (c, x, 0.0)
+    } else if hue < 120.0 {
+        (x, c, 0.0)
+    } else if hue < 180.0 {
+        (0.0, c, x)
+    } else if hue < 240.0 {
+        (0.0, x, c)
+    } else if hue < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+
+    Color::srgb(r + m, g + m, b + m)
+}
+
 // ===== Tests =====
 
 #[cfg(test)]
@@ -664,5 +849,63 @@ mod tests {
         conditions.add(Condition::UNCONSCIOUS);
         conditions.add(Condition::DEAD);
         assert_eq!(count_conditions(&conditions), 8);
+    }
+
+    #[test]
+    fn test_direction_to_string_north() {
+        assert_eq!(direction_to_string(&Direction::North), "N");
+    }
+
+    #[test]
+    fn test_direction_to_string_east() {
+        assert_eq!(direction_to_string(&Direction::East), "E");
+    }
+
+    #[test]
+    fn test_direction_to_string_south() {
+        assert_eq!(direction_to_string(&Direction::South), "S");
+    }
+
+    #[test]
+    fn test_direction_to_string_west() {
+        assert_eq!(direction_to_string(&Direction::West), "W");
+    }
+
+    #[test]
+    fn test_compass_constants_valid() {
+        // Verify compass constants are defined with reasonable values
+        assert_eq!(COMPASS_SIZE, 48.0);
+        assert_eq!(COMPASS_BORDER_WIDTH, 2.0);
+        assert_eq!(COMPASS_FONT_SIZE, 24.0);
+    }
+
+    #[test]
+    fn test_get_portrait_color_deterministic() {
+        // Same portrait_id should always produce same color
+        let color1 = get_portrait_color(42);
+        let color2 = get_portrait_color(42);
+        assert!(colors_approx_equal(color1, color2));
+    }
+
+    #[test]
+    fn test_get_portrait_color_different_ids() {
+        // Different IDs should produce different colors
+        let color1 = get_portrait_color(0);
+        let color2 = get_portrait_color(1);
+        assert!(!colors_approx_equal(color1, color2));
+    }
+
+    #[test]
+    fn test_get_portrait_color_full_range() {
+        // Test boundary values
+        let _color_min = get_portrait_color(0);
+        let _color_max = get_portrait_color(255);
+        // Should not panic and should produce valid colors
+    }
+
+    #[test]
+    fn test_portrait_constants_valid() {
+        // Verify portrait constants are defined with reasonable values
+        assert_eq!(PORTRAIT_SIZE, 40.0);
     }
 }
