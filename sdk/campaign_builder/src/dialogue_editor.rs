@@ -19,12 +19,16 @@
 //! - Dialogue tree validation and preview
 //! - Import/export RON support
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use crate::ui_helpers::{
+    autocomplete_item_selector, autocomplete_quest_selector, ActionButtons, EditorToolbar,
+    ItemAction, ToolbarAction, TwoColumnLayout,
+};
 use antares::domain::dialogue::{
     DialogueAction, DialogueChoice, DialogueCondition, DialogueId, DialogueNode, DialogueTree,
     NodeId,
 };
-use antares::domain::quest::QuestId;
+use antares::domain::items::types::Item;
+use antares::domain::quest::{Quest, QuestId};
 use antares::domain::types::ItemId;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
@@ -75,11 +79,11 @@ pub struct DialogueEditorState {
     /// Available dialogue IDs (for cross-references)
     pub available_dialogue_ids: Vec<DialogueId>,
 
-    /// Available quest IDs (for conditions/actions)
-    pub available_quest_ids: Vec<QuestId>,
+    /// Available quests (for conditions/actions/associated quest)
+    pub quests: Vec<Quest>,
 
-    /// Available item IDs (for conditions/actions)
-    pub available_item_ids: Vec<ItemId>,
+    /// Available items (for conditions/actions)
+    pub items: Vec<Item>,
 
     /// Whether to show dialogue preview in list view
     pub show_preview: bool,
@@ -311,8 +315,8 @@ impl Default for DialogueEditorState {
             has_unsaved_changes: false,
             validation_errors: Vec::new(),
             available_dialogue_ids: Vec::new(),
-            available_quest_ids: Vec::new(),
-            available_item_ids: Vec::new(),
+            quests: Vec::new(),
+            items: Vec::new(),
             show_preview: false,
             show_import_dialog: false,
             import_buffer: String::new(),
@@ -1015,6 +1019,8 @@ impl DialogueEditorState {
     ///
     /// * `ui` - The egui UI context
     /// * `dialogues` - Mutable reference to the dialogues data (synced with app state)
+    /// * `quests` - Slice of available quests for autocomplete
+    /// * `items` - Slice of available items for autocomplete
     /// * `campaign_dir` - Optional campaign directory path
     /// * `dialogue_file` - Filename for dialogue data
     /// * `unsaved_changes` - Mutable flag for tracking unsaved changes
@@ -1025,6 +1031,8 @@ impl DialogueEditorState {
         &mut self,
         ui: &mut egui::Ui,
         dialogues: &mut Vec<DialogueTree>,
+        quests: &[Quest],
+        items: &[Item],
         campaign_dir: Option<&PathBuf>,
         dialogue_file: &str,
         unsaved_changes: &mut bool,
@@ -1033,6 +1041,8 @@ impl DialogueEditorState {
     ) {
         // Sync dialogues from parameter to internal state
         self.dialogues = dialogues.clone();
+        self.quests = quests.to_vec();
+        self.items = items.to_vec();
 
         ui.heading("💬 Dialogues Editor");
         ui.add_space(5.0);
@@ -1543,10 +1553,13 @@ impl DialogueEditorState {
                 ui.checkbox(&mut self.dialogue_buffer.repeatable, "");
                 ui.end_row();
 
-                ui.label("Associated Quest ID:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.dialogue_buffer.associated_quest)
-                        .desired_width(150.0),
+                ui.label("Associated Quest:");
+                autocomplete_quest_selector(
+                    ui,
+                    "dialogue_associated_quest",
+                    "",
+                    &mut self.dialogue_buffer.associated_quest,
+                    &self.quests,
                 );
                 ui.end_row();
             });
@@ -2033,5 +2046,116 @@ mod tests {
         assert_eq!(choice.text, "Modified choice");
         assert_eq!(choice.target_node, Some(5));
         assert!(choice.ends_dialogue);
+    }
+
+    #[test]
+    fn test_dialogue_editor_loads_quests_and_items() {
+        use antares::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use antares::domain::quest::Quest;
+
+        let mut editor = DialogueEditorState::new();
+
+        // Create a quest using the up-to-date Quest API
+        let mut quest = Quest::new(1, "Save the Village", "Help save the village");
+        quest.min_level = Some(1);
+        quest.repeatable = false;
+        quest.is_main_quest = true;
+
+        let items = vec![Item {
+            id: 42,
+            name: "Healing Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(50),
+                is_combat_usable: true,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec!["healing".to_string()],
+        }];
+
+        editor.quests = vec![quest.clone()];
+        editor.items = items.clone();
+
+        assert_eq!(editor.quests.len(), 1);
+        assert_eq!(editor.items.len(), 1);
+        assert_eq!(editor.quests[0].name, "Save the Village");
+        assert_eq!(editor.items[0].name, "Healing Potion");
+    }
+
+    #[test]
+    fn test_dialogue_buffer_with_quest_reference() {
+        let mut editor = DialogueEditorState::new();
+
+        let mut quest = Quest::new(5, "Find the Artifact", "Locate the ancient artifact");
+        quest.min_level = Some(3);
+        quest.repeatable = false;
+        quest.is_main_quest = false;
+        quest.quest_giver_npc = None;
+        quest.quest_giver_map = None;
+        quest.quest_giver_position = None;
+
+        editor.quests = vec![quest];
+        editor.dialogue_buffer.associated_quest = "5".to_string();
+
+        // Verify buffer can store quest ID as string
+        assert_eq!(editor.dialogue_buffer.associated_quest, "5");
+
+        // Verify we can find the quest by ID
+        let quest_id: QuestId = editor.dialogue_buffer.associated_quest.parse().unwrap();
+        let found_quest = editor.quests.iter().find(|q| q.id == quest_id);
+        assert!(found_quest.is_some());
+        assert_eq!(found_quest.unwrap().name, "Find the Artifact");
+    }
+
+    #[test]
+    fn test_condition_buffer_with_quest_and_item_references() {
+        let mut editor = DialogueEditorState::new();
+
+        editor.condition_buffer.quest_id = "10".to_string();
+        editor.condition_buffer.item_id = "25".to_string();
+
+        // Verify buffers store IDs as strings
+        assert_eq!(editor.condition_buffer.quest_id, "10");
+        assert_eq!(editor.condition_buffer.item_id, "25");
+
+        // Verify parsing works
+        let quest_id: Result<QuestId, _> = editor.condition_buffer.quest_id.parse();
+        let item_id: Result<ItemId, _> = editor.condition_buffer.item_id.parse();
+        assert!(quest_id.is_ok());
+        assert!(item_id.is_ok());
+        assert_eq!(quest_id.unwrap(), 10);
+        assert_eq!(item_id.unwrap(), 25);
+    }
+
+    #[test]
+    fn test_action_buffer_with_quest_and_item_references() {
+        let mut editor = DialogueEditorState::new();
+
+        editor.action_buffer.quest_id = "3".to_string();
+        editor.action_buffer.unlock_quest_id = "7".to_string();
+        editor.action_buffer.item_id = "15".to_string();
+
+        // Verify buffers store IDs as strings
+        assert_eq!(editor.action_buffer.quest_id, "3");
+        assert_eq!(editor.action_buffer.unlock_quest_id, "7");
+        assert_eq!(editor.action_buffer.item_id, "15");
+
+        // Verify parsing works
+        let quest_id: Result<QuestId, _> = editor.action_buffer.quest_id.parse();
+        let unlock_quest_id: Result<QuestId, _> = editor.action_buffer.unlock_quest_id.parse();
+        let item_id: Result<ItemId, _> = editor.action_buffer.item_id.parse();
+        assert!(quest_id.is_ok());
+        assert!(unlock_quest_id.is_ok());
+        assert!(item_id.is_ok());
+        assert_eq!(quest_id.unwrap(), 3);
+        assert_eq!(unlock_quest_id.unwrap(), 7);
+        assert_eq!(item_id.unwrap(), 15);
     }
 }

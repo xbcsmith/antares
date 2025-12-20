@@ -9,6 +9,7 @@
 use antares::application::GameState;
 use antares::game::resources::GlobalState;
 use antares::game::systems::camera::CameraPlugin;
+use antares::game::systems::hud::HudPlugin;
 use antares::game::systems::map::MapRenderingPlugin;
 use antares::sdk::campaign_loader::{Campaign, CampaignLoader};
 use bevy::prelude::*;
@@ -49,6 +50,7 @@ fn main() {
         .add_plugins(AntaresPlugin { campaign })
         .add_plugins(MapRenderingPlugin)
         .add_plugins(CameraPlugin)
+        .add_plugins(HudPlugin)
         .add_plugins(antares::game::systems::input::InputPlugin)
         .add_plugins(antares::game::systems::events::EventPlugin)
         // .add_plugins(antares::game::systems::ui::UiPlugin) // Temporarily disabled due to egui context issue

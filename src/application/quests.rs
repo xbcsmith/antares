@@ -321,6 +321,10 @@ impl QuestSystem {
 ///
 /// This function is designed to be registered as a normal Bevy system:
 /// ```no_run
+/// use bevy::prelude::{App, Update};
+/// use antares::application::quests::QuestProgressEvent;
+///
+/// let mut app = App::new();
 /// app.add_message::<QuestProgressEvent>()
 ///    .add_systems(Update, crate::application::quests::update);
 /// ```

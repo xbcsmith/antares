@@ -51,5 +51,9 @@ path = "src/bin/race_editor.rs"
 name = "item_editor"
 path = "src/bin/item_editor.rs"
 
+[[bin]]
+name = "name_gen"
+path = "src/bin/name_gen.rs"
+
 [dev-dependencies]
 tempfile = "3.23"

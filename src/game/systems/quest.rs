@@ -17,7 +17,11 @@ use bevy::prelude::*;
 ///
 /// Usage:
 /// ```no_run
+/// use bevy::prelude::{App, MinimalPlugins};
 /// use antares::game::systems::quest::QuestPlugin;
+///
+/// let mut app = App::new();
+/// app.add_plugins(MinimalPlugins);
 /// app.add_plugins(QuestPlugin);
 /// ```
 pub struct QuestPlugin;

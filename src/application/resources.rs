@@ -23,7 +23,7 @@ use bevy::prelude::*;
 ///
 /// let db = ContentDatabase::new();
 /// let content = GameContent::new(db);
-/// assert_eq!(content.db().classes.count(), 0);
+/// assert_eq!(content.db().classes.all_classes().count(), 0);
 /// ```
 #[derive(Resource, Debug, Clone)]
 pub struct GameContent(pub ContentDatabase);

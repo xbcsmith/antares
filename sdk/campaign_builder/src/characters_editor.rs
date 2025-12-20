@@ -8,7 +8,8 @@
 //! Uses shared UI components for consistent layout.
 
 use crate::ui_helpers::{
-    searchable_selector_multi, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
+    autocomplete_class_selector, autocomplete_item_list_selector, autocomplete_item_selector,
+    autocomplete_race_selector, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
     TwoColumnLayout,
 };
 use antares::domain::character::{Alignment, Sex};
@@ -94,16 +95,14 @@ pub struct CharacterEditBuffer {
     pub is_premade: bool,
     // Starting items as typed vector of IDs
     pub starting_items: Vec<ItemId>,
-    // Search query for starting items (persisted across frames)
-    pub starting_items_query: String,
-    // Starting equipment
-    pub weapon_id: String,
-    pub armor_id: String,
-    pub shield_id: String,
-    pub helmet_id: String,
-    pub boots_id: String,
-    pub accessory1_id: String,
-    pub accessory2_id: String,
+    // Starting equipment (using ItemId, 0 = empty slot)
+    pub weapon_id: ItemId,
+    pub armor_id: ItemId,
+    pub shield_id: ItemId,
+    pub helmet_id: ItemId,
+    pub boots_id: ItemId,
+    pub accessory1_id: ItemId,
+    pub accessory2_id: ItemId,
 }
 
 impl Default for CharacterEditBuffer {
@@ -129,14 +128,13 @@ impl Default for CharacterEditBuffer {
             description: String::new(),
             is_premade: true,
             starting_items: Vec::new(),
-            starting_items_query: String::new(),
-            weapon_id: String::new(),
-            armor_id: String::new(),
-            shield_id: String::new(),
-            helmet_id: String::new(),
-            boots_id: String::new(),
-            accessory1_id: String::new(),
-            accessory2_id: String::new(),
+            weapon_id: 0,
+            armor_id: 0,
+            shield_id: 0,
+            helmet_id: 0,
+            boots_id: 0,
+            accessory1_id: 0,
+            accessory2_id: 0,
         }
     }
 }
@@ -198,42 +196,13 @@ impl CharactersEditorState {
                 description: character.description.clone(),
                 is_premade: character.is_premade,
                 starting_items: character.starting_items.clone(),
-                starting_items_query: String::new(),
-                weapon_id: character
-                    .starting_equipment
-                    .weapon
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                armor_id: character
-                    .starting_equipment
-                    .armor
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                shield_id: character
-                    .starting_equipment
-                    .shield
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                helmet_id: character
-                    .starting_equipment
-                    .helmet
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                boots_id: character
-                    .starting_equipment
-                    .boots
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                accessory1_id: character
-                    .starting_equipment
-                    .accessory1
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                accessory2_id: character
-                    .starting_equipment
-                    .accessory2
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
+                weapon_id: character.starting_equipment.weapon.unwrap_or(0),
+                armor_id: character.starting_equipment.armor.unwrap_or(0),
+                shield_id: character.starting_equipment.shield.unwrap_or(0),
+                helmet_id: character.starting_equipment.helmet.unwrap_or(0),
+                boots_id: character.starting_equipment.boots.unwrap_or(0),
+                accessory1_id: character.starting_equipment.accessory1.unwrap_or(0),
+                accessory2_id: character.starting_equipment.accessory2.unwrap_or(0),
             };
         }
     }
@@ -322,41 +291,41 @@ impl CharactersEditorState {
         // Starting items as typed Vec<ItemId> from the edit buffer
         let starting_items: Vec<ItemId> = self.buffer.starting_items.clone();
 
-        // Parse starting equipment
-        let weapon = if self.buffer.weapon_id.trim().is_empty() {
+        // Starting equipment - convert 0 to None for optional fields
+        let weapon = if self.buffer.weapon_id == 0 {
             None
         } else {
-            self.buffer.weapon_id.trim().parse::<ItemId>().ok()
+            Some(self.buffer.weapon_id)
         };
-        let armor = if self.buffer.armor_id.trim().is_empty() {
+        let armor = if self.buffer.armor_id == 0 {
             None
         } else {
-            self.buffer.armor_id.trim().parse::<ItemId>().ok()
+            Some(self.buffer.armor_id)
         };
-        let shield = if self.buffer.shield_id.trim().is_empty() {
+        let shield = if self.buffer.shield_id == 0 {
             None
         } else {
-            self.buffer.shield_id.trim().parse::<ItemId>().ok()
+            Some(self.buffer.shield_id)
         };
-        let helmet = if self.buffer.helmet_id.trim().is_empty() {
+        let helmet = if self.buffer.helmet_id == 0 {
             None
         } else {
-            self.buffer.helmet_id.trim().parse::<ItemId>().ok()
+            Some(self.buffer.helmet_id)
         };
-        let boots = if self.buffer.boots_id.trim().is_empty() {
+        let boots = if self.buffer.boots_id == 0 {
             None
         } else {
-            self.buffer.boots_id.trim().parse::<ItemId>().ok()
+            Some(self.buffer.boots_id)
         };
-        let accessory1 = if self.buffer.accessory1_id.trim().is_empty() {
+        let accessory1 = if self.buffer.accessory1_id == 0 {
             None
         } else {
-            self.buffer.accessory1_id.trim().parse::<ItemId>().ok()
+            Some(self.buffer.accessory1_id)
         };
-        let accessory2 = if self.buffer.accessory2_id.trim().is_empty() {
+        let accessory2 = if self.buffer.accessory2_id == 0 {
             None
         } else {
-            self.buffer.accessory2_id.trim().parse::<ItemId>().ok()
+            Some(self.buffer.accessory2_id)
         };
 
         let character = CharacterDefinition {
@@ -1099,47 +1068,27 @@ impl CharactersEditorState {
                         ui.end_row();
 
                         ui.label("Race:");
-                        egui::ComboBox::from_id_salt("race_select")
-                            .selected_text(if self.buffer.race_id.is_empty() {
-                                "Select Race"
-                            } else {
-                                &self.buffer.race_id
-                            })
-                            .show_ui(ui, |ui| {
-                                for race in races {
-                                    if ui
-                                        .selectable_label(
-                                            self.buffer.race_id == race.id,
-                                            &race.name,
-                                        )
-                                        .clicked()
-                                    {
-                                        self.buffer.race_id = race.id.clone();
-                                    }
-                                }
-                            });
+                        if autocomplete_race_selector(
+                            ui,
+                            "race_select",
+                            "",
+                            &mut self.buffer.race_id,
+                            races,
+                        ) {
+                            // Selection changed
+                        }
                         ui.end_row();
 
                         ui.label("Class:");
-                        egui::ComboBox::from_id_salt("class_select")
-                            .selected_text(if self.buffer.class_id.is_empty() {
-                                "Select Class"
-                            } else {
-                                &self.buffer.class_id
-                            })
-                            .show_ui(ui, |ui| {
-                                for class in classes {
-                                    if ui
-                                        .selectable_label(
-                                            self.buffer.class_id == class.id,
-                                            &class.name,
-                                        )
-                                        .clicked()
-                                    {
-                                        self.buffer.class_id = class.id.clone();
-                                    }
-                                }
-                            });
+                        if autocomplete_class_selector(
+                            ui,
+                            "class_select",
+                            "",
+                            &mut self.buffer.class_id,
+                            classes,
+                        ) {
+                            // Selection changed
+                        }
                         ui.end_row();
 
                         ui.label("Sex:");
@@ -1274,31 +1223,15 @@ impl CharactersEditorState {
                 ui.add_space(10.0);
                 ui.heading("Starting Items");
 
-                ui.label("Enter item IDs separated by commas:");
-                if searchable_selector_multi(
+                if autocomplete_item_list_selector(
                     ui,
                     "character_starting_items",
                     "Starting Items",
                     &mut self.buffer.starting_items,
                     items,
-                    |i| i.id,
-                    |i| i.name.clone(),
-                    &mut self.buffer.starting_items_query,
                 ) {
                     self.has_unsaved_changes = true;
                 }
-
-                // Show available items for reference
-                ui.collapsing("Available Items", |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_height(150.0)
-                        .id_salt("available_items_scroll")
-                        .show(ui, |ui| {
-                            for item in items {
-                                ui.label(format!("{}: {}", item.id, item.name));
-                            }
-                        });
-                });
 
                 ui.add_space(10.0);
                 ui.heading("Description");
@@ -1341,79 +1274,90 @@ impl CharactersEditorState {
             .spacing([10.0, 4.0])
             .show(ui, |ui| {
                 // Weapon slot
-                ui.label("Weapon:");
-                show_item_selector(ui, "weapon_slot", &mut self.buffer.weapon_id, items);
+                if autocomplete_item_selector(
+                    ui,
+                    "weapon_slot",
+                    "Weapon:",
+                    &mut self.buffer.weapon_id,
+                    items,
+                ) {
+                    self.has_unsaved_changes = true;
+                }
                 ui.end_row();
 
                 // Armor slot
-                ui.label("Armor:");
-                show_item_selector(ui, "armor_slot", &mut self.buffer.armor_id, items);
+                if autocomplete_item_selector(
+                    ui,
+                    "armor_slot",
+                    "Armor:",
+                    &mut self.buffer.armor_id,
+                    items,
+                ) {
+                    self.has_unsaved_changes = true;
+                }
                 ui.end_row();
 
                 // Shield slot
-                ui.label("Shield:");
-                show_item_selector(ui, "shield_slot", &mut self.buffer.shield_id, items);
+                if autocomplete_item_selector(
+                    ui,
+                    "shield_slot",
+                    "Shield:",
+                    &mut self.buffer.shield_id,
+                    items,
+                ) {
+                    self.has_unsaved_changes = true;
+                }
                 ui.end_row();
 
                 // Helmet slot
-                ui.label("Helmet:");
-                show_item_selector(ui, "helmet_slot", &mut self.buffer.helmet_id, items);
+                if autocomplete_item_selector(
+                    ui,
+                    "helmet_slot",
+                    "Helmet:",
+                    &mut self.buffer.helmet_id,
+                    items,
+                ) {
+                    self.has_unsaved_changes = true;
+                }
                 ui.end_row();
 
                 // Boots slot
-                ui.label("Boots:");
-                show_item_selector(ui, "boots_slot", &mut self.buffer.boots_id, items);
+                if autocomplete_item_selector(
+                    ui,
+                    "boots_slot",
+                    "Boots:",
+                    &mut self.buffer.boots_id,
+                    items,
+                ) {
+                    self.has_unsaved_changes = true;
+                }
                 ui.end_row();
 
                 // Accessory 1
-                ui.label("Accessory 1:");
-                show_item_selector(ui, "accessory1_slot", &mut self.buffer.accessory1_id, items);
+                if autocomplete_item_selector(
+                    ui,
+                    "accessory1_slot",
+                    "Accessory 1:",
+                    &mut self.buffer.accessory1_id,
+                    items,
+                ) {
+                    self.has_unsaved_changes = true;
+                }
                 ui.end_row();
 
                 // Accessory 2
-                ui.label("Accessory 2:");
-                show_item_selector(ui, "accessory2_slot", &mut self.buffer.accessory2_id, items);
+                if autocomplete_item_selector(
+                    ui,
+                    "accessory2_slot",
+                    "Accessory 2:",
+                    &mut self.buffer.accessory2_id,
+                    items,
+                ) {
+                    self.has_unsaved_changes = true;
+                }
                 ui.end_row();
             });
     }
-}
-
-/// Show an item selector dropdown (standalone function to avoid borrow issues)
-fn show_item_selector(ui: &mut egui::Ui, id_salt: &str, selected_id: &mut String, items: &[Item]) {
-    ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(selected_id).desired_width(60.0));
-
-        egui::ComboBox::from_id_salt(id_salt)
-            .selected_text(if selected_id.is_empty() {
-                "None"
-            } else {
-                selected_id
-                    .parse::<ItemId>()
-                    .ok()
-                    .and_then(|id| items.iter().find(|i| i.id == id))
-                    .map(|i| i.name.as_str())
-                    .unwrap_or("Unknown")
-            })
-            .show_ui(ui, |ui| {
-                if ui
-                    .selectable_label(selected_id.is_empty(), "None")
-                    .clicked()
-                {
-                    *selected_id = String::new();
-                }
-                for item in items {
-                    if ui
-                        .selectable_label(
-                            selected_id.parse::<ItemId>().ok() == Some(item.id),
-                            format!("{}: {}", item.id, item.name),
-                        )
-                        .clicked()
-                    {
-                        *selected_id = item.id.to_string();
-                    }
-                }
-            });
-    });
 }
 
 /// Helper function to get sex name
@@ -1435,12 +1379,37 @@ fn alignment_name(alignment: Alignment) -> &'static str {
 }
 
 /// Helper function to get item name by ID
-fn item_name_by_id(items: &[Item], id: ItemId) -> String {
+fn item_name_by_id(items: &[Item], item_id: ItemId) -> String {
     items
         .iter()
-        .find(|i| i.id == id)
-        .map(|i| format!("{} ({})", i.name, id))
-        .unwrap_or_else(|| format!("Unknown Item ({})", id))
+        .find(|i| i.id == item_id)
+        .map(|i| i.name.clone())
+        .unwrap_or_else(|| format!("Unknown (ID: {})", item_id))
+}
+
+/// Helper function for tests - creates a test item
+#[cfg(test)]
+fn create_test_item(id: ItemId, name: &str) -> Item {
+    use antares::domain::items::types::{ConsumableData, ConsumableEffect, ItemType};
+
+    Item {
+        id,
+        name: name.to_string(),
+        item_type: ItemType::Consumable(ConsumableData {
+            effect: ConsumableEffect::HealHp(0),
+            is_combat_usable: false,
+        }),
+        base_cost: 10,
+        sell_cost: 5,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 0,
+        is_cursed: false,
+        icon_path: None,
+        tags: Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -1782,14 +1751,123 @@ mod tests {
         state.buffer.name = "Character With Equipment".to_string();
         state.buffer.race_id = "human".to_string();
         state.buffer.class_id = "knight".to_string();
-        state.buffer.weapon_id = "1".to_string();
-        state.buffer.armor_id = "2".to_string();
+        state.buffer.weapon_id = 1;
+        state.buffer.armor_id = 2;
 
         state.save_character().unwrap();
         assert!(state.characters.iter().any(|c| c.id == "with_equipment"));
         assert_eq!(state.characters[0].starting_equipment.weapon, Some(1));
         assert_eq!(state.characters[0].starting_equipment.armor, Some(2));
         assert!(state.characters[0].starting_equipment.shield.is_none());
+    }
+
+    #[test]
+    fn test_autocomplete_equipment_buffer_initialization() {
+        let mut state = CharactersEditorState::new();
+        state.start_new_character();
+
+        // Verify default equipment IDs are 0 (empty)
+        assert_eq!(state.buffer.weapon_id, 0);
+        assert_eq!(state.buffer.armor_id, 0);
+        assert_eq!(state.buffer.shield_id, 0);
+        assert_eq!(state.buffer.helmet_id, 0);
+        assert_eq!(state.buffer.boots_id, 0);
+        assert_eq!(state.buffer.accessory1_id, 0);
+        assert_eq!(state.buffer.accessory2_id, 0);
+    }
+
+    #[test]
+    fn test_autocomplete_starting_items_initialization() {
+        let mut state = CharactersEditorState::new();
+        state.start_new_character();
+
+        // Verify starting items is an empty vector
+        assert!(state.buffer.starting_items.is_empty());
+    }
+
+    #[test]
+    fn test_autocomplete_equipment_edit_loads_values() {
+        let mut state = CharactersEditorState::new();
+
+        // Create a character with equipment
+        let character = CharacterDefinition {
+            id: "test_char".to_string(),
+            name: "Test Character".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Good,
+            base_stats: BaseStats::new(10, 10, 10, 10, 10, 10, 10),
+            portrait_id: 0,
+            starting_gold: 100,
+            starting_gems: 0,
+            starting_food: 10,
+            starting_items: vec![50, 51],
+            starting_equipment: StartingEquipment {
+                weapon: Some(10),
+                armor: Some(20),
+                shield: Some(30),
+                helmet: None,
+                boots: None,
+                accessory1: None,
+                accessory2: None,
+            },
+            description: String::new(),
+            is_premade: true,
+        };
+
+        state.characters.push(character);
+        state.start_edit_character(0);
+
+        // Verify equipment IDs are loaded into buffer
+        assert_eq!(state.buffer.weapon_id, 10);
+        assert_eq!(state.buffer.armor_id, 20);
+        assert_eq!(state.buffer.shield_id, 30);
+        assert_eq!(state.buffer.helmet_id, 0);
+        assert_eq!(state.buffer.boots_id, 0);
+        assert_eq!(state.buffer.accessory1_id, 0);
+        assert_eq!(state.buffer.accessory2_id, 0);
+
+        // Verify starting items are loaded
+        assert_eq!(state.buffer.starting_items, vec![50, 51]);
+    }
+
+    #[test]
+    fn test_autocomplete_equipment_zero_converts_to_none() {
+        let mut state = CharactersEditorState::new();
+        state.start_new_character();
+        state.buffer.id = "zero_test".to_string();
+        state.buffer.name = "Zero Equipment Test".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+        state.buffer.weapon_id = 0;
+        state.buffer.armor_id = 5;
+
+        state.save_character().unwrap();
+
+        let saved = &state.characters[0];
+        assert_eq!(saved.starting_equipment.weapon, None);
+        assert_eq!(saved.starting_equipment.armor, Some(5));
+    }
+
+    #[test]
+    fn test_autocomplete_starting_items_persistence() {
+        let mut state = CharactersEditorState::new();
+        state.start_new_character();
+        state.buffer.id = "items_persist".to_string();
+        state.buffer.name = "Items Persistence Test".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+        state.buffer.starting_items = vec![1, 2, 3, 4];
+
+        state.save_character().unwrap();
+
+        let saved = &state.characters[0];
+        assert_eq!(saved.starting_items, vec![1, 2, 3, 4]);
+
+        // Edit and verify items are loaded back
+        state.start_edit_character(0);
+        assert_eq!(state.buffer.starting_items, vec![1, 2, 3, 4]);
     }
 
     /// Verify that starting_items in the Character edit buffer round-trips to

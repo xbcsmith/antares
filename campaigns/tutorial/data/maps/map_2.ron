@@ -4408,18 +4408,6 @@
     ],
     events: {
         (
-            x: 2,
-            y: 2,
-        ): Encounter(
-            name: "Kobold Ambush",
-            description: "A group of kobolds jump out to attack!",
-            monster_group: [
-                2,
-                2,
-                2,
-            ],
-        ),
-        (
             x: 19,
             y: 17,
         ): Teleport(
@@ -4430,6 +4418,18 @@
                 y: 10,
             ),
             map_id: 4,
+        ),
+        (
+            x: 2,
+            y: 2,
+        ): Encounter(
+            name: "Kobold Ambush",
+            description: "A group of kobolds jump out to attack!",
+            monster_group: [
+                2,
+                2,
+                2,
+            ],
         ),
         (
             x: 9,

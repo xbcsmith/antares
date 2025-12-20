@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use crate::ui_helpers::{
+    autocomplete_condition_selector, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
+    TwoColumnLayout,
+};
+use antares::domain::conditions::ConditionDefinition;
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
 use antares::domain::types::DiceRoll;
 use eframe::egui;
@@ -28,6 +32,9 @@ pub struct SpellsEditorState {
     // Filters
     pub filter_school: Option<SpellSchool>,
     pub filter_level: Option<u8>,
+
+    // Autocomplete state
+    pub condition_input_buffer: String,
 }
 
 impl Default for SpellsEditorState {
@@ -42,6 +49,7 @@ impl Default for SpellsEditorState {
             show_preview: false,
             filter_school: None,
             filter_level: None,
+            condition_input_buffer: String::new(),
         }
     }
 }
@@ -74,6 +82,7 @@ impl SpellsEditorState {
         &mut self,
         ui: &mut egui::Ui,
         spells: &mut Vec<Spell>,
+        conditions: &[ConditionDefinition],
         campaign_dir: Option<&PathBuf>,
         spells_file: &str,
         unsaved_changes: &mut bool,
@@ -278,6 +287,7 @@ impl SpellsEditorState {
             SpellsEditorMode::Add | SpellsEditorMode::Edit => self.show_form(
                 ui,
                 spells,
+                conditions,
                 unsaved_changes,
                 status_message,
                 campaign_dir,
@@ -542,6 +552,7 @@ impl SpellsEditorState {
         &mut self,
         ui: &mut egui::Ui,
         spells: &mut Vec<Spell>,
+        conditions: &[ConditionDefinition],
         unsaved_changes: &mut bool,
         status_message: &mut String,
         campaign_dir: Option<&PathBuf>,
@@ -701,6 +712,54 @@ impl SpellsEditorState {
                     });
 
                     ui.checkbox(&mut self.edit_buffer.saving_throw, "Allows Saving Throw");
+                });
+
+                ui.add_space(10.0);
+
+                ui.group(|ui| {
+                    ui.heading("Applied Conditions");
+
+                    // Display current conditions
+                    if !self.edit_buffer.applied_conditions.is_empty() {
+                        ui.label("Current Conditions:");
+                        let mut to_remove = None;
+                        for (idx, cond_id) in self.edit_buffer.applied_conditions.iter().enumerate()
+                        {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("• {}", cond_id));
+                                if ui.small_button("❌").clicked() {
+                                    to_remove = Some(idx);
+                                }
+                            });
+                        }
+                        if let Some(idx) = to_remove {
+                            self.edit_buffer.applied_conditions.remove(idx);
+                        }
+                        ui.separator();
+                    }
+
+                    // Add new condition using autocomplete
+                    ui.label("Add Condition:");
+                    if autocomplete_condition_selector(
+                        ui,
+                        "spell_condition_add",
+                        "Select Condition:",
+                        &mut self.condition_input_buffer,
+                        conditions,
+                    ) {
+                        // Add condition if not already present
+                        if !self.condition_input_buffer.is_empty()
+                            && !self
+                                .edit_buffer
+                                .applied_conditions
+                                .contains(&self.condition_input_buffer)
+                        {
+                            self.edit_buffer
+                                .applied_conditions
+                                .push(self.condition_input_buffer.clone());
+                            self.condition_input_buffer.clear();
+                        }
+                    }
                 });
 
                 ui.add_space(10.0);

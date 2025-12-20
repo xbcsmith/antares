@@ -1,7 +1,7 @@
 # Engine SDK Campaign Data Integration - Status Report
 
-**Date:** 2025-01-29  
-**Report Type:** Gap Analysis  
+**Date:** 2025-01-29
+**Report Type:** Gap Analysis
 **Related Documents:**
 
 - `docs/explanation/engine_sdk_support_plan.md` (original plan)

@@ -19,23 +19,35 @@ impl Plugin for CameraPlugin {
 pub struct MainCamera;
 
 fn setup_camera(mut commands: Commands) {
-    // Spawn a 3D camera
+    debug!("Setting up first-person camera at eye level (0.6 units)");
+
+    // Spawn a 3D camera - Bevy 0.17 uses required components pattern
+    // First-person view like Might and Magic 1:
+    // - Camera at party position at eye level (0.6 units = 6 feet)
+    // - Looking straight ahead in facing direction
+    // - No offset - camera IS the party's viewpoint
+    // Scale: 1 unit ≈ 10 feet, so eye level is 6 feet above ground
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 1.7, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
+        Transform::from_xyz(0.0, 0.6, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
         MainCamera,
     ));
 
-    // Add a light source attached to the camera (or just global for now)
+    debug!("Adding point light at (0, 5, 0) with intensity 2M lumens");
+
+    // Add a light source - positioned above to illuminate tall dungeon walls
+    // Bevy 0.17 uses lumen-based physically-based rendering
     commands.spawn((
         PointLight {
-            intensity: 1500.0,
+            intensity: 2_000_000.0, // Bright enough for tall walls in first-person
             shadows_enabled: true,
-            range: 20.0,
+            range: 60.0,
             ..default()
         },
         Transform::from_xyz(0.0, 5.0, 0.0),
     ));
+
+    debug!("Camera setup complete");
 }
 
 fn update_camera(
@@ -47,39 +59,35 @@ fn update_camera(
     let party_facing = game_state.world.party_facing;
 
     if let Ok(mut transform) = camera_query.single_mut() {
-        // Update position
-        // Map (x, y) -> World (x, 0, y)
-        // Add 0.5 to center in tile
-        let target_pos = Vec3::new(
+        // First-person camera: positioned AT party location at eye level
+        // Eye height constant
+        let eye_height = 0.6; // 6 feet above ground (1 unit = 10 feet)
+
+        // Party center position in world space
+        // Add 0.5 to center camera in the tile
+        let camera_pos = Vec3::new(
             party_pos.x as f32 + 0.5,
-            1.7, // Eye height
+            eye_height,
             party_pos.y as f32 + 0.5,
         );
 
-        // Smoothly interpolate position (optional, for now snap)
-        transform.translation = target_pos;
-
-        // Update rotation based on facing
-        // Wait, let's verify direction mapping.
-        // North (0, -1). World -Z.
-        // South (0, 1). World +Z.
-        // East (1, 0). World +X.
-        // West (-1, 0). World -X.
-
-        // Bevy Camera looking at -Z by default.
-        // So:
-        // North (-Z) -> 0
-        // West (-X) -> PI/2
-        // South (+Z) -> PI
-        // East (+X) -> -PI/2 (or 3PI/2)
-
-        let rotation = match party_facing {
-            Direction::North => Quat::from_rotation_y(0.0),
-            Direction::West => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
-            Direction::South => Quat::from_rotation_y(std::f32::consts::PI),
-            Direction::East => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
+        // Camera rotation based on party facing direction
+        // Looking straight ahead (horizontal) in the facing direction
+        // Direction mapping:
+        // North (0, -1) -> World -Z -> Y-rotation 0
+        // South (0, 1) -> World +Z -> Y-rotation PI
+        // East (1, 0) -> World +X -> Y-rotation -PI/2
+        // West (-1, 0) -> World -X -> Y-rotation PI/2
+        let y_rotation = match party_facing {
+            Direction::North => 0.0,
+            Direction::South => std::f32::consts::PI,
+            Direction::East => -std::f32::consts::FRAC_PI_2,
+            Direction::West => std::f32::consts::FRAC_PI_2,
         };
 
+        let rotation = Quat::from_rotation_y(y_rotation);
+
+        transform.translation = camera_pos;
         transform.rotation = rotation;
     }
 }

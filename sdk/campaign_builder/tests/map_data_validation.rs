@@ -10,9 +10,7 @@
 use std::fs;
 use std::path::Path;
 
-use antares::domain::types::Position;
 use antares::domain::world::{Map, MapEvent};
-use ron;
 
 /// Scan maps to ensure every event and NPC has a non-empty name and description.
 #[test]

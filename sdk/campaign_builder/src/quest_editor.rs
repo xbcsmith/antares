@@ -28,9 +28,6 @@ use std::path::PathBuf;
 /// Editor state for quest designer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuestEditorState {
-    /// List of quests (synchronized with main app)
-    pub quests: Vec<Quest>,
-
     /// Currently selected quest index
     pub selected_quest: Option<usize>,
 
@@ -86,8 +83,8 @@ pub struct QuestEditBuffer {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub min_level: String,
-    pub max_level: String,
+    pub min_level: u8,
+    pub max_level: u8,
     pub repeatable: bool,
     pub is_main_quest: bool,
     pub quest_giver_npc: String,
@@ -102,8 +99,8 @@ impl Default for QuestEditBuffer {
             id: String::new(),
             name: String::new(),
             description: String::new(),
-            min_level: "1".to_string(),
-            max_level: "30".to_string(),
+            min_level: 1,
+            max_level: 30,
             repeatable: false,
             is_main_quest: false,
             quest_giver_npc: String::new(),
@@ -148,6 +145,11 @@ pub struct ObjectiveEditBuffer {
     pub npc_id: String,
     pub flag_name: String,
     pub flag_value: bool,
+    // Autocomplete input buffers
+    pub monster_input_buffer: String,
+    pub item_input_buffer: String,
+    pub map_input_buffer: String,
+    pub npc_input_buffer: String,
 }
 
 /// Objective type selector
@@ -190,6 +192,10 @@ impl Default for ObjectiveEditBuffer {
             npc_id: String::new(),
             flag_name: String::new(),
             flag_value: false,
+            monster_input_buffer: String::new(),
+            item_input_buffer: String::new(),
+            map_input_buffer: String::new(),
+            npc_input_buffer: String::new(),
         }
     }
 }
@@ -253,7 +259,6 @@ impl Default for RewardEditBuffer {
 impl Default for QuestEditorState {
     fn default() -> Self {
         Self {
-            quests: Vec::new(),
             selected_quest: None,
             selected_stage: None,
             selected_objective: None,
@@ -479,12 +484,17 @@ impl QuestEditorState {
     }
 
     /// Edit an existing stage
-    pub fn edit_stage(&mut self, quest_idx: usize, stage_idx: usize) -> Result<(), String> {
-        if quest_idx >= self.quests.len() {
+    pub fn edit_stage(
+        &mut self,
+        quests: &[Quest],
+        quest_idx: usize,
+        stage_idx: usize,
+    ) -> Result<(), String> {
+        if quest_idx >= quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        let quest = &self.quests[quest_idx];
+        let quest = &quests[quest_idx];
         if stage_idx >= quest.stages.len() {
             return Err("Invalid stage index".to_string());
         }
@@ -502,12 +512,17 @@ impl QuestEditorState {
     }
 
     /// Save edited stage
-    pub fn save_stage(&mut self, quest_idx: usize, stage_idx: usize) -> Result<(), String> {
-        if quest_idx >= self.quests.len() {
+    pub fn save_stage(
+        &mut self,
+        quests: &mut [Quest],
+        quest_idx: usize,
+        stage_idx: usize,
+    ) -> Result<(), String> {
+        if quest_idx >= quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        if stage_idx >= self.quests[quest_idx].stages.len() {
+        if stage_idx >= quests[quest_idx].stages.len() {
             return Err("Invalid stage index".to_string());
         }
 
@@ -517,7 +532,7 @@ impl QuestEditorState {
             .parse::<u8>()
             .map_err(|_| "Invalid stage number".to_string())?;
 
-        let stage = &mut self.quests[quest_idx].stages[stage_idx];
+        let stage = &mut quests[quest_idx].stages[stage_idx];
         stage.stage_number = stage_num;
         stage.name = self.stage_buffer.name.clone();
         stage.description = self.stage_buffer.description.clone();
@@ -531,16 +546,21 @@ impl QuestEditorState {
     }
 
     /// Delete a stage from quest
-    pub fn delete_stage(&mut self, quest_idx: usize, stage_idx: usize) -> Result<(), String> {
-        if quest_idx >= self.quests.len() {
+    pub fn delete_stage(
+        &mut self,
+        quests: &mut [Quest],
+        quest_idx: usize,
+        stage_idx: usize,
+    ) -> Result<(), String> {
+        if quest_idx >= quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        if stage_idx >= self.quests[quest_idx].stages.len() {
+        if stage_idx >= quests[quest_idx].stages.len() {
             return Err("Invalid stage index".to_string());
         }
 
-        self.quests[quest_idx].stages.remove(stage_idx);
+        quests[quest_idx].stages.remove(stage_idx);
         self.has_unsaved_changes = true;
 
         if self.selected_stage == Some(stage_idx) {
@@ -553,15 +573,16 @@ impl QuestEditorState {
     /// Edit an existing objective
     pub fn edit_objective(
         &mut self,
+        quests: &[Quest],
         quest_idx: usize,
         stage_idx: usize,
         objective_idx: usize,
     ) -> Result<(), String> {
-        if quest_idx >= self.quests.len() {
+        if quest_idx >= quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        let quest = &self.quests[quest_idx];
+        let quest = &quests[quest_idx];
         if stage_idx >= quest.stages.len() {
             return Err("Invalid stage index".to_string());
         }
@@ -647,19 +668,20 @@ impl QuestEditorState {
     /// Save edited objective
     pub fn save_objective(
         &mut self,
+        quests: &mut [Quest],
         quest_idx: usize,
         stage_idx: usize,
         objective_idx: usize,
     ) -> Result<(), String> {
-        if quest_idx >= self.quests.len() {
+        if quest_idx >= quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        if stage_idx >= self.quests[quest_idx].stages.len() {
+        if stage_idx >= quests[quest_idx].stages.len() {
             return Err("Invalid stage index".to_string());
         }
 
-        if objective_idx >= self.quests[quest_idx].stages[stage_idx].objectives.len() {
+        if objective_idx >= quests[quest_idx].stages[stage_idx].objectives.len() {
             return Err("Invalid objective index".to_string());
         }
 
@@ -779,7 +801,7 @@ impl QuestEditorState {
             },
         };
 
-        self.quests[quest_idx].stages[stage_idx].objectives[objective_idx] = objective;
+        quests[quest_idx].stages[stage_idx].objectives[objective_idx] = objective;
         self.has_unsaved_changes = true;
         self.selected_objective = None;
         self.selected_reward = None;
@@ -789,23 +811,24 @@ impl QuestEditorState {
     /// Delete an objective from a stage
     pub fn delete_objective(
         &mut self,
+        quests: &mut [Quest],
         quest_idx: usize,
         stage_idx: usize,
         objective_idx: usize,
     ) -> Result<(), String> {
-        if quest_idx >= self.quests.len() {
+        if quest_idx >= quests.len() {
             return Err("Invalid quest index".to_string());
         }
 
-        if stage_idx >= self.quests[quest_idx].stages.len() {
+        if stage_idx >= quests[quest_idx].stages.len() {
             return Err("Invalid stage index".to_string());
         }
 
-        if objective_idx >= self.quests[quest_idx].stages[stage_idx].objectives.len() {
+        if objective_idx >= quests[quest_idx].stages[stage_idx].objectives.len() {
             return Err("Invalid objective index".to_string());
         }
 
-        self.quests[quest_idx].stages[stage_idx]
+        quests[quest_idx].stages[stage_idx]
             .objectives
             .remove(objective_idx);
         self.has_unsaved_changes = true;
@@ -818,10 +841,10 @@ impl QuestEditorState {
     }
 
     /// Find orphaned objectives (stages with no objectives)
-    pub fn find_orphaned_objectives(&self) -> Vec<(QuestId, u8)> {
+    pub fn find_orphaned_objectives(&self, quests: &[Quest]) -> Vec<(QuestId, u8)> {
         let mut orphaned = Vec::new();
 
-        for quest in &self.quests {
+        for quest in quests {
             for stage in &quest.stages {
                 if stage.objectives.is_empty() {
                     orphaned.push((quest.id, stage.stage_number));
@@ -832,16 +855,11 @@ impl QuestEditorState {
         orphaned
     }
 
-    /// Load quests from data
-    pub fn load_quests(&mut self, quests: Vec<Quest>) {
-        self.quests = quests;
-        self.has_unsaved_changes = false;
-        self.validation_errors.clear();
-    }
+    // load_quests removed as QuestEditorState no longer owns the quests list.
 
     /// Get filtered quests based on search
-    pub fn filtered_quests(&self) -> Vec<(usize, &Quest)> {
-        self.quests
+    pub fn filtered_quests<'a>(&self, quests: &'a [Quest]) -> Vec<(usize, &'a Quest)> {
+        quests
             .iter()
             .enumerate()
             .filter(|(_, quest)| {
@@ -856,7 +874,7 @@ impl QuestEditorState {
     }
 
     /// Start creating a new quest
-    pub fn start_new_quest(&mut self, next_id: String) {
+    pub fn start_new_quest(&mut self, quests: &mut Vec<Quest>, next_id: String) {
         // Create a temporary quest
         let mut new_quest = Quest::new(0, "New Quest", "Description");
         // Try to parse ID if numeric, otherwise use 0 (will be updated on save)
@@ -864,8 +882,8 @@ impl QuestEditorState {
             new_quest.id = id_num;
         }
 
-        self.quests.push(new_quest);
-        let new_idx = self.quests.len() - 1;
+        quests.push(new_quest);
+        let new_idx = quests.len() - 1;
 
         self.selected_quest = Some(new_idx);
         self.mode = QuestEditorMode::Creating;
@@ -884,17 +902,17 @@ impl QuestEditorState {
     }
 
     /// Start editing the selected quest
-    pub fn start_edit_quest(&mut self, index: usize) {
-        if index < self.quests.len() {
+    pub fn start_edit_quest(&mut self, quests: &[Quest], index: usize) {
+        if index < quests.len() {
             self.selected_quest = Some(index);
-            let quest = &self.quests[index];
+            let quest = &quests[index];
 
             self.quest_buffer = QuestEditBuffer {
                 id: quest.id.to_string(),
                 name: quest.name.clone(),
                 description: quest.description.clone(),
-                min_level: quest.min_level.map_or(String::new(), |l| l.to_string()),
-                max_level: quest.max_level.map_or(String::new(), |l| l.to_string()),
+                min_level: quest.min_level.unwrap_or(1),
+                max_level: quest.max_level.unwrap_or(30),
                 repeatable: quest.repeatable,
                 is_main_quest: quest.is_main_quest,
                 quest_giver_npc: quest
@@ -924,34 +942,15 @@ impl QuestEditorState {
     }
 
     /// Save current quest being edited
-    pub fn save_quest(&mut self) -> Result<(), String> {
+    pub fn save_quest(&mut self, quests: &mut Vec<Quest>) -> Result<(), String> {
         let id = self
             .quest_buffer
             .id
             .parse::<QuestId>()
             .map_err(|_| "Invalid quest ID".to_string())?;
 
-        let min_level = if self.quest_buffer.min_level.is_empty() {
-            None
-        } else {
-            Some(
-                self.quest_buffer
-                    .min_level
-                    .parse::<u8>()
-                    .map_err(|_| "Invalid min level".to_string())?,
-            )
-        };
-
-        let max_level = if self.quest_buffer.max_level.is_empty() {
-            None
-        } else {
-            Some(
-                self.quest_buffer
-                    .max_level
-                    .parse::<u8>()
-                    .map_err(|_| "Invalid max level".to_string())?,
-            )
-        };
+        let min_level = Some(self.quest_buffer.min_level);
+        let max_level = Some(self.quest_buffer.max_level);
 
         let quest_giver_position = if !self.quest_buffer.quest_giver_x.is_empty()
             && !self.quest_buffer.quest_giver_y.is_empty()
@@ -972,7 +971,7 @@ impl QuestEditorState {
         };
 
         let mut quest = if let Some(idx) = self.selected_quest {
-            self.quests[idx].clone()
+            quests[idx].clone()
         } else {
             Quest::new(id, &self.quest_buffer.name, &self.quest_buffer.description)
         };
@@ -997,9 +996,9 @@ impl QuestEditorState {
         quest.quest_giver_position = quest_giver_position;
 
         if let Some(idx) = self.selected_quest {
-            self.quests[idx] = quest;
+            quests[idx] = quest;
         } else {
-            self.quests.push(quest);
+            quests.push(quest);
         }
 
         self.has_unsaved_changes = true;
@@ -1052,9 +1051,6 @@ impl QuestEditorState {
         status_message: &mut String,
         file_load_merge_mode: &mut bool,
     ) {
-        // Sync quests from parameter to internal state
-        self.quests = quests.clone();
-
         ui.heading("📜 Quests Editor");
         ui.add_space(5.0);
 
@@ -1070,7 +1066,7 @@ impl QuestEditorState {
         match toolbar_action {
             ToolbarAction::New => {
                 let next_id = quests.iter().map(|q| q.id).max().unwrap_or(0) + 1;
-                self.start_new_quest(next_id.to_string());
+                self.start_new_quest(quests, next_id.to_string());
                 *unsaved_changes = true;
             }
             ToolbarAction::Save => {
@@ -1163,7 +1159,6 @@ impl QuestEditorState {
                             Ok(contents) => match ron::from_str::<Vec<Quest>>(&contents) {
                                 Ok(loaded_quests) => {
                                     *quests = loaded_quests;
-                                    self.quests = quests.clone();
                                     *status_message = format!("Reloaded {} quests", quests.len());
                                 }
                                 Err(e) => {
@@ -1273,12 +1268,12 @@ impl QuestEditorState {
                     match action {
                         ItemAction::Edit => {
                             if let Some(idx) = self.selected_quest {
-                                self.start_edit_quest(idx);
+                                self.start_edit_quest(quests, idx);
                             }
                         }
                         ItemAction::Delete => {
                             if let Some(idx) = self.selected_quest {
-                                self.delete_quest(idx);
+                                self.delete_quest(quests, idx);
                                 self.selected_quest = None;
                                 *unsaved_changes = true;
                             }
@@ -1317,22 +1312,26 @@ impl QuestEditorState {
                 }
             }
             QuestEditorMode::Creating | QuestEditorMode::Editing => {
-                // Full-screen quest form editor - use the external `quests` buffer to
-                // prevent overlapping mutable borrows of `self.quests` within UI closures.
-                self.show_quest_form(ui, quests, items, monsters, maps, unsaved_changes);
+                // Full-screen quest form editor
+                self.show_quest_form(
+                    ui,
+                    quests,
+                    items,
+                    monsters,
+                    maps,
+                    unsaved_changes,
+                    status_message,
+                );
             }
         }
-
-        // Sync quests back from internal state to parameter
-        *quests = self.quests.clone();
     }
 
     /// Cancel current edit
-    pub fn cancel_edit(&mut self) {
+    pub fn cancel_edit(&mut self, quests: &mut Vec<Quest>) {
         if self.mode == QuestEditorMode::Creating {
             if let Some(idx) = self.selected_quest {
-                if idx < self.quests.len() {
-                    self.quests.remove(idx);
+                if idx < quests.len() {
+                    quests.remove(idx);
                 }
             }
         }
@@ -1348,15 +1347,15 @@ impl QuestEditorState {
     }
 
     /// Delete quest at index
-    pub fn delete_quest(&mut self, index: usize) {
-        if index < self.quests.len() {
-            self.quests.remove(index);
+    pub fn delete_quest(&mut self, quests: &mut Vec<Quest>, index: usize) {
+        if index < quests.len() {
+            quests.remove(index);
             self.has_unsaved_changes = true;
         }
     }
 
     /// Add a new stage to current quest
-    pub fn add_stage(&mut self) -> Result<(), String> {
+    pub fn add_stage(&mut self, quests: &mut [Quest]) -> Result<(), String> {
         if self.selected_quest.is_none() {
             return Err("No quest selected".to_string());
         }
@@ -1370,7 +1369,7 @@ impl QuestEditorState {
         let stage = QuestStage::new(stage_num, &self.stage_buffer.name);
 
         if let Some(idx) = self.selected_quest {
-            self.quests[idx].add_stage(stage);
+            quests[idx].add_stage(stage);
             self.has_unsaved_changes = true;
             self.stage_buffer = StageEditBuffer::default();
             self.selected_stage = None;
@@ -1381,24 +1380,28 @@ impl QuestEditorState {
     }
 
     /// Add a default objective to current stage
-    pub fn add_default_objective(&mut self, stage_idx: usize) -> Result<usize, String> {
+    pub fn add_default_objective(
+        &mut self,
+        quests: &mut [Quest],
+        stage_idx: usize,
+    ) -> Result<usize, String> {
         if let Some(quest_idx) = self.selected_quest {
-            if quest_idx >= self.quests.len() {
+            if quest_idx >= quests.len() {
                 return Err("Invalid quest index".to_string());
             }
 
-            if stage_idx < self.quests[quest_idx].stages.len() {
+            if stage_idx < quests[quest_idx].stages.len() {
                 // Add a default objective (Kill Monster 0, Qty 1)
                 let objective = QuestObjective::KillMonsters {
                     monster_id: 0,
                     quantity: 1,
                 };
 
-                self.quests[quest_idx].stages[stage_idx].add_objective(objective);
+                quests[quest_idx].stages[stage_idx].add_objective(objective);
                 self.has_unsaved_changes = true;
 
                 // Return the index of the new objective
-                Ok(self.quests[quest_idx].stages[stage_idx].objectives.len() - 1)
+                Ok(quests[quest_idx].stages[stage_idx].objectives.len() - 1)
             } else {
                 Err("Invalid stage index".to_string())
             }
@@ -1408,12 +1411,12 @@ impl QuestEditorState {
     }
 
     /// Validate current quest
-    pub fn validate_current_quest(&mut self) {
+    pub fn validate_current_quest(&mut self, quests: &[Quest]) {
         self.validation_errors.clear();
 
         if let Some(idx) = self.selected_quest {
-            if idx < self.quests.len() {
-                let quest = &self.quests[idx];
+            if idx < quests.len() {
+                let quest = &quests[idx];
 
                 if quest.name.is_empty() {
                     self.validation_errors
@@ -1436,12 +1439,12 @@ impl QuestEditorState {
     }
 
     /// Get preview text for current quest
-    pub fn get_quest_preview(&self, index: usize) -> String {
-        if index >= self.quests.len() {
+    pub fn get_quest_preview(&self, quests: &[Quest], index: usize) -> String {
+        if index >= quests.len() {
             return String::new();
         }
 
-        let quest = &self.quests[index];
+        let quest = &quests[index];
         let mut preview = format!(
             "Quest: {}\n\nID: {}\n\nDescription:\n{}\n\n",
             quest.name, quest.id, quest.description
@@ -1581,6 +1584,7 @@ impl QuestEditorState {
         monsters: &[MonsterDefinition],
         maps: &[Map],
         unsaved_changes: &mut bool,
+        status_message: &mut String,
     ) {
         let is_creating = matches!(self.mode, QuestEditorMode::Creating);
 
@@ -1626,40 +1630,90 @@ impl QuestEditorState {
 
                 ui.add_space(10.0);
 
+                // Level Requirements
                 ui.group(|ui| {
-                    ui.label("Level Requirements");
-                    ui.separator();
-
                     ui.horizontal(|ui| {
-                        ui.label("Min Level:");
-                        ui.text_edit_singleline(&mut self.quest_buffer.min_level);
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.label("Max Level:");
-                        ui.text_edit_singleline(&mut self.quest_buffer.max_level);
+                        ui.label("Level Requirements");
+                        ui.add_space(20.0);
+                        ui.label("Min:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.quest_buffer.min_level).range(0..=255),
+                        );
+                        ui.add_space(10.0);
+                        ui.label("Max:");
+                        ui.add(
+                            egui::DragValue::new(&mut self.quest_buffer.max_level).range(0..=255),
+                        );
                     });
                 });
 
                 ui.add_space(10.0);
 
+                // Quest Giver information
                 ui.group(|ui| {
                     ui.label("Quest Giver");
                     ui.separator();
 
                     ui.horizontal(|ui| {
                         ui.label("NPC ID:");
-                        ui.text_edit_singleline(&mut self.quest_buffer.quest_giver_npc);
-                    });
+                        if crate::ui_helpers::autocomplete_npc_selector(
+                            ui,
+                            "quest_giver_npc",
+                            "",
+                            &mut self.quest_buffer.quest_giver_npc,
+                            maps,
+                        ) {
+                            // The selector returns "map_id:npc_id"
+                            if let Some((map_id_str, npc_id_str)) =
+                                self.quest_buffer.quest_giver_npc.split_once(':')
+                            {
+                                if let (Ok(map_id), Ok(npc_id)) =
+                                    (map_id_str.parse::<MapId>(), npc_id_str.parse::<u16>())
+                                {
+                                    if let Some(map) = maps.iter().find(|m| m.id == map_id) {
+                                        if let Some(npc) = map.npcs.iter().find(|n| n.id == npc_id)
+                                        {
+                                            self.quest_buffer.quest_giver_map = map.id.to_string();
+                                            self.quest_buffer.quest_giver_x =
+                                                npc.position.x.to_string();
+                                            self.quest_buffer.quest_giver_y =
+                                                npc.position.y.to_string();
+                                        }
+                                    }
+                                }
+                            } else if let Ok(npc_id) =
+                                self.quest_buffer.quest_giver_npc.parse::<u16>()
+                            {
+                                // Fallback for manual ID entry
+                                for map in maps {
+                                    if let Some(npc) = map.npcs.iter().find(|n| n.id == npc_id) {
+                                        self.quest_buffer.quest_giver_map = map.id.to_string();
+                                        self.quest_buffer.quest_giver_x =
+                                            npc.position.x.to_string();
+                                        self.quest_buffer.quest_giver_y =
+                                            npc.position.y.to_string();
+                                        break;
+                                    }
+                                }
+                            }
+                        }
 
-                    ui.horizontal(|ui| {
+                        ui.add_space(10.0);
+
                         ui.label("Map ID:");
-                        ui.text_edit_singleline(&mut self.quest_buffer.quest_giver_map);
+                        crate::ui_helpers::autocomplete_map_selector(
+                            ui,
+                            "quest_giver_map",
+                            "",
+                            &mut self.quest_buffer.quest_giver_map,
+                            maps,
+                        );
                     });
 
                     ui.horizontal(|ui| {
                         ui.label("Position X:");
                         ui.text_edit_singleline(&mut self.quest_buffer.quest_giver_x);
+                        ui.add_space(10.0);
                         ui.label("Y:");
                         ui.text_edit_singleline(&mut self.quest_buffer.quest_giver_y);
                     });
@@ -1678,20 +1732,30 @@ impl QuestEditorState {
                 ui.add_space(10.0);
 
                 // Validation display
-                self.show_quest_validation(ui);
+                self.show_quest_validation(ui, quests);
 
                 ui.add_space(10.0);
 
                 // Action buttons
                 ui.horizontal(|ui| {
                     if ui.button("⬅ Back to List").clicked() {
-                        self.cancel_edit();
+                        self.cancel_edit(quests);
                     }
 
-                    let _ = ui.button("✅ Save Quest");
+                    if ui.button("✅ Save Quest").clicked() {
+                        match self.save_quest(quests) {
+                            Ok(_) => {
+                                *unsaved_changes = true;
+                                *status_message = "Quest saved".to_string();
+                            }
+                            Err(e) => {
+                                *status_message = format!("Error saving quest: {}", e);
+                            }
+                        }
+                    }
 
                     if ui.button("❌ Cancel").clicked() {
-                        self.cancel_edit();
+                        self.cancel_edit(quests);
                     }
                 });
             });
@@ -1712,7 +1776,7 @@ impl QuestEditorState {
                 ui.heading("Quest Stages");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("➕ Add Stage").clicked() {
-                        let _ = self.add_stage();
+                        let _ = self.add_stage(quests);
                         *unsaved_changes = true;
                     }
                 });
@@ -1770,14 +1834,14 @@ impl QuestEditorState {
 
                     // Handle stage deletion
                     if let Some(stage_idx) = stage_to_delete {
-                        if self.delete_stage(selected_idx, stage_idx).is_ok() {
+                        if self.delete_stage(quests, selected_idx, stage_idx).is_ok() {
                             *unsaved_changes = true;
                         }
                     }
 
                     // Handle stage editing
                     if let Some(stage_idx) = stage_to_edit {
-                        if self.edit_stage(selected_idx, stage_idx).is_ok() {
+                        if self.edit_stage(quests, selected_idx, stage_idx).is_ok() {
                             self.mode = QuestEditorMode::Editing;
                         }
                     }
@@ -1828,7 +1892,7 @@ impl QuestEditorState {
                     ui.horizontal(|ui| {
                         if ui.button("✅ Save").clicked() {
                             if let Some(selected_idx) = self.selected_quest {
-                                if self.save_stage(selected_idx, stage_idx).is_ok() {
+                                if self.save_stage(quests, selected_idx, stage_idx).is_ok() {
                                     *unsaved_changes = true;
                                 }
                             }
@@ -1865,10 +1929,10 @@ impl QuestEditorState {
                         .on_hover_text("Add Objective")
                         .clicked()
                     {
-                        if let Ok(new_idx) = self.add_default_objective(stage_idx) {
+                        if let Ok(new_idx) = self.add_default_objective(quests, stage_idx) {
                             *unsaved_changes = true;
                             // Immediately start editing the new objective
-                            let _ = self.edit_objective(quest_idx, stage_idx, new_idx);
+                            let _ = self.edit_objective(quests, quest_idx, stage_idx, new_idx);
                         }
                     }
                 });
@@ -1905,14 +1969,20 @@ impl QuestEditorState {
 
             // Handle objective deletion
             if let Some(obj_idx) = objective_to_delete {
-                if self.delete_objective(quest_idx, stage_idx, obj_idx).is_ok() {
+                if self
+                    .delete_objective(quests, quest_idx, stage_idx, obj_idx)
+                    .is_ok()
+                {
                     *unsaved_changes = true;
                 }
             }
 
             // Handle objective editing
             if let Some(obj_idx) = objective_to_edit {
-                if self.edit_objective(quest_idx, stage_idx, obj_idx).is_ok() {
+                if self
+                    .edit_objective(quests, quest_idx, stage_idx, obj_idx)
+                    .is_ok()
+                {
                     // Objective editing modal will be shown below
                 }
             }
@@ -1977,89 +2047,79 @@ impl QuestEditorState {
                     // Type-specific fields
                     match self.objective_buffer.objective_type {
                         crate::quest_editor::ObjectiveType::KillMonsters => {
-                            ui.horizontal(|ui| {
-                                ui.label("Monster:");
-                                egui::ComboBox::from_id_salt("monster_selector")
-                                    .selected_text(
-                                        monsters
-                                            .iter()
-                                            .find(|m| {
-                                                m.id.to_string() == self.objective_buffer.monster_id
-                                            })
-                                            .map(|m| format!("{} - {}", m.id, m.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.monster_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for monster in monsters {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.monster_id,
-                                                monster.id.to_string(),
-                                                format!("{} - {}", monster.id, monster.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for monster selection
+                            let mut monster_name = if let Ok(monster_id) =
+                                self.objective_buffer.monster_id.parse::<u8>()
+                            {
+                                monsters
+                                    .iter()
+                                    .find(|m| m.id == monster_id)
+                                    .map(|m| m.name.clone())
+                                    .unwrap_or_else(|| self.objective_buffer.monster_id.clone())
+                            } else {
+                                self.objective_buffer.monster_id.clone()
+                            };
+
+                            if crate::ui_helpers::autocomplete_monster_selector(
+                                ui,
+                                "quest_objective_monster",
+                                "Monster:",
+                                &mut monster_name,
+                                monsters,
+                            ) {
+                                if let Some(monster) =
+                                    monsters.iter().find(|m| m.name == monster_name)
+                                {
+                                    self.objective_buffer.monster_id = monster.id.to_string();
+                                    *unsaved_changes = true;
+                                } else if monster_name.is_empty() {
+                                    self.objective_buffer.monster_id.clear();
+                                    *unsaved_changes = true;
+                                }
+                            }
+
                             ui.horizontal(|ui| {
                                 ui.label("Quantity:");
                                 ui.text_edit_singleline(&mut self.objective_buffer.quantity);
                             });
                         }
                         crate::quest_editor::ObjectiveType::CollectItems => {
-                            ui.horizontal(|ui| {
-                                ui.label("Item:");
-                                egui::ComboBox::from_id_salt("item_selector")
-                                    .selected_text(
-                                        items
-                                            .iter()
-                                            .find(|i| {
-                                                i.id.to_string() == self.objective_buffer.item_id
-                                            })
-                                            .map(|i| format!("{} - {}", i.id, i.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.item_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for item in items {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.item_id,
-                                                item.id.to_string(),
-                                                format!("{} - {}", item.id, item.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for item selection
+                            use crate::ui_helpers::autocomplete_item_selector;
+
+                            let mut item_id_num =
+                                self.objective_buffer.item_id.parse::<u8>().unwrap_or(0);
+
+                            if autocomplete_item_selector(
+                                ui,
+                                "quest_objective_item",
+                                "Item:",
+                                &mut item_id_num,
+                                items,
+                            ) {
+                                self.objective_buffer.item_id = item_id_num.to_string();
+                                *unsaved_changes = true;
+                            }
+
                             ui.horizontal(|ui| {
                                 ui.label("Quantity:");
                                 ui.text_edit_singleline(&mut self.objective_buffer.quantity);
                             });
                         }
                         crate::quest_editor::ObjectiveType::ReachLocation => {
-                            ui.horizontal(|ui| {
-                                ui.label("Map:");
-                                egui::ComboBox::from_id_salt("map_selector")
-                                    .selected_text(
-                                        maps.iter()
-                                            .find(|m| {
-                                                m.id.to_string() == self.objective_buffer.map_id
-                                            })
-                                            .map(|m| format!("{} - {}", m.id, m.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.map_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for map in maps {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.map_id,
-                                                map.id.to_string(),
-                                                format!("{} - {}", map.id, map.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for map selection
+                            use crate::ui_helpers::autocomplete_map_selector;
+
+                            if autocomplete_map_selector(
+                                ui,
+                                "quest_objective_map",
+                                "Map:",
+                                &mut self.objective_buffer.map_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
+
                             ui.horizontal(|ui| {
                                 ui.label("X:");
                                 ui.text_edit_singleline(&mut self.objective_buffer.location_x);
@@ -2072,94 +2132,62 @@ impl QuestEditorState {
                             });
                         }
                         crate::quest_editor::ObjectiveType::TalkToNpc => {
-                            ui.horizontal(|ui| {
-                                ui.label("Map:");
-                                egui::ComboBox::from_id_salt("map_selector_npc")
-                                    .selected_text(
-                                        maps.iter()
-                                            .find(|m| {
-                                                m.id.to_string() == self.objective_buffer.map_id
-                                            })
-                                            .map(|m| format!("{} - {}", m.id, m.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.map_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for map in maps {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.map_id,
-                                                map.id.to_string(),
-                                                format!("{} - {}", map.id, map.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for map selection
+                            use crate::ui_helpers::autocomplete_map_selector;
 
-                            // Filter NPCs based on selected map
-                            let selected_map_id =
-                                self.objective_buffer.map_id.parse::<u16>().unwrap_or(0);
-                            let map_npcs: Vec<_> = maps
-                                .iter()
-                                .find(|m| m.id == selected_map_id)
-                                .map(|m| m.npcs.clone())
-                                .unwrap_or_default();
+                            if autocomplete_map_selector(
+                                ui,
+                                "quest_objective_npc_map",
+                                "Map:",
+                                &mut self.objective_buffer.map_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
 
-                            ui.horizontal(|ui| {
-                                ui.label("NPC:");
-                                egui::ComboBox::from_id_salt("npc_selector")
-                                    .selected_text(
-                                        map_npcs
-                                            .iter()
-                                            .find(|n| {
-                                                n.id.to_string() == self.objective_buffer.npc_id
-                                            })
-                                            .map(|n| format!("{} - {}", n.id, n.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.npc_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for npc in &map_npcs {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.npc_id,
-                                                npc.id.to_string(),
-                                                format!("{} - {}", npc.id, npc.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for NPC selection (cross-map aware)
+                            use crate::ui_helpers::autocomplete_npc_selector;
+
+                            if autocomplete_npc_selector(
+                                ui,
+                                "quest_objective_npc",
+                                "NPC:",
+                                &mut self.objective_buffer.npc_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
                         }
                         crate::quest_editor::ObjectiveType::DeliverItem => {
-                            ui.horizontal(|ui| {
-                                ui.label("Item:");
-                                egui::ComboBox::from_id_salt("item_selector_deliver")
-                                    .selected_text(
-                                        items
-                                            .iter()
-                                            .find(|i| {
-                                                i.id.to_string() == self.objective_buffer.item_id
-                                            })
-                                            .map(|i| format!("{} - {}", i.id, i.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.item_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for item in items {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.item_id,
-                                                item.id.to_string(),
-                                                format!("{} - {}", item.id, item.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for item selection
+                            use crate::ui_helpers::autocomplete_item_selector;
 
-                            ui.horizontal(|ui| {
-                                ui.label("NPC ID:");
-                                ui.text_edit_singleline(&mut self.objective_buffer.npc_id);
-                            });
+                            let mut item_id_num =
+                                self.objective_buffer.item_id.parse::<u8>().unwrap_or(0);
+
+                            if autocomplete_item_selector(
+                                ui,
+                                "quest_objective_deliver_item",
+                                "Item:",
+                                &mut item_id_num,
+                                items,
+                            ) {
+                                self.objective_buffer.item_id = item_id_num.to_string();
+                                *unsaved_changes = true;
+                            }
+
+                            // Use autocomplete for NPC selection
+                            use crate::ui_helpers::autocomplete_npc_selector;
+
+                            if autocomplete_npc_selector(
+                                ui,
+                                "quest_objective_deliver_npc",
+                                "Deliver to NPC:",
+                                &mut self.objective_buffer.npc_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
 
                             ui.horizontal(|ui| {
                                 ui.label("Quantity:");
@@ -2167,63 +2195,31 @@ impl QuestEditorState {
                             });
                         }
                         crate::quest_editor::ObjectiveType::EscortNpc => {
-                            ui.horizontal(|ui| {
-                                ui.label("Map:");
-                                egui::ComboBox::from_id_salt("map_selector_escort")
-                                    .selected_text(
-                                        maps.iter()
-                                            .find(|m| {
-                                                m.id.to_string() == self.objective_buffer.map_id
-                                            })
-                                            .map(|m| format!("{} - {}", m.id, m.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.map_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for map in maps {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.map_id,
-                                                map.id.to_string(),
-                                                format!("{} - {}", map.id, map.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for map selection
+                            use crate::ui_helpers::autocomplete_map_selector;
 
-                            // Filter NPCs based on selected map
-                            let selected_map_id =
-                                self.objective_buffer.map_id.parse::<u16>().unwrap_or(0);
-                            let map_npcs: Vec<_> = maps
-                                .iter()
-                                .find(|m| m.id == selected_map_id)
-                                .map(|m| m.npcs.clone())
-                                .unwrap_or_default();
+                            if autocomplete_map_selector(
+                                ui,
+                                "quest_objective_escort_map",
+                                "Map:",
+                                &mut self.objective_buffer.map_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
 
-                            ui.horizontal(|ui| {
-                                ui.label("NPC:");
-                                egui::ComboBox::from_id_salt("npc_selector_escort")
-                                    .selected_text(
-                                        map_npcs
-                                            .iter()
-                                            .find(|n| {
-                                                n.id.to_string() == self.objective_buffer.npc_id
-                                            })
-                                            .map(|n| format!("{} - {}", n.id, n.name))
-                                            .unwrap_or_else(|| {
-                                                self.objective_buffer.npc_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for npc in &map_npcs {
-                                            ui.selectable_value(
-                                                &mut self.objective_buffer.npc_id,
-                                                npc.id.to_string(),
-                                                format!("{} - {}", npc.id, npc.name),
-                                            );
-                                        }
-                                    });
-                            });
+                            // Use autocomplete for NPC selection
+                            use crate::ui_helpers::autocomplete_npc_selector;
+
+                            if autocomplete_npc_selector(
+                                ui,
+                                "quest_objective_escort_npc",
+                                "NPC:",
+                                &mut self.objective_buffer.npc_id,
+                                maps,
+                            ) {
+                                *unsaved_changes = true;
+                            }
 
                             ui.horizontal(|ui| {
                                 ui.label("Destination X:");
@@ -2245,7 +2241,10 @@ impl QuestEditorState {
 
                     ui.horizontal(|ui| {
                         if ui.button("✅ Save").clicked() {
-                            if self.save_objective(quest_idx, stage_idx, obj_idx).is_ok() {
+                            if self
+                                .save_objective(quests, quest_idx, stage_idx, obj_idx)
+                                .is_ok()
+                            {
                                 *unsaved_changes = true;
                             }
                         }
@@ -2439,26 +2438,18 @@ impl QuestEditorState {
                         }
                         crate::quest_editor::RewardType::Items => {
                             ui.horizontal(|ui| {
-                                ui.label("Item:");
-                                egui::ComboBox::from_id_salt("reward_item_selector")
-                                    .selected_text(
-                                        items
-                                            .iter()
-                                            .find(|i| {
-                                                i.id.to_string() == self.reward_buffer.item_id
-                                            })
-                                            .map(|i| format!("{} - {}", i.id, i.name))
-                                            .unwrap_or_else(|| self.reward_buffer.item_id.clone()),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for item in items {
-                                            ui.selectable_value(
-                                                &mut self.reward_buffer.item_id,
-                                                item.id.to_string(),
-                                                format!("{} - {}", item.id, item.name),
-                                            );
-                                        }
-                                    });
+                                let mut item_id_num =
+                                    self.reward_buffer.item_id.parse::<u8>().unwrap_or(0);
+
+                                if crate::ui_helpers::autocomplete_item_selector(
+                                    ui,
+                                    "reward_item_selector",
+                                    "Item:",
+                                    &mut item_id_num,
+                                    items,
+                                ) {
+                                    self.reward_buffer.item_id = item_id_num.to_string();
+                                }
                             });
                             ui.horizontal(|ui| {
                                 ui.label("Quantity:");
@@ -2467,29 +2458,15 @@ impl QuestEditorState {
                         }
                         crate::quest_editor::RewardType::UnlockQuest => {
                             ui.horizontal(|ui| {
-                                ui.label("Quest:");
-                                egui::ComboBox::from_id_salt("reward_quest_selector")
-                                    .selected_text(
-                                        quests
-                                            .iter()
-                                            .find(|q| {
-                                                q.id.to_string()
-                                                    == self.reward_buffer.unlock_quest_id
-                                            })
-                                            .map(|q| format!("{} - {}", q.id, q.name))
-                                            .unwrap_or_else(|| {
-                                                self.reward_buffer.unlock_quest_id.clone()
-                                            }),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for quest in quests.iter() {
-                                            ui.selectable_value(
-                                                &mut self.reward_buffer.unlock_quest_id,
-                                                quest.id.to_string(),
-                                                format!("{} - {}", quest.id, quest.name),
-                                            );
-                                        }
-                                    });
+                                if crate::ui_helpers::autocomplete_quest_selector(
+                                    ui,
+                                    "reward_quest_selector",
+                                    "Quest:",
+                                    &mut self.reward_buffer.unlock_quest_id,
+                                    quests,
+                                ) {
+                                    // Quest selected
+                                }
                             });
                         }
                         crate::quest_editor::RewardType::SetFlag => {
@@ -2530,8 +2507,8 @@ impl QuestEditorState {
     }
 
     /// Show quest validation display
-    fn show_quest_validation(&mut self, ui: &mut egui::Ui) {
-        self.validate_current_quest();
+    fn show_quest_validation(&mut self, ui: &mut egui::Ui, quests: &[Quest]) {
+        self.validate_current_quest(quests);
         let errors = &self.validation_errors;
 
         if !errors.is_empty() {
@@ -2562,58 +2539,61 @@ mod tests {
     #[test]
     fn test_quest_editor_state_creation() {
         let editor = QuestEditorState::new();
-        assert_eq!(editor.quests.len(), 0);
         assert_eq!(editor.mode, QuestEditorMode::List);
     }
 
     #[test]
     fn test_start_new_quest() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest("1".to_string());
+        let mut quests = Vec::new();
+        editor.start_new_quest(&mut quests, "1".to_string());
         assert_eq!(editor.mode, QuestEditorMode::Creating);
     }
 
     #[test]
     fn test_save_quest_creates_new() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest("1".to_string());
+        let mut quests = Vec::new();
+        editor.start_new_quest(&mut quests, "1".to_string());
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Test Quest".to_string();
         editor.quest_buffer.description = "Test Description".to_string();
 
-        assert!(editor.save_quest().is_ok());
-        assert_eq!(editor.quests.len(), 1);
-        assert_eq!(editor.quests[0].name, "Test Quest");
+        assert!(editor.save_quest(&mut quests).is_ok());
+        assert_eq!(quests.len(), 1);
+        assert_eq!(quests[0].name, "Test Quest");
     }
 
     #[test]
     fn test_delete_quest() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest("1".to_string());
+        let mut quests = Vec::new();
+        editor.start_new_quest(&mut quests, "1".to_string());
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Test Quest".to_string();
-        editor.save_quest().unwrap();
+        editor.save_quest(&mut quests).unwrap();
 
-        assert_eq!(editor.quests.len(), 1);
-        editor.delete_quest(0);
-        assert_eq!(editor.quests.len(), 0);
+        assert_eq!(quests.len(), 1);
+        editor.delete_quest(&mut quests, 0);
+        assert_eq!(quests.len(), 0);
     }
 
     #[test]
     fn test_filtered_quests() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest("1".to_string());
+        let mut quests = Vec::new();
+        editor.start_new_quest(&mut quests, "1".to_string());
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Dragon Slayer".to_string();
-        editor.save_quest().unwrap();
+        editor.save_quest(&mut quests).unwrap();
 
-        editor.start_new_quest("2".to_string());
+        editor.start_new_quest(&mut quests, "2".to_string());
         editor.quest_buffer.id = "2".to_string();
         editor.quest_buffer.name = "Treasure Hunt".to_string();
-        editor.save_quest().unwrap();
+        editor.save_quest(&mut quests).unwrap();
 
         editor.search_filter = "dragon".to_string();
-        let filtered = editor.filtered_quests();
+        let filtered = editor.filtered_quests(&quests);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].1.name, "Dragon Slayer");
     }
@@ -2621,42 +2601,44 @@ mod tests {
     #[test]
     fn test_add_stage() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest("1".to_string());
+        let mut quests = Vec::new();
+        editor.start_new_quest(&mut quests, "1".to_string());
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Test Quest".to_string();
-        editor.save_quest().unwrap();
+        editor.save_quest(&mut quests).unwrap();
 
         editor.selected_quest = Some(0);
         editor.stage_buffer.number = "1".to_string();
         editor.stage_buffer.name = "Find the Artifact".to_string();
-        assert!(editor.add_stage().is_ok());
+        assert!(editor.add_stage(&mut quests).is_ok());
 
-        assert_eq!(editor.quests[0].stages.len(), 1);
+        assert_eq!(quests[0].stages.len(), 1);
     }
 
     #[test]
     fn test_validation_empty_quest() {
         let mut editor = QuestEditorState::new();
-        editor.start_new_quest("1".to_string());
+        let mut quests = Vec::new();
+        editor.start_new_quest(&mut quests, "1".to_string());
         editor.quest_buffer.id = "1".to_string();
         editor.quest_buffer.name = "Test".to_string();
-        editor.save_quest().unwrap();
+        editor.save_quest(&mut quests).unwrap();
 
         editor.selected_quest = Some(0);
-        editor.validate_current_quest();
+        editor.validate_current_quest(&quests);
         assert!(!editor.validation_errors.is_empty());
     }
 
     #[test]
     fn test_quest_buffer_levels() {
         let buffer = QuestEditBuffer {
-            min_level: "5".to_string(),
-            max_level: "15".to_string(),
+            min_level: 5,
+            max_level: 15,
             ..Default::default()
         };
 
-        assert_eq!(buffer.min_level.parse::<u8>().unwrap(), 5);
-        assert_eq!(buffer.max_level.parse::<u8>().unwrap(), 15);
+        assert_eq!(buffer.min_level, 5);
+        assert_eq!(buffer.max_level, 15);
     }
 
     #[test]
@@ -2676,14 +2658,15 @@ mod tests {
     #[test]
     fn test_edit_stage() {
         let mut state = QuestEditorState::new();
+        let mut quests = Vec::new();
         let mut quest = Quest::new(1, "Test Quest", "Test description");
         let mut stage = QuestStage::new(1, "Stage 1");
         stage.description = "Test stage description".to_string();
         quest.add_stage(stage);
-        state.quests.push(quest);
+        quests.push(quest);
 
         // Edit the stage
-        assert!(state.edit_stage(0, 0).is_ok());
+        assert!(state.edit_stage(&mut quests, 0, 0).is_ok());
         assert_eq!(state.stage_buffer.number, "1");
         assert_eq!(state.stage_buffer.name, "Stage 1");
         assert_eq!(state.stage_buffer.description, "Test stage description");
@@ -2693,17 +2676,18 @@ mod tests {
     #[test]
     fn test_delete_stage() {
         let mut state = QuestEditorState::new();
+        let mut quests = Vec::new();
         let mut quest = Quest::new(1, "Test Quest", "Test description");
         quest.add_stage(QuestStage::new(1, "Stage 1"));
         quest.add_stage(QuestStage::new(2, "Stage 2"));
-        state.quests.push(quest);
+        quests.push(quest);
 
-        assert_eq!(state.quests[0].stages.len(), 2);
+        assert_eq!(quests[0].stages.len(), 2);
 
         // Delete first stage
-        assert!(state.delete_stage(0, 0).is_ok());
-        assert_eq!(state.quests[0].stages.len(), 1);
-        assert_eq!(state.quests[0].stages[0].stage_number, 2);
+        assert!(state.delete_stage(&mut quests, 0, 0).is_ok());
+        assert_eq!(quests[0].stages.len(), 1);
+        assert_eq!(quests[0].stages[0].stage_number, 2);
     }
 
     #[test]
@@ -2711,6 +2695,7 @@ mod tests {
         use antares::domain::quest::QuestObjective;
 
         let mut state = QuestEditorState::new();
+        let mut quests = Vec::new();
         let mut quest = Quest::new(1, "Test Quest", "Test description");
         let mut stage = QuestStage::new(1, "Stage 1");
         stage.add_objective(QuestObjective::KillMonsters {
@@ -2718,10 +2703,10 @@ mod tests {
             quantity: 10,
         });
         quest.add_stage(stage);
-        state.quests.push(quest);
+        quests.push(quest);
 
         // Edit the objective
-        assert!(state.edit_objective(0, 0, 0).is_ok());
+        assert!(state.edit_objective(&quests, 0, 0, 0).is_ok());
         assert_eq!(state.objective_buffer.monster_id, "5");
         assert_eq!(state.objective_buffer.quantity, "10");
         assert_eq!(state.selected_objective, Some(0));
@@ -2732,6 +2717,7 @@ mod tests {
         use antares::domain::quest::QuestObjective;
 
         let mut state = QuestEditorState::new();
+        let mut quests = Vec::new();
         let mut quest = Quest::new(1, "Test Quest", "Test description");
         let mut stage = QuestStage::new(1, "Stage 1");
         stage.add_objective(QuestObjective::KillMonsters {
@@ -2743,35 +2729,36 @@ mod tests {
             quantity: 5,
         });
         quest.add_stage(stage);
-        state.quests.push(quest);
+        quests.push(quest);
 
-        assert_eq!(state.quests[0].stages[0].objectives.len(), 2);
+        assert_eq!(quests[0].stages[0].objectives.len(), 2);
 
         // Delete first objective
-        assert!(state.delete_objective(0, 0, 0).is_ok());
-        assert_eq!(state.quests[0].stages[0].objectives.len(), 1);
+        assert!(state.delete_objective(&mut quests, 0, 0, 0).is_ok());
+        assert_eq!(quests[0].stages[0].objectives.len(), 1);
     }
 
     #[test]
     fn test_find_orphaned_objectives() {
-        let mut state = QuestEditorState::new();
+        let state = QuestEditorState::new();
+        let mut quests = Vec::new();
 
         // Quest with valid stages
         let mut quest1 = Quest::new(1, "Quest 1", "Test");
         let mut stage1 = QuestStage::new(1, "Stage 1");
-        stage1.add_objective(QuestObjective::KillMonsters {
-            monster_id: 1,
-            quantity: 5,
+        stage1.add_objective(QuestObjective::TalkToNpc {
+            npc_id: 1,
+            map_id: 1,
         });
         quest1.add_stage(stage1);
-        state.quests.push(quest1);
+        quests.push(quest1);
 
         // Quest with orphaned stage
         let mut quest2 = Quest::new(2, "Quest 2", "Test");
         quest2.add_stage(QuestStage::new(1, "Empty Stage"));
-        state.quests.push(quest2);
+        quests.push(quest2);
 
-        let orphaned = state.find_orphaned_objectives();
+        let orphaned = state.find_orphaned_objectives(&quests);
         assert_eq!(orphaned.len(), 1);
         assert_eq!(orphaned[0], (2, 1));
     }
@@ -2781,6 +2768,7 @@ mod tests {
         use antares::domain::quest::QuestObjective;
 
         let mut state = QuestEditorState::new();
+        let mut quests = Vec::new();
         let mut quest = Quest::new(1, "Test Quest", "Test description");
         let mut stage = QuestStage::new(1, "Stage 1");
         stage.add_objective(QuestObjective::KillMonsters {
@@ -2788,17 +2776,17 @@ mod tests {
             quantity: 10,
         });
         quest.add_stage(stage);
-        state.quests.push(quest);
+        quests.push(quest);
 
         // Edit and save the objective
-        state.edit_objective(0, 0, 0).unwrap();
+        state.edit_objective(&quests, 0, 0, 0).unwrap();
         state.objective_buffer.monster_id = "8".to_string();
         state.objective_buffer.quantity = "15".to_string();
 
-        assert!(state.save_objective(0, 0, 0).is_ok());
+        assert!(state.save_objective(&mut quests, 0, 0, 0).is_ok());
 
         // Verify changes
-        match &state.quests[0].stages[0].objectives[0] {
+        match &quests[0].stages[0].objectives[0] {
             QuestObjective::KillMonsters {
                 monster_id,
                 quantity,
@@ -2808,5 +2796,145 @@ mod tests {
             }
             _ => panic!("Expected KillMonsters objective"),
         }
+    }
+
+    // =========================================================================
+    // ObjectiveEditBuffer Autocomplete Buffer Tests
+    // =========================================================================
+
+    #[test]
+    fn test_objective_buffer_autocomplete_fields_initialization() {
+        let buffer = ObjectiveEditBuffer::default();
+        assert!(
+            buffer.monster_input_buffer.is_empty(),
+            "Monster input buffer should be empty on initialization"
+        );
+        assert!(
+            buffer.item_input_buffer.is_empty(),
+            "Item input buffer should be empty on initialization"
+        );
+        assert!(
+            buffer.map_input_buffer.is_empty(),
+            "Map input buffer should be empty on initialization"
+        );
+        assert!(
+            buffer.npc_input_buffer.is_empty(),
+            "NPC input buffer should be empty on initialization"
+        );
+    }
+
+    #[test]
+    fn test_objective_buffer_monster_autocomplete() {
+        let mut buffer = ObjectiveEditBuffer::default();
+        buffer.objective_type = ObjectiveType::KillMonsters;
+
+        // Simulate autocomplete selection
+        buffer.monster_input_buffer = "Goblin Warrior".to_string();
+        buffer.monster_id = "5".to_string();
+
+        assert_eq!(buffer.monster_input_buffer, "Goblin Warrior");
+        assert_eq!(buffer.monster_id, "5");
+    }
+
+    #[test]
+    fn test_objective_buffer_item_autocomplete() {
+        let mut buffer = ObjectiveEditBuffer::default();
+        buffer.objective_type = ObjectiveType::CollectItems;
+
+        // Simulate autocomplete selection
+        buffer.item_input_buffer = "Magic Sword".to_string();
+        buffer.item_id = "42".to_string();
+
+        assert_eq!(buffer.item_input_buffer, "Magic Sword");
+        assert_eq!(buffer.item_id, "42");
+    }
+
+    #[test]
+    fn test_objective_buffer_map_autocomplete() {
+        let mut buffer = ObjectiveEditBuffer::default();
+        buffer.objective_type = ObjectiveType::ReachLocation;
+
+        // Simulate autocomplete selection
+        buffer.map_input_buffer = "Dark Forest (ID: 3)".to_string();
+        buffer.map_id = "3".to_string();
+
+        assert_eq!(buffer.map_input_buffer, "Dark Forest (ID: 3)");
+        assert_eq!(buffer.map_id, "3");
+    }
+
+    #[test]
+    fn test_objective_buffer_npc_autocomplete() {
+        let mut buffer = ObjectiveEditBuffer::default();
+        buffer.objective_type = ObjectiveType::TalkToNpc;
+
+        // Simulate autocomplete selection (composite ID format)
+        buffer.npc_input_buffer = "Merchant (Map: Town, NPC ID: 1)".to_string();
+        buffer.npc_id = "1:1".to_string();
+
+        assert_eq!(buffer.npc_input_buffer, "Merchant (Map: Town, NPC ID: 1)");
+        assert_eq!(buffer.npc_id, "1:1");
+    }
+
+    #[test]
+    fn test_objective_buffer_multiple_types_preserve_buffers() {
+        let mut buffer = ObjectiveEditBuffer::default();
+
+        // Set buffers for different objective types
+        buffer.monster_input_buffer = "Dragon".to_string();
+        buffer.item_input_buffer = "Healing Potion".to_string();
+        buffer.map_input_buffer = "Castle".to_string();
+        buffer.npc_input_buffer = "King".to_string();
+
+        // Change objective type
+        buffer.objective_type = ObjectiveType::CollectItems;
+
+        // Verify all buffers are still present (not cleared on type change)
+        assert_eq!(buffer.monster_input_buffer, "Dragon");
+        assert_eq!(buffer.item_input_buffer, "Healing Potion");
+        assert_eq!(buffer.map_input_buffer, "Castle");
+        assert_eq!(buffer.npc_input_buffer, "King");
+    }
+
+    #[test]
+    fn test_quest_giver_auto_population() {
+        let mut editor = QuestEditorState::default();
+        let map_id: MapId = 1;
+        let mut maps = vec![Map::new(
+            map_id,
+            "Test Map".to_string(),
+            "Desc".to_string(),
+            20,
+            20,
+        )];
+        maps[0].npcs.push(antares::domain::world::Npc::new(
+            5,
+            "Test NPC".to_string(),
+            "Desc".to_string(),
+            Position::new(10, 20),
+            "Dialogue".to_string(),
+        ));
+
+        // Simulate selection of NPC from map 1
+        editor.quest_buffer.quest_giver_npc = "1:5".to_string();
+
+        // This is the logic from show_quest_form
+        if let Some((map_id_str, npc_id_str)) = editor.quest_buffer.quest_giver_npc.split_once(':')
+        {
+            if let (Ok(parsed_map_id), Ok(parsed_npc_id)) =
+                (map_id_str.parse::<MapId>(), npc_id_str.parse::<u16>())
+            {
+                if let Some(map) = maps.iter().find(|m| m.id == parsed_map_id) {
+                    if let Some(npc) = map.npcs.iter().find(|n| n.id == parsed_npc_id) {
+                        editor.quest_buffer.quest_giver_map = map.id.to_string();
+                        editor.quest_buffer.quest_giver_x = npc.position.x.to_string();
+                        editor.quest_buffer.quest_giver_y = npc.position.y.to_string();
+                    }
+                }
+            }
+        }
+
+        assert_eq!(editor.quest_buffer.quest_giver_map, "1");
+        assert_eq!(editor.quest_buffer.quest_giver_x, "10");
+        assert_eq!(editor.quest_buffer.quest_giver_y, "20");
     }
 }
