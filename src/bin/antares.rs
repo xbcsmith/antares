@@ -52,6 +52,7 @@ fn main() {
     let graphics_config = campaign.game_config.graphics.clone();
     let camera_config = campaign.game_config.camera.clone();
     let controls_config = campaign.game_config.controls.clone();
+    let audio_config = campaign.game_config.audio.clone();
 
     // Configure window plugin from graphics config
     let window_plugin = WindowPlugin {
@@ -94,6 +95,9 @@ fn main() {
             controls_config,
         ))
         .add_plugins(antares::game::systems::events::EventPlugin)
+        .add_plugins(antares::game::systems::audio::AudioPlugin {
+            config: audio_config,
+        })
         // .add_plugins(antares::game::systems::ui::UiPlugin) // Temporarily disabled due to egui context issue
         .run();
 }
