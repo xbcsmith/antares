@@ -1,0 +1,38 @@
+GameConfig(
+    graphics: GraphicsConfig(
+        resolution: (1280, 720),
+        fullscreen: false,
+        vsync: true,
+        msaa_samples: 4,
+        shadow_quality: Medium,
+    ),
+    audio: AudioConfig(
+        master_volume: 0.8,
+        music_volume: 0.6,
+        sfx_volume: 1.0,
+        ambient_volume: 0.5,
+        enable_audio: true,
+    ),
+    controls: ControlsConfig(
+        move_forward: ["W", "ArrowUp"],
+        move_back: ["S", "ArrowDown"],
+        turn_left: ["A", "ArrowLeft"],
+        turn_right: ["D", "ArrowRight"],
+        interact: ["Space", "E"],
+        menu: ["Escape"],
+        movement_cooldown: 0.2,
+    ),
+    camera: CameraConfig(
+        mode: FirstPerson,
+        eye_height: 0.6,
+        fov: 70.0,
+        near_clip: 0.1,
+        far_clip: 1000.0,
+        smooth_rotation: false,
+        rotation_speed: 180.0,
+        light_height: 5.0,
+        light_intensity: 2000000.0,
+        light_range: 60.0,
+        shadows_enabled: true,
+    ),
+)
