@@ -1,0 +1,250 @@
+// Antares Campaign Game Configuration Template
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+//
+// Copy this file to your campaign directory as config.ron
+//
+// All values shown are defaults. You can omit any section to use defaults.
+// This file uses RON (Rusty Object Notation) format.
+
+GameConfig(
+    // ========================================================================
+    // Graphics and Rendering Configuration
+    // ========================================================================
+    graphics: GraphicsConfig(
+        // Window resolution (width, height) in pixels
+        // Common values: (1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)
+        // Must be greater than 0
+        resolution: (1280, 720),
+
+        // Start in fullscreen mode
+        // true = fullscreen, false = windowed
+        fullscreen: false,
+
+        // Enable vertical sync (prevents screen tearing)
+        // true = sync to monitor refresh rate (smoother, may add latency)
+        // false = unlimited FPS (responsive, may tear)
+        vsync: true,
+
+        // Multisample anti-aliasing samples
+        // 0 = disabled (best performance)
+        // 2 = minimal AA
+        // 4 = good balance (recommended)
+        // 8 = high quality (performance cost)
+        // Must be 0 or a power of 2
+        msaa_samples: 4,
+
+        // Shadow rendering quality
+        // Low    = minimal shadows, best performance
+        // Medium = balanced quality (recommended)
+        // High   = detailed shadows
+        // Ultra  = maximum quality, highest cost
+        shadow_quality: Medium,
+    ),
+
+    // ========================================================================
+    // Audio Configuration
+    // ========================================================================
+    audio: AudioConfig(
+        // Master volume (affects all audio)
+        // Range: 0.0 (silent) to 1.0 (full volume)
+        master_volume: 0.8,
+
+        // Background music volume
+        // Range: 0.0 (silent) to 1.0 (full volume)
+        // Final volume = music_volume * master_volume
+        music_volume: 0.6,
+
+        // Sound effects volume (combat, UI, interactions)
+        // Range: 0.0 (silent) to 1.0 (full volume)
+        // Final volume = sfx_volume * master_volume
+        sfx_volume: 1.0,
+
+        // Ambient sounds volume (environmental audio)
+        // Range: 0.0 (silent) to 1.0 (full volume)
+        // Final volume = ambient_volume * master_volume
+        ambient_volume: 0.5,
+
+        // Enable audio system
+        // true = audio plays, false = all audio disabled
+        enable_audio: true,
+    ),
+
+    // ========================================================================
+    // Input Controls Configuration
+    // ========================================================================
+    controls: ControlsConfig(
+        // Keys for moving forward
+        // Each action can have multiple key bindings
+        // Use Bevy KeyCode names: "W", "A", "S", "D", "ArrowUp", "Space", etc.
+        move_forward: ["W", "ArrowUp"],
+
+        // Keys for moving backward
+        move_back: ["S", "ArrowDown"],
+
+        // Keys for turning left (90-degree rotation)
+        turn_left: ["A", "ArrowLeft"],
+
+        // Keys for turning right (90-degree rotation)
+        turn_right: ["D", "ArrowRight"],
+
+        // Keys for interaction (talking to NPCs, opening doors, etc.)
+        interact: ["Space", "E"],
+
+        // Keys for opening menu/pausing game
+        menu: ["Escape"],
+
+        // Movement cooldown in seconds
+        // Prevents accidental double-moves or rapid movement
+        // Range: 0.0+ (0.0 = no cooldown, instant movement)
+        // Recommended: 0.1-0.3 for grid-based movement
+        movement_cooldown: 0.2,
+    ),
+
+    // ========================================================================
+    // Camera Configuration
+    // ========================================================================
+    camera: CameraConfig(
+        // Camera mode
+        // FirstPerson = first-person view (immersive, standard RPG)
+        // Tactical    = top-down angled view (tactical combat focus)
+        // Isometric   = isometric/diagonal view (classic CRPG style)
+        mode: FirstPerson,
+
+        // Eye height above ground in world units (1 unit = 10 feet)
+        // 0.6 = 6 feet (human eye level)
+        // Adjust for different races or perspectives
+        // Range: must be positive
+        eye_height: 0.6,
+
+        // Field of view in degrees (horizontal)
+        // 60  = narrow, more zoomed in
+        // 70  = balanced (recommended)
+        // 90  = wide, more peripheral vision
+        // 120 = very wide, fish-eye effect
+        // Range: 30.0-150.0 degrees
+        fov: 70.0,
+
+        // Near clipping plane distance
+        // Objects closer than this are not rendered
+        // Range: 0.01-1.0 (smaller = see closer objects, may cause z-fighting)
+        near_clip: 0.1,
+
+        // Far clipping plane distance
+        // Objects farther than this are not rendered
+        // Range: 100.0-10000.0 (larger = see farther, performance cost)
+        far_clip: 1000.0,
+
+        // Enable smooth camera rotation
+        // true  = camera rotates smoothly over time (cinematic)
+        // false = instant 90-degree snapping (grid-based, responsive)
+        smooth_rotation: false,
+
+        // Rotation speed in degrees per second
+        // Only used if smooth_rotation is true
+        // 90  = slow, 1 second per 90-degree turn
+        // 180 = moderate (recommended)
+        // 360 = fast, 0.5 seconds per turn
+        // Range: 1.0-1000.0
+        rotation_speed: 180.0,
+
+        // Light source height above ground in world units
+        // The camera has an attached point light that illuminates the scene
+        // 5.0 = 50 feet above player (like a torch held overhead)
+        light_height: 5.0,
+
+        // Light intensity in lumens
+        // 500000   = dim, small radius
+        // 2000000  = balanced (recommended)
+        // 10000000 = very bright, large radius
+        // Range: must be positive
+        light_intensity: 2000000.0,
+
+        // Light range in world units (falloff distance)
+        // 30.0 = small radius, dark dungeons
+        // 60.0 = balanced (recommended)
+        // 120.0 = large radius, well-lit areas
+        // Range: must be positive
+        light_range: 60.0,
+
+        // Enable shadow rendering from the camera light
+        // true = shadows cast from light (atmospheric, performance cost)
+        // false = no shadows (better performance)
+        shadows_enabled: true,
+    ),
+)
+
+// ============================================================================
+// Example Configurations for Different Campaign Styles
+// ============================================================================
+
+// TACTICAL RPG (Turn-based combat focus)
+// - Top-down camera for battlefield overview
+// - Lower movement cooldown for responsive tactical control
+// - Higher FOV to see more of the battlefield
+//
+// camera: CameraConfig(
+//     mode: Tactical,
+//     fov: 90.0,
+//     eye_height: 1.0,
+//     light_height: 10.0,
+//     // ... other defaults
+// ),
+// controls: ControlsConfig(
+//     movement_cooldown: 0.1,
+//     // ... other defaults
+// ),
+
+// ACTION RPG (Fast-paced exploration and combat)
+// - First-person camera for immersion
+// - Higher FOV for better awareness
+// - Faster rotation for responsive controls
+// - Lower movement cooldown for fluid movement
+//
+// camera: CameraConfig(
+//     mode: FirstPerson,
+//     fov: 90.0,
+//     smooth_rotation: true,
+//     rotation_speed: 360.0,
+//     // ... other defaults
+// ),
+// controls: ControlsConfig(
+//     movement_cooldown: 0.05,
+//     // ... other defaults
+// ),
+
+// EXPLORATION RPG (Puzzle and story focus)
+// - Isometric camera for classic CRPG feel
+// - Wider FOV to see environment
+// - Ambient sound focus for atmosphere
+// - Standard movement for deliberate exploration
+//
+// camera: CameraConfig(
+//     mode: Isometric,
+//     fov: 80.0,
+//     eye_height: 0.8,
+//     // ... other defaults
+// ),
+// audio: AudioConfig(
+//     music_volume: 0.4,
+//     ambient_volume: 0.8,
+//     // ... other defaults
+// ),
+
+// HORROR RPG (Atmospheric tension)
+// - Low lighting for suspense
+// - Higher ambient volume
+// - Lower music volume
+// - Shadows enabled for atmosphere
+//
+// camera: CameraConfig(
+//     light_intensity: 500000.0,
+//     light_range: 30.0,
+//     shadows_enabled: true,
+//     // ... other defaults
+// ),
+// audio: AudioConfig(
+//     music_volume: 0.3,
+//     ambient_volume: 0.9,
+//     // ... other defaults
+// ),

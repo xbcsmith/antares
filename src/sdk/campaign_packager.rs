@@ -538,6 +538,7 @@ mod tests {
                 images: "assets/images".to_string(),
             },
             root_path: PathBuf::new(),
+            game_config: crate::sdk::game_config::GameConfig::default(),
         };
 
         let manifest = PackageManifest::new(&campaign);
@@ -591,6 +592,7 @@ mod tests {
                 images: "assets/images".to_string(),
             },
             root_path: PathBuf::new(),
+            game_config: crate::sdk::game_config::GameConfig::default(),
         };
 
         let mut manifest = PackageManifest::new(&campaign);

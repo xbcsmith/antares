@@ -445,6 +445,7 @@ mod tests {
                 images: "images".to_string(),
             },
             root_path: PathBuf::from("test_campaign"),
+            game_config: crate::sdk::game_config::GameConfig::default(),
         };
 
         let mut game_state = GameState::new();
