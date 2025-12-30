@@ -1,6 +1,6 @@
 # Character Portraits
 
-Create a single image sprite sheet with 20 small fantasy character portraits arranged in a 5x4 grid, each exactly 64x64 pixels with 4 px between them, on a dark background. All are head-and-shoulders view only, no helmets or full head coverings, faces fully visible. 
+Create a single image sprite sheet with 20 small fantasy character portraits arranged in a 5x4 grid, each exactly 64x64 pixels with 4 px between them, on a dark background. All are head-and-shoulders view only, no helmets or full head coverings, faces fully visible.
 
 Cute stylized cartoon art style with bold black outlines, metallic shading, glowing accents, vibrant colors, and dramatic rim lighting, exactly matching the style of Soul Knight or classic mobile fantasy RPG icons.
 

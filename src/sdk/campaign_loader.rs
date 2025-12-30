@@ -125,6 +125,10 @@ pub struct Campaign {
     /// Root path of campaign directory
     #[serde(skip)]
     pub root_path: PathBuf,
+
+    /// Game engine configuration
+    #[serde(skip)]
+    pub game_config: crate::sdk::game_config::GameConfig,
 }
 
 /// Campaign configuration (gameplay settings)
@@ -351,6 +355,13 @@ impl Campaign {
             // Set root path
             campaign.root_path = path.to_path_buf();
 
+            // Load game configuration from config.ron
+            let config_path = path.join("config.ron");
+            campaign.game_config =
+                crate::sdk::game_config::GameConfig::load_or_default(&config_path).map_err(
+                    |e| CampaignError::MetadataError(format!("Failed to load game config: {}", e)),
+                )?;
+
             // Ensure ID matches directory if possible, or keep metadata ID
             if let Some(dir_name) = path.file_name() {
                 let dir_id = dir_name.to_string_lossy().to_string();
@@ -371,6 +382,13 @@ impl Campaign {
 
         // Set root path
         campaign.root_path = path.to_path_buf();
+
+        // Load game configuration from config.ron
+        let config_path = path.join("config.ron");
+        campaign.game_config = crate::sdk::game_config::GameConfig::load_or_default(&config_path)
+            .map_err(|e| {
+            CampaignError::MetadataError(format!("Failed to load game config: {}", e))
+        })?;
 
         // Extract ID from directory name
         if let Some(dir_name) = path.file_name() {
@@ -481,6 +499,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 images: "assets/images".to_string(),
             },
             root_path: PathBuf::new(),
+            game_config: crate::sdk::game_config::GameConfig::default(),
         })
     }
 }

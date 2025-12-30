@@ -118,9 +118,9 @@ Create a single image sprite sheet with 20 small fantasy character portraits arr
 ```
 
 Notes / FAQ
-- Q: What DPI should I put in the PNG metadata?  
+- Q: What DPI should I put in the PNG metadata?
   A: DPI is meaningless for raster game assets — use pixels (64×64). If you must set DPI, 72 DPI is an acceptable default; the engine ignores DPI metadata.
-- Q: Should portraits have transparent backgrounds?  
+- Q: Should portraits have transparent backgrounds?
   A: Either is fine. Individual PNGs with alpha are convenient. If you deliver a sprite sheet with a dark sheet background, ensure each cell area is consistent and crop-friendly.
 
 If you'd like, I can:
