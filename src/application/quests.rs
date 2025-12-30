@@ -326,7 +326,7 @@ impl QuestSystem {
 ///
 /// let mut app = App::new();
 /// app.add_message::<QuestProgressEvent>()
-///    .add_systems(Update, crate::application::quests::update);
+///    .add_systems(Update, antares::application::quests::update);
 /// ```
 pub fn update(
     mut quest_system: ResMut<QuestSystem>,

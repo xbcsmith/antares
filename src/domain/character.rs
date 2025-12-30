@@ -909,8 +909,8 @@ pub struct Character {
     pub resistances: Resistances,
     /// Per-character quest/event tracking
     pub quest_flags: QuestFlags,
-    /// Portrait/avatar ID
-    pub portrait_id: u8,
+    /// Portrait/avatar ID (filename stem / unique string)
+    pub portrait_id: String,
     /// Special quest attribute
     pub worthiness: u8,
     /// Individual gold (0-max)
@@ -979,7 +979,7 @@ impl Character {
             active_conditions: Vec::new(),
             resistances: Resistances::new(),
             quest_flags: QuestFlags::new(),
-            portrait_id: 0,
+            portrait_id: String::new(),
             worthiness: 0,
             gold: 0,
             gems: 0,

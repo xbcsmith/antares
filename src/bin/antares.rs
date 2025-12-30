@@ -32,6 +32,11 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
+    // Initialize tracing subscriber with environment filter so RUST_LOG controls logging level
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     // Load campaign
     let campaign = if let Some(path_str) = args.campaign {
         let path = PathBuf::from(path_str);

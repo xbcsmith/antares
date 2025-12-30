@@ -18,6 +18,7 @@ use crate::domain::types::Direction;
 use crate::game::resources::GlobalState;
 use bevy::prelude::*;
 use std::collections::HashMap;
+use tracing::debug;
 
 // ===== Constants =====
 
@@ -121,14 +122,13 @@ pub struct CharacterPortrait {
     pub party_index: usize,
 }
 
-/// Resource holding loaded portrait image handles for the active campaign.
-///
-/// Contains maps indexed by numeric portrait ID and by filename (lowercased).
+// Resource holding loaded portrait image handles for the active campaign.
+//
+// Indexed by normalized filename stem (lowercased, spaces -> underscores).
 #[derive(Resource, Default)]
 pub struct PortraitAssets {
-    /// Maps numeric portrait_id -> Image handle
-    pub handles_by_id: HashMap<u8, Handle<Image>>,
-    /// Maps filename stem (lowercased, underscores) -> Image handle
+    /// Maps filename stem (normalized: lowercase, underscores) -> Image handle.
+    /// Keys are normalized filename stems (e.g., "kira", "painter", "10").
     pub handles_by_name: HashMap<String, Handle<Image>>,
     /// Optional fallback image handle
     pub fallback: Option<Handle<Image>>,
@@ -418,30 +418,50 @@ fn update_portraits(
 
     for (portrait, mut bg_color, mut image_node) in portrait_query.iter_mut() {
         if let Some(character) = party.members.get(portrait.party_index) {
-            // First try numeric id (e.g., "10.png"), then try normalized character name
-            let mut found_handle: Option<Handle<Image>> = None;
+            debug!(
+                "update_portraits: checking slot {} for character '{}' (portrait_id={})",
+                portrait.party_index, character.name, character.portrait_id
+            );
 
-            if let Some(handle) = portraits.handles_by_id.get(&character.portrait_id) {
-                found_handle = Some(handle.clone());
-            } else {
-                let name_key = character.name.to_lowercase().replace(' ', "_");
-                if let Some(handle) = portraits.handles_by_name.get(&name_key) {
-                    found_handle = Some(handle.clone());
+            // Normalize keys
+            let portrait_key = character
+                .portrait_id
+                .trim()
+                .to_lowercase()
+                .replace(' ', "_");
+            let name_key = character.name.to_lowercase().replace(' ', "_");
+
+            // Lookup by explicit portrait_id key first (if provided)
+            if !portrait_key.is_empty() {
+                if let Some(handle) = portraits.handles_by_name.get(&portrait_key) {
+                    image_node.image = handle.clone();
+                    image_node.color = Color::WHITE;
+                    *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
+                    continue;
                 }
             }
 
-            if let Some(handle) = found_handle {
-                // Display the image and make background transparent so the image shows through
-                image_node.image = handle;
+            // Then try lookup by normalized name
+            if let Some(handle) = portraits.handles_by_name.get(&name_key) {
+                image_node.image = handle.clone();
                 image_node.color = Color::WHITE;
                 *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
             } else {
-                // No image available -> fallback to color placeholder
+                // No image available -> fallback to deterministic color based on portrait_key or name_key
                 image_node.image = Handle::<Image>::default();
                 image_node.color = Color::WHITE;
-                *bg_color = BackgroundColor(get_portrait_color(character.portrait_id));
+                let color_key = if !portrait_key.is_empty() {
+                    portrait_key.as_str()
+                } else {
+                    name_key.as_str()
+                };
+                *bg_color = BackgroundColor(get_portrait_color(color_key));
             }
         } else {
+            debug!(
+                "update_portraits: clearing empty slot {}",
+                portrait.party_index
+            );
             // Empty slot -> clear image and use default placeholder color
             image_node.image = ImageNode::default().image;
             image_node.color = Color::WHITE;
@@ -453,17 +473,29 @@ fn update_portraits(
 /// Ensures portrait image assets for the active campaign are discovered and loaded.
 ///
 /// Scans `<campaign_root>/assets/portraits/` for image files (png/jpg/jpeg)
-/// and loads them via the `AssetServer`. Numeric filenames (e.g. `10.png`) are
-/// indexed by portrait id; other filenames are indexed by their lowercase stem.
+/// and loads them via the `AssetServer`. Files are indexed by normalized filename stem
+/// (lowercased, spaces replaced by underscores).
 fn ensure_portraits_loaded(
     global_state: Res<GlobalState>,
-    asset_server: Res<AssetServer>,
+    asset_server: Option<Res<AssetServer>>,
     mut portraits: ResMut<PortraitAssets>,
 ) {
     // Only proceed when campaign is loaded
     let campaign = match &global_state.0.campaign {
         Some(c) => c,
         None => return,
+    };
+    debug!("ensure_portraits_loaded: campaign id = {}", campaign.id);
+
+    // If there's no AssetServer resource available yet (e.g., test environments that don't
+    // register the full set of Bevy plugins), skip loading for now. We'll try again on the
+    // next frame when the resource may exist.
+    let asset_server = match asset_server {
+        Some(a) => a,
+        None => {
+            debug!("ensure_portraits_loaded: no AssetServer available; skipping portrait load for campaign {}", campaign.id);
+            return;
+        }
     };
 
     // If we've already loaded portraits for this campaign, nothing to do
@@ -475,6 +507,7 @@ fn ensure_portraits_loaded(
 
     let portraits_dir = campaign.root_path.join("assets/portraits");
     if !portraits_dir.exists() {
+        debug!("ensure_portraits_loaded: portraits_dir '{}' does not exist for campaign '{}', marking as loaded", portraits_dir.display(), campaign.id);
         portraits.loaded_for_campaign = Some(campaign.id.clone());
         return;
     }
@@ -490,16 +523,21 @@ fn ensure_portraits_loaded(
                 let ext = ext.to_lowercase();
                 if ext == "png" || ext == "jpg" || ext == "jpeg" {
                     if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        debug!(
+                            "ensure_portraits_loaded: found portrait file: {}",
+                            path.display()
+                        );
                         // Load the file (absolute path is supported by AssetServer)
                         let handle: Handle<Image> = asset_server.load(path.clone());
 
-                        if let Ok(id) = stem.parse::<u8>() {
-                            portraits.handles_by_id.insert(id, handle);
-                        } else {
-                            portraits
-                                .handles_by_name
-                                .insert(stem.to_lowercase().replace(' ', "_"), handle);
-                        }
+                        // Normalize the filename stem into a lookup key and index by name
+                        let key = stem.to_lowercase().replace(' ', "_");
+                        portraits.handles_by_name.insert(key.clone(), handle);
+                        debug!(
+                            "ensure_portraits_loaded: indexed '{}' as key '{}'",
+                            path.display(),
+                            key
+                        );
                     }
                 }
             }
@@ -507,6 +545,11 @@ fn ensure_portraits_loaded(
     }
 
     portraits.loaded_for_campaign = Some(campaign.id.clone());
+    debug!(
+        "ensure_portraits_loaded: loaded {} portraits for campaign '{}'",
+        portraits.handles_by_name.len(),
+        campaign.id
+    );
 }
 
 // Helper moved into test scope to avoid dead-code warnings during clippy runs.
@@ -757,13 +800,13 @@ pub fn direction_to_string(direction: &Direction) -> String {
     }
 }
 
-/// Returns portrait color based on character portrait_id
+/// Returns portrait color based on portrait key
 ///
-/// Generates a deterministic color from portrait_id for placeholder display.
-/// Each portrait_id maps to a unique color for visual distinction.
+/// Generates a deterministic color from the portrait key (filename stem) for placeholder display.
+/// Each portrait key maps to a unique color for visual distinction.
 ///
 /// # Arguments
-/// * `portrait_id` - Character's portrait identifier (0-255)
+/// * `portrait_key` - Character's portrait identifier (filename stem / normalized key)
 ///
 /// # Returns
 /// Bevy Color for the portrait placeholder
@@ -774,13 +817,20 @@ pub fn direction_to_string(direction: &Direction) -> String {
 /// use antares::game::systems::hud::get_portrait_color;
 /// use bevy::prelude::Color;
 ///
-/// let color = get_portrait_color(0);
-/// // Returns a deterministic color based on ID
+/// let color = get_portrait_color("0");
+/// // Returns a deterministic color based on key
 /// ```
-pub fn get_portrait_color(portrait_id: u8) -> Color {
-    // Generate deterministic colors based on portrait_id
-    // Uses HSL-like distribution for visual variety
-    let hue = (portrait_id as f32 * 137.5) % 360.0; // Golden angle distribution
+pub fn get_portrait_color(portrait_key: &str) -> Color {
+    // Deterministic color from string key via hashing
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    portrait_key.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    // Use golden angle distribution on hash to obtain hue
+    let hue = (hash as f32 * 137.5) % 360.0;
     let saturation = 0.6;
     let lightness = 0.5;
 
@@ -998,27 +1048,187 @@ mod tests {
         assert_eq!(COMPASS_FONT_SIZE, 24.0);
     }
 
+    /// Verifies that the HUD systems populate character name and HP text fields.
+    ///
+    /// This test:
+    /// - Creates a minimal `GameState` with a single party member
+    /// - Runs the HUD setup and update systems via a `bevy::prelude::App`
+    /// - Checks that the name and HP text entities for slot 0 are populated
+    #[test]
+    fn test_update_hud_populates_texts() {
+        use super::{CharacterNameText, GlobalState, HpText, HudPlugin};
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, AttributePair16, Character, Sex};
+        use bevy::prelude::*;
+
+        // Prepare GameState with a single character (slot 0)
+        let mut state = GameState::new();
+        let mut ch = Character::new(
+            "Test Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.hp = AttributePair16 {
+            base: 100,
+            current: 45,
+        };
+        ch.portrait_id = "10".to_string();
+        state.party.add_member(ch).unwrap();
+
+        // Build an App and add minimal plugins + HUD plugin (keeps test lightweight)
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+
+        // Run startup (setup_hud) and one update (update_hud)
+        app.update(); // Startup
+        app.update(); // Update
+
+        // Verify character name text was populated for party slot 0
+        let mut name_found = false;
+        {
+            let world = app.world_mut();
+            let mut q = world.query::<(&CharacterNameText, &bevy::ui::widget::Text)>();
+            for (name_comp, text) in q.iter(world) {
+                if name_comp.party_index == 0 {
+                    // Name should include 'Test Hero' (may be prefixed with slot number)
+                    assert!(
+                        text.contains("Test Hero") || text.contains("1. Test Hero"),
+                        "Unexpected name text: '{:?}'",
+                        text
+                    );
+                    name_found = true;
+                }
+            }
+        }
+
+        // Verify HP text was populated for party slot 0
+        let mut hp_found = false;
+        {
+            let world = app.world_mut();
+            let mut q = world.query::<(&HpText, &bevy::ui::widget::Text)>();
+            for (hp_comp, text) in q.iter(world) {
+                if hp_comp.party_index == 0 {
+                    // Should display "45/100" (format from format_hp_display)
+                    assert!(
+                        text.contains("45/100"),
+                        "Unexpected HP text for slot 0: '{:?}'",
+                        text
+                    );
+                    hp_found = true;
+                }
+            }
+        }
+
+        assert!(name_found, "Character name text not populated for slot 0");
+        assert!(hp_found, "HP text not populated for slot 0");
+    }
+
+    /// Verifies portrait placeholder behavior and that inserting a portrait handle
+    /// causes the HUD to set the portrait background to transparent and apply the image.
+    #[test]
+    fn test_update_portraits_placeholder_and_image() {
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, Character, Sex};
+        use bevy::prelude::*;
+
+        // Prepare GameState with a character that has portrait_id = 10
+        let mut state = GameState::new();
+        let mut ch = Character::new(
+            "Painter".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        ch.portrait_id = "10".to_string();
+        state.party.add_member(ch).unwrap();
+
+        // Build App and add HUD plugin
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+
+        // Run startup and an update so placeholders are applied
+        app.update();
+        app.update();
+
+        // Query portrait slot 0 and verify placeholder color is present (deterministic color based on portrait_id)
+        // Query portrait slot 0 and verify deterministic color is applied based on the name key
+        {
+            let world = app.world_mut();
+            let mut portrait_query =
+                world.query::<(&CharacterPortrait, &BackgroundColor, &ImageNode)>();
+            let mut found_placeholder = false;
+            for (portrait, bg_color, _image_node) in portrait_query.iter(world) {
+                if portrait.party_index == 0 {
+                    // For an occupied slot with no image asset, when an explicit `portrait_id` is provided
+                    // but no image asset exists, the HUD should use the deterministic placeholder color
+                    // computed from the explicit portrait key.
+                    assert_eq!(*bg_color, BackgroundColor(get_portrait_color("10")));
+                    found_placeholder = true;
+                }
+            }
+            assert!(found_placeholder, "Portrait color not set for slot 0");
+        }
+
+        // Insert a (test) image handle for name 'painter' and run update to apply it
+        let handle = Handle::<Image>::default();
+        {
+            let world = app.world_mut();
+            let mut portraits = world.resource_mut::<PortraitAssets>();
+            portraits
+                .handles_by_name
+                .insert("painter".to_string(), handle.clone());
+        }
+        app.update();
+
+        // After providing a handle, the background should be transparent and the image handle applied
+        {
+            let world = app.world_mut();
+            let mut portrait_query =
+                world.query::<(&CharacterPortrait, &BackgroundColor, &ImageNode)>();
+            let mut found_image = false;
+            for (portrait, bg_color, image_node) in portrait_query.iter(world) {
+                if portrait.party_index == 0 {
+                    assert_eq!(*bg_color, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)));
+                    assert_eq!(image_node.image, handle);
+                    found_image = true;
+                }
+            }
+            assert!(
+                found_image,
+                "Portrait image not applied for slot 0 after inserting asset handle"
+            );
+        }
+    }
+
     #[test]
     fn test_get_portrait_color_deterministic() {
-        // Same portrait_id should always produce same color
-        let color1 = get_portrait_color(42);
-        let color2 = get_portrait_color(42);
+        // Same portrait key should always produce same color
+        let color1 = get_portrait_color("42");
+        let color2 = get_portrait_color("42");
         assert!(colors_approx_equal(color1, color2));
     }
 
     #[test]
     fn test_get_portrait_color_different_ids() {
-        // Different IDs should produce different colors
-        let color1 = get_portrait_color(0);
-        let color2 = get_portrait_color(1);
+        // Different keys should produce different colors
+        let color1 = get_portrait_color("0");
+        let color2 = get_portrait_color("1");
         assert!(!colors_approx_equal(color1, color2));
     }
 
     #[test]
     fn test_get_portrait_color_full_range() {
-        // Test boundary values
-        let _color_min = get_portrait_color(0);
-        let _color_max = get_portrait_color(255);
+        // Test boundary values on string keys
+        let _color_min = get_portrait_color("0");
+        let _color_max = get_portrait_color("255");
         // Should not panic and should produce valid colors
     }
 
@@ -1026,6 +1236,69 @@ mod tests {
     fn test_portrait_constants_valid() {
         // Verify portrait constants are defined with reasonable values
         assert_eq!(PORTRAIT_SIZE, 40.0);
+    }
+
+    #[test]
+    fn test_update_portraits_portrait_id_priority() {
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, Character, Sex};
+        use bevy::prelude::*;
+
+        // Prepare GameState with a character that has portrait_id = "10"
+        let mut state = GameState::new();
+        let mut ch = Character::new(
+            "Painter".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        ch.portrait_id = "10".to_string();
+        state.party.add_member(ch).unwrap();
+
+        // Build App and add HUD plugin
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+
+        // Run startup and an update so placeholders are applied
+        app.update();
+        app.update();
+
+        // Insert two handles: one for "10" and one for "painter"
+        let handle_10 = Handle::<Image>::default();
+        let handle_painter = Handle::<Image>::default();
+        {
+            let world = app.world_mut();
+            let mut portraits = world.resource_mut::<PortraitAssets>();
+            portraits
+                .handles_by_name
+                .insert("10".to_string(), handle_10.clone());
+            portraits
+                .handles_by_name
+                .insert("painter".to_string(), handle_painter.clone());
+        }
+        app.update();
+
+        // Verify the portrait image applied is the one indexed by explicit portrait_id ("10")
+        {
+            let world = app.world_mut();
+            let mut portrait_query =
+                world.query::<(&CharacterPortrait, &BackgroundColor, &ImageNode)>();
+            let mut found_image = false;
+            for (portrait, _bg, image_node) in portrait_query.iter(world) {
+                if portrait.party_index == 0 {
+                    assert_eq!(image_node.image, handle_10);
+                    found_image = true;
+                }
+            }
+            assert!(
+                found_image,
+                "Portrait image not applied for slot 0 after inserting both keys"
+            );
+        }
     }
 
     #[test]

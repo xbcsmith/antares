@@ -236,6 +236,8 @@ dependencies = [
  "tar",
  "tempfile",
  "thiserror 2.0.17",
+ "tracing",
+ "tracing-subscriber",
  "wayland-client",
  "wayland-sys",
 ]

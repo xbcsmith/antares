@@ -545,7 +545,7 @@ mod tests {
             active_conditions: vec![],
             resistances: crate::domain::character::Resistances::default(),
             quest_flags: crate::domain::character::QuestFlags::new(),
-            portrait_id: 0,
+            portrait_id: "0".to_string(),
             worthiness: 0,
             gold: 0,
             gems: 0,
