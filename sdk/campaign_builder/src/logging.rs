@@ -338,6 +338,7 @@ pub mod category {
     pub const VALIDATION: &str = "Validation";
     pub const UI: &str = "UI";
     pub const DATA: &str = "Data";
+    pub const CAMPAIGN: &str = "Campaign";
 }
 
 #[cfg(test)]

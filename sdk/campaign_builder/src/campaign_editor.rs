@@ -250,7 +250,7 @@ impl CampaignMetadataEditorState {
     /// # Examples
     ///
     /// ```
-    /// use crate::sdk::campaign_builder::campaign_editor::{CampaignMetadataEditorState, CampaignEditorMode};
+    /// use campaign_builder::campaign_editor::{CampaignMetadataEditorState, CampaignEditorMode};
     ///
     /// let mut state = CampaignMetadataEditorState::new();
     /// state.metadata.id = "x".to_string();
@@ -268,7 +268,7 @@ impl CampaignMetadataEditorState {
     /// # Examples
     ///
     /// ```
-    /// use crate::sdk::campaign_builder::campaign_editor::{CampaignMetadataEditorState, CampaignEditorMode};
+    /// use campaign_builder::campaign_editor::{CampaignMetadataEditorState, CampaignEditorMode};
     ///
     /// let mut state = CampaignMetadataEditorState::new();
     /// state.metadata.id = "orig_id".to_string();

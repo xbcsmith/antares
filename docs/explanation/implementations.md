@@ -57,9 +57,9 @@ See `docs/explanation/phase5_advanced_features_implementation.md` for complete d
 
 ### Testing
 
-Created `sdk/campaign_builder/tests/phase5_rotation_test.rs` with 30 comprehensive tests:
+Created `sdk/campaign_builder/tests/rotation_test.rs` with 26 comprehensive tests:
 
-- 11 domain model tests
+- 7 domain model tests
 - 2 serialization tests
 - 4 preset tests
 - 5 editor state tests
@@ -86,7 +86,7 @@ Created `sdk/campaign_builder/tests/phase5_rotation_test.rs` with 30 comprehensi
 
 ### Files Created
 
-- `sdk/campaign_builder/tests/phase5_rotation_test.rs` - Rotation tests (376 lines)
+- `sdk/campaign_builder/tests/rotation_test.rs` - Rotation tests (400 lines)
 - `docs/explanation/phase5_advanced_features_implementation.md` - Complete documentation (~900 lines)
 
 ### Success Criteria
@@ -712,7 +712,7 @@ Successfully implemented Phase 4 of the Tile Visual Metadata Implementation Plan
 
 #### 4.1 Visual Metadata Preset System (`sdk/campaign_builder/src/map_editor.rs`)
 
-Created `VisualPreset` enum with 10 predefined configurations for common use cases:
+Created `VisualPreset` enum with 13 predefined configurations for common use cases:
 
 **Preset Definitions:**
 
@@ -728,6 +728,9 @@ pub enum VisualPreset {
     HighMountain,   // height=5.0, darker gray tint
     Sunken,         // y_offset=-0.5
     Raised,         // y_offset=0.5
+    Rotated45,      // rotation_y=45.0
+    Rotated90,      // rotation_y=90.0
+    DiagonalWall,   // rotation_y=45.0, width_z=0.2
 }
 ```
 
@@ -918,7 +921,7 @@ Visual Properties
 
 ✅ Preset Selection:
 
-- All 10 presets apply correct metadata values
+- All 13 presets apply correct metadata values
 - Preset dropdown displays all options
 - Single-click application works
 - Editor fields update to reflect preset values

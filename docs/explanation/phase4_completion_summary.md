@@ -10,7 +10,7 @@
 
 Phase 4 successfully enhanced the Campaign Builder map editor with advanced visual metadata editing capabilities. Two major features were implemented:
 
-1. **Visual Metadata Preset System** - 10 predefined configurations for common use cases (walls, trees, mountains, offsets)
+1. **Visual Metadata Preset System** - 13 predefined configurations for common use cases (walls, trees, mountains, offsets)
 2. **Bulk Edit Support** - Multi-tile selection and simultaneous visual property application
 
 These features significantly improve map authoring efficiency by enabling one-click presets and batch operations on multiple tiles.
@@ -23,22 +23,26 @@ These features significantly improve map authoring efficiency by enabling one-cl
 
 **File:** `sdk/campaign_builder/src/map_editor.rs`
 
-Created `VisualPreset` enum with 10 common configurations:
+Created `VisualPreset` enum with 13 common configurations:
 
-| Preset | Configuration | Use Case |
-|--------|---------------|----------|
-| Default | All None | Reset to defaults |
-| Short Wall | height=1.5 | Garden walls, low barriers |
-| Tall Wall | height=3.5 | Castle walls, fortifications |
-| Thin Wall | width_z=0.2 | Interior dividers, fences |
-| Small Tree | height=2.0, scale=0.5, green tint | Young trees, shrubs |
-| Large Tree | height=4.0, scale=1.5, green tint | Ancient trees, forest |
-| Low Mountain | height=2.0, gray tint | Hills, small peaks |
-| High Mountain | height=5.0, darker gray tint | Towering peaks, cliffs |
-| Sunken | y_offset=-0.5 | Pits, craters, depressions |
-| Raised | y_offset=0.5 | Platforms, altars, elevations |
+| Preset        | Configuration                     | Use Case                      |
+| ------------- | --------------------------------- | ----------------------------- |
+| Default       | All None                          | Reset to defaults             |
+| Short Wall    | height=1.5                        | Garden walls, low barriers    |
+| Tall Wall     | height=3.5                        | Castle walls, fortifications  |
+| Thin Wall     | width_z=0.2                       | Interior dividers, fences     |
+| Small Tree    | height=2.0, scale=0.5, green tint | Young trees, shrubs           |
+| Large Tree    | height=4.0, scale=1.5, green tint | Ancient trees, forest         |
+| Low Mountain  | height=2.0, gray tint             | Hills, small peaks            |
+| High Mountain | height=5.0, darker gray tint      | Towering peaks, cliffs        |
+| Sunken        | y_offset=-0.5                     | Pits, craters, depressions    |
+| Raised        | y_offset=0.5                      | Platforms, altars, elevations |
+| Rotated 45°   | rotation_y=45.0                   | Diagonal orientation          |
+| Rotated 90°   | rotation_y=90.0                   | Perpendicular orientation     |
+| Diagonal Wall | rotation_y=45.0, width_z=0.2      | Thin diagonal walls for mazes |
 
 **Features:**
+
 - `name()` - User-friendly display name
 - `all()` - Iterator over all presets
 - `to_metadata()` - Converts to TileVisualMetadata
@@ -46,12 +50,14 @@ Created `VisualPreset` enum with 10 common configurations:
 ### 2. Multi-Tile Selection System
 
 **New Fields in `MapEditorState`:**
+
 ```rust
 pub selected_tiles: Vec<Position>,
 pub multi_select_mode: bool,
 ```
 
 **New Methods:**
+
 ```rust
 toggle_multi_select_mode()              // Enable/disable mode
 toggle_tile_selection(pos)              // Add/remove tile from selection
@@ -61,6 +67,7 @@ apply_visual_metadata_to_selection()    // Bulk apply to all selected
 ```
 
 **Visual Feedback:**
+
 - Single selection: Yellow border (existing)
 - Multi-selection: Light blue borders
 - Selection count displayed in inspector: "📌 N tiles selected for bulk edit"
@@ -68,11 +75,13 @@ apply_visual_metadata_to_selection()    // Bulk apply to all selected
 ### 3. UI Integration
 
 **Preset Selector (ComboBox dropdown):**
+
 - Appears at top of Visual Properties panel
 - One-click application to selected tile(s)
 - Automatically updates editor controls to reflect preset values
 
 **Bulk Edit Controls:**
+
 - "Apply to N Tiles" button (dynamic text based on selection)
 - "Reset to Defaults" applies to all selected tiles
 - "Multi-Select Mode" toggle button (shows checkmark when active)
@@ -123,11 +132,13 @@ apply_visual_metadata_to_selection()    // Bulk apply to all selected
 
 **Lines Added:** ~250 lines
 **Files Modified:** 2
+
 - `sdk/campaign_builder/src/map_editor.rs` (main implementation)
 - `docs/explanation/implementations.md` (documentation)
 
 **Files Created:** 1
-- `sdk/campaign_builder/tests/phase4_gui_integration_test.rs` (24 tests)
+
+- `sdk/campaign_builder/tests/gui_integration_test.rs` (27 tests)
 
 ### Key Design Decisions
 
@@ -141,10 +152,11 @@ apply_visual_metadata_to_selection()    // Bulk apply to all selected
 
 ## Testing
 
-### Automated Tests (24 tests, 100% pass rate)
+### Automated Tests (27 tests, 100% pass rate)
 
 **Preset System Tests (11 tests):**
-- `test_all_presets_defined` - Verifies 10 presets accessible
+
+- `test_all_presets_defined` - Verifies 13 presets accessible
 - `test_preset_default` - Default clears all metadata
 - `test_preset_short_wall` - height=1.5
 - `test_preset_tall_wall` - height=3.5
@@ -157,6 +169,7 @@ apply_visual_metadata_to_selection()    // Bulk apply to all selected
 - `test_preset_raised` - y_offset=0.5
 
 **Multi-Select Tests (6 tests):**
+
 - `test_multi_select_mode_initialization` - Starts disabled with empty selection
 - `test_toggle_multi_select_mode` - Toggle on/off works
 - `test_toggle_multi_select_clears_selection` - Disabling clears tiles
@@ -164,13 +177,17 @@ apply_visual_metadata_to_selection()    // Bulk apply to all selected
 - `test_clear_tile_selection` - Clears all selections
 - `test_is_tile_selected` - Selection state tracking
 
-**Bulk Edit Tests (4 tests):**
+**Bulk Edit Tests (6 tests):**
+
 - `test_apply_visual_metadata_single_tile` - Single tile application
 - `test_apply_visual_metadata_to_selection_empty` - Falls back to current position
 - `test_apply_visual_metadata_to_multiple_tiles` - Applies to all selected
 - `test_bulk_edit_workflow` - Complete wall section workflow
+- `test_preset_application_workflow` - Apply each preset and verify it's applied correctly
+- `test_mixed_editing_workflow` - Mixed single/multi edit workflow
 
-**Integration Tests (3 tests):**
+**Integration Tests (4 tests):**
+
 - `test_editor_state_initialization_with_phase4_fields` - Phase 4 fields initialized
 - `test_has_changes_flag_on_visual_edit` - Unsaved changes tracking
 - `test_preset_names_are_unique` - No duplicate preset names
@@ -179,12 +196,14 @@ apply_visual_metadata_to_selection()    // Bulk apply to all selected
 ### Manual GUI Testing (Campaign Builder)
 
 ✅ **Preset Selection:**
-- All 10 presets visible in dropdown
+
+- All 13 presets visible in dropdown
 - Single-click application works
 - Editor controls update to reflect preset values
 - Works with both single and multi-selection
 
 ✅ **Multi-Select Mode:**
+
 - Toggle button enables/disables correctly
 - Tiles show light blue borders when selected
 - Selection count displays accurately
@@ -192,6 +211,7 @@ apply_visual_metadata_to_selection()    // Bulk apply to all selected
 - Hint text guides user interaction
 
 ✅ **Bulk Edit Operations:**
+
 - Apply button text updates based on selection count
 - Visual metadata applies to all selected tiles
 - Reset clears metadata from all selected tiles
@@ -276,12 +296,14 @@ cargo nextest run --all-features                      # ✅ PASS (1034/1034 test
 ### High Priority
 
 1. **Advanced Selection Tools:**
+
    - Rectangle selection (click-drag to select region)
    - Lasso selection for irregular shapes
    - Select by terrain/wall type (e.g., "select all mountains")
    - Invert selection, grow/shrink selection
 
 2. **Custom Preset Management:**
+
    - User-defined custom presets
    - Save/load preset library to disk
    - Import/export preset collections
@@ -295,11 +317,13 @@ cargo nextest run --all-features                      # ✅ PASS (1034/1034 test
 ### Medium Priority
 
 4. **Visual Preview:**
+
    - Embedded 3D preview in inspector (Bevy integration)
    - Real-time rendering updates
    - Camera controls for preview viewport
 
 5. **Batch Operations:**
+
    - Randomize (apply random variations within range)
    - Gradient (interpolate values across selection)
    - Symmetry (mirror visual properties)
@@ -313,11 +337,13 @@ cargo nextest run --all-features                      # ✅ PASS (1034/1034 test
 ### Low Priority
 
 7. **Selection Persistence:**
+
    - Named selections (save selection as "Eastern Wall")
    - Reload selections between sessions
    - Selection history (recent selections)
 
 8. **Keyboard Shortcuts:**
+
    - Ctrl+A: Select all
    - Ctrl+Shift+A: Deselect all
    - Ctrl+I: Invert selection

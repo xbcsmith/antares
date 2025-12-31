@@ -213,7 +213,7 @@ impl TileVisualMetadata {
     /// let mut metadata = TileVisualMetadata::default();
     /// assert_eq!(metadata.effective_rotation_y(), 0.0);
     ///
-    /// metadata.rotation_y = Some(45.0);
+    /// let metadata = TileVisualMetadata { rotation_y: Some(45.0), ..Default::default() };
     /// assert_eq!(metadata.effective_rotation_y(), 45.0);
     /// ```
     pub fn effective_rotation_y(&self) -> f32 {
@@ -227,8 +227,7 @@ impl TileVisualMetadata {
     /// ```
     /// use antares::domain::world::TileVisualMetadata;
     ///
-    /// let mut metadata = TileVisualMetadata::default();
-    /// metadata.rotation_y = Some(180.0);
+    /// let metadata = TileVisualMetadata { rotation_y: Some(180.0), ..Default::default() };
     /// assert!((metadata.rotation_y_radians() - std::f32::consts::PI).abs() < 0.001);
     /// ```
     pub fn rotation_y_radians(&self) -> f32 {
@@ -517,7 +516,7 @@ pub struct ResolvedNpc {
     /// NPC description from definition
     pub description: String,
     /// Portrait path from definition
-    pub portrait_path: String,
+    pub portrait_id: String,
     /// Position from placement
     pub position: Position,
     /// Facing direction from placement
@@ -551,7 +550,7 @@ impl ResolvedNpc {
     ///     id: "guard".to_string(),
     ///     name: "City Guard".to_string(),
     ///     description: "A vigilant guard".to_string(),
-    ///     portrait_path: "guard.png".to_string(),
+    ///     portrait_id: "guard.png".to_string(),
     ///     dialogue_id: Some(10),
     ///     quest_ids: vec![],
     ///     faction: Some("City Watch".to_string()),
@@ -572,7 +571,7 @@ impl ResolvedNpc {
             npc_id: definition.id.clone(),
             name: definition.name.clone(),
             description: definition.description.clone(),
-            portrait_path: definition.portrait_path.clone(),
+            portrait_id: definition.portrait_id.clone(),
             position: placement.position,
             facing: placement.facing,
             dialogue_id: placement.dialogue_override.or(definition.dialogue_id),
@@ -715,7 +714,7 @@ impl Map {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{Map, Npc};
+    /// use antares::domain::world::Map;
     /// use antares::domain::world::npc::NpcPlacement;
     /// use antares::domain::types::Position;
     ///
@@ -812,7 +811,8 @@ impl Map {
     /// # Examples
     ///
     /// ```
-    /// use antares::domain::world::{Map, ResolvedNpc};
+    /// use antares::domain::world::Map;
+    /// use antares::domain::world::ResolvedNpc;
     /// use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
     /// use antares::domain::types::Position;
     /// use antares::sdk::database::NpcDatabase;
@@ -875,7 +875,7 @@ mod map_npc_resolution_tests {
         assert_eq!(resolved[0].npc_id, "merchant_bob");
         assert_eq!(resolved[0].name, "Bob the Merchant");
         assert_eq!(resolved[0].position, Position::new(5, 5));
-        assert_eq!(resolved[0].portrait_path, "merchant.png");
+        assert_eq!(resolved[0].portrait_id, "merchant.png");
     }
 
     #[test]
@@ -938,7 +938,7 @@ mod map_npc_resolution_tests {
             id: "guard".to_string(),
             name: "City Guard".to_string(),
             description: "Vigilant guard".to_string(),
-            portrait_path: "guard.png".to_string(),
+            portrait_id: "guard.png".to_string(),
             dialogue_id: Some(10),
             quest_ids: vec![],
             faction: Some("City Watch".to_string()),
@@ -972,7 +972,7 @@ mod map_npc_resolution_tests {
             id: "quest_giver".to_string(),
             name: "Elder".to_string(),
             description: "Village elder".to_string(),
-            portrait_path: "elder.png".to_string(),
+            portrait_id: "elder.png".to_string(),
             dialogue_id: Some(5),
             quest_ids: vec![1, 2, 3],
             faction: Some("Village".to_string()),
@@ -1001,7 +1001,7 @@ mod map_npc_resolution_tests {
             id: "test_npc".to_string(),
             name: "Test NPC".to_string(),
             description: "A test NPC".to_string(),
-            portrait_path: "test.png".to_string(),
+            portrait_id: "test.png".to_string(),
             dialogue_id: Some(42),
             quest_ids: vec![1],
             faction: Some("Test Faction".to_string()),
@@ -1023,7 +1023,7 @@ mod map_npc_resolution_tests {
         assert_eq!(resolved.npc_id, "test_npc");
         assert_eq!(resolved.name, "Test NPC");
         assert_eq!(resolved.description, "A test NPC");
-        assert_eq!(resolved.portrait_path, "test.png");
+        assert_eq!(resolved.portrait_id, "test.png");
         assert_eq!(resolved.position, Position::new(3, 4));
         assert_eq!(resolved.facing, Some(Direction::North));
         assert_eq!(resolved.dialogue_id, Some(42));
@@ -1040,7 +1040,7 @@ mod map_npc_resolution_tests {
             id: "npc".to_string(),
             name: "NPC".to_string(),
             description: "".to_string(),
-            portrait_path: "npc.png".to_string(),
+            portrait_id: "npc.png".to_string(),
             dialogue_id: Some(10),
             quest_ids: vec![],
             faction: None,
@@ -1892,29 +1892,40 @@ mod tests {
 
     #[test]
     fn test_rotation_y_custom_value() {
-        let mut metadata = TileVisualMetadata::default();
-        metadata.rotation_y = Some(45.0);
+        let metadata = TileVisualMetadata {
+            rotation_y: Some(45.0),
+            ..Default::default()
+        };
         assert_eq!(metadata.effective_rotation_y(), 45.0);
     }
 
     #[test]
     fn test_rotation_y_radians_conversion() {
-        let mut metadata = TileVisualMetadata::default();
+        let metadata0 = TileVisualMetadata {
+            rotation_y: Some(0.0),
+            ..Default::default()
+        };
+        assert!((metadata0.rotation_y_radians() - 0.0).abs() < 0.001);
 
-        metadata.rotation_y = Some(0.0);
-        assert!((metadata.rotation_y_radians() - 0.0).abs() < 0.001);
+        let metadata90 = TileVisualMetadata {
+            rotation_y: Some(90.0),
+            ..Default::default()
+        };
+        assert!((metadata90.rotation_y_radians() - std::f32::consts::FRAC_PI_2).abs() < 0.001);
 
-        metadata.rotation_y = Some(90.0);
-        assert!((metadata.rotation_y_radians() - std::f32::consts::FRAC_PI_2).abs() < 0.001);
-
-        metadata.rotation_y = Some(180.0);
-        assert!((metadata.rotation_y_radians() - std::f32::consts::PI).abs() < 0.001);
+        let metadata180 = TileVisualMetadata {
+            rotation_y: Some(180.0),
+            ..Default::default()
+        };
+        assert!((metadata180.rotation_y_radians() - std::f32::consts::PI).abs() < 0.001);
     }
 
     #[test]
     fn test_rotation_serialization() {
-        let mut metadata = TileVisualMetadata::default();
-        metadata.rotation_y = Some(45.0);
+        let metadata = TileVisualMetadata {
+            rotation_y: Some(45.0),
+            ..Default::default()
+        };
 
         let serialized = ron::to_string(&metadata).unwrap();
         let deserialized: TileVisualMetadata = ron::from_str(&serialized).unwrap();

@@ -26,4 +26,6 @@ pub use blueprint::MapBlueprint;
 pub use events::{trigger_event, EventError, EventResult};
 pub use movement::{check_tile_blocked, move_party, MovementError};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};
-pub use types::{Map, MapEvent, TerrainType, Tile, TileVisualMetadata, WallType, World};
+pub use types::{
+    Map, MapEvent, ResolvedNpc, TerrainType, Tile, TileVisualMetadata, WallType, World,
+};

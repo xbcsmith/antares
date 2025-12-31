@@ -16,7 +16,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use antares::sdk::campaign_builder::test_utils::{
+//! use campaign_builder::test_utils::{
 //!     scan_source_files,
 //!     find_pattern_matches,
 //!     PatternMatcher,
@@ -247,7 +247,7 @@ impl PatternMatcher {
 /// # Example
 ///
 /// ```no_run
-/// use antares::sdk::campaign_builder::test_utils::scan_source_files;
+/// use campaign_builder::test_utils::scan_source_files;
 ///
 /// let files = scan_source_files("sdk/campaign_builder/src");
 /// for file in files {

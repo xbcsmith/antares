@@ -6,7 +6,7 @@
 //! Tests for rotation_y field in TileVisualMetadata and Campaign Builder integration.
 
 use antares::domain::types::Position;
-use antares::domain::world::{TerrainType, Tile, TileVisualMetadata, WallType};
+use antares::domain::world::{Map, TerrainType, Tile, TileVisualMetadata, WallType};
 use campaign_builder::map_editor::{MapEditorState, VisualMetadataEditor, VisualPreset};
 
 // ===== Domain Model Tests =====
@@ -25,50 +25,62 @@ fn test_rotation_y_effective_default() {
 
 #[test]
 fn test_rotation_y_custom_value() {
-    let mut metadata = TileVisualMetadata::default();
-    metadata.rotation_y = Some(45.0);
+    let metadata = TileVisualMetadata {
+        rotation_y: Some(45.0),
+        ..Default::default()
+    };
     assert_eq!(metadata.effective_rotation_y(), 45.0);
 }
 
 #[test]
 fn test_rotation_y_radians_conversion() {
-    let mut metadata = TileVisualMetadata::default();
+    let m0 = TileVisualMetadata {
+        rotation_y: Some(0.0),
+        ..Default::default()
+    };
+    assert!((m0.rotation_y_radians() - 0.0).abs() < 0.001);
 
-    // 0 degrees = 0 radians
-    metadata.rotation_y = Some(0.0);
-    assert!((metadata.rotation_y_radians() - 0.0).abs() < 0.001);
+    let m90 = TileVisualMetadata {
+        rotation_y: Some(90.0),
+        ..Default::default()
+    };
+    assert!((m90.rotation_y_radians() - std::f32::consts::FRAC_PI_2).abs() < 0.001);
 
-    // 90 degrees = π/2 radians
-    metadata.rotation_y = Some(90.0);
-    assert!((metadata.rotation_y_radians() - std::f32::consts::FRAC_PI_2).abs() < 0.001);
+    let m180 = TileVisualMetadata {
+        rotation_y: Some(180.0),
+        ..Default::default()
+    };
+    assert!((m180.rotation_y_radians() - std::f32::consts::PI).abs() < 0.001);
 
-    // 180 degrees = π radians
-    metadata.rotation_y = Some(180.0);
-    assert!((metadata.rotation_y_radians() - std::f32::consts::PI).abs() < 0.001);
-
-    // 360 degrees = 2π radians
-    metadata.rotation_y = Some(360.0);
-    assert!((metadata.rotation_y_radians() - std::f32::consts::TAU).abs() < 0.001);
+    let m360 = TileVisualMetadata {
+        rotation_y: Some(360.0),
+        ..Default::default()
+    };
+    assert!((m360.rotation_y_radians() - std::f32::consts::TAU).abs() < 0.001);
 }
 
 #[test]
 fn test_rotation_y_negative_values() {
-    let mut metadata = TileVisualMetadata::default();
-    metadata.rotation_y = Some(-45.0);
+    let metadata = TileVisualMetadata {
+        rotation_y: Some(-45.0),
+        ..Default::default()
+    };
     assert_eq!(metadata.effective_rotation_y(), -45.0);
     assert!((metadata.rotation_y_radians() - (-45.0_f32).to_radians()).abs() < 0.001);
 }
 
 #[test]
 fn test_rotation_y_large_values() {
-    let mut metadata = TileVisualMetadata::default();
-    metadata.rotation_y = Some(720.0); // Two full rotations
+    let metadata = TileVisualMetadata {
+        rotation_y: Some(720.0),
+        ..Default::default()
+    }; // Two full rotations
     assert_eq!(metadata.effective_rotation_y(), 720.0);
 }
 
 #[test]
 fn test_tile_with_rotation() {
-    let mut tile = Tile::new(TerrainType::Ground, WallType::Normal);
+    let mut tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal);
     tile.visual.rotation_y = Some(45.0);
 
     assert_eq!(tile.visual.rotation_y, Some(45.0));
@@ -79,8 +91,10 @@ fn test_tile_with_rotation() {
 
 #[test]
 fn test_rotation_y_serialization() {
-    let mut metadata = TileVisualMetadata::default();
-    metadata.rotation_y = Some(45.0);
+    let metadata = TileVisualMetadata {
+        rotation_y: Some(45.0),
+        ..Default::default()
+    };
 
     let serialized = ron::to_string(&metadata).unwrap();
     assert!(serialized.contains("rotation_y"));
@@ -164,7 +178,7 @@ fn test_visual_editor_default_rotation() {
 
 #[test]
 fn test_visual_editor_load_rotation_from_tile() {
-    let mut tile = Tile::new(TerrainType::Ground, WallType::Normal);
+    let mut tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal);
     tile.visual.rotation_y = Some(45.0);
 
     let mut editor = VisualMetadataEditor::default();
@@ -176,7 +190,7 @@ fn test_visual_editor_load_rotation_from_tile() {
 
 #[test]
 fn test_visual_editor_load_no_rotation_from_tile() {
-    let tile = Tile::new(TerrainType::Ground, WallType::Normal);
+    let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal);
 
     let mut editor = VisualMetadataEditor::default();
     editor.load_from_tile(&tile);
@@ -187,9 +201,11 @@ fn test_visual_editor_load_no_rotation_from_tile() {
 
 #[test]
 fn test_visual_editor_to_metadata_with_rotation() {
-    let mut editor = VisualMetadataEditor::default();
-    editor.enable_rotation_y = true;
-    editor.temp_rotation_y = 90.0;
+    let editor = VisualMetadataEditor {
+        enable_rotation_y: true,
+        temp_rotation_y: 90.0,
+        ..Default::default()
+    };
 
     let metadata = editor.to_metadata();
     assert_eq!(metadata.rotation_y, Some(90.0));
@@ -197,9 +213,11 @@ fn test_visual_editor_to_metadata_with_rotation() {
 
 #[test]
 fn test_visual_editor_to_metadata_without_rotation() {
-    let mut editor = VisualMetadataEditor::default();
-    editor.enable_rotation_y = false;
-    editor.temp_rotation_y = 90.0; // Should be ignored
+    let editor = VisualMetadataEditor {
+        enable_rotation_y: false,
+        temp_rotation_y: 90.0,
+        ..Default::default()
+    }; // Should be ignored
 
     let metadata = editor.to_metadata();
     assert_eq!(metadata.rotation_y, None);
@@ -209,8 +227,8 @@ fn test_visual_editor_to_metadata_without_rotation() {
 
 #[test]
 fn test_map_editor_apply_rotation_to_tile() {
-    let mut editor_state = MapEditorState::new();
-    editor_state.create_new_map("Test Map".to_string(), 10, 10);
+    let map = Map::new(1, "Test Map".to_string(), "".to_string(), 10, 10);
+    let mut editor_state = MapEditorState::new(map);
 
     let pos = Position::new(5, 5);
     editor_state.visual_editor.enable_rotation_y = true;
@@ -219,21 +237,18 @@ fn test_map_editor_apply_rotation_to_tile() {
     let metadata = editor_state.visual_editor.to_metadata();
     editor_state.apply_visual_metadata(pos, &metadata);
 
-    if let Some(map) = editor_state.current_map_mut() {
-        if let Some(tile) = map.get_tile(pos) {
-            assert_eq!(tile.visual.rotation_y, Some(45.0));
-        } else {
-            panic!("Tile not found at {:?}", pos);
-        }
+    let map = &mut editor_state.map;
+    if let Some(tile) = map.get_tile(pos) {
+        assert_eq!(tile.visual.rotation_y, Some(45.0));
     } else {
-        panic!("No current map");
+        panic!("Tile not found at {:?}", pos);
     }
 }
 
 #[test]
 fn test_map_editor_apply_rotation_preset() {
-    let mut editor_state = MapEditorState::new();
-    editor_state.create_new_map("Test Map".to_string(), 10, 10);
+    let map = Map::new(1, "Test Map".to_string(), "".to_string(), 10, 10);
+    let mut editor_state = MapEditorState::new(map);
 
     let pos = Position::new(3, 3);
     let preset = VisualPreset::Rotated90;
@@ -241,21 +256,18 @@ fn test_map_editor_apply_rotation_preset() {
 
     editor_state.apply_visual_metadata(pos, &metadata);
 
-    if let Some(map) = editor_state.current_map_mut() {
-        if let Some(tile) = map.get_tile(pos) {
-            assert_eq!(tile.visual.rotation_y, Some(90.0));
-        } else {
-            panic!("Tile not found at {:?}", pos);
-        }
+    let map = &mut editor_state.map;
+    if let Some(tile) = map.get_tile(pos) {
+        assert_eq!(tile.visual.rotation_y, Some(90.0));
     } else {
-        panic!("No current map");
+        panic!("Tile not found at {:?}", pos);
     }
 }
 
 #[test]
 fn test_map_editor_bulk_apply_rotation() {
-    let mut editor_state = MapEditorState::new();
-    editor_state.create_new_map("Test Map".to_string(), 10, 10);
+    let map = Map::new(1, "Test Map".to_string(), "".to_string(), 10, 10);
+    let mut editor_state = MapEditorState::new(map);
 
     // Select multiple tiles
     editor_state.toggle_multi_select_mode();
@@ -269,21 +281,18 @@ fn test_map_editor_bulk_apply_rotation() {
     editor_state.apply_visual_metadata_to_selection(&metadata);
 
     // Verify all selected tiles have the rotation
-    if let Some(map) = editor_state.current_map_mut() {
-        for pos in [
-            Position::new(2, 2),
-            Position::new(3, 3),
-            Position::new(4, 4),
-        ] {
-            if let Some(tile) = map.get_tile(pos) {
-                assert_eq!(tile.visual.rotation_y, Some(45.0));
-                assert_eq!(tile.visual.width_z, Some(0.2));
-            } else {
-                panic!("Tile not found at {:?}", pos);
-            }
+    let map = &mut editor_state.map;
+    for pos in [
+        Position::new(2, 2),
+        Position::new(3, 3),
+        Position::new(4, 4),
+    ] {
+        if let Some(tile) = map.get_tile(pos) {
+            assert_eq!(tile.visual.rotation_y, Some(45.0));
+            assert_eq!(tile.visual.width_z, Some(0.2));
+        } else {
+            panic!("Tile not found at {:?}", pos);
         }
-    } else {
-        panic!("No current map");
     }
 }
 
@@ -291,11 +300,13 @@ fn test_map_editor_bulk_apply_rotation() {
 
 #[test]
 fn test_rotation_with_other_properties() {
-    let mut metadata = TileVisualMetadata::default();
-    metadata.height = Some(2.5);
-    metadata.rotation_y = Some(45.0);
-    metadata.scale = Some(1.2);
-    metadata.color_tint = Some((0.8, 0.9, 1.0));
+    let metadata = TileVisualMetadata {
+        height: Some(2.5),
+        rotation_y: Some(45.0),
+        scale: Some(1.2),
+        color_tint: Some((0.8, 0.9, 1.0)),
+        ..Default::default()
+    };
 
     assert_eq!(
         metadata.effective_height(TerrainType::Ground, WallType::Normal),
@@ -313,7 +324,7 @@ fn test_rotation_with_other_properties() {
 
 #[test]
 fn test_rotation_roundtrip_through_editor() {
-    let mut original_tile = Tile::new(TerrainType::Ground, WallType::Door);
+    let mut original_tile = Tile::new(0, 0, TerrainType::Ground, WallType::Door);
     original_tile.visual.rotation_y = Some(135.0);
     original_tile.visual.height = Some(2.0);
 
@@ -336,8 +347,10 @@ fn test_rotation_roundtrip_through_editor() {
 
 #[test]
 fn test_rotation_zero_vs_none() {
-    let mut with_zero = TileVisualMetadata::default();
-    with_zero.rotation_y = Some(0.0);
+    let with_zero = TileVisualMetadata {
+        rotation_y: Some(0.0),
+        ..Default::default()
+    };
 
     let with_none = TileVisualMetadata::default();
 
@@ -351,11 +364,12 @@ fn test_rotation_zero_vs_none() {
 
 #[test]
 fn test_rotation_boundary_values() {
-    let mut metadata = TileVisualMetadata::default();
-
     // Test common boundary values
     for angle in [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0, 360.0] {
-        metadata.rotation_y = Some(angle);
+        let metadata = TileVisualMetadata {
+            rotation_y: Some(angle),
+            ..Default::default()
+        };
         assert_eq!(metadata.effective_rotation_y(), angle);
         assert!((metadata.rotation_y_radians() - angle.to_radians()).abs() < 0.001);
     }

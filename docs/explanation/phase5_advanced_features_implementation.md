@@ -157,11 +157,11 @@ ui.horizontal(|ui| {
 
 Added three rotation-based presets:
 
-| Preset | Rotation | Additional Properties | Use Case |
-|--------|----------|----------------------|----------|
-| **Rotated 45°** | 45.0° | None | Diagonal orientation tests |
-| **Rotated 90°** | 90.0° | None | Perpendicular walls/doors |
-| **Diagonal Wall** | 45.0° | width_z=0.2 | Thin diagonal walls for mazes |
+| Preset            | Rotation | Additional Properties | Use Case                      |
+| ----------------- | -------- | --------------------- | ----------------------------- |
+| **Rotated 45°**   | 45.0°    | None                  | Diagonal orientation tests    |
+| **Rotated 90°**   | 90.0°    | None                  | Perpendicular walls/doors     |
+| **Diagonal Wall** | 45.0°    | width_z=0.2           | Thin diagonal walls for mazes |
 
 ```rust
 pub enum VisualPreset {
@@ -198,11 +198,12 @@ Rotation serializes cleanly to RON:
 
 ### 1.6 Testing
 
-Created comprehensive test suite in `sdk/campaign_builder/tests/phase5_rotation_test.rs`:
+Created comprehensive test suite in `sdk/campaign_builder/tests/rotation_test.rs`:
 
 **Test Categories:**
 
-1. **Domain Model Tests (11 tests)**
+1. **Domain Model Tests (7 tests)**
+
    - Default values
    - Custom values
    - Degree-to-radian conversion
@@ -211,16 +212,19 @@ Created comprehensive test suite in `sdk/campaign_builder/tests/phase5_rotation_
    - Tile integration
 
 2. **Serialization Tests (2 tests)**
+
    - RON roundtrip
    - Backward compatibility
 
 3. **Preset Tests (4 tests)**
+
    - Rotated45 preset
    - Rotated90 preset
    - DiagonalWall preset
    - All presets enumeration
 
 4. **Editor State Tests (5 tests)**
+
    - Default state
    - Load from tile with rotation
    - Load from tile without rotation
@@ -228,11 +232,13 @@ Created comprehensive test suite in `sdk/campaign_builder/tests/phase5_rotation_
    - To metadata with rotation disabled
 
 5. **Integration Tests (3 tests)**
+
    - Apply rotation to single tile
    - Apply rotation preset
    - Bulk apply rotation to selection
 
 6. **Combined Feature Tests (2 tests)**
+
    - Rotation with other properties
    - Roundtrip through editor
 
@@ -241,9 +247,9 @@ Created comprehensive test suite in `sdk/campaign_builder/tests/phase5_rotation_
    - Boundary values (0°, 45°, 90°, etc.)
    - All fields None
 
-**Total: 30 tests** covering rotation feature
+**Total: 26 tests** covering rotation feature
 
-**All tests pass:** ✅ 1034/1034 project tests (including 30 new rotation tests)
+**All tests pass:** ✅ 1034/1034 project tests (including 26 new rotation tests)
 
 ### 1.7 Use Cases & Examples
 
@@ -779,11 +785,11 @@ if editor.visual_editor.animation_type != AnimationType::None {
 
 ### Phase 5 Deliverables
 
-| Deliverable | Status | Notes |
-|-------------|--------|-------|
-| ✅ Rotation support implemented | **COMPLETE** | Full Y-axis rotation with tests |
-| ✅ Rotation works for walls and decorations | **COMPLETE** | All tile types support rotation |
-| ✅ Advanced features documented | **COMPLETE** | Material, mesh, animation designs |
+| Deliverable                                   | Status       | Notes                             |
+| --------------------------------------------- | ------------ | --------------------------------- |
+| ✅ Rotation support implemented               | **COMPLETE** | Full Y-axis rotation with tests   |
+| ✅ Rotation works for walls and decorations   | **COMPLETE** | All tile types support rotation   |
+| ✅ Advanced features documented               | **COMPLETE** | Material, mesh, animation designs |
 | ✅ Systems designed for future implementation | **COMPLETE** | Detailed specs with code examples |
 
 ### Quality Metrics
@@ -814,11 +820,13 @@ if editor.visual_editor.animation_type != AnimationType::None {
 ### Immediate Next Steps (Phase 6 Candidates)
 
 1. **Material Override Implementation** (3-5 days)
+
    - Highest value-add for visual variety
    - Enables texture swaps without code changes
    - Requires campaign asset loading infrastructure
 
 2. **Custom Mesh Implementation** (5-7 days)
+
    - Enables artist-created content
    - Unlocks decorative props, statues, complex features
    - Depends on asset pipeline design
@@ -831,10 +839,12 @@ if editor.visual_editor.animation_type != AnimationType::None {
 ### Long-Term Enhancements
 
 4. **Animation Properties Implementation** (4-6 days)
+
    - Adds visual interest and life to maps
    - Lower priority (visual polish, not core gameplay)
 
 5. **Advanced Rendering Features** (research phase)
+
    - Emissive materials (glowing torches, lava)
    - Transparency/alpha (water, glass)
    - Decals (blood splatters, scorch marks)
@@ -853,7 +863,7 @@ if editor.visual_editor.animation_type != AnimationType::None {
 
 1. **Incremental Design** - Rotation first, advanced features as designs allowed focused implementation
 2. **Backward Compatibility** - Optional fields ensured zero migration burden
-3. **Comprehensive Testing** - 30 tests caught edge cases early
+3. **Comprehensive Testing** - 26 tests caught edge cases early
 4. **Preset System** - Rotation presets provide immediate value to designers
 
 ### Challenges Overcome
@@ -874,22 +884,22 @@ if editor.visual_editor.animation_type != AnimationType::None {
 
 ### Modified Files
 
-| File | Changes | Lines |
-|------|---------|-------|
-| `src/domain/world/types.rs` | Added rotation_y field, helper methods | +36 |
-| `src/game/systems/map.rs` | Apply rotation in rendering (5 spawn sites) | +35 |
-| `sdk/campaign_builder/src/map_editor.rs` | Rotation UI, editor state, presets | +52 |
-| `tests/phase3_map_authoring_test.rs` | Added rotation_y to test fixtures | +2 |
-| `tests/rendering_visual_metadata_test.rs` | Added rotation_y to test fixtures | +1 |
+| File                                      | Changes                                     | Lines |
+| ----------------------------------------- | ------------------------------------------- | ----- |
+| `src/domain/world/types.rs`               | Added rotation_y field, helper methods      | +36   |
+| `src/game/systems/map.rs`                 | Apply rotation in rendering (5 spawn sites) | +35   |
+| `sdk/campaign_builder/src/map_editor.rs`  | Rotation UI, editor state, presets          | +52   |
+| `tests/phase3_map_authoring_test.rs`      | Added rotation_y to test fixtures           | +2    |
+| `tests/rendering_visual_metadata_test.rs` | Added rotation_y to test fixtures           | +1    |
 
 **Total:** ~126 lines added/modified
 
 ### New Files
 
-| File | Purpose | Lines |
-|------|---------|-------|
-| `sdk/campaign_builder/tests/phase5_rotation_test.rs` | Comprehensive rotation tests | 376 |
-| `docs/explanation/phase5_advanced_features_implementation.md` | This document | ~900 |
+| File                                                          | Purpose                      | Lines |
+| ------------------------------------------------------------- | ---------------------------- | ----- |
+| `sdk/campaign_builder/tests/rotation_test.rs`                 | Comprehensive rotation tests | 400   |
+| `docs/explanation/phase5_advanced_features_implementation.md` | This document                | ~900  |
 
 **Total:** ~1276 new lines
 
@@ -899,21 +909,21 @@ if editor.visual_editor.animation_type != AnimationType::None {
 
 ### Test Breakdown by Category
 
-| Category | Tests | Status |
-|----------|-------|--------|
-| Domain Model | 11 | ✅ All passing |
-| Serialization | 2 | ✅ All passing |
-| Presets | 4 | ✅ All passing |
-| Editor State | 5 | ✅ All passing |
-| Integration | 3 | ✅ All passing |
-| Combined Features | 2 | ✅ All passing |
-| Edge Cases | 3 | ✅ All passing |
-| **Total** | **30** | **✅ 100%** |
+| Category          | Tests  | Status         |
+| ----------------- | ------ | -------------- |
+| Domain Model      | 7      | ✅ All passing |
+| Serialization     | 2      | ✅ All passing |
+| Presets           | 4      | ✅ All passing |
+| Editor State      | 5      | ✅ All passing |
+| Integration       | 3      | ✅ All passing |
+| Combined Features | 2      | ✅ All passing |
+| Edge Cases        | 3      | ✅ All passing |
+| **Total**         | **26** | **✅ 100%**    |
 
 ### Test Execution Time
 
 ```
-Phase 5 rotation tests: ~0.15s (30 tests)
+Phase 5 rotation tests: ~0.15s (26 tests)
 Total project tests: ~1.5s (1034 tests)
 ```
 
@@ -1006,7 +1016,7 @@ pub fn effective_rotation_y(&self) -> f32 {
 
 - Calling code doesn't handle Option
 - Centralized default logic
-- Consistent with existing effective_* methods
+- Consistent with existing effective\_\* methods
 
 ### 3. Preset Pattern (Designer Productivity)
 

@@ -16,7 +16,7 @@ use campaign_builder::map_editor::{MapEditorState, VisualPreset};
 fn test_all_presets_defined() {
     // Verify all presets are accessible
     let presets = VisualPreset::all();
-    assert_eq!(presets.len(), 10, "Expected 10 presets");
+    assert_eq!(presets.len(), 13, "Expected 13 presets");
 
     // Verify each has a name
     for preset in presets {
@@ -284,7 +284,7 @@ fn test_apply_visual_metadata_single_tile() {
         ..Default::default()
     };
 
-    editor.apply_visual_metadata(pos, metadata.clone());
+    editor.apply_visual_metadata(pos, &metadata.clone());
 
     let tile = editor.map.get_tile(pos).expect("Tile should exist");
     assert_eq!(tile.visual.height, Some(2.5));
@@ -306,7 +306,7 @@ fn test_apply_visual_metadata_to_selection_empty() {
     };
 
     // No multi-selection, should apply to current position
-    editor.apply_visual_metadata_to_selection(metadata);
+    editor.apply_visual_metadata_to_selection(&metadata);
 
     let tile = editor.map.get_tile(pos).expect("Tile should exist");
     assert_eq!(tile.visual.height, Some(3.0));
@@ -333,7 +333,7 @@ fn test_apply_visual_metadata_to_multiple_tiles() {
         ..Default::default()
     };
 
-    editor.apply_visual_metadata_to_selection(metadata);
+    editor.apply_visual_metadata_to_selection(&metadata);
 
     // Verify all tiles have the metadata
     for pos in &[pos1, pos2, pos3] {
@@ -370,7 +370,7 @@ fn test_bulk_edit_workflow() {
 
     // Apply tall wall preset
     let preset_metadata = VisualPreset::TallWall.to_metadata();
-    editor.apply_visual_metadata_to_selection(preset_metadata);
+    editor.apply_visual_metadata_to_selection(&preset_metadata);
 
     // Verify all wall tiles have the same height
     for pos in &wall_positions {
@@ -394,7 +394,7 @@ fn test_preset_application_workflow() {
     // Apply each preset and verify it's applied correctly
     for preset in VisualPreset::all() {
         let metadata = preset.to_metadata();
-        editor.apply_visual_metadata(pos, metadata.clone());
+        editor.apply_visual_metadata(pos, &metadata.clone());
 
         let tile = editor.map.get_tile(pos).expect("Tile should exist");
         assert_eq!(tile.visual, metadata, "Preset {} failed", preset.name());
@@ -408,7 +408,7 @@ fn test_mixed_editing_workflow() {
 
     // Step 1: Apply preset to single tile
     let pos1 = Position::new(0, 0);
-    editor.apply_visual_metadata(pos1, VisualPreset::SmallTree.to_metadata());
+    editor.apply_visual_metadata(pos1, &VisualPreset::SmallTree.to_metadata());
 
     let tile1 = editor.map.get_tile(pos1).expect("Tile should exist");
     assert_eq!(tile1.visual.height, Some(2.0));
@@ -424,7 +424,7 @@ fn test_mixed_editing_workflow() {
         ..Default::default()
     };
 
-    editor.apply_visual_metadata_to_selection(custom_metadata);
+    editor.apply_visual_metadata_to_selection(&custom_metadata);
 
     let tile2 = editor
         .map
@@ -464,7 +464,7 @@ fn test_has_changes_flag_on_visual_edit() {
         ..Default::default()
     };
 
-    editor.apply_visual_metadata(Position::new(0, 0), metadata);
+    editor.apply_visual_metadata(Position::new(0, 0), &metadata);
     assert!(editor.has_changes);
 }
 

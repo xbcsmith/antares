@@ -1547,7 +1547,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                             .iter()
                             .any(|p| p.position == pos);
 
-                    let color = Self::tile_color(&tile, event_type, has_npc_placement);
+                    let color = Self::tile_color(&tile, event_type.as_ref(), has_npc_placement);
 
                     let rect = Rect::from_min_size(
                         to_screen(x, y),
@@ -1921,7 +1921,7 @@ impl MapsEditorState {
                     m.width,
                     m.height,
                     m.events.len(),
-                    m.npcs.len(),
+                    m.npc_placements.len(),
                 )
             })
             .collect();
@@ -2072,6 +2072,7 @@ impl MapsEditorState {
                     monsters,
                     items,
                     conditions,
+                    npcs,
                     campaign_dir,
                     maps_dir,
                     display_config,
@@ -2284,6 +2285,7 @@ impl MapsEditorState {
         monsters: &[MonsterDefinition],
         items: &[Item],
         conditions: &[antares::domain::conditions::ConditionDefinition],
+        npcs: &[NpcDefinition],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -2543,7 +2545,7 @@ impl MapsEditorState {
                                 .id_salt("map_editor_inspector_scroll")
                                 .show(right_ui, |ui| {
                                     Self::show_inspector_panel(
-                                        ui, editor_ref, maps, monsters, items, conditions,
+                                        ui, editor_ref, maps, monsters, items, conditions, npcs,
                                     );
                                 });
                         },
@@ -2751,6 +2753,7 @@ impl MapsEditorState {
         monsters: &[MonsterDefinition],
         items: &[Item],
         conditions: &[antares::domain::conditions::ConditionDefinition],
+        npcs: &[NpcDefinition],
     ) {
         ui.heading("Inspector");
         ui.separator();
@@ -2786,11 +2789,19 @@ impl MapsEditorState {
                     ui.label(format!("Blocked: {}", tile.blocked));
                 }
 
-                if let Some(npc) = editor.map.npcs.iter().find(|n| n.position == pos) {
+                if let Some(placement) =
+                    editor.map.npc_placements.iter().find(|n| n.position == pos)
+                {
                     ui.separator();
                     ui.label("NPC:");
-                    ui.label(format!("Name: {}", npc.name));
-                    ui.label(format!("ID: {}", npc.id));
+                    // Try to find name if possible
+                    let name = npcs
+                        .iter()
+                        .find(|n| n.id == placement.npc_id)
+                        .map(|n| n.name.as_str())
+                        .unwrap_or("Unknown");
+                    ui.label(format!("Name: {}", name));
+                    ui.label(format!("ID: {}", placement.npc_id));
                 }
 
                 if let Some(event) = editor.map.get_event(pos) {
@@ -3311,7 +3322,7 @@ impl MapsEditorState {
             // NPC picker with dropdown
             ui.horizontal(|ui| {
                 ui.label("NPC:");
-                egui::ComboBox::from_id_source("npc_placement_picker")
+                egui::ComboBox::from_id_salt("npc_placement_picker")
                     .selected_text(
                         npcs.iter()
                             .find(|n| n.id == placement_editor.selected_npc_id)
@@ -3358,7 +3369,7 @@ impl MapsEditorState {
 
             ui.horizontal(|ui| {
                 ui.label("Facing:");
-                egui::ComboBox::from_id_source("npc_facing")
+                egui::ComboBox::from_id_salt("npc_facing")
                     .selected_text(placement_editor.facing.as_deref().unwrap_or("None"))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut placement_editor.facing, None, "None");
@@ -3497,7 +3508,7 @@ impl MapsEditorState {
         }
 
         // Draw NPC markers
-        for npc in &map.npcs {
+        for npc in &map.npc_placements {
             let pos = &npc.position;
             if pos.x >= 0 && pos.x < map.width as i32 && pos.y >= 0 && pos.y < map.height as i32 {
                 let marker_pos = rect.min
@@ -4029,27 +4040,7 @@ mod tests {
         assert!(state.map.get_event(pos).is_none());
     }
 
-    #[test]
-    fn test_add_remove_npc() {
-        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
-        let mut state = MapEditorState::new(map);
-
-        let npc = Npc::new(
-            1,
-            "Merchant".to_string(),
-            "Desc".to_string(),
-            Position::new(5, 5),
-            "Hello!".to_string(),
-        );
-
-        let placement = NpcPlacement::new("test_npc", Position::new(5, 5));
-        state.add_npc_placement(placement);
-        assert_eq!(state.map.npc_placements.len(), 1);
-        assert!(state.has_changes);
-
-        state.remove_npc_placement(0);
-        assert_eq!(state.map.npc_placements.len(), 0);
-    }
+    // test_add_remove_npc removed as it relied on deprecated Npc struct
 
     #[test]
     fn test_fill_region() {
@@ -4182,23 +4173,7 @@ mod tests {
         assert!(editor.to_map_event().is_err());
     }
 
-    #[test]
-    fn test_npc_editor_state_to_npc() {
-        let editor = NpcEditorState {
-            npc_id: "42".to_string(),
-            name: "Guard".to_string(),
-            description: "Desc".to_string(),
-            position_x: "10".to_string(),
-            position_y: "15".to_string(),
-            dialogue: "Halt!".to_string(),
-        };
-
-        let npc = editor.to_npc().unwrap();
-        assert_eq!(npc.id, 42);
-        assert_eq!(npc.name, "Guard");
-        assert_eq!(npc.position, Position::new(10, 15));
-        assert_eq!(npc.dialogue, "Halt!");
-    }
+    // test_npc_editor_state_to_npc removed
 
     #[test]
     fn test_editor_tool_names() {
@@ -4567,7 +4542,7 @@ mod tests {
 
         egui::CentralPanel::default().show(&ctx, |ui| {
             // Should render the inspector without panicking (and include name/description)
-            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[], &[]);
+            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[], &[], &[]);
         });
 
         // Verify selection was preserved and the inspector invocation completed

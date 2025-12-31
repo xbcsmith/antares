@@ -10,7 +10,7 @@
                 description: "Find the Foo in the area",
                 objectives: [
                     TalkToNpc(
-                        npc_id: 10,
+                        npc_id: "tutorial_wizard_fizban",
                         map_id: 2,
                     ),
                     CollectItems(
@@ -26,12 +26,12 @@
                 description: "Return the Foo to Fizban",
                 objectives: [
                     TalkToNpc(
-                        npc_id: 10,
+                        npc_id: "tutorial_wizard_fizban",
                         map_id: 2,
                     ),
                     DeliverItem(
                         item_id: 102,
-                        npc_id: 10,
+                        npc_id: "tutorial_wizard_fizban",
                         quantity: 1,
                     ),
                 ],
@@ -43,7 +43,7 @@
                 description: "Find the Foo Stand",
                 objectives: [
                     TalkToNpc(
-                        npc_id: 10,
+                        npc_id: "tutorial_wizard_fizban",
                         map_id: 2,
                     ),
                     CollectItems(
@@ -59,12 +59,12 @@
                 description: "Return the Foo Stand to Fizban",
                 objectives: [
                     TalkToNpc(
-                        npc_id: 10,
+                        npc_id: "tutorial_wizard_fizban",
                         map_id: 2,
                     ),
                     DeliverItem(
                         item_id: 103,
-                        npc_id: 10,
+                        npc_id: "tutorial_wizard_fizban",
                         quantity: 1,
                     ),
                 ],
@@ -73,13 +73,14 @@
         ],
         rewards: [
             Experience(100),
+            Gold(50),
         ],
         min_level: Some(1),
         max_level: Some(30),
         required_quests: [],
         repeatable: false,
         is_main_quest: false,
-        quest_giver_npc: Some(10),
+        quest_giver_npc: Some("tutorial_wizard_fizban"),
         quest_giver_map: Some(2),
         quest_giver_position: Some((
             x: 13,
@@ -97,7 +98,7 @@
                 description: "Find the Bar in the area",
                 objectives: [
                     TalkToNpc(
-                        npc_id: 11,
+                        npc_id: "tutorial_wizard_fizban_brother",
                         map_id: 2,
                     ),
                     CollectItems(
@@ -113,12 +114,12 @@
                 description: "Return the Bar to Fizban\'s Brother",
                 objectives: [
                     TalkToNpc(
-                        npc_id: 11,
+                        npc_id: "tutorial_wizard_fizban_brother",
                         map_id: 2,
                     ),
                     DeliverItem(
                         item_id: 104,
-                        npc_id: 11,
+                        npc_id: "tutorial_wizard_fizban_brother",
                         quantity: 1,
                     ),
                 ],
@@ -130,7 +131,7 @@
                 description: "Get the Foo and the Foo Stand from Fizban",
                 objectives: [
                     TalkToNpc(
-                        npc_id: 10,
+                        npc_id: "tutorial_wizard_fizban",
                         map_id: 2,
                     ),
                     CollectItems(
@@ -150,24 +151,27 @@
                 description: "Give the Foo and the Foo Stand to Fizban\'s Brother",
                 objectives: [
                     TalkToNpc(
-                        npc_id: 11,
+                        npc_id: "tutorial_wizard_fizban_brother",
                         map_id: 2,
                     ),
                     DeliverItem(
                         item_id: 102,
-                        npc_id: 11,
+                        npc_id: "tutorial_wizard_fizban_brother",
                         quantity: 1,
                     ),
                     DeliverItem(
                         item_id: 103,
-                        npc_id: 11,
+                        npc_id: "tutorial_wizard_fizban_brother",
                         quantity: 1,
                     ),
                 ],
                 require_all_objectives: true,
             ),
         ],
-        rewards: [],
+        rewards: [
+            Experience(250),
+            Gold(50),
+        ],
         min_level: Some(1),
         max_level: Some(30),
         required_quests: [
@@ -175,7 +179,7 @@
         ],
         repeatable: false,
         is_main_quest: false,
-        quest_giver_npc: Some(11),
+        quest_giver_npc: Some("tutorial_wizard_fizban_brother"),
         quest_giver_map: Some(2),
         quest_giver_position: Some((
             x: 3,
@@ -202,15 +206,17 @@
         ],
         rewards: [
             Items([
-                (6, 1),
+                (42, 1),
             ]),
+            Experience(250),
+            Gold(50),
         ],
         min_level: Some(1),
         max_level: Some(30),
         required_quests: [],
         repeatable: false,
         is_main_quest: false,
-        quest_giver_npc: Some(11),
+        quest_giver_npc: Some("tutorial_wizard_fizban_brother"),
         quest_giver_map: Some(2),
         quest_giver_position: Some((
             x: 3,
@@ -244,19 +250,22 @@
         required_quests: [],
         repeatable: false,
         is_main_quest: false,
-        quest_giver_npc: None,
-        quest_giver_map: None,
-        quest_giver_position: None,
+        quest_giver_npc: Some("tutorial_goblin_dying"),
+        quest_giver_map: Some(6),
+        quest_giver_position: Some((
+            x: 1,
+            y: 1,
+        )),
     ),
     (
         id: 5,
         name: "The Lich\'s Tomb",
-        description: "Journey to the Harow Downs to face the Lich",
+        description: "Journey to the Harrow Downs to face the Lich",
         stages: [
             (
                 stage_number: 1,
-                name: "",
-                description: "",
+                name: "The Lich\'s Tomb",
+                description: "Journey to the Harrow Downs to face the Lich",
                 objectives: [
                     ReachLocation(
                         map_id: 6,
@@ -271,7 +280,7 @@
                         quantity: 1,
                     ),
                     TalkToNpc(
-                        npc_id: 0,
+                        npc_id: "tutorial_elder_village2",
                         map_id: 1,
                     ),
                 ],
@@ -290,7 +299,7 @@
         required_quests: [],
         repeatable: false,
         is_main_quest: true,
-        quest_giver_npc: None,
+        quest_giver_npc: Some("tutorial_elder_village2"),
         quest_giver_map: Some(1),
         quest_giver_position: Some((
             x: 1,
