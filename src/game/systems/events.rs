@@ -108,7 +108,12 @@ fn handle_events(
                 if let Some(ref mut log) = game_log {
                     log.add(msg);
                 }
-                // TODO: Start dialogue
+                // TODO: Update to new NPC system
+                // - This uses legacy numeric npc_id (u16)
+                // - Should look up NPC from database by string ID
+                // - Get dialogue_id from NpcDefinition
+                // - Start dialogue tree with proper DialogueId
+                // See Phase 4.2 of NPC Externalization Implementation Plan
             }
         }
     }

@@ -259,6 +259,105 @@ impl Npc {
     }
 }
 
+// ===== Resolved NPC =====
+
+/// Resolved NPC combining placement and definition data
+///
+/// This struct merges an NPC placement (position, facing, overrides) with
+/// the NPC definition (name, portrait, dialogue, etc.) from the database.
+/// It's used at runtime after loading maps and resolving NPC references.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::ResolvedNpc;
+/// use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
+/// use antares::domain::types::Position;
+///
+/// let definition = NpcDefinition::new("merchant_1", "Bob", "merchant.png");
+/// let placement = NpcPlacement::new("merchant_1", Position::new(10, 15));
+/// let resolved = ResolvedNpc::from_placement_and_definition(&placement, &definition);
+///
+/// assert_eq!(resolved.npc_id, "merchant_1");
+/// assert_eq!(resolved.name, "Bob");
+/// assert_eq!(resolved.position, Position::new(10, 15));
+/// ```
+#[derive(Debug, Clone)]
+pub struct ResolvedNpc {
+    /// NPC ID from definition
+    pub npc_id: String,
+    /// NPC name from definition
+    pub name: String,
+    /// NPC description from definition
+    pub description: String,
+    /// Portrait path from definition
+    pub portrait_path: String,
+    /// Position from placement
+    pub position: Position,
+    /// Facing direction from placement
+    pub facing: Option<Direction>,
+    /// Effective dialogue ID (placement override or definition default)
+    pub dialogue_id: Option<crate::domain::dialogue::DialogueId>,
+    /// Quest IDs from definition
+    pub quest_ids: Vec<crate::domain::quest::QuestId>,
+    /// Faction from definition
+    pub faction: Option<String>,
+    /// Whether NPC is a merchant
+    pub is_merchant: bool,
+    /// Whether NPC is an innkeeper
+    pub is_innkeeper: bool,
+}
+
+impl ResolvedNpc {
+    /// Creates a ResolvedNpc from a placement and definition
+    ///
+    /// The dialogue_id uses the placement's override if present, otherwise
+    /// falls back to the definition's default dialogue.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::ResolvedNpc;
+    /// use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
+    /// use antares::domain::types::Position;
+    ///
+    /// let definition = NpcDefinition {
+    ///     id: "guard".to_string(),
+    ///     name: "City Guard".to_string(),
+    ///     description: "A vigilant guard".to_string(),
+    ///     portrait_path: "guard.png".to_string(),
+    ///     dialogue_id: Some(10),
+    ///     quest_ids: vec![],
+    ///     faction: Some("City Watch".to_string()),
+    ///     is_merchant: false,
+    ///     is_innkeeper: false,
+    /// };
+    ///
+    /// let placement = NpcPlacement::new("guard", Position::new(5, 5));
+    ///
+    /// let resolved = ResolvedNpc::from_placement_and_definition(&placement, &definition);
+    /// assert_eq!(resolved.dialogue_id, Some(10));
+    /// ```
+    pub fn from_placement_and_definition(
+        placement: &crate::domain::world::npc::NpcPlacement,
+        definition: &crate::domain::world::npc::NpcDefinition,
+    ) -> Self {
+        Self {
+            npc_id: definition.id.clone(),
+            name: definition.name.clone(),
+            description: definition.description.clone(),
+            portrait_path: definition.portrait_path.clone(),
+            position: placement.position,
+            facing: placement.facing,
+            dialogue_id: placement.dialogue_override.or(definition.dialogue_id),
+            quest_ids: definition.quest_ids.clone(),
+            faction: definition.faction.clone(),
+            is_merchant: definition.is_merchant,
+            is_innkeeper: definition.is_innkeeper,
+        }
+    }
+}
+
 // ===== Map =====
 
 /// A map in the game world
@@ -441,6 +540,299 @@ impl Map {
     /// Adds an NPC to the map
     pub fn add_npc(&mut self, npc: Npc) {
         self.npcs.push(npc);
+    }
+
+    /// Resolves NPC placements using the NPC database
+    ///
+    /// This method takes the NPC placements on the map and resolves them
+    /// against the NPC database to create `ResolvedNpc` instances that
+    /// combine placement data (position, facing) with definition data
+    /// (name, portrait, dialogue, etc.).
+    ///
+    /// NPCs that reference IDs not found in the database are skipped with
+    /// a warning (in production, consider logging).
+    ///
+    /// # Arguments
+    ///
+    /// * `npc_db` - Reference to the NPC database
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of `ResolvedNpc` instances
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Map, ResolvedNpc};
+    /// use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
+    /// use antares::domain::types::Position;
+    /// use antares::sdk::database::NpcDatabase;
+    ///
+    /// let mut npc_db = NpcDatabase::new();
+    /// let npc_def = NpcDefinition::new("merchant_1", "Bob", "merchant.png");
+    /// npc_db.add_npc(npc_def).unwrap();
+    ///
+    /// let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+    /// map.npc_placements.push(NpcPlacement::new("merchant_1", Position::new(5, 5)));
+    ///
+    /// let resolved = map.resolve_npcs(&npc_db);
+    /// assert_eq!(resolved.len(), 1);
+    /// assert_eq!(resolved[0].name, "Bob");
+    /// ```
+    pub fn resolve_npcs(&self, npc_db: &crate::sdk::database::NpcDatabase) -> Vec<ResolvedNpc> {
+        self.npc_placements
+            .iter()
+            .filter_map(|placement| {
+                if let Some(definition) = npc_db.get_npc(&placement.npc_id) {
+                    Some(ResolvedNpc::from_placement_and_definition(
+                        placement, definition,
+                    ))
+                } else {
+                    // NPC definition not found in database
+                    // In production, this should log a warning
+                    eprintln!(
+                        "Warning: NPC '{}' not found in database on map {}",
+                        placement.npc_id, self.id
+                    );
+                    None
+                }
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod map_npc_resolution_tests {
+    use super::*;
+    use crate::domain::world::npc::{NpcDefinition, NpcPlacement};
+    use crate::sdk::database::NpcDatabase;
+
+    #[test]
+    fn test_resolve_npcs_with_single_npc() {
+        // Arrange
+        let mut npc_db = NpcDatabase::new();
+        let npc_def = NpcDefinition::new("merchant_bob", "Bob the Merchant", "merchant.png");
+        npc_db.add_npc(npc_def).expect("Failed to add NPC");
+
+        let mut map = Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
+        map.npc_placements
+            .push(NpcPlacement::new("merchant_bob", Position::new(5, 5)));
+
+        // Act
+        let resolved = map.resolve_npcs(&npc_db);
+
+        // Assert
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].npc_id, "merchant_bob");
+        assert_eq!(resolved[0].name, "Bob the Merchant");
+        assert_eq!(resolved[0].position, Position::new(5, 5));
+        assert_eq!(resolved[0].portrait_path, "merchant.png");
+    }
+
+    #[test]
+    fn test_resolve_npcs_with_multiple_npcs() {
+        // Arrange
+        let mut npc_db = NpcDatabase::new();
+        npc_db
+            .add_npc(NpcDefinition::merchant(
+                "merchant_1",
+                "Merchant Shop",
+                "merchant.png",
+            ))
+            .unwrap();
+        npc_db
+            .add_npc(NpcDefinition::innkeeper(
+                "innkeeper_1",
+                "Friendly Inn",
+                "innkeeper.png",
+            ))
+            .unwrap();
+
+        let mut map = Map::new(1, "Town".to_string(), "Town map".to_string(), 20, 20);
+        map.npc_placements
+            .push(NpcPlacement::new("merchant_1", Position::new(5, 5)));
+        map.npc_placements
+            .push(NpcPlacement::new("innkeeper_1", Position::new(10, 10)));
+
+        // Act
+        let resolved = map.resolve_npcs(&npc_db);
+
+        // Assert
+        assert_eq!(resolved.len(), 2);
+        assert!(resolved.iter().any(|n| n.npc_id == "merchant_1"));
+        assert!(resolved.iter().any(|n| n.npc_id == "innkeeper_1"));
+        assert!(resolved.iter().any(|n| n.is_merchant));
+        assert!(resolved.iter().any(|n| n.is_innkeeper));
+    }
+
+    #[test]
+    fn test_resolve_npcs_with_missing_definition() {
+        // Arrange
+        let npc_db = NpcDatabase::new(); // Empty database
+
+        let mut map = Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
+        map.npc_placements
+            .push(NpcPlacement::new("nonexistent_npc", Position::new(5, 5)));
+
+        // Act
+        let resolved = map.resolve_npcs(&npc_db);
+
+        // Assert
+        assert_eq!(resolved.len(), 0, "Missing NPCs should be skipped");
+    }
+
+    #[test]
+    fn test_resolve_npcs_with_dialogue_override() {
+        // Arrange
+        let mut npc_db = NpcDatabase::new();
+        let npc_def = NpcDefinition {
+            id: "guard".to_string(),
+            name: "City Guard".to_string(),
+            description: "Vigilant guard".to_string(),
+            portrait_path: "guard.png".to_string(),
+            dialogue_id: Some(10),
+            quest_ids: vec![],
+            faction: Some("City Watch".to_string()),
+            is_merchant: false,
+            is_innkeeper: false,
+        };
+        npc_db.add_npc(npc_def).unwrap();
+
+        let mut map = Map::new(1, "City".to_string(), "City map".to_string(), 20, 20);
+        let mut placement = NpcPlacement::new("guard", Position::new(5, 5));
+        placement.dialogue_override = Some(99); // Override dialogue
+        map.npc_placements.push(placement);
+
+        // Act
+        let resolved = map.resolve_npcs(&npc_db);
+
+        // Assert
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(
+            resolved[0].dialogue_id,
+            Some(99),
+            "Should use placement override"
+        );
+    }
+
+    #[test]
+    fn test_resolve_npcs_with_quest_givers() {
+        // Arrange
+        let mut npc_db = NpcDatabase::new();
+        let npc_def = NpcDefinition {
+            id: "quest_giver".to_string(),
+            name: "Elder".to_string(),
+            description: "Village elder".to_string(),
+            portrait_path: "elder.png".to_string(),
+            dialogue_id: Some(5),
+            quest_ids: vec![1, 2, 3],
+            faction: Some("Village".to_string()),
+            is_merchant: false,
+            is_innkeeper: false,
+        };
+        npc_db.add_npc(npc_def).unwrap();
+
+        let mut map = Map::new(1, "Village".to_string(), "Village map".to_string(), 15, 15);
+        map.npc_placements
+            .push(NpcPlacement::new("quest_giver", Position::new(7, 7)));
+
+        // Act
+        let resolved = map.resolve_npcs(&npc_db);
+
+        // Assert
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].quest_ids, vec![1, 2, 3]);
+        assert_eq!(resolved[0].faction, Some("Village".to_string()));
+    }
+
+    #[test]
+    fn test_resolved_npc_from_placement_and_definition() {
+        // Arrange
+        let definition = NpcDefinition {
+            id: "test_npc".to_string(),
+            name: "Test NPC".to_string(),
+            description: "A test NPC".to_string(),
+            portrait_path: "test.png".to_string(),
+            dialogue_id: Some(42),
+            quest_ids: vec![1],
+            faction: Some("Test Faction".to_string()),
+            is_merchant: true,
+            is_innkeeper: false,
+        };
+
+        let placement = NpcPlacement {
+            npc_id: "test_npc".to_string(),
+            position: Position::new(3, 4),
+            facing: Some(Direction::North),
+            dialogue_override: None,
+        };
+
+        // Act
+        let resolved = ResolvedNpc::from_placement_and_definition(&placement, &definition);
+
+        // Assert
+        assert_eq!(resolved.npc_id, "test_npc");
+        assert_eq!(resolved.name, "Test NPC");
+        assert_eq!(resolved.description, "A test NPC");
+        assert_eq!(resolved.portrait_path, "test.png");
+        assert_eq!(resolved.position, Position::new(3, 4));
+        assert_eq!(resolved.facing, Some(Direction::North));
+        assert_eq!(resolved.dialogue_id, Some(42));
+        assert_eq!(resolved.quest_ids, vec![1]);
+        assert_eq!(resolved.faction, Some("Test Faction".to_string()));
+        assert!(resolved.is_merchant);
+        assert!(!resolved.is_innkeeper);
+    }
+
+    #[test]
+    fn test_resolved_npc_uses_dialogue_override() {
+        // Arrange
+        let definition = NpcDefinition {
+            id: "npc".to_string(),
+            name: "NPC".to_string(),
+            description: "".to_string(),
+            portrait_path: "npc.png".to_string(),
+            dialogue_id: Some(10),
+            quest_ids: vec![],
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+        };
+
+        let placement = NpcPlacement {
+            npc_id: "npc".to_string(),
+            position: Position::new(0, 0),
+            facing: None,
+            dialogue_override: Some(20),
+        };
+
+        // Act
+        let resolved = ResolvedNpc::from_placement_and_definition(&placement, &definition);
+
+        // Assert
+        assert_eq!(
+            resolved.dialogue_id,
+            Some(20),
+            "Should use placement override, not definition default"
+        );
+    }
+
+    #[test]
+    fn test_resolve_npcs_empty_placements() {
+        // Arrange
+        let mut npc_db = NpcDatabase::new();
+        npc_db
+            .add_npc(NpcDefinition::new("npc1", "NPC 1", "npc1.png"))
+            .unwrap();
+
+        let map = Map::new(1, "Empty".to_string(), "No NPCs".to_string(), 10, 10);
+        // No placements added
+
+        // Act
+        let resolved = map.resolve_npcs(&npc_db);
+
+        // Assert
+        assert_eq!(resolved.len(), 0);
     }
 }
 
