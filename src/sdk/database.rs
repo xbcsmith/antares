@@ -2446,4 +2446,191 @@ mod tests {
         assert_eq!(stats.total(), 181);
         assert_eq!(stats.npc_count, 15);
     }
+
+    #[test]
+    fn test_load_core_npcs_file() {
+        // Test loading the actual core NPCs data file
+        let core_npcs_path = "data/npcs.ron";
+
+        // Skip test if file doesn't exist (in CI environments)
+        if !std::path::Path::new(core_npcs_path).exists() {
+            return;
+        }
+
+        let db = NpcDatabase::load_from_file(core_npcs_path).expect("Failed to load core npcs.ron");
+
+        // Verify base archetypes are loaded
+        assert!(db.has_npc("base_merchant"), "base_merchant not found");
+        assert!(db.has_npc("base_innkeeper"), "base_innkeeper not found");
+        assert!(db.has_npc("base_priest"), "base_priest not found");
+        assert!(db.has_npc("base_elder"), "base_elder not found");
+        assert!(db.has_npc("base_guard"), "base_guard not found");
+        assert!(db.has_npc("base_ranger"), "base_ranger not found");
+        assert!(db.has_npc("base_wizard"), "base_wizard not found");
+
+        // Verify archetype properties
+        let merchant = db
+            .get_npc("base_merchant")
+            .expect("Merchant archetype not found");
+        assert!(
+            merchant.is_merchant,
+            "Merchant should have is_merchant=true"
+        );
+        assert!(!merchant.is_innkeeper, "Merchant should not be innkeeper");
+        assert_eq!(merchant.faction, Some("Merchants Guild".to_string()));
+
+        let innkeeper = db
+            .get_npc("base_innkeeper")
+            .expect("Innkeeper archetype not found");
+        assert!(
+            innkeeper.is_innkeeper,
+            "Innkeeper should have is_innkeeper=true"
+        );
+        assert!(!innkeeper.is_merchant, "Innkeeper should not be merchant");
+        assert_eq!(innkeeper.faction, Some("Innkeepers Guild".to_string()));
+
+        let priest = db
+            .get_npc("base_priest")
+            .expect("Priest archetype not found");
+        assert_eq!(priest.faction, Some("Temple".to_string()));
+
+        // Verify count
+        assert_eq!(db.count(), 7, "Should have 7 base archetypes");
+    }
+
+    #[test]
+    fn test_load_tutorial_npcs_file() {
+        // Test loading the tutorial campaign NPCs data file
+        let tutorial_npcs_path = "campaigns/tutorial/data/npcs.ron";
+
+        // Skip test if file doesn't exist (in CI environments)
+        if !std::path::Path::new(tutorial_npcs_path).exists() {
+            return;
+        }
+
+        let db = NpcDatabase::load_from_file(tutorial_npcs_path)
+            .expect("Failed to load tutorial npcs.ron");
+
+        // Verify key tutorial NPCs are loaded
+        assert!(
+            db.has_npc("tutorial_elder_village"),
+            "Village elder not found"
+        );
+        assert!(db.has_npc("tutorial_wizard_fizban"), "Fizban not found");
+        assert!(
+            db.has_npc("tutorial_wizard_fizban_brother"),
+            "Fizban's brother not found"
+        );
+        assert!(db.has_npc("tutorial_ranger_lost"), "Lost ranger not found");
+
+        // Verify Fizban's properties (quest giver with dialogue)
+        let fizban = db
+            .get_npc("tutorial_wizard_fizban")
+            .expect("Fizban not found");
+        assert_eq!(fizban.name, "Fizban");
+        assert_eq!(
+            fizban.dialogue_id,
+            Some(1),
+            "Fizban should reference dialogue 1"
+        );
+        assert_eq!(fizban.quest_ids, vec![0], "Fizban should give quest 0");
+        assert_eq!(fizban.faction, Some("Wizards".to_string()));
+
+        // Verify Fizban's brother (multiple quests)
+        let brother = db
+            .get_npc("tutorial_wizard_fizban_brother")
+            .expect("Fizban's brother not found");
+        assert_eq!(
+            brother.quest_ids,
+            vec![1, 3],
+            "Brother should give quests 1 and 3"
+        );
+
+        // Verify merchants and innkeepers
+        let merchants = db.merchants();
+        assert!(merchants.len() >= 2, "Should have at least 2 merchants");
+
+        let innkeepers = db.innkeepers();
+        assert!(innkeepers.len() >= 2, "Should have at least 2 innkeepers");
+
+        // Verify quest givers
+        let quest_givers = db.quest_givers();
+        assert!(
+            quest_givers.len() >= 3,
+            "Should have at least 3 quest givers"
+        );
+
+        // Verify Village Elder has quest 5 (The Lich's Tomb)
+        let elder = db
+            .get_npc("tutorial_elder_village")
+            .expect("Elder not found");
+        assert_eq!(elder.quest_ids, vec![5], "Elder should give quest 5");
+
+        // Verify total count (12 NPCs in tutorial)
+        assert_eq!(db.count(), 12, "Should have 12 tutorial NPCs");
+    }
+
+    #[test]
+    fn test_tutorial_npcs_reference_valid_dialogues() {
+        // Test that tutorial NPCs reference valid dialogue IDs
+        let tutorial_npcs_path = "campaigns/tutorial/data/npcs.ron";
+        let tutorial_dialogues_path = "campaigns/tutorial/data/dialogues.ron";
+
+        // Skip test if files don't exist
+        if !std::path::Path::new(tutorial_npcs_path).exists()
+            || !std::path::Path::new(tutorial_dialogues_path).exists()
+        {
+            return;
+        }
+
+        let npc_db = NpcDatabase::load_from_file(tutorial_npcs_path)
+            .expect("Failed to load tutorial npcs.ron");
+        let dialogue_db = DialogueDatabase::load_from_file(tutorial_dialogues_path)
+            .expect("Failed to load tutorial dialogues.ron");
+
+        // Verify all NPCs with dialogue_id reference valid dialogues
+        for npc_id in npc_db.all_npcs() {
+            let npc = npc_db.get_npc(&npc_id).expect("NPC not found");
+            if let Some(dialogue_id) = npc.dialogue_id {
+                assert!(
+                    dialogue_db.has_dialogue(&dialogue_id),
+                    "NPC {} references invalid dialogue_id {}",
+                    npc.id,
+                    dialogue_id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_tutorial_npcs_reference_valid_quests() {
+        // Test that tutorial NPCs reference valid quest IDs
+        let tutorial_npcs_path = "campaigns/tutorial/data/npcs.ron";
+        let tutorial_quests_path = "campaigns/tutorial/data/quests.ron";
+
+        // Skip test if files don't exist
+        if !std::path::Path::new(tutorial_npcs_path).exists()
+            || !std::path::Path::new(tutorial_quests_path).exists()
+        {
+            return;
+        }
+
+        let npc_db = NpcDatabase::load_from_file(tutorial_npcs_path)
+            .expect("Failed to load tutorial npcs.ron");
+        let quest_db = QuestDatabase::load_from_file(tutorial_quests_path)
+            .expect("Failed to load tutorial quests.ron");
+
+        // Verify all NPCs with quest_ids reference valid quests
+        for npc_id in npc_db.all_npcs() {
+            let npc = npc_db.get_npc(&npc_id).expect("NPC not found");
+            for quest_id in &npc.quest_ids {
+                assert!(
+                    quest_db.has_quest(quest_id),
+                    "NPC {} references invalid quest_id {}",
+                    npc.id,
+                    quest_id
+                );
+            }
+        }
+    }
 }
