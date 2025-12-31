@@ -2,14 +2,21 @@
 
 ## SDK
 
+### Remove Event Triggers
+
+[remove per tile event triggers implementation](./remove_per_tile_event_triggers_implementation_plan.md)
+
 ### Config Editor Implementation
 
 [config editor implementation](./config_editor_implementation_plan.md)
 
-
 ### Portrait Support Implementation
 
 [portrait support implementation](./portrait_support_implementation_plan.md)
+
+## Starting Position Implementation
+
+X Need to be able to set starting position for player characters in map editor. (It is done in the campaign.ron)
 
 ## Game Engine
 
@@ -28,4 +35,3 @@
 ### Sprite Support (After Tile Visual Metadata)
 
 [Sprite Support](./sprite_support_implementation_plan.md)
-

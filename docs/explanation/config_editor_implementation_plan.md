@@ -13,13 +13,13 @@ Add a Config tab to the Campaign Builder SDK that allows campaign authors to vis
   - `AudioConfig`: master_volume, music_volume, sfx_volume, ambient_volume, enable_audio
   - `ControlsConfig`: move_forward, move_back, turn_left, turn_right, interact, menu, movement_cooldown
   - `CameraConfig`: mode, eye_height, fov, near_clip, far_clip, smooth_rotation, rotation_speed, light_height, light_intensity, light_range, shadows_enabled
-  
+
 - **Editor Pattern**: All editors follow a consistent pattern:
   - `*EditorState` struct with `mode`, `search_query`, `edit_buffer`, etc.
   - `new()` and `default()` constructors
   - `show()` method accepting `&mut egui::Ui` plus data references
   - Toolbar integration via `EditorToolbar`, save/load/reload actions
-  
+
 - **Tab System**: [`main.rs`](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/sdk/campaign_builder/src/main.rs#L232-L246) defines `EditorTab` enum and dispatches to editor `show()` methods
 
 ### Identified Issues

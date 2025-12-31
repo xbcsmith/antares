@@ -272,7 +272,7 @@ ui.horizontal(|ui| {
     ) {
         // Selection changed via autocomplete
     }
-    
+
     // Grid picker button
     if ui.button("🖼").on_hover_text("Browse portraits").clicked() {
         self.portrait_picker_open = true;
@@ -401,7 +401,7 @@ if let Some(texture) = self.load_portrait_texture(ctx, campaign_dir, &portrait_i
                 .color(egui::Color32::YELLOW)
         );
     });
-    
+
     // If not already "0", try loading fallback portrait "0"
     if portrait_id != "0" {
         if let Some(fallback) = self.load_portrait_texture(ctx, campaign_dir, "0") {

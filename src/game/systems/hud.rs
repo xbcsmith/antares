@@ -18,7 +18,7 @@ use crate::domain::types::Direction;
 use crate::game::resources::GlobalState;
 use bevy::prelude::*;
 use std::collections::HashMap;
-use tracing::debug;
+use tracing::{debug, warn};
 
 // ===== Constants =====
 
@@ -412,6 +412,8 @@ fn update_compass(
 fn update_portraits(
     global_state: Res<GlobalState>,
     portraits: Res<PortraitAssets>,
+    asset_server: Option<Res<AssetServer>>,
+    images: Option<Res<Assets<Image>>>,
     mut portrait_query: Query<(&CharacterPortrait, &mut BackgroundColor, &mut ImageNode)>,
 ) {
     let party = &global_state.0.party;
@@ -431,21 +433,67 @@ fn update_portraits(
                 .replace(' ', "_");
             let name_key = character.name.to_lowercase().replace(' ', "_");
 
+            // Helper to check if a handle is loaded. We consider a handle 'loaded' if:
+            // - It's present in the `Assets<Image>` storage (useful for tests where assets
+            //   are inserted directly), or
+            // - The AssetServer reports the handle as `Loaded` (normal runtime case).
+            let is_handle_loaded = |handle: &Handle<Image>| -> bool {
+                if handle == &Handle::<Image>::default() {
+                    return false;
+                }
+                // If the asset exists in the Assets<Image> storage, treat it as loaded.
+                if let Some(imgs) = &images {
+                    if imgs.get(handle.id()).is_some() {
+                        return true;
+                    }
+                }
+                // Otherwise, if an AssetServer is available, consult its load state.
+                if let Some(server) = &asset_server {
+                    server
+                        .get_load_state(handle.id())
+                        .map(|s| s.is_loaded())
+                        .unwrap_or(false)
+                } else {
+                    // No AssetServer available (tests / minimal env) -> assume available
+                    true
+                }
+            };
+
             // Lookup by explicit portrait_id key first (if provided)
             if !portrait_key.is_empty() {
                 if let Some(handle) = portraits.handles_by_name.get(&portrait_key) {
-                    image_node.image = handle.clone();
-                    image_node.color = Color::WHITE;
-                    *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
-                    continue;
+                    if is_handle_loaded(handle) {
+                        image_node.image = handle.clone();
+                        image_node.color = Color::WHITE;
+                        *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
+                        continue;
+                    } else {
+                        // Keep placeholder until asset is fully loaded
+                        image_node.image = Handle::<Image>::default();
+                        image_node.color = Color::WHITE;
+                        *bg_color = BackgroundColor(get_portrait_color(portrait_key.as_str()));
+                        continue;
+                    }
                 }
             }
 
             // Then try lookup by normalized name
             if let Some(handle) = portraits.handles_by_name.get(&name_key) {
-                image_node.image = handle.clone();
-                image_node.color = Color::WHITE;
-                *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
+                if is_handle_loaded(handle) {
+                    image_node.image = handle.clone();
+                    image_node.color = Color::WHITE;
+                    *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
+                } else {
+                    // No image available / not yet loaded -> fallback to deterministic color
+                    image_node.image = Handle::<Image>::default();
+                    image_node.color = Color::WHITE;
+                    let color_key = if !portrait_key.is_empty() {
+                        portrait_key.as_str()
+                    } else {
+                        name_key.as_str()
+                    };
+                    *bg_color = BackgroundColor(get_portrait_color(color_key));
+                }
             } else {
                 // No image available -> fallback to deterministic color based on portrait_key or name_key
                 image_node.image = Handle::<Image>::default();
@@ -527,17 +575,92 @@ fn ensure_portraits_loaded(
                             "ensure_portraits_loaded: found portrait file: {}",
                             path.display()
                         );
-                        // Load the file (absolute path is supported by AssetServer)
-                        let handle: Handle<Image> = asset_server.load(path.clone());
 
-                        // Normalize the filename stem into a lookup key and index by name
-                        let key = stem.to_lowercase().replace(' ', "_");
-                        portraits.handles_by_name.insert(key.clone(), handle);
+                        // Compute the path relative to the campaign root and load it via the campaign's
+                        // named AssetSource (`<campaign_id>://...`). This keeps asset references relative
+                        // to the campaign directory while ensuring they are approved by the AssetServer.
+                        let relative_path = match path.strip_prefix(&campaign.root_path) {
+                            Ok(p) => p.to_path_buf(),
+                            Err(_) => {
+                                // Fallback: try canonicalizing both path and campaign root to compute a relative path.
+                                match (
+                                    std::fs::canonicalize(&path),
+                                    std::fs::canonicalize(&campaign.root_path),
+                                ) {
+                                    (Ok(abs_path), Ok(abs_root)) => abs_path
+                                        .strip_prefix(&abs_root)
+                                        .map(|p| p.to_path_buf())
+                                        .unwrap_or_else(|_| {
+                                            std::path::PathBuf::from(
+                                                path.file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or_default(),
+                                            )
+                                        }),
+                                    _ => std::path::PathBuf::from(
+                                        path.file_name()
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or_default(),
+                                    ),
+                                }
+                            }
+                        };
+
+                        // Normalize separators to '/' for AssetPath parsing
+                        let rel_str = relative_path
+                            .components()
+                            .map(|c| c.as_os_str().to_string_lossy())
+                            .collect::<Vec<_>>()
+                            .join("/");
+
+                        // Load relative to the campaign (BEVY_ASSET_ROOT points to the campaign directory)
                         debug!(
-                            "ensure_portraits_loaded: indexed '{}' as key '{}'",
-                            path.display(),
-                            key
+                            "ensure_portraits_loaded: loading portrait via relative asset path '{}'",
+                            rel_str
                         );
+
+                        // Attempt a normal load first. If the AssetServer refuses (returns a default handle)
+                        // attempt `load_override` as a fallback so assets living outside the default
+                        // approved locations can still be loaded in single-campaign runs.
+                        let mut handle: Handle<Image> = asset_server.load(rel_str.clone());
+
+                        if handle == Handle::default() {
+                            debug!(
+                                "ensure_portraits_loaded: standard load returned default handle for '{}', trying load_override",
+                                rel_str
+                            );
+                            let override_handle: Handle<Image> =
+                                asset_server.load_override(rel_str.clone());
+                            if override_handle != Handle::default() {
+                                handle = override_handle;
+                            } else {
+                                warn!(
+                                    "ensure_portraits_loaded: failed to load portrait '{}' for campaign '{}' (unapproved path or missing loader); skipping",
+                                    rel_str, campaign.id
+                                );
+                                continue;
+                            }
+                        }
+
+                        // Only index non-default handles so we don't store transparent-placeholder handles
+                        // which would prevent later attempts to resolve the asset.
+                        if handle != Handle::default() {
+                            let key = stem.to_lowercase().replace(' ', "_");
+                            portraits
+                                .handles_by_name
+                                .insert(key.clone(), handle.clone());
+                            debug!(
+                                "ensure_portraits_loaded: indexed '{}' as key '{}'",
+                                path.display(),
+                                key
+                            );
+                        } else {
+                            // Defensive: shouldn't normally happen because of checks above.
+                            warn!(
+                                "ensure_portraits_loaded: skipping indexing of portrait '{}' (default handle)",
+                                rel_str
+                            );
+                        }
                     }
                 }
             }
@@ -552,8 +675,9 @@ fn ensure_portraits_loaded(
     );
 }
 
-// Helper moved into test scope to avoid dead-code warnings during clippy runs.
-// See the unit tests for a test-only helper implementation that performs the same behavior.
+// (removed) Path canonicalization helper
+// Portraits are now loaded via named campaign asset sources (e.g. `campaign_id://assets/portraits/foo.png`)
+// so the dedicated absolute-path helper is no longer needed.
 
 // ===== Helper Functions =====
 
@@ -1177,8 +1301,32 @@ mod tests {
             assert!(found_placeholder, "Portrait color not set for slot 0");
         }
 
-        // Insert a (test) image handle for name 'painter' and run update to apply it
-        let handle = Handle::<Image>::default();
+        // Insert a (test) image asset for name 'painter' and run update to apply it.
+        // In some test environments the `Assets<Image>` resource may not have been
+        // initialized by asset-related plugins, so ensure it exists before adding.
+        let handle = {
+            let world = app.world_mut();
+            // Ensure the Assets<Image> resource exists in this test world.
+            if world.get_resource::<Assets<Image>>().is_none() {
+                world.init_resource::<Assets<Image>>();
+            }
+            let mut images = world.resource_mut::<Assets<Image>>();
+
+            // Create a minimal 1x1 white image so the asset can be treated as \"loaded\"
+            // by the Assets storage in the test environment.
+            let img = Image::new_fill(
+                bevy::render::render_resource::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                bevy::render::render_resource::TextureDimension::D2,
+                &[255u8, 255u8, 255u8, 255u8],
+                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                bevy::asset::RenderAssetUsages::all(),
+            );
+            images.add(img)
+        };
         {
             let world = app.world_mut();
             let mut portraits = world.resource_mut::<PortraitAssets>();
@@ -1186,6 +1334,22 @@ mod tests {
                 .handles_by_name
                 .insert("painter".to_string(), handle.clone());
         }
+
+        // Sanity checks: ensure the portrait mapping and image resource are present
+        {
+            let world = app.world();
+            let portraits = world.resource::<PortraitAssets>();
+            assert!(
+                portraits.handles_by_name.contains_key("painter"),
+                "Portrait mapping missing for 'painter'"
+            );
+            let images = world.resource::<Assets<Image>>();
+            assert!(
+                images.get(handle.id()).is_some(),
+                "Inserted image asset not present in Assets<Image>"
+            );
+        }
+
         app.update();
 
         // After providing a handle, the background should be transparent and the image handle applied

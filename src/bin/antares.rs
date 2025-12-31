@@ -32,10 +32,8 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    // Initialize tracing subscriber with environment filter so RUST_LOG controls logging level
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    // Let Bevy's LogPlugin initialize logging to avoid double-initialization.
+    // Tracing/log setup is handled by the engine's LogPlugin now.
 
     // Load campaign
     let campaign = if let Some(path_str) = args.campaign {
@@ -79,32 +77,50 @@ fn main() {
         ..default()
     };
 
-    App::new()
-        .add_plugins(DefaultPlugins.set(window_plugin).set(RenderPlugin {
-            render_creation: RenderCreation::Automatic(WgpuSettings {
-                backends: Some(Backends::all()),
+    // Set BEVY_ASSET_ROOT to the campaign directory so the AssetServer resolves relative asset paths against it.
+    let campaign_root_abs = campaign
+        .root_path
+        .canonicalize()
+        .unwrap_or_else(|_| campaign.root_path.clone());
+    let campaign_root_str = campaign_root_abs.to_string_lossy().to_string();
+    std::env::set_var("BEVY_ASSET_ROOT", campaign_root_str.clone());
+
+    // Build the app and configure the AssetPlugin to use '.' as its file path so the effective asset root is the campaign root
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(window_plugin)
+            .set(bevy::asset::AssetPlugin {
+                file_path: ".".to_string(),
+                ..Default::default()
+            })
+            .set(RenderPlugin {
+                render_creation: RenderCreation::Automatic(WgpuSettings {
+                    backends: Some(Backends::all()),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
-        .insert_resource(GraphicsConfigResource {
-            msaa_samples: graphics_config.msaa_samples,
-            shadow_quality: graphics_config.shadow_quality,
-        })
-        .add_plugins(EguiPlugin::default())
-        .add_plugins(AntaresPlugin { campaign })
-        .add_plugins(MapRenderingPlugin)
-        .add_plugins(CameraPlugin::new(camera_config))
-        .add_plugins(HudPlugin)
-        .add_plugins(antares::game::systems::input::InputPlugin::new(
-            controls_config,
-        ))
-        .add_plugins(antares::game::systems::events::EventPlugin)
-        .add_plugins(antares::game::systems::audio::AudioPlugin {
-            config: audio_config,
-        })
-        // .add_plugins(antares::game::systems::ui::UiPlugin) // Temporarily disabled due to egui context issue
-        .run();
+    )
+    .insert_resource(GraphicsConfigResource {
+        msaa_samples: graphics_config.msaa_samples,
+        shadow_quality: graphics_config.shadow_quality,
+    })
+    .add_plugins(EguiPlugin::default())
+    .add_plugins(AntaresPlugin { campaign })
+    .add_plugins(MapRenderingPlugin)
+    .add_plugins(CameraPlugin::new(camera_config))
+    .add_plugins(HudPlugin)
+    .add_plugins(antares::game::systems::input::InputPlugin::new(
+        controls_config,
+    ))
+    .add_plugins(antares::game::systems::events::EventPlugin)
+    .add_plugins(antares::game::systems::audio::AudioPlugin {
+        config: audio_config,
+    });
+
+    // .add_plugins(antares::game::systems::ui::UiPlugin) // Temporarily disabled due to egui context issue
+    app.run();
 }
 
 /// Main game plugin organizing all systems

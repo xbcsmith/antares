@@ -274,7 +274,7 @@ Update `spawn_map()` to:
 - Get texture and atlas handles from `SpriteAssets`
 - Create `Sprite3d` bundle with billboard settings (`double_sided: true`)
 - Set `pixels_per_metre: 128.0` (1 world unit = 128 pixels base)
-- Position at tile coordinates using `tile.visual.mesh_y_position()` 
+- Position at tile coordinates using `tile.visual.mesh_y_position()`
 - Apply scale from `tile.visual.effective_scale()`
 - Tag with `MapEntity`, `TileCoord`, `TileSprite`
 

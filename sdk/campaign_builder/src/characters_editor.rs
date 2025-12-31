@@ -267,11 +267,9 @@ impl CharactersEditorState {
             .map_err(|_| "Invalid Luck value")?;
 
         // Parse other fields
-        let portrait_id = self
-            .buffer
-            .portrait_id
-            .parse::<u8>()
-            .map_err(|_| "Invalid Portrait ID")?;
+        // Portrait IDs are now strings (filename stems). Accept whatever the user typed
+        // and store it as a trimmed string. An empty string indicates no portrait.
+        let portrait_id = self.buffer.portrait_id.trim().to_string();
         let starting_gold = self
             .buffer
             .starting_gold
