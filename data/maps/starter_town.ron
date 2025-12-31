@@ -3382,4 +3382,46 @@
             dialogue: "May the light guide you. I can heal your wounds and cure your ailments.",
         ),
     ],
+    npc_placements: [
+        // Village Elder - Quest giver in town square
+        (
+            npc_id: "base_elder",
+            position: (
+                x: 10,
+                y: 4,
+            ),
+            facing: Some(South),
+            dialogue_override: None,
+        ),
+        // Innkeeper - Provides rest and healing
+        (
+            npc_id: "base_innkeeper",
+            position: (
+                x: 4,
+                y: 3,
+            ),
+            facing: Some(South),
+            dialogue_override: None,
+        ),
+        // Merchant - Sells goods
+        (
+            npc_id: "base_merchant",
+            position: (
+                x: 15,
+                y: 3,
+            ),
+            facing: Some(South),
+            dialogue_override: None,
+        ),
+        // Priest - Healing and cures
+        (
+            npc_id: "base_priest",
+            position: (
+                x: 10,
+                y: 9,
+            ),
+            facing: Some(North),
+            dialogue_override: None,
+        ),
+    ],
 )

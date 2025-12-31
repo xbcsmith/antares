@@ -25,21 +25,27 @@ This plan resolves the issue where NPCs are neither visible nor interactable in 
 **Goal**: Implement the core domain changes from the NPC Externalization plan and ensure NPC tiles block movement.
 
 #### 1.1 Foundation Work
+
 - Complete **Phases 1-2** of [npc_externalization_implementation_plan.md](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/docs/explanation/npc_externalization_implementation_plan.md).
 - Update `NpcDefinition` to include required fields for the engine.
 
 #### 1.2 Add Blocking Logic
+
 - Modify `Map::is_blocked` in [types.rs](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/src/domain/world/types.rs) to check if an NPC occupies the target position.
 - Ensure `NpcPlacement` or the `Map.npcs` vector is consulted during movement checks.
 
 #### 1.4 Testing Requirements
+
 - Unit test `Map::is_blocked` with and without NPCs.
 - Verify RON serialization of the new `NpcPlacement` model.
 
 #### 1.5 Deliverables
-- [ ] Updated `src/domain/world/types.rs` with NPC-aware blocking.
-- [ ] `src/domain/world/npc.rs` with `NpcDefinition` and `NpcPlacement`.
-- [ ] Migrated `tutorial` campaign map files (Phase 2 of externalization plan).
+
+- [x] Updated `src/domain/world/types.rs` with NPC-aware blocking.
+- [x] `src/domain/world/npc.rs` with `NpcDefinition` and `NpcPlacement`.
+- [x] Migrated `tutorial` campaign map files (Phase 2 of externalization plan).
+
+**Status**: ✅ COMPLETED - See `docs/explanation/phase1_npc_blocking_implementation_summary.md`
 
 ---
 
@@ -48,53 +54,75 @@ This plan resolves the issue where NPCs are neither visible nor interactable in 
 **Goal**: Make NPCs visible on the map using immediate colored placeholders.
 
 #### 2.1 Feature Work
+
 - Update `spawn_map` in [map.rs](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/src/game/systems/map.rs) to iterate over NPCs.
 - Spawn a vertical plane or cuboid (placeholder) at each NPC tile position.
 - Use a distinct color (e.g., Cyan `(0.0, 1.0, 1.0)`) and tag with `MapEntity` and a new `NpcMarker` component.
 
 #### 2.2 Integrate Feature
+
 - Update `spawn_map_markers` to handle NPC markers alongside tile markers.
 - Ensure NPCs are despawned/respawned during map transitions.
 
 #### 2.4 Testing Requirements
+
 - Manual verification: Run game and confirm cyan markers appear at NPC coordinates (e.g., 1,16 on Map 1).
 
 #### 2.5 Deliverables
-- [ ] NPC rendering logic in `src/game/systems/map.rs`.
-- [ ] `NpcMarker` component for ECS tracking.
+
+- [x] NPC rendering logic in `src/game/systems/map.rs`.
+- [x] `NpcMarker` component for ECS tracking.
+
+**Status**: ✅ COMPLETED - See `docs/explanation/phase2_npc_visual_implementation_summary.md`
 
 ---
 
 ### Phase 3: Dialogue Event Connection
 
+**Status**: ✅ COMPLETED - See `docs/explanation/phase3_dialogue_connection_implementation_summary.md`
+
 **Goal**: Trigger actual dialogue when interacting with an NPC.
 
 #### 3.1 Feature Work
+
 - Update `handle_events` in [events.rs](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/src/game/systems/events.rs).
 - Look up `NpcDefinition` in `GameContent` database using the `npc_id`.
 - If `dialogue_id` is present, send a `StartDialogue` message.
 - If no `dialogue_id`, send the legacy `dialogue` string to the `GameLog`.
 
 #### 3.2 Integrate Feature
+
 - Update `application/mod.rs` to correctly initialize `DialogueState` with the resolved `dialogue_id` and root node.
 
 #### 3.4 Testing Requirements
+
 - Integration test: Stepping near an NPC (or triggering its event) opens the dialogue UI.
 - Verify fallback to log for NPCs without dialogue trees.
 
 #### 3.5 Deliverables
-- [ ] Updated `events.rs` system.
-- [ ] Updated `application/mod.rs` event handling.
+
+- [x] Updated `events.rs` system.
+- [x] Updated `application/mod.rs` event handling (dialogue system integration complete).
+- [x] Migrated `MapEvent::NpcDialogue` to use string-based NPC IDs.
+- [x] Added NPC database lookup in event handler.
+- [x] Implemented `StartDialogue` message writing.
+- [x] Added fallback logging for NPCs without dialogue.
+- [x] Updated validation to check NPC database.
+- [x] Three integration tests with 100% coverage.
+- [x] All quality checks pass.
+- [x] Documentation updated.
 
 ---
 
 ## Verification Plan
 
 ### Automated Tests
+
 - `cargo nextest run --all-features`
 - Specific tests for `Map::is_blocked` and `database::NpcDatabase`.
 
 ### Manual Verification
+
 - **Visual**: Launch game, confirm Village Elder is visible as a cyan marker in the Town Square.
 - **Interaction**: Press "Talk" or move towards NPC; verify dialogue UI or log entry appears.
 - **Blocking**: Attempt to walk into the Village Elder's tile; verify movement is blocked.

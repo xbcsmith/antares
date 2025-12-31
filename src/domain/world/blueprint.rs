@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::domain::types::{MapId, Position};
-use crate::domain::world::{Map, MapEvent, Npc, TerrainType, Tile, WallType};
+use crate::domain::world::{Map, MapEvent, NpcPlacement, TerrainType, Tile, WallType};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -18,7 +18,7 @@ pub struct MapBlueprint {
     pub tiles: Vec<TileBlueprint>,
     pub events: Vec<MapEventBlueprint>,
     #[serde(default)]
-    pub npcs: Vec<NpcBlueprint>,
+    pub npc_placements: Vec<NpcPlacementBlueprint>,
     #[serde(default)]
     pub exits: Vec<ExitBlueprint>,
     pub starting_position: Position,
@@ -72,7 +72,7 @@ pub enum BlueprintEventType {
     Combat(Vec<MonsterSpawn>),
     Teleport { map_id: u16, x: i32, y: i32 },
     Trap { damage: u16, effect: Option<String> },
-    NpcDialogue(u16),
+    NpcDialogue(String),
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,14 +87,22 @@ pub struct LootItem {
     pub quantity: u16,
 }
 
+/// Blueprint for NPC placement (references NPC definition by ID)
+///
+/// This is the new format for placing NPCs on maps. Instead of inline NPC data,
+/// it references an NPC definition from the NPC database.
 #[derive(Debug, Deserialize)]
-pub struct NpcBlueprint {
-    pub id: u16,
-    pub name: String,
-    #[serde(default)]
-    pub description: String,
+pub struct NpcPlacementBlueprint {
+    /// ID of the NPC definition in the database
+    pub npc_id: String,
+    /// Position on the map
     pub position: Position,
-    pub dialogue_id: Option<String>,
+    /// Optional facing direction
+    #[serde(default)]
+    pub facing: Option<crate::domain::types::Direction>,
+    /// Optional dialogue override (uses NPC's default if None)
+    #[serde(default)]
+    pub dialogue_override: Option<crate::domain::dialogue::DialogueId>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -186,15 +194,15 @@ impl From<MapBlueprint> for Map {
             events.insert(bp_event.position, event);
         }
 
-        let npcs = bp
-            .npcs
+        // Convert NPC placements from blueprint format
+        let npc_placements = bp
+            .npc_placements
             .into_iter()
-            .map(|bp_npc| Npc {
-                id: bp_npc.id,
-                name: bp_npc.name,
-                description: bp_npc.description,
-                position: bp_npc.position,
-                dialogue: bp_npc.dialogue_id.unwrap_or_else(|| "...".to_string()),
+            .map(|bp_placement| NpcPlacement {
+                npc_id: bp_placement.npc_id,
+                position: bp_placement.position,
+                facing: bp_placement.facing,
+                dialogue_override: bp_placement.dialogue_override,
             })
             .collect();
 
@@ -206,7 +214,234 @@ impl From<MapBlueprint> for Map {
             height: bp.height,
             tiles,
             events,
-            npcs,
+            npc_placements,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::types::Direction;
+
+    #[test]
+    fn test_npc_placement_blueprint_conversion() {
+        // Arrange
+        let bp = MapBlueprint {
+            id: 1,
+            name: "Test Map".to_string(),
+            description: "Test description".to_string(),
+            width: 10,
+            height: 10,
+            environment: EnvironmentType::Indoor,
+            tiles: vec![TileBlueprint {
+                x: 0,
+                y: 0,
+                code: TileCode::Floor,
+            }],
+            events: vec![],
+            npc_placements: vec![
+                NpcPlacementBlueprint {
+                    npc_id: "merchant_1".to_string(),
+                    position: Position::new(5, 5),
+                    facing: Some(Direction::North),
+                    dialogue_override: None,
+                },
+                NpcPlacementBlueprint {
+                    npc_id: "guard_1".to_string(),
+                    position: Position::new(8, 3),
+                    facing: None,
+                    dialogue_override: Some(42),
+                },
+            ],
+            exits: vec![],
+            starting_position: Position::new(0, 0),
+        };
+
+        // Act
+        let map: Map = bp.into();
+
+        // Assert
+        assert_eq!(map.npc_placements.len(), 2);
+        assert_eq!(map.npc_placements[0].npc_id, "merchant_1");
+        assert_eq!(map.npc_placements[0].position, Position::new(5, 5));
+        assert_eq!(map.npc_placements[0].facing, Some(Direction::North));
+        assert_eq!(map.npc_placements[0].dialogue_override, None);
+
+        assert_eq!(map.npc_placements[1].npc_id, "guard_1");
+        assert_eq!(map.npc_placements[1].position, Position::new(8, 3));
+        assert_eq!(map.npc_placements[1].facing, None);
+        assert_eq!(map.npc_placements[1].dialogue_override, Some(42));
+    }
+
+    #[test]
+    fn test_empty_npc_placements() {
+        // Arrange
+        let bp = MapBlueprint {
+            id: 1,
+            name: "Empty Map".to_string(),
+            description: "No NPCs".to_string(),
+            width: 5,
+            height: 5,
+            environment: EnvironmentType::Cave,
+            tiles: vec![],
+            events: vec![],
+            npc_placements: vec![],
+            exits: vec![],
+            starting_position: Position::new(0, 0),
+        };
+
+        // Act
+        let map: Map = bp.into();
+
+        // Assert
+        assert_eq!(map.npc_placements.len(), 0);
+    }
+
+    #[test]
+    fn test_npc_placement_with_all_fields() {
+        // Arrange
+        let bp = MapBlueprint {
+            id: 5,
+            name: "Full NPC Test".to_string(),
+            description: "Testing all NPC placement fields".to_string(),
+            width: 20,
+            height: 20,
+            environment: EnvironmentType::Indoor,
+            tiles: vec![],
+            events: vec![],
+            npc_placements: vec![NpcPlacementBlueprint {
+                npc_id: "innkeeper_mary".to_string(),
+                position: Position::new(12, 8),
+                facing: Some(Direction::West),
+                dialogue_override: Some(100),
+            }],
+            exits: vec![],
+            starting_position: Position::new(1, 1),
+        };
+
+        // Act
+        let map: Map = bp.into();
+
+        // Assert
+        assert_eq!(map.npc_placements.len(), 1);
+        let placement = &map.npc_placements[0];
+        assert_eq!(placement.npc_id, "innkeeper_mary");
+        assert_eq!(placement.position, Position::new(12, 8));
+        assert_eq!(placement.facing, Some(Direction::West));
+        assert_eq!(placement.dialogue_override, Some(100));
+    }
+
+    #[test]
+    fn test_integration_npc_blueprint_to_resolution() {
+        // This integration test demonstrates the complete workflow:
+        // 1. Define NPCs in database
+        // 2. Create map blueprint with NPC placements
+        // 3. Convert blueprint to Map
+        // 4. Resolve NPCs against database
+        // 5. Verify resolved data is correct
+
+        // Arrange - Create NPC database
+        let mut npc_db = crate::sdk::database::NpcDatabase::new();
+
+        let merchant = crate::domain::world::npc::NpcDefinition {
+            id: "merchant_bob".to_string(),
+            name: "Bob the Merchant".to_string(),
+            description: "A friendly merchant".to_string(),
+            portrait_path: "merchant.png".to_string(),
+            dialogue_id: Some(10),
+            quest_ids: vec![],
+            faction: Some("Merchants Guild".to_string()),
+            is_merchant: true,
+            is_innkeeper: false,
+        };
+
+        let guard = crate::domain::world::npc::NpcDefinition {
+            id: "city_guard".to_string(),
+            name: "City Guard".to_string(),
+            description: "A vigilant guard".to_string(),
+            portrait_path: "guard.png".to_string(),
+            dialogue_id: Some(20),
+            quest_ids: vec![],
+            faction: Some("City Watch".to_string()),
+            is_merchant: false,
+            is_innkeeper: false,
+        };
+
+        npc_db.add_npc(merchant).unwrap();
+        npc_db.add_npc(guard).unwrap();
+
+        // Arrange - Create map blueprint with NPC placements
+        let blueprint = MapBlueprint {
+            id: 1,
+            name: "Test Town".to_string(),
+            description: "Integration test map".to_string(),
+            width: 20,
+            height: 20,
+            environment: EnvironmentType::Outdoor,
+            tiles: vec![TileBlueprint {
+                x: 0,
+                y: 0,
+                code: TileCode::Grass,
+            }],
+            events: vec![],
+            npc_placements: vec![
+                NpcPlacementBlueprint {
+                    npc_id: "merchant_bob".to_string(),
+                    position: Position::new(5, 5),
+                    facing: Some(Direction::South),
+                    dialogue_override: None,
+                },
+                NpcPlacementBlueprint {
+                    npc_id: "city_guard".to_string(),
+                    position: Position::new(10, 10),
+                    facing: Some(Direction::North),
+                    dialogue_override: Some(99), // Override guard's default dialogue
+                },
+            ],
+            exits: vec![],
+            starting_position: Position::new(0, 0),
+        };
+
+        // Act - Convert blueprint to Map
+        let map: Map = blueprint.into();
+
+        // Assert - Map has correct placements
+        assert_eq!(map.npc_placements.len(), 2);
+        assert_eq!(map.npc_placements[0].npc_id, "merchant_bob");
+        assert_eq!(map.npc_placements[1].npc_id, "city_guard");
+
+        // Act - Resolve NPCs against database
+        let resolved = map.resolve_npcs(&npc_db);
+
+        // Assert - Resolved NPCs have correct data
+        assert_eq!(resolved.len(), 2);
+
+        // Verify merchant
+        let merchant_resolved = resolved
+            .iter()
+            .find(|n| n.npc_id == "merchant_bob")
+            .expect("Merchant not found");
+        assert_eq!(merchant_resolved.name, "Bob the Merchant");
+        assert_eq!(merchant_resolved.position, Position::new(5, 5));
+        assert_eq!(merchant_resolved.facing, Some(Direction::South));
+        assert_eq!(merchant_resolved.dialogue_id, Some(10)); // Uses default
+        assert!(merchant_resolved.is_merchant);
+        assert_eq!(
+            merchant_resolved.faction,
+            Some("Merchants Guild".to_string())
+        );
+
+        // Verify guard
+        let guard_resolved = resolved
+            .iter()
+            .find(|n| n.npc_id == "city_guard")
+            .expect("Guard not found");
+        assert_eq!(guard_resolved.name, "City Guard");
+        assert_eq!(guard_resolved.position, Position::new(10, 10));
+        assert_eq!(guard_resolved.facing, Some(Direction::North));
+        assert_eq!(guard_resolved.dialogue_id, Some(99)); // Uses override, not default 20
+        assert!(!guard_resolved.is_merchant);
+        assert_eq!(guard_resolved.faction, Some("City Watch".to_string()));
     }
 }

@@ -32,6 +32,7 @@ mod items_editor;
 mod logging;
 mod map_editor;
 mod monsters_editor;
+mod npc_editor;
 mod packager;
 mod quest_editor;
 mod races_editor;
@@ -159,6 +160,7 @@ struct CampaignMetadata {
     quests_file: String,
     dialogue_file: String,
     conditions_file: String,
+    npcs_file: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -223,6 +225,7 @@ impl Default for CampaignMetadata {
             quests_file: "data/quests.ron".to_string(),
             dialogue_file: "data/dialogue.ron".to_string(),
             conditions_file: "data/conditions.ron".to_string(),
+            npcs_file: "data/npcs.ron".to_string(),
         }
     }
 }
@@ -241,6 +244,7 @@ enum EditorTab {
     Races,
     Characters,
     Dialogues,
+    NPCs,
     Assets,
     Validation,
 }
@@ -267,6 +271,7 @@ impl EditorTab {
             EditorTab::Races => "Races",
             EditorTab::Characters => "Characters",
             EditorTab::Dialogues => "Dialogues",
+            EditorTab::NPCs => "NPCs",
             EditorTab::Assets => "Assets",
             EditorTab::Validation => "Validation",
         }
@@ -412,6 +417,9 @@ struct CampaignBuilderApp {
     dialogues: Vec<DialogueTree>,
     dialogue_editor_state: DialogueEditorState,
 
+    // NPC editor state
+    npc_editor_state: npc_editor::NpcEditorState,
+
     // Classes editor state
     classes_editor_state: classes_editor::ClassesEditorState,
 
@@ -512,6 +520,8 @@ impl Default for CampaignBuilderApp {
 
             dialogues: Vec::new(),
             dialogue_editor_state: DialogueEditorState::default(),
+
+            npc_editor_state: npc_editor::NpcEditorState::default(),
 
             classes_editor_state: classes_editor::ClassesEditorState::default(),
 
@@ -722,6 +732,24 @@ impl CampaignBuilderApp {
         errors
     }
 
+    /// Validate NPC IDs for uniqueness
+    ///
+    /// Returns validation errors for any duplicate IDs found.
+    fn validate_npc_ids(&self) -> Vec<validation::ValidationResult> {
+        let mut errors = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for npc in &self.npc_editor_state.npcs {
+            if !seen_ids.insert(npc.id.clone()) {
+                errors.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::NPCs,
+                    format!("Duplicate NPC ID: {}", npc.id),
+                ));
+            }
+        }
+        errors
+    }
+
     /// Generate category status checks (passed or no data info messages)
     ///
     /// This function checks each data category and adds:
@@ -818,6 +846,19 @@ impl CampaignBuilderApp {
             results.push(validation::ValidationResult::passed(
                 validation::ValidationCategory::Dialogues,
                 format!("{} dialogues validated", self.dialogues.len()),
+            ));
+        }
+
+        // NPCs category
+        if self.npc_editor_state.npcs.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::NPCs,
+                "No NPCs loaded - add NPCs or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::NPCs,
+                format!("{} NPCs validated", self.npc_editor_state.npcs.len()),
             ));
         }
 
@@ -1297,6 +1338,63 @@ impl CampaignBuilderApp {
         Ok(())
     }
 
+    /// Save NPCs to a file path
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to save NPCs to
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if save was successful
+    fn save_npcs_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+        // Create directory if it doesn't exist
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create NPCs directory: {}", e))?;
+        }
+
+        let ron_config = ron::ser::PrettyConfig::new()
+            .struct_names(false)
+            .enumerate_arrays(false);
+
+        let contents = ron::ser::to_string_pretty(&self.npc_editor_state.npcs, ron_config)
+            .map_err(|e| format!("Failed to serialize NPCs: {}", e))?;
+
+        std::fs::write(path, contents).map_err(|e| format!("Failed to write NPCs file: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Load NPCs from campaign file
+    fn load_npcs(&mut self) -> Result<(), CampaignError> {
+        if let Some(dir) = &self.campaign_dir {
+            let npcs_path = dir.join(&self.campaign.npcs_file);
+
+            if npcs_path.exists() {
+                let contents =
+                    std::fs::read_to_string(&npcs_path).map_err(|e| CampaignError::Io(e))?;
+
+                let npcs: Vec<antares::domain::world::npc::NpcDefinition> =
+                    ron::from_str(&contents).map_err(|e| CampaignError::Deserialization(e))?;
+
+                self.npc_editor_state.npcs = npcs;
+                self.logger.log(
+                    LogLevel::Info,
+                    category::CAMPAIGN,
+                    &format!("Loaded {} NPCs", self.npc_editor_state.npcs.len()),
+                );
+            } else {
+                self.logger.log(
+                    LogLevel::Warn,
+                    category::CAMPAIGN,
+                    &format!("NPCs file not found: {:?}", npcs_path),
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Load monsters from RON file
     fn load_monsters(&mut self) {
         let monsters_file = self.campaign.monsters_file.clone();
@@ -1473,6 +1571,7 @@ impl CampaignBuilderApp {
         self.validation_errors.extend(self.validate_monster_ids());
         self.validation_errors.extend(self.validate_map_ids());
         self.validation_errors.extend(self.validate_condition_ids());
+        self.validation_errors.extend(self.validate_npc_ids());
 
         // Add category status checks (passed or no data info)
         self.validation_errors
@@ -1663,6 +1762,7 @@ impl CampaignBuilderApp {
             ("Races file", &self.campaign.races_file),
             ("Quests file", &self.campaign.quests_file),
             ("Dialogue file", &self.campaign.dialogue_file),
+            ("NPCs file", &self.campaign.npcs_file),
         ] {
             if path.is_empty() {
                 self.validation_errors
@@ -1799,6 +1899,11 @@ impl CampaignBuilderApp {
             if let Err(e) = self.save_dialogues_to_file(&dialogues_path) {
                 save_warnings.push(format!("Dialogues: {}", e));
             }
+
+            let npcs_path = dir.join(&self.campaign.npcs_file);
+            if let Err(e) = self.save_npcs_to_file(&npcs_path) {
+                save_warnings.push(format!("NPCs: {}", e));
+            }
         }
 
         // Now save campaign metadata to RON format
@@ -1925,6 +2030,11 @@ impl CampaignBuilderApp {
                             category::FILE_IO,
                             &format!("Failed to load dialogues: {}", e),
                         );
+                    }
+
+                    if let Err(e) = self.load_npcs() {
+                        self.logger
+                            .warn(category::FILE_IO, &format!("Failed to load NPCs: {}", e));
                     }
 
                     // Scan asset references and mark loaded data files
@@ -2845,6 +2955,7 @@ impl eframe::App for CampaignBuilderApp {
                 &self.monsters,
                 &self.items,
                 &self.conditions,
+                &self.npc_editor_state.npcs,
                 self.campaign_dir.as_ref(),
                 &self.campaign.maps_dir,
                 &self.tool_config.display,
@@ -2892,6 +3003,14 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,
             ),
+            EditorTab::NPCs => {
+                if self
+                    .npc_editor_state
+                    .show(ui, &self.dialogues, &self.quests)
+                {
+                    self.unsaved_changes = true;
+                }
+            }
             EditorTab::Assets => self.show_assets_editor(ui),
             EditorTab::Validation => self.show_validation_panel(ui),
         });
@@ -4516,6 +4635,7 @@ mod tests {
             quests_file: "data/quests.ron".to_string(),
             dialogue_file: "data/dialogue.ron".to_string(),
             conditions_file: "data/conditions.ron".to_string(),
+            npcs_file: "data/npcs.ron".to_string(),
         };
 
         let ron_config = ron::ser::PrettyConfig::new()

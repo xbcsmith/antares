@@ -43,7 +43,8 @@ use crate::ui_helpers::{
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
 use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
-use antares::domain::world::{Map, MapEvent, Npc, TerrainType, Tile, WallType};
+use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
+use antares::domain::world::{Map, MapEvent, TerrainType, Tile, WallType};
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
 use std::fs;
@@ -171,10 +172,13 @@ enum EditorAction {
         event: MapEvent,
         event_id: Option<EventId>,
     },
-    /// NPC was added
-    NpcAdded { npc: Npc },
-    /// NPC was removed
-    NpcRemoved { index: usize, npc: Npc },
+    /// NPC placement was added
+    NpcPlacementAdded { placement: NpcPlacement },
+    /// NPC placement was removed
+    NpcPlacementRemoved {
+        index: usize,
+        placement: NpcPlacement,
+    },
 }
 
 /// Undo/redo stack
@@ -317,8 +321,8 @@ pub struct MapEditorState {
     pub auto_fit_on_resize: bool,
     /// Event editor state
     pub event_editor: Option<EventEditorState>,
-    /// NPC editor state
-    pub npc_editor: Option<NpcEditorState>,
+    /// NPC placement editor state
+    pub npc_placement_editor: Option<NpcPlacementEditorState>,
     /// Show metadata editor panel
     pub show_metadata_editor: bool,
 }
@@ -348,7 +352,7 @@ impl MapEditorState {
             show_npcs: true,
             auto_fit_on_resize: true,
             event_editor: None,
-            npc_editor: None,
+            npc_placement_editor: None,
             show_metadata_editor: false,
         }
     }
@@ -481,19 +485,20 @@ impl MapEditorState {
         }
     }
 
-    /// Adds an NPC
-    pub fn add_npc(&mut self, npc: Npc) {
-        self.map.add_npc(npc.clone());
-        self.undo_stack.push(EditorAction::NpcAdded { npc });
+    /// Adds an NPC placement
+    pub fn add_npc_placement(&mut self, placement: NpcPlacement) {
+        self.map.npc_placements.push(placement.clone());
+        self.undo_stack
+            .push(EditorAction::NpcPlacementAdded { placement });
         self.has_changes = true;
     }
 
-    /// Removes an NPC by index
-    pub fn remove_npc(&mut self, index: usize) {
-        if index < self.map.npcs.len() {
-            let npc = self.map.npcs.remove(index);
+    /// Removes an NPC placement by index
+    pub fn remove_npc_placement(&mut self, index: usize) {
+        if index < self.map.npc_placements.len() {
+            let placement = self.map.npc_placements.remove(index);
             self.undo_stack
-                .push(EditorAction::NpcRemoved { index, npc });
+                .push(EditorAction::NpcPlacementRemoved { index, placement });
             self.has_changes = true;
         }
     }
@@ -531,11 +536,11 @@ impl MapEditorState {
             } => {
                 self.map.add_event(position, event);
             }
-            EditorAction::NpcAdded { .. } => {
-                self.map.npcs.pop();
+            EditorAction::NpcPlacementAdded { .. } => {
+                self.map.npc_placements.pop();
             }
-            EditorAction::NpcRemoved { index, npc } => {
-                self.map.npcs.insert(index, npc);
+            EditorAction::NpcPlacementRemoved { index, placement } => {
+                self.map.npc_placements.insert(index, placement);
             }
         }
     }
@@ -557,11 +562,11 @@ impl MapEditorState {
             EditorAction::EventRemoved { position, .. } => {
                 self.map.remove_event(position);
             }
-            EditorAction::NpcAdded { npc } => {
-                self.map.add_npc(npc);
+            EditorAction::NpcPlacementAdded { placement } => {
+                self.map.npc_placements.push(placement);
             }
-            EditorAction::NpcRemoved { index, .. } => {
-                self.map.npcs.remove(index);
+            EditorAction::NpcPlacementRemoved { index, .. } => {
+                self.map.npc_placements.remove(index);
             }
         }
     }
@@ -571,9 +576,9 @@ impl MapEditorState {
         self.validation_errors.clear();
 
         // Check for disconnected areas (basic check)
-        if self.map.events.is_empty() && self.map.npcs.is_empty() {
+        if self.map.events.is_empty() && self.map.npc_placements.is_empty() {
             self.validation_errors
-                .push("Warning: Map has no events or NPCs".to_string());
+                .push("Warning: Map has no events or NPC placements".to_string());
         }
 
         // Check for unreachable events
@@ -586,12 +591,13 @@ impl MapEditorState {
             }
         }
 
-        // Check for NPCs on blocked tiles
-        for npc in &self.map.npcs {
-            if self.map.is_blocked(npc.position) {
+        // Check for NPC placements on blocked tiles (note: we check before placement is added)
+        // This validation requires NPC database to get NPC names, so we just check positions
+        for (idx, placement) in self.map.npc_placements.iter().enumerate() {
+            if self.map.is_blocked(placement.position) {
                 self.validation_errors.push(format!(
-                    "Error: NPC '{}' at ({}, {}) is on a blocked tile",
-                    npc.name, npc.position.x, npc.position.y
+                    "Error: NPC placement #{} (id: '{}') at ({}, {}) is on a blocked tile",
+                    idx, placement.npc_id, placement.position.x, placement.position.y
                 ));
             }
         }
@@ -990,18 +996,25 @@ impl EventEditorState {
 
 /// NPC editor state
 #[derive(Debug, Clone, Default)]
-pub struct NpcEditorState {
-    pub npc_id: String,
-    pub name: String,
-    pub description: String,
+/// NPC placement editor state for map editor
+///
+/// This is used when placing NPC references on maps, not for editing NPC definitions.
+/// It allows selecting an NPC from the database and placing it at a position.
+pub struct NpcPlacementEditorState {
+    pub selected_npc_id: String,
     pub position_x: String,
     pub position_y: String,
-    pub dialogue: String,
+    pub facing: Option<String>,
+    pub dialogue_override: String,
 }
 
-impl NpcEditorState {
-    pub fn to_npc(&self) -> Result<Npc, String> {
-        let id = self.npc_id.parse().map_err(|_| "Invalid NPC ID")?;
+impl NpcPlacementEditorState {
+    /// Converts the editor state to an NPC placement
+    pub fn to_placement(&self) -> Result<NpcPlacement, String> {
+        if self.selected_npc_id.is_empty() {
+            return Err("Must select an NPC".to_string());
+        }
+
         let x = self
             .position_x
             .parse()
@@ -1011,26 +1024,34 @@ impl NpcEditorState {
             .parse()
             .map_err(|_| "Invalid Y coordinate")?;
 
-        if self.name.is_empty() {
-            return Err("NPC name cannot be empty".to_string());
-        }
+        let facing = self.facing.as_ref().and_then(|f| match f.as_str() {
+            "North" => Some(antares::domain::types::Direction::North),
+            "South" => Some(antares::domain::types::Direction::South),
+            "East" => Some(antares::domain::types::Direction::East),
+            "West" => Some(antares::domain::types::Direction::West),
+            _ => None,
+        });
 
-        Ok(Npc::new(
-            id,
-            self.name.clone(),
-            self.description.clone(),
-            Position::new(x, y),
-            self.dialogue.clone(),
-        ))
+        let dialogue_override = if self.dialogue_override.is_empty() {
+            None
+        } else {
+            self.dialogue_override.parse().ok()
+        };
+
+        Ok(NpcPlacement {
+            npc_id: self.selected_npc_id.clone(),
+            position: Position::new(x, y),
+            facing,
+            dialogue_override,
+        })
     }
 
     pub fn clear(&mut self) {
-        self.npc_id.clear();
-        self.name.clear();
-        self.description.clear();
-        self.position_x.clear();
-        self.position_y.clear();
-        self.dialogue.clear();
+        self.selected_npc_id = String::new();
+        self.position_x = String::new();
+        self.position_y = String::new();
+        self.facing = None;
+        self.dialogue_override = String::new();
     }
 }
 
@@ -1055,9 +1076,9 @@ impl<'a> MapGridWidget<'a> {
         self
     }
 
-    fn tile_color(tile: &Tile, event_type: Option<&EventType>, has_npc: bool) -> Color32 {
-        if has_npc {
-            return Color32::from_rgb(255, 200, 0); // Yellow for NPCs
+    fn tile_color(tile: &Tile, event_type: Option<&EventType>, has_npc_placement: bool) -> Color32 {
+        if has_npc_placement {
+            return Color32::from_rgb(255, 200, 0); // Yellow for NPC placements
         }
 
         // Determine terrain color first so we can blend it with wall color if needed
@@ -1151,10 +1172,15 @@ impl<'a> Widget for MapGridWidget<'a> {
                     } else {
                         None
                     };
-                    let has_npc = self.state.show_npcs
-                        && self.state.map.npcs.iter().any(|npc| npc.position == pos);
+                    let has_npc_placement = self.state.show_npcs
+                        && self
+                            .state
+                            .map
+                            .npc_placements
+                            .iter()
+                            .any(|p| p.position == pos);
 
-                    let color = Self::tile_color(tile, event_type.as_ref(), has_npc);
+                    let color = Self::tile_color(&tile, event_type, has_npc_placement);
 
                     let rect = Rect::from_min_size(
                         to_screen(x, y),
@@ -1225,13 +1251,13 @@ impl<'a> Widget for MapGridWidget<'a> {
                             }
                         }
                         EditorTool::PlaceNpc => {
-                            if self.state.npc_editor.is_none() {
-                                self.state.npc_editor = Some(NpcEditorState {
+                            if self.state.npc_placement_editor.is_none() {
+                                self.state.npc_placement_editor = Some(NpcPlacementEditorState {
                                     position_x: pos.x.to_string(),
                                     position_y: pos.y.to_string(),
                                     ..Default::default()
                                 });
-                            } else if let Some(ref mut editor) = self.state.npc_editor {
+                            } else if let Some(ref mut editor) = self.state.npc_placement_editor {
                                 editor.position_x = pos.x.to_string();
                                 editor.position_y = pos.y.to_string();
                             }
@@ -1309,8 +1335,10 @@ impl<'a> Widget for MapPreviewWidget<'a> {
                         MapEvent::Sign { .. } => EventType::Sign,
                         MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
                     });
-                    let has_npc = self.map.npcs.iter().any(|n| n.position == pos);
-                    let color = MapGridWidget::tile_color(tile, event_type.as_ref(), has_npc);
+                    let has_npc_placement =
+                        self.map.npc_placements.iter().any(|p| p.position == pos);
+                    let color =
+                        MapGridWidget::tile_color(tile, event_type.as_ref(), has_npc_placement);
 
                     let rect =
                         Rect::from_min_size(to_screen(x, y), Vec2::new(tile_size, tile_size));
@@ -1534,6 +1562,7 @@ impl MapsEditorState {
         monsters: &[MonsterDefinition],
         items: &[Item],
         conditions: &[antares::domain::conditions::ConditionDefinition],
+        npcs: &[NpcDefinition],
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
         display_config: &DisplayConfig,
@@ -1741,7 +1770,7 @@ impl MapsEditorState {
                             ui.label(format!("Map ID: {}", map.id));
                             ui.label(format!("Size: {}x{}", map.width, map.height));
                             ui.label(format!("Events: {}", map.events.len()));
-                            ui.label(format!("NPCs: {}", map.npcs.len()));
+                            ui.label(format!("NPC Placements: {}", map.npc_placements.len()));
                             if !map.description.is_empty() {
                                 ui.separator();
                                 ui.label("Description:");
@@ -2445,11 +2474,11 @@ impl MapsEditorState {
             });
         }
 
-        // NPC editor (when PlaceNpc tool is active)
+        // NPC placement editor (when PlaceNpc tool is active)
         if matches!(editor.current_tool, EditorTool::PlaceNpc) {
             ui.group(|ui| {
-                ui.heading("NPC Editor");
-                Self::show_npc_editor(ui, editor);
+                ui.heading("Place NPC");
+                Self::show_npc_placement_editor(ui, editor, npcs);
             });
         }
 
@@ -2459,7 +2488,10 @@ impl MapsEditorState {
         ui.group(|ui| {
             ui.heading("Statistics");
             ui.label(format!("Events: {}", editor.map.events.len()));
-            ui.label(format!("NPCs: {}", editor.map.npcs.len()));
+            ui.label(format!(
+                "NPC Placements: {}",
+                editor.map.npc_placements.len()
+            ));
         });
 
         // Validation errors
@@ -2868,46 +2900,123 @@ impl MapsEditorState {
         }
     }
 
-    /// Show NPC editor
-    fn show_npc_editor(ui: &mut egui::Ui, editor: &mut MapEditorState) {
-        if let Some(ref mut npc_editor) = editor.npc_editor {
-            ui.label("NPC ID:");
-            ui.text_edit_singleline(&mut npc_editor.npc_id);
+    /// Show NPC placement editor with NPC picker
+    fn show_npc_placement_editor(
+        ui: &mut egui::Ui,
+        editor: &mut MapEditorState,
+        npcs: &[NpcDefinition],
+    ) {
+        if let Some(ref mut placement_editor) = editor.npc_placement_editor {
+            ui.label("Select an NPC to place on the map:");
 
-            ui.label("Name:");
-            ui.text_edit_singleline(&mut npc_editor.name);
+            // NPC picker with dropdown
+            ui.horizontal(|ui| {
+                ui.label("NPC:");
+                egui::ComboBox::from_id_source("npc_placement_picker")
+                    .selected_text(
+                        npcs.iter()
+                            .find(|n| n.id == placement_editor.selected_npc_id)
+                            .map(|n| n.name.as_str())
+                            .unwrap_or("Select NPC..."),
+                    )
+                    .show_ui(ui, |ui| {
+                        for npc in npcs {
+                            ui.selectable_value(
+                                &mut placement_editor.selected_npc_id,
+                                npc.id.clone(),
+                                &npc.name,
+                            );
+                        }
+                    });
+            });
 
-            ui.label("Position X:");
-            ui.text_edit_singleline(&mut npc_editor.position_x);
-
-            ui.label("Position Y:");
-            ui.text_edit_singleline(&mut npc_editor.position_y);
-
-            ui.label("Dialogue:");
-            ui.text_edit_multiline(&mut npc_editor.dialogue);
-
-            ui.separator();
-
-            let mut add_npc = false;
-            let mut npc_to_add: Option<Npc> = None;
-
-            if ui.button("➕ Add NPC").clicked() {
-                match npc_editor.to_npc() {
-                    Ok(npc) => {
-                        npc_to_add = Some(npc);
-                        add_npc = true;
+            if !placement_editor.selected_npc_id.is_empty() {
+                if let Some(selected_npc) = npcs
+                    .iter()
+                    .find(|n| n.id == placement_editor.selected_npc_id)
+                {
+                    ui.label(format!("📝 {}", selected_npc.description));
+                    if selected_npc.is_merchant {
+                        ui.label("🛒 Merchant");
                     }
-                    Err(err) => {
-                        ui.label(format!("Error: {}", err));
+                    if selected_npc.is_innkeeper {
+                        ui.label("🏨 Innkeeper");
                     }
                 }
             }
 
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("Position X:");
+                ui.text_edit_singleline(&mut placement_editor.position_x);
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Position Y:");
+                ui.text_edit_singleline(&mut placement_editor.position_y);
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Facing:");
+                egui::ComboBox::from_id_source("npc_facing")
+                    .selected_text(placement_editor.facing.as_deref().unwrap_or("None"))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut placement_editor.facing, None, "None");
+                        ui.selectable_value(
+                            &mut placement_editor.facing,
+                            Some("North".to_string()),
+                            "North",
+                        );
+                        ui.selectable_value(
+                            &mut placement_editor.facing,
+                            Some("South".to_string()),
+                            "South",
+                        );
+                        ui.selectable_value(
+                            &mut placement_editor.facing,
+                            Some("East".to_string()),
+                            "East",
+                        );
+                        ui.selectable_value(
+                            &mut placement_editor.facing,
+                            Some("West".to_string()),
+                            "West",
+                        );
+                    });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Dialogue Override (optional):");
+                ui.text_edit_singleline(&mut placement_editor.dialogue_override);
+            });
+
+            ui.separator();
+
+            let mut add_placement = false;
+            let mut placement_to_add: Option<NpcPlacement> = None;
+
+            if ui.button("➕ Place NPC").clicked() {
+                match placement_editor.to_placement() {
+                    Ok(placement) => {
+                        placement_to_add = Some(placement);
+                        add_placement = true;
+                    }
+                    Err(err) => {
+                        ui.colored_label(egui::Color32::RED, format!("Error: {}", err));
+                    }
+                }
+            }
+
+            if ui.button("❌ Cancel").clicked() {
+                editor.npc_placement_editor = None;
+            }
+
             // Apply after borrow ends
-            if add_npc {
-                if let Some(npc) = npc_to_add {
-                    editor.add_npc(npc);
-                    if let Some(ref mut ed) = editor.npc_editor {
+            if add_placement {
+                if let Some(placement) = placement_to_add {
+                    editor.add_npc_placement(placement);
+                    if let Some(ref mut ed) = editor.npc_placement_editor {
                         ed.clear();
                     }
                 }
@@ -3359,12 +3468,13 @@ mod tests {
             "Hello!".to_string(),
         );
 
-        state.add_npc(npc);
-        assert_eq!(state.map.npcs.len(), 1);
+        let placement = NpcPlacement::new("test_npc", Position::new(5, 5));
+        state.add_npc_placement(placement);
+        assert_eq!(state.map.npc_placements.len(), 1);
         assert!(state.has_changes);
 
-        state.remove_npc(0);
-        assert_eq!(state.map.npcs.len(), 0);
+        state.remove_npc_placement(0);
+        assert_eq!(state.map.npc_placements.len(), 0);
     }
 
     #[test]

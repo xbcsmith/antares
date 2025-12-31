@@ -2922,4 +2922,5 @@
         ),
     },
     npcs: [],
+    npc_placements: [],
 )

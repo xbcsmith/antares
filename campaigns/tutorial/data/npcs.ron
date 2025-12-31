@@ -1,0 +1,164 @@
+// npcs.ron - Tutorial Campaign NPC definitions
+//
+// This file contains NPC definitions specific to the tutorial campaign.
+// NPCs are referenced by maps using NpcPlacement entries.
+//
+// NPC IDs follow the pattern: "tutorial_{role}_{name}"
+// Dialogue IDs reference entries in campaigns/tutorial/data/dialogues.ron
+// Quest IDs reference entries in campaigns/tutorial/data/quests.ron
+
+[
+    // ===== Map 1: Town Square NPCs =====
+
+    (
+        id: "tutorial_elder_village",
+        name: "Village Elder",
+        description: "The wise elder of the village who can provide quests and local lore.",
+        portrait_path: "portraits/elder.png",
+        dialogue_id: None,
+        quest_ids: [5],  // The Lich's Tomb quest
+        faction: Some("Village"),
+        is_merchant: false,
+        is_innkeeper: false,
+    ),
+
+    (
+        id: "tutorial_innkeeper_town",
+        name: "InnKeeper",
+        description: "The proprietor of the Cozy Inn who offers rooms and warm meals to travelers.",
+        portrait_path: "portraits/innkeeper.png",
+        dialogue_id: None,
+        quest_ids: [],
+        faction: Some("Innkeepers Guild"),
+        is_merchant: false,
+        is_innkeeper: true,
+    ),
+
+    (
+        id: "tutorial_merchant_town",
+        name: "Merchant",
+        description: "A traveling merchant offering goods and supplies to adventurers.",
+        portrait_path: "portraits/merchant.png",
+        dialogue_id: None,
+        quest_ids: [],
+        faction: Some("Merchants Guild"),
+        is_merchant: true,
+        is_innkeeper: false,
+    ),
+
+    (
+        id: "tutorial_priestess_town",
+        name: "High Priestess",
+        description: "The head priestess of the temple who provides healing and blessings to the townsfolk.",
+        portrait_path: "portraits/priestess.png",
+        dialogue_id: None,
+        quest_ids: [],
+        faction: Some("Temple"),
+        is_merchant: false,
+        is_innkeeper: false,
+    ),
+
+    // ===== Map 2: Fizban's Cave NPCs =====
+
+    (
+        id: "tutorial_wizard_fizban",
+        name: "Fizban",
+        description: "A seasoned local guide familiar with the cave and its dangers.",
+        portrait_path: "portraits/wizard.png",
+        dialogue_id: Some(1),  // "Fizban Story" dialogue
+        quest_ids: [0],  // "Fizban's Quest"
+        faction: Some("Wizards"),
+        is_merchant: false,
+        is_innkeeper: false,
+    ),
+
+    (
+        id: "tutorial_wizard_fizban_brother",
+        name: "Fizban Brother",
+        description: "A local villager and brother to Fizban, known for his local knowledge and gossip.",
+        portrait_path: "portraits/villager.png",
+        dialogue_id: None,
+        quest_ids: [1, 3],  // "Fizban's Brother's Quest" and "Kill Monsters"
+        faction: Some("Village"),
+        is_merchant: false,
+        is_innkeeper: false,
+    ),
+
+    // ===== Map 4: Forest NPCs =====
+
+    (
+        id: "tutorial_ranger_lost",
+        name: "Lost Ranger",
+        description: "A ranger who has lost his way and seeks guidance.",
+        portrait_path: "portraits/ranger.png",
+        dialogue_id: None,
+        quest_ids: [],
+        faction: Some("Rangers"),
+        is_merchant: false,
+        is_innkeeper: false,
+    ),
+
+    // ===== Map 5: Second Town NPCs =====
+
+    (
+        id: "tutorial_elder_village2",
+        name: "Village Elder",
+        description: "The wise elder of the village who offers guidance and local quests.",
+        portrait_path: "portraits/elder.png",
+        dialogue_id: None,
+        quest_ids: [],
+        faction: Some("Village"),
+        is_merchant: false,
+        is_innkeeper: false,
+    ),
+
+    (
+        id: "tutorial_innkeeper_town2",
+        name: "Innkeeper",
+        description: "The proprietor of the inn who rents rooms and provides food to travelers.",
+        portrait_path: "portraits/innkeeper.png",
+        dialogue_id: None,
+        quest_ids: [],
+        faction: Some("Innkeepers Guild"),
+        is_merchant: false,
+        is_innkeeper: true,
+    ),
+
+    (
+        id: "tutorial_merchant_town2",
+        name: "Merchant",
+        description: "A traveling merchant offering a selection of goods and supplies.",
+        portrait_path: "portraits/merchant.png",
+        dialogue_id: None,
+        quest_ids: [],
+        faction: Some("Merchants Guild"),
+        is_merchant: true,
+        is_innkeeper: false,
+    ),
+
+    (
+        id: "tutorial_priest_town2",
+        name: "High Priest",
+        description: "The head cleric of the temple, who offers healing and spiritual counsel.",
+        portrait_path: "portraits/priest.png",
+        dialogue_id: None,
+        quest_ids: [],
+        faction: Some("Temple"),
+        is_merchant: false,
+        is_innkeeper: false,
+    ),
+
+    // ===== Map 6: Harow Downs NPCs =====
+
+    (
+        id: "tutorial_goblin_dying",
+        name: "Dying Goblin",
+        description: "A dying goblin who was attacked by his tribe for stealing.",
+        portrait_path: "portraits/goblin.png",
+        dialogue_id: None,
+        quest_ids: [],
+        faction: Some("Goblins"),
+        is_merchant: false,
+        is_innkeeper: false,
+    ),
+]
