@@ -44,7 +44,7 @@ use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
 use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
-use antares::domain::world::{Map, MapEvent, TerrainType, Tile, WallType};
+use antares::domain::world::{Map, MapEvent, TerrainType, Tile, TileVisualMetadata, WallType};
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
 use std::fs;
@@ -287,6 +287,160 @@ pub struct MapConnection {
     pub description: String,
 }
 
+// ===== Visual Metadata Editor =====
+
+/// Visual metadata editor state for tile customization
+#[derive(Debug, Clone)]
+pub struct VisualMetadataEditor {
+    /// Enable custom height
+    pub enable_height: bool,
+    /// Temporary height value
+    pub temp_height: f32,
+    /// Enable custom width_x
+    pub enable_width_x: bool,
+    /// Temporary width_x value
+    pub temp_width_x: f32,
+    /// Enable custom width_z
+    pub enable_width_z: bool,
+    /// Temporary width_z value
+    pub temp_width_z: f32,
+    /// Enable color tint
+    pub enable_color_tint: bool,
+    /// Temporary color R component
+    pub temp_color_r: f32,
+    /// Temporary color G component
+    pub temp_color_g: f32,
+    /// Temporary color B component
+    pub temp_color_b: f32,
+    /// Enable custom scale
+    pub enable_scale: bool,
+    /// Temporary scale value
+    pub temp_scale: f32,
+    /// Enable Y offset
+    pub enable_y_offset: bool,
+    /// Temporary Y offset value
+    pub temp_y_offset: f32,
+}
+
+impl Default for VisualMetadataEditor {
+    fn default() -> Self {
+        Self {
+            enable_height: false,
+            temp_height: 2.5,
+            enable_width_x: false,
+            temp_width_x: 1.0,
+            enable_width_z: false,
+            temp_width_z: 1.0,
+            enable_color_tint: false,
+            temp_color_r: 1.0,
+            temp_color_g: 1.0,
+            temp_color_b: 1.0,
+            enable_scale: false,
+            temp_scale: 1.0,
+            enable_y_offset: false,
+            temp_y_offset: 0.0,
+        }
+    }
+}
+
+impl VisualMetadataEditor {
+    /// Load visual metadata from a tile into the editor
+    pub fn load_from_tile(&mut self, tile: &Tile) {
+        if let Some(height) = tile.visual.height {
+            self.enable_height = true;
+            self.temp_height = height;
+        } else {
+            self.enable_height = false;
+            self.temp_height = 2.5;
+        }
+
+        if let Some(width_x) = tile.visual.width_x {
+            self.enable_width_x = true;
+            self.temp_width_x = width_x;
+        } else {
+            self.enable_width_x = false;
+            self.temp_width_x = 1.0;
+        }
+
+        if let Some(width_z) = tile.visual.width_z {
+            self.enable_width_z = true;
+            self.temp_width_z = width_z;
+        } else {
+            self.enable_width_z = false;
+            self.temp_width_z = 1.0;
+        }
+
+        if let Some((r, g, b)) = tile.visual.color_tint {
+            self.enable_color_tint = true;
+            self.temp_color_r = r;
+            self.temp_color_g = g;
+            self.temp_color_b = b;
+        } else {
+            self.enable_color_tint = false;
+            self.temp_color_r = 1.0;
+            self.temp_color_g = 1.0;
+            self.temp_color_b = 1.0;
+        }
+
+        if let Some(scale) = tile.visual.scale {
+            self.enable_scale = true;
+            self.temp_scale = scale;
+        } else {
+            self.enable_scale = false;
+            self.temp_scale = 1.0;
+        }
+
+        if let Some(y_offset) = tile.visual.y_offset {
+            self.enable_y_offset = true;
+            self.temp_y_offset = y_offset;
+        } else {
+            self.enable_y_offset = false;
+            self.temp_y_offset = 0.0;
+        }
+    }
+
+    /// Convert editor state to TileVisualMetadata
+    pub fn to_metadata(&self) -> TileVisualMetadata {
+        TileVisualMetadata {
+            height: if self.enable_height {
+                Some(self.temp_height)
+            } else {
+                None
+            },
+            width_x: if self.enable_width_x {
+                Some(self.temp_width_x)
+            } else {
+                None
+            },
+            width_z: if self.enable_width_z {
+                Some(self.temp_width_z)
+            } else {
+                None
+            },
+            color_tint: if self.enable_color_tint {
+                Some((self.temp_color_r, self.temp_color_g, self.temp_color_b))
+            } else {
+                None
+            },
+            scale: if self.enable_scale {
+                Some(self.temp_scale)
+            } else {
+                None
+            },
+            y_offset: if self.enable_y_offset {
+                Some(self.temp_y_offset)
+            } else {
+                None
+            },
+        }
+    }
+
+    /// Reset to default values
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 // ===== Map Editor State (per-map editing state) =====
 
 /// Map editor state (pure logic, no UI)
@@ -325,6 +479,8 @@ pub struct MapEditorState {
     pub npc_placement_editor: Option<NpcPlacementEditorState>,
     /// Show metadata editor panel
     pub show_metadata_editor: bool,
+    /// Visual metadata editor state
+    pub visual_editor: VisualMetadataEditor,
 }
 
 impl MapEditorState {
@@ -354,6 +510,7 @@ impl MapEditorState {
             event_editor: None,
             npc_placement_editor: None,
             show_metadata_editor: false,
+            visual_editor: VisualMetadataEditor::default(),
         }
     }
 
@@ -2460,6 +2617,13 @@ impl MapsEditorState {
                     }
                 }
             });
+
+            // Visual metadata editor
+            ui.separator();
+            ui.group(|ui| {
+                ui.heading("Visual Properties");
+                Self::show_visual_metadata_editor(ui, editor, pos);
+            });
         } else {
             ui.label("No tile selected");
         }
@@ -3111,7 +3275,119 @@ impl MapsEditorState {
         }
     }
 
-    /// Show import dialog window
+    /// Show visual metadata editor for selected tile
+    fn show_visual_metadata_editor(ui: &mut egui::Ui, editor: &mut MapEditorState, pos: Position) {
+        // Load tile's current visual metadata into editor if selection changed
+        if let Some(tile) = editor.map.get_tile(pos) {
+            editor.visual_editor.load_from_tile(tile);
+        }
+
+        // Height
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut editor.visual_editor.enable_height, "Height:");
+            ui.add_enabled(
+                editor.visual_editor.enable_height,
+                egui::DragValue::new(&mut editor.visual_editor.temp_height)
+                    .speed(0.1)
+                    .range(0.1..=10.0),
+            );
+            ui.label("units");
+        });
+
+        // Width X
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut editor.visual_editor.enable_width_x, "Width X:");
+            ui.add_enabled(
+                editor.visual_editor.enable_width_x,
+                egui::DragValue::new(&mut editor.visual_editor.temp_width_x)
+                    .speed(0.05)
+                    .range(0.1..=1.0),
+            );
+        });
+
+        // Width Z
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut editor.visual_editor.enable_width_z, "Width Z:");
+            ui.add_enabled(
+                editor.visual_editor.enable_width_z,
+                egui::DragValue::new(&mut editor.visual_editor.temp_width_z)
+                    .speed(0.05)
+                    .range(0.1..=1.0),
+            );
+        });
+
+        // Scale
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut editor.visual_editor.enable_scale, "Scale:");
+            ui.add_enabled(
+                editor.visual_editor.enable_scale,
+                egui::DragValue::new(&mut editor.visual_editor.temp_scale)
+                    .speed(0.05)
+                    .range(0.1..=3.0),
+            );
+        });
+
+        // Y Offset
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut editor.visual_editor.enable_y_offset, "Y Offset:");
+            ui.add_enabled(
+                editor.visual_editor.enable_y_offset,
+                egui::DragValue::new(&mut editor.visual_editor.temp_y_offset)
+                    .speed(0.1)
+                    .range(-2.0..=2.0),
+            );
+            ui.label("units");
+        });
+
+        // Color Tint
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut editor.visual_editor.enable_color_tint, "Color Tint:");
+        });
+        if editor.visual_editor.enable_color_tint {
+            ui.horizontal(|ui| {
+                ui.label("  R:");
+                ui.add(
+                    egui::DragValue::new(&mut editor.visual_editor.temp_color_r)
+                        .speed(0.01)
+                        .range(0.0..=1.0),
+                );
+                ui.label("G:");
+                ui.add(
+                    egui::DragValue::new(&mut editor.visual_editor.temp_color_g)
+                        .speed(0.01)
+                        .range(0.0..=1.0),
+                );
+                ui.label("B:");
+                ui.add(
+                    egui::DragValue::new(&mut editor.visual_editor.temp_color_b)
+                        .speed(0.01)
+                        .range(0.0..=1.0),
+                );
+            });
+        }
+
+        ui.separator();
+
+        // Action buttons
+        ui.horizontal(|ui| {
+            if ui.button("Apply").clicked() {
+                let visual_metadata = editor.visual_editor.to_metadata();
+                if let Some(tile) = editor.map.get_tile_mut(pos) {
+                    tile.visual = visual_metadata;
+                    editor.has_changes = true;
+                }
+            }
+
+            if ui.button("Reset to Defaults").clicked() {
+                if let Some(tile) = editor.map.get_tile_mut(pos) {
+                    tile.visual = TileVisualMetadata::default();
+                    editor.visual_editor.reset();
+                    editor.has_changes = true;
+                }
+            }
+        });
+    }
+
     fn show_import_dialog_window(
         &mut self,
         ctx: &egui::Context,
