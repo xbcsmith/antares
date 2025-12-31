@@ -42,7 +42,7 @@ Phase 3 successfully updated the Campaign Builder SDK to support the new NPC ext
    ```rust
    // Old
    use antares::domain::world::{Map, MapEvent, Npc, TerrainType, Tile, WallType};
-   
+
    // New
    use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
    use antares::domain::world::{Map, MapEvent, TerrainType, Tile, WallType};
@@ -57,7 +57,7 @@ Phase 3 successfully updated the Campaign Builder SDK to support the new NPC ext
        pub description: String,
        pub dialogue: String,
    }
-   
+
    // New: NPC placement picker
    pub struct NpcPlacementEditorState {
        pub selected_npc_id: String,
@@ -73,7 +73,7 @@ Phase 3 successfully updated the Campaign Builder SDK to support the new NPC ext
    // Old
    NpcAdded { npc: Npc }
    NpcRemoved { index: usize, npc: Npc }
-   
+
    // New
    NpcPlacementAdded { placement: NpcPlacement }
    NpcPlacementRemoved { index: usize, placement: NpcPlacement }
@@ -88,8 +88,8 @@ Phase 3 successfully updated the Campaign Builder SDK to support the new NPC ext
 5. **NPC Placement Picker UI:**
    ```rust
    fn show_npc_placement_editor(
-       ui: &mut egui::Ui, 
-       editor: &mut MapEditorState, 
+       ui: &mut egui::Ui,
+       editor: &mut MapEditorState,
        npcs: &[NpcDefinition]
    ) {
        // ComboBox dropdown with NPC names
@@ -199,7 +199,7 @@ Phase 3 successfully updated the Campaign Builder SDK to support the new NPC ext
        for map in maps {
            for placement in &map.npc_placements {  // Changed from map.npcs
                let display = format!(
-                   "{} (Map: {}, Position: {:?})", 
+                   "{} (Map: {}, Position: {:?})",
                    placement.npc_id, map.name, placement.position
                );
                let npc_id = format!("{}:{}", map.id, placement.npc_id);

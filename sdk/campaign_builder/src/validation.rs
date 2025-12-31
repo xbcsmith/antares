@@ -67,7 +67,7 @@ impl ValidationCategory {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::campaign_builder::validation::ValidationCategory;
+    /// use campaign_builder::validation::ValidationCategory;
     ///
     /// assert_eq!(ValidationCategory::Metadata.display_name(), "Metadata");
     /// assert_eq!(ValidationCategory::Items.display_name(), "Items");
@@ -160,7 +160,7 @@ impl ValidationSeverity {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::campaign_builder::validation::ValidationSeverity;
+    /// use campaign_builder::validation::ValidationSeverity;
     ///
     /// assert_eq!(ValidationSeverity::Error.icon(), "❌");
     /// assert_eq!(ValidationSeverity::Warning.icon(), "⚠️");
@@ -226,7 +226,7 @@ impl ValidationResult {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::campaign_builder::validation::{
+    /// use campaign_builder::validation::{
     ///     ValidationCategory, ValidationSeverity, ValidationResult
     /// };
     ///
@@ -339,7 +339,7 @@ impl ValidationSummary {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::campaign_builder::validation::{
+    /// use campaign_builder::validation::{
     ///     ValidationCategory, ValidationResult, ValidationSummary
     /// };
     ///
@@ -397,7 +397,7 @@ impl ValidationSummary {
 /// # Examples
 ///
 /// ```
-/// use antares::sdk::campaign_builder::validation::{
+/// use campaign_builder::validation::{
 ///     ValidationCategory, ValidationResult, group_results_by_category
 /// };
 ///
@@ -477,7 +477,7 @@ pub fn count_errors_by_category(
 /// # Examples
 ///
 /// ```
-/// use antares::sdk::campaign_builder::validation::validate_class_id_reference;
+/// use campaign_builder::validation::validate_class_id_reference;
 ///
 /// let classes = vec!["knight".to_string(), "sorcerer".to_string()];
 /// let result = validate_class_id_reference("knight", &classes, "character 'Hero'");
@@ -533,7 +533,7 @@ pub fn validate_class_id_reference(
 /// # Examples
 ///
 /// ```
-/// use antares::sdk::campaign_builder::validation::validate_race_id_reference;
+/// use campaign_builder::validation::validate_race_id_reference;
 ///
 /// let races = vec!["human".to_string(), "elf".to_string()];
 /// let result = validate_race_id_reference("human", &races, "character 'Hero'");
@@ -588,7 +588,7 @@ pub fn validate_race_id_reference(
 /// # Examples
 ///
 /// ```
-/// use antares::sdk::campaign_builder::validation::validate_character_references;
+/// use campaign_builder::validation::validate_character_references;
 ///
 /// let characters = vec![
 ///     ("Hero".to_string(), "knight".to_string(), "human".to_string()),
@@ -658,7 +658,7 @@ pub const STANDARD_PROFICIENCY_IDS: &[&str] = &[
 /// # Examples
 ///
 /// ```
-/// use antares::sdk::campaign_builder::validation::validate_proficiency_id;
+/// use campaign_builder::validation::validate_proficiency_id;
 ///
 /// let result = validate_proficiency_id("martial_melee", "class 'Knight'");
 /// assert!(result.is_none()); // Valid proficiency
@@ -703,7 +703,7 @@ pub fn validate_proficiency_id(proficiency_id: &str, context: &str) -> Option<Va
 /// # Examples
 ///
 /// ```
-/// use antares::sdk::campaign_builder::validation::validate_class_proficiencies;
+/// use campaign_builder::validation::validate_class_proficiencies;
 ///
 /// let proficiencies = vec!["martial_melee", "heavy_armor", "shield"];
 /// let results = validate_class_proficiencies("knight", proficiencies.into_iter());
@@ -743,7 +743,7 @@ pub fn validate_class_proficiencies<'a>(
 /// # Examples
 ///
 /// ```
-/// use antares::sdk::campaign_builder::validation::validate_race_proficiencies;
+/// use campaign_builder::validation::validate_race_proficiencies;
 ///
 /// let proficiencies = vec!["martial_ranged"];
 /// let results = validate_race_proficiencies("elf", proficiencies.into_iter());

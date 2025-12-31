@@ -165,26 +165,20 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
             }
 
             // Validate NPCs
-            for npc in &map.npcs {
+            // Validate NPC Placements
+            for placement in &map.npc_placements {
                 assert!(
-                    !npc.name.trim().is_empty(),
-                    "NPC in map {} id {} has empty name",
-                    path.display(),
-                    npc.id
+                    !placement.npc_id.trim().is_empty(),
+                    "NPC placement in map {} has empty npc_id",
+                    path.display()
                 );
-                assert!(
-                    !npc.description.trim().is_empty(),
-                    "NPC in map {} id {} has empty description",
-                    path.display(),
-                    npc.id
-                );
-                // position sanity check (optional)
-                let pos = npc.position;
+                // position sanity check
+                let pos = placement.position;
                 assert!(
                     pos.x >= 0 && pos.y >= 0,
-                    "NPC in map {} id {} has invalid position {:?}",
+                    "NPC placement in map {} id {} has invalid position {:?}",
                     path.display(),
-                    npc.id,
+                    placement.npc_id,
                     pos
                 );
             }

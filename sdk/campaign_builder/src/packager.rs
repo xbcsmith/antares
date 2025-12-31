@@ -161,7 +161,7 @@ pub fn parse_version(version: &str) -> Option<(u32, u32, u32)> {
 /// # Examples
 ///
 /// ```
-/// use antares::sdk::campaign_builder::packager::{increment_version, VersionIncrement};
+/// use campaign_builder::packager::{increment_version, VersionIncrement};
 ///
 /// assert_eq!(increment_version("1.0.0", VersionIncrement::Patch), "1.0.1");
 /// assert_eq!(increment_version("1.0.0", VersionIncrement::Minor), "1.1.0");

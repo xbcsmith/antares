@@ -25,7 +25,7 @@ use std::path::PathBuf;
 /// # Examples
 ///
 /// ```no_run
-/// use antares::sdk::campaign_builder::conditions_editor::ConditionsEditorState;
+/// use campaign_builder::conditions_editor::ConditionsEditorState;
 ///
 /// // In an egui context you would store and reuse the state:
 /// // let mut state = ConditionsEditorState::new();

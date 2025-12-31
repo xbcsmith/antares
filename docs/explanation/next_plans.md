@@ -26,11 +26,11 @@
 
 ## npc gameplay fix plan
 
- ✅ COMPLETED -[npc gameplay fix plan](./npc_gameplay_fix_implementation_plan.md)
+ ✅ COMPLETED - [npc gameplay fix plan](./npc_gameplay_fix_implementation_plan.md)
 
 ### Tile Visual Metadata
 
-[Tile Visual Metadata](./tile_visual_metadata_implementation_plan.md)
+ ✅ COMPLETED - [Tile Visual Metadata](./tile_visual_metadata_implementation_plan.md)
 
 ### Sprite Support (After Tile Visual Metadata)
 

@@ -81,7 +81,7 @@ pub struct Quest {
     pub is_main_quest: bool,
 
     /// Quest giver NPC ID (optional)
-    pub quest_giver_npc: Option<u16>,
+    pub quest_giver_npc: Option<String>,
 
     /// Map ID where quest is given
     pub quest_giver_map: Option<MapId>,
@@ -261,7 +261,7 @@ pub enum QuestObjective {
     /// Talk to a specific NPC
     TalkToNpc {
         /// NPC ID
-        npc_id: u16,
+        npc_id: String,
         /// Map where NPC is located
         map_id: MapId,
     },
@@ -271,7 +271,7 @@ pub enum QuestObjective {
         /// Item to deliver
         item_id: ItemId,
         /// NPC to deliver to
-        npc_id: u16,
+        npc_id: String,
         /// Quantity to deliver
         quantity: u16,
     },
@@ -279,7 +279,7 @@ pub enum QuestObjective {
     /// Escort an NPC to a location
     EscortNpc {
         /// NPC to escort
-        npc_id: u16,
+        npc_id: String,
         /// Destination map
         map_id: MapId,
         /// Destination position
@@ -537,7 +537,7 @@ mod tests {
         assert!(obj2.description().contains("Collect 5"));
 
         let obj3 = QuestObjective::TalkToNpc {
-            npc_id: 7,
+            npc_id: "7".to_string(),
             map_id: 3,
         };
         assert!(obj3.description().contains("Talk to NPC 7"));
@@ -619,7 +619,7 @@ mod tests {
         // Stage 3: Return to quest giver
         let mut stage3 = QuestStage::new(3, "Return to Village");
         stage3.add_objective(QuestObjective::TalkToNpc {
-            npc_id: 1,
+            npc_id: "1".to_string(),
             map_id: 1,
         });
         quest.add_stage(stage3);

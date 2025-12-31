@@ -21,7 +21,7 @@
 //!     id: "village_elder".to_string(),
 //!     name: "Elder Theron".to_string(),
 //!     description: "The wise village elder".to_string(),
-//!     portrait_path: "assets/portraits/elder.png".to_string(),
+//!     portrait_id: "elder".to_string(),
 //!     dialogue_id: Some(1),
 //!     quest_ids: vec![1, 2],
 //!     faction: Some("Village Council".to_string()),
@@ -64,7 +64,7 @@ pub type NpcId = String;
 ///     id: "merchant_tom".to_string(),
 ///     name: "Tom the Merchant".to_string(),
 ///     description: "A friendly traveling merchant".to_string(),
-///     portrait_path: "assets/portraits/merchant.png".to_string(),
+///     portrait_id: "assets/portraits/merchant.png".to_string(),
 ///     dialogue_id: Some(5),
 ///     quest_ids: vec![],
 ///     faction: Some("Merchants Guild".to_string()),
@@ -88,7 +88,7 @@ pub struct NpcDefinition {
     pub description: String,
 
     /// Path to portrait image (required)
-    pub portrait_path: String,
+    pub portrait_id: String,
 
     /// Reference to default dialogue tree
     #[serde(default)]
@@ -118,7 +118,7 @@ impl NpcDefinition {
     ///
     /// * `id` - Unique identifier for the NPC
     /// * `name` - Display name
-    /// * `portrait_path` - Path to portrait image
+    /// * `portrait_id` - Path to portrait image
     ///
     /// # Examples
     ///
@@ -138,13 +138,13 @@ impl NpcDefinition {
     pub fn new(
         id: impl Into<String>,
         name: impl Into<String>,
-        portrait_path: impl Into<String>,
+        portrait_id: impl Into<String>,
     ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
             description: String::new(),
-            portrait_path: portrait_path.into(),
+            portrait_id: portrait_id.into(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -172,13 +172,13 @@ impl NpcDefinition {
     pub fn merchant(
         id: impl Into<String>,
         name: impl Into<String>,
-        portrait_path: impl Into<String>,
+        portrait_id: impl Into<String>,
     ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
             description: String::new(),
-            portrait_path: portrait_path.into(),
+            portrait_id: portrait_id.into(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -206,13 +206,13 @@ impl NpcDefinition {
     pub fn innkeeper(
         id: impl Into<String>,
         name: impl Into<String>,
-        portrait_path: impl Into<String>,
+        portrait_id: impl Into<String>,
     ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
             description: String::new(),
-            portrait_path: portrait_path.into(),
+            portrait_id: portrait_id.into(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -378,7 +378,7 @@ mod tests {
 
         assert_eq!(npc.id, "test_npc");
         assert_eq!(npc.name, "Test NPC");
-        assert_eq!(npc.portrait_path, "test.png");
+        assert_eq!(npc.portrait_id, "test.png");
         assert_eq!(npc.description, "");
         assert_eq!(npc.dialogue_id, None);
         assert_eq!(npc.quest_ids.len(), 0);
@@ -433,7 +433,7 @@ mod tests {
             id: "elder".to_string(),
             name: "Village Elder".to_string(),
             description: "Wise elder".to_string(),
-            portrait_path: "elder.png".to_string(),
+            portrait_id: "elder.png".to_string(),
             dialogue_id: Some(1),
             quest_ids: vec![1, 2, 3],
             faction: Some("Village".to_string()),
@@ -532,7 +532,7 @@ mod tests {
             id: "complete_npc".to_string(),
             name: "Complete NPC".to_string(),
             description: "An NPC with all fields set".to_string(),
-            portrait_path: "complete.png".to_string(),
+            portrait_id: "complete.png".to_string(),
             dialogue_id: Some(10),
             quest_ids: vec![1, 2, 3, 4],
             faction: Some("Test Faction".to_string()),

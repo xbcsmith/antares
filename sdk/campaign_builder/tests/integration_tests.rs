@@ -268,7 +268,7 @@ fn test_monsters_persist_after_save() {
 #[test]
 fn test_no_ui_id_clashes() {
     // Read source files
-    let main_src = fs::read_to_string("src/main.rs").expect("Failed to read src/main.rs");
+    let main_src = fs::read_to_string("src/lib.rs").expect("Failed to read src/lib.rs");
 
     let map_editor_src =
         fs::read_to_string("src/map_editor.rs").expect("Failed to read src/map_editor.rs");
@@ -330,7 +330,7 @@ fn test_no_ui_id_clashes() {
 /// Verifies that data files use .ron extension per architecture.md
 #[test]
 fn test_ron_format_used_not_json() {
-    let main_src = fs::read_to_string("src/main.rs").expect("Failed to read src/main.rs");
+    let main_src = fs::read_to_string("src/lib.rs").expect("Failed to read src/lib.rs");
 
     // Look for .json file extensions in string literals (excluding comments)
     let lines_with_json: Vec<&str> = main_src
@@ -404,7 +404,7 @@ fn test_map_editor_terrain_wall_independence() {
 /// Comprehensive check across all expected data file references
 #[test]
 fn test_all_data_files_use_ron_format() {
-    let main_src = fs::read_to_string("src/main.rs").expect("Failed to read src/main.rs");
+    let main_src = fs::read_to_string("src/lib.rs").expect("Failed to read src/lib.rs");
 
     // Expected .ron file references
     let expected_ron_files = vec![

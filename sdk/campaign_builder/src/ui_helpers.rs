@@ -182,7 +182,7 @@ pub fn remove_autocomplete_buffer(ctx: &egui::Context, id: egui::Id) {
 ///
 /// ```no_run
 /// use eframe::egui;
-/// use antares::sdk::campaign_builder::ui_helpers::render_grid_header;
+/// use campaign_builder::ui_helpers::render_grid_header;
 ///
 /// // Example usage inside a Grid:
 /// // egui::Grid::new("example_grid").num_columns(3).show(ui, |ui| {
@@ -206,7 +206,7 @@ pub fn render_grid_header(ui: &mut egui::Ui, headers: &[&str]) {
 ///
 /// ```no_run
 /// use eframe::egui;
-/// use antares::sdk::campaign_builder::ui_helpers::show_validation_severity_icon;
+/// use campaign_builder::ui_helpers::show_validation_severity_icon;
 ///
 /// // Example usage:
 /// // show_validation_severity_icon(ui, crate::validation::ValidationSeverity::Error);
@@ -253,7 +253,7 @@ pub fn show_clickable_path(ui: &mut egui::Ui, path: &Path) -> egui::Response {
 ///
 /// ```
 /// use eframe::egui::Vec2;
-/// use antares::sdk::campaign_builder::ui_helpers::compute_panel_height_from_size;
+/// use campaign_builder::ui_helpers::compute_panel_height_from_size;
 ///
 /// let size = Vec2::new(400.0, 240.0);
 /// assert_eq!(compute_panel_height_from_size(size, 100.0), 240.0);
@@ -276,7 +276,7 @@ pub fn compute_panel_height_from_size(size: egui::Vec2, min_height: f32) -> f32 
 ///
 /// ```no_run
 /// use eframe::egui;
-/// use antares::sdk::campaign_builder::ui_helpers::compute_panel_height;
+/// use campaign_builder::ui_helpers::compute_panel_height;
 ///
 /// // In editor code where `ui: &mut egui::Ui` exists:
 /// // let panel_height = compute_panel_height(ui, DEFAULT_PANEL_MIN_HEIGHT);
@@ -379,7 +379,7 @@ pub enum CsvParseError {
 /// # Examples
 ///
 /// ```
-/// # use antares::sdk::campaign_builder::ui_helpers::parse_id_csv_to_vec;
+/// # use campaign_builder::ui_helpers::parse_id_csv_to_vec;
 /// let parsed = parse_id_csv_to_vec::<u8>("1, 2, 3").unwrap();
 /// assert_eq!(parsed, vec![1, 2, 3u8]);
 /// ```
@@ -413,7 +413,7 @@ where
 /// # Examples
 ///
 /// ```
-/// # use antares::sdk::campaign_builder::ui_helpers::format_vec_to_csv;
+/// # use campaign_builder::ui_helpers::format_vec_to_csv;
 /// let out = format_vec_to_csv(&[1u8, 2u8, 3u8]);
 /// assert_eq!(out, "1, 2, 3");
 /// ```
@@ -435,7 +435,7 @@ where
 /// # Examples
 ///
 /// ```
-/// # use antares::sdk::campaign_builder::ui_helpers::filter_items_by_query;
+/// # use campaign_builder::ui_helpers::filter_items_by_query;
 /// struct Foo { name: String }
 /// let items = vec![Foo { name: "Goblin".to_string() }, Foo { name: "Orc".to_string() }];
 /// let idx = filter_items_by_query(&items, "gob", |f| f.name.clone());
@@ -652,7 +652,7 @@ impl<'a> EditorToolbar<'a> {
     /// # Examples
     ///
     /// ```no_run
-    /// use antares::sdk::campaign_builder::ui_helpers::EditorToolbar;
+    /// use campaign_builder::ui_helpers::EditorToolbar;
     ///
     /// let toolbar = EditorToolbar::new("Items");
     /// ```
@@ -735,7 +735,7 @@ impl<'a> EditorToolbar<'a> {
     ///
     /// ```no_run
     /// use eframe::egui;
-    /// use antares::sdk::campaign_builder::ui_helpers::{EditorToolbar, ToolbarAction};
+    /// use campaign_builder::ui_helpers::{EditorToolbar, ToolbarAction};
     ///
     /// // In an editor's show() method:
     /// fn example(ui: &mut egui::Ui, search: &mut String, merge: &mut bool) {
@@ -935,7 +935,7 @@ impl ActionButtons {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::campaign_builder::ui_helpers::ActionButtons;
+    /// use campaign_builder::ui_helpers::ActionButtons;
     ///
     /// let buttons = ActionButtons::new();
     /// ```
@@ -994,7 +994,7 @@ impl ActionButtons {
     ///
     /// ```no_run
     /// use eframe::egui;
-    /// use antares::sdk::campaign_builder::ui_helpers::{ActionButtons, ItemAction};
+    /// use campaign_builder::ui_helpers::{ActionButtons, ItemAction};
     ///
     /// fn example(ui: &mut egui::Ui, has_selection: bool) {
     ///     let action = ActionButtons::new()
@@ -1118,7 +1118,7 @@ impl<'a> TwoColumnLayout<'a> {
     ///
     /// ```no_run
     /// use eframe::egui;
-    /// use antares::sdk::campaign_builder::ui_helpers::TwoColumnLayout;
+    /// use campaign_builder::ui_helpers::TwoColumnLayout;
     ///
     /// fn example(ui: &mut egui::Ui) {
     ///     TwoColumnLayout::new("items")
@@ -1206,7 +1206,7 @@ impl<'a> TwoColumnLayout<'a> {
     ///
     /// ```no_run
     /// use eframe::egui;
-    /// use antares::sdk::campaign_builder::ui_helpers::TwoColumnLayout;
+    /// use campaign_builder::ui_helpers::TwoColumnLayout;
     ///
     /// fn example(ui: &mut egui::Ui) {
     ///     TwoColumnLayout::new("items")
@@ -1382,7 +1382,7 @@ impl<'a> ImportExportDialog<'a> {
     ///
     /// ```no_run
     /// use eframe::egui;
-    /// use antares::sdk::campaign_builder::ui_helpers::{ImportExportDialog, ImportExportDialogState, ImportExportResult};
+    /// use campaign_builder::ui_helpers::{ImportExportDialog, ImportExportDialogState, ImportExportResult};
     ///
     /// fn example(ctx: &egui::Context, state: &mut ImportExportDialogState) {
     ///     let result = ImportExportDialog::new("Import Item", state)
@@ -1566,7 +1566,7 @@ impl<'a> AttributePairInput<'a> {
     /// ```no_run
     /// use eframe::egui;
     /// use antares::domain::character::AttributePair;
-    /// use antares::sdk::campaign_builder::ui_helpers::AttributePairInput;
+    /// use campaign_builder::ui_helpers::AttributePairInput;
     ///
     /// fn example(ui: &mut egui::Ui, ac: &mut AttributePair) {
     ///     AttributePairInput::new("AC", ac).show(ui);
@@ -1720,7 +1720,7 @@ impl<'a> AttributePair16Input<'a> {
     /// ```no_run
     /// use eframe::egui;
     /// use antares::domain::character::AttributePair16;
-    /// use antares::sdk::campaign_builder::ui_helpers::AttributePair16Input;
+    /// use campaign_builder::ui_helpers::AttributePair16Input;
     ///
     /// fn example(ui: &mut egui::Ui, hp: &mut AttributePair16) {
     ///     AttributePair16Input::new("HP", hp).show(ui);
@@ -2015,7 +2015,7 @@ impl<'a> AutocompleteInput<'a> {
 ///
 /// ```no_run
 /// use antares::domain::items::Item;
-/// use antares::sdk::campaign_builder::ui_helpers::load_ron_file;
+/// use campaign_builder::ui_helpers::load_ron_file;
 /// use std::path::Path;
 ///
 /// let items: Result<Vec<Item>, String> = load_ron_file(Path::new("data/items.ron"));
@@ -2047,7 +2047,7 @@ pub fn load_ron_file<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> 
 ///
 /// ```no_run
 /// use antares::domain::items::Item;
-/// use antares::sdk::campaign_builder::ui_helpers::save_ron_file;
+/// use campaign_builder::ui_helpers::save_ron_file;
 /// use std::path::Path;
 ///
 /// let items: Vec<Item> = vec![];
@@ -2236,7 +2236,7 @@ pub fn handle_reload<T: serde::de::DeserializeOwned>(
 /// use eframe::egui;
 /// use antares::domain::items::types::Item;
 /// use antares::domain::types::ItemId;
-/// use antares::sdk::campaign_builder::ui_helpers::autocomplete_item_selector;
+/// use campaign_builder::ui_helpers::autocomplete_item_selector;
 ///
 /// fn show_item_picker(ui: &mut egui::Ui, selected: &mut ItemId, items: &[Item]) {
 ///     if autocomplete_item_selector(ui, "weapon_picker", "Weapon:", selected, items) {
@@ -2688,16 +2688,15 @@ pub fn autocomplete_npc_selector(
         let current_display = if !selected_npc_id.is_empty() {
             // Parse map_id:npc_id format
             if let Some((map_id_str, npc_id_str)) = selected_npc_id.split_once(':') {
-                if let (Ok(map_id), Ok(npc_id)) = (
-                    map_id_str.parse::<antares::domain::types::MapId>(),
-                    npc_id_str.parse::<u16>(),
-                ) {
+                if let Ok(map_id) = map_id_str.parse::<antares::domain::types::MapId>() {
+                    let npc_id = npc_id_str.to_string();
                     // Find the NPC
                     maps.iter()
                         .find(|m| m.id == map_id)
-                        .and_then(|m| m.npcs.iter().find(|n| n.id == npc_id))
-                        .map(|npc| {
-                            format!("{} (Map: {}, NPC ID: {})", npc.name, map_id_str, npc.id)
+                        .and_then(|m| m.npc_placements.iter().find(|n| n.npc_id == npc_id))
+                        .map(|placement| {
+                            // We don't have name access here, just show ID
+                            format!("NPC ID: {} (Map: {})", placement.npc_id, map_id)
                         })
                         .unwrap_or_else(|| selected_npc_id.clone())
                 } else {
@@ -3370,7 +3369,7 @@ pub fn autocomplete_monster_list_selector(
 ///
 /// ```no_run
 /// use antares::domain::combat::database::MonsterDefinition;
-/// use antares::sdk::campaign_builder::ui_helpers::extract_monster_candidates;
+/// use campaign_builder::ui_helpers::extract_monster_candidates;
 ///
 /// let monsters = vec![
 ///     MonsterDefinition { id: 1, name: "Goblin".to_string(), /* ... */ },
@@ -3415,7 +3414,7 @@ pub fn extract_class_candidates(
 /// ```no_run
 /// use antares::domain::items::types::Item;
 /// use antares::domain::types::ItemId;
-/// use antares::sdk::campaign_builder::ui_helpers::extract_item_candidates;
+/// use campaign_builder::ui_helpers::extract_item_candidates;
 ///
 /// let items = vec![
 ///     Item { id: 1, name: "Longsword".to_string(), /* ... */ },
@@ -3498,7 +3497,7 @@ pub fn extract_quest_candidates(
 ///
 /// ```no_run
 /// use antares::domain::conditions::ConditionDefinition;
-/// use antares::sdk::campaign_builder::ui_helpers::extract_condition_candidates;
+/// use campaign_builder::ui_helpers::extract_condition_candidates;
 ///
 /// let conditions = vec![
 ///     ConditionDefinition { id: "poison".to_string(), name: "Poisoned".to_string(), /* ... */ },
@@ -3535,7 +3534,7 @@ pub fn extract_condition_candidates(
 /// ```no_run
 /// use antares::domain::magic::types::Spell;
 /// use antares::domain::types::SpellId;
-/// use antares::sdk::campaign_builder::ui_helpers::extract_spell_candidates;
+/// use campaign_builder::ui_helpers::extract_spell_candidates;
 ///
 /// let spells = vec![
 ///     Spell { id: 1, name: "Fireball".to_string(), /* ... */ },
@@ -3570,7 +3569,7 @@ pub fn extract_spell_candidates(
 ///
 /// ```no_run
 /// use antares::domain::proficiency::{ProficiencyDefinition, ProficiencyId, ProficiencyCategory};
-/// use antares::sdk::campaign_builder::ui_helpers::extract_proficiency_candidates;
+/// use campaign_builder::ui_helpers::extract_proficiency_candidates;
 ///
 /// let proficiencies = vec![
 ///     ProficiencyDefinition {
@@ -3729,7 +3728,7 @@ fn generate_synthetic_proficiencies(items: &[Item]) -> Vec<ProficiencyDefinition
 ///
 /// ```no_run
 /// use antares::domain::items::types::Item;
-/// use antares::sdk::campaign_builder::ui_helpers::extract_item_tag_candidates;
+/// use campaign_builder::ui_helpers::extract_item_tag_candidates;
 ///
 /// let items = vec![]; // Items with tags
 /// let candidates = extract_item_tag_candidates(&items);
@@ -3765,7 +3764,7 @@ pub fn extract_item_tag_candidates(items: &[antares::domain::items::types::Item]
 ///
 /// ```no_run
 /// use antares::domain::races::RaceDefinition;
-/// use antares::sdk::campaign_builder::ui_helpers::extract_special_ability_candidates;
+/// use campaign_builder::ui_helpers::extract_special_ability_candidates;
 ///
 /// let races = vec![]; // Races with special abilities
 /// let candidates = extract_special_ability_candidates(&races);
@@ -3813,7 +3812,7 @@ pub fn extract_special_ability_candidates(
 ///
 /// ```
 /// use antares::domain::world::Map;
-/// use antares::sdk::campaign_builder::ui_helpers::extract_map_candidates;
+/// use campaign_builder::ui_helpers::extract_map_candidates;
 ///
 /// let maps = vec![
 ///     Map::new(1, "Town Square".to_string(), "Starting area".to_string(), 20, 20),
@@ -3839,22 +3838,17 @@ pub fn extract_map_candidates(
 /// # Examples
 ///
 /// ```
-/// use antares::domain::world::{Map, Npc};
+/// use antares::domain::world::{Map, npc::NpcPlacement};
 /// use antares::domain::types::Position;
-/// use antares::sdk::campaign_builder::ui_helpers::extract_npc_candidates;
+/// use campaign_builder::ui_helpers::extract_npc_candidates;
 ///
 /// let mut map = Map::new(1, "Town".to_string(), "Desc".to_string(), 10, 10);
-/// map.npcs.push(Npc {
-///     id: 1,
-///     name: "Merchant".to_string(),
-///     description: "Sells goods".to_string(),
-///     position: Position::new(5, 5),
-///     dialogue_id: None,
-/// });
+/// map.npc_placements.push(NpcPlacement::new("merchant", Position::new(5, 5)));
 ///
 /// let candidates = extract_npc_candidates(&[map]);
 /// assert_eq!(candidates.len(), 1);
-/// assert!(candidates[0].0.contains("Merchant"));
+/// assert_eq!(candidates[0].1, "1:merchant".to_string());
+/// assert!(candidates[0].0.contains("Town"));
 /// ```
 pub fn extract_npc_candidates(maps: &[antares::domain::world::Map]) -> Vec<(String, String)> {
     let mut candidates = Vec::new();
@@ -4066,7 +4060,7 @@ impl AutocompleteCandidateCache {
 ///
 /// ```no_run
 /// use eframe::egui;
-/// use antares::sdk::campaign_builder::ui_helpers::show_entity_validation_warning;
+/// use campaign_builder::ui_helpers::show_entity_validation_warning;
 ///
 /// fn example(ui: &mut egui::Ui, item_id: u32, items: &[Item]) {
 ///     let exists = items.iter().any(|i| i.id == item_id);
