@@ -6,7 +6,7 @@ CampaignMetadata(
     description: "Tutorial Campaign",
     engine_version: "0.1.0",
     starting_map: "1",
-    starting_position: (10, 10),
+    starting_position: (9, 17),
     starting_direction: "North",
     starting_gold: 100,
     starting_food: 10,

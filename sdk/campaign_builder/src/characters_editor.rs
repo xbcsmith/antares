@@ -121,7 +121,7 @@ impl Default for CharacterEditBuffer {
             speed: "10".to_string(),
             accuracy: "10".to_string(),
             luck: "10".to_string(),
-            portrait_id: "0".to_string(),
+            portrait_id: String::new(),
             starting_gold: "100".to_string(),
             starting_gems: "0".to_string(),
             starting_food: "10".to_string(),
@@ -267,11 +267,9 @@ impl CharactersEditorState {
             .map_err(|_| "Invalid Luck value")?;
 
         // Parse other fields
-        let portrait_id = self
-            .buffer
-            .portrait_id
-            .parse::<u8>()
-            .map_err(|_| "Invalid Portrait ID")?;
+        // Portrait IDs are now strings (filename stems). Accept whatever the user typed
+        // and store it as a trimmed string. An empty string indicates no portrait.
+        let portrait_id = self.buffer.portrait_id.trim().to_string();
         let starting_gold = self
             .buffer
             .starting_gold
@@ -1798,7 +1796,7 @@ mod tests {
             sex: Sex::Male,
             alignment: Alignment::Good,
             base_stats: BaseStats::new(10, 10, 10, 10, 10, 10, 10),
-            portrait_id: 0,
+            portrait_id: "0".to_string(),
             starting_gold: 100,
             starting_gems: 0,
             starting_food: 10,

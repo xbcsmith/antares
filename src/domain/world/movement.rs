@@ -160,44 +160,6 @@ pub fn check_tile_blocked(map: &Map, position: Position) -> Result<bool, Movemen
     Ok(tile.is_blocked())
 }
 
-/// Triggers any event associated with a tile
-///
-/// This function checks if a tile has an event trigger and returns information
-/// about it. The actual event handling is done by the event system.
-///
-/// # Arguments
-///
-/// * `map` - The map to check for events
-/// * `position` - The position to check for events
-///
-/// # Returns
-///
-/// Returns `Some(event_id)` if there's an event trigger, `None` otherwise
-///
-/// # Examples
-///
-/// ```
-/// use antares::domain::world::{Map, trigger_tile_event, Tile, TerrainType, WallType};
-/// use antares::domain::types::Position;
-///
-/// let mut map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
-/// let pos = Position::new(5, 5);
-///
-/// // Initially no event
-/// assert!(trigger_tile_event(&map, pos).is_none());
-///
-/// // Add event trigger to tile
-/// if let Some(tile) = map.get_tile_mut(pos) {
-///     tile.event_trigger = Some(42);
-/// }
-///
-/// // Now event should be found
-/// assert_eq!(trigger_tile_event(&map, pos), Some(42));
-/// ```
-pub fn trigger_tile_event(map: &Map, position: Position) -> Option<u16> {
-    map.get_tile(position).and_then(|tile| tile.event_trigger)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,26 +337,6 @@ mod tests {
         let result = check_tile_blocked(&map, pos);
         assert!(result.is_err());
         assert!(matches!(result, Err(MovementError::OutOfBounds(10, 10))));
-    }
-
-    #[test]
-    fn test_trigger_tile_event_none() {
-        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
-        let pos = Position::new(5, 5);
-
-        assert!(trigger_tile_event(&map, pos).is_none());
-    }
-
-    #[test]
-    fn test_trigger_tile_event_exists() {
-        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 10, 10);
-        let pos = Position::new(5, 5);
-
-        if let Some(tile) = map.get_tile_mut(pos) {
-            tile.event_trigger = Some(42);
-        }
-
-        assert_eq!(trigger_tile_event(&map, pos), Some(42));
     }
 
     #[test]
