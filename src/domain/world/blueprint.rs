@@ -207,6 +207,7 @@ impl From<MapBlueprint> for Map {
             tiles,
             events,
             npcs,
+            npc_placements: Vec::new(),
         }
     }
 }

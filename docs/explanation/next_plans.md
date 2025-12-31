@@ -22,7 +22,7 @@ X Need to be able to set starting position for player characters in map editor. 
 
 ## npc externalization plan
 
-[npc externalization plan](./npc_externalization_implementation_plan.md)
+[ ] [npc externalization plan](./npc_externalization_implementation_plan.md)
 
 ## npc gameplay fix plan
 

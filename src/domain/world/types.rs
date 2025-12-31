@@ -292,8 +292,12 @@ pub struct Map {
     pub tiles: Vec<Tile>,
     /// Events at specific positions
     pub events: HashMap<Position, MapEvent>,
-    /// NPCs on this map
+    /// NPCs on this map (legacy - use npc_placements)
+    #[serde(default)]
     pub npcs: Vec<Npc>,
+    /// NPC placements (references to NPC definitions)
+    #[serde(default)]
+    pub npc_placements: Vec<crate::domain::world::npc::NpcPlacement>,
 }
 
 fn default_map_name() -> String {
@@ -337,6 +341,7 @@ impl Map {
             tiles,
             events: HashMap::new(),
             npcs: Vec::new(),
+            npc_placements: Vec::new(),
         }
     }
 
