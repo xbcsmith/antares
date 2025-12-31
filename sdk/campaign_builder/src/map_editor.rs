@@ -287,6 +287,116 @@ pub struct MapConnection {
     pub description: String,
 }
 
+// ===== Visual Metadata Presets =====
+
+/// Predefined visual metadata presets for common use cases
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisualPreset {
+    /// Default (all None)
+    Default,
+    /// Short wall (height=1.5)
+    ShortWall,
+    /// Tall wall (height=3.5)
+    TallWall,
+    /// Thin wall (width_z=0.2)
+    ThinWall,
+    /// Small tree (scale=0.5, height=2.0, green tint)
+    SmallTree,
+    /// Large tree (scale=1.5, height=4.0, green tint)
+    LargeTree,
+    /// Low mountain (height=2.0, gray tint)
+    LowMountain,
+    /// High mountain (height=5.0, gray tint)
+    HighMountain,
+    /// Sunken (y_offset=-0.5)
+    Sunken,
+    /// Raised (y_offset=0.5)
+    Raised,
+}
+
+impl VisualPreset {
+    /// Returns the display name for the preset
+    pub fn name(&self) -> &str {
+        match self {
+            VisualPreset::Default => "Default (None)",
+            VisualPreset::ShortWall => "Short Wall",
+            VisualPreset::TallWall => "Tall Wall",
+            VisualPreset::ThinWall => "Thin Wall",
+            VisualPreset::SmallTree => "Small Tree",
+            VisualPreset::LargeTree => "Large Tree",
+            VisualPreset::LowMountain => "Low Mountain",
+            VisualPreset::HighMountain => "High Mountain",
+            VisualPreset::Sunken => "Sunken",
+            VisualPreset::Raised => "Raised",
+        }
+    }
+
+    /// Returns all available presets for iteration
+    pub fn all() -> &'static [VisualPreset] {
+        &[
+            VisualPreset::Default,
+            VisualPreset::ShortWall,
+            VisualPreset::TallWall,
+            VisualPreset::ThinWall,
+            VisualPreset::SmallTree,
+            VisualPreset::LargeTree,
+            VisualPreset::LowMountain,
+            VisualPreset::HighMountain,
+            VisualPreset::Sunken,
+            VisualPreset::Raised,
+        ]
+    }
+
+    /// Converts the preset to TileVisualMetadata
+    pub fn to_metadata(&self) -> TileVisualMetadata {
+        match self {
+            VisualPreset::Default => TileVisualMetadata::default(),
+            VisualPreset::ShortWall => TileVisualMetadata {
+                height: Some(1.5),
+                ..Default::default()
+            },
+            VisualPreset::TallWall => TileVisualMetadata {
+                height: Some(3.5),
+                ..Default::default()
+            },
+            VisualPreset::ThinWall => TileVisualMetadata {
+                width_z: Some(0.2),
+                ..Default::default()
+            },
+            VisualPreset::SmallTree => TileVisualMetadata {
+                height: Some(2.0),
+                scale: Some(0.5),
+                color_tint: Some((0.6, 0.9, 0.6)), // Light green tint
+                ..Default::default()
+            },
+            VisualPreset::LargeTree => TileVisualMetadata {
+                height: Some(4.0),
+                scale: Some(1.5),
+                color_tint: Some((0.5, 0.8, 0.5)), // Green tint
+                ..Default::default()
+            },
+            VisualPreset::LowMountain => TileVisualMetadata {
+                height: Some(2.0),
+                color_tint: Some((0.7, 0.7, 0.7)), // Gray tint
+                ..Default::default()
+            },
+            VisualPreset::HighMountain => TileVisualMetadata {
+                height: Some(5.0),
+                color_tint: Some((0.6, 0.6, 0.6)), // Darker gray tint
+                ..Default::default()
+            },
+            VisualPreset::Sunken => TileVisualMetadata {
+                y_offset: Some(-0.5),
+                ..Default::default()
+            },
+            VisualPreset::Raised => TileVisualMetadata {
+                y_offset: Some(0.5),
+                ..Default::default()
+            },
+        }
+    }
+}
+
 // ===== Visual Metadata Editor =====
 
 /// Visual metadata editor state for tile customization
@@ -481,6 +591,10 @@ pub struct MapEditorState {
     pub show_metadata_editor: bool,
     /// Visual metadata editor state
     pub visual_editor: VisualMetadataEditor,
+    /// Multi-tile selection for bulk editing
+    pub selected_tiles: Vec<Position>,
+    /// Selection mode (single vs multi)
+    pub multi_select_mode: bool,
 }
 
 impl MapEditorState {
@@ -511,7 +625,59 @@ impl MapEditorState {
             npc_placement_editor: None,
             show_metadata_editor: false,
             visual_editor: VisualMetadataEditor::default(),
+            selected_tiles: Vec::new(),
+            multi_select_mode: false,
         }
+    }
+
+    /// Apply visual metadata to a single tile
+    pub fn apply_visual_metadata(&mut self, pos: Position, metadata: &TileVisualMetadata) {
+        if let Some(tile) = self.map.get_tile_mut(pos) {
+            tile.visual = metadata.clone();
+            self.has_changes = true;
+        }
+    }
+
+    /// Apply visual metadata to all selected tiles
+    pub fn apply_visual_metadata_to_selection(&mut self, metadata: &TileVisualMetadata) {
+        if self.selected_tiles.is_empty() {
+            // If no multi-selection, apply to current selected position
+            if let Some(pos) = self.selected_position {
+                self.apply_visual_metadata(pos, metadata);
+            }
+        } else {
+            // Apply to all selected tiles
+            for pos in self.selected_tiles.clone() {
+                self.apply_visual_metadata(pos, metadata);
+            }
+        }
+    }
+
+    /// Toggle multi-select mode
+    pub fn toggle_multi_select_mode(&mut self) {
+        self.multi_select_mode = !self.multi_select_mode;
+        if !self.multi_select_mode {
+            self.selected_tiles.clear();
+        }
+    }
+
+    /// Add or remove a tile from selection
+    pub fn toggle_tile_selection(&mut self, pos: Position) {
+        if let Some(index) = self.selected_tiles.iter().position(|p| *p == pos) {
+            self.selected_tiles.remove(index);
+        } else {
+            self.selected_tiles.push(pos);
+        }
+    }
+
+    /// Clear all tile selections
+    pub fn clear_tile_selection(&mut self) {
+        self.selected_tiles.clear();
+    }
+
+    /// Check if a tile is in the selection
+    pub fn is_tile_selected(&self, pos: Position) -> bool {
+        self.selected_tiles.contains(&pos)
     }
 
     /// Sets a tile at the specified position
@@ -1366,6 +1532,16 @@ impl<'a> Widget for MapGridWidget<'a> {
                             egui::StrokeKind::Outside,
                         );
                     }
+
+                    // Highlight multi-selected tiles
+                    if self.state.is_tile_selected(pos) {
+                        painter.rect_stroke(
+                            rect,
+                            0.0,
+                            Stroke::new(2.0, Color32::LIGHT_BLUE),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
                 }
             }
         }
@@ -1381,6 +1557,11 @@ impl<'a> Widget for MapGridWidget<'a> {
                 let pos = Position::new(x, y);
 
                 if self.state.map.is_valid_position(pos) {
+                    // Handle multi-select mode
+                    if self.state.multi_select_mode {
+                        self.state.toggle_tile_selection(pos);
+                    }
+
                     self.state.selected_position = Some(pos);
 
                     // Apply current tool
@@ -2622,6 +2803,16 @@ impl MapsEditorState {
             ui.separator();
             ui.group(|ui| {
                 ui.heading("Visual Properties");
+
+                // Multi-select info
+                if !editor.selected_tiles.is_empty() {
+                    ui.label(format!(
+                        "📌 {} tiles selected for bulk edit",
+                        editor.selected_tiles.len()
+                    ));
+                    ui.separator();
+                }
+
                 Self::show_visual_metadata_editor(ui, editor, pos);
             });
         } else {
@@ -3277,6 +3468,31 @@ impl MapsEditorState {
 
     /// Show visual metadata editor for selected tile
     fn show_visual_metadata_editor(ui: &mut egui::Ui, editor: &mut MapEditorState, pos: Position) {
+        // Preset selector
+        ui.horizontal(|ui| {
+            ui.label("Preset:");
+            egui::ComboBox::from_id_salt("visual_preset_combo")
+                .selected_text("Select Preset...")
+                .show_ui(ui, |ui| {
+                    for preset in VisualPreset::all() {
+                        if ui.button(preset.name()).clicked() {
+                            let metadata = preset.to_metadata();
+                            if editor.multi_select_mode && !editor.selected_tiles.is_empty() {
+                                editor.apply_visual_metadata_to_selection(&metadata);
+                            } else {
+                                editor.apply_visual_metadata(pos, &metadata);
+                            }
+                            // Update editor state to reflect preset
+                            if let Some(tile) = editor.map.get_tile(pos) {
+                                editor.visual_editor.load_from_tile(tile);
+                            }
+                        }
+                    }
+                });
+        });
+
+        ui.separator();
+
         // Load tile's current visual metadata into editor if selection changed
         if let Some(tile) = editor.map.get_tile(pos) {
             editor.visual_editor.load_from_tile(tile);
@@ -3370,22 +3586,49 @@ impl MapsEditorState {
 
         // Action buttons
         ui.horizontal(|ui| {
-            if ui.button("Apply").clicked() {
+            // Show different button text based on selection mode
+            let apply_text = if !editor.selected_tiles.is_empty() {
+                format!("Apply to {} Tiles", editor.selected_tiles.len())
+            } else {
+                "Apply".to_string()
+            };
+
+            if ui.button(&apply_text).clicked() {
                 let visual_metadata = editor.visual_editor.to_metadata();
-                if let Some(tile) = editor.map.get_tile_mut(pos) {
-                    tile.visual = visual_metadata;
-                    editor.has_changes = true;
-                }
+                editor.apply_visual_metadata_to_selection(&visual_metadata);
             }
 
             if ui.button("Reset to Defaults").clicked() {
-                if let Some(tile) = editor.map.get_tile_mut(pos) {
-                    tile.visual = TileVisualMetadata::default();
-                    editor.visual_editor.reset();
-                    editor.has_changes = true;
+                let default_metadata = TileVisualMetadata::default();
+                editor.apply_visual_metadata_to_selection(&default_metadata);
+                editor.visual_editor.reset();
+            }
+        });
+
+        ui.separator();
+
+        // Multi-select controls
+        ui.horizontal(|ui| {
+            let button_text = if editor.multi_select_mode {
+                "✓ Multi-Select Mode"
+            } else {
+                "Multi-Select Mode"
+            };
+
+            if ui.button(button_text).clicked() {
+                editor.toggle_multi_select_mode();
+            }
+
+            if !editor.selected_tiles.is_empty() {
+                if ui.button("Clear Selection").clicked() {
+                    editor.clear_tile_selection();
                 }
             }
         });
+
+        if editor.multi_select_mode {
+            ui.label("💡 Click tiles to add/remove from selection");
+        }
     }
 
     fn show_import_dialog_window(
