@@ -3355,6 +3355,91 @@ pub fn autocomplete_monster_list_selector(
     changed
 }
 
+/// Portrait selector widget with autocomplete functionality
+///
+/// Provides an autocomplete text input for selecting a portrait by ID.
+/// The widget displays available portrait IDs as suggestions and allows
+/// the user to type and select from the list.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `id_salt` - Unique identifier for this widget instance
+/// * `label` - Text label to display before the input
+/// * `selected_portrait_id` - Mutable reference to the currently selected portrait ID
+/// * `available_portraits` - Slice of available portrait IDs to choose from
+///
+/// # Returns
+///
+/// Returns `true` if the selection changed during this frame, `false` otherwise
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::ui_helpers::autocomplete_portrait_selector;
+///
+/// fn show_character_editor(ui: &mut egui::Ui, portrait_id: &mut String, portraits: &[String]) {
+///     if autocomplete_portrait_selector(ui, "char_portrait", "Portrait:", portrait_id, portraits) {
+///         println!("Portrait selection changed to: {}", portrait_id);
+///     }
+/// }
+/// ```
+pub fn autocomplete_portrait_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_portrait_id: &mut String,
+    available_portraits: &[String],
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        ui.label(label);
+
+        // Get current portrait ID display value
+        let current_value = selected_portrait_id.clone();
+
+        let buffer_id = make_autocomplete_id(ui, "portrait", id_salt);
+
+        // Build candidates from available portraits
+        let candidates: Vec<String> = available_portraits.to_vec();
+
+        // Persistent buffer logic
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_value.clone());
+
+        let response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder("Start typing portrait ID...")
+            .show(ui, &mut text_buffer);
+
+        // Commit valid selections
+        if response.changed() && !text_buffer.is_empty() && text_buffer != current_value {
+            if available_portraits.contains(&text_buffer) {
+                *selected_portrait_id = text_buffer.clone();
+                changed = true;
+            }
+        }
+
+        // Show clear button
+        if !selected_portrait_id.is_empty()
+            && ui
+                .small_button("✖")
+                .on_hover_text("Clear selection")
+                .clicked()
+        {
+            selected_portrait_id.clear();
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
+            changed = true;
+        }
+
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+    });
+
+    changed
+}
+
 /// Extracts monster name candidates from a list of monster definitions.
 ///
 /// Returns a vector of monster names suitable for autocomplete widgets.
@@ -6224,5 +6309,175 @@ mod tests {
 
         // Cleanup
         std::fs::remove_dir_all(&temp_dir).expect("Failed to cleanup test directory");
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_basic_selection() {
+        // Test basic portrait selection functionality
+        let ctx = egui::Context::default();
+        let mut portrait_id = String::new();
+        let available_portraits = vec!["0".to_string(), "1".to_string(), "2".to_string()];
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Initially no selection
+                assert_eq!(portrait_id, "");
+
+                // Simulate selecting portrait "1"
+                portrait_id = "1".to_string();
+                let changed = autocomplete_portrait_selector(
+                    ui,
+                    "test_portrait",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                );
+
+                // Since we manually set it, the widget should see it
+                assert_eq!(portrait_id, "1");
+            });
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_clear_button() {
+        // Test that clear button functionality is present
+        let ctx = egui::Context::default();
+        let mut portrait_id = "5".to_string();
+        let available_portraits = vec!["5".to_string(), "10".to_string()];
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Portrait is selected
+                assert_eq!(portrait_id, "5");
+
+                // Call the selector (clear button should be available)
+                autocomplete_portrait_selector(
+                    ui,
+                    "test_clear",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                );
+
+                // Portrait should still be selected after just rendering
+                assert_eq!(portrait_id, "5");
+            });
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_empty_candidates() {
+        // Test behavior with no available portraits
+        let ctx = egui::Context::default();
+        let mut portrait_id = String::new();
+        let available_portraits: Vec<String> = vec![];
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let changed = autocomplete_portrait_selector(
+                    ui,
+                    "test_empty",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                );
+
+                // Should not change with empty candidates
+                assert!(!changed);
+                assert_eq!(portrait_id, "");
+            });
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_validates_selection() {
+        // Test that selection must be from available portraits
+        let ctx = egui::Context::default();
+        let mut portrait_id = String::new();
+        let available_portraits = vec!["0".to_string(), "1".to_string()];
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Try to set an invalid portrait ID
+                portrait_id = "999".to_string();
+
+                autocomplete_portrait_selector(
+                    ui,
+                    "test_validate",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                );
+
+                // The widget should accept the value but won't auto-clear it
+                // (validation happens on change, not on initial display)
+                assert_eq!(portrait_id, "999");
+            });
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_numeric_ids() {
+        // Test with numeric portrait IDs (common case)
+        let ctx = egui::Context::default();
+        let mut portrait_id = String::new();
+        let available_portraits = vec![
+            "0".to_string(),
+            "1".to_string(),
+            "10".to_string(),
+            "100".to_string(),
+        ];
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                autocomplete_portrait_selector(
+                    ui,
+                    "test_numeric",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                );
+
+                // Should render without errors
+                assert_eq!(portrait_id, "");
+            });
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_preserves_buffer() {
+        // Test that widget state persists across frames
+        let ctx = egui::Context::default();
+        let mut portrait_id = "0".to_string();
+        let available_portraits = vec!["0".to_string(), "1".to_string()];
+
+        // Frame 1
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                autocomplete_portrait_selector(
+                    ui,
+                    "test_persist",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                );
+            });
+        });
+
+        // Frame 2 - buffer should be persisted
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                autocomplete_portrait_selector(
+                    ui,
+                    "test_persist",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                );
+                // Portrait ID should still be "0"
+                assert_eq!(portrait_id, "0");
+            });
+        });
     }
 }

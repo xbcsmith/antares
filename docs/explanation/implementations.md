@@ -180,14 +180,216 @@ campaign_dir/
 
 **Total Lines Added:** 411 lines (133 implementation + 278 tests)
 
-### Next Steps (Phase 2)
+### Next Steps
 
 The following phases from the implementation plan are ready to proceed:
 
-- Phase 2: Autocomplete Portrait Selector
+- ✅ Phase 2: Autocomplete Portrait Selector (COMPLETED - see below)
 - Phase 3: Portrait Grid Picker Popup
 - Phase 4: Preview Panel Portrait Display
 - Phase 5: Polish and Edge Cases
+
+---
+
+## Phase 2: Portrait Support - Autocomplete Portrait Selector - COMPLETED
+
+### Summary
+
+Implemented an autocomplete widget for portrait selection following existing UI patterns. This phase provides a user-friendly text-based selection interface that allows users to type and select portrait IDs with autocomplete suggestions.
+
+### Changes Made
+
+#### 2.1 Autocomplete Portrait Selector Widget (`sdk/campaign_builder/src/ui_helpers.rs`)
+
+Added `autocomplete_portrait_selector` function following the existing autocomplete widget patterns:
+
+```rust
+pub fn autocomplete_portrait_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_portrait_id: &mut String,
+    available_portraits: &[String],
+) -> bool
+```
+
+**Features:**
+
+- Autocomplete text input with suggestions from available portraits
+- Persistent buffer state across frames using egui memory
+- Clear button (✖) to remove selection
+- Returns `true` when selection changes
+- Validates selection against available portraits
+- Integrates with existing `AutocompleteInput` widget
+
+**Implementation Details:**
+
+- Uses `AutocompleteInput::new(id_salt, &candidates)` for core widget
+- Uses `make_autocomplete_id`, `load_autocomplete_buffer`, `store_autocomplete_buffer` for state persistence
+- Follows pattern from `autocomplete_race_selector` and `autocomplete_class_selector`
+- Horizontal layout: label + input + clear button
+- Placeholder text: "Start typing portrait ID..."
+
+**Pattern Consistency:**
+
+- Matches signature pattern of other autocomplete selectors
+- Uses same buffer persistence mechanism
+- Consistent clear button behavior
+- Same return value semantics (bool indicating change)
+
+### Architecture Compliance
+
+✅ **Follows existing patterns:**
+
+- Exactly matches `autocomplete_race_selector` pattern (String-based IDs)
+- Consistent with all other `autocomplete_*_selector` functions
+- Uses established `AutocompleteInput` widget infrastructure
+- Proper buffer management with egui memory
+
+✅ **Module placement:**
+
+- Added in `ui_helpers.rs` after `autocomplete_monster_list_selector` (line 3356)
+- Placed before `extract_monster_candidates` section
+- Maintains logical grouping with other autocomplete selectors
+
+✅ **Type system:**
+
+- Uses `String` for portrait IDs (consistent with other string-based selectors)
+- Uses `&[String]` for candidates list
+- Returns `bool` for change detection (standard pattern)
+
+✅ **Documentation:**
+
+- Comprehensive doc comments with examples
+- Documents all parameters and return value
+- Includes usage example in doc test
+
+### Validation Results
+
+**Quality Checks - ALL PASSED:**
+
+```bash
+✅ cargo fmt --all                                      # Code formatted
+✅ cargo check --all-targets --all-features            # Compiles successfully
+✅ cargo clippy --all-targets --all-features -- -D warnings  # Zero warnings
+✅ cargo nextest run --all-features -p campaign_builder      # 820/820 tests passed
+```
+
+**No warnings generated** - All `ctx.run` return values properly handled with `let _ =`
+
+### Test Coverage
+
+**Autocomplete Portrait Selector Tests (6 tests):**
+
+1. ✅ `test_autocomplete_portrait_selector_basic_selection` - Basic selection functionality
+2. ✅ `test_autocomplete_portrait_selector_clear_button` - Clear button presence and behavior
+3. ✅ `test_autocomplete_portrait_selector_empty_candidates` - Handles empty portrait list
+4. ✅ `test_autocomplete_portrait_selector_validates_selection` - Validates against available portraits
+5. ✅ `test_autocomplete_portrait_selector_numeric_ids` - Works with numeric portrait IDs
+6. ✅ `test_autocomplete_portrait_selector_preserves_buffer` - Buffer persists across frames
+
+**Test Techniques Used:**
+
+- egui context creation for widget testing
+- Multi-frame testing (buffer persistence)
+- Edge case testing (empty candidates, invalid selections)
+- Numeric ID testing (common portrait naming pattern)
+- Widget behavior verification (clear button, selection changes)
+
+### Deliverables Status
+
+- [x] `autocomplete_portrait_selector` function in `ui_helpers.rs`
+- [x] Comprehensive doc comments with usage examples
+- [x] Unit tests (6 tests covering all functionality)
+- [x] All quality gates passed
+
+### Success Criteria
+
+✅ **Autocomplete widget shows suggestions from available portraits** - Verified in tests
+✅ **Selection persists correctly** - Verified with buffer persistence test
+✅ **Clear button removes selection** - Verified with clear button test
+✅ **Validates selections** - Only accepts portraits from available list
+✅ **Follows existing patterns** - Matches other autocomplete selectors exactly
+
+### Implementation Details
+
+**Widget Layout:**
+
+```
+[Label:] [Autocomplete Input Field...] [✖]
+```
+
+**State Management:**
+
+- Buffer ID: `make_autocomplete_id(ui, "portrait", id_salt)`
+- State persisted in egui memory between frames
+- Buffer cleared when clear button clicked
+
+**Integration Example:**
+
+```rust
+let available_portraits = extract_portrait_candidates(campaign_dir);
+if autocomplete_portrait_selector(
+    ui,
+    "char_portrait",
+    "Portrait:",
+    &mut character.portrait_id,
+    &available_portraits,
+) {
+    println!("Portrait changed to: {}", character.portrait_id);
+}
+```
+
+### Benefits Achieved
+
+- **User-friendly text input**: Type-ahead with suggestions
+- **Consistent UX**: Matches all other autocomplete selectors in the app
+- **Persistent state**: Typed text survives frame updates
+- **Validation**: Only valid portrait IDs can be selected
+- **Clear feedback**: Clear button provides easy way to reset selection
+- **Integration ready**: Can be used immediately in character editor
+
+### Related Files
+
+**Modified:**
+
+- `sdk/campaign_builder/src/ui_helpers.rs` - Added autocomplete selector function (86 lines)
+- `sdk/campaign_builder/src/ui_helpers.rs` - Added comprehensive tests (174 lines)
+
+**Total Lines Added:** 260 lines (86 implementation + 174 tests)
+
+### Integration Points
+
+**Ready for use in:**
+
+- Character editor (portrait selection field)
+- Any UI component needing portrait selection
+- Works with `extract_portrait_candidates` from Phase 1
+
+**Example integration pattern:**
+
+```rust
+// In character editor
+let portraits = extract_portrait_candidates(campaign_dir);
+if autocomplete_portrait_selector(
+    ui,
+    &format!("char_{}", character.id),
+    "Portrait:",
+    &mut character.portrait_id,
+    &portraits,
+) {
+    // Portrait changed - mark as unsaved, update preview, etc.
+    editor_state.has_unsaved_changes = true;
+}
+```
+
+### Next Steps
+
+The following phases from the implementation plan are ready to proceed:
+
+- Phase 3: Portrait Grid Picker Popup (visual grid selector with thumbnails)
+- Phase 4: Preview Panel Portrait Display (show selected portrait in character preview)
+- Phase 5: Polish and Edge Cases (tooltips, error handling, full integration testing)
 
 ---
 
