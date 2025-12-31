@@ -19,6 +19,7 @@ fn test_ron_round_trip_with_visual() {
         color_tint: Some((0.8, 0.6, 0.4)),
         scale: None,
         y_offset: None,
+        rotation_y: None,
     };
 
     // Serialize to RON
@@ -223,6 +224,7 @@ fn test_map_round_trip_preserves_visual() {
         color_tint: Some((0.7, 0.6, 0.5)),
         scale: Some(1.2),
         y_offset: Some(0.3),
+        rotation_y: None,
     };
 
     // Serialize to RON

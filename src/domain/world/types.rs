@@ -90,6 +90,11 @@ pub struct TileVisualMetadata {
     /// Vertical offset from ground (default: 0.0)
     /// Positive = raised, negative = sunken
     pub y_offset: Option<f32>,
+
+    /// Rotation around Y-axis in degrees (default: 0.0)
+    /// Useful for angled walls, rotated props, diagonal features
+    /// Positive = counter-clockwise when viewed from above
+    pub rotation_y: Option<f32>,
 }
 
 impl TileVisualMetadata {
@@ -196,6 +201,38 @@ impl TileVisualMetadata {
             self.effective_height(terrain, wall_type) * scale,
             self.effective_width_z() * scale,
         )
+    }
+
+    /// Get effective rotation_y in degrees (defaults to 0.0)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::TileVisualMetadata;
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.effective_rotation_y(), 0.0);
+    ///
+    /// metadata.rotation_y = Some(45.0);
+    /// assert_eq!(metadata.effective_rotation_y(), 45.0);
+    /// ```
+    pub fn effective_rotation_y(&self) -> f32 {
+        self.rotation_y.unwrap_or(0.0)
+    }
+
+    /// Get rotation_y in radians (converts from degrees)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::TileVisualMetadata;
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// metadata.rotation_y = Some(180.0);
+    /// assert!((metadata.rotation_y_radians() - std::f32::consts::PI).abs() < 0.001);
+    /// ```
+    pub fn rotation_y_radians(&self) -> f32 {
+        self.effective_rotation_y().to_radians()
     }
 
     /// Calculate Y-position for mesh center
@@ -1844,5 +1881,52 @@ mod tests {
             !map.is_blocked(Position::new(5, 5)),
             "Center should not be blocked"
         );
+    }
+
+    #[test]
+    fn test_rotation_y_default() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(metadata.rotation_y, None);
+        assert_eq!(metadata.effective_rotation_y(), 0.0);
+    }
+
+    #[test]
+    fn test_rotation_y_custom_value() {
+        let mut metadata = TileVisualMetadata::default();
+        metadata.rotation_y = Some(45.0);
+        assert_eq!(metadata.effective_rotation_y(), 45.0);
+    }
+
+    #[test]
+    fn test_rotation_y_radians_conversion() {
+        let mut metadata = TileVisualMetadata::default();
+
+        metadata.rotation_y = Some(0.0);
+        assert!((metadata.rotation_y_radians() - 0.0).abs() < 0.001);
+
+        metadata.rotation_y = Some(90.0);
+        assert!((metadata.rotation_y_radians() - std::f32::consts::FRAC_PI_2).abs() < 0.001);
+
+        metadata.rotation_y = Some(180.0);
+        assert!((metadata.rotation_y_radians() - std::f32::consts::PI).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_rotation_serialization() {
+        let mut metadata = TileVisualMetadata::default();
+        metadata.rotation_y = Some(45.0);
+
+        let serialized = ron::to_string(&metadata).unwrap();
+        let deserialized: TileVisualMetadata = ron::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.rotation_y, Some(45.0));
+    }
+
+    #[test]
+    fn test_tile_with_rotation() {
+        let mut tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal);
+        tile.visual.rotation_y = Some(90.0);
+
+        assert_eq!(tile.visual.rotation_y, Some(90.0));
+        assert_eq!(tile.visual.effective_rotation_y(), 90.0);
     }
 }

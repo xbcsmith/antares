@@ -343,6 +343,7 @@ fn test_visual_metadata_serialization_roundtrip() {
         color_tint: Some((0.8, 0.9, 1.0)),
         scale: Some(1.2),
         y_offset: Some(0.3),
+        rotation_y: None,
     };
 
     // Serialize to RON

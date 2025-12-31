@@ -1,3 +1,105 @@
+## Phase 5: Advanced Features - Rotation Support & Advanced Designs - COMPLETED
+
+**Date:** 2025-01-XX
+**Status:** ✅ Rotation implemented | 📋 Advanced features designed
+
+### Summary
+
+Successfully implemented Phase 5 of the Tile Visual Metadata system, delivering production-ready Y-axis rotation support for all tile types and comprehensive design specifications for future advanced features (material override, custom meshes, animations).
+
+### Changes Made
+
+#### 5.1 Rotation Support (IMPLEMENTED)
+
+Added `rotation_y` field to `TileVisualMetadata`:
+
+```rust
+pub struct TileVisualMetadata {
+    // ... existing fields ...
+    /// Rotation around Y-axis in degrees (default: 0.0)
+    pub rotation_y: Option<f32>,
+}
+```
+
+**Key Features:**
+
+- Degrees-based API (more intuitive than radians for designers)
+- Y-axis rotation only (sufficient for tile-based 2.5D rendering)
+- Backward compatible (optional field)
+- Helper methods: `effective_rotation_y()`, `rotation_y_radians()`
+
+#### 5.2 Rendering Integration
+
+Updated `src/game/systems/map.rs` to apply rotation when spawning tile meshes:
+
+- Mountains, forests, walls, doors, torches all support rotation
+- Applied via Bevy quaternion rotation after translation
+- Zero performance impact (rotation part of transform matrix)
+
+#### 5.3 Campaign Builder Integration
+
+Added rotation controls to Visual Metadata Editor:
+
+- Checkbox to enable/disable rotation
+- Drag slider (0-360°, 1° precision)
+- Three new presets: Rotated45, Rotated90, DiagonalWall
+- Full support for bulk editing rotated tiles
+
+#### 5.4 Advanced Features (DESIGNED)
+
+Created comprehensive design specifications for:
+
+- **Material Override System** - Per-tile texture/material customization
+- **Custom Mesh Reference** - Artist-supplied 3D models for complex features
+- **Animation Properties** - Bobbing, rotating, pulsing, swaying effects
+
+See `docs/explanation/phase5_advanced_features_implementation.md` for complete designs.
+
+### Testing
+
+Created `sdk/campaign_builder/tests/phase5_rotation_test.rs` with 30 comprehensive tests:
+
+- 11 domain model tests
+- 2 serialization tests
+- 4 preset tests
+- 5 editor state tests
+- 3 integration tests
+- 2 combined feature tests
+- 3 edge case tests
+
+**All tests pass:** ✅ 1034/1034 (100%)
+
+### Quality Gates
+
+- ✅ `cargo fmt --all` - Formatted
+- ✅ `cargo check --all-targets --all-features` - No errors
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - Zero warnings
+- ✅ `cargo nextest run --all-features` - 1034/1034 passing
+
+### Files Modified
+
+- `src/domain/world/types.rs` - Added rotation_y field and methods (+36 lines)
+- `src/game/systems/map.rs` - Apply rotation in rendering (+35 lines)
+- `sdk/campaign_builder/src/map_editor.rs` - Rotation UI and presets (+52 lines)
+- `tests/phase3_map_authoring_test.rs` - Updated test fixtures (+2 lines)
+- `tests/rendering_visual_metadata_test.rs` - Updated test fixtures (+1 line)
+
+### Files Created
+
+- `sdk/campaign_builder/tests/phase5_rotation_test.rs` - Rotation tests (376 lines)
+- `docs/explanation/phase5_advanced_features_implementation.md` - Complete documentation (~900 lines)
+
+### Success Criteria
+
+✅ Rotation works for walls and decorations
+✅ Advanced features documented with examples
+✅ Systems designed for future implementation
+✅ Zero clippy warnings
+✅ All tests passing
+✅ Backward compatibility maintained
+
+---
+
 ## Phase 1: Tile Visual Metadata - Domain Model Extension - COMPLETED
 
 **Date:** 2025-01-26

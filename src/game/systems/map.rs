@@ -425,10 +425,17 @@ fn spawn_map(
                                 ..default()
                             });
 
+                            // Apply rotation if specified
+                            let rotation = bevy::prelude::Quat::from_rotation_y(
+                                tile.visual.rotation_y_radians(),
+                            );
+                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
+                                .with_rotation(rotation);
+
                             commands.spawn((
                                 Mesh3d(mesh),
                                 MeshMaterial3d(material),
-                                Transform::from_xyz(x as f32, y_pos, y as f32),
+                                transform,
                                 GlobalTransform::default(),
                                 Visibility::default(),
                                 MapEntity(map.id),
@@ -471,14 +478,21 @@ fn spawn_map(
 
                             let material = materials.add(StandardMaterial {
                                 base_color,
-                                perceptual_roughness: 0.7,
+                                perceptual_roughness: 0.9,
                                 ..default()
                             });
+
+                            // Apply rotation if specified
+                            let rotation = bevy::prelude::Quat::from_rotation_y(
+                                tile.visual.rotation_y_radians(),
+                            );
+                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
+                                .with_rotation(rotation);
 
                             commands.spawn((
                                 Mesh3d(mesh),
                                 MeshMaterial3d(material),
-                                Transform::from_xyz(x as f32, y_pos, y as f32),
+                                transform,
                                 GlobalTransform::default(),
                                 Visibility::default(),
                                 MapEntity(map.id),
@@ -544,10 +558,16 @@ fn spawn_map(
                             ..default()
                         });
 
+                        // Apply rotation if specified
+                        let rotation =
+                            bevy::prelude::Quat::from_rotation_y(tile.visual.rotation_y_radians());
+                        let transform =
+                            Transform::from_xyz(x as f32, y_pos, y as f32).with_rotation(rotation);
+
                         commands.spawn((
                             Mesh3d(mesh),
                             MeshMaterial3d(material),
-                            Transform::from_xyz(x as f32, y_pos, y as f32),
+                            transform,
                             GlobalTransform::default(),
                             Visibility::default(),
                             MapEntity(map.id),
@@ -602,10 +622,17 @@ fn spawn_map(
                                     ..default()
                                 });
 
+                                // Apply rotation if specified
+                                let rotation = bevy::prelude::Quat::from_rotation_y(
+                                    tile.visual.rotation_y_radians(),
+                                );
+                                let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
+                                    .with_rotation(rotation);
+
                                 commands.spawn((
                                     Mesh3d(mesh),
                                     MeshMaterial3d(tile_wall_material),
-                                    Transform::from_xyz(x as f32, y_pos, y as f32),
+                                    transform,
                                     GlobalTransform::default(),
                                     Visibility::default(),
                                     MapEntity(map.id),
@@ -639,10 +666,17 @@ fn spawn_map(
                                     ..default()
                                 });
 
+                                // Apply rotation if specified
+                                let rotation = bevy::prelude::Quat::from_rotation_y(
+                                    tile.visual.rotation_y_radians(),
+                                );
+                                let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
+                                    .with_rotation(rotation);
+
                                 commands.spawn((
                                     Mesh3d(mesh),
                                     MeshMaterial3d(material),
-                                    Transform::from_xyz(x as f32, y_pos, y as f32),
+                                    transform,
                                     GlobalTransform::default(),
                                     Visibility::default(),
                                     MapEntity(map.id),
@@ -679,10 +713,17 @@ fn spawn_map(
                                     ..default()
                                 });
 
+                                // Apply rotation if specified
+                                let rotation = bevy::prelude::Quat::from_rotation_y(
+                                    tile.visual.rotation_y_radians(),
+                                );
+                                let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
+                                    .with_rotation(rotation);
+
                                 commands.spawn((
                                     Mesh3d(mesh),
                                     MeshMaterial3d(material),
-                                    Transform::from_xyz(x as f32, y_pos, y as f32),
+                                    transform,
                                     GlobalTransform::default(),
                                     Visibility::default(),
                                     MapEntity(map.id),

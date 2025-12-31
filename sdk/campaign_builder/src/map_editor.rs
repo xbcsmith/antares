@@ -312,6 +312,12 @@ pub enum VisualPreset {
     Sunken,
     /// Raised (y_offset=0.5)
     Raised,
+    /// Rotated 45 degrees (rotation_y=45.0)
+    Rotated45,
+    /// Rotated 90 degrees (rotation_y=90.0)
+    Rotated90,
+    /// Diagonal wall (rotation_y=45.0, width_z=0.2)
+    DiagonalWall,
 }
 
 impl VisualPreset {
@@ -328,6 +334,9 @@ impl VisualPreset {
             VisualPreset::HighMountain => "High Mountain",
             VisualPreset::Sunken => "Sunken",
             VisualPreset::Raised => "Raised",
+            VisualPreset::Rotated45 => "Rotated 45°",
+            VisualPreset::Rotated90 => "Rotated 90°",
+            VisualPreset::DiagonalWall => "Diagonal Wall",
         }
     }
 
@@ -344,6 +353,9 @@ impl VisualPreset {
             VisualPreset::HighMountain,
             VisualPreset::Sunken,
             VisualPreset::Raised,
+            VisualPreset::Rotated45,
+            VisualPreset::Rotated90,
+            VisualPreset::DiagonalWall,
         ]
     }
 
@@ -393,6 +405,19 @@ impl VisualPreset {
                 y_offset: Some(0.5),
                 ..Default::default()
             },
+            VisualPreset::Rotated45 => TileVisualMetadata {
+                rotation_y: Some(45.0),
+                ..Default::default()
+            },
+            VisualPreset::Rotated90 => TileVisualMetadata {
+                rotation_y: Some(90.0),
+                ..Default::default()
+            },
+            VisualPreset::DiagonalWall => TileVisualMetadata {
+                rotation_y: Some(45.0),
+                width_z: Some(0.2),
+                ..Default::default()
+            },
         }
     }
 }
@@ -430,6 +455,10 @@ pub struct VisualMetadataEditor {
     pub enable_y_offset: bool,
     /// Temporary Y offset value
     pub temp_y_offset: f32,
+    /// Enable rotation Y
+    pub enable_rotation_y: bool,
+    /// Temporary rotation Y value (in degrees)
+    pub temp_rotation_y: f32,
 }
 
 impl Default for VisualMetadataEditor {
@@ -449,6 +478,8 @@ impl Default for VisualMetadataEditor {
             temp_scale: 1.0,
             enable_y_offset: false,
             temp_y_offset: 0.0,
+            enable_rotation_y: false,
+            temp_rotation_y: 0.0,
         }
     }
 }
@@ -507,6 +538,14 @@ impl VisualMetadataEditor {
             self.enable_y_offset = false;
             self.temp_y_offset = 0.0;
         }
+
+        if let Some(rotation_y) = tile.visual.rotation_y {
+            self.enable_rotation_y = true;
+            self.temp_rotation_y = rotation_y;
+        } else {
+            self.enable_rotation_y = false;
+            self.temp_rotation_y = 0.0;
+        }
     }
 
     /// Convert editor state to TileVisualMetadata
@@ -539,6 +578,11 @@ impl VisualMetadataEditor {
             },
             y_offset: if self.enable_y_offset {
                 Some(self.temp_y_offset)
+            } else {
+                None
+            },
+            rotation_y: if self.enable_rotation_y {
+                Some(self.temp_rotation_y)
             } else {
                 None
             },
@@ -3552,7 +3596,18 @@ impl MapsEditorState {
                     .speed(0.1)
                     .range(-2.0..=2.0),
             );
-            ui.label("units");
+        });
+
+        // Rotation Y
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut editor.visual_editor.enable_rotation_y, "Rotation Y:");
+            ui.add_enabled(
+                editor.visual_editor.enable_rotation_y,
+                egui::DragValue::new(&mut editor.visual_editor.temp_rotation_y)
+                    .speed(1.0)
+                    .range(0.0..=360.0)
+                    .suffix("°"),
+            );
         });
 
         // Color Tint
