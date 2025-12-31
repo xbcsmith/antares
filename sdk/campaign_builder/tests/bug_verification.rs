@@ -60,7 +60,7 @@ fn test_bug_2_verify_unique_widget_ids() {
     // This test verifies that combo boxes and other widgets use unique IDs
     // We can't directly test egui widget IDs, but we can verify the patterns
 
-    let source_code = fs::read_to_string("src/main.rs").expect("Failed to read main.rs");
+    let source_code = fs::read_to_string("src/lib.rs").expect("Failed to read lib.rs");
 
     // Extract only production code (before #[cfg(test)] module)
     // This avoids false positives from test string literals that contain "from_label"
@@ -244,7 +244,7 @@ fn test_monsters_tab_widget_ids_unique() {
 fn test_no_implicit_widget_id_generation() {
     // Advanced test: Check for widgets that might generate implicit IDs
 
-    let source_code = fs::read_to_string("src/main.rs").expect("Failed to read main.rs");
+    let source_code = fs::read_to_string("src/lib.rs").expect("Failed to read lib.rs");
 
     // Pattern: Multiple TextEdit widgets with same label might clash
     // Pattern: Multiple DragValue widgets in same scope might clash
@@ -276,7 +276,7 @@ fn test_no_implicit_widget_id_generation() {
 fn test_ron_file_format_used_not_json() {
     // Verify that data files use .ron extension, not .json or .yaml
 
-    let source_code = fs::read_to_string("src/main.rs").expect("Failed to read main.rs");
+    let source_code = fs::read_to_string("src/lib.rs").expect("Failed to read lib.rs");
 
     // Check CampaignMetadata file paths
     assert!(

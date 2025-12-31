@@ -101,7 +101,7 @@ pub struct NpcEditBuffer {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub portrait_path: String,
+    pub portrait_id: String,
     pub dialogue_id: String,
     pub quest_ids: Vec<String>,
     pub faction: String,
@@ -115,7 +115,7 @@ impl Default for NpcEditBuffer {
             id: String::new(),
             name: String::new(),
             description: String::new(),
-            portrait_path: String::new(),
+            portrait_id: String::new(),
             dialogue_id: String::new(),
             quest_ids: Vec::new(),
             faction: String::new(),
@@ -177,23 +177,13 @@ impl NpcEditorState {
         let mut needs_save = false;
 
         // Toolbar
-        let toolbar_action = EditorToolbar::new("NPCs").show(ui, |ui| {
-            if ui.button("➕ Add NPC").clicked() {
-                self.start_add_npc();
-                ToolbarAction::Custom("add".to_string())
-            } else if ui.button("📥 Import").clicked() {
-                self.show_import_dialog = true;
-                ToolbarAction::Custom("import".to_string())
-            } else if ui.button("📤 Export All").clicked() {
-                ToolbarAction::Custom("export".to_string())
-            } else {
-                ToolbarAction::None
-            }
-        });
+        let toolbar_action = EditorToolbar::new("NPCs").show(ui);
 
         // Handle toolbar actions
         match toolbar_action {
-            ToolbarAction::Custom(action) if action == "export" => {
+            ToolbarAction::New => self.start_add_npc(),
+            ToolbarAction::Import => self.show_import_dialog = true,
+            ToolbarAction::Export => {
                 needs_save |= self.export_all_npcs();
             }
             _ => {}
@@ -341,202 +331,209 @@ impl NpcEditorState {
             _ => "NPC Editor",
         };
 
+        let preview_buffer = self.edit_buffer.clone();
         TwoColumnLayout::new(title)
-            .left_column_width(300.0)
-            .show(ui, |left_ui, right_ui| {
-                // Left column: Form fields
-                egui::ScrollArea::vertical().show(left_ui, |ui| {
-                    ui.heading("Basic Information");
+            .with_left_width(300.0)
+            .show_split(
+                ui,
+                |left_ui| {
+                    // Left column: Form fields
+                    egui::ScrollArea::vertical().show(left_ui, |ui| {
+                        ui.heading("Basic Information");
 
-                    ui.horizontal(|ui| {
-                        ui.label("ID:");
-                        ui.text_edit_singleline(&mut self.edit_buffer.id);
-                    });
+                        ui.horizontal(|ui| {
+                            ui.label("ID:");
+                            ui.text_edit_singleline(&mut self.edit_buffer.id);
+                        });
 
-                    ui.horizontal(|ui| {
-                        ui.label("Name:");
-                        ui.text_edit_singleline(&mut self.edit_buffer.name);
-                    });
+                        ui.horizontal(|ui| {
+                            ui.label("Name:");
+                            ui.text_edit_singleline(&mut self.edit_buffer.name);
+                        });
 
-                    ui.horizontal(|ui| {
-                        ui.label("Description:");
-                    });
-                    ui.text_edit_multiline(&mut self.edit_buffer.description);
+                        ui.horizontal(|ui| {
+                            ui.label("Description:");
+                        });
+                        ui.text_edit_multiline(&mut self.edit_buffer.description);
 
-                    ui.separator();
+                        ui.separator();
 
-                    ui.heading("Appearance");
+                        ui.heading("Appearance");
 
-                    ui.horizontal(|ui| {
-                        ui.label("Portrait Path:");
-                        ui.text_edit_singleline(&mut self.edit_buffer.portrait_path);
-                    });
-                    ui.label("📁 Relative to campaign assets directory");
+                        ui.horizontal(|ui| {
+                            ui.label("Portrait ID:");
+                            ui.text_edit_singleline(&mut self.edit_buffer.portrait_id);
+                        });
+                        ui.label("📁 Relative to campaign assets directory");
 
-                    ui.separator();
+                        ui.separator();
 
-                    ui.heading("Dialogue & Quests");
+                        ui.heading("Dialogue & Quests");
 
-                    // Dialogue ID autocomplete
-                    ui.horizontal(|ui| {
-                        ui.label("Dialogue ID:");
-                    });
+                        // Dialogue ID autocomplete
+                        ui.horizontal(|ui| {
+                            ui.label("Dialogue ID:");
+                        });
 
-                    let dialogue_options: Vec<String> = self
-                        .available_dialogues
-                        .iter()
-                        .map(|d| format!("{} - {}", d.id, d.name))
-                        .collect();
+                        let dialogue_options: Vec<String> = self
+                            .available_dialogues
+                            .iter()
+                            .map(|d| format!("{} - {}", d.id, d.name))
+                            .collect();
 
-                    egui::ComboBox::from_id_salt("npc_dialogue_select")
-                        .selected_text(if self.edit_buffer.dialogue_id.is_empty() {
-                            "None".to_string()
-                        } else {
-                            self.edit_buffer.dialogue_id.clone()
-                        })
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_label(self.edit_buffer.dialogue_id.is_empty(), "None")
-                                .clicked()
-                            {
-                                self.edit_buffer.dialogue_id.clear();
-                            }
-
-                            for dialogue in &self.available_dialogues {
-                                let label = format!("{} - {}", dialogue.id, dialogue.name);
+                        egui::ComboBox::from_id_salt("npc_dialogue_select")
+                            .selected_text(if self.edit_buffer.dialogue_id.is_empty() {
+                                "None".to_string()
+                            } else {
+                                self.edit_buffer.dialogue_id.clone()
+                            })
+                            .show_ui(ui, |ui| {
                                 if ui
                                     .selectable_label(
-                                        self.edit_buffer.dialogue_id == dialogue.id.to_string(),
-                                        &label,
+                                        self.edit_buffer.dialogue_id.is_empty(),
+                                        "None",
                                     )
                                     .clicked()
                                 {
-                                    self.edit_buffer.dialogue_id = dialogue.id.to_string();
+                                    self.edit_buffer.dialogue_id.clear();
                                 }
-                            }
-                        });
 
-                    ui.separator();
-
-                    // Quest IDs multi-select
-                    ui.label("Associated Quests:");
-
-                    egui::ScrollArea::vertical()
-                        .max_height(150.0)
-                        .show(ui, |ui| {
-                            for quest in &self.available_quests {
-                                let quest_id_str = quest.id.to_string();
-                                let mut is_selected =
-                                    self.edit_buffer.quest_ids.contains(&quest_id_str);
-
-                                if ui
-                                    .checkbox(
-                                        &mut is_selected,
-                                        format!("{} - {}", quest.id, quest.name),
-                                    )
-                                    .clicked()
-                                {
-                                    if is_selected {
-                                        if !self.edit_buffer.quest_ids.contains(&quest_id_str) {
-                                            self.edit_buffer.quest_ids.push(quest_id_str);
-                                        }
-                                    } else {
-                                        self.edit_buffer.quest_ids.retain(|id| id != &quest_id_str);
+                                for dialogue in &self.available_dialogues {
+                                    let label = format!("{} - {}", dialogue.id, dialogue.name);
+                                    if ui
+                                        .selectable_label(
+                                            self.edit_buffer.dialogue_id == dialogue.id.to_string(),
+                                            &label,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.edit_buffer.dialogue_id = dialogue.id.to_string();
                                     }
                                 }
-                            }
+                            });
+
+                        ui.separator();
+
+                        // Quest IDs multi-select
+                        ui.label("Associated Quests:");
+
+                        egui::ScrollArea::vertical()
+                            .max_height(150.0)
+                            .show(ui, |ui| {
+                                for quest in &self.available_quests {
+                                    let quest_id_str = quest.id.to_string();
+                                    let mut is_selected =
+                                        self.edit_buffer.quest_ids.contains(&quest_id_str);
+
+                                    if ui
+                                        .checkbox(
+                                            &mut is_selected,
+                                            format!("{} - {}", quest.id, quest.name),
+                                        )
+                                        .clicked()
+                                    {
+                                        if is_selected {
+                                            if !self.edit_buffer.quest_ids.contains(&quest_id_str) {
+                                                self.edit_buffer.quest_ids.push(quest_id_str);
+                                            }
+                                        } else {
+                                            self.edit_buffer
+                                                .quest_ids
+                                                .retain(|id| id != &quest_id_str);
+                                        }
+                                    }
+                                }
+                            });
+
+                        ui.separator();
+
+                        ui.heading("Faction & Roles");
+
+                        ui.horizontal(|ui| {
+                            ui.label("Faction:");
+                            ui.text_edit_singleline(&mut self.edit_buffer.faction);
                         });
 
-                    ui.separator();
+                        ui.checkbox(&mut self.edit_buffer.is_merchant, "🏪 Is Merchant");
+                        ui.checkbox(&mut self.edit_buffer.is_innkeeper, "🛏️ Is Innkeeper");
 
-                    ui.heading("Faction & Roles");
+                        ui.separator();
 
-                    ui.horizontal(|ui| {
-                        ui.label("Faction:");
-                        ui.text_edit_singleline(&mut self.edit_buffer.faction);
+                        // Validation errors
+                        if !self.validation_errors.is_empty() {
+                            ui.group(|ui| {
+                                ui.heading("⚠️ Validation Errors");
+                                for error in &self.validation_errors {
+                                    ui.label(error);
+                                }
+                            });
+                        }
                     });
+                },
+                |right_ui| {
+                    // Right column: Preview and actions
+                    egui::ScrollArea::vertical().show(right_ui, |ui| {
+                        ui.heading("Preview");
 
-                    ui.checkbox(&mut self.edit_buffer.is_merchant, "🏪 Is Merchant");
-                    ui.checkbox(&mut self.edit_buffer.is_innkeeper, "🛏️ Is Innkeeper");
-
-                    ui.separator();
-
-                    // Validation errors
-                    if !self.validation_errors.is_empty() {
                         ui.group(|ui| {
-                            ui.heading("⚠️ Validation Errors");
-                            for error in &self.validation_errors {
-                                ui.label(error);
+                            ui.label(format!("ID: {}", preview_buffer.id));
+                            ui.label(format!("Name: {}", preview_buffer.name));
+
+                            if !preview_buffer.description.is_empty() {
+                                ui.separator();
+                                ui.label(&preview_buffer.description);
+                            }
+
+                            ui.separator();
+
+                            ui.label(format!("Portrait: {}", preview_buffer.portrait_id));
+
+                            if !preview_buffer.dialogue_id.is_empty() {
+                                ui.label(format!("💬 Dialogue: {}", preview_buffer.dialogue_id));
+                            }
+
+                            if !preview_buffer.quest_ids.is_empty() {
+                                ui.label(format!("📜 Quests: {}", preview_buffer.quest_ids.len()));
+                                for quest_id in &preview_buffer.quest_ids {
+                                    ui.label(format!("  - {}", quest_id));
+                                }
+                            }
+
+                            if !preview_buffer.faction.is_empty() {
+                                ui.label(format!("⚔️ Faction: {}", preview_buffer.faction));
+                            }
+
+                            ui.separator();
+
+                            if preview_buffer.is_merchant {
+                                ui.label("🏪 Merchant");
+                            }
+                            if preview_buffer.is_innkeeper {
+                                ui.label("🛏️ Innkeeper");
                             }
                         });
-                    }
-                });
-
-                // Right column: Preview and actions
-                egui::ScrollArea::vertical().show(right_ui, |ui| {
-                    ui.heading("Preview");
-
-                    ui.group(|ui| {
-                        ui.label(format!("ID: {}", self.edit_buffer.id));
-                        ui.label(format!("Name: {}", self.edit_buffer.name));
-
-                        if !self.edit_buffer.description.is_empty() {
-                            ui.separator();
-                            ui.label(&self.edit_buffer.description);
-                        }
-
-                        ui.separator();
-
-                        ui.label(format!("Portrait: {}", self.edit_buffer.portrait_path));
-
-                        if !self.edit_buffer.dialogue_id.is_empty() {
-                            ui.label(format!("💬 Dialogue: {}", self.edit_buffer.dialogue_id));
-                        }
-
-                        if !self.edit_buffer.quest_ids.is_empty() {
-                            ui.label(format!("📜 Quests: {}", self.edit_buffer.quest_ids.len()));
-                            for quest_id in &self.edit_buffer.quest_ids {
-                                ui.label(format!("  - {}", quest_id));
-                            }
-                        }
-
-                        if !self.edit_buffer.faction.is_empty() {
-                            ui.label(format!("⚔️ Faction: {}", self.edit_buffer.faction));
-                        }
-
-                        ui.separator();
-
-                        if self.edit_buffer.is_merchant {
-                            ui.label("🏪 Merchant");
-                        }
-                        if self.edit_buffer.is_innkeeper {
-                            ui.label("🛏️ Innkeeper");
-                        }
                     });
-                });
-            });
+                },
+            );
 
         ui.separator();
 
         // Action buttons
-        let action = ActionButtons::new()
-            .with_save("Save", self.validation_errors.is_empty())
-            .with_cancel("Cancel")
-            .show(ui);
-
-        match action {
-            ItemAction::Save => {
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(self.validation_errors.is_empty(), egui::Button::new("Save"))
+                .clicked()
+            {
                 if self.save_npc() {
                     needs_save = true;
                     self.mode = NpcEditorMode::List;
                 }
             }
-            ItemAction::Cancel => {
+            if ui.button("Cancel").clicked() {
                 self.mode = NpcEditorMode::List;
                 self.edit_buffer = NpcEditBuffer::default();
             }
-            _ => {}
-        }
+        });
 
         needs_save
     }
@@ -589,7 +586,7 @@ impl NpcEditorState {
                 id: npc.id.clone(),
                 name: npc.name.clone(),
                 description: npc.description.clone(),
-                portrait_path: npc.portrait_path.clone(),
+                portrait_id: npc.portrait_id.clone(),
                 dialogue_id: npc.dialogue_id.map(|id| id.to_string()).unwrap_or_default(),
                 quest_ids: npc.quest_ids.iter().map(|id| id.to_string()).collect(),
                 faction: npc.faction.clone().unwrap_or_default(),
@@ -641,9 +638,9 @@ impl NpcEditorState {
         }
 
         // Portrait path validation
-        if self.edit_buffer.portrait_path.trim().is_empty() {
+        if self.edit_buffer.portrait_id.trim().is_empty() {
             self.validation_errors
-                .push("Portrait path cannot be empty".to_string());
+                .push("Portrait ID cannot be empty".to_string());
         }
 
         // Dialogue ID validation
@@ -704,7 +701,7 @@ impl NpcEditorState {
             id: self.edit_buffer.id.clone(),
             name: self.edit_buffer.name.clone(),
             description: self.edit_buffer.description.clone(),
-            portrait_path: self.edit_buffer.portrait_path.clone(),
+            portrait_id: self.edit_buffer.portrait_id.clone(),
             dialogue_id,
             quest_ids,
             faction: if self.edit_buffer.faction.is_empty() {
@@ -837,7 +834,7 @@ mod tests {
         let mut state = NpcEditorState::new();
         state.edit_buffer.id = "".to_string();
         state.edit_buffer.name = "Test NPC".to_string();
-        state.edit_buffer.portrait_path = "test.png".to_string();
+        state.edit_buffer.portrait_id = "test.png".to_string();
         state.validate_edit_buffer();
         assert!(!state.validation_errors.is_empty());
         assert!(state
@@ -851,7 +848,7 @@ mod tests {
         let mut state = NpcEditorState::new();
         state.edit_buffer.id = "invalid id!".to_string();
         state.edit_buffer.name = "Test NPC".to_string();
-        state.edit_buffer.portrait_path = "test.png".to_string();
+        state.edit_buffer.portrait_id = "test.png".to_string();
         state.validate_edit_buffer();
         assert!(!state.validation_errors.is_empty());
     }
@@ -861,7 +858,7 @@ mod tests {
         let mut state = NpcEditorState::new();
         state.edit_buffer.id = "test_npc_1".to_string();
         state.edit_buffer.name = "Test NPC".to_string();
-        state.edit_buffer.portrait_path = "test.png".to_string();
+        state.edit_buffer.portrait_id = "test.png".to_string();
         state.mode = NpcEditorMode::Add;
         state.validate_edit_buffer();
         assert!(state.validation_errors.is_empty());
@@ -875,7 +872,7 @@ mod tests {
             id: "merchant_1".to_string(),
             name: "Bob the Merchant".to_string(),
             description: "A friendly merchant".to_string(),
-            portrait_path: "portraits/merchant.png".to_string(),
+            portrait_id: "portraits/merchant.png".to_string(),
             dialogue_id: String::new(),
             quest_ids: Vec::new(),
             faction: "Merchants".to_string(),
@@ -896,7 +893,7 @@ mod tests {
             id: "npc_1".to_string(),
             name: "Old Name".to_string(),
             description: String::new(),
-            portrait_path: "old.png".to_string(),
+            portrait_id: "old.png".to_string(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -910,7 +907,7 @@ mod tests {
             id: "npc_1".to_string(),
             name: "New Name".to_string(),
             description: String::new(),
-            portrait_path: "old.png".to_string(),
+            portrait_id: "old.png".to_string(),
             dialogue_id: String::new(),
             quest_ids: Vec::new(),
             faction: String::new(),
@@ -930,7 +927,7 @@ mod tests {
             id: "npc_1".to_string(),
             name: "Test".to_string(),
             description: String::new(),
-            portrait_path: "test.png".to_string(),
+            portrait_id: "test.png".to_string(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -950,7 +947,7 @@ mod tests {
             id: "merchant_1".to_string(),
             name: "Bob the Merchant".to_string(),
             description: String::new(),
-            portrait_path: "test.png".to_string(),
+            portrait_id: "test.png".to_string(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -970,7 +967,7 @@ mod tests {
             id: "merchant_1".to_string(),
             name: "Merchant".to_string(),
             description: String::new(),
-            portrait_path: "test.png".to_string(),
+            portrait_id: "test.png".to_string(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -982,7 +979,7 @@ mod tests {
             id: "guard_1".to_string(),
             name: "Guard".to_string(),
             description: String::new(),
-            portrait_path: "test.png".to_string(),
+            portrait_id: "test.png".to_string(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -1003,7 +1000,7 @@ mod tests {
             id: "npc_1".to_string(),
             name: "Test".to_string(),
             description: String::new(),
-            portrait_path: "test.png".to_string(),
+            portrait_id: "test.png".to_string(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -1032,7 +1029,7 @@ mod tests {
             id: "existing".to_string(),
             name: "Existing".to_string(),
             description: String::new(),
-            portrait_path: "test.png".to_string(),
+            portrait_id: "test.png".to_string(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -1043,7 +1040,7 @@ mod tests {
         state.mode = NpcEditorMode::Add;
         state.edit_buffer.id = "existing".to_string();
         state.edit_buffer.name = "New".to_string();
-        state.edit_buffer.portrait_path = "test.png".to_string();
+        state.edit_buffer.portrait_id = "test.png".to_string();
 
         state.validate_edit_buffer();
         assert!(state

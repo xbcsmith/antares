@@ -752,7 +752,7 @@ impl QuestEditorState {
                     .parse::<MapId>()
                     .map_err(|_| "Invalid map ID".to_string())?;
                 QuestObjective::TalkToNpc {
-                    npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
+                    npc_id: self.objective_buffer.npc_id.clone(),
                     map_id,
                 }
             }
@@ -769,7 +769,7 @@ impl QuestEditorState {
                     .map_err(|_| "Invalid quantity".to_string())?;
                 QuestObjective::DeliverItem {
                     item_id,
-                    npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
+                    npc_id: self.objective_buffer.npc_id.clone(),
                     quantity: quantity as u16,
                 }
             }
@@ -790,7 +790,7 @@ impl QuestEditorState {
                     .parse::<u32>()
                     .map_err(|_| "Invalid Y coordinate".to_string())?;
                 QuestObjective::EscortNpc {
-                    npc_id: self.objective_buffer.npc_id.parse::<u16>().unwrap_or(0),
+                    npc_id: self.objective_buffer.npc_id.clone(),
                     map_id,
                     position: Position::new(x as i32, y as i32),
                 }
@@ -915,10 +915,7 @@ impl QuestEditorState {
                 max_level: quest.max_level.unwrap_or(30),
                 repeatable: quest.repeatable,
                 is_main_quest: quest.is_main_quest,
-                quest_giver_npc: quest
-                    .quest_giver_npc
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
+                quest_giver_npc: quest.quest_giver_npc.clone().unwrap_or_default(),
                 quest_giver_map: quest
                     .quest_giver_map
                     .map_or(String::new(), |m| m.to_string()),
@@ -986,7 +983,11 @@ impl QuestEditorState {
         quest.quest_giver_npc = if self.quest_buffer.quest_giver_npc.is_empty() {
             None
         } else {
-            self.quest_buffer.quest_giver_npc.parse::<u16>().ok()
+            if self.quest_buffer.quest_giver_npc.is_empty() {
+                None
+            } else {
+                Some(self.quest_buffer.quest_giver_npc.clone())
+            }
         };
         quest.quest_giver_map = if self.quest_buffer.quest_giver_map.is_empty() {
             None
@@ -1031,7 +1032,7 @@ impl QuestEditorState {
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::campaign_builder::quest_editor::{QuestEditorState, QuestEditorMode};
+    /// use campaign_builder::quest_editor::{QuestEditorState, QuestEditorMode};
     ///
     /// let mut editor = QuestEditorState::new();
     /// editor.start_new_quest("1".to_string());
@@ -1667,11 +1668,11 @@ impl QuestEditorState {
                             if let Some((map_id_str, npc_id_str)) =
                                 self.quest_buffer.quest_giver_npc.split_once(':')
                             {
-                                if let (Ok(map_id), Ok(npc_id)) =
-                                    (map_id_str.parse::<MapId>(), npc_id_str.parse::<u16>())
-                                {
+                                if let Ok(map_id) = map_id_str.parse::<MapId>() {
+                                    let npc_id = npc_id_str.to_string();
                                     if let Some(map) = maps.iter().find(|m| m.id == map_id) {
-                                        if let Some(npc) = map.npcs.iter().find(|n| n.id == npc_id)
+                                        if let Some(npc) =
+                                            map.npc_placements.iter().find(|n| n.npc_id == npc_id)
                                         {
                                             self.quest_buffer.quest_giver_map = map.id.to_string();
                                             self.quest_buffer.quest_giver_x =
@@ -1681,18 +1682,21 @@ impl QuestEditorState {
                                         }
                                     }
                                 }
-                            } else if let Ok(npc_id) =
-                                self.quest_buffer.quest_giver_npc.parse::<u16>()
-                            {
-                                // Fallback for manual ID entry
-                                for map in maps {
-                                    if let Some(npc) = map.npcs.iter().find(|n| n.id == npc_id) {
-                                        self.quest_buffer.quest_giver_map = map.id.to_string();
-                                        self.quest_buffer.quest_giver_x =
-                                            npc.position.x.to_string();
-                                        self.quest_buffer.quest_giver_y =
-                                            npc.position.y.to_string();
-                                        break;
+                            } else {
+                                let npc_id = self.quest_buffer.quest_giver_npc.clone();
+                                if !npc_id.is_empty() {
+                                    // Fallback for manual ID entry
+                                    for map in maps {
+                                        if let Some(npc) =
+                                            map.npc_placements.iter().find(|n| n.npc_id == npc_id)
+                                        {
+                                            self.quest_buffer.quest_giver_map = map.id.to_string();
+                                            self.quest_buffer.quest_giver_x =
+                                                npc.position.x.to_string();
+                                            self.quest_buffer.quest_giver_y =
+                                                npc.position.y.to_string();
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -2747,7 +2751,7 @@ mod tests {
         let mut quest1 = Quest::new(1, "Quest 1", "Test");
         let mut stage1 = QuestStage::new(1, "Stage 1");
         stage1.add_objective(QuestObjective::TalkToNpc {
-            npc_id: 1,
+            npc_id: "1".to_string(),
             map_id: 1,
         });
         quest1.add_stage(stage1);
@@ -2906,13 +2910,14 @@ mod tests {
             20,
             20,
         )];
-        maps[0].npcs.push(antares::domain::world::Npc::new(
-            5,
-            "Test NPC".to_string(),
-            "Desc".to_string(),
-            Position::new(10, 20),
-            "Dialogue".to_string(),
-        ));
+        maps[0]
+            .npc_placements
+            .push(antares::domain::world::npc::NpcPlacement {
+                npc_id: "5".to_string(), // Changed to "5" to match the quest_giver_npc "1:5"
+                position: Position::new(10, 20),
+                facing: None,
+                dialogue_override: None,
+            });
 
         // Simulate selection of NPC from map 1
         editor.quest_buffer.quest_giver_npc = "1:5".to_string();
@@ -2920,11 +2925,10 @@ mod tests {
         // This is the logic from show_quest_form
         if let Some((map_id_str, npc_id_str)) = editor.quest_buffer.quest_giver_npc.split_once(':')
         {
-            if let (Ok(parsed_map_id), Ok(parsed_npc_id)) =
-                (map_id_str.parse::<MapId>(), npc_id_str.parse::<u16>())
-            {
-                if let Some(map) = maps.iter().find(|m| m.id == parsed_map_id) {
-                    if let Some(npc) = map.npcs.iter().find(|n| n.id == parsed_npc_id) {
+            if let Ok(map_id) = map_id_str.parse::<MapId>() {
+                let npc_id = npc_id_str.to_string();
+                if let Some(map) = maps.iter().find(|m| m.id == map_id) {
+                    if let Some(npc) = map.npc_placements.iter().find(|n| n.npc_id == npc_id) {
                         editor.quest_buffer.quest_giver_map = map.id.to_string();
                         editor.quest_buffer.quest_giver_x = npc.position.x.to_string();
                         editor.quest_buffer.quest_giver_y = npc.position.y.to_string();

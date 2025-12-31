@@ -1,28 +1,4 @@
-// characters.ron - Tutorial Campaign character definitions for Antares RPG
-//
-// This file contains character definitions specific to the Tutorial campaign.
-// These include tutorial-specific pre-made characters and NPCs that can join the party.
-//
-// Each character references:
-//   - race_id: Must match an id in races.ron (campaign or core)
-//   - class_id: Must match an id in classes.ron (campaign or core)
-//   - starting_items: Item IDs from items.ron (inventory items)
-//   - starting_equipment: Item IDs from items.ron (equipped items)
-//
-// Sex values: Male, Female, Other
-// Alignment values: Good, Neutral, Evil
-// Portrait identifiers are filename stems (strings), e.g. "kira" or "10"
-//
-// Character types:
-//   - is_premade: true  = Pre-made characters for new game selection
-//   - is_premade: false = NPC templates or recruitable characters
-
 [
-    // ===== Tutorial Pre-Made Characters =====
-    // Simpler characters with clear roles for new players
-
-    // ===== Kira - Human Knight (Tutorial) =====
-    // A straightforward warrior for learning combat basics.
     (
         id: "tutorial_human_knight",
         name: "Kira",
@@ -43,22 +19,22 @@
         starting_gold: 100,
         starting_gems: 0,
         starting_food: 15,
-        starting_items: [50, 50], // 2x Healing Potion
+        starting_items: [
+            50,
+            50,
+        ],
         starting_equipment: (
-            weapon: Some(3),   // Short Sword (easier to start)
-            armor: Some(20),   // Leather Armor
+            weapon: Some(3),
+            armor: Some(20),
             shield: None,
             helmet: None,
             boots: None,
             accessory1: None,
             accessory2: None,
         ),
-        description: "A young warrior eager to prove herself. Kira's straightforward fighting style makes her an excellent choice for players learning the basics of combat.",
+        description: "A young warrior eager to prove herself. Kira\'s straightforward fighting style makes her an excellent choice for players learning the basics of combat.",
         is_premade: true,
     ),
-
-    // ===== Sage - Elf Sorcerer (Tutorial) =====
-    // A simple spellcaster for learning magic basics.
     (
         id: "tutorial_elf_sorcerer",
         name: "Sage",
@@ -79,9 +55,13 @@
         starting_gold: 50,
         starting_gems: 5,
         starting_food: 15,
-        starting_items: [51, 51, 50], // 2x Magic Potion, 1x Healing Potion
+        starting_items: [
+            51,
+            51,
+            50,
+        ],
         starting_equipment: (
-            weapon: Some(1),   // Club (safe for sorcerer)
+            weapon: Some(1),
             armor: None,
             shield: None,
             helmet: None,
@@ -92,9 +72,6 @@
         description: "A curious elven mage who delights in teaching others about the arcane arts. Sage is perfect for players who want to learn how spellcasting works.",
         is_premade: true,
     ),
-
-    // ===== Mira - Human Cleric (Tutorial) =====
-    // A healer for learning support mechanics.
     (
         id: "tutorial_human_cleric",
         name: "Mira",
@@ -115,25 +92,23 @@
         starting_gold: 75,
         starting_gems: 2,
         starting_food: 15,
-        starting_items: [50, 50, 52], // 2x Healing Potion, 1x Cure Poison
+        starting_items: [
+            50,
+            50,
+            52,
+        ],
         starting_equipment: (
-            weapon: Some(1),   // Club
-            armor: Some(20),   // Leather Armor
+            weapon: Some(1),
+            armor: Some(20),
             shield: None,
             helmet: None,
             boots: None,
             accessory1: None,
             accessory2: None,
         ),
-        description: "A kind-hearted healer from the local temple. Mira's divine magic can mend wounds and cure ailments, teaching players the value of support characters.",
+        description: "A kind-hearted healer from the local temple. Mira\'s divine magic can mend wounds and cure ailments, teaching players the value of support characters.",
         is_premade: true,
     ),
-
-    // ===== Recruitable NPCs =====
-    // Characters that can join the party during the tutorial campaign
-
-    // ===== Old Gareth - Dwarf Warrior NPC =====
-    // A retired adventurer who can be recruited early in the tutorial.
     (
         id: "npc_old_gareth",
         name: "Old Gareth",
@@ -154,22 +129,21 @@
         starting_gold: 20,
         starting_gems: 0,
         starting_food: 5,
-        starting_items: [50], // Healing Potion
+        starting_items: [
+            50,
+        ],
         starting_equipment: (
-            weapon: Some(6),   // Battle Axe
-            armor: Some(20),   // Leather Armor
+            weapon: Some(6),
+            armor: Some(20),
             shield: None,
             helmet: None,
             boots: None,
             accessory1: None,
             accessory2: None,
         ),
-        description: "A grizzled dwarf veteran who runs the town's smithy. Though his adventuring days are behind him, Old Gareth can be convinced to join a worthy cause one last time.",
+        description: "A grizzled dwarf veteran who runs the town\'s smithy. Though his adventuring days are behind him, Old Gareth can be convinced to join a worthy cause one last time.",
         is_premade: false,
     ),
-
-    // ===== Whisper - Elf Robber NPC =====
-    // A thief who can be recruited to help with locked doors and traps.
     (
         id: "npc_whisper",
         name: "Whisper",
@@ -190,22 +164,21 @@
         starting_gold: 150,
         starting_gems: 1,
         starting_food: 5,
-        starting_items: [2], // Extra Dagger
+        starting_items: [
+            2,
+        ],
         starting_equipment: (
-            weapon: Some(2),   // Dagger
-            armor: Some(20),   // Leather Armor
+            weapon: Some(2),
+            armor: Some(20),
             shield: None,
             helmet: None,
             boots: None,
             accessory1: None,
             accessory2: None,
         ),
-        description: "A nimble elf with quick fingers and quicker feet. Whisper claims to be a 'locksmith' but her skills with traps suggest a more colorful past.",
+        description: "A nimble elf with quick fingers and quicker feet. Whisper claims to be a \'locksmith\' but her skills with traps suggest a more colorful past.",
         is_premade: false,
     ),
-
-    // ===== Apprentice Zara - Gnome Sorcerer NPC =====
-    // A young mage who joins as a quest reward.
     (
         id: "npc_apprentice_zara",
         name: "Apprentice Zara",
@@ -226,9 +199,11 @@
         starting_gold: 10,
         starting_gems: 2,
         starting_food: 5,
-        starting_items: [51], // Magic Potion
+        starting_items: [
+            51,
+        ],
         starting_equipment: (
-            weapon: Some(1),   // Club
+            weapon: Some(1),
             armor: None,
             shield: None,
             helmet: None,
@@ -236,14 +211,9 @@
             accessory1: None,
             accessory2: None,
         ),
-        description: "An enthusiastic gnome apprentice from the Mage's Guild. Zara was separated from her mentor and seeks adventurers to help her complete her studies.",
+        description: "An enthusiastic gnome apprentice from the Mage\'s Guild. Zara was separated from her mentor and seeks adventurers to help her complete her studies.",
         is_premade: false,
     ),
-
-    // ===== Template Characters =====
-    // Base templates for generating random characters
-
-    // ===== Generic Human Fighter Template =====
     (
         id: "template_human_fighter",
         name: "Human Fighter",
@@ -266,8 +236,8 @@
         starting_food: 10,
         starting_items: [],
         starting_equipment: (
-            weapon: Some(3),   // Short Sword
-            armor: Some(20),   // Leather Armor
+            weapon: Some(3),
+            armor: Some(20),
             shield: None,
             helmet: None,
             boots: None,
@@ -277,8 +247,6 @@
         description: "A standard human fighter template for character generation.",
         is_premade: false,
     ),
-
-    // ===== Generic Elf Mage Template =====
     (
         id: "template_elf_mage",
         name: "Elf Mage",
@@ -301,7 +269,7 @@
         starting_food: 10,
         starting_items: [],
         starting_equipment: (
-            weapon: Some(2),   // Dagger
+            weapon: Some(2),
             armor: None,
             shield: None,
             helmet: None,
@@ -312,8 +280,6 @@
         description: "A standard elf mage template for character generation.",
         is_premade: false,
     ),
-
-    // ===== Generic Dwarf Cleric Template =====
     (
         id: "template_dwarf_cleric",
         name: "Dwarf Cleric",
@@ -336,8 +302,8 @@
         starting_food: 10,
         starting_items: [],
         starting_equipment: (
-            weapon: Some(5),   // Mace
-            armor: Some(20),   // Leather Armor
+            weapon: Some(5),
+            armor: Some(20),
             shield: None,
             helmet: None,
             boots: None,

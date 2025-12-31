@@ -1521,6 +1521,7 @@ impl ContentStats {
     ///     dialogue_count: 15,
     ///     condition_count: 10,
     ///     character_count: 8,
+    ///     npc_count: 0,
     /// };
     ///
     /// assert_eq!(stats.total(), 251);
@@ -1756,7 +1757,7 @@ mod tests {
                         name: "Return",
                         description: "Return to innkeeper",
                         objectives: [
-                            TalkToNpc(npc_id: 1, map_id: 1)
+                            TalkToNpc(npc_id: "1", map_id: 1)
                         ],
                         require_all_objectives: true,
                     )
@@ -1767,7 +1768,7 @@ mod tests {
                 required_quests: [],
                 repeatable: false,
                 is_main_quest: false,
-                quest_giver_npc: Some(1),
+                quest_giver_npc: Some("1"),
                 quest_giver_map: Some(1),
                 quest_giver_position: None,
             ),
@@ -2197,7 +2198,7 @@ mod tests {
             id: "village_elder".to_string(),
             name: "Elder Theron".to_string(),
             description: "The wise village elder".to_string(),
-            portrait_path: "elder.png".to_string(),
+            portrait_id: "elder.png".to_string(),
             dialogue_id: Some(1),
             quest_ids: vec![1, 2],
             faction: Some("Village".to_string()),
@@ -2378,7 +2379,7 @@ mod tests {
         id: "village_elder",
         name: "Elder Theron",
         description: "The wise village elder",
-        portrait_path: "assets/portraits/elder.png",
+        portrait_id: "elder",
         dialogue_id: Some(1),
         quest_ids: [1, 2],
         faction: Some("Village Council"),
@@ -2389,7 +2390,7 @@ mod tests {
         id: "merchant_bob",
         name: "Bob the Merchant",
         description: "A traveling merchant",
-        portrait_path: "assets/portraits/merchant.png",
+        portrait_id: "merchant",
         dialogue_id: Some(5),
         quest_ids: [],
         faction: Some("Merchants Guild"),
