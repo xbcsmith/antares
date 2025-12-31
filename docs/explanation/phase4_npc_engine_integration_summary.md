@@ -1,7 +1,7 @@
 # Phase 4: NPC Externalization - Engine Integration
 
-**Implementation Date:** 2025-01-26  
-**Status:** ✅ COMPLETED  
+**Implementation Date:** 2025-01-26
+**Status:** ✅ COMPLETED
 **Phase:** 4 of 5 (NPC Externalization)
 
 ---
@@ -86,11 +86,11 @@ pub struct ResolvedNpc {
     pub faction: Option<String>,
     pub is_merchant: bool,
     pub is_innkeeper: bool,
-    
+
     // From NpcPlacement (map)
     pub position: Position,
     pub facing: Option<Direction>,
-    
+
     // Merged logic
     pub dialogue_id: Option<DialogueId>,  // Override OR default
 }
@@ -260,7 +260,7 @@ Use `npc_placements` format:
     id: 1,
     name: "Town",
     // ... other fields ...
-    
+
     npc_placements: [
         (
             npc_id: "merchant_bob",
@@ -335,7 +335,7 @@ Use `npc_placements` format:
     id: 1,
     name: "Town Square",
     // ... other fields ...
-    
+
     npc_placements: [
         (
             npc_id: "merchant_bob",
@@ -361,7 +361,7 @@ let resolved_npcs = map.resolve_npcs(&npc_db);
 for npc in resolved_npcs {
     println!("{} at {:?}", npc.name, npc.position);
     render_npc_sprite(npc.portrait_path, npc.position, npc.facing);
-    
+
     if npc.is_merchant {
         enable_shop_interaction(npc.npc_id);
     }

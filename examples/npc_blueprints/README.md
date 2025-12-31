@@ -65,7 +65,7 @@ npc_placements: [
         facing: Some(South),
         dialogue_override: None,
     ),
-    
+
     // Guard at south gate with custom greeting
     (
         npc_id: "city_guard",
@@ -118,7 +118,7 @@ Reference NPCs by ID:
     id: 1,
     name: "Town Square",
     // ... other map fields ...
-    
+
     npc_placements: [
         (
             npc_id: "merchant_bob",

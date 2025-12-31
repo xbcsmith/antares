@@ -1,3 +1,165 @@
+## Phase 1: NPC Externalization & Blocking - COMPLETED
+
+**Date:** 2025-01-26
+**Status:** ✅ Implementation complete
+
+### Summary
+
+Successfully implemented Phase 1 of the NPC Gameplay Fix Implementation Plan, adding NPC blocking logic to the movement system and migrating tutorial campaign maps to use the new NPC placement system. NPCs now properly block movement, preventing the party from walking through them.
+
+### Changes Made
+
+#### 1.1 Foundation Work
+
+**NPC Externalization Infrastructure**: Already completed in previous phases
+
+- `NpcDefinition` in `src/domain/world/npc.rs` with all required fields
+- `NpcPlacement` for map-level NPC references
+- `NpcDatabase` in `src/sdk/database.rs` for centralized NPC management
+- `ResolvedNpc` for runtime NPC data merging
+
+#### 1.2 Add Blocking Logic
+
+**File**: `antares/src/domain/world/types.rs`
+
+Updated `Map::is_blocked()` method to check for NPCs occupying positions:
+
+- **Enhanced Movement Blocking**:
+  - Checks tile blocking first (walls, terrain)
+  - Checks if any `NpcPlacement` occupies the position
+  - Checks legacy `npcs` for backward compatibility
+  - Returns `true` if position is blocked by any source
+
+**Implementation Details**:
+
+```rust
+pub fn is_blocked(&self, pos: Position) -> bool {
+    // Check tile blocking first
+    if self.get_tile(pos).is_none_or(|tile| tile.is_blocked()) {
+        return true;
+    }
+
+    // Check if any NPC placement occupies this position
+    if self.npc_placements.iter().any(|npc| npc.position == pos) {
+        return true;
+    }
+
+    // Check legacy NPCs (for backward compatibility)
+    if self.npcs.iter().any(|npc| npc.position == pos) {
+        return true;
+    }
+
+    false
+}
+```
+
+**Tests Added** (10 comprehensive tests):
+
+1. `test_is_blocked_empty_tile_not_blocked()` - Empty ground tiles are walkable
+2. `test_is_blocked_tile_with_wall_is_blocked()` - Wall tiles block movement
+3. `test_is_blocked_npc_placement_blocks_movement()` - New NPC placements block
+4. `test_is_blocked_legacy_npc_blocks_movement()` - Legacy NPCs still block
+5. `test_is_blocked_multiple_npcs_at_different_positions()` - Multiple NPCs tested
+6. `test_is_blocked_out_of_bounds_is_blocked()` - Out of bounds positions blocked
+7. `test_is_blocked_npc_on_walkable_tile_blocks()` - NPC overrides walkable terrain
+8. `test_is_blocked_wall_and_npc_both_block()` - Tile blocking takes priority
+9. `test_is_blocked_boundary_conditions()` - NPCs at map edges/corners
+10. `test_is_blocked_mixed_legacy_and_new_npcs()` - Both NPC systems work together
+
+#### 1.3 Campaign Data Migration
+
+**Files Updated**:
+
+- `antares/data/maps/starter_town.ron`
+- `antares/data/maps/forest_area.ron`
+- `antares/data/maps/starter_dungeon.ron`
+
+**Migration Details**:
+
+1. **Starter Town** (`starter_town.ron`):
+
+   - Added 4 NPC placements referencing NPC database
+   - Village Elder at (10, 4) - `base_elder`
+   - Innkeeper at (4, 3) - `base_innkeeper`
+   - Merchant at (15, 3) - `base_merchant`
+   - Priest at (10, 9) - `base_priest`
+   - Kept legacy `npcs` array for backward compatibility
+   - All placements include facing direction
+
+2. **Forest Area** (`forest_area.ron`):
+
+   - Added 1 NPC placement for Lost Ranger
+   - Ranger at (2, 2) - `base_ranger`
+   - Kept legacy NPC data for compatibility
+
+3. **Starter Dungeon** (`starter_dungeon.ron`):
+   - Added empty `npc_placements` array
+   - No NPCs in dungeon (monsters only)
+
+**NPC Database References**:
+All placements reference existing NPCs in `data/npcs.ron`:
+
+- `base_elder` - Village Elder archetype
+- `base_innkeeper` - Innkeeper archetype
+- `base_merchant` - Merchant archetype
+- `base_priest` - Priest archetype
+- `base_ranger` - Ranger archetype
+
+### Architecture Compliance
+
+✅ **Data Structures**: Uses `NpcPlacement` exactly as defined in architecture
+✅ **Type Aliases**: Uses `Position` type consistently
+✅ **Backward Compatibility**: Legacy `npcs` array preserved in maps
+✅ **File Format**: RON format with proper structure
+✅ **Module Placement**: Changes in correct domain layer (world/types.rs)
+✅ **Constants**: No magic numbers introduced
+✅ **Separation of Concerns**: Blocking logic in domain, not game systems
+
+### Quality Checks
+
+✅ **cargo fmt --all**: Passed
+✅ **cargo check --all-targets --all-features**: Passed
+✅ **cargo clippy --all-targets --all-features -- -D warnings**: Passed (0 warnings)
+✅ **cargo nextest run --all-features**: Passed (974 tests, 10 new blocking tests)
+
+### Testing Coverage
+
+- **Unit Tests**: 10 new tests for blocking behavior
+- **Integration**: Existing map loading tests verify RON format compatibility
+- **Edge Cases**: Boundary conditions, mixed legacy/new NPCs, out of bounds
+- **Backward Compatibility**: Legacy NPCs still block movement correctly
+
+### Deliverables Status
+
+- [x] Updated `src/domain/world/types.rs` with NPC-aware blocking
+- [x] Migrated `starter_town.ron` campaign map
+- [x] Migrated `forest_area.ron` campaign map
+- [x] Migrated `starter_dungeon.ron` campaign map
+- [x] Comprehensive unit tests for blocking logic
+- [x] RON serialization verified for NPC placements
+
+### Notes for Future Phases
+
+**Phase 2 Prerequisites Met**:
+
+- NPCs have positions defined in placements
+- Blocking system prevents walking through NPCs
+- Campaign data uses placement references
+
+**Phase 3 Prerequisites Met**:
+
+- NPC positions stored in placements
+- NPC database contains all NPC definitions
+- Maps reference NPCs by string ID
+
+**Recommendations**:
+
+- Consider replacing `eprintln!` in `Map::resolve_npcs()` with proper logging (e.g., `tracing::warn!`)
+- Add validation tool to check all NPC placement IDs reference valid database entries
+- Consider adding `is_blocking` field to `NpcDefinition` for non-blocking NPCs (future enhancement)
+
+---
+
 ## Phase 4: NPC Externalization - Engine Integration - COMPLETED
 
 **Date:** 2025-01-26

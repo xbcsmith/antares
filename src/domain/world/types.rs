@@ -486,8 +486,45 @@ impl Map {
     }
 
     /// Returns true if the tile at the position is blocked
+    ///
+    /// This checks both tile blocking (walls, terrain) and NPC blocking.
+    /// NPCs are considered blocking obstacles - the party cannot move through them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Map, Npc};
+    /// use antares::domain::world::npc::NpcPlacement;
+    /// use antares::domain::types::Position;
+    ///
+    /// let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+    ///
+    /// // Position is not blocked initially
+    /// assert!(!map.is_blocked(Position::new(5, 5)));
+    ///
+    /// // Add NPC placement at position
+    /// map.npc_placements.push(NpcPlacement::new("guard", Position::new(5, 5)));
+    ///
+    /// // Now the position is blocked by the NPC
+    /// assert!(map.is_blocked(Position::new(5, 5)));
+    /// ```
     pub fn is_blocked(&self, pos: Position) -> bool {
-        self.get_tile(pos).is_none_or(|tile| tile.is_blocked())
+        // Check tile blocking first
+        if self.get_tile(pos).is_none_or(|tile| tile.is_blocked()) {
+            return true;
+        }
+
+        // Check if any NPC placement occupies this position
+        if self.npc_placements.iter().any(|npc| npc.position == pos) {
+            return true;
+        }
+
+        // Check legacy NPCs (for backward compatibility)
+        if self.npcs.iter().any(|npc| npc.position == pos) {
+            return true;
+        }
+
+        false
     }
 
     /// Adds an event at the specified position
@@ -1100,5 +1137,283 @@ mod tests {
 
         // Assert
         assert!(result.is_none());
+    }
+
+    // ===== NPC Blocking Tests =====
+
+    #[test]
+    fn test_is_blocked_empty_tile_not_blocked() {
+        // Arrange
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(5, 5);
+
+        // Act & Assert
+        assert!(
+            !map.is_blocked(pos),
+            "Empty ground tile should not be blocked"
+        );
+    }
+
+    #[test]
+    fn test_is_blocked_tile_with_wall_is_blocked() {
+        // Arrange
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(5, 5);
+
+        // Set tile as blocked (wall)
+        if let Some(tile) = map.get_tile_mut(pos) {
+            tile.wall_type = WallType::Normal;
+            tile.blocked = true;
+        }
+
+        // Act & Assert
+        assert!(map.is_blocked(pos), "Tile with wall should be blocked");
+    }
+
+    #[test]
+    fn test_is_blocked_npc_placement_blocks_movement() {
+        // Arrange
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let npc_pos = Position::new(5, 5);
+
+        // Add NPC placement
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "guard", npc_pos,
+            ));
+
+        // Act & Assert
+        assert!(
+            map.is_blocked(npc_pos),
+            "Position with NPC placement should be blocked"
+        );
+        assert!(
+            !map.is_blocked(Position::new(6, 5)),
+            "Adjacent position should not be blocked"
+        );
+    }
+
+    #[test]
+    fn test_is_blocked_legacy_npc_blocks_movement() {
+        // Arrange
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let npc_pos = Position::new(3, 7);
+
+        // Add legacy NPC
+        map.npcs.push(Npc::new(
+            1,
+            "Merchant".to_string(),
+            "A merchant".to_string(),
+            npc_pos,
+            "Welcome!".to_string(),
+        ));
+
+        // Act & Assert
+        assert!(
+            map.is_blocked(npc_pos),
+            "Position with legacy NPC should be blocked"
+        );
+        assert!(
+            !map.is_blocked(Position::new(4, 7)),
+            "Adjacent position should not be blocked"
+        );
+    }
+
+    #[test]
+    fn test_is_blocked_multiple_npcs_at_different_positions() {
+        // Arrange
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+
+        // Add multiple NPC placements
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "guard1",
+                Position::new(5, 5),
+            ));
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "guard2",
+                Position::new(10, 10),
+            ));
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "merchant",
+                Position::new(15, 15),
+            ));
+
+        // Act & Assert
+        assert!(
+            map.is_blocked(Position::new(5, 5)),
+            "First NPC position should be blocked"
+        );
+        assert!(
+            map.is_blocked(Position::new(10, 10)),
+            "Second NPC position should be blocked"
+        );
+        assert!(
+            map.is_blocked(Position::new(15, 15)),
+            "Third NPC position should be blocked"
+        );
+        assert!(
+            !map.is_blocked(Position::new(7, 7)),
+            "Empty position should not be blocked"
+        );
+    }
+
+    #[test]
+    fn test_is_blocked_out_of_bounds_is_blocked() {
+        // Arrange
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+
+        // Act & Assert
+        assert!(
+            map.is_blocked(Position::new(-1, 5)),
+            "Negative X should be blocked"
+        );
+        assert!(
+            map.is_blocked(Position::new(5, -1)),
+            "Negative Y should be blocked"
+        );
+        assert!(
+            map.is_blocked(Position::new(10, 5)),
+            "X >= width should be blocked"
+        );
+        assert!(
+            map.is_blocked(Position::new(5, 10)),
+            "Y >= height should be blocked"
+        );
+        assert!(
+            map.is_blocked(Position::new(100, 100)),
+            "Far out of bounds should be blocked"
+        );
+    }
+
+    #[test]
+    fn test_is_blocked_npc_on_walkable_tile_blocks() {
+        // Arrange
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(5, 5);
+
+        // Verify tile is walkable first
+        assert!(!map.is_blocked(pos), "Tile should be walkable initially");
+
+        // Add NPC placement
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new("npc", pos));
+
+        // Act & Assert
+        assert!(
+            map.is_blocked(pos),
+            "NPC on walkable tile should block movement"
+        );
+    }
+
+    #[test]
+    fn test_is_blocked_wall_and_npc_both_block() {
+        // Arrange
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(5, 5);
+
+        // Set tile as blocked
+        if let Some(tile) = map.get_tile_mut(pos) {
+            tile.wall_type = WallType::Normal;
+            tile.blocked = true;
+        }
+
+        // Also add NPC (unusual case but tests priority)
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new("npc", pos));
+
+        // Act & Assert
+        assert!(
+            map.is_blocked(pos),
+            "Position with wall and NPC should be blocked"
+        );
+    }
+
+    #[test]
+    fn test_is_blocked_boundary_conditions() {
+        // Arrange
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+
+        // Add NPCs at corners and edges
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "npc1",
+                Position::new(0, 0), // Top-left corner
+            ));
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "npc2",
+                Position::new(9, 9), // Bottom-right corner
+            ));
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "npc3",
+                Position::new(0, 9), // Bottom-left corner
+            ));
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "npc4",
+                Position::new(9, 0), // Top-right corner
+            ));
+
+        // Act & Assert
+        assert!(
+            map.is_blocked(Position::new(0, 0)),
+            "Top-left corner should be blocked"
+        );
+        assert!(
+            map.is_blocked(Position::new(9, 9)),
+            "Bottom-right corner should be blocked"
+        );
+        assert!(
+            map.is_blocked(Position::new(0, 9)),
+            "Bottom-left corner should be blocked"
+        );
+        assert!(
+            map.is_blocked(Position::new(9, 0)),
+            "Top-right corner should be blocked"
+        );
+        assert!(
+            !map.is_blocked(Position::new(5, 5)),
+            "Center should not be blocked"
+        );
+    }
+
+    #[test]
+    fn test_is_blocked_mixed_legacy_and_new_npcs() {
+        // Arrange
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 15, 15);
+
+        // Add legacy NPC
+        map.npcs.push(Npc::new(
+            1,
+            "Old NPC".to_string(),
+            "Legacy".to_string(),
+            Position::new(3, 3),
+            "Hello".to_string(),
+        ));
+
+        // Add new NPC placement
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "new_npc",
+                Position::new(7, 7),
+            ));
+
+        // Act & Assert
+        assert!(
+            map.is_blocked(Position::new(3, 3)),
+            "Legacy NPC position should be blocked"
+        );
+        assert!(
+            map.is_blocked(Position::new(7, 7)),
+            "New NPC placement position should be blocked"
+        );
+        assert!(
+            !map.is_blocked(Position::new(5, 5)),
+            "Empty position should not be blocked"
+        );
     }
 }
