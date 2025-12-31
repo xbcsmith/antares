@@ -52,6 +52,169 @@ pub enum TerrainType {
     Mountain,
 }
 
+/// Visual rendering properties for a tile
+///
+/// All dimensions in world units (1 unit ≈ 10 feet).
+/// All fields are optional to maintain backward compatibility.
+/// When None, defaults are determined by terrain/wall type.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::{TileVisualMetadata, TerrainType, WallType};
+///
+/// let mut metadata = TileVisualMetadata::default();
+/// metadata.height = Some(1.5); // Custom 15-foot wall
+/// assert_eq!(metadata.effective_height(TerrainType::Ground, WallType::Normal), 1.5);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct TileVisualMetadata {
+    /// Height of wall/terrain feature (Y-axis dimension)
+    /// Default: wall=2.5, mountain=3.0, tree=2.2, door=2.5
+    pub height: Option<f32>,
+
+    /// Width in X-axis (default: 1.0 for full tile)
+    pub width_x: Option<f32>,
+
+    /// Depth in Z-axis (default: 1.0 for full tile)
+    pub width_z: Option<f32>,
+
+    /// Color tint (RGB, 0.0-1.0 range)
+    /// Applied multiplicatively to base material color
+    pub color_tint: Option<(f32, f32, f32)>,
+
+    /// Scale multiplier (default: 1.0)
+    /// Applied uniformly to all dimensions
+    pub scale: Option<f32>,
+
+    /// Vertical offset from ground (default: 0.0)
+    /// Positive = raised, negative = sunken
+    pub y_offset: Option<f32>,
+}
+
+impl TileVisualMetadata {
+    /// Get effective height for this tile based on terrain/wall type
+    ///
+    /// Falls back to hardcoded defaults if not specified.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, TerrainType, WallType};
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.effective_height(TerrainType::Ground, WallType::Normal), 2.5);
+    /// assert_eq!(metadata.effective_height(TerrainType::Mountain, WallType::None), 3.0);
+    /// ```
+    pub fn effective_height(&self, terrain: TerrainType, wall_type: WallType) -> f32 {
+        if let Some(h) = self.height {
+            return h;
+        }
+
+        // Default heights matching current hardcoded values
+        match wall_type {
+            WallType::Normal | WallType::Door | WallType::Torch => 2.5,
+            WallType::None => match terrain {
+                TerrainType::Mountain => 3.0,
+                TerrainType::Forest => 2.2,
+                _ => 0.0, // Flat terrain has no height
+            },
+        }
+    }
+
+    /// Get effective width_x (defaults to 1.0)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::TileVisualMetadata;
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.effective_width_x(), 1.0);
+    /// ```
+    pub fn effective_width_x(&self) -> f32 {
+        self.width_x.unwrap_or(1.0)
+    }
+
+    /// Get effective width_z (defaults to 1.0)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::TileVisualMetadata;
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.effective_width_z(), 1.0);
+    /// ```
+    pub fn effective_width_z(&self) -> f32 {
+        self.width_z.unwrap_or(1.0)
+    }
+
+    /// Get effective scale (defaults to 1.0)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::TileVisualMetadata;
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.effective_scale(), 1.0);
+    /// ```
+    pub fn effective_scale(&self) -> f32 {
+        self.scale.unwrap_or(1.0)
+    }
+
+    /// Get effective y_offset (defaults to 0.0)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::TileVisualMetadata;
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.effective_y_offset(), 0.0);
+    /// ```
+    pub fn effective_y_offset(&self) -> f32 {
+        self.y_offset.unwrap_or(0.0)
+    }
+
+    /// Calculate mesh dimensions (width_x, height, width_z) with scale applied
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, TerrainType, WallType};
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// let (x, h, z) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+    /// assert_eq!((x, h, z), (1.0, 2.5, 1.0));
+    /// ```
+    pub fn mesh_dimensions(&self, terrain: TerrainType, wall_type: WallType) -> (f32, f32, f32) {
+        let scale = self.effective_scale();
+        (
+            self.effective_width_x() * scale,
+            self.effective_height(terrain, wall_type) * scale,
+            self.effective_width_z() * scale,
+        )
+    }
+
+    /// Calculate Y-position for mesh center
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, TerrainType, WallType};
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.mesh_y_position(TerrainType::Ground, WallType::Normal), 1.25);
+    /// ```
+    pub fn mesh_y_position(&self, terrain: TerrainType, wall_type: WallType) -> f32 {
+        let height = self.effective_height(terrain, wall_type);
+        let scale = self.effective_scale();
+        (height * scale / 2.0) + self.effective_y_offset()
+    }
+}
+
 /// A single tile in the game world
 ///
 /// # Examples
@@ -81,6 +244,10 @@ pub struct Tile {
     pub x: i32,
     /// Y coordinate
     pub y: i32,
+
+    /// Optional visual rendering metadata
+    #[serde(default)]
+    pub visual: TileVisualMetadata,
 }
 
 impl Tile {
@@ -108,6 +275,7 @@ impl Tile {
             is_special: false,
             is_dark: false,
             visited: false,
+            visual: TileVisualMetadata::default(),
         }
     }
 
@@ -129,6 +297,74 @@ impl Tile {
     /// Marks the tile as visited
     pub fn mark_visited(&mut self) {
         self.visited = true;
+    }
+
+    /// Sets a custom height for this tile
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    ///
+    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    ///     .with_height(1.5);
+    /// assert_eq!(tile.visual.height, Some(1.5));
+    /// ```
+    pub fn with_height(mut self, height: f32) -> Self {
+        self.visual.height = Some(height);
+        self
+    }
+
+    /// Sets custom dimensions for this tile
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    ///
+    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    ///     .with_dimensions(0.8, 1.5, 0.8);
+    /// assert_eq!(tile.visual.width_x, Some(0.8));
+    /// assert_eq!(tile.visual.height, Some(1.5));
+    /// assert_eq!(tile.visual.width_z, Some(0.8));
+    /// ```
+    pub fn with_dimensions(mut self, width_x: f32, height: f32, width_z: f32) -> Self {
+        self.visual.width_x = Some(width_x);
+        self.visual.height = Some(height);
+        self.visual.width_z = Some(width_z);
+        self
+    }
+
+    /// Sets a color tint for this tile
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    ///
+    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    ///     .with_color_tint(1.0, 0.5, 0.5);
+    /// assert_eq!(tile.visual.color_tint, Some((1.0, 0.5, 0.5)));
+    /// ```
+    pub fn with_color_tint(mut self, r: f32, g: f32, b: f32) -> Self {
+        self.visual.color_tint = Some((r, g, b));
+        self
+    }
+
+    /// Sets a scale multiplier for this tile
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    ///
+    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    ///     .with_scale(1.5);
+    /// assert_eq!(tile.visual.scale, Some(1.5));
+    /// ```
+    pub fn with_scale(mut self, scale: f32) -> Self {
+        self.visual.scale = Some(scale);
+        self
     }
 }
 
@@ -920,6 +1156,336 @@ impl Default for World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ===== TileVisualMetadata Tests =====
+
+    #[test]
+    fn test_tile_visual_metadata_default() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(metadata.height, None);
+        assert_eq!(metadata.width_x, None);
+        assert_eq!(metadata.width_z, None);
+        assert_eq!(metadata.color_tint, None);
+        assert_eq!(metadata.scale, None);
+        assert_eq!(metadata.y_offset, None);
+    }
+
+    #[test]
+    fn test_effective_height_wall() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(
+            metadata.effective_height(TerrainType::Ground, WallType::Normal),
+            2.5
+        );
+    }
+
+    #[test]
+    fn test_effective_height_door() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(
+            metadata.effective_height(TerrainType::Ground, WallType::Door),
+            2.5
+        );
+    }
+
+    #[test]
+    fn test_effective_height_torch() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(
+            metadata.effective_height(TerrainType::Ground, WallType::Torch),
+            2.5
+        );
+    }
+
+    #[test]
+    fn test_effective_height_mountain() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(
+            metadata.effective_height(TerrainType::Mountain, WallType::None),
+            3.0
+        );
+    }
+
+    #[test]
+    fn test_effective_height_forest() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(
+            metadata.effective_height(TerrainType::Forest, WallType::None),
+            2.2
+        );
+    }
+
+    #[test]
+    fn test_effective_height_flat_terrain() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(
+            metadata.effective_height(TerrainType::Ground, WallType::None),
+            0.0
+        );
+        assert_eq!(
+            metadata.effective_height(TerrainType::Grass, WallType::None),
+            0.0
+        );
+    }
+
+    #[test]
+    fn test_effective_height_custom() {
+        let metadata = TileVisualMetadata {
+            height: Some(5.0),
+            ..Default::default()
+        };
+        assert_eq!(
+            metadata.effective_height(TerrainType::Ground, WallType::Normal),
+            5.0
+        );
+        assert_eq!(
+            metadata.effective_height(TerrainType::Mountain, WallType::None),
+            5.0
+        );
+    }
+
+    #[test]
+    fn test_mesh_dimensions_default() {
+        let metadata = TileVisualMetadata::default();
+        let (x, h, z) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+        assert_eq!((x, h, z), (1.0, 2.5, 1.0));
+    }
+
+    #[test]
+    fn test_mesh_dimensions_custom() {
+        let metadata = TileVisualMetadata {
+            width_x: Some(0.8),
+            height: Some(1.5),
+            width_z: Some(0.6),
+            ..Default::default()
+        };
+        let (x, h, z) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+        assert_eq!((x, h, z), (0.8, 1.5, 0.6));
+    }
+
+    #[test]
+    fn test_mesh_dimensions_with_scale() {
+        let metadata = TileVisualMetadata {
+            scale: Some(2.0),
+            ..Default::default()
+        };
+        let (x, h, z) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+        assert_eq!((x, h, z), (2.0, 5.0, 2.0)); // 1.0*2.0, 2.5*2.0, 1.0*2.0
+    }
+
+    #[test]
+    fn test_mesh_dimensions_custom_with_scale() {
+        let metadata = TileVisualMetadata {
+            width_x: Some(0.5),
+            height: Some(1.0),
+            width_z: Some(0.5),
+            scale: Some(2.0),
+            ..Default::default()
+        };
+        let (x, h, z) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
+        assert_eq!((x, h, z), (1.0, 2.0, 1.0)); // 0.5*2.0, 1.0*2.0, 0.5*2.0
+    }
+
+    #[test]
+    fn test_mesh_y_position_wall() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(
+            metadata.mesh_y_position(TerrainType::Ground, WallType::Normal),
+            1.25
+        ); // 2.5 / 2.0
+    }
+
+    #[test]
+    fn test_mesh_y_position_mountain() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(
+            metadata.mesh_y_position(TerrainType::Mountain, WallType::None),
+            1.5
+        ); // 3.0 / 2.0
+    }
+
+    #[test]
+    fn test_mesh_y_position_forest() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(
+            metadata.mesh_y_position(TerrainType::Forest, WallType::None),
+            1.1
+        ); // 2.2 / 2.0
+    }
+
+    #[test]
+    fn test_mesh_y_position_custom_offset() {
+        let metadata = TileVisualMetadata {
+            y_offset: Some(0.5),
+            ..Default::default()
+        };
+        assert_eq!(
+            metadata.mesh_y_position(TerrainType::Ground, WallType::Normal),
+            1.75
+        ); // (2.5 / 2.0) + 0.5
+    }
+
+    #[test]
+    fn test_mesh_y_position_with_scale() {
+        let metadata = TileVisualMetadata {
+            scale: Some(2.0),
+            ..Default::default()
+        };
+        assert_eq!(
+            metadata.mesh_y_position(TerrainType::Ground, WallType::Normal),
+            2.5
+        ); // (2.5 * 2.0) / 2.0
+    }
+
+    #[test]
+    fn test_mesh_y_position_scale_and_offset() {
+        let metadata = TileVisualMetadata {
+            scale: Some(2.0),
+            y_offset: Some(1.0),
+            ..Default::default()
+        };
+        assert_eq!(
+            metadata.mesh_y_position(TerrainType::Ground, WallType::Normal),
+            3.5
+        ); // ((2.5 * 2.0) / 2.0) + 1.0
+    }
+
+    #[test]
+    fn test_effective_width_x_default() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(metadata.effective_width_x(), 1.0);
+    }
+
+    #[test]
+    fn test_effective_width_x_custom() {
+        let metadata = TileVisualMetadata {
+            width_x: Some(0.5),
+            ..Default::default()
+        };
+        assert_eq!(metadata.effective_width_x(), 0.5);
+    }
+
+    #[test]
+    fn test_effective_width_z_default() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(metadata.effective_width_z(), 1.0);
+    }
+
+    #[test]
+    fn test_effective_width_z_custom() {
+        let metadata = TileVisualMetadata {
+            width_z: Some(0.7),
+            ..Default::default()
+        };
+        assert_eq!(metadata.effective_width_z(), 0.7);
+    }
+
+    #[test]
+    fn test_effective_scale_default() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(metadata.effective_scale(), 1.0);
+    }
+
+    #[test]
+    fn test_effective_scale_custom() {
+        let metadata = TileVisualMetadata {
+            scale: Some(1.5),
+            ..Default::default()
+        };
+        assert_eq!(metadata.effective_scale(), 1.5);
+    }
+
+    #[test]
+    fn test_effective_y_offset_default() {
+        let metadata = TileVisualMetadata::default();
+        assert_eq!(metadata.effective_y_offset(), 0.0);
+    }
+
+    #[test]
+    fn test_effective_y_offset_custom() {
+        let metadata = TileVisualMetadata {
+            y_offset: Some(-0.5),
+            ..Default::default()
+        };
+        assert_eq!(metadata.effective_y_offset(), -0.5);
+    }
+
+    #[test]
+    fn test_tile_builder_with_height() {
+        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal).with_height(3.0);
+        assert_eq!(tile.visual.height, Some(3.0));
+    }
+
+    #[test]
+    fn test_tile_builder_with_dimensions() {
+        let tile =
+            Tile::new(0, 0, TerrainType::Ground, WallType::Normal).with_dimensions(0.8, 2.0, 0.9);
+        assert_eq!(tile.visual.width_x, Some(0.8));
+        assert_eq!(tile.visual.height, Some(2.0));
+        assert_eq!(tile.visual.width_z, Some(0.9));
+    }
+
+    #[test]
+    fn test_tile_builder_with_color_tint() {
+        let tile =
+            Tile::new(0, 0, TerrainType::Ground, WallType::Normal).with_color_tint(1.0, 0.5, 0.25);
+        assert_eq!(tile.visual.color_tint, Some((1.0, 0.5, 0.25)));
+    }
+
+    #[test]
+    fn test_tile_builder_with_scale() {
+        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal).with_scale(1.5);
+        assert_eq!(tile.visual.scale, Some(1.5));
+    }
+
+    #[test]
+    fn test_tile_builder_chain() {
+        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+            .with_height(2.0)
+            .with_scale(1.5)
+            .with_color_tint(0.8, 0.8, 1.0);
+        assert_eq!(tile.visual.height, Some(2.0));
+        assert_eq!(tile.visual.scale, Some(1.5));
+        assert_eq!(tile.visual.color_tint, Some((0.8, 0.8, 1.0)));
+    }
+
+    #[test]
+    fn test_serde_backward_compat() {
+        // Old format without visual field should deserialize with default
+        let ron_data = r#"(
+            terrain: Ground,
+            wall_type: Normal,
+            blocked: true,
+            is_special: false,
+            is_dark: false,
+            visited: false,
+            x: 5,
+            y: 10,
+        )"#;
+        let tile: Tile = ron::from_str(ron_data).expect("Failed to deserialize");
+        assert_eq!(tile.x, 5);
+        assert_eq!(tile.y, 10);
+        assert_eq!(tile.visual, TileVisualMetadata::default());
+    }
+
+    #[test]
+    fn test_serde_with_visual() {
+        // New format with visual field should round-trip correctly
+        let tile = Tile::new(3, 7, TerrainType::Mountain, WallType::None)
+            .with_height(4.0)
+            .with_color_tint(0.5, 0.5, 0.5);
+
+        let serialized = ron::to_string(&tile).expect("Failed to serialize");
+        let deserialized: Tile = ron::from_str(&serialized).expect("Failed to deserialize");
+
+        assert_eq!(deserialized.x, tile.x);
+        assert_eq!(deserialized.y, tile.y);
+        assert_eq!(deserialized.terrain, tile.terrain);
+        assert_eq!(deserialized.visual.height, Some(4.0));
+        assert_eq!(deserialized.visual.color_tint, Some((0.5, 0.5, 0.5)));
+    }
+
+    // ===== Existing Tile Tests =====
 
     #[test]
     fn test_tile_creation() {
