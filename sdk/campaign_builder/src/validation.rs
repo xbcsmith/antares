@@ -43,6 +43,8 @@ pub enum ValidationCategory {
     Quests,
     /// Dialogue definitions and IDs
     Dialogues,
+    /// NPC definitions and IDs
+    NPCs,
     /// Class definitions
     Classes,
     /// Race definitions
@@ -82,6 +84,7 @@ impl ValidationCategory {
             ValidationCategory::Conditions => "Conditions",
             ValidationCategory::Quests => "Quests",
             ValidationCategory::Dialogues => "Dialogues",
+            ValidationCategory::NPCs => "NPCs",
             ValidationCategory::Classes => "Classes",
             ValidationCategory::Races => "Races",
             ValidationCategory::Characters => "Characters",
@@ -105,6 +108,7 @@ impl ValidationCategory {
             ValidationCategory::Conditions,
             ValidationCategory::Quests,
             ValidationCategory::Dialogues,
+            ValidationCategory::NPCs,
             ValidationCategory::Classes,
             ValidationCategory::Races,
             ValidationCategory::Characters,
@@ -125,6 +129,7 @@ impl ValidationCategory {
             ValidationCategory::Conditions => "💀",
             ValidationCategory::Quests => "📜",
             ValidationCategory::Dialogues => "💬",
+            ValidationCategory::NPCs => "🧙",
             ValidationCategory::Classes => "⚔️",
             ValidationCategory::Races => "👤",
             ValidationCategory::Characters => "🧑",
