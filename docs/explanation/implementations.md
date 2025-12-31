@@ -1,3 +1,196 @@
+## Phase 1: Portrait Support - Core Portrait Discovery - COMPLETED
+
+### Summary
+
+Implemented core portrait discovery functionality to scan and enumerate available portrait assets from the campaign directory. This phase establishes the foundation for portrait support by providing functions to discover portrait files and resolve portrait IDs to file paths.
+
+### Changes Made
+
+#### 1.1 Portrait Discovery Function (`sdk/campaign_builder/src/ui_helpers.rs`)
+
+Added `extract_portrait_candidates` function to discover available portrait files:
+
+```rust
+pub fn extract_portrait_candidates(campaign_dir: Option<&PathBuf>) -> Vec<String>
+```
+
+**Features:**
+
+- Scans `campaign_dir/assets/portraits` directory for image files
+- Supports `.png`, `.jpg`, and `.jpeg` extensions
+- Prioritizes PNG files when multiple formats exist for same portrait ID
+- Returns sorted list of portrait ID strings (numeric sort for numeric IDs)
+- Handles missing directories gracefully (returns empty vector)
+- Extracts portrait IDs from filenames (e.g., `0.png` → `"0"`)
+
+**Implementation Details:**
+
+- Uses `std::fs::read_dir` for directory traversal
+- Filters files by extension (case-insensitive)
+- Custom sorting: numeric for numeric IDs, alphabetic otherwise
+- Deduplication with PNG priority
+
+#### 1.2 Portrait Path Resolution Helper (`sdk/campaign_builder/src/ui_helpers.rs`)
+
+Added `resolve_portrait_path` function to resolve portrait ID to full file path:
+
+```rust
+pub fn resolve_portrait_path(
+    campaign_dir: Option<&PathBuf>,
+    portrait_id: &str,
+) -> Option<PathBuf>
+```
+
+**Features:**
+
+- Builds path: `campaign_dir/assets/portraits/{portrait_id}.png`
+- Prioritizes PNG format
+- Falls back to JPG/JPEG if PNG not found
+- Returns `Some(PathBuf)` if file exists, `None` otherwise
+- Validates file existence before returning
+
+#### 1.3 Module Documentation Updates
+
+Updated module-level documentation in `ui_helpers.rs` to include:
+
+- `extract_portrait_candidates` - Extracts available portrait IDs from campaign assets
+- `resolve_portrait_path` - Resolves portrait ID to full file path
+
+### Architecture Compliance
+
+✅ **Follows existing patterns:**
+
+- Matches naming convention of other `extract_*_candidates` functions
+- Consistent with `resolve_*` helper pattern
+- Proper error handling using `Option` types
+- No unwrap() calls - all errors handled gracefully
+
+✅ **Module placement:**
+
+- Added to `ui_helpers.rs` alongside other candidate extraction functions
+- Located after `extract_npc_candidates` and before cache section
+- Maintains consistent ordering with other extraction functions
+
+✅ **Type system:**
+
+- Uses `PathBuf` for file paths (standard Rust convention)
+- Uses `Option<&PathBuf>` for optional campaign directory
+- Returns owned `String` for portrait IDs (consistent with other extractors)
+
+### Validation Results
+
+**Quality Checks - ALL PASSED:**
+
+```bash
+✅ cargo fmt --all                                      # Code formatted
+✅ cargo check --all-targets --all-features            # Compiles successfully
+✅ cargo clippy --all-targets --all-features -- -D warnings  # Zero warnings
+✅ cargo nextest run --all-features -p campaign_builder      # 814/814 tests passed
+```
+
+### Test Coverage
+
+**Portrait Discovery Tests (8 tests):**
+
+1. ✅ `test_extract_portrait_candidates_no_campaign_dir` - Returns empty when no campaign dir
+2. ✅ `test_extract_portrait_candidates_nonexistent_directory` - Returns empty for missing directory
+3. ✅ `test_extract_portrait_candidates_empty_directory` - Returns empty for empty directory
+4. ✅ `test_extract_portrait_candidates_with_png_files` - Discovers PNG files correctly
+5. ✅ `test_extract_portrait_candidates_numeric_sort` - Sorts numerically (1, 2, 10, 20 not "1", "10", "2", "20")
+6. ✅ `test_extract_portrait_candidates_mixed_extensions` - Handles PNG, JPG, JPEG
+7. ✅ `test_extract_portrait_candidates_png_priority` - Prioritizes PNG over other formats
+8. ✅ `test_extract_portrait_candidates_ignores_non_images` - Ignores non-image files
+
+**Portrait Resolution Tests (6 tests):**
+
+1. ✅ `test_resolve_portrait_path_no_campaign_dir` - Returns None when no campaign dir
+2. ✅ `test_resolve_portrait_path_nonexistent_file` - Returns None for missing files
+3. ✅ `test_resolve_portrait_path_finds_png` - Finds PNG files
+4. ✅ `test_resolve_portrait_path_finds_jpg` - Finds JPG files
+5. ✅ `test_resolve_portrait_path_finds_jpeg` - Finds JPEG files
+6. ✅ `test_resolve_portrait_path_prioritizes_png` - Returns PNG when multiple formats exist
+
+**Test Techniques Used:**
+
+- Temporary directory creation for isolated testing
+- File system operations (create, read, cleanup)
+- Edge case testing (empty, missing, invalid)
+- Boundary testing (numeric sorting)
+- Format priority testing (PNG preference)
+- Cleanup in all test cases to prevent pollution
+
+### Deliverables Status
+
+- [x] `extract_portrait_candidates` function in `ui_helpers.rs`
+- [x] `resolve_portrait_path` function in `ui_helpers.rs`
+- [x] Module documentation updated
+- [x] Comprehensive unit tests (14 tests total)
+- [x] All quality gates passed
+
+### Success Criteria
+
+✅ **Functions compile without errors** - Passed
+✅ **Unit tests pass** - 14/14 tests passed
+✅ **Discovery correctly enumerates portrait files** - Verified with multiple test cases
+✅ **PNG prioritization works** - Verified with dedicated test
+✅ **Numeric sorting works** - Verified (1, 2, 10, 20 order)
+✅ **Graceful error handling** - All edge cases handled
+
+### Implementation Details
+
+**File Structure Expected:**
+
+```
+campaign_dir/
+└── assets/
+    └── portraits/
+        ├── 0.png
+        ├── 1.png
+        ├── 2.jpg
+        └── 10.png
+```
+
+**Sorting Logic:**
+
+- Attempts to parse portrait IDs as `u32`
+- If both parse successfully: numeric comparison
+- Otherwise: alphabetic comparison
+- Result: "1", "2", "10", "20" (not "1", "10", "2", "20")
+
+**Format Priority:**
+
+1. PNG (highest priority)
+2. JPG
+3. JPEG (lowest priority)
+
+### Benefits Achieved
+
+- **Reusable foundation**: Functions can be used by multiple UI components
+- **Consistent patterns**: Matches existing `extract_*` function conventions
+- **Robust error handling**: No panics, all edge cases handled
+- **Extensible design**: Easy to add new image formats if needed
+- **Well tested**: Comprehensive test coverage including edge cases
+
+### Related Files
+
+**Modified:**
+
+- `sdk/campaign_builder/src/ui_helpers.rs` - Added portrait discovery functions (133 lines added)
+- `sdk/campaign_builder/src/ui_helpers.rs` - Added comprehensive tests (278 lines added)
+
+**Total Lines Added:** 411 lines (133 implementation + 278 tests)
+
+### Next Steps (Phase 2)
+
+The following phases from the implementation plan are ready to proceed:
+
+- Phase 2: Autocomplete Portrait Selector
+- Phase 3: Portrait Grid Picker Popup
+- Phase 4: Preview Panel Portrait Display
+- Phase 5: Polish and Edge Cases
+
+---
+
 ## Phase 5: Advanced Features - Rotation Support & Advanced Designs - COMPLETED
 
 **Date:** 2025-01-XX
