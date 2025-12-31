@@ -4,7 +4,7 @@
 
 ### Remove Event Triggers
 
-[X] [remove per tile event triggers implementation](./remove_per_tile_event_triggers_implementation_plan.md)
+ ✅ COMPLETED - [remove per tile event triggers implementation](./remove_per_tile_event_triggers_implementation_plan.md)
 
 ### Config Editor Implementation
 
@@ -16,17 +16,17 @@
 
 ## Starting Position Implementation
 
-X Need to be able to set starting position for player characters in map editor. (It is done in the campaign.ron)
+ ✅ COMPLETED - Need to be able to set starting position for player characters in map editor. (It is done in the campaign.ron)
 
 ## Game Engine
 
 ## npc externalization plan
 
-[ ] [npc externalization plan](./npc_externalization_implementation_plan.md)
+ ✅ COMPLETED - [npc externalization plan](./npc_externalization_implementation_plan.md)
 
 ## npc gameplay fix plan
 
-[npc gameplay fix plan](./npc_gameplay_fix_implementation_plan.md)
+ ✅ COMPLETED -[npc gameplay fix plan](./npc_gameplay_fix_implementation_plan.md)
 
 ### Tile Visual Metadata
 

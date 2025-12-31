@@ -74,7 +74,7 @@ pub enum BlueprintEventType {
     Combat(Vec<MonsterSpawn>),
     Teleport { map_id: u16, x: i32, y: i32 },
     Trap { damage: u16, effect: Option<String> },
-    NpcDialogue(u16),
+    NpcDialogue(String),
 }
 
 #[derive(Debug, Deserialize)]

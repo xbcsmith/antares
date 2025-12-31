@@ -526,12 +526,16 @@ impl<'a> Validator<'a> {
                     // Signs are always valid
                 }
                 crate::domain::world::MapEvent::NpcDialogue { npc_id, .. } => {
-                    // Validate NPC exists on this map
-                    if !map.npcs.iter().any(|npc| npc.id == *npc_id) {
+                    // Validate NPC exists in database or on map (legacy)
+                    let npc_exists = self.db.npcs.has_npc(npc_id)
+                        || map.npc_placements.iter().any(|p| &p.npc_id == npc_id)
+                        || map.npcs.iter().any(|npc| npc.name == *npc_id);
+
+                    if !npc_exists {
                         errors.push(ValidationError::BalanceWarning {
                             severity: Severity::Error,
                             message: format!(
-                                "Map {} has NPC dialogue event for non-existent NPC {} at ({}, {})",
+                                "Map {} has NPC dialogue event for non-existent NPC '{}' at ({}, {})",
                                 map.id, npc_id, pos.x, pos.y
                             ),
                         });

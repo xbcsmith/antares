@@ -46,7 +46,7 @@ pub enum MapEventType {
         target_pos: types::Position,
     },
     NpcDialogue {
-        npc_id: u16,
+        npc_id: String,
     },
     CombatEncounter {
         monster_group_id: u8,
@@ -134,9 +134,9 @@ fn map_event_to_event_type(ev: &world::MapEvent) -> Option<MapEventType> {
             target_map: *map_id,
             target_pos: *destination,
         }),
-        world::MapEvent::NpcDialogue { npc_id, .. } => {
-            Some(MapEventType::NpcDialogue { npc_id: *npc_id })
-        }
+        world::MapEvent::NpcDialogue { npc_id, .. } => Some(MapEventType::NpcDialogue {
+            npc_id: npc_id.clone(),
+        }),
         world::MapEvent::Encounter { monster_group, .. } => {
             // For the lightweight form we store the primary group id (if any)
             let gid = *monster_group.first().unwrap_or(&0);

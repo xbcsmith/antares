@@ -19,7 +19,7 @@ pub struct NpcMarker {
 }
 ```
 
-**Purpose**: 
+**Purpose**:
 - Identifies entities as NPC visual markers in the ECS
 - Stores the NPC ID for lookup and interaction
 - Enables queries and filtering of NPC entities
@@ -218,7 +218,7 @@ The system is ready for Phase 3 (Dialogue Event Connection), which will enable p
 
 ---
 
-**Implementation Date**: 2025-01-XX  
-**Phase**: 2 of 3 (NPC Gameplay Fix)  
-**Status**: ✅ Complete  
+**Implementation Date**: 2025-01-XX
+**Phase**: 2 of 3 (NPC Gameplay Fix)
+**Status**: ✅ Complete
 **Tests**: 974 passed, 0 failed

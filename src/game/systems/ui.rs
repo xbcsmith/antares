@@ -21,11 +21,24 @@ pub struct GameLog {
 }
 
 impl GameLog {
+    /// Create a new empty game log
+    pub fn new() -> Self {
+        Self {
+            messages: Vec::new(),
+        }
+    }
+
+    /// Add a message to the game log
     pub fn add(&mut self, msg: String) {
         self.messages.push(msg);
         if self.messages.len() > 50 {
             self.messages.remove(0);
         }
+    }
+
+    /// Get all log entries
+    pub fn entries(&self) -> &[String] {
+        &self.messages
     }
 }
 

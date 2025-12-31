@@ -207,8 +207,8 @@ pub enum MapEvent {
         /// Event description
         #[serde(default)]
         description: String,
-        /// NPC identifier
-        npc_id: u16,
+        /// NPC identifier (string-based ID for NPC database lookup)
+        npc_id: crate::domain::world::NpcId,
     },
 }
 

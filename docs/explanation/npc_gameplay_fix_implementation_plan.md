@@ -79,6 +79,8 @@ This plan resolves the issue where NPCs are neither visible nor interactable in 
 
 ### Phase 3: Dialogue Event Connection
 
+**Status**: ✅ COMPLETED - See `docs/explanation/phase3_dialogue_connection_implementation_summary.md`
+
 **Goal**: Trigger actual dialogue when interacting with an NPC.
 
 #### 3.1 Feature Work
@@ -99,8 +101,16 @@ This plan resolves the issue where NPCs are neither visible nor interactable in 
 
 #### 3.5 Deliverables
 
-- [ ] Updated `events.rs` system.
-- [ ] Updated `application/mod.rs` event handling.
+- [x] Updated `events.rs` system.
+- [x] Updated `application/mod.rs` event handling (dialogue system integration complete).
+- [x] Migrated `MapEvent::NpcDialogue` to use string-based NPC IDs.
+- [x] Added NPC database lookup in event handler.
+- [x] Implemented `StartDialogue` message writing.
+- [x] Added fallback logging for NPCs without dialogue.
+- [x] Updated validation to check NPC database.
+- [x] Three integration tests with 100% coverage.
+- [x] All quality checks pass.
+- [x] Documentation updated.
 
 ---
 

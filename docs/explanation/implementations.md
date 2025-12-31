@@ -338,6 +338,296 @@ To verify NPC visuals in the game:
 
 ---
 
+## Phase 3: Dialogue Event Connection - COMPLETED
+
+**Date:** 2025-01-26
+**Status:** ✅ Implementation complete
+
+### Summary
+
+Successfully implemented Phase 3 of the NPC Gameplay Fix Implementation Plan, connecting NPC interaction events to the dialogue system. When players trigger NPC dialogue events, the system now looks up the NPC definition in the database, checks for assigned dialogue trees, and either triggers the dialogue system or logs a fallback message.
+
+### Changes Made
+
+#### 3.1 Data Model Migration
+
+**Files Updated**:
+
+- `src/domain/world/types.rs` - MapEvent::NpcDialogue
+- `src/domain/world/events.rs` - EventResult::NpcDialogue
+- `src/domain/world/blueprint.rs` - BlueprintEventType::NpcDialogue
+- `src/game/systems/map.rs` - MapEventType::NpcDialogue
+
+**Migration from Numeric to String-Based NPC IDs**:
+
+Migrated `MapEvent::NpcDialogue` from legacy numeric IDs to string-based NPC IDs for database compatibility:
+
+```rust
+// Before (legacy):
+NpcDialogue {
+    name: String,
+    description: String,
+    npc_id: u16,  // Numeric ID
+}
+
+// After (modern):
+NpcDialogue {
+    name: String,
+    description: String,
+    npc_id: crate::domain::world::NpcId,  // String-based ID
+}
+```
+
+**Rationale**: The externalized NPC system uses human-readable string IDs (e.g., "tutorial_elder_village") for maintainability and editor UX. This change enables database lookup using consistent ID types.
+
+#### 3.2 Event Handler Implementation
+
+**File**: `src/game/systems/events.rs`
+
+Updated `handle_events` system to implement dialogue connection logic:
+
+**Key Features**:
+
+1. **Database Lookup**: Uses `content.db().npcs.get_npc(npc_id)` to retrieve NPC definitions
+2. **Dialogue Check**: Verifies `dialogue_id` is present before triggering dialogue
+3. **Message Writing**: Sends `StartDialogue` message to dialogue system
+4. **Graceful Fallback**: Logs friendly message for NPCs without dialogue trees
+5. **Error Handling**: Logs errors for missing NPCs (caught by validation)
+
+**System Signature Updates**:
+
+Added new resource dependencies:
+
+```rust
+fn handle_events(
+    mut event_reader: MessageReader<MapEventTriggered>,
+    mut map_change_writer: MessageWriter<MapChangeEvent>,
+    mut dialogue_writer: MessageWriter<StartDialogue>,  // NEW
+    content: Res<GameContent>,                          // NEW
+    mut game_log: Option<ResMut<GameLog>>,
+)
+```
+
+**Implementation Logic**:
+
+```rust
+MapEvent::NpcDialogue { npc_id, .. } => {
+    // Look up NPC in database
+    if let Some(npc_def) = content.db().npcs.get_npc(npc_id) {
+        if let Some(dialogue_id) = npc_def.dialogue_id {
+            // Trigger dialogue system
+            dialogue_writer.write(StartDialogue { dialogue_id });
+            game_log.add(format!("{} wants to talk.", npc_def.name));
+        } else {
+            // Fallback for NPCs without dialogue
+            game_log.add(format!(
+                "{}: Hello, traveler! (No dialogue available)",
+                npc_def.name
+            ));
+        }
+    } else {
+        // Error: NPC not in database
+        game_log.add(format!("Error: NPC '{}' not found", npc_id));
+    }
+}
+```
+
+#### 3.3 Validation Updates
+
+**File**: `src/sdk/validation.rs`
+
+Updated NPC dialogue event validation to check against the NPC database:
+
+```rust
+MapEvent::NpcDialogue { npc_id, .. } => {
+    let npc_exists = self.db.npcs.has_npc(npc_id)
+        || map.npc_placements.iter().any(|p| &p.npc_id == npc_id)
+        || map.npcs.iter().any(|npc| npc.name == *npc_id);
+
+    if !npc_exists {
+        errors.push(ValidationError::BalanceWarning {
+            severity: Severity::Error,
+            message: format!(
+                "Map {} has NPC dialogue event for non-existent NPC '{}' at ({}, {})",
+                map.id, npc_id, pos.x, pos.y
+            ),
+        });
+    }
+}
+```
+
+This ensures campaigns are validated against the centralized NPC database while maintaining backward compatibility.
+
+#### 3.4 GameLog Enhancements
+
+**File**: `src/game/systems/ui.rs`
+
+Added utility methods to `GameLog` for testing and consistency:
+
+```rust
+impl GameLog {
+    pub fn new() -> Self {
+        Self { messages: Vec::new() }
+    }
+
+    pub fn entries(&self) -> &[String] {
+        &self.messages
+    }
+}
+```
+
+### Integration Points
+
+#### Dialogue System Integration
+
+Connects to existing dialogue runtime (`src/game/systems/dialogue.rs`):
+
+- **Message**: `StartDialogue { dialogue_id }`
+- **Handler**: `handle_start_dialogue` system
+- **Effect**: Transitions game to `GameMode::Dialogue(DialogueState::start(...))`
+
+The dialogue system then:
+
+1. Fetches dialogue tree from `GameContent`
+2. Initializes `DialogueState` with root node
+3. Executes root node actions
+4. Logs dialogue text to GameLog
+
+#### Content Database Integration
+
+Uses `NpcDatabase` from `src/sdk/database.rs`:
+
+- **Lookup**: `get_npc(npc_id: &str) -> Option<&NpcDefinition>`
+- **Validation**: `has_npc(npc_id: &str) -> bool`
+
+NPCs loaded from `campaigns/{campaign}/data/npcs.ron` at startup.
+
+### Test Coverage
+
+Added three new integration tests:
+
+#### Test 1: `test_npc_dialogue_event_triggers_dialogue_when_npc_has_dialogue_id`
+
+- **Purpose**: Verify NPCs with dialogue trees trigger dialogue system
+- **Scenario**: NPC with `dialogue_id: Some(1)` triggers event
+- **Assertion**: `StartDialogue` message sent with correct dialogue ID
+
+#### Test 2: `test_npc_dialogue_event_logs_when_npc_has_no_dialogue_id`
+
+- **Purpose**: Verify graceful fallback for NPCs without dialogue
+- **Scenario**: NPC with `dialogue_id: None` triggers event
+- **Assertion**: GameLog contains fallback message with NPC name
+
+#### Test 3: `test_npc_dialogue_event_logs_error_when_npc_not_found`
+
+- **Purpose**: Verify error handling for missing NPCs
+- **Scenario**: Non-existent NPC ID triggers event
+- **Assertion**: GameLog contains error message
+
+**Test Architecture Note**: Tests use two-update pattern to account for Bevy message system timing:
+
+```rust
+app.update(); // First: check_for_events writes MapEventTriggered
+app.update(); // Second: handle_events processes MapEventTriggered
+```
+
+**Quality Gates**: All checks passed
+
+```bash
+✅ cargo fmt --all
+✅ cargo check --all-targets --all-features
+✅ cargo clippy --all-targets --all-features -- -D warnings
+✅ cargo nextest run --all-features  # All 977 tests passed
+```
+
+### Migration Path
+
+#### For Existing Campaigns
+
+Campaigns using legacy numeric NPC IDs must migrate to string-based IDs:
+
+**Before** (old blueprint format):
+
+```ron
+BlueprintEventType::NpcDialogue(42)  // Numeric ID
+```
+
+**After** (new blueprint format):
+
+```ron
+BlueprintEventType::NpcDialogue("tutorial_elder_village")  // String ID
+```
+
+#### Backward Compatibility
+
+Validation checks three sources for NPC existence:
+
+1. **Modern**: NPC database (`self.db.npcs.has_npc(npc_id)`)
+2. **Modern**: NPC placements (`map.npc_placements`)
+3. **Legacy**: Embedded NPCs (`map.npcs`)
+
+### Architecture Compliance
+
+**Data Structures**:
+
+- ✅ Uses `NpcId` type alias consistently
+- ✅ Uses `DialogueId` type alias
+- ✅ Follows domain/game layer separation
+- ✅ No domain dependencies on infrastructure
+
+**Module Placement**:
+
+- ✅ Event handling in `game/systems/events.rs`
+- ✅ NPC database in `sdk/database.rs`
+- ✅ Dialogue runtime in `game/systems/dialogue.rs`
+- ✅ Type definitions in `domain/world/`
+
+### Deliverables Status
+
+- [x] Updated `MapEvent::NpcDialogue` to use string-based NPC IDs
+- [x] Implemented NPC database lookup in `handle_events`
+- [x] Added `StartDialogue` message writing
+- [x] Implemented fallback logging for NPCs without dialogue
+- [x] Updated validation to check NPC database
+- [x] Added GameLog utility methods
+- [x] Three integration tests with 100% coverage
+- [x] All quality checks pass
+- [x] Documentation updated
+
+### Known Limitations
+
+1. **Tile-Based Interaction Only**: NPCs can only be interacted with via MapEvent triggers (not direct clicking)
+2. **No Visual Feedback**: Dialogue state change not reflected in rendering yet
+3. **Single Dialogue Per NPC**: NPCs have one default dialogue tree (no quest-based branching)
+4. **No UI Integration**: Dialogue triggered but UI rendering is pending
+
+### Next Steps
+
+**Immediate** (Future Phases):
+
+- Implement direct NPC interaction (click/key press on NPC visuals)
+- Integrate dialogue UI rendering with portraits
+- Add dialogue override system (per-placement dialogue customization)
+- Implement quest-based dialogue variations
+
+**Future Enhancements**:
+
+- NPC idle animations and talking animations
+- Dynamic dialogue based on quest progress
+- NPC reaction system (disposition, reputation)
+- Multi-stage conversations with branching paths
+
+### Related Files
+
+- **Implementation**: `src/game/systems/events.rs`
+- **Domain Types**: `src/domain/world/types.rs`, `src/domain/world/events.rs`
+- **Database**: `src/sdk/database.rs` (NpcDatabase)
+- **Dialogue System**: `src/game/systems/dialogue.rs`
+- **Validation**: `src/sdk/validation.rs`
+- **Detailed Summary**: `docs/explanation/phase3_dialogue_connection_implementation_summary.md`
+
+---
+
 ## Phase 4: NPC Externalization - Engine Integration - COMPLETED
 
 **Date:** 2025-01-26
