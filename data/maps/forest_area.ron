@@ -4517,4 +4517,16 @@
             dialogue: "These woods are more dangerous than they used to be. Watch your step, traveler.",
         ),
     ],
+    npc_placements: [
+        // Lost Ranger - Warns about danger in the forest
+        (
+            npc_id: "base_ranger",
+            position: (
+                x: 2,
+                y: 2,
+            ),
+            facing: Some(East),
+            dialogue_override: None,
+        ),
+    ],
 )

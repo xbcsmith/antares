@@ -32,9 +32,9 @@ fn test_load_start_area() {
     let has_ground = map.tiles.iter().any(|t| t.terrain == TerrainType::Ground);
     assert!(has_ground, "Map should have some ground tiles");
 
-    // Verify NPCs (map may or may not have NPCs)
-    // Just check that the NPC list is accessible
-    let _npc_count = map.npcs.len();
+    // Verify NPC placements (map may or may not have NPCs)
+    // Just check that the NPC placement list is accessible
+    let _npc_count = map.npc_placements.len();
 }
 
 #[test]
@@ -63,14 +63,14 @@ fn test_map_consistency() {
         );
     }
 
-    // Verify NPC positions are valid
-    for npc in &map.npcs {
+    // Verify NPC placement positions are valid
+    for placement in &map.npc_placements {
         assert!(
-            npc.position.x < map.width as i32 && npc.position.y < map.height as i32,
-            "NPC '{}' at ({},{}) is outside map bounds",
-            npc.name,
-            npc.position.x,
-            npc.position.y
+            placement.position.x < map.width as i32 && placement.position.y < map.height as i32,
+            "NPC placement '{}' at ({},{}) is outside map bounds",
+            placement.npc_id,
+            placement.position.x,
+            placement.position.y
         );
     }
 }

@@ -50,8 +50,8 @@ pub enum EventResult {
     },
     /// NPC dialogue initiated
     NpcDialogue {
-        /// NPC identifier
-        npc_id: u16,
+        /// NPC identifier (string-based ID for NPC database lookup)
+        npc_id: crate::domain::world::NpcId,
     },
 }
 
@@ -186,7 +186,9 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
 
         MapEvent::NpcDialogue { npc_id, .. } => {
             // NPC dialogues are repeatable - don't remove
-            EventResult::NpcDialogue { npc_id }
+            EventResult::NpcDialogue {
+                npc_id: npc_id.clone(),
+            }
         }
     };
 
@@ -393,7 +395,7 @@ mod tests {
             MapEvent::NpcDialogue {
                 name: "NPC".to_string(),
                 description: "Desc".to_string(),
-                npc_id: 42,
+                npc_id: "test_npc".to_string(),
             },
         );
 
@@ -404,7 +406,7 @@ mod tests {
         assert!(result.is_ok());
         match result.unwrap() {
             EventResult::NpcDialogue { npc_id } => {
-                assert_eq!(npc_id, 42);
+                assert_eq!(npc_id, "test_npc");
             }
             _ => panic!("Expected NpcDialogue event"),
         }
@@ -412,7 +414,12 @@ mod tests {
         // NPC dialogue should still be there (repeatable)
         let result2 = trigger_event(&mut world, pos);
         assert!(result2.is_ok());
-        matches!(result2.unwrap(), EventResult::NpcDialogue { npc_id: 42 });
+        matches!(
+            result2.unwrap(),
+            EventResult::NpcDialogue {
+                npc_id: ref id
+            } if id == "test_npc"
+        );
     }
 
     #[test]

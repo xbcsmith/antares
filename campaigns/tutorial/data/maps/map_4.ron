@@ -4165,16 +4165,13 @@
             text: "Exit to town.",
         ),
     },
-    npcs: [
+    npc_placements: [
         (
-            id: 5,
-            name: "Lost Ranger",
-            description: "A ranger who has lost his way and seeks guidance.",
+            npc_id: "tutorial_ranger_lost",
             position: (
                 x: 2,
                 y: 2,
             ),
-            dialogue: "These woods are more dangerous than they used to be. Watch your step, traveler.",
         ),
     ],
 )

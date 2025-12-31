@@ -557,7 +557,7 @@ pub fn town_map(id: MapId, name: &str, description: &str, width: u32, height: u3
         height,
         tiles,
         events: std::collections::HashMap::new(),
-        npcs: Vec::new(),
+        npc_placements: Vec::new(),
     }
 }
 
@@ -602,7 +602,7 @@ pub fn dungeon_map(id: MapId, name: &str, description: &str, width: u32, height:
         height,
         tiles,
         events: std::collections::HashMap::new(),
-        npcs: Vec::new(),
+        npc_placements: Vec::new(),
     }
 }
 
@@ -635,7 +635,7 @@ pub fn forest_map(id: MapId, name: &str, description: &str, width: u32, height: 
         height,
         tiles,
         events: std::collections::HashMap::new(),
-        npcs: Vec::new(),
+        npc_placements: Vec::new(),
     }
 }
 

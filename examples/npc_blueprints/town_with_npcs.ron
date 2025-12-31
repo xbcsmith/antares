@@ -1,0 +1,103 @@
+// Example MapBlueprint using new NPC placement format
+//
+// This demonstrates how to place NPCs on a map by referencing
+// NPC definitions from the NPC database instead of inlining
+// all NPC data in the map file.
+//
+// Benefits:
+// - NPC definitions are reusable across multiple maps
+// - Easier to maintain NPC data in one place
+// - Per-placement dialogue overrides for context-specific interactions
+
+(
+    id: 100,
+    name: "Example Town",
+    description: "A bustling town with various NPCs",
+    width: 20,
+    height: 15,
+    environment: Outdoor,
+    starting_position: (x: 10, y: 12),
+
+    // Tile definitions (simplified for example)
+    tiles: [
+        (x: 0, y: 0, code: Grass),
+        (x: 1, y: 0, code: Grass),
+        (x: 2, y: 0, code: Grass),
+        // ... more tiles ...
+    ],
+
+    // Map events
+    events: [
+        (
+            position: (x: 5, y: 5),
+            name: "Town Sign",
+            description: "A weathered wooden sign",
+            event_type: Text("Welcome to Example Town!"),
+        ),
+    ],
+
+    // NEW: NPC placements referencing database entries
+    npc_placements: [
+        // Merchant in the shop (position 8, 4)
+        (
+            npc_id: "merchant_bob",
+            position: (x: 8, y: 4),
+            facing: Some(South),
+            dialogue_override: None,  // Uses merchant's default dialogue
+        ),
+
+        // Innkeeper at the tavern (position 15, 7)
+        (
+            npc_id: "innkeeper_mary",
+            position: (x: 15, y: 7),
+            facing: Some(West),
+            dialogue_override: None,
+        ),
+
+        // Quest giver (village elder) at center square
+        (
+            npc_id: "village_elder",
+            position: (x: 10, y: 8),
+            facing: Some(North),
+            dialogue_override: None,
+        ),
+
+        // City guard with context-specific dialogue override
+        // This guard uses a different greeting than guards in other locations
+        (
+            npc_id: "city_guard",
+            position: (x: 3, y: 2),
+            facing: Some(East),
+            dialogue_override: Some(250),  // Special "town entrance" dialogue
+        ),
+
+        // Another guard with default dialogue
+        (
+            npc_id: "city_guard",
+            position: (x: 18, y: 13),
+            facing: Some(West),
+            dialogue_override: None,  // Uses guard's default dialogue
+        ),
+
+        // Traveling merchant (no facing direction)
+        (
+            npc_id: "merchant_wandering",
+            position: (x: 12, y: 10),
+            facing: None,
+            dialogue_override: None,
+        ),
+    ],
+
+    // OLD: Legacy NPC format (still supported for backward compatibility)
+    // These will be deprecated in favor of npc_placements
+    npcs: [],
+
+    // Exit points to other maps
+    exits: [
+        (
+            map_id: 2,
+            position: (x: 0, y: 7),
+            target_position: (x: 19, y: 7),
+        ),
+    ],
+)

@@ -4061,46 +4061,34 @@
             text: "To the Dark Forrest",
         ),
     },
-    npcs: [
+    npc_placements: [
         (
-            id: 1,
-            name: "Village Elder",
-            description: "The wise elder of the village who can provide quests and local lore.",
+            npc_id: "tutorial_elder_village",
             position: (
                 x: 1,
                 y: 16,
             ),
-            dialogue: "Greetings, brave adventurers! Dark forces stir in the dungeon to the east. Will you help us?",
         ),
         (
-            id: 2,
-            name: "InnKeeper",
-            description: "The proprietor of the Cozy Inn who offers rooms and warm meals to travelers.",
+            npc_id: "tutorial_innkeeper_town",
             position: (
                 x: 1,
                 y: 3,
             ),
-            dialogue: "Welcome to my inn! You look weary from your travels. Rest here and recover your strength.",
         ),
         (
-            id: 3,
-            name: "Merchant",
-            description: "A traveling merchant offering goods and supplies to adventurers.",
+            npc_id: "tutorial_merchant_town",
             position: (
                 x: 1,
                 y: 9,
             ),
-            dialogue: "I have the finest goods in the land! Take a look at my wares.",
         ),
         (
-            id: 4,
-            name: "High Priestess",
-            description: "The head priestess of the temple who provides healing and blessings to the townsfolk.",
+            npc_id: "tutorial_priestess_town",
             position: (
                 x: 18,
                 y: 4,
             ),
-            dialogue: "May the light guide you. I can heal your wounds and cure your ailements",
         ),
     ],
 )

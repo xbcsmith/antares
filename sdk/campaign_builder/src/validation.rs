@@ -43,6 +43,8 @@ pub enum ValidationCategory {
     Quests,
     /// Dialogue definitions and IDs
     Dialogues,
+    /// NPC definitions and IDs
+    NPCs,
     /// Class definitions
     Classes,
     /// Race definitions
@@ -82,6 +84,7 @@ impl ValidationCategory {
             ValidationCategory::Conditions => "Conditions",
             ValidationCategory::Quests => "Quests",
             ValidationCategory::Dialogues => "Dialogues",
+            ValidationCategory::NPCs => "NPCs",
             ValidationCategory::Classes => "Classes",
             ValidationCategory::Races => "Races",
             ValidationCategory::Characters => "Characters",
@@ -105,6 +108,7 @@ impl ValidationCategory {
             ValidationCategory::Conditions,
             ValidationCategory::Quests,
             ValidationCategory::Dialogues,
+            ValidationCategory::NPCs,
             ValidationCategory::Classes,
             ValidationCategory::Races,
             ValidationCategory::Characters,
@@ -125,6 +129,7 @@ impl ValidationCategory {
             ValidationCategory::Conditions => "💀",
             ValidationCategory::Quests => "📜",
             ValidationCategory::Dialogues => "💬",
+            ValidationCategory::NPCs => "🧙",
             ValidationCategory::Classes => "⚔️",
             ValidationCategory::Races => "👤",
             ValidationCategory::Characters => "🧑",
@@ -932,6 +937,84 @@ pub fn validate_armor_classification(
 }
 
 #[cfg(test)]
+/// Validates NPC placement references
+///
+/// Checks if NPC placement references a valid NPC ID from the NPC database.
+///
+/// # Arguments
+///
+/// * `npc_id` - The NPC ID from the placement
+/// * `available_npc_ids` - Set of valid NPC IDs from the NPC database
+///
+/// # Returns
+///
+/// Returns `Ok(())` if valid, or an error message
+pub fn validate_npc_placement_reference(
+    npc_id: &str,
+    available_npc_ids: &std::collections::HashSet<String>,
+) -> Result<(), String> {
+    if npc_id.is_empty() {
+        return Err("NPC ID cannot be empty".to_string());
+    }
+
+    if !available_npc_ids.contains(npc_id) {
+        return Err(format!(
+            "NPC placement references unknown NPC ID: '{}'",
+            npc_id
+        ));
+    }
+
+    Ok(())
+}
+
+/// Validates NPC dialogue ID reference
+///
+/// Checks if NPC's dialogue_id references a valid dialogue from the dialogue database.
+///
+/// # Arguments
+///
+/// * `dialogue_id` - The dialogue ID from the NPC definition
+/// * `available_dialogue_ids` - Set of valid dialogue IDs
+///
+/// # Returns
+///
+/// Returns `Ok(())` if valid, or an error message
+pub fn validate_npc_dialogue_reference(
+    dialogue_id: Option<u16>,
+    available_dialogue_ids: &std::collections::HashSet<u16>,
+) -> Result<(), String> {
+    if let Some(id) = dialogue_id {
+        if !available_dialogue_ids.contains(&id) {
+            return Err(format!("NPC references unknown dialogue ID: {}", id));
+        }
+    }
+    Ok(())
+}
+
+/// Validates NPC quest ID references
+///
+/// Checks if NPC's quest_ids reference valid quests from the quest database.
+///
+/// # Arguments
+///
+/// * `quest_ids` - The quest IDs from the NPC definition
+/// * `available_quest_ids` - Set of valid quest IDs
+///
+/// # Returns
+///
+/// Returns `Ok(())` if all valid, or an error message with the first invalid ID
+pub fn validate_npc_quest_references(
+    quest_ids: &[u32],
+    available_quest_ids: &std::collections::HashSet<u32>,
+) -> Result<(), String> {
+    for quest_id in quest_ids {
+        if !available_quest_ids.contains(quest_id) {
+            return Err(format!("NPC references unknown quest ID: {}", quest_id));
+        }
+    }
+    Ok(())
+}
+
 mod tests {
     use super::*;
 
@@ -1384,7 +1467,6 @@ mod tests {
     fn test_validation_summary_empty() {
         let results: Vec<ValidationResult> = vec![];
         let summary = ValidationSummary::from_results(&results);
-
         assert_eq!(summary.error_count, 0);
         assert_eq!(summary.warning_count, 0);
         assert_eq!(summary.info_count, 0);
@@ -1392,5 +1474,85 @@ mod tests {
         assert_eq!(summary.total(), 0);
         assert!(summary.has_no_errors());
         assert!(summary.all_passed());
+    }
+
+    #[test]
+    fn test_validate_npc_placement_reference_valid() {
+        let mut available = std::collections::HashSet::new();
+        available.insert("merchant_bob".to_string());
+        available.insert("innkeeper_mary".to_string());
+
+        assert!(validate_npc_placement_reference("merchant_bob", &available).is_ok());
+    }
+
+    #[test]
+    fn test_validate_npc_placement_reference_invalid() {
+        let mut available = std::collections::HashSet::new();
+        available.insert("merchant_bob".to_string());
+
+        let result = validate_npc_placement_reference("unknown_npc", &available);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown NPC ID"));
+    }
+
+    #[test]
+    fn test_validate_npc_placement_reference_empty() {
+        let available = std::collections::HashSet::new();
+        let result = validate_npc_placement_reference("", &available);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot be empty"));
+    }
+
+    #[test]
+    fn test_validate_npc_dialogue_reference_valid() {
+        let mut available = std::collections::HashSet::new();
+        available.insert(1);
+        available.insert(5);
+
+        assert!(validate_npc_dialogue_reference(Some(1), &available).is_ok());
+        assert!(validate_npc_dialogue_reference(None, &available).is_ok());
+    }
+
+    #[test]
+    fn test_validate_npc_dialogue_reference_invalid() {
+        let mut available = std::collections::HashSet::new();
+        available.insert(1);
+
+        let result = validate_npc_dialogue_reference(Some(99), &available);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown dialogue ID"));
+    }
+
+    #[test]
+    fn test_validate_npc_quest_references_valid() {
+        let mut available = std::collections::HashSet::new();
+        available.insert(1);
+        available.insert(2);
+        available.insert(3);
+
+        assert!(validate_npc_quest_references(&[1, 2], &available).is_ok());
+        assert!(validate_npc_quest_references(&[], &available).is_ok());
+    }
+
+    #[test]
+    fn test_validate_npc_quest_references_invalid() {
+        let mut available = std::collections::HashSet::new();
+        available.insert(1);
+        available.insert(2);
+
+        let result = validate_npc_quest_references(&[1, 99], &available);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown quest ID: 99"));
+    }
+
+    #[test]
+    fn test_validate_npc_quest_references_multiple_invalid() {
+        let mut available = std::collections::HashSet::new();
+        available.insert(1);
+
+        // Should fail on first invalid quest
+        let result = validate_npc_quest_references(&[99, 100], &available);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown quest ID"));
     }
 }

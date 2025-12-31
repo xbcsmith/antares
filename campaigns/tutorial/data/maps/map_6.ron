@@ -4061,16 +4061,13 @@
             ],
         ),
     },
-    npcs: [
+    npc_placements: [
         (
-            id: 1,
-            name: "Dying Goblin",
-            description: "",
+            npc_id: "tutorial_goblin_dying",
             position: (
                 x: 15,
                 y: 8,
             ),
-            dialogue: "Dying Goblin who was attacked by his tribe for stealing",
         ),
     ],
 )

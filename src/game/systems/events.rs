@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::application::resources::GameContent;
 use crate::domain::world::MapEvent;
 use crate::game::resources::GlobalState;
+use crate::game::systems::dialogue::StartDialogue;
 use crate::game::systems::map::MapChangeEvent;
 use bevy::prelude::*;
 
@@ -49,6 +51,8 @@ fn check_for_events(
 fn handle_events(
     mut event_reader: MessageReader<MapEventTriggered>,
     mut map_change_writer: MessageWriter<MapChangeEvent>,
+    mut dialogue_writer: MessageWriter<StartDialogue>,
+    content: Res<GameContent>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
 ) {
     for trigger in event_reader.read() {
@@ -103,12 +107,35 @@ fn handle_events(
                 // TODO: Start combat
             }
             MapEvent::NpcDialogue { npc_id, .. } => {
-                let msg = format!("NPC {} wants to talk.", npc_id);
-                println!("{}", msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(msg);
+                // Look up NPC in database
+                if let Some(npc_def) = content.db().npcs.get_npc(npc_id) {
+                    // Check if NPC has a dialogue tree
+                    if let Some(dialogue_id) = npc_def.dialogue_id {
+                        // Send StartDialogue message to trigger dialogue system
+                        dialogue_writer.write(StartDialogue { dialogue_id });
+
+                        let msg = format!("{} wants to talk.", npc_def.name);
+                        println!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                    } else {
+                        // Fallback: No dialogue tree, log to game log
+                        let msg =
+                            format!("{}: Hello, traveler! (No dialogue available)", npc_def.name);
+                        println!("{}", msg);
+                        if let Some(ref mut log) = game_log {
+                            log.add(msg);
+                        }
+                    }
+                } else {
+                    // NPC not found in database - log error
+                    let msg = format!("Error: NPC '{}' not found in database", npc_id);
+                    println!("{}", msg);
+                    if let Some(ref mut log) = game_log {
+                        log.add(msg);
+                    }
                 }
-                // TODO: Start dialogue
             }
         }
     }
@@ -127,6 +154,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
         app.add_plugins(EventPlugin);
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
@@ -146,6 +174,9 @@ mod tests {
         game_state.world.set_party_position(event_pos);
 
         app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
 
         // Act
         app.update();
@@ -166,6 +197,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
         app.add_plugins(EventPlugin);
 
         let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
@@ -177,6 +209,9 @@ mod tests {
         game_state.world.set_party_position(Position::new(5, 5));
 
         app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
 
         // Act
         app.update();
@@ -197,6 +232,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
         app.add_plugins(EventPlugin);
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
@@ -216,6 +252,9 @@ mod tests {
         game_state.world.set_party_position(event_pos);
 
         app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
 
         // Act - update multiple times at same position
         app.update();
@@ -235,6 +274,175 @@ mod tests {
         assert_eq!(
             second_update_count, 0,
             "Expected no events on second update (same position)"
+        );
+    }
+
+    #[test]
+    fn test_npc_dialogue_event_triggers_dialogue_when_npc_has_dialogue_id() {
+        use crate::domain::world::NpcDefinition;
+
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_plugins(EventPlugin);
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let event_pos = Position::new(5, 5);
+        map.add_event(
+            event_pos,
+            MapEvent::NpcDialogue {
+                name: "Elder".to_string(),
+                description: "Village Elder".to_string(),
+                npc_id: "test_elder".to_string(),
+            },
+        );
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+
+        // Add NPC to database with dialogue_id
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let npc = NpcDefinition {
+            id: "test_elder".to_string(),
+            name: "Village Elder".to_string(),
+            description: "Wise elder".to_string(),
+            portrait_path: "portraits/elder.png".to_string(),
+            dialogue_id: Some(1u16),
+            quest_ids: vec![],
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+        };
+        db.npcs.add_npc(npc).unwrap();
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+
+        // Act
+        app.update(); // First update: check_for_events writes MapEventTriggered
+        app.update(); // Second update: handle_events processes MapEventTriggered
+
+        // Assert - StartDialogue message should be sent
+        let dialogue_messages = app.world().resource::<Messages<StartDialogue>>();
+        let mut reader = dialogue_messages.get_cursor();
+        let messages: Vec<_> = reader.read(dialogue_messages).collect();
+        assert_eq!(messages.len(), 1, "Expected StartDialogue message");
+        assert_eq!(messages[0].dialogue_id, 1u16);
+    }
+
+    #[test]
+    fn test_npc_dialogue_event_logs_when_npc_has_no_dialogue_id() {
+        use crate::domain::world::NpcDefinition;
+        use crate::game::systems::ui::GameLog;
+
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_plugins(EventPlugin);
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let event_pos = Position::new(5, 5);
+        map.add_event(
+            event_pos,
+            MapEvent::NpcDialogue {
+                name: "Merchant".to_string(),
+                description: "Town Merchant".to_string(),
+                npc_id: "test_merchant".to_string(),
+            },
+        );
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+
+        // Add NPC to database without dialogue_id
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let npc = NpcDefinition {
+            id: "test_merchant".to_string(),
+            name: "Town Merchant".to_string(),
+            description: "Sells goods".to_string(),
+            portrait_path: "portraits/merchant.png".to_string(),
+            dialogue_id: None,
+            quest_ids: vec![],
+            faction: None,
+            is_merchant: true,
+            is_innkeeper: false,
+        };
+        db.npcs.add_npc(npc).unwrap();
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GameLog::new());
+
+        // Act
+        app.update(); // First update: check_for_events writes MapEventTriggered
+        app.update(); // Second update: handle_events processes MapEventTriggered
+
+        // Assert - GameLog should contain fallback message
+        let game_log = app.world().resource::<GameLog>();
+        let entries = game_log.entries();
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.contains("Town Merchant") && e.contains("No dialogue available")),
+            "Expected fallback message in game log. Actual entries: {:?}",
+            entries
+        );
+    }
+
+    #[test]
+    fn test_npc_dialogue_event_logs_error_when_npc_not_found() {
+        use crate::game::systems::ui::GameLog;
+
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_plugins(EventPlugin);
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let event_pos = Position::new(5, 5);
+        map.add_event(
+            event_pos,
+            MapEvent::NpcDialogue {
+                name: "Unknown".to_string(),
+                description: "Unknown NPC".to_string(),
+                npc_id: "nonexistent_npc".to_string(),
+            },
+        );
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+
+        let db = crate::sdk::database::ContentDatabase::new();
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GameLog::new());
+
+        // Act
+        app.update(); // First update: check_for_events writes MapEventTriggered
+        app.update(); // Second update: handle_events processes MapEventTriggered
+
+        // Assert - GameLog should contain error message
+        let game_log = app.world().resource::<GameLog>();
+        let entries = game_log.entries();
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.contains("Error") && e.contains("nonexistent_npc")),
+            "Expected error message in game log. Actual entries: {:?}",
+            entries
         );
     }
 }
