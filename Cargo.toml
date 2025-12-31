@@ -32,6 +32,7 @@ wayland-client = "0.31.11"
 wayland-sys = "0.31.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+ordered-float = "4.0"
 
 [[bin]]
 name = "antares"

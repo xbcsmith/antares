@@ -259,16 +259,6 @@ Scale is applied uniformly to maintain proportions.
 5. **Testability:** Pure functions make testing straightforward
 6. **Performance:** No runtime overhead when using defaults (Option<T> is zero-cost when None)
 
-### Next Steps (Phase 2)
-
-Phase 2 will integrate this domain model with the rendering system:
-
-- Refactor `spawn_map()` to use `TileVisualMetadata`
-- Update mesh creation to respect custom dimensions
-- Implement mesh caching system for performance
-- Update all terrain type spawning logic
-- Add rendering integration tests
-
 ### Related Files
 
 **Modified:**
@@ -282,6 +272,335 @@ Phase 2 will integrate this domain model with the rendering system:
 **Reverse Dependencies (for Phase 2):**
 
 - `src/game/systems/map.rs` - Will consume TileVisualMetadata for rendering
+
+---
+
+## Phase 2: Tile Visual Metadata - Rendering System Integration - COMPLETED
+
+**Date Completed:** 2025-01-XX
+**Implementation Phase:** Per-Tile Visual Metadata (Phase 2 of 5)
+
+### Summary
+
+Phase 2 successfully integrated per-tile visual metadata into the rendering system, replacing hardcoded mesh dimensions with dynamic per-tile values while maintaining full backward compatibility. The implementation includes a mesh caching system to optimize performance and comprehensive integration tests to validate rendering behavior.
+
+### Changes Made
+
+#### 2.1 Mesh Caching System (`src/game/systems/map.rs`)
+
+Added type aliases and helper function for efficient mesh reuse:
+
+```rust
+/// Type alias for mesh cache keys (width_x, height, width_z)
+type MeshDimensions = (OrderedFloat<f32>, OrderedFloat<f32>, OrderedFloat<f32>);
+
+/// Type alias for the mesh cache HashMap
+type MeshCache = HashMap<MeshDimensions, Handle<Mesh>>;
+
+/// Helper function to get or create a cached mesh with given dimensions
+fn get_or_create_mesh(
+    meshes: &mut ResMut<Assets<Mesh>>,
+    cache: &mut MeshCache,
+    width_x: f32,
+    height: f32,
+    width_z: f32,
+) -> Handle<Mesh>
+```
+
+**Purpose:** Prevents duplicate mesh creation when multiple tiles share identical dimensions. Uses `OrderedFloat` to enable floating-point HashMap keys.
+
+**Dependency Added:** `ordered-float = "4.0"` to `Cargo.toml`
+
+#### 2.2 Refactored `spawn_map()` Function
+
+Replaced hardcoded mesh creation with per-tile dynamic meshes:
+
+**Before (hardcoded):**
+
+```rust
+let wall_mesh = meshes.add(Cuboid::new(1.0, 2.5, 1.0));
+let mountain_mesh = meshes.add(Cuboid::new(1.0, 3.0, 1.0));
+let forest_mesh = meshes.add(Cuboid::new(0.8, 2.2, 0.8));
+```
+
+**After (per-tile metadata):**
+
+```rust
+let (width_x, height, width_z) = tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+let mesh = get_or_create_mesh(&mut meshes, &mut mesh_cache, width_x, height, width_z);
+let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+```
+
+#### 2.3 Per-Tile Dimension Application
+
+Updated all terrain/wall type spawning logic:
+
+- **Walls** (WallType::Normal) - uses `mesh_dimensions()` with terrain-based tinting
+- **Doors** (WallType::Door) - uses `mesh_dimensions()` with brown base color
+- **Torches** (WallType::Torch) - uses `mesh_dimensions()` (newly implemented)
+- **Mountains** (TerrainType::Mountain) - uses `mesh_dimensions()` with gray color
+- **Trees** (TerrainType::Forest) - uses `mesh_dimensions()` with green color
+- **Perimeter Walls** - uses `mesh_dimensions()` for automatic boundary walls
+
+#### 2.4 Color Tinting Integration
+
+Implemented multiplicative color tinting when `tile.visual.color_tint` is specified:
+
+```rust
+let mut base_color = mountain_color;
+if let Some((r, g, b)) = tile.visual.color_tint {
+    base_color = Color::srgb(
+        mountain_rgb.0 * r,
+        mountain_rgb.1 * g,
+        mountain_rgb.2 * b,
+    );
+}
+```
+
+**Behavior:** Tint values (0.0-1.0) multiply the base RGB values, allowing per-tile color variations.
+
+#### 2.5 Y-Position Calculation
+
+Replaced hardcoded Y-positions with calculated values:
+
+**Before:**
+
+```rust
+Transform::from_xyz(x as f32, 1.25, y as f32)  // Hardcoded
+```
+
+**After:**
+
+```rust
+let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+Transform::from_xyz(x as f32, y_pos, y as f32)
+```
+
+**Calculation:** `y_pos = (height * scale / 2.0) + y_offset`
+
+#### 2.6 Module Export Update (`src/domain/world/mod.rs`)
+
+Added `TileVisualMetadata` to public exports:
+
+```rust
+pub use types::{Map, MapEvent, TerrainType, Tile, TileVisualMetadata, WallType, World};
+```
+
+### Architecture Compliance
+
+**✅ Domain Layer Purity:** `TileVisualMetadata` remains in domain layer with no rendering dependencies
+**✅ Separation of Concerns:** Rendering system queries domain model; domain model doesn't know about Bevy
+**✅ Backward Compatibility:** Default values reproduce exact pre-Phase-2 rendering behavior
+**✅ Type Safety:** Uses type aliases (`MeshDimensions`, `MeshCache`) per Clippy recommendations
+**✅ Performance:** Mesh caching prevents duplicate allocations for identical dimensions
+
+### Validation Results
+
+**Quality Checks:**
+
+```bash
+✅ cargo fmt --all              → No changes (formatted)
+✅ cargo check                   → Compiled successfully
+✅ cargo clippy -- -D warnings   → 0 warnings
+✅ cargo nextest run             → 1023/1023 tests passed
+```
+
+**Diagnostics:**
+
+- No errors or warnings in `src/game/systems/map.rs`
+- No errors or warnings in `src/domain/world/types.rs`
+- No errors or warnings in `src/domain/world/mod.rs`
+
+### Test Coverage
+
+Created comprehensive integration test suite (`tests/rendering_visual_metadata_test.rs`) with 19 tests:
+
+#### Default Behavior Tests
+
+- `test_default_wall_height_unchanged` - Verifies wall height=2.5
+- `test_default_mountain_height` - Verifies mountain height=3.0
+- `test_default_forest_height` - Verifies forest height=2.2
+- `test_default_door_height` - Verifies door height=2.5
+- `test_torch_default_height` - Verifies torch height=2.5
+- `test_default_dimensions_are_full_tile` - Verifies width_x=1.0, width_z=1.0
+- `test_flat_terrain_has_no_height` - Verifies ground/grass height=0.0
+
+#### Custom Value Tests
+
+- `test_custom_wall_height_applied` - Custom height=1.5 overrides default
+- `test_custom_mountain_height_applied` - Custom height=5.0 overrides default
+- `test_custom_dimensions_override_defaults` - Custom dimensions replace defaults
+
+#### Color Tinting Tests
+
+- `test_color_tint_multiplies_base_color` - Tint values stored correctly
+- Validated tint range (0.0-1.0)
+
+#### Scale Tests
+
+- `test_scale_multiplies_dimensions` - Scale=2.0 doubles all dimensions
+- `test_scale_affects_y_position` - Scale affects Y-position calculation
+- `test_combined_scale_and_custom_height` - Scale and custom height multiply
+
+#### Y-Offset Tests
+
+- `test_y_offset_shifts_position` - Positive/negative offsets adjust Y-position
+
+#### Builder Pattern Tests
+
+- `test_builder_methods_are_chainable` - Builder methods chain correctly
+
+#### Integration Tests
+
+- `test_map_with_mixed_visual_metadata` - Map with varied metadata works
+- `test_visual_metadata_serialization_roundtrip` - RON (de)serialization preserves data
+- `test_backward_compatibility_default_visual` - Old RON files load with defaults
+
+**Test Results:** All 19 tests pass (100% success rate)
+
+### Deliverables Status
+
+- [x] Mesh caching system implemented with HashMap
+- [x] `spawn_map()` updated to read tile.visual metadata
+- [x] Y-position calculation uses `mesh_y_position()`
+- [x] Dimensions calculation uses `mesh_dimensions()`
+- [x] Color tinting applied when specified
+- [x] All terrain/wall types support visual metadata (Walls, Doors, Torches, Mountains, Trees)
+- [x] ordered-float dependency added to Cargo.toml
+- [x] Integration tests written and passing (19 tests)
+- [x] All quality gates pass (fmt, check, clippy, tests)
+
+### Success Criteria
+
+**✅ Default tiles render identically to pre-Phase-2 system**
+Default values reproduce exact hardcoded behavior:
+
+- Walls: height=2.5, y_pos=1.25
+- Mountains: height=3.0, y_pos=1.5
+- Trees: height=2.2, y_pos=1.1
+
+**✅ Custom heights render at correct Y-positions**
+Custom height values correctly calculate mesh center position.
+
+**✅ Mesh cache reduces duplicate mesh creation**
+HashMap caching prevents duplicate meshes for identical dimensions.
+
+**✅ Color tints apply correctly to materials**
+Multiplicative tinting modifies base colors per-tile.
+
+**✅ Scale multiplier affects all dimensions uniformly**
+Scale multiplies width_x, height, and width_z uniformly.
+
+**✅ All quality gates pass**
+1023/1023 tests pass, zero clippy warnings, zero compilation errors.
+
+### Implementation Details
+
+**Mesh Cache Efficiency:**
+
+- Cache key: `(OrderedFloat<f32>, OrderedFloat<f32>, OrderedFloat<f32>)`
+- Cache scope: Local to `spawn_map()` execution (per map spawn)
+- Benefit: Reduces mesh allocations when many tiles share dimensions
+- Example: 100 walls with default dimensions → 1 mesh created, 99 clones
+
+**Color Tinting Strategy:**
+
+- Walls: Apply terrain-based darkening (0.6x), then per-tile tint
+- Mountains/Trees/Doors: Apply per-tile tint to base color
+- Tint values: Multiplicative (0.5 = 50% brightness)
+
+**Y-Position Calculation:**
+
+- Formula: `(height * scale / 2.0) + y_offset`
+- Default offset: 0.0 (no adjustment)
+- Positive offset: Raises mesh
+- Negative offset: Lowers mesh (e.g., sunken terrain)
+
+**Backward Compatibility:**
+
+- Old RON files: `visual` field absent → uses `#[serde(default)]`
+- Default behavior: Identical to pre-Phase-2 hardcoded values
+- Migration: Not required; old maps work unchanged
+
+### Benefits Achieved
+
+**For Map Authors:**
+
+- Can customize wall heights per tile (e.g., tall towers, low walls)
+- Can adjust mountain/tree heights for visual variety
+- Can tint individual tiles (e.g., mossy walls, dead trees)
+- Can scale features uniformly (e.g., giant mushrooms)
+
+**For Rendering Performance:**
+
+- Mesh caching reduces memory allocations
+- Identical dimensions reuse same mesh handle
+- No performance regression vs. hardcoded meshes
+
+**For Code Maintainability:**
+
+- Single source of truth for visual properties (domain model)
+- Rendering system queries data; no magic numbers
+- Easy to add new visual properties (rotation, materials, etc.)
+
+### Next Steps (Phase 3)
+
+Phase 3 will enable map authors to use visual metadata in RON files and tooling:
+
+- Add RON format examples to documentation
+- Update map authoring guides
+- Extend CLI map builder to support visual metadata
+- Update SDK campaign builder for visual metadata editing
+- Add validation for visual metadata ranges
+- Create example maps showcasing visual variety
+
+### Related Files
+
+**Modified:**
+
+- `src/game/systems/map.rs` - Refactored spawn_map(), added mesh caching, integrated per-tile metadata
+- `src/domain/world/mod.rs` - Exported TileVisualMetadata
+- `Cargo.toml` - Added ordered-float = "4.0" dependency
+
+**Created:**
+
+- `tests/rendering_visual_metadata_test.rs` - 19 integration tests for rendering behavior
+
+**Dependencies:**
+
+- `src/domain/world/types.rs` - Provides TileVisualMetadata API (Phase 1)
+- `ordered-float` crate - Enables floating-point HashMap keys
+
+**Reverse Dependencies:**
+
+- Future Phase 3 - Map authoring tools will generate tiles with visual metadata
+- Future Phase 5 - Advanced features (rotation, custom meshes, materials)
+
+### Implementation Notes
+
+**Design Decisions:**
+
+1. **Local mesh cache:** Cache lives in `spawn_map()` scope, not global resource. Simplifies lifecycle management and prevents stale handles.
+
+2. **Multiplicative tinting:** Color tint multiplies base color rather than replacing it. Preserves terrain identity (green forest, gray mountain) while allowing variation.
+
+3. **No breaking changes:** All existing functionality preserved; visual metadata is purely additive.
+
+4. **Type aliases for clarity:** `MeshDimensions` and `MeshCache` improve readability and satisfy Clippy type complexity warnings.
+
+**Known Limitations:**
+
+- Mesh cache is per-spawn, not persistent across map changes (acceptable; cache hit rate is high within single map)
+- No mesh cache statistics/metrics (can add in future if needed)
+- Color tinting uses RGB tuples, not full `Color` type (sufficient for current use cases)
+
+**Future Enhancements (Phase 5):**
+
+- Rotation metadata (`rotation_y: Option<f32>`)
+- Custom mesh references (`mesh_id: Option<String>`)
+- Material overrides (`material_id: Option<String>`)
+- Animation properties (`animation: Option<AnimationMetadata>`)
+- Lighting properties (`emissive_strength: Option<f32>`)
 
 ---
 

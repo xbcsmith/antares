@@ -5,7 +5,15 @@ use crate::domain::types;
 use crate::domain::world;
 use crate::game::resources::GlobalState;
 use bevy::prelude::*;
+use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// Type alias for mesh cache keys (width_x, height, width_z)
+type MeshDimensions = (OrderedFloat<f32>, OrderedFloat<f32>, OrderedFloat<f32>);
+
+/// Type alias for the mesh cache HashMap
+type MeshCache = HashMap<MeshDimensions, Handle<Mesh>>;
 
 /// Plugin that renders the current map using Bevy meshes/materials.
 ///
@@ -279,7 +287,29 @@ fn should_skip_marker_spawn(
     last_map.is_none() && has_existing_map_entities
 }
 
-/// Original visual map spawner - keeps previous behavior (renders meshes)
+/// Helper function to get or create a cached mesh with given dimensions
+fn get_or_create_mesh(
+    meshes: &mut ResMut<Assets<Mesh>>,
+    cache: &mut MeshCache,
+    width_x: f32,
+    height: f32,
+    width_z: f32,
+) -> Handle<Mesh> {
+    let key = (
+        OrderedFloat(width_x),
+        OrderedFloat(height),
+        OrderedFloat(width_z),
+    );
+    cache
+        .entry(key)
+        .or_insert_with(|| meshes.add(Cuboid::new(width_x, height, width_z)))
+        .clone()
+}
+
+/// Spawns visual entities (meshes/materials) for the current map.
+/// This is invoked on demand (e.g., when the map changes).
+///
+/// Note: Spawned entities are tagged with `MapEntity` for lifecycle management
 /// but also tags spawned visual entities with `MapEntity` and `TileCoord` so
 /// they are part of the dynamic despawn/spawn lifecycle.
 fn spawn_map(
@@ -297,6 +327,10 @@ fn spawn_map(
             "Found current map: {} (size: {}x{})",
             map.name, map.width, map.height
         );
+
+        // Mesh cache: reuse meshes with identical dimensions
+        let mut mesh_cache: MeshCache = HashMap::new();
+
         // Materials (base colors)
         // RGB tuples are kept to allow per-tile tinting of walls based on terrain
         let floor_rgb = (0.3_f32, 0.3_f32, 0.3_f32);
@@ -323,33 +357,9 @@ fn spawn_map(
             ..default()
         });
 
-        let wall_material = materials.add(StandardMaterial {
-            base_color: wall_base_color,
-            perceptual_roughness: 0.5,
-            ..default()
-        });
-
-        let door_material = materials.add(StandardMaterial {
-            base_color: door_color, // Brown
-            perceptual_roughness: 0.5,
-            ..default()
-        });
-
         let water_material = materials.add(StandardMaterial {
             base_color: water_color, // Blue
             perceptual_roughness: 0.3,
-            ..default()
-        });
-
-        let mountain_material = materials.add(StandardMaterial {
-            base_color: mountain_color, // Gray rock
-            perceptual_roughness: 0.8,
-            ..default()
-        });
-
-        let forest_material = materials.add(StandardMaterial {
-            base_color: forest_color, // Green
-            perceptual_roughness: 0.7,
             ..default()
         });
 
@@ -359,16 +369,9 @@ fn spawn_map(
             ..default()
         });
 
-        // Meshes with proper scale for first-person view: 1 unit ≈ 10 feet
-        // Camera at 0.6 units (6 feet eye level), so walls must be much taller to loom above
-        // Walls are 2.5 units tall (25 feet) - towering above the 6-foot viewpoint
-        // Doors are 2.5 units tall and fill the tile (1.0 thick) so no gaps
+        // Standard meshes for flat terrain (no height)
         let floor_mesh = meshes.add(Plane3d::default().mesh().size(1.0, 1.0));
-        let wall_mesh = meshes.add(Cuboid::new(1.0, 2.5, 1.0)); // 10x25x10 feet
-        let door_mesh = meshes.add(Cuboid::new(1.0, 2.5, 1.0)); // Same as wall, fills tile
         let water_mesh = meshes.add(Plane3d::default().mesh().size(1.0, 1.0));
-        let mountain_mesh = meshes.add(Cuboid::new(1.0, 3.0, 1.0)); // Mountains even taller (30 feet)
-        let forest_mesh = meshes.add(Cuboid::new(0.8, 2.2, 0.8)); // Trees taller (22 feet)
 
         // Iterate over tiles
         for y in 0..map.height {
@@ -394,12 +397,38 @@ fn spawn_map(
                             ));
                         }
                         world::TerrainType::Mountain => {
-                            // Render mountain as tall block (3.0 units = 30 feet)
-                            // Center at y=1.5 (bottom at 0, top at 3.0)
+                            // Use per-tile visual metadata for dimensions
+                            let (width_x, height, width_z) =
+                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                            let mesh = get_or_create_mesh(
+                                &mut meshes,
+                                &mut mesh_cache,
+                                width_x,
+                                height,
+                                width_z,
+                            );
+                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+
+                            // Apply color tint if specified
+                            let mut base_color = mountain_color;
+                            if let Some((r, g, b)) = tile.visual.color_tint {
+                                base_color = Color::srgb(
+                                    mountain_rgb.0 * r,
+                                    mountain_rgb.1 * g,
+                                    mountain_rgb.2 * b,
+                                );
+                            }
+
+                            let material = materials.add(StandardMaterial {
+                                base_color,
+                                perceptual_roughness: 0.8,
+                                ..default()
+                            });
+
                             commands.spawn((
-                                Mesh3d(mountain_mesh.clone()),
-                                MeshMaterial3d(mountain_material.clone()),
-                                Transform::from_xyz(x as f32, 1.5, y as f32),
+                                Mesh3d(mesh),
+                                MeshMaterial3d(material),
+                                Transform::from_xyz(x as f32, y_pos, y as f32),
                                 GlobalTransform::default(),
                                 Visibility::default(),
                                 MapEntity(map.id),
@@ -417,12 +446,39 @@ fn spawn_map(
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
-                            // Then tree on top (2.2 units = 22 feet tall)
-                            // Center at y=1.1 (bottom at 0, top at 2.2)
+
+                            // Use per-tile visual metadata for tree dimensions
+                            let (width_x, height, width_z) =
+                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                            let mesh = get_or_create_mesh(
+                                &mut meshes,
+                                &mut mesh_cache,
+                                width_x,
+                                height,
+                                width_z,
+                            );
+                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+
+                            // Apply color tint if specified
+                            let mut base_color = forest_color;
+                            if let Some((r, g, b)) = tile.visual.color_tint {
+                                base_color = Color::srgb(
+                                    forest_rgb.0 * r,
+                                    forest_rgb.1 * g,
+                                    forest_rgb.2 * b,
+                                );
+                            }
+
+                            let material = materials.add(StandardMaterial {
+                                base_color,
+                                perceptual_roughness: 0.7,
+                                ..default()
+                            });
+
                             commands.spawn((
-                                Mesh3d(forest_mesh.clone()),
-                                MeshMaterial3d(forest_material.clone()),
-                                Transform::from_xyz(x as f32, 1.1, y as f32),
+                                Mesh3d(mesh),
+                                MeshMaterial3d(material),
+                                Transform::from_xyz(x as f32, y_pos, y as f32),
                                 GlobalTransform::default(),
                                 Visibility::default(),
                                 MapEntity(map.id),
@@ -457,12 +513,41 @@ fn spawn_map(
 
                     // Spawn wall/door based on wall_type or perimeter
                     if is_perimeter && tile.wall_type == world::WallType::None {
-                        // Add perimeter walls where none exist (2.5 units = 25 feet tall)
-                        // Center at y=1.25 (bottom at 0, top at 2.5)
+                        // Add perimeter walls using per-tile visual metadata
+                        let (width_x, height, width_z) = tile
+                            .visual
+                            .mesh_dimensions(tile.terrain, world::WallType::Normal);
+                        let mesh = get_or_create_mesh(
+                            &mut meshes,
+                            &mut mesh_cache,
+                            width_x,
+                            height,
+                            width_z,
+                        );
+                        let y_pos = tile
+                            .visual
+                            .mesh_y_position(tile.terrain, world::WallType::Normal);
+
+                        // Apply color tint if specified
+                        let mut base_color = wall_base_color;
+                        if let Some((r, g, b)) = tile.visual.color_tint {
+                            base_color = Color::srgb(
+                                wall_base_rgb.0 * r,
+                                wall_base_rgb.1 * g,
+                                wall_base_rgb.2 * b,
+                            );
+                        }
+
+                        let material = materials.add(StandardMaterial {
+                            base_color,
+                            perceptual_roughness: 0.5,
+                            ..default()
+                        });
+
                         commands.spawn((
-                            Mesh3d(wall_mesh.clone()),
-                            MeshMaterial3d(wall_material.clone()),
-                            Transform::from_xyz(x as f32, 1.25, y as f32),
+                            Mesh3d(mesh),
+                            MeshMaterial3d(material),
+                            Transform::from_xyz(x as f32, y_pos, y as f32),
                             GlobalTransform::default(),
                             Visibility::default(),
                             MapEntity(map.id),
@@ -486,16 +571,41 @@ fn spawn_map(
                                 };
                                 // Darken a bit to make the wall distinct from the floor
                                 let darken = 0.6_f32;
-                                let wall_color = Color::srgb(tr * darken, tg * darken, tb * darken);
+
+                                // Use per-tile visual metadata for dimensions
+                                let (width_x, height, width_z) =
+                                    tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                                let mesh = get_or_create_mesh(
+                                    &mut meshes,
+                                    &mut mesh_cache,
+                                    width_x,
+                                    height,
+                                    width_z,
+                                );
+                                let y_pos =
+                                    tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+
+                                // Apply base terrain tint, then per-tile color tint if specified
+                                let mut wall_color =
+                                    Color::srgb(tr * darken, tg * darken, tb * darken);
+                                if let Some((r, g, b)) = tile.visual.color_tint {
+                                    wall_color = Color::srgb(
+                                        wall_color.to_srgba().red * r,
+                                        wall_color.to_srgba().green * g,
+                                        wall_color.to_srgba().blue * b,
+                                    );
+                                }
+
                                 let tile_wall_material = materials.add(StandardMaterial {
                                     base_color: wall_color,
                                     perceptual_roughness: 0.5,
                                     ..default()
                                 });
+
                                 commands.spawn((
-                                    Mesh3d(wall_mesh.clone()),
-                                    MeshMaterial3d(tile_wall_material.clone()),
-                                    Transform::from_xyz(x as f32, 1.25, y as f32), // Center at 1.25 (25 feet tall)
+                                    Mesh3d(mesh),
+                                    MeshMaterial3d(tile_wall_material),
+                                    Transform::from_xyz(x as f32, y_pos, y as f32),
                                     GlobalTransform::default(),
                                     Visibility::default(),
                                     MapEntity(map.id),
@@ -503,12 +613,76 @@ fn spawn_map(
                                 ));
                             }
                             world::WallType::Door => {
-                                // Door now fills tile (1.0x2.5x1.0) - same dimensions as wall
-                                // Center at y=1.25 (25 feet tall, fills entire tile space)
+                                // Use per-tile visual metadata for dimensions
+                                let (width_x, height, width_z) =
+                                    tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                                let mesh = get_or_create_mesh(
+                                    &mut meshes,
+                                    &mut mesh_cache,
+                                    width_x,
+                                    height,
+                                    width_z,
+                                );
+                                let y_pos =
+                                    tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+
+                                // Apply color tint if specified
+                                let mut base_color = door_color;
+                                if let Some((r, g, b)) = tile.visual.color_tint {
+                                    base_color =
+                                        Color::srgb(door_rgb.0 * r, door_rgb.1 * g, door_rgb.2 * b);
+                                }
+
+                                let material = materials.add(StandardMaterial {
+                                    base_color,
+                                    perceptual_roughness: 0.5,
+                                    ..default()
+                                });
+
                                 commands.spawn((
-                                    Mesh3d(door_mesh.clone()),
-                                    MeshMaterial3d(door_material.clone()),
-                                    Transform::from_xyz(x as f32, 1.25, y as f32),
+                                    Mesh3d(mesh),
+                                    MeshMaterial3d(material),
+                                    Transform::from_xyz(x as f32, y_pos, y as f32),
+                                    GlobalTransform::default(),
+                                    Visibility::default(),
+                                    MapEntity(map.id),
+                                    TileCoord(pos),
+                                ));
+                            }
+                            world::WallType::Torch => {
+                                // Use per-tile visual metadata for dimensions
+                                let (width_x, height, width_z) =
+                                    tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                                let mesh = get_or_create_mesh(
+                                    &mut meshes,
+                                    &mut mesh_cache,
+                                    width_x,
+                                    height,
+                                    width_z,
+                                );
+                                let y_pos =
+                                    tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+
+                                // Apply color tint if specified
+                                let mut base_color = wall_base_color;
+                                if let Some((r, g, b)) = tile.visual.color_tint {
+                                    base_color = Color::srgb(
+                                        wall_base_rgb.0 * r,
+                                        wall_base_rgb.1 * g,
+                                        wall_base_rgb.2 * b,
+                                    );
+                                }
+
+                                let material = materials.add(StandardMaterial {
+                                    base_color,
+                                    perceptual_roughness: 0.5,
+                                    ..default()
+                                });
+
+                                commands.spawn((
+                                    Mesh3d(mesh),
+                                    MeshMaterial3d(material),
+                                    Transform::from_xyz(x as f32, y_pos, y as f32),
                                     GlobalTransform::default(),
                                     Visibility::default(),
                                     MapEntity(map.id),
