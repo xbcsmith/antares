@@ -119,7 +119,7 @@ You can also edit character definitions directly in RON files.
         accuracy: 10,
         luck: 10,
     ),
-    portrait_id: 1,
+    portrait_id: "1",
     starting_gold: 100,
     starting_gems: 0,
     starting_food: 10,
@@ -159,7 +159,7 @@ You can also edit character definitions directly in RON files.
             accuracy: 12,
             luck: 8,
         ),
-        portrait_id: 1,
+        portrait_id: "1",
         starting_gold: 100,
         starting_gems: 0,
         starting_food: 10,
@@ -192,7 +192,7 @@ You can also edit character definitions directly in RON files.
             accuracy: 10,
             luck: 10,
         ),
-        portrait_id: 5,
+        portrait_id: "0",
         starting_gold: 50,
         starting_gems: 5,
         starting_food: 10,
@@ -216,28 +216,28 @@ You can also edit character definitions directly in RON files.
 
 ### Required Fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | String | Unique identifier for the character definition |
-| `name` | String | Character display name |
-| `race_id` | String | Reference to races.ron (e.g., `"human"`, `"elf"`) |
-| `class_id` | String | Reference to classes.ron (e.g., `"knight"`, `"sorcerer"`) |
-| `sex` | Enum | `Male`, `Female`, or `Other` |
-| `alignment` | Enum | `Good`, `Neutral`, or `Evil` |
-| `base_stats` | Struct | Starting attribute values |
+| Field        | Type   | Description                                               |
+| ------------ | ------ | --------------------------------------------------------- |
+| `id`         | String | Unique identifier for the character definition            |
+| `name`       | String | Character display name                                    |
+| `race_id`    | String | Reference to races.ron (e.g., `"human"`, `"elf"`)         |
+| `class_id`   | String | Reference to classes.ron (e.g., `"knight"`, `"sorcerer"`) |
+| `sex`        | Enum   | `Male`, `Female`, or `Other`                              |
+| `alignment`  | Enum   | `Good`, `Neutral`, or `Evil`                              |
+| `base_stats` | Struct | Starting attribute values                                 |
 
 ### Optional Fields (with defaults)
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `portrait_id` | u8 | 0 | Portrait/avatar identifier |
-| `starting_gold` | u32 | 0 | Initial gold amount |
-| `starting_gems` | u32 | 0 | Initial gems amount |
-| `starting_food` | u32 | 10 | Initial food rations |
-| `starting_items` | Vec | [] | Item IDs to add to inventory |
-| `starting_equipment` | Struct | Empty | Items to equip in slots |
-| `description` | String | "" | Character backstory/bio |
-| `is_premade` | bool | false | Player-selectable character |
+| Field                | Type   | Default | Description                                                                                             |
+| -------------------- | ------ | ------- | ------------------------------------------------------------------------------------------------------- |
+| `portrait_id`        | String | ""      | Portrait/avatar identifier (filename stem; normalized to lowercase with spaces replaced by underscores) |
+| `starting_gold`      | u32    | 0       | Initial gold amount                                                                                     |
+| `starting_gems`      | u32    | 0       | Initial gems amount                                                                                     |
+| `starting_food`      | u32    | 10      | Initial food rations                                                                                    |
+| `starting_items`     | Vec    | []      | Item IDs to add to inventory                                                                            |
+| `starting_equipment` | Struct | Empty   | Items to equip in slots                                                                                 |
+| `description`        | String | ""      | Character backstory/bio                                                                                 |
+| `is_premade`         | bool   | false   | Player-selectable character                                                                             |
 
 ### Base Stats Structure
 
@@ -271,14 +271,14 @@ starting_equipment: (
 
 ### Stat Allocation by Class
 
-| Class | Primary Stats | Secondary Stats |
-|-------|--------------|-----------------|
-| Knight | Might, Endurance | Accuracy, Speed |
-| Paladin | Might, Personality | Endurance, Luck |
-| Archer | Accuracy, Speed | Intellect, Luck |
-| Cleric | Personality, Endurance | Luck, Intellect |
-| Sorcerer | Intellect, Luck | Personality, Speed |
-| Robber | Speed, Accuracy | Luck, Might |
+| Class    | Primary Stats          | Secondary Stats    |
+| -------- | ---------------------- | ------------------ |
+| Knight   | Might, Endurance       | Accuracy, Speed    |
+| Paladin  | Might, Personality     | Endurance, Luck    |
+| Archer   | Accuracy, Speed        | Intellect, Luck    |
+| Cleric   | Personality, Endurance | Luck, Intellect    |
+| Sorcerer | Intellect, Luck        | Personality, Speed |
+| Robber   | Speed, Accuracy        | Luck, Might        |
 
 ### Recommended Stat Ranges
 
@@ -291,13 +291,13 @@ starting_equipment: (
 
 Remember that race modifiers are applied during instantiation:
 
-| Race | Modifiers |
-|------|-----------|
-| Human | None |
-| Elf | +1 Intellect, +1 Accuracy, -1 Might, -1 Endurance |
-| Dwarf | +1 Endurance, +1 Luck, -1 Intellect, -1 Speed |
-| Gnome | +1 Luck, +1 Speed, -1 Might, -1 Personality |
-| Half-Elf | +1 Intellect, -1 Personality |
+| Race     | Modifiers                                            |
+| -------- | ---------------------------------------------------- |
+| Human    | None                                                 |
+| Elf      | +1 Intellect, +1 Accuracy, -1 Might, -1 Endurance    |
+| Dwarf    | +1 Endurance, +1 Luck, -1 Intellect, -1 Speed        |
+| Gnome    | +1 Luck, +1 Speed, -1 Might, -1 Personality          |
+| Half-Elf | +1 Intellect, -1 Personality                         |
 | Half-Orc | +2 Might, +1 Endurance, -2 Intellect, -1 Personality |
 
 ### Starting Equipment Tiers
@@ -382,7 +382,7 @@ Create a balanced party of 6 characters covering different roles:
         accuracy: 8,
         luck: 10,
     ),
-    portrait_id: 12,
+    portrait_id: "12",
     starting_gold: 0,
     starting_gems: 0,
     starting_food: 0,

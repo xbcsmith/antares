@@ -27,15 +27,15 @@ dedicated module providing richer visual feedback on party status.
 
 ### Existing Infrastructure
 
-| Component                 | Location                           | Purpose                                                                              |
-| ------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------ |
-| `UiPlugin`                | `src/game/systems/ui.rs#L9-16`     | Basic party panel with name, HP, SP, level, class, race                              |
-| `Condition` bitflags      | `src/domain/character.rs#L432-506` | Status flags: FINE, ASLEEP, BLINDED, POISONED, PARALYZED, DEAD, etc.                 |
-| `ActiveCondition`         | `src/domain/conditions.rs#L66`     | Data-driven conditions with duration and magnitude                                   |
-| `ConditionDefinition`     | `src/domain/conditions.rs#L49`     | Condition metadata (name, description, effects, icon_id)                             |
-| `Character` struct        | `src/domain/character.rs#L870-920` | Contains `portrait_id: u8`, `hp: AttributePair16`, `conditions`, `active_conditions` |
-| `PARTY_MAX_SIZE` constant | `src/domain/character.rs#L101`     | Defined as `6` - maximum party members                                               |
-| `AttributePair16`         | `src/domain/character.rs`          | Contains `.current` and `.base` fields for HP values                                 |
+| Component                 | Location                           | Purpose                                                                                  |
+| ------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------- |
+| `UiPlugin`                | `src/game/systems/ui.rs#L9-16`     | Basic party panel with name, HP, SP, level, class, race                                  |
+| `Condition` bitflags      | `src/domain/character.rs#L432-506` | Status flags: FINE, ASLEEP, BLINDED, POISONED, PARALYZED, DEAD, etc.                     |
+| `ActiveCondition`         | `src/domain/conditions.rs#L66`     | Data-driven conditions with duration and magnitude                                       |
+| `ConditionDefinition`     | `src/domain/conditions.rs#L49`     | Condition metadata (name, description, effects, icon_id)                                 |
+| `Character` struct        | `src/domain/character.rs#L870-920` | Contains `portrait_id: String`, `hp: AttributePair16`, `conditions`, `active_conditions` |
+| `PARTY_MAX_SIZE` constant | `src/domain/character.rs#L101`     | Defined as `6` - maximum party members                                                   |
+| `AttributePair16`         | `src/domain/character.rs`          | Contains `.current` and `.base` fields for HP values                                     |
 
 ### Identified Issues
 

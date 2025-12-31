@@ -452,69 +452,30 @@ impl MapEditorState {
     }
 
     /// Helper: Get next available EventId for this map (scans existing tile triggers)
-    ///
-    /// This is an editor-only helper used to auto-assign an EventId onto the tile's
-    /// `event_trigger` field without changing the core `Map` domain structure.
-    fn next_available_event_id(&self) -> EventId {
-        self.map
-            .tiles
-            .iter()
-            .filter_map(|t| t.event_trigger)
-            .max()
-            .unwrap_or(0)
-            + 1
-    }
-
     /// Adds an event at position
     pub fn add_event(&mut self, pos: Position, event: MapEvent) {
         if !self.map.is_valid_position(pos) {
             return;
         }
 
-        // Check for an existing event ID using an immutable borrow before we
-        // compute a new one or mutably borrow the tile to set a new ID.
-        let existing_id = if let Some(tile) = self.map.get_tile(pos) {
-            tile.event_trigger
-        } else {
-            // invalid pos
-            return;
-        };
-
-        // If no existing id, compute the next ID (immutably) and then set it via
-        // a separate mutable borrow to avoid borrow checker conflicts.
-        let event_id = if let Some(id) = existing_id {
-            id
-        } else {
-            let id = self.next_available_event_id();
-            if let Some(tile) = self.map.get_tile_mut(pos) {
-                tile.event_trigger = Some(id);
-            }
-            id
-        };
-
+        // Event ID no longer stored on tiles - Map.events is canonical
         self.map.add_event(pos, event.clone());
         self.undo_stack.push(EditorAction::EventAdded {
             position: pos,
             event,
-            event_id: Some(event_id),
+            event_id: None,
         });
         self.has_changes = true;
     }
 
     /// Removes event at position
     pub fn remove_event(&mut self, pos: Position) {
-        // Grab and clear the tile's event ID (if present)
-        let event_id = if let Some(tile) = self.map.get_tile_mut(pos) {
-            tile.event_trigger.take()
-        } else {
-            None
-        };
-
+        // Event removed from Map.events, no tile cleanup needed
         if let Some(event) = self.map.remove_event(pos) {
             self.undo_stack.push(EditorAction::EventRemoved {
                 position: pos,
                 event,
-                event_id,
+                event_id: None,
             });
             self.has_changes = true;
         }
@@ -564,21 +525,11 @@ impl MapEditorState {
             }
             EditorAction::EventAdded { position, .. } => {
                 self.map.remove_event(position);
-                if let Some(tile) = self.map.get_tile_mut(position) {
-                    tile.event_trigger = None;
-                }
             }
             EditorAction::EventRemoved {
-                position,
-                event,
-                event_id,
+                position, event, ..
             } => {
                 self.map.add_event(position, event);
-                if let Some(id) = event_id {
-                    if let Some(tile) = self.map.get_tile_mut(position) {
-                        tile.event_trigger = Some(id);
-                    }
-                }
             }
             EditorAction::NpcAdded { .. } => {
                 self.map.npcs.pop();
@@ -599,22 +550,12 @@ impl MapEditorState {
                 }
             }
             EditorAction::EventAdded {
-                position,
-                event,
-                event_id,
+                position, event, ..
             } => {
                 self.map.add_event(position, event);
-                if let Some(id) = event_id {
-                    if let Some(tile) = self.map.get_tile_mut(position) {
-                        tile.event_trigger = Some(id);
-                    }
-                }
             }
             EditorAction::EventRemoved { position, .. } => {
                 self.map.remove_event(position);
-                if let Some(tile) = self.map.get_tile_mut(position) {
-                    tile.event_trigger = None;
-                }
             }
             EditorAction::NpcAdded { npc } => {
                 self.map.add_npc(npc);
@@ -2910,7 +2851,7 @@ impl MapsEditorState {
                 editor.event_editor = None;
             } else if replace_event {
                 if let Some(event) = event_to_add {
-                    // Replace the event in-place (preserve tile.event_trigger id).
+                    // Replace the event in-place at this position.
                     // This keeps the edit workflow simple and immediate for users.
                     editor.map.add_event(event_pos, event);
                     editor.has_changes = true;
@@ -3209,30 +3150,7 @@ impl MapsEditorState {
                             if path.extension().and_then(|s| s.to_str()) == Some("ron") {
                                 match fs::read_to_string(&path) {
                                     Ok(contents) => match ron::from_str::<Map>(&contents) {
-                                        Ok(mut map) => {
-                                            // Backfill missing event ids for older map formats
-                                            let mut next_id = map
-                                                .tiles
-                                                .iter()
-                                                .filter_map(|t| t.event_trigger)
-                                                .max()
-                                                .unwrap_or(0)
-                                                + 1;
-
-                                            // Collect positions to avoid holding an immutable borrow
-                                            // of `map.events` while mutably borrowing tiles later.
-                                            let event_positions: Vec<Position> =
-                                                map.events.keys().cloned().collect();
-
-                                            for pos in event_positions {
-                                                if let Some(tile) = map.get_tile_mut(pos) {
-                                                    if tile.event_trigger.is_none() {
-                                                        tile.event_trigger = Some(next_id);
-                                                        next_id += 1;
-                                                    }
-                                                }
-                                            }
-
+                                        Ok(map) => {
                                             maps.push(map);
                                             loaded_count += 1;
                                         }
@@ -3749,8 +3667,8 @@ mod tests {
     }
 
     #[test]
-    fn test_undo_redo_event_id_preserved() {
-        // Should preserve tile.event_trigger across add -> undo -> redo
+    fn test_undo_redo_event_preserved() {
+        // Renamed: no longer testing event_trigger ID preservation
         let mut state = MapEditorState::new(Map::new(
             1,
             "UndoRedo Map".to_string(),
@@ -3765,28 +3683,27 @@ mod tests {
             text: "Hello UndoRedo".to_string(),
         };
 
-        // Add event and check tile has an event id
+        // Add event
         state.add_event(pos, event);
-        let id_opt = state.map.get_tile(pos).unwrap().event_trigger;
-        assert!(id_opt.is_some());
-        let assigned_id = id_opt.unwrap();
+        assert!(state.map.get_event(pos).is_some());
 
-        // Undo -> event removed and id cleared
+        // Undo -> event removed
         state.undo();
         assert!(state.map.get_event(pos).is_none());
-        assert!(state.map.get_tile(pos).unwrap().event_trigger.is_none());
 
-        // Redo -> event restored and id restored
+        // Redo -> event restored
         state.redo();
         assert!(state.map.get_event(pos).is_some());
-        assert_eq!(
-            state.map.get_tile(pos).unwrap().event_trigger,
-            Some(assigned_id)
-        );
+
+        // Verify event data matches
+        match state.map.get_event(pos).unwrap() {
+            MapEvent::Sign { text, .. } => assert_eq!(text, "Hello UndoRedo"),
+            _ => panic!("Wrong event type"),
+        }
     }
 
     #[test]
-    fn test_load_maps_backfills_event_ids() {
+    fn test_load_maps_preserves_events() {
         use std::fs;
         use tempfile::tempdir;
 
@@ -3797,7 +3714,7 @@ mod tests {
         let maps_path = tmpdir.path().join(maps_dir);
         fs::create_dir_all(&maps_path).expect("Failed to create maps dir");
 
-        // Build a map in which we add an event but DO NOT set tile.event_trigger
+        // Build a map with an event
         let mut map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let pos = Position::new(5, 5);
         map.add_event(
@@ -3808,18 +3725,16 @@ mod tests {
                 text: "Test sign".to_string(),
             },
         );
-        // Intentionally keep event_trigger None (simulate older map files)
-        assert!(map.get_tile(pos).unwrap().event_trigger.is_none());
 
         // Write it out to a file
         let ron_cfg = ron::ser::PrettyConfig::default();
         fs::write(
-            maps_path.join("map_noids.ron"),
+            maps_path.join("map_with_event.ron"),
             ron::ser::to_string_pretty(&map, ron_cfg).expect("Serialize map"),
         )
         .expect("Write map");
 
-        // Load via MapsEditorState::load_maps - it should backfill event IDs
+        // Load via MapsEditorState::load_maps
         let mut loaded_maps: Vec<Map> = Vec::new();
         let mut status_message = String::new();
         let state = MapsEditorState::new();
@@ -3832,9 +3747,12 @@ mod tests {
 
         assert_eq!(loaded_maps.len(), 1);
         let loaded = &loaded_maps[0];
-        // the tile for the event must now have an assigned event_trigger
-        let tid = loaded.get_tile(pos).unwrap().event_trigger;
-        assert!(tid.is_some());
+        // Verify event is preserved
+        assert!(loaded.get_event(pos).is_some());
+        match loaded.get_event(pos).unwrap() {
+            MapEvent::Sign { text, .. } => assert_eq!(text, "Test sign"),
+            _ => panic!("Wrong event type"),
+        }
     }
 
     #[test]
@@ -3983,9 +3901,8 @@ mod tests {
             text: "Original".to_string(),
         };
 
-        // Add the original event (this assigns an event id on the tile)
+        // Add the original event
         state.add_event(pos, original.clone());
-        let assigned_id = state.map.get_tile(pos).unwrap().event_trigger.unwrap();
 
         // Create editor from the existing event and change a field
         let mut editor = EventEditorState::from_map_event(pos, state.map.get_event(pos).unwrap());
@@ -3993,22 +3910,17 @@ mod tests {
         editor.sign_text = "Changed".to_string();
         let new_event = editor.to_map_event().expect("valid event");
 
-        // Simulate the Save Changes path: replace in-place (preserve tile.event_trigger id)
+        // Simulate the Save Changes path: replace in-place
         state.map.add_event(pos, new_event);
         state.has_changes = true;
 
-        // Verify updated event (by pattern matching its variant) and that the event id is preserved
+        // Verify updated event
         if let MapEvent::Sign { name, text, .. } = state.map.get_event(pos).unwrap() {
             assert_eq!(name, "New Sign");
             assert_eq!(text, "Changed");
         } else {
             panic!("Expected Sign event");
         }
-
-        assert_eq!(
-            state.map.get_tile(pos).unwrap().event_trigger,
-            Some(assigned_id)
-        );
     }
 
     #[test]

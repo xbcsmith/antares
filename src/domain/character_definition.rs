@@ -401,7 +401,7 @@ impl Default for BaseStats {
 ///     sex: Sex::Male,
 ///     alignment: Alignment::Good,
 ///     base_stats: BaseStats::new(16, 8, 10, 14, 12, 14, 10),
-///     portrait_id: 1,
+///     portrait_id: "1".to_string(),
 ///     starting_gold: 100,
 ///     starting_gems: 0,
 ///     starting_food: 10,
@@ -437,9 +437,9 @@ pub struct CharacterDefinition {
     /// Base statistics before race/class modifiers
     pub base_stats: BaseStats,
 
-    /// Portrait/avatar identifier
+    /// Portrait/avatar identifier (filename stem / unique string)
     #[serde(default)]
-    pub portrait_id: u8,
+    pub portrait_id: String,
 
     /// Starting gold amount
     #[serde(default)]
@@ -521,7 +521,7 @@ impl CharacterDefinition {
             sex,
             alignment,
             base_stats: BaseStats::default(),
-            portrait_id: 0,
+            portrait_id: String::new(),
             starting_gold: 0,
             starting_gems: 0,
             starting_food: 10,
@@ -615,6 +615,29 @@ impl CharacterDefinition {
                 "Character '{}' has empty class_id",
                 self.id
             )));
+        }
+
+        // Portrait ID must be a normalized filename stem when provided.
+        // Normalization rule: lowercase, spaces replaced by underscores.
+        if !self.portrait_id.is_empty() {
+            let normalized = self.portrait_id.to_lowercase().replace(' ', "_");
+            if normalized != self.portrait_id {
+                return Err(CharacterDefinitionError::ValidationError(format!(
+                    "Character '{}' has non-normalized portrait_id '{}'; expected '{}'",
+                    self.id, self.portrait_id, normalized
+                )));
+            }
+
+            // Ensure only allowed characters are present (a-z, 0-9, underscore, hyphen)
+            if !normalized
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                return Err(CharacterDefinitionError::ValidationError(format!(
+                    "Character '{}' has invalid portrait_id '{}'; allowed characters: a-z, 0-9, '_' and '-'",
+                    self.id, self.portrait_id
+                )));
+            }
         }
 
         Ok(())
@@ -739,7 +762,7 @@ impl CharacterDefinition {
             active_conditions: Vec::new(),
             resistances,
             quest_flags: QuestFlags::new(),
-            portrait_id: self.portrait_id,
+            portrait_id: self.portrait_id.clone(),
             worthiness: 0,
             gold: self.starting_gold,
             gems: self.starting_gems,
@@ -1067,7 +1090,7 @@ impl CharacterDatabase {
     ///             accuracy: 14,
     ///             luck: 10,
     ///         ),
-    ///         portrait_id: 1,
+    ///         portrait_id: "1",
     ///         starting_gold: 100,
     ///         starting_gems: 0,
     ///         starting_food: 10,
@@ -1854,7 +1877,7 @@ mod tests {
                     accuracy: 14,
                     luck: 10,
                 ),
-                portrait_id: 1,
+                portrait_id: "1",
                 starting_gold: 100,
                 starting_gems: 5,
                 starting_food: 10,
@@ -1882,7 +1905,7 @@ mod tests {
                     accuracy: 10,
                     luck: 12,
                 ),
-                portrait_id: 2,
+                portrait_id: "2",
                 starting_gold: 50,
                 starting_gems: 10,
                 starting_food: 10,
@@ -1906,6 +1929,75 @@ mod tests {
         let sorcerer = db.get_character("pregen_sorcerer").unwrap();
         assert_eq!(sorcerer.name, "Merlin");
         assert_eq!(sorcerer.base_stats.intellect, 16);
+    }
+
+    #[test]
+    fn test_character_database_load_from_string_rejects_numeric_portrait_id() {
+        // RON with a numeric portrait_id should fail parsing since portrait_id is now a string key
+        let ron_numeric = r#"[
+            (
+                id: "numeric_knight",
+                name: "Num Knight",
+                race_id: "human",
+                class_id: "knight",
+                sex: Male,
+                alignment: Good,
+                base_stats: (
+                    might: 10,
+                    intellect: 10,
+                    personality: 10,
+                    endurance: 10,
+                    speed: 10,
+                    accuracy: 10,
+                    luck: 10,
+                ),
+                portrait_id: 1,
+                starting_gold: 0,
+                starting_gems: 0,
+                starting_food: 10,
+                starting_items: [],
+                starting_equipment: (),
+                description: "",
+                is_premade: true,
+            ),
+        ]"#;
+
+        let res = CharacterDatabase::load_from_string(ron_numeric);
+        assert!(matches!(res, Err(CharacterDefinitionError::ParseError(_))));
+    }
+
+    #[test]
+    fn test_character_definition_validate_rejects_non_normalized_portrait_id() {
+        // Non-normalized portrait IDs (spaces / uppercase) should be rejected by validate()
+        let mut def = CharacterDefinition::new(
+            "test_char".to_string(),
+            "Test Character".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        def.portrait_id = "Sir Galahad".to_string(); // contains space and uppercase
+        let res = def.validate();
+        assert!(matches!(
+            res,
+            Err(CharacterDefinitionError::ValidationError(_))
+        ));
+    }
+
+    #[test]
+    fn test_character_definition_validate_accepts_normalized_portrait_id() {
+        // Properly normalized portrait IDs should pass
+        let mut def = CharacterDefinition::new(
+            "test_char2".to_string(),
+            "Test Character 2".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        def.portrait_id = "sir_galahad".to_string(); // normalized form
+        assert!(def.validate().is_ok());
     }
 
     #[test]
@@ -2737,7 +2829,7 @@ mod tests {
             sex: Sex::Male,
             alignment: Alignment::Good,
             base_stats: BaseStats::new(14, 10, 10, 12, 10, 12, 10),
-            portrait_id: 1,
+            portrait_id: "1".to_string(),
             starting_gold: 100,
             starting_gems: 5,
             starting_food: 15,
@@ -2765,7 +2857,7 @@ mod tests {
         assert_eq!(character.level, 1);
         assert_eq!(character.experience, 0);
         assert_eq!(character.age, 18);
-        assert_eq!(character.portrait_id, 1);
+        assert_eq!(character.portrait_id, "1");
         assert_eq!(character.gold, 100);
         assert_eq!(character.gems, 5);
         assert_eq!(character.food, 15);
@@ -2917,7 +3009,7 @@ mod tests {
             sex: Sex::Female,
             alignment: Alignment::Neutral,
             base_stats: BaseStats::new(8, 16, 10, 8, 10, 10, 12),
-            portrait_id: 2,
+            portrait_id: "2".to_string(),
             starting_gold: 50,
             starting_gems: 10,
             starting_food: 10,
@@ -2960,7 +3052,7 @@ mod tests {
             sex: Sex::Male,
             alignment: Alignment::Good,
             base_stats: BaseStats::new(16, 16, 10, 14, 10, 14, 10),
-            portrait_id: 1,
+            portrait_id: "1".to_string(),
             starting_gold: 100,
             starting_gems: 0,
             starting_food: 10,

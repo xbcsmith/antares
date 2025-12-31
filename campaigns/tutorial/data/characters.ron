@@ -11,6 +11,7 @@
 //
 // Sex values: Male, Female, Other
 // Alignment values: Good, Neutral, Evil
+// Portrait identifiers are filename stems (strings), e.g. "kira" or "10"
 //
 // Character types:
 //   - is_premade: true  = Pre-made characters for new game selection
@@ -38,7 +39,7 @@
             accuracy: 12,
             luck: 10,
         ),
-        portrait_id: 10,
+        portrait_id: "10",
         starting_gold: 100,
         starting_gems: 0,
         starting_food: 15,
@@ -74,7 +75,7 @@
             accuracy: 11,
             luck: 12,
         ),
-        portrait_id: 11,
+        portrait_id: "11",
         starting_gold: 50,
         starting_gems: 5,
         starting_food: 15,
@@ -110,7 +111,7 @@
             accuracy: 10,
             luck: 12,
         ),
-        portrait_id: 12,
+        portrait_id: "12",
         starting_gold: 75,
         starting_gems: 2,
         starting_food: 15,
@@ -149,7 +150,7 @@
             accuracy: 11,
             luck: 9,
         ),
-        portrait_id: 20,
+        portrait_id: "20",
         starting_gold: 20,
         starting_gems: 0,
         starting_food: 5,
@@ -185,7 +186,7 @@
             accuracy: 14,
             luck: 15,
         ),
-        portrait_id: 21,
+        portrait_id: "21",
         starting_gold: 150,
         starting_gems: 1,
         starting_food: 5,
@@ -221,7 +222,7 @@
             accuracy: 10,
             luck: 14,
         ),
-        portrait_id: 22,
+        portrait_id: "22",
         starting_gold: 10,
         starting_gems: 2,
         starting_food: 5,
@@ -259,7 +260,7 @@
             accuracy: 12,
             luck: 10,
         ),
-        portrait_id: 0,
+        portrait_id: "0",
         starting_gold: 50,
         starting_gems: 0,
         starting_food: 10,
@@ -294,7 +295,7 @@
             accuracy: 11,
             luck: 12,
         ),
-        portrait_id: 15,
+        portrait_id: "15",
         starting_gold: 30,
         starting_gems: 2,
         starting_food: 10,
@@ -329,7 +330,7 @@
             accuracy: 10,
             luck: 11,
         ),
-        portrait_id: 16,
+        portrait_id: "16",
         starting_gold: 40,
         starting_gems: 1,
         starting_food: 10,

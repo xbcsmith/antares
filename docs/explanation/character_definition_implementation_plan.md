@@ -21,15 +21,15 @@ during gameplay and in saves.
 
 The project has established patterns for data-driven entities:
 
-| Entity | Domain Types | Data File | SDK Editor |
-|--------|-------------|-----------|------------|
-| Classes | `ClassDefinition`, `ClassDatabase` | `classes.ron` | `classes_editor.rs` |
-| Items | `Item` | `items.ron` | `items_editor.rs` |
-| Monsters | `MonsterDefinition` | `monsters.ron` | `monsters_editor.rs` |
-| Spells | `Spell` | `spells.ron` | `spells_editor.rs` |
-| Conditions | `ConditionDefinition` | `conditions.ron` | `conditions_editor.rs` |
-| Races | `RaceDefinition` (partial) | `races.ron` | None |
-| **Characters** | None | None | None |
+| Entity         | Domain Types                       | Data File        | SDK Editor             |
+| -------------- | ---------------------------------- | ---------------- | ---------------------- |
+| Classes        | `ClassDefinition`, `ClassDatabase` | `classes.ron`    | `classes_editor.rs`    |
+| Items          | `Item`                             | `items.ron`      | `items_editor.rs`      |
+| Monsters       | `MonsterDefinition`                | `monsters.ron`   | `monsters_editor.rs`   |
+| Spells         | `Spell`                            | `spells.ron`     | `spells_editor.rs`     |
+| Conditions     | `ConditionDefinition`              | `conditions.ron` | `conditions_editor.rs` |
+| Races          | `RaceDefinition` (partial)         | `races.ron`      | None                   |
+| **Characters** | None                               | None             | None                   |
 
 The runtime `Character` struct in `src/domain/character.rs` handles gameplay
 state (HP, SP, inventory, conditions, etc.) but has no corresponding
@@ -66,7 +66,7 @@ Create `src/domain/character_definition.rs` with:
   - `sex: Sex` - Character sex (reuse existing enum)
   - `alignment: Alignment` - Starting alignment (reuse existing enum)
   - `base_stats: Stats` - Starting stats (before race/class modifiers)
-  - `portrait_id: u8` - Portrait/avatar identifier
+  - `portrait_id: String` - Portrait/avatar identifier (filename stem; normalized to lowercase with spaces replaced by underscores; empty string `""` indicates no portrait)
   - `starting_gold: u32` - Initial gold amount
   - `starting_items: Vec<ItemId>` - Items to add to inventory
   - `starting_equipment: StartingEquipment` - Items to equip
@@ -383,17 +383,17 @@ This plan has the following dependencies:
 
 ## File Summary
 
-| File | Action | Description |
-|------|--------|-------------|
-| `src/domain/character_definition.rs` | Create | Domain types |
-| `src/domain/mod.rs` | Modify | Export new module |
-| `data/characters.ron` | Create | Core character definitions |
-| `campaigns/tutorial/data/characters.ron` | Create | Tutorial characters |
-| `src/sdk/database.rs` | Modify | Add CharacterDatabase |
-| `src/sdk/campaign_loader.rs` | Modify | Load characters |
-| `sdk/campaign_builder/src/characters_editor.rs` | Create | Visual editor |
-| `sdk/campaign_builder/src/main.rs` | Modify | Add Characters tab |
-| `sdk/campaign_builder/src/validation.rs` | Modify | Character validation |
-| `docs/reference/architecture.md` | Modify | Document types |
-| `docs/explanation/implementations.md` | Modify | Document system |
-| `docs/how-to/create_characters.md` | Create | Usage guide |
+| File                                            | Action | Description                |
+| ----------------------------------------------- | ------ | -------------------------- |
+| `src/domain/character_definition.rs`            | Create | Domain types               |
+| `src/domain/mod.rs`                             | Modify | Export new module          |
+| `data/characters.ron`                           | Create | Core character definitions |
+| `campaigns/tutorial/data/characters.ron`        | Create | Tutorial characters        |
+| `src/sdk/database.rs`                           | Modify | Add CharacterDatabase      |
+| `src/sdk/campaign_loader.rs`                    | Modify | Load characters            |
+| `sdk/campaign_builder/src/characters_editor.rs` | Create | Visual editor              |
+| `sdk/campaign_builder/src/main.rs`              | Modify | Add Characters tab         |
+| `sdk/campaign_builder/src/validation.rs`        | Modify | Character validation       |
+| `docs/reference/architecture.md`                | Modify | Document types             |
+| `docs/explanation/implementations.md`           | Modify | Document system            |
+| `docs/how-to/create_characters.md`              | Create | Usage guide                |

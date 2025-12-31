@@ -10,7 +10,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.2 for complete specifications.
 
-use crate::domain::types::{Direction, EventId, MapId, Position};
+use crate::domain::types::{Direction, MapId, Position};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -81,8 +81,6 @@ pub struct Tile {
     pub x: i32,
     /// Y coordinate
     pub y: i32,
-    /// Optional event trigger
-    pub event_trigger: Option<EventId>,
 }
 
 impl Tile {
@@ -110,7 +108,6 @@ impl Tile {
             is_special: false,
             is_dark: false,
             visited: false,
-            event_trigger: None,
         }
     }
 
@@ -404,6 +401,38 @@ impl Map {
         self.events.remove(&pos)
     }
 
+    /// Gets the event at a specific position, if one exists
+    ///
+    /// # Arguments
+    ///
+    /// * `position` - The position to check for events
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(&MapEvent)` if an event exists at the position, `None` otherwise
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Map, MapEvent};
+    /// use antares::domain::types::Position;
+    ///
+    /// let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+    /// let pos = Position::new(5, 5);
+    /// let event = MapEvent::Sign {
+    ///     name: "Test".to_string(),
+    ///     description: "A sign".to_string(),
+    ///     text: "Hello!".to_string(),
+    /// };
+    /// map.add_event(pos, event);
+    ///
+    /// assert!(map.get_event_at_position(pos).is_some());
+    /// assert!(map.get_event_at_position(Position::new(0, 0)).is_none());
+    /// ```
+    pub fn get_event_at_position(&self, position: Position) -> Option<&MapEvent> {
+        self.get_event(position)
+    }
+
     /// Adds an NPC to the map
     pub fn add_npc(&mut self, npc: Npc) {
         self.npcs.push(npc);
@@ -638,5 +667,41 @@ mod tests {
         assert_eq!(npc.id, 1);
         assert_eq!(npc.name, "Merchant");
         assert_eq!(npc.position, Position::new(10, 10));
+    }
+
+    #[test]
+    fn test_map_get_event_at_position_returns_event() {
+        // Arrange
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(5, 5);
+        let event = MapEvent::Sign {
+            name: "Test Sign".to_string(),
+            description: "A test sign".to_string(),
+            text: "Hello, World!".to_string(),
+        };
+        map.add_event(pos, event.clone());
+
+        // Act
+        let result = map.get_event_at_position(pos);
+
+        // Assert
+        assert!(result.is_some());
+        match result.unwrap() {
+            MapEvent::Sign { text, .. } => assert_eq!(text, "Hello, World!"),
+            _ => panic!("Expected Sign event"),
+        }
+    }
+
+    #[test]
+    fn test_map_get_event_at_position_returns_none_when_no_event() {
+        // Arrange
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(5, 5);
+
+        // Act
+        let result = map.get_event_at_position(pos);
+
+        // Assert
+        assert!(result.is_none());
     }
 }

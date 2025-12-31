@@ -20,6 +20,7 @@ serde = { version = "1.0", features = ["derive"] }
 ron = "0.12"
 thiserror = "2.0"
 regex = "1.11"
+clap = { version = "4.5", features = ["derive"] }
 
 # For file dialogs
 rfd = "0.15"
@@ -30,3 +31,7 @@ tempfile = "3.23"
 [[bin]]
 name = "campaign-builder"
 path = "src/main.rs"
+
+[[bin]]
+name = "migrate_maps"
+path = "src/bin/migrate_maps.rs"

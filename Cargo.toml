@@ -30,6 +30,8 @@ bevy = { version = "0.17", default-features = true }
 bevy_egui = "0.38"
 wayland-client = "0.31.11"
 wayland-sys = "0.31.7"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [[bin]]
 name = "antares"

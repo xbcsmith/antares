@@ -115,6 +115,7 @@ The kingdom is in peril! An ancient evil has awakened...
 Edit the data files in the `data/` directory:
 
 **Items** (`data/items.ron`):
+
 ```ron
 [
     Item(
@@ -128,6 +129,7 @@ Edit the data files in the `data/` directory:
 ```
 
 **Quests** (`data/quests.ron`):
+
 ```ron
 [
     Quest(
@@ -152,6 +154,7 @@ Edit the data files in the `data/` directory:
 ```
 
 **Maps** (`data/maps/map001.ron`):
+
 ```ron
 Map(
     id: 1,
@@ -161,6 +164,57 @@ Map(
     // ... map data
 )
 ```
+
+**Map Events** (`data/maps/map001.ron`):
+
+Events are defined using a position-based system. Add events to the `events` field as a HashMap:
+
+```ron
+Map(
+    id: 1,
+    name: "Tutorial Town",
+    description: "A peaceful starting town",
+    width: 20,
+    height: 20,
+    tiles: [
+        // ... tile definitions ...
+    ],
+    events: {
+        Position(x: 5, y: 5): MapEvent::Sign(
+            name: "Welcome Sign",
+            description: "A wooden sign with carved letters",
+            text: "Welcome to Antares! Explore the town and talk to the townsfolk.",
+        ),
+        Position(x: 10, y: 3): MapEvent::Treasure(
+            name: "Treasure Chest",
+            description: "A locked wooden chest",
+            loot: [
+                LootItem(item_id: 1, quantity: 50),  // 50 gold
+                LootItem(item_id: 42, quantity: 1),  // Magic sword
+            ],
+        ),
+        Position(x: 15, y: 8): MapEvent::Combat(
+            name: "Goblin Ambush",
+            description: "Goblins leap from the shadows!",
+            monsters: [
+                MonsterSpawn(monster_id: 1, count: 3),  // 3 goblins
+            ],
+        ),
+    },
+    npcs: [],
+)
+```
+
+**Event Types Available:**
+
+- **Sign**: Display text to player
+- **Treasure**: Award items/gold to party
+- **Combat**: Trigger tactical battle
+- **Teleport**: Transport party to another map/position
+- **Trap**: Deal damage or apply conditions
+- **NpcDialogue**: Start conversation with NPC
+
+**Important:** Do NOT use the deprecated `event_trigger` field on tiles. Events are now exclusively defined in the `events` HashMap, keyed by position. See `docs/explanation/map_event_system.md` for complete documentation.
 
 ---
 
@@ -175,6 +229,7 @@ campaign_validator campaigns/my_campaign
 ```
 
 **Expected Output**:
+
 ```
 Campaign: My Awesome Campaign v1.0.0
 Author: Your Name
@@ -225,32 +280,42 @@ Warnings (1):
 **Common Errors and Fixes**:
 
 #### Error: "Missing 'data' directory"
+
 ```bash
 mkdir -p campaigns/my_campaign/data
 ```
 
 #### Error: "campaign.ron not found"
+
 Create the file with proper Campaign structure (see Step 2).
 
 #### Error: "No maps defined"
+
 Add at least one map in `data/maps/`:
+
 ```bash
 touch campaigns/my_campaign/data/maps/map001.ron
 # Edit with map data
 ```
 
 #### Error: "Quest 1: Invalid monster ID: 99"
+
 The quest references a monster that doesn't exist. Either:
+
 - Add the monster to `data/monsters.ron`, or
 - Change the quest to use a valid monster ID
 
 #### Error: "Dialogue 5: Node 10 is orphaned"
+
 The dialogue has an unreachable node. Either:
+
 - Connect the node to the dialogue tree, or
 - Remove the orphaned node
 
 #### Error: "starting_level (10) > max_level (5)"
+
 Fix in `campaign.ron`:
+
 ```ron
 starting_level: 1,
 max_level: 20,
@@ -261,7 +326,9 @@ max_level: 20,
 Warnings won't prevent your campaign from working but should be addressed:
 
 #### Warning: "No classes defined"
+
 Add classes in `data/classes.ron`:
+
 ```ron
 [
     Class(
@@ -273,6 +340,7 @@ Add classes in `data/classes.ron`:
 ```
 
 #### Warning: "No items defined"
+
 Add items in `data/items.ron`.
 
 ---
@@ -288,6 +356,7 @@ campaign_validator --all
 ```
 
 **Output**:
+
 ```
 Validating 3 campaigns...
 
@@ -316,6 +385,7 @@ campaign_validator --all -d /path/to/campaigns
 ### CI/CD Integration
 
 **GitHub Actions** (`.github/workflows/validate.yml`):
+
 ```yaml
 name: Validate Campaigns
 
@@ -336,6 +406,7 @@ jobs:
 ```
 
 **GitLab CI** (`.gitlab-ci.yml`):
+
 ```yaml
 validate-campaigns:
   stage: test
@@ -347,6 +418,7 @@ validate-campaigns:
 ### Pre-commit Hook
 
 Create `.git/hooks/pre-commit`:
+
 ```bash
 #!/bin/bash
 echo "Validating campaign..."
@@ -355,6 +427,7 @@ echo "Validation passed!"
 ```
 
 Make it executable:
+
 ```bash
 chmod +x .git/hooks/pre-commit
 ```
@@ -368,6 +441,7 @@ campaign_validator --json campaigns/my_campaign > validation_report.json
 ```
 
 **Output**:
+
 ```json
 {
   "is_valid": true,
@@ -379,6 +453,7 @@ campaign_validator --json campaigns/my_campaign > validation_report.json
 ```
 
 **Parse with jq**:
+
 ```bash
 # Check if valid
 campaign_validator --json campaigns/my_campaign | jq '.is_valid'
@@ -424,19 +499,23 @@ my_campaign/
 ### Configuration Guidelines
 
 **Starting Resources**:
+
 - `starting_gold: 100-500` (depending on difficulty)
 - `starting_food: 50-100`
 - `starting_level: 1` (standard starting level)
 
 **Party Limits**:
+
 - `max_party_size: 6` (standard party size)
 - `max_roster_size: 20` (enough for variety)
 
 **Level Range**:
+
 - `starting_level: 1`
 - `max_level: 20` (full progression arc)
 
 **Difficulty Settings**:
+
 - `Easy`: For casual players
 - `Normal`: Standard difficulty (recommended)
 - `Hard`: For experienced players
@@ -445,12 +524,14 @@ my_campaign/
 ### Version Management
 
 Use semantic versioning:
+
 - **1.0.0**: Initial release
 - **1.1.0**: New content (maps, quests)
 - **1.0.1**: Bug fixes, balance tweaks
 - **2.0.0**: Major changes, incompatible with v1.x saves
 
 Update `engine_version` to match minimum required engine:
+
 ```ron
 engine_version: "0.1.0",
 ```
@@ -475,11 +556,13 @@ engine_version: "0.1.0",
 ### Validation Workflow
 
 1. **After Each Content Addition**: Quick validation
+
    ```bash
    campaign_validator campaigns/my_campaign
    ```
 
 2. **Before Committing**: Full validation
+
    ```bash
    campaign_validator -v campaigns/my_campaign
    ```
@@ -492,11 +575,13 @@ engine_version: "0.1.0",
 ### Debug Validation Issues
 
 **Errors Only Mode** (hide warnings):
+
 ```bash
 campaign_validator -e campaigns/my_campaign
 ```
 
 **Focus on Specific Issues**:
+
 1. Run validation
 2. Fix first error
 3. Re-run validation
@@ -521,6 +606,7 @@ campaign_validator -e campaigns/my_campaign
 ### Files to Exclude
 
 Don't include these in distribution:
+
 - `.git/` directory
 - `*.swp`, `*.tmp`, `*~` temporary files
 - `.DS_Store` (macOS)
@@ -552,12 +638,14 @@ tar -czf my_campaign_v1.0.0.tar.gz my_campaign_release/
 ### Campaign Won't Load
 
 **Check**: campaign.ron syntax
+
 ```bash
 # Test RON parsing
 ron-validate campaigns/my_campaign/campaign.ron
 ```
 
 **Check**: File permissions
+
 ```bash
 ls -la campaigns/my_campaign/
 ```
@@ -565,6 +653,7 @@ ls -la campaigns/my_campaign/
 ### Content Loading Fails
 
 **Check**: Data file syntax
+
 ```bash
 # Validate each RON file
 ron-validate campaigns/my_campaign/data/*.ron
@@ -575,6 +664,7 @@ ron-validate campaigns/my_campaign/data/*.ron
 ### Validation Takes Too Long
 
 **Large Campaigns**: Use errors-only mode
+
 ```bash
 campaign_validator -e campaigns/my_campaign
 ```

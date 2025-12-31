@@ -13,7 +13,7 @@
 // Alignment values: Good, Neutral, Evil
 //
 // Base stats range from 3-18 (standard RPG stat range)
-// Portrait IDs are 0-255 (u8)
+// Portrait IDs are filename stems (strings). Use normalized keys (lowercase, spaces -> underscores).
 
 [
     // ===== Sir Aldric - Human Knight =====
@@ -35,7 +35,7 @@
             accuracy: 13,
             luck: 10,
         ),
-        portrait_id: 1,
+        portrait_id: "1",
         starting_gold: 50,
         starting_gems: 0,
         starting_food: 10,
@@ -72,7 +72,7 @@
             accuracy: 12,
             luck: 11,
         ),
-        portrait_id: 2,
+        portrait_id: "2",
         starting_gold: 40,
         starting_gems: 1,
         starting_food: 10,
@@ -109,7 +109,7 @@
             accuracy: 16,
             luck: 12,
         ),
-        portrait_id: 3,
+        portrait_id: "3",
         starting_gold: 35,
         starting_gems: 0,
         starting_food: 10,
@@ -146,7 +146,7 @@
             accuracy: 11,
             luck: 13,
         ),
-        portrait_id: 4,
+        portrait_id: "4",
         starting_gold: 30,
         starting_gems: 2,
         starting_food: 10,
@@ -183,7 +183,7 @@
             accuracy: 10,
             luck: 15,
         ),
-        portrait_id: 5,
+        portrait_id: "5",
         starting_gold: 25,
         starting_gems: 3,
         starting_food: 10,
@@ -220,7 +220,7 @@
             accuracy: 14,
             luck: 14,
         ),
-        portrait_id: 6,
+        portrait_id: "6",
         starting_gold: 75,
         starting_gems: 0,
         starting_food: 10,

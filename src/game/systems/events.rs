@@ -113,3 +113,128 @@ fn handle_events(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::GameState;
+    use crate::domain::types::Position;
+    use crate::domain::world::{Map, MapEvent};
+
+    #[test]
+    fn test_event_triggered_when_party_moves_to_event_position() {
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_plugins(EventPlugin);
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let event_pos = Position::new(5, 5);
+        map.add_event(
+            event_pos,
+            MapEvent::Sign {
+                name: "Test".to_string(),
+                description: "Test sign".to_string(),
+                text: "You found it!".to_string(),
+            },
+        );
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+
+        app.insert_resource(GlobalState(game_state));
+
+        // Act
+        app.update();
+
+        // Assert
+        let events = app.world().resource::<Messages<MapEventTriggered>>();
+        let mut reader = events.get_cursor();
+        let triggered_events: Vec<_> = reader.read(events).collect();
+        assert!(
+            !triggered_events.is_empty(),
+            "Expected at least one event to be triggered"
+        );
+    }
+
+    #[test]
+    fn test_no_event_triggered_when_no_event_at_position() {
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_plugins(EventPlugin);
+
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        // No events added to map
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(Position::new(5, 5));
+
+        app.insert_resource(GlobalState(game_state));
+
+        // Act
+        app.update();
+
+        // Assert
+        let events = app.world().resource::<Messages<MapEventTriggered>>();
+        let mut reader = events.get_cursor();
+        let triggered_events: Vec<_> = reader.read(events).collect();
+        assert!(
+            triggered_events.is_empty(),
+            "Expected no events to be triggered"
+        );
+    }
+
+    #[test]
+    fn test_event_only_triggers_once_per_position() {
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_plugins(EventPlugin);
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let event_pos = Position::new(5, 5);
+        map.add_event(
+            event_pos,
+            MapEvent::Sign {
+                name: "Test".to_string(),
+                description: "Test sign".to_string(),
+                text: "You found it!".to_string(),
+            },
+        );
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+
+        app.insert_resource(GlobalState(game_state));
+
+        // Act - update multiple times at same position
+        app.update();
+        let events = app.world().resource::<Messages<MapEventTriggered>>();
+        let mut reader = events.get_cursor();
+        let first_update_count = reader.read(events).count();
+
+        app.update();
+        let events = app.world().resource::<Messages<MapEventTriggered>>();
+        let second_update_count = reader.read(events).count();
+
+        // Assert - only first update should trigger event
+        assert_eq!(
+            first_update_count, 1,
+            "Expected exactly one event on first update"
+        );
+        assert_eq!(
+            second_update_count, 0,
+            "Expected no events on second update (same position)"
+        );
+    }
+}
