@@ -3,15 +3,19 @@
 
 //! Generate Starter Maps for Antares RPG
 //!
-//! This example creates the three starter maps for the game:
-//! - Map 1: Starter Town (safe zone with NPCs)
+//! **DEPRECATED**: This example is outdated. NPCs are now defined in the centralized
+//! NPC database (campaigns/tutorial/data/npcs.ron) and placed using NpcPlacement.
+//! Use the campaign builder tools instead.
+//!
+//! This example creates basic map structures without NPCs:
+//! - Map 1: Starter Town (buildings and layout)
 //! - Map 2: Starter Dungeon (combat encounters)
 //! - Map 3: Forest Area (wilderness exploration)
 //!
 //! Run with: cargo run --example generate_starter_maps
 
 use antares::domain::types::Position;
-use antares::domain::world::{Map, MapEvent, Npc, TerrainType, Tile, WallType};
+use antares::domain::world::{Map, MapEvent, TerrainType, Tile, WallType};
 use std::fs;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -88,36 +92,9 @@ fn generate_starter_town() -> Result<(), Box<dyn std::error::Error>> {
     *map.get_tile_mut(Position::new(19, 7)).unwrap() =
         Tile::new(19, 7, TerrainType::Stone, WallType::Door);
 
-    // Add NPCs
-    map.add_npc(Npc::new(
-        1,
-        "Village Elder".to_string(),
-        "The wise leader of the village.".to_string(),
-        Position::new(10, 4),
-        "Greetings, brave adventurers! Dark forces stir in the dungeon to the east. Will you help us?".to_string(),
-    ));
-    map.add_npc(Npc::new(
-        2,
-        "Innkeeper".to_string(),
-        "A friendly innkeeper.".to_string(),
-        Position::new(4, 3),
-        "Welcome to my inn! You look weary from your travels. Rest here and recover your strength."
-            .to_string(),
-    ));
-    map.add_npc(Npc::new(
-        3,
-        "Merchant".to_string(),
-        "A shrewd merchant.".to_string(),
-        Position::new(15, 3),
-        "I have the finest goods in the land! Take a look at my wares.".to_string(),
-    ));
-    map.add_npc(Npc::new(
-        4,
-        "High Priest".to_string(),
-        "A holy man.".to_string(),
-        Position::new(10, 9),
-        "May the light guide you. I can heal your wounds and cure your ailments.".to_string(),
-    ));
+    // NOTE: NPCs are now defined in campaigns/tutorial/data/npcs.ron
+    // and placed using NpcPlacement entries. See the migration guide in
+    // docs/how-to/npc_externalization.md for details.
 
     // Add sign events
     map.add_event(
@@ -364,15 +341,9 @@ fn generate_forest_area() -> Result<(), Box<dyn std::error::Error>> {
     *map.get_tile_mut(Position::new(0, 10)).unwrap() =
         Tile::new(0, 10, TerrainType::Grass, WallType::Door);
 
-    // Add NPC
-    map.add_npc(Npc::new(
-        5,
-        "Lost Ranger".to_string(),
-        "A ranger lost in the woods.".to_string(),
-        Position::new(2, 2),
-        "These woods are more dangerous than they used to be. Watch your step, traveler."
-            .to_string(),
-    ));
+    // NOTE: NPCs are now defined in campaigns/tutorial/data/npcs.ron
+    // and placed using NpcPlacement entries. See the migration guide in
+    // docs/how-to/npc_externalization.md for details.
 
     // Add encounters
     map.add_event(

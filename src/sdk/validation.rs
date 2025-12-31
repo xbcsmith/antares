@@ -526,10 +526,9 @@ impl<'a> Validator<'a> {
                     // Signs are always valid
                 }
                 crate::domain::world::MapEvent::NpcDialogue { npc_id, .. } => {
-                    // Validate NPC exists in database or on map (legacy)
+                    // Validate NPC exists in database or placements
                     let npc_exists = self.db.npcs.has_npc(npc_id)
-                        || map.npc_placements.iter().any(|p| &p.npc_id == npc_id)
-                        || map.npcs.iter().any(|npc| npc.name == *npc_id);
+                        || map.npc_placements.iter().any(|p| &p.npc_id == npc_id);
 
                     if !npc_exists {
                         errors.push(ValidationError::BalanceWarning {
@@ -544,27 +543,16 @@ impl<'a> Validator<'a> {
             }
         }
 
-        // Validate NPCs
-        for npc in &map.npcs {
-            // Check if NPC position is valid
-            if !map.is_valid_position(npc.position) {
+        // Validate NPC placements
+        for placement in &map.npc_placements {
+            // Check if placement position is valid
+            if !map.is_valid_position(placement.position) {
                 errors.push(ValidationError::BalanceWarning {
                     severity: Severity::Error,
                     message: format!(
-                        "Map {} has NPC '{}' (ID {}) at invalid position ({}, {})",
-                        map.id, npc.name, npc.id, npc.position.x, npc.position.y
+                        "Map {} has NPC placement '{}' at invalid position ({}, {})",
+                        map.id, placement.npc_id, placement.position.x, placement.position.y
                     ),
-                });
-            }
-        }
-
-        // Check for duplicate NPC IDs
-        let mut seen_npc_ids = std::collections::HashSet::new();
-        for npc in &map.npcs {
-            if !seen_npc_ids.insert(npc.id) {
-                errors.push(ValidationError::DuplicateId {
-                    entity_type: "NPC".to_string(),
-                    id: npc.id.to_string(),
                 });
             }
         }
@@ -581,13 +569,13 @@ impl<'a> Validator<'a> {
             });
         }
 
-        if map.npcs.len() > 100 {
+        if map.npc_placements.len() > 100 {
             errors.push(ValidationError::BalanceWarning {
                 severity: Severity::Warning,
                 message: format!(
-                    "Map {} has {} NPCs, which may cause performance issues",
+                    "Map {} has {} NPC placements, which may cause performance issues",
                     map.id,
-                    map.npcs.len()
+                    map.npc_placements.len()
                 ),
             });
         }

@@ -1,7 +1,7 @@
 # Phase 3: Dialogue Event Connection - Implementation Summary
 
-**Status**: ✅ COMPLETED  
-**Date**: 2025-01-XX  
+**Status**: ✅ COMPLETED
+**Date**: 2025-01-XX
 **Phase**: NPC Gameplay Fix - Phase 3
 
 ---
@@ -66,7 +66,7 @@ MapEvent::NpcDialogue { npc_id, .. } => {
         if let Some(dialogue_id) = npc_def.dialogue_id {
             // Send StartDialogue message to trigger dialogue system
             dialogue_writer.write(StartDialogue { dialogue_id });
-            
+
             let msg = format!("{} wants to talk.", npc_def.name);
             if let Some(ref mut log) = game_log {
                 log.add(msg);
@@ -127,7 +127,7 @@ impl GameLog {
     pub fn new() -> Self {
         Self { messages: Vec::new() }
     }
-    
+
     pub fn entries(&self) -> &[String] {
         &self.messages
     }
@@ -148,7 +148,7 @@ MapEvent::NpcDialogue { npc_id, .. } => {
     let npc_exists = self.db.npcs.has_npc(npc_id)
         || map.npc_placements.iter().any(|p| &p.npc_id == npc_id)
         || map.npcs.iter().any(|npc| npc.name == *npc_id);
-    
+
     if !npc_exists {
         errors.push(ValidationError::BalanceWarning {
             severity: Severity::Error,

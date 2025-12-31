@@ -3,6 +3,10 @@
 
 //! Interactive Map Builder Tool
 //!
+//! **DEPRECATED**: NPC functionality has been removed. Use the campaign builder
+//! and NPC database system instead. This tool now only supports basic map creation
+//! and event placement.
+//!
 //! A command-line tool for creating and editing Antares RPG maps.
 //!
 //! # Features
@@ -11,7 +15,6 @@
 //! - Load and edit existing map RON files
 //! - Set individual tiles or fill regions
 //! - Add events (encounters, treasures, teleports, etc.)
-//! - Add NPCs with dialogue
 //! - Real-time ASCII visualization
 //! - Inline validation feedback
 //! - Save maps in RON format
@@ -29,7 +32,6 @@
 //! - `set <x> <y> <terrain> [wall]` - Set tile
 //! - `fill <x1> <y1> <x2> <y2> <terrain> [wall]` - Fill region
 //! - `event <x> <y> <type> <data>` - Add event
-//! - `npc <id> <x> <y> <name> <dialogue>` - Add NPC
 //! - `show` - Display map
 //! - `info` - Show map info
 //! - `save <path>` - Save map
@@ -42,7 +44,7 @@
 //! See `docs/reference/map_ron_format.md` for RON format specification.
 
 use antares::domain::types::{MapId, Position};
-use antares::domain::world::{Map, MapEvent, Npc, TerrainType, Tile, WallType};
+use antares::domain::world::{Map, MapEvent, TerrainType, Tile, WallType};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::fs;
@@ -192,35 +194,6 @@ impl MapBuilder {
         }
     }
 
-    /// Adds an NPC at the specified position
-    fn add_npc(&mut self, id: u16, x: i32, y: i32, name: String, dialogue: String) {
-        let Some(ref mut map) = self.map else {
-            println!("❌ Error: No map loaded. Use 'new' or 'load' first.");
-            return;
-        };
-
-        let pos = Position::new(x, y);
-        if !map.is_valid_position(pos) {
-            println!("❌ Error: Position ({}, {}) is out of bounds", x, y);
-            return;
-        }
-
-        let npc = Npc {
-            id,
-            name: name.clone(),
-            description: String::new(),
-            position: pos,
-            dialogue,
-        };
-
-        map.npcs.push(npc);
-        println!("✅ Added NPC '{}' at ({}, {})", name, x, y);
-
-        if self.auto_show {
-            self.show_map();
-        }
-    }
-
     /// Displays the map as ASCII art
     fn show_map(&self) {
         let Some(ref map) = self.map else {
@@ -255,8 +228,6 @@ impl MapBuilder {
                     }
                 } else if map.events.contains_key(&pos) {
                     '!'
-                } else if map.npcs.iter().any(|npc| npc.position == pos) {
-                    '@'
                 } else {
                     match tile.terrain {
                         TerrainType::Ground => '.',
@@ -297,7 +268,7 @@ impl MapBuilder {
         println!("Dimensions: {}x{}", map.width, map.height);
         println!("Total tiles: {}", map.width * map.height);
         println!("Events: {}", map.events.len());
-        println!("NPCs: {}", map.npcs.len());
+        println!("NPC Placements: {}", map.npc_placements.len());
         println!();
     }
 
@@ -444,23 +415,23 @@ impl MapBuilder {
                 self.fill_tiles(x1, y1, x2, y2, terrain, wall);
             }
             "event" => {
-                if parts.len() < 4 {
+                if parts.len() < 5 {
                     println!("Usage: event <x> <y> <type> <data>");
                     return true;
                 }
 
                 let x: i32 = match parts[1].parse() {
-                    Ok(x) => x,
+                    Ok(v) => v,
                     Err(_) => {
-                        println!("❌ Error: Invalid X coordinate");
+                        println!("❌ Error: Invalid x coordinate");
                         return true;
                     }
                 };
 
                 let y: i32 = match parts[2].parse() {
-                    Ok(y) => y,
+                    Ok(v) => v,
                     Err(_) => {
-                        println!("❌ Error: Invalid Y coordinate");
+                        println!("❌ Error: Invalid y coordinate");
                         return true;
                     }
                 };
@@ -469,73 +440,40 @@ impl MapBuilder {
                 let data = parts[4..].join(" ");
 
                 let event = match event_type {
+                    "encounter" => MapEvent::Encounter {
+                        name: format!("Encounter at ({}, {})", x, y),
+                        description: data,
+                        monster_group: vec![],
+                    },
+                    "treasure" => MapEvent::Treasure {
+                        name: format!("Treasure at ({}, {})", x, y),
+                        description: data,
+                        loot: vec![],
+                    },
                     "sign" => MapEvent::Sign {
-                        name: "Sign".to_string(),
+                        name: format!("Sign at ({}, {})", x, y),
                         description: String::new(),
                         text: data,
                     },
-                    "treasure" => MapEvent::Treasure {
-                        name: "Treasure".to_string(),
-                        description: String::new(),
-                        loot: vec![],
-                    },
-                    "encounter" => MapEvent::Encounter {
-                        name: "Encounter".to_string(),
-                        description: String::new(),
-                        monster_group: vec![],
-                    },
                     "trap" => MapEvent::Trap {
-                        name: "Trap".to_string(),
-                        description: String::new(),
+                        name: format!("Trap at ({}, {})", x, y),
+                        description: data,
                         damage: 10,
                         effect: None,
                     },
                     _ => {
-                        println!("⚠️  Unknown event type '{}', using sign", event_type);
-                        MapEvent::Sign {
-                            name: "Sign".to_string(),
-                            description: String::new(),
-                            text: data,
-                        }
+                        println!(
+                            "❌ Error: Unknown event type. Use: encounter, treasure, sign, trap"
+                        );
+                        return true;
                     }
                 };
 
                 self.add_event(x, y, event);
             }
             "npc" => {
-                if parts.len() < 6 {
-                    println!("Usage: npc <id> <x> <y> <name> <dialogue>");
-                    return true;
-                }
-
-                let id: u16 = match parts[1].parse() {
-                    Ok(id) => id,
-                    Err(_) => {
-                        println!("❌ Error: Invalid NPC ID (must be a number)");
-                        return true;
-                    }
-                };
-
-                let x: i32 = match parts[2].parse() {
-                    Ok(x) => x,
-                    Err(_) => {
-                        println!("❌ Error: Invalid X coordinate");
-                        return true;
-                    }
-                };
-
-                let y: i32 = match parts[3].parse() {
-                    Ok(y) => y,
-                    Err(_) => {
-                        println!("❌ Error: Invalid Y coordinate");
-                        return true;
-                    }
-                };
-
-                let name = parts[4].to_string();
-                let dialogue = parts[5..].join(" ");
-
-                self.add_npc(id, x, y, name, dialogue);
+                println!("❌ NPC command is deprecated. Use the campaign builder and NPC database instead.");
+                println!("   See docs/how-to/npc_externalization.md for migration guide.");
             }
             "show" => {
                 self.show_map();
@@ -639,8 +577,6 @@ fn print_help() {
     println!("\n🎭 Content:");
     println!("  event <x> <y> <type> <data>    Add event");
     println!("    Types: encounter, treasure, sign, trap");
-    println!("  npc <id> <x> <y> <name> <dialogue>");
-    println!("                                 Add NPC (id must be a number)");
     println!("\n👁️  Viewing:");
     println!("  show                           Display map (ASCII)");
     println!("  info                           Show map details");
@@ -658,7 +594,6 @@ fn print_help() {
     println!("  set 8 8 stone normal           Place stone wall at center");
     println!("  set 8 9 stone door             Place door south of wall");
     println!("  event 5 5 sign Welcome!        Add welcome sign");
-    println!("  npc 1 10 10 Guard \"Halt!\"      Add guard NPC (ID must be number)");
     println!("  save data/my_map.ron           Save to data directory");
     println!("  auto off                       Disable auto-show");
     println!();
@@ -770,17 +705,6 @@ mod tests {
 
         let map = builder.map.as_ref().unwrap();
         assert!(map.get_event(Position::new(3, 3)).is_some());
-    }
-
-    #[test]
-    fn test_add_npc() {
-        let mut builder = MapBuilder::new();
-        builder.create_map(1, 10, 10);
-        builder.add_npc(1, 5, 5, "Merchant".to_string(), "Welcome!".to_string());
-
-        let map = builder.map.as_ref().unwrap();
-        assert_eq!(map.npcs.len(), 1);
-        assert_eq!(map.npcs[0].name, "Merchant");
     }
 
     #[test]

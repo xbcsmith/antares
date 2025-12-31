@@ -212,53 +212,6 @@ pub enum MapEvent {
     },
 }
 
-// ===== NPC =====
-
-/// Non-player character in the world
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Npc {
-    /// NPC identifier
-    pub id: u16,
-    /// NPC name
-    pub name: String,
-    /// NPC description
-    #[serde(default)]
-    pub description: String,
-    /// Position on the map
-    pub position: Position,
-    /// Dialogue/interaction text
-    pub dialogue: String,
-}
-
-impl Npc {
-    /// Creates a new NPC
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::world::Npc;
-    /// use antares::domain::types::Position;
-    ///
-    /// let npc = Npc::new(1, "Merchant".to_string(), "A friendly merchant".to_string(), Position::new(5, 5), "Welcome!".to_string());
-    /// assert_eq!(npc.name, "Merchant");
-    /// ```
-    pub fn new(
-        id: u16,
-        name: String,
-        description: String,
-        position: Position,
-        dialogue: String,
-    ) -> Self {
-        Self {
-            id,
-            name,
-            description,
-            position,
-            dialogue,
-        }
-    }
-}
-
 // ===== Resolved NPC =====
 
 /// Resolved NPC combining placement and definition data
@@ -391,9 +344,6 @@ pub struct Map {
     pub tiles: Vec<Tile>,
     /// Events at specific positions
     pub events: HashMap<Position, MapEvent>,
-    /// NPCs on this map (legacy - use npc_placements)
-    #[serde(default)]
-    pub npcs: Vec<Npc>,
     /// NPC placements (references to NPC definitions)
     #[serde(default)]
     pub npc_placements: Vec<crate::domain::world::npc::NpcPlacement>,
@@ -439,7 +389,6 @@ impl Map {
             height,
             tiles,
             events: HashMap::new(),
-            npcs: Vec::new(),
             npc_placements: Vec::new(),
         }
     }
@@ -519,11 +468,6 @@ impl Map {
             return true;
         }
 
-        // Check legacy NPCs (for backward compatibility)
-        if self.npcs.iter().any(|npc| npc.position == pos) {
-            return true;
-        }
-
         false
     }
 
@@ -572,11 +516,6 @@ impl Map {
     /// ```
     pub fn get_event_at_position(&self, position: Position) -> Option<&MapEvent> {
         self.get_event(position)
-    }
-
-    /// Adds an NPC to the map
-    pub fn add_npc(&mut self, npc: Npc) {
-        self.npcs.push(npc);
     }
 
     /// Resolves NPC placements using the NPC database
@@ -1090,20 +1029,6 @@ mod tests {
     }
 
     #[test]
-    fn test_npc_creation() {
-        let npc = Npc::new(
-            1,
-            "Merchant".to_string(),
-            "Desc".to_string(),
-            Position::new(10, 10),
-            "Buy something!".to_string(),
-        );
-        assert_eq!(npc.id, 1);
-        assert_eq!(npc.name, "Merchant");
-        assert_eq!(npc.position, Position::new(10, 10));
-    }
-
-    #[test]
     fn test_map_get_event_at_position_returns_event() {
         // Arrange
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
@@ -1189,32 +1114,6 @@ mod tests {
         );
         assert!(
             !map.is_blocked(Position::new(6, 5)),
-            "Adjacent position should not be blocked"
-        );
-    }
-
-    #[test]
-    fn test_is_blocked_legacy_npc_blocks_movement() {
-        // Arrange
-        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
-        let npc_pos = Position::new(3, 7);
-
-        // Add legacy NPC
-        map.npcs.push(Npc::new(
-            1,
-            "Merchant".to_string(),
-            "A merchant".to_string(),
-            npc_pos,
-            "Welcome!".to_string(),
-        ));
-
-        // Act & Assert
-        assert!(
-            map.is_blocked(npc_pos),
-            "Position with legacy NPC should be blocked"
-        );
-        assert!(
-            !map.is_blocked(Position::new(4, 7)),
             "Adjacent position should not be blocked"
         );
     }
@@ -1378,42 +1277,6 @@ mod tests {
         assert!(
             !map.is_blocked(Position::new(5, 5)),
             "Center should not be blocked"
-        );
-    }
-
-    #[test]
-    fn test_is_blocked_mixed_legacy_and_new_npcs() {
-        // Arrange
-        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 15, 15);
-
-        // Add legacy NPC
-        map.npcs.push(Npc::new(
-            1,
-            "Old NPC".to_string(),
-            "Legacy".to_string(),
-            Position::new(3, 3),
-            "Hello".to_string(),
-        ));
-
-        // Add new NPC placement
-        map.npc_placements
-            .push(crate::domain::world::npc::NpcPlacement::new(
-                "new_npc",
-                Position::new(7, 7),
-            ));
-
-        // Act & Assert
-        assert!(
-            map.is_blocked(Position::new(3, 3)),
-            "Legacy NPC position should be blocked"
-        );
-        assert!(
-            map.is_blocked(Position::new(7, 7)),
-            "New NPC placement position should be blocked"
-        );
-        assert!(
-            !map.is_blocked(Position::new(5, 5)),
-            "Empty position should not be blocked"
         );
     }
 }

@@ -187,12 +187,12 @@ fn validate_content(map: &Map, errors: &mut Vec<String>) {
         }
     }
 
-    // Validate NPC positions
-    for npc in &map.npcs {
-        if !is_position_valid(&npc.position, map.width, map.height) {
+    // Validate NPC placements
+    for placement in &map.npc_placements {
+        if !is_position_valid(&placement.position, map.width, map.height) {
             errors.push(format!(
-                "NPC '{}' at ({}, {}) out of bounds (map: {}x{})",
-                npc.name, npc.position.x, npc.position.y, map.width, map.height
+                "NPC placement '{}' at ({}, {}) out of bounds (map: {}x{})",
+                placement.npc_id, placement.position.x, placement.position.y, map.width, map.height
             ));
         }
     }
@@ -212,19 +212,19 @@ fn validate_gameplay(map: &Map, errors: &mut Vec<String>) {
         }
     }
 
-    for npc in &map.npcs {
-        let pos_tuple = (npc.position.x, npc.position.y);
+    for placement in &map.npc_placements {
+        let pos_tuple = (placement.position.x, placement.position.y);
         if occupied_positions.contains(&pos_tuple) {
             errors.push(format!(
-                "NPC '{}' overlaps with event at ({}, {})",
-                npc.name, npc.position.x, npc.position.y
+                "NPC placement '{}' overlaps with event at ({}, {})",
+                placement.npc_id, placement.position.x, placement.position.y
             ));
         }
     }
 
     // Warn about maps with no content
-    if map.events.is_empty() && map.npcs.is_empty() {
-        errors.push("Map has no events or NPCs (empty map)".to_string());
+    if map.events.is_empty() && map.npc_placements.is_empty() {
+        errors.push("Map has no events or NPC placements (empty map)".to_string());
     }
 }
 
@@ -240,7 +240,7 @@ fn print_map_summary(map: &Map) {
     println!("  Size: {}x{}", map.width, map.height);
     println!("  Total tiles: {}", map.width * map.height);
     println!("  Events: {}", map.events.len());
-    println!("  NPCs: {}", map.npcs.len());
+    println!("  NPC Placements: {}", map.npc_placements.len());
 
     // Count event types
     let mut encounters = 0;
@@ -283,12 +283,12 @@ fn print_map_summary(map: &Map) {
         }
     }
 
-    if !map.npcs.is_empty() {
-        println!("\n  NPCs:");
-        for npc in &map.npcs {
+    if !map.npc_placements.is_empty() {
+        println!("\n  NPC Placements:");
+        for placement in &map.npc_placements {
             println!(
                 "    - {} at ({}, {})",
-                npc.name, npc.position.x, npc.position.y
+                placement.npc_id, placement.position.x, placement.position.y
             );
         }
     }

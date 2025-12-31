@@ -260,9 +260,13 @@ impl NpcEditorState {
 
         ui.separator();
 
+        // Track actions to perform after iteration
+        let mut index_to_delete: Option<usize> = None;
+        let mut index_to_edit: Option<usize> = None;
+
         // NPC list
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for (index, npc) in filtered_npcs {
+            for (index, npc) in &filtered_npcs {
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
@@ -295,11 +299,10 @@ impl NpcEditorState {
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button("🗑️ Delete").clicked() {
-                                self.npcs.remove(index);
-                                needs_save = true;
+                                index_to_delete = Some(*index);
                             }
                             if ui.button("✏️ Edit").clicked() {
-                                self.start_edit_npc(index);
+                                index_to_edit = Some(*index);
                             }
                         });
                     });
@@ -312,6 +315,15 @@ impl NpcEditorState {
                 });
             }
         });
+
+        // Apply actions after iteration
+        if let Some(index) = index_to_delete {
+            self.npcs.remove(index);
+            needs_save = true;
+        }
+        if let Some(index) = index_to_edit {
+            self.start_edit_npc(index);
+        }
 
         needs_save
     }

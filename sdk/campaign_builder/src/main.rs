@@ -1386,7 +1386,7 @@ impl CampaignBuilderApp {
                 );
             } else {
                 self.logger.log(
-                    LogLevel::Warning,
+                    LogLevel::Warn,
                     category::CAMPAIGN,
                     &format!("NPCs file not found: {:?}", npcs_path),
                 );
@@ -2955,6 +2955,7 @@ impl eframe::App for CampaignBuilderApp {
                 &self.monsters,
                 &self.items,
                 &self.conditions,
+                &self.npc_editor_state.npcs,
                 self.campaign_dir.as_ref(),
                 &self.campaign.maps_dir,
                 &self.tool_config.display,
@@ -4634,6 +4635,7 @@ mod tests {
             quests_file: "data/quests.ron".to_string(),
             dialogue_file: "data/dialogue.ron".to_string(),
             conditions_file: "data/conditions.ron".to_string(),
+            npcs_file: "data/npcs.ron".to_string(),
         };
 
         let ron_config = ron::ser::PrettyConfig::new()

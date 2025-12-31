@@ -3859,9 +3859,12 @@ pub fn extract_map_candidates(
 pub fn extract_npc_candidates(maps: &[antares::domain::world::Map]) -> Vec<(String, String)> {
     let mut candidates = Vec::new();
     for map in maps {
-        for npc in &map.npcs {
-            let display = format!("{} (Map: {}, NPC ID: {})", npc.name, map.name, npc.id);
-            let npc_id = format!("{}:{}", map.id, npc.id);
+        for placement in &map.npc_placements {
+            let display = format!(
+                "{} (Map: {}, Position: {:?})",
+                placement.npc_id, map.name, placement.position
+            );
+            let npc_id = format!("{}:{}", map.id, placement.npc_id);
             candidates.push((display, npc_id));
         }
     }
@@ -5697,44 +5700,42 @@ mod tests {
     #[test]
     fn test_extract_npc_candidates() {
         use antares::domain::types::Position;
-        use antares::domain::world::{Map, Npc};
+        use antares::domain::world::npc::NpcPlacement;
+        use antares::domain::world::Map;
 
         let mut map1 = Map::new(1, "Town".to_string(), "Desc".to_string(), 10, 10);
-        map1.npcs.push(Npc {
-            id: 1,
-            name: "Merchant".to_string(),
-            description: "Sells goods".to_string(),
+        map1.npc_placements.push(NpcPlacement {
+            npc_id: "merchant_1".to_string(),
             position: Position::new(5, 5),
-            dialogue: String::new(),
+            facing: None,
+            dialogue_override: None,
         });
-        map1.npcs.push(Npc {
-            id: 2,
-            name: "Guard".to_string(),
-            description: "Protects the town".to_string(),
+        map1.npc_placements.push(NpcPlacement {
+            npc_id: "guard_1".to_string(),
             position: Position::new(7, 3),
-            dialogue: String::new(),
+            facing: None,
+            dialogue_override: None,
         });
 
         let mut map2 = Map::new(2, "Castle".to_string(), "Desc".to_string(), 15, 15);
-        map2.npcs.push(Npc {
-            id: 1,
-            name: "King".to_string(),
-            description: "Rules the land".to_string(),
+        map2.npc_placements.push(NpcPlacement {
+            npc_id: "king_1".to_string(),
             position: Position::new(8, 8),
-            dialogue: String::new(),
+            facing: None,
+            dialogue_override: None,
         });
 
         let candidates = extract_npc_candidates(&[map1, map2]);
 
         assert_eq!(candidates.len(), 3);
-        assert!(candidates[0].0.contains("Merchant"));
+        assert!(candidates[0].0.contains("merchant_1"));
         assert!(candidates[0].0.contains("Town"));
-        assert_eq!(candidates[0].1, "1:1");
-        assert!(candidates[1].0.contains("Guard"));
-        assert_eq!(candidates[1].1, "1:2");
-        assert!(candidates[2].0.contains("King"));
+        assert_eq!(candidates[0].1, "1:merchant_1");
+        assert!(candidates[1].0.contains("guard_1"));
+        assert_eq!(candidates[1].1, "1:guard_1");
+        assert!(candidates[2].0.contains("king_1"));
         assert!(candidates[2].0.contains("Castle"));
-        assert_eq!(candidates[2].1, "2:1");
+        assert_eq!(candidates[2].1, "2:king_1");
     }
 
     #[test]

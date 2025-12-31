@@ -10,8 +10,7 @@
 //!
 //! 1. Creating a map with NPCs using the new placement system
 //! 2. Demonstrating that NPCs block movement
-//! 3. Testing backward compatibility with legacy NPCs
-//! 4. Showing how the blocking system works with walls and terrain
+//! 3. Showing how the blocking system works with walls and terrain
 //!
 //! ## Running This Example
 //!
@@ -21,7 +20,7 @@
 
 use antares::domain::types::{Direction, Position};
 use antares::domain::world::npc::NpcPlacement;
-use antares::domain::world::{Map, Npc, WallType};
+use antares::domain::world::{Map, WallType};
 
 fn main() {
     println!("=== NPC Blocking System Example ===\n");
@@ -74,19 +73,15 @@ fn main() {
         dialogue_override: None,
     });
     println!("  - Merchant at {:?} (facing South)", merchant_pos);
-    println!();
 
-    // Add legacy NPC to demonstrate backward compatibility
-    println!("👤 Adding legacy NPC (backward compatibility):");
     let elder_pos = Position::new(1, 1);
-    map.npcs.push(Npc::new(
-        1,
-        "Village Elder".to_string(),
-        "The wise leader".to_string(),
-        elder_pos,
-        "Welcome, traveler!".to_string(),
-    ));
-    println!("  - Village Elder at {:?}", elder_pos);
+    map.npc_placements.push(NpcPlacement {
+        npc_id: "village_elder".to_string(),
+        position: elder_pos,
+        facing: Some(Direction::East),
+        dialogue_override: None,
+    });
+    println!("  - Village Elder at {:?} (facing East)", elder_pos);
     println!();
 
     // Test blocking at various positions
@@ -95,9 +90,9 @@ fn main() {
     let test_positions = vec![
         (Position::new(0, 0), "Empty ground"),
         (Position::new(5, 0), "Wall tile"),
-        (guard_pos, "Guard NPC (new placement)"),
-        (merchant_pos, "Merchant NPC (new placement)"),
-        (elder_pos, "Village Elder (legacy NPC)"),
+        (guard_pos, "Guard NPC placement"),
+        (merchant_pos, "Merchant NPC placement"),
+        (elder_pos, "Village Elder NPC placement"),
         (Position::new(2, 2), "Empty ground near NPCs"),
         (Position::new(-1, 5), "Out of bounds (negative)"),
         (Position::new(10, 10), "Out of bounds (beyond map)"),
@@ -146,8 +141,7 @@ fn main() {
 
     println!();
     println!("=== Summary ===\n");
-    println!("✅ NPC placements block movement (new system)");
-    println!("✅ Legacy NPCs block movement (backward compatibility)");
+    println!("✅ NPC placements block movement");
     println!("✅ Walls and terrain blocking still works");
     println!("✅ Out-of-bounds positions are blocked");
     println!("✅ Adjacent tiles to NPCs remain walkable");
@@ -169,8 +163,6 @@ fn print_map_with_npcs(map: &Map, party_pos: Position) {
                 'P' // Party
             } else if map.npc_placements.iter().any(|npc| npc.position == pos) {
                 'N' // NPC placement
-            } else if map.npcs.iter().any(|npc| npc.position == pos) {
-                'E' // Elder (legacy NPC)
             } else if let Some(tile) = map.get_tile(pos) {
                 if tile.wall_type == WallType::Normal {
                     '#' // Wall
@@ -210,24 +202,26 @@ mod tests {
     }
 
     #[test]
-    fn test_example_legacy_npc_blocking() {
+    fn test_example_multiple_npc_blocking() {
         // Create map
         let mut map = Map::new(1, "Test".to_string(), "Test".to_string(), 10, 10);
 
-        // Add legacy NPC
-        let npc_pos = Position::new(3, 3);
-        map.npcs.push(Npc::new(
-            1,
-            "Test".to_string(),
-            "Test".to_string(),
-            npc_pos,
-            "Hello".to_string(),
-        ));
+        // Add multiple NPC placements
+        let npc_pos1 = Position::new(3, 3);
+        let npc_pos2 = Position::new(7, 7);
+        map.npc_placements
+            .push(NpcPlacement::new("test_npc1", npc_pos1));
+        map.npc_placements
+            .push(NpcPlacement::new("test_npc2", npc_pos2));
 
         // Test blocking
         assert!(
-            map.is_blocked(npc_pos),
-            "Legacy NPC position should be blocked"
+            map.is_blocked(npc_pos1),
+            "First NPC position should be blocked"
+        );
+        assert!(
+            map.is_blocked(npc_pos2),
+            "Second NPC position should be blocked"
         );
     }
 }

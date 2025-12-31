@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::domain::types::{MapId, Position};
-use crate::domain::world::{Map, MapEvent, Npc, NpcPlacement, TerrainType, Tile, WallType};
+use crate::domain::world::{Map, MapEvent, NpcPlacement, TerrainType, Tile, WallType};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -17,8 +17,6 @@ pub struct MapBlueprint {
     pub environment: EnvironmentType,
     pub tiles: Vec<TileBlueprint>,
     pub events: Vec<MapEventBlueprint>,
-    #[serde(default)]
-    pub npcs: Vec<NpcBlueprint>,
     #[serde(default)]
     pub npc_placements: Vec<NpcPlacementBlueprint>,
     #[serde(default)]
@@ -87,16 +85,6 @@ pub struct MonsterSpawn {
 pub struct LootItem {
     pub item_id: u8,
     pub quantity: u16,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct NpcBlueprint {
-    pub id: u16,
-    pub name: String,
-    #[serde(default)]
-    pub description: String,
-    pub position: Position,
-    pub dialogue_id: Option<String>,
 }
 
 /// Blueprint for NPC placement (references NPC definition by ID)
@@ -206,18 +194,6 @@ impl From<MapBlueprint> for Map {
             events.insert(bp_event.position, event);
         }
 
-        let npcs = bp
-            .npcs
-            .into_iter()
-            .map(|bp_npc| Npc {
-                id: bp_npc.id,
-                name: bp_npc.name,
-                description: bp_npc.description,
-                position: bp_npc.position,
-                dialogue: bp_npc.dialogue_id.unwrap_or_else(|| "...".to_string()),
-            })
-            .collect();
-
         // Convert NPC placements from blueprint format
         let npc_placements = bp
             .npc_placements
@@ -238,7 +214,6 @@ impl From<MapBlueprint> for Map {
             height: bp.height,
             tiles,
             events,
-            npcs,
             npc_placements,
         }
     }
@@ -265,7 +240,6 @@ mod tests {
                 code: TileCode::Floor,
             }],
             events: vec![],
-            npcs: vec![],
             npc_placements: vec![
                 NpcPlacementBlueprint {
                     npc_id: "merchant_1".to_string(),
@@ -301,87 +275,6 @@ mod tests {
     }
 
     #[test]
-    fn test_legacy_npc_blueprint_conversion() {
-        // Arrange
-        let bp = MapBlueprint {
-            id: 1,
-            name: "Legacy Map".to_string(),
-            description: "Map with old-style NPCs".to_string(),
-            width: 10,
-            height: 10,
-            environment: EnvironmentType::Outdoor,
-            tiles: vec![TileBlueprint {
-                x: 0,
-                y: 0,
-                code: TileCode::Grass,
-            }],
-            events: vec![],
-            npcs: vec![NpcBlueprint {
-                id: 1,
-                name: "Old NPC".to_string(),
-                description: "Legacy NPC".to_string(),
-                position: Position::new(3, 3),
-                dialogue_id: Some("greeting".to_string()),
-            }],
-            npc_placements: vec![],
-            exits: vec![],
-            starting_position: Position::new(0, 0),
-        };
-
-        // Act
-        let map: Map = bp.into();
-
-        // Assert
-        assert_eq!(map.npcs.len(), 1);
-        assert_eq!(map.npcs[0].name, "Old NPC");
-        assert_eq!(map.npcs[0].position, Position::new(3, 3));
-        assert_eq!(map.npc_placements.len(), 0);
-    }
-
-    #[test]
-    fn test_mixed_npc_formats() {
-        // Arrange - map with both legacy NPCs and new placements
-        let bp = MapBlueprint {
-            id: 1,
-            name: "Mixed Map".to_string(),
-            description: "Both old and new NPCs".to_string(),
-            width: 15,
-            height: 15,
-            environment: EnvironmentType::Dungeon,
-            tiles: vec![TileBlueprint {
-                x: 0,
-                y: 0,
-                code: TileCode::Stone,
-            }],
-            events: vec![],
-            npcs: vec![NpcBlueprint {
-                id: 99,
-                name: "Legacy NPC".to_string(),
-                description: "Old format".to_string(),
-                position: Position::new(1, 1),
-                dialogue_id: None,
-            }],
-            npc_placements: vec![NpcPlacementBlueprint {
-                npc_id: "new_npc".to_string(),
-                position: Position::new(10, 10),
-                facing: Some(Direction::South),
-                dialogue_override: None,
-            }],
-            exits: vec![],
-            starting_position: Position::new(0, 0),
-        };
-
-        // Act
-        let map: Map = bp.into();
-
-        // Assert
-        assert_eq!(map.npcs.len(), 1, "Should have 1 legacy NPC");
-        assert_eq!(map.npc_placements.len(), 1, "Should have 1 new placement");
-        assert_eq!(map.npcs[0].name, "Legacy NPC");
-        assert_eq!(map.npc_placements[0].npc_id, "new_npc");
-    }
-
-    #[test]
     fn test_empty_npc_placements() {
         // Arrange
         let bp = MapBlueprint {
@@ -393,7 +286,6 @@ mod tests {
             environment: EnvironmentType::Cave,
             tiles: vec![],
             events: vec![],
-            npcs: vec![],
             npc_placements: vec![],
             exits: vec![],
             starting_position: Position::new(0, 0),
@@ -404,7 +296,6 @@ mod tests {
 
         // Assert
         assert_eq!(map.npc_placements.len(), 0);
-        assert_eq!(map.npcs.len(), 0);
     }
 
     #[test]
@@ -419,7 +310,6 @@ mod tests {
             environment: EnvironmentType::Indoor,
             tiles: vec![],
             events: vec![],
-            npcs: vec![],
             npc_placements: vec![NpcPlacementBlueprint {
                 npc_id: "innkeeper_mary".to_string(),
                 position: Position::new(12, 8),
@@ -495,7 +385,6 @@ mod tests {
                 code: TileCode::Grass,
             }],
             events: vec![],
-            npcs: vec![],
             npc_placements: vec![
                 NpcPlacementBlueprint {
                     npc_id: "merchant_bob".to_string(),

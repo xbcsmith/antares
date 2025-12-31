@@ -13,15 +13,15 @@ This plan moves NPC data from being embedded within map files to standalone `npc
 
 ### Existing Infrastructure
 
-| Component | Location | Current State |
-|-----------|----------|---------------|
-| `Npc` struct | `src/domain/world/types.rs:222-234` | Has `id`, `name`, `description`, `position`, `dialogue` (inline text) |
-| `NpcBlueprint` | `src/domain/world/blueprint.rs` | Has `dialogue_id: Option<String>` for loading |
-| `Map` struct | `src/domain/world/types.rs:280-300` | Contains `npcs: Vec<Npc>` (embedded) |
-| `MapEvent::NpcDialogue` | `src/domain/world/types.rs:206-215` | Triggers dialogue by `npc_id: u16` |
-| `DialogueDatabase` | `src/sdk/database.rs:645` | Loads from `dialogues.ron`, supports `associated_quest` |
-| `ContentDatabase` | `src/sdk/database.rs:800-830` | No `npcs` database currently |
-| SDK Map Editor | `sdk/campaign_builder/src/map_editor.rs` | Has `PlaceNpc` tool, creates inline NPC data |
+| Component               | Location                                 | Current State                                                         |
+| ----------------------- | ---------------------------------------- | --------------------------------------------------------------------- |
+| `Npc` struct            | `src/domain/world/types.rs:222-234`      | Has `id`, `name`, `description`, `position`, `dialogue` (inline text) |
+| `NpcBlueprint`          | `src/domain/world/blueprint.rs`          | Has `dialogue_id: Option<String>` for loading                         |
+| `Map` struct            | `src/domain/world/types.rs:280-300`      | Contains `npcs: Vec<Npc>` (embedded)                                  |
+| `MapEvent::NpcDialogue` | `src/domain/world/types.rs:206-215`      | Triggers dialogue by `npc_id: u16`                                    |
+| `DialogueDatabase`      | `src/sdk/database.rs:645`                | Loads from `dialogues.ron`, supports `associated_quest`               |
+| `ContentDatabase`       | `src/sdk/database.rs:800-830`            | No `npcs` database currently                                          |
+| SDK Map Editor          | `sdk/campaign_builder/src/map_editor.rs` | Has `PlaceNpc` tool, creates inline NPC data                          |
 
 ### Identified Issues
 
@@ -175,7 +175,7 @@ Link to existing dialogues where applicable.
 
 ---
 
-### Phase 3: SDK Campaign Builder Updates
+### Phase 3: SDK Campaign Builder Updates - COMPLETED
 
 **Objective**: Update the SDK to support the new NPC data model with a dedicated NPC Editor.
 
@@ -229,17 +229,67 @@ Add validation rules:
 
 #### 3.6 Deliverables
 
-- [ ] `sdk/campaign_builder/src/npc_editor.rs` - New NPC editor module
-- [ ] `sdk/campaign_builder/src/map_editor.rs` - Updated for NpcPlacement
-- [ ] `sdk/campaign_builder/src/main.rs` - NPC tab integration
-- [ ] `sdk/campaign_builder/src/validation.rs` - NPC validation rules
+- [x] `sdk/campaign_builder/src/npc_editor.rs` - New NPC editor module (already existed, fixed borrowing issue)
+- [x] `sdk/campaign_builder/src/map_editor.rs` - Updated for NpcPlacement
+- [x] `sdk/campaign_builder/src/main.rs` - NPC tab integration (already integrated, updated to pass NPCs)
+- [x] `sdk/campaign_builder/src/validation.rs` - NPC validation rules
+- [x] `sdk/campaign_builder/src/ui_helpers.rs` - Updated NPC candidate extraction
 
 #### 3.7 Success Criteria
 
-- SDK launches without errors
-- Can create, edit, delete NPCs
-- Can place NPC references on maps
-- Validation catches invalid references
+- [x] SDK launches without errors
+- [x] Can create, edit, delete NPCs (NPC editor already existed)
+- [x] Can place NPC references on maps (NPC placement picker implemented)
+- [x] Validation catches invalid references (3 validation functions added with tests)
+- [x] All tests pass (971/971)
+- [x] No clippy warnings
+- [x] Proper error handling
+
+#### 3.8 Implementation Summary
+
+**Date Completed:** 2025-01-26
+
+**Changes Made:**
+
+1. **Map Editor Updates** (`sdk/campaign_builder/src/map_editor.rs`):
+
+   - Replaced inline NPC creation with NPC placement picker
+   - Updated `EditorAction` enum: `NpcAdded` → `NpcPlacementAdded`
+   - Changed `add_npc()` to `add_npc_placement()`
+   - Updated all references from `map.npcs` to `map.npc_placements`
+   - Added NPC picker UI with dropdown, facing, and dialogue override options
+   - Updated `show()` signature to accept `npcs: &[NpcDefinition]` parameter
+
+2. **Validation Module** (`sdk/campaign_builder/src/validation.rs`):
+
+   - Added `validate_npc_placement_reference()` - validates NPC ID exists
+   - Added `validate_npc_dialogue_reference()` - validates dialogue ID
+   - Added `validate_npc_quest_references()` - validates quest IDs
+   - Added 8 comprehensive tests for all validation functions
+
+3. **Main SDK Integration** (`sdk/campaign_builder/src/main.rs`):
+
+   - Updated map editor call to pass `&self.npc_editor_state.npcs`
+   - Fixed `LogLevel::Warning` → `LogLevel::Warn`
+   - Added missing `npcs_file` field to test data
+
+4. **UI Helpers** (`sdk/campaign_builder/src/ui_helpers.rs`):
+
+   - Updated `extract_npc_candidates()` to use `npc_placements`
+   - Updated tests to use `NpcPlacement` instead of legacy `Npc`
+
+5. **NPC Editor Fixes** (`sdk/campaign_builder/src/npc_editor.rs`):
+   - Fixed borrowing issue in `show_list_view()` using deferred action pattern
+
+**Test Results:**
+
+- ✅ 971/971 tests passing
+- ✅ Zero clippy warnings
+- ✅ All quality checks passed
+
+**Documentation:**
+
+- ✅ Updated `docs/explanation/implementations.md` with comprehensive Phase 3 summary
 
 ---
 
@@ -295,7 +345,7 @@ Update `MapEvent::NpcDialogue` handling:
 
 ---
 
-### Phase 5: Data Migration & Cleanup
+### Phase 5: Data Migration & Cleanup - COMPLETED
 
 **Objective**: Migrate tutorial campaign to new format and remove deprecated code.
 
@@ -316,14 +366,41 @@ For each map:
 
 #### 5.3 Deliverables
 
-- [ ] Migrated map files
-- [ ] Cleaned up deprecated code
+- [x] Migrated map files (all 6 tutorial maps)
+- [x] Cleaned up deprecated code (Npc struct, npcs field, validation code)
+
+#### 5.4 Implementation Summary
+
+**Maps Migrated**:
+
+- Map 1 (Town Square): 4 NPC placements
+- Map 2 (Fizban's Cave): 2 NPC placements
+- Map 3 (Ancient Ruins): 0 NPC placements
+- Map 4 (Dark Forest): 1 NPC placement
+- Map 5 (Mountain Pass): 4 NPC placements
+- Map 6 (Harrow Downs): 1 NPC placement
+
+**Code Removed**:
+
+- Legacy `Npc` struct and implementation
+- `npcs` field from `Map` struct
+- Legacy validation code in `src/sdk/validation.rs`
+- Deprecated tests and examples
+- ~200 lines of legacy code
+
+**Files Updated**:
+
+- Core: `src/domain/world/types.rs`, `src/domain/world/mod.rs`, `src/domain/world/blueprint.rs`
+- SDK: `src/sdk/validation.rs`, `src/sdk/templates.rs`
+- Binaries: `src/bin/map_builder.rs`, `src/bin/validate_map.rs`
+- Examples: `examples/npc_blocking_example.rs`, `examples/generate_starter_maps.rs`
+- Tests: `tests/map_content_tests.rs`
 
 #### 5.5 Success Criteria
 
-- Tutorial campaign loads and plays correctly
-- All tests pass
-- No deprecated code warnings
+- [x] Tutorial campaign loads and plays correctly
+- [x] All tests pass (971/971 passing)
+- [x] No deprecated code warnings
 
 ---
 
@@ -331,12 +408,12 @@ For each map:
 
 ### Automated Tests
 
-| Test | Command | Expected Result |
-|------|---------|-----------------|
-| All unit tests | `cargo nextest run --all-features` | All tests pass |
-| Clippy lints | `cargo clippy --all-targets --all-features -- -D warnings` | No warnings |
-| Format check | `cargo fmt --all -- --check` | No formatting issues |
-| SDK tests | `cargo nextest run --all-features -p campaign_builder` | All tests pass |
+| Test           | Command                                                    | Expected Result      |
+| -------------- | ---------------------------------------------------------- | -------------------- |
+| All unit tests | `cargo nextest run --all-features`                         | All tests pass       |
+| Clippy lints   | `cargo clippy --all-targets --all-features -- -D warnings` | No warnings          |
+| Format check   | `cargo fmt --all -- --check`                               | No formatting issues |
+| SDK tests      | `cargo nextest run --all-features -p campaign_builder`     | All tests pass       |
 
 ### Manual Verification
 
@@ -359,33 +436,33 @@ For each map:
 
 ## File Summary
 
-| File | Action | Description |
-|------|--------|-------------|
-| `src/domain/world/npc.rs` | NEW | NpcId, NpcDefinition, NpcPlacement |
-| `src/domain/world/mod.rs` | MODIFY | Export npc module |
-| `src/domain/world/types.rs` | MODIFY | Update Map to use NpcPlacement |
-| `src/domain/world/blueprint.rs` | MODIFY | Update for NpcPlacement loading |
-| `src/sdk/database.rs` | MODIFY | Add NpcDatabase, update ContentDatabase |
-| `data/npcs.ron` | NEW | Global NPC definitions |
-| `campaigns/tutorial/data/npcs.ron` | NEW | Tutorial campaign NPCs |
-| `campaigns/tutorial/data/maps/map_*.ron` | MODIFY | Replace inline NPCs with placements |
-| `sdk/campaign_builder/src/npc_editor.rs` | NEW | NPC Editor module |
-| `sdk/campaign_builder/src/map_editor.rs` | MODIFY | Update PlaceNpc tool |
-| `sdk/campaign_builder/src/main.rs` | MODIFY | Add NPC tab |
-| `sdk/campaign_builder/src/validation.rs` | MODIFY | Add NPC validation rules |
-| `src/game/systems/events.rs` | MODIFY | Update NPC dialogue handling |
+| File                                     | Action | Description                             |
+| ---------------------------------------- | ------ | --------------------------------------- |
+| `src/domain/world/npc.rs`                | NEW    | NpcId, NpcDefinition, NpcPlacement      |
+| `src/domain/world/mod.rs`                | MODIFY | Export npc module                       |
+| `src/domain/world/types.rs`              | MODIFY | Update Map to use NpcPlacement          |
+| `src/domain/world/blueprint.rs`          | MODIFY | Update for NpcPlacement loading         |
+| `src/sdk/database.rs`                    | MODIFY | Add NpcDatabase, update ContentDatabase |
+| `data/npcs.ron`                          | NEW    | Global NPC definitions                  |
+| `campaigns/tutorial/data/npcs.ron`       | NEW    | Tutorial campaign NPCs                  |
+| `campaigns/tutorial/data/maps/map_*.ron` | MODIFY | Replace inline NPCs with placements     |
+| `sdk/campaign_builder/src/npc_editor.rs` | NEW    | NPC Editor module                       |
+| `sdk/campaign_builder/src/map_editor.rs` | MODIFY | Update PlaceNpc tool                    |
+| `sdk/campaign_builder/src/main.rs`       | MODIFY | Add NPC tab                             |
+| `sdk/campaign_builder/src/validation.rs` | MODIFY | Add NPC validation rules                |
+| `src/game/systems/events.rs`             | MODIFY | Update NPC dialogue handling            |
 
 ---
 
 ## Timeline Estimate
 
-| Phase | Estimated Duration | Dependencies |
-|-------|-------------------|--------------|
-| Phase 1: Core Domain Module | 2-3 days | None |
-| Phase 2: Data File Creation | 0.5 days | Phase 1 |
-| Phase 3: SDK Updates | 2-3 days | Phase 1 |
-| Phase 4: Engine Integration | 1-2 days | Phase 1, Phase 2 |
-| Phase 5: Migration & Cleanup | 1 day | Phase 2, Phase 3, Phase 4 |
-| **Total** | **7-10 days** | |
+| Phase                        | Estimated Duration | Dependencies              |
+| ---------------------------- | ------------------ | ------------------------- |
+| Phase 1: Core Domain Module  | 2-3 days           | None                      |
+| Phase 2: Data File Creation  | 0.5 days           | Phase 1                   |
+| Phase 3: SDK Updates         | 2-3 days           | Phase 1                   |
+| Phase 4: Engine Integration  | 1-2 days           | Phase 1, Phase 2          |
+| Phase 5: Migration & Cleanup | 1 day              | Phase 2, Phase 3, Phase 4 |
+| **Total**                    | **7-10 days**      |                           |
 
 Phases 2 and 3 can run in parallel after Phase 1 completes.

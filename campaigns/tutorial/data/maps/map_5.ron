@@ -3052,46 +3052,34 @@
             map_id: 4,
         ),
     },
-    npcs: [
+    npc_placements: [
         (
-            id: 1,
-            name: "Village Elder",
-            description: "The wise elder of the village who offers guidance and local quests.",
+            npc_id: "tutorial_elder_village2",
             position: (
                 x: 10,
                 y: 4,
             ),
-            dialogue: "Greetings, brave adventurers! Dark forces stir in the dungeon to the east. Will you help us?",
         ),
         (
-            id: 2,
-            name: "Innkeeper",
-            description: "The proprietor of the inn who rents rooms and provides food to travelers.",
+            npc_id: "tutorial_innkeeper_town2",
             position: (
                 x: 4,
                 y: 3,
             ),
-            dialogue: "Welcome to my inn! You look weary from your travels. Rest here and recover your strength.",
         ),
         (
-            id: 3,
-            name: "Merchant",
-            description: "A traveling merchant offering a selection of goods and supplies.",
+            npc_id: "tutorial_merchant_town2",
             position: (
                 x: 15,
                 y: 3,
             ),
-            dialogue: "I have the finest goods in the land! Take a look at my wares.",
         ),
         (
-            id: 4,
-            name: "High Priest",
-            description: "The head cleric of the temple, who offers healing and spiritual counsel.",
+            npc_id: "tutorial_priest_town2",
             position: (
                 x: 10,
                 y: 9,
             ),
-            dialogue: "May the light guide you. I can heal your wounds and cure your ailments.",
         ),
     ],
 )
