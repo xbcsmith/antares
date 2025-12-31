@@ -4,7 +4,7 @@
 
 ### Remove Event Triggers
 
-[remove per tile event triggers implementation](./remove_per_tile_event_triggers_implementation_plan.md)
+[X] [remove per tile event triggers implementation](./remove_per_tile_event_triggers_implementation_plan.md)
 
 ### Config Editor Implementation
 
