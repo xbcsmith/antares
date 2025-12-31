@@ -22,6 +22,13 @@ pub struct MapEntity(pub types::MapId);
 #[derive(bevy::prelude::Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TileCoord(pub types::Position);
 
+/// Component tagging an entity as an NPC visual marker
+#[derive(bevy::prelude::Component, Debug, Clone, PartialEq, Eq)]
+pub struct NpcMarker {
+    /// NPC ID from the definition
+    pub npc_id: String,
+}
+
 /// Event trigger component - attached to entities that represent in-world event triggers
 #[derive(bevy::prelude::Component, Debug, Clone)]
 pub struct EventTrigger {
@@ -98,6 +105,7 @@ fn handle_door_opened(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     global_state: Res<GlobalState>,
+    content: Res<crate::application::resources::GameContent>,
 ) {
     // Only refresh if a door was actually opened
     if door_messages.read().count() == 0 {
@@ -112,7 +120,7 @@ fn handle_door_opened(
     }
 
     // Respawn the map with updated door states
-    spawn_map(commands, meshes, materials, global_state);
+    spawn_map(commands, meshes, materials, global_state, content);
 }
 
 /// Converts a domain MapEvent into a lightweight MapEventType (if supported)
@@ -169,7 +177,10 @@ fn map_change_handler(
 /// it despawns previously spawned map entities.
 fn spawn_map_markers(
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     global_state: Res<GlobalState>,
+    content: Res<crate::application::resources::GameContent>,
     query_existing: Query<Entity, With<MapEntity>>,
     mut last_map: Local<Option<types::MapId>>,
 ) {
@@ -221,6 +232,38 @@ fn spawn_map_markers(
                 ));
             }
         }
+
+        // Spawn NPC visual markers for the new map (Phase 2: NPC Visual Representation)
+        let resolved_npcs = map.resolve_npcs(&content.0.npcs);
+        let npc_color = Color::srgb(0.0, 1.0, 1.0); // Cyan
+        let npc_material = materials.add(StandardMaterial {
+            base_color: npc_color,
+            perceptual_roughness: 0.5,
+            ..default()
+        });
+
+        // Vertical plane representing NPC (billboard-like)
+        // 1.0 wide, 1.8 tall (human height ~6 feet), 0.1 depth
+        let npc_mesh = meshes.add(Cuboid::new(1.0, 1.8, 0.1));
+
+        for resolved_npc in resolved_npcs.iter() {
+            let x = resolved_npc.position.x as f32;
+            let y = resolved_npc.position.y as f32;
+
+            // Center the NPC marker at y=0.9 (bottom at 0, top at 1.8)
+            commands.spawn((
+                Mesh3d(npc_mesh.clone()),
+                MeshMaterial3d(npc_material.clone()),
+                Transform::from_xyz(x, 0.9, y),
+                GlobalTransform::default(),
+                Visibility::default(),
+                MapEntity(map_id),
+                TileCoord(resolved_npc.position),
+                NpcMarker {
+                    npc_id: resolved_npc.npc_id.clone(),
+                },
+            ));
+        }
     } else {
         // Current map id is set to an unknown map - leave the world empty
         warn!("Current map {} not present in world", current);
@@ -244,6 +287,7 @@ fn spawn_map(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     global_state: Res<GlobalState>,
+    content: Res<crate::application::resources::GameContent>,
 ) {
     debug!("spawn_map system called");
     let game_state = &global_state.0;
@@ -493,9 +537,42 @@ fn spawn_map(
             }
         }
 
+        // Spawn NPC visual markers (Phase 2: NPC Visual Representation)
+        let resolved_npcs = map.resolve_npcs(&content.0.npcs);
+        let npc_color = Color::srgb(0.0, 1.0, 1.0); // Cyan
+        let npc_material = materials.add(StandardMaterial {
+            base_color: npc_color,
+            perceptual_roughness: 0.5,
+            ..default()
+        });
+
+        // Vertical plane representing NPC (billboard-like)
+        // 1.0 wide, 1.8 tall (human height ~6 feet), 0.1 depth
+        let npc_mesh = meshes.add(Cuboid::new(1.0, 1.8, 0.1));
+
+        for resolved_npc in resolved_npcs.iter() {
+            let x = resolved_npc.position.x as f32;
+            let y = resolved_npc.position.y as f32;
+
+            // Center the NPC marker at y=0.9 (bottom at 0, top at 1.8)
+            commands.spawn((
+                Mesh3d(npc_mesh.clone()),
+                MeshMaterial3d(npc_material.clone()),
+                Transform::from_xyz(x, 0.9, y),
+                GlobalTransform::default(),
+                Visibility::default(),
+                MapEntity(map.id),
+                TileCoord(resolved_npc.position),
+                NpcMarker {
+                    npc_id: resolved_npc.npc_id.clone(),
+                },
+            ));
+        }
+
         debug!(
-            "Map spawning complete with {} tiles",
-            map.width * map.height
+            "Map spawning complete with {} tiles and {} NPCs",
+            map.width * map.height,
+            resolved_npcs.len()
         );
     } else {
         warn!("No current map found during spawn_map!");

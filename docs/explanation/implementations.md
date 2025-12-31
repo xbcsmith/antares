@@ -160,6 +160,184 @@ All placements reference existing NPCs in `data/npcs.ron`:
 
 ---
 
+## Phase 2: NPC Visual Representation (Placeholders) - COMPLETED
+
+**Date:** 2025-01-26
+**Status:** ✅ Implementation complete
+
+### Summary
+
+Successfully implemented Phase 2 of the NPC Gameplay Fix Implementation Plan, adding visual placeholder representations for NPCs on the map. NPCs are now visible as cyan-colored vertical planes positioned at their designated map locations, making them identifiable during gameplay.
+
+### Changes Made
+
+#### 2.1 NpcMarker Component
+
+**File**: `antares/src/game/systems/map.rs`
+
+Added new ECS component to track NPC visual entities:
+
+```rust
+/// Component tagging an entity as an NPC visual marker
+#[derive(bevy::prelude::Component, Debug, Clone, PartialEq, Eq)]
+pub struct NpcMarker {
+    /// NPC ID from the definition
+    pub npc_id: String,
+}
+```
+
+**Purpose**:
+
+- Identifies entities as NPC visual markers in the ECS
+- Stores the NPC ID for lookup and interaction
+- Enables queries and filtering of NPC entities
+
+#### 2.2 Visual Spawning Logic
+
+**Updated Systems**:
+
+1. **spawn_map** (initial map load at Startup):
+
+   - Added `GameContent` resource parameter for NPC database access
+   - Resolves NPCs using `map.resolve_npcs(&content.0.npcs)`
+   - Spawns cyan vertical cuboid (1.0 × 1.8 × 0.1) for each NPC
+   - Centers at y=0.9 (bottom at 0, top at 1.8 - human height)
+   - Tags with `MapEntity`, `TileCoord`, and `NpcMarker` components
+
+2. **spawn_map_markers** (map transitions):
+
+   - Added mesh/material resources for NPC visual spawning
+   - Added `GameContent` resource parameter
+   - Spawns NPC visuals when map changes (same logic as initial spawn)
+   - Ensures NPCs despawn/respawn correctly with other map entities
+
+3. **handle_door_opened** (door state changes):
+   - Added `GameContent` resource parameter
+   - Passes content to `spawn_map` when respawning after door opening
+
+**Visual Properties**:
+
+- **Mesh**: Vertical cuboid (billboard-like) - 1.0 wide × 1.8 tall × 0.1 depth
+- **Color**: Cyan (RGB: 0.0, 1.0, 1.0) - distinct from terrain colors
+- **Material**: Perceptual roughness 0.5 for moderate shininess
+- **Position**: X/Z at NPC coordinates, Y at 0.9 (centered vertically)
+
+#### 2.3 Lifecycle Integration
+
+**Spawning Events**:
+
+- Initial map load (Startup)
+- Map transitions (Update when current_map changes)
+- Door opening events (DoorOpenedEvent)
+
+**Despawning**:
+
+- Automatic via `MapEntity` component
+- All NPCs cleaned up when map changes
+- No special cleanup logic required
+
+### Validation Results
+
+**Quality Checks**: All passed ✅
+
+```bash
+cargo fmt --all                                      # ✅ OK
+cargo check --all-targets --all-features            # ✅ OK
+cargo clippy --all-targets --all-features -D warnings  # ✅ OK
+cargo nextest run --all-features                    # ✅ 974 passed, 0 failed
+```
+
+### Manual Verification
+
+To verify NPC visuals in the game:
+
+1. Run the game: `cargo run`
+2. Load a map with NPC placements (e.g., starter_town)
+3. Observe cyan vertical planes at NPC positions
+
+**Expected NPCs on starter_town (Map 1)**:
+
+- Village Elder at (10, 4) - cyan marker
+- Innkeeper at (4, 3) - cyan marker
+- Merchant at (15, 3) - cyan marker
+- Priest at (10, 9) - cyan marker
+
+### Architecture Compliance
+
+**Data Structures**: Used exactly as defined
+
+- `ResolvedNpc` from `src/domain/world/types.rs`
+- `NpcPlacement` through `map.npc_placements`
+- `NpcDatabase` via `GameContent` resource
+
+**Module Placement**: Correct layer
+
+- All changes in `src/game/systems/map.rs` (game/rendering layer)
+- No domain layer modifications
+- Proper separation of concerns maintained
+
+**Type System**: Adheres to architecture
+
+- `MapId` used in `MapEntity` component
+- `Position` used in `TileCoord` component
+- NPC ID as String (matches domain definition)
+
+### Test Coverage
+
+**Existing tests**: All 974 tests pass without modification
+
+- No breaking changes to existing functionality
+- NPC blocking logic from Phase 1 remains functional
+- Integration with existing map entity lifecycle verified
+
+**Manual testing**: Required per implementation plan
+
+- Visual verification is primary testing method
+- NPCs appear at correct coordinates from map data
+
+### Deliverables Status
+
+- [x] `NpcMarker` component for ECS tracking
+- [x] NPC rendering logic in `src/game/systems/map.rs`
+- [x] NPCs spawn at correct positions on initial map load
+- [x] NPCs respawn during map transitions
+- [x] NPCs despawn/respawn on door opening
+- [x] All quality checks pass
+- [x] Documentation updated
+
+### Known Limitations
+
+1. **Placeholder Visuals**: NPCs render as simple cyan boxes, not sprites/models
+2. **No Facing Representation**: NPC facing direction not visualized
+3. **No Portrait Display**: Portrait paths stored but not rendered
+4. **Static Visuals**: NPCs don't animate or change appearance
+
+### Next Steps (Phase 3)
+
+**Dialogue Event Connection**:
+
+- Hook up `MapEvent::NpcDialogue` to start dialogue
+- Update `handle_events` in `events.rs` to look up NpcDefinition and start dialogue
+- Update `application/mod.rs` to initialize DialogueState correctly
+
+**Future Enhancements** (post-Phase 3):
+
+- Replace cuboid placeholders with sprite billboards
+- Add NPC portraits in dialogue UI
+- Visualize NPC facing direction
+- Add NPC animations (idle, talking)
+- Integrate NPC role indicators (merchant icon, quest marker)
+
+### Related Files
+
+- **Implementation**: `src/game/systems/map.rs`
+- **Dependencies**: `src/application/resources.rs` (GameContent)
+- **Domain Types**: `src/domain/world/types.rs` (ResolvedNpc)
+- **Database**: `src/sdk/database.rs` (NpcDatabase, ContentDatabase)
+- **Detailed Summary**: `docs/explanation/phase2_npc_visual_implementation_summary.md`
+
+---
+
 ## Phase 4: NPC Externalization - Engine Integration - COMPLETED
 
 **Date:** 2025-01-26

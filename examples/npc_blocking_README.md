@@ -185,6 +185,6 @@ When modifying this example:
 
 ---
 
-**Last Updated**: 2025-01-26  
-**Phase**: 1 - NPC Externalization & Blocking  
+**Last Updated**: 2025-01-26
+**Phase**: 1 - NPC Externalization & Blocking
 **Status**: ✅ Complete
