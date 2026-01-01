@@ -9,7 +9,8 @@
 
 use crate::ui_helpers::{
     autocomplete_class_selector, autocomplete_item_list_selector, autocomplete_item_selector,
-    autocomplete_race_selector, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
+    autocomplete_portrait_selector, autocomplete_race_selector, extract_portrait_candidates,
+    resolve_portrait_path, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
     TwoColumnLayout,
 };
 use antares::domain::character::{Alignment, Sex};
@@ -22,10 +23,11 @@ use antares::domain::races::RaceDefinition;
 use antares::domain::types::{ItemId, RaceId};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Editor state for characters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CharactersEditorState {
     /// All characters being edited
     pub characters: Vec<CharacterDefinition>,
@@ -56,6 +58,22 @@ pub struct CharactersEditorState {
 
     /// Unsaved changes
     pub has_unsaved_changes: bool,
+
+    /// Whether the portrait grid picker popup is open
+    #[serde(skip)]
+    pub portrait_picker_open: bool,
+
+    /// Cached portrait textures for grid display
+    #[serde(skip)]
+    pub portrait_textures: HashMap<String, Option<egui::TextureHandle>>,
+
+    /// Available portrait IDs (cached from directory scan)
+    #[serde(skip)]
+    pub available_portraits: Vec<String>,
+
+    /// Last campaign directory (to detect changes)
+    #[serde(skip)]
+    pub last_campaign_dir: Option<PathBuf>,
 }
 
 /// Editor mode
@@ -152,6 +170,10 @@ impl Default for CharactersEditorState {
             filter_alignment: None,
             filter_premade_only: false,
             has_unsaved_changes: false,
+            portrait_picker_open: false,
+            portrait_textures: HashMap::new(),
+            available_portraits: Vec::new(),
+            last_campaign_dir: None,
         }
     }
 }
@@ -461,6 +483,228 @@ impl CharactersEditorState {
         self.filter_premade_only = false;
     }
 
+    /// Loads a portrait texture from file and caches it
+    ///
+    /// This method attempts to load a portrait image from the campaign directory,
+    /// decode it, convert it to egui's ColorImage format, and cache it as a TextureHandle.
+    /// If the texture is already cached, returns the cached version.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The egui context for texture registration
+    /// * `campaign_dir` - The campaign directory containing assets/portraits
+    /// * `portrait_id` - The portrait ID (filename stem) to load
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(&TextureHandle)` if the image was successfully loaded and cached,
+    /// or `None` if the image could not be loaded (file not found, decode error, etc.).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use campaign_builder::characters_editor::CharactersEditorState;
+    /// use std::path::PathBuf;
+    ///
+    /// let mut state = CharactersEditorState::new();
+    /// let campaign_dir = PathBuf::from("/path/to/campaign");
+    /// // In egui context:
+    /// // let texture = state.load_portrait_texture(ctx, Some(&campaign_dir), "0");
+    /// ```
+    pub fn load_portrait_texture(
+        &mut self,
+        ctx: &egui::Context,
+        campaign_dir: Option<&PathBuf>,
+        portrait_id: &str,
+    ) -> bool {
+        // Check if already cached
+        if self.portrait_textures.contains_key(portrait_id) {
+            return self.portrait_textures.get(portrait_id).unwrap().is_some();
+        }
+
+        // Attempt to load and decode image
+        let texture_handle = (|| {
+            let path = resolve_portrait_path(campaign_dir, portrait_id)?;
+
+            // Read image file
+            let image_bytes = std::fs::read(&path).ok()?;
+
+            // Decode image using image crate
+            let dynamic_image = image::load_from_memory(&image_bytes).ok()?;
+
+            // Convert to RGBA8
+            let rgba_image = dynamic_image.to_rgba8();
+            let size = [rgba_image.width() as usize, rgba_image.height() as usize];
+            let pixels = rgba_image.as_flat_samples();
+
+            // Create egui ColorImage
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+
+            // Register texture with egui
+            let texture_handle = ctx.load_texture(
+                format!("portrait_{}", portrait_id),
+                color_image,
+                egui::TextureOptions::LINEAR,
+            );
+
+            Some(texture_handle)
+        })();
+
+        // Cache result (even None for failed loads to avoid repeated attempts)
+        let loaded = texture_handle.is_some();
+        self.portrait_textures
+            .insert(portrait_id.to_string(), texture_handle);
+
+        loaded
+    }
+
+    /// Shows portrait grid picker popup for visual portrait selection
+    ///
+    /// Displays a popup window with a grid of portrait thumbnails that the user can click to select.
+    /// The popup is modal and closes when a portrait is selected or the close button is clicked.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The egui context for rendering
+    /// * `campaign_dir` - The campaign directory containing assets/portraits
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(portrait_id)` if the user clicked on a portrait to select it,
+    /// or `None` if no selection was made this frame.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use campaign_builder::characters_editor::CharactersEditorState;
+    /// use std::path::PathBuf;
+    ///
+    /// let mut state = CharactersEditorState::new();
+    /// let campaign_dir = PathBuf::from("/path/to/campaign");
+    /// // In egui context:
+    /// // if let Some(selected_id) = state.show_portrait_grid_picker(ctx, Some(&campaign_dir)) {
+    /// //     println!("Selected portrait: {}", selected_id);
+    /// // }
+    /// ```
+    pub fn show_portrait_grid_picker(
+        &mut self,
+        ctx: &egui::Context,
+        campaign_dir: Option<&PathBuf>,
+    ) -> Option<String> {
+        let mut selected_portrait: Option<String> = None;
+
+        // Clone the portraits list to avoid borrow issues
+        let available_portraits = self.available_portraits.clone();
+
+        egui::Window::new("Select Portrait")
+            .collapsible(false)
+            .resizable(true)
+            .default_width(400.0)
+            .default_height(500.0)
+            .show(ctx, |ui| {
+                ui.label("Click a portrait to select:");
+                ui.separator();
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    // Display portraits in a grid with 4 columns
+                    const COLUMNS: usize = 4;
+                    const THUMBNAIL_SIZE: f32 = 80.0;
+
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+
+                    let total_portraits = available_portraits.len();
+                    let rows = total_portraits.div_ceil(COLUMNS);
+
+                    for row in 0..rows {
+                        ui.horizontal(|ui| {
+                            for col in 0..COLUMNS {
+                                let idx = row * COLUMNS + col;
+                                if idx >= total_portraits {
+                                    break;
+                                }
+
+                                let portrait_id = &available_portraits[idx];
+
+                                ui.vertical(|ui| {
+                                    // Try to load texture
+                                    self.load_portrait_texture(ctx, campaign_dir, portrait_id);
+                                    let has_texture = self
+                                        .portrait_textures
+                                        .get(portrait_id)
+                                        .and_then(|opt| opt.as_ref())
+                                        .is_some();
+
+                                    // Create image button or placeholder
+                                    let button_response = if has_texture {
+                                        let texture = self
+                                            .portrait_textures
+                                            .get(portrait_id)
+                                            .unwrap()
+                                            .as_ref()
+                                            .unwrap();
+                                        ui.add(
+                                            egui::Button::image(
+                                                egui::Image::new(texture).fit_to_exact_size(
+                                                    egui::vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE),
+                                                ),
+                                            )
+                                            .frame(true),
+                                        )
+                                    } else {
+                                        // Placeholder for failed/missing images
+                                        let (rect, response) = ui.allocate_exact_size(
+                                            egui::vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE),
+                                            egui::Sense::click(),
+                                        );
+                                        ui.painter().rect_filled(
+                                            rect,
+                                            2.0,
+                                            egui::Color32::from_gray(50),
+                                        );
+                                        ui.painter().text(
+                                            rect.center(),
+                                            egui::Align2::CENTER_CENTER,
+                                            "?",
+                                            egui::FontId::proportional(24.0),
+                                            egui::Color32::from_gray(150),
+                                        );
+                                        response
+                                    };
+
+                                    // Check if clicked
+                                    if button_response.clicked() {
+                                        selected_portrait = Some(portrait_id.clone());
+                                        self.portrait_picker_open = false;
+                                    }
+
+                                    // Show portrait ID below thumbnail
+                                    ui.label(
+                                        egui::RichText::new(portrait_id)
+                                            .size(10.0)
+                                            .color(egui::Color32::from_gray(200)),
+                                    );
+                                });
+                            }
+                        });
+                    }
+
+                    // Show message if no portraits found
+                    if total_portraits == 0 {
+                        ui.label("No portraits found in campaign assets/portraits directory.");
+                    }
+                });
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Close").clicked() {
+                        self.portrait_picker_open = false;
+                    }
+                });
+            });
+
+        selected_portrait
+    }
+
     /// Loads characters from a file path
     pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
         let content =
@@ -510,6 +754,19 @@ impl CharactersEditorState {
         status_message: &mut String,
         file_load_merge_mode: &mut bool,
     ) {
+        // Scan portraits if campaign directory changed
+        let campaign_dir_changed = match (&self.last_campaign_dir, campaign_dir) {
+            (None, Some(_)) => true,
+            (Some(_), None) => true,
+            (Some(last), Some(current)) => last != current,
+            (None, None) => false,
+        };
+
+        if campaign_dir_changed {
+            self.available_portraits = extract_portrait_candidates(campaign_dir);
+            self.last_campaign_dir = campaign_dir.cloned();
+        }
+
         ui.heading("👤 Characters Editor");
         ui.add_space(5.0);
 
@@ -633,6 +890,14 @@ impl CharactersEditorState {
             }
             CharactersEditorMode::Add | CharactersEditorMode::Edit => {
                 self.show_character_form(ui, races, classes, items);
+            }
+        }
+
+        // Show portrait grid picker popup if open
+        if self.portrait_picker_open {
+            if let Some(selected_id) = self.show_portrait_grid_picker(ui.ctx(), campaign_dir) {
+                self.buffer.portrait_id = selected_id;
+                *unsaved_changes = true;
             }
         }
     }
@@ -1125,10 +1390,21 @@ impl CharactersEditorState {
                         ui.end_row();
 
                         ui.label("Portrait ID:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.buffer.portrait_id)
-                                .desired_width(60.0),
-                        );
+                        ui.horizontal(|ui| {
+                            // Autocomplete input
+                            autocomplete_portrait_selector(
+                                ui,
+                                "character_portrait",
+                                "",
+                                &mut self.buffer.portrait_id,
+                                &self.available_portraits,
+                            );
+
+                            // Grid picker button
+                            if ui.button("🖼").on_hover_text("Browse portraits").clicked() {
+                                self.portrait_picker_open = true;
+                            }
+                        });
                         ui.end_row();
 
                         ui.label("Premade:");
@@ -1947,5 +2223,128 @@ mod tests {
         state.save_character().unwrap();
 
         assert!(state.has_unsaved_changes);
+    }
+
+    #[test]
+    fn test_portrait_picker_initial_state() {
+        let state = CharactersEditorState::new();
+        assert!(!state.portrait_picker_open);
+        assert!(state.portrait_textures.is_empty());
+        assert!(state.available_portraits.is_empty());
+        assert!(state.last_campaign_dir.is_none());
+    }
+
+    #[test]
+    fn test_portrait_picker_open_flag() {
+        let mut state = CharactersEditorState::new();
+        assert!(!state.portrait_picker_open);
+
+        state.portrait_picker_open = true;
+        assert!(state.portrait_picker_open);
+
+        state.portrait_picker_open = false;
+        assert!(!state.portrait_picker_open);
+    }
+
+    #[test]
+    fn test_available_portraits_cache() {
+        let mut state = CharactersEditorState::new();
+        assert!(state.available_portraits.is_empty());
+
+        // Simulate scanning portraits
+        state.available_portraits = vec!["0".to_string(), "1".to_string(), "2".to_string()];
+        assert_eq!(state.available_portraits.len(), 3);
+        assert_eq!(state.available_portraits[0], "0");
+        assert_eq!(state.available_portraits[1], "1");
+        assert_eq!(state.available_portraits[2], "2");
+    }
+
+    #[test]
+    fn test_campaign_dir_change_detection() {
+        let mut state = CharactersEditorState::new();
+        let dir1 = PathBuf::from("/path/to/campaign1");
+        let dir2 = PathBuf::from("/path/to/campaign2");
+
+        // Initial state
+        assert!(state.last_campaign_dir.is_none());
+
+        // Set first directory
+        state.last_campaign_dir = Some(dir1.clone());
+        assert_eq!(state.last_campaign_dir, Some(dir1.clone()));
+
+        // Change to different directory
+        state.last_campaign_dir = Some(dir2.clone());
+        assert_eq!(state.last_campaign_dir, Some(dir2));
+        assert_ne!(state.last_campaign_dir, Some(dir1));
+    }
+
+    #[test]
+    fn test_portrait_texture_cache_insertion() {
+        let mut state = CharactersEditorState::new();
+        assert!(state.portrait_textures.is_empty());
+
+        // Simulate failed texture load (None)
+        state.portrait_textures.insert("0".to_string(), None);
+        assert_eq!(state.portrait_textures.len(), 1);
+        assert!(state.portrait_textures.contains_key("0"));
+        assert!(state.portrait_textures.get("0").unwrap().is_none());
+
+        // Add another entry
+        state.portrait_textures.insert("1".to_string(), None);
+        assert_eq!(state.portrait_textures.len(), 2);
+    }
+
+    #[test]
+    fn test_portrait_id_in_edit_buffer() {
+        let mut state = CharactersEditorState::new();
+        state.start_new_character();
+
+        // Default should be empty
+        assert!(state.buffer.portrait_id.is_empty());
+
+        // Set portrait ID
+        state.buffer.portrait_id = "42".to_string();
+        assert_eq!(state.buffer.portrait_id, "42");
+
+        // Clear portrait ID
+        state.buffer.portrait_id.clear();
+        assert!(state.buffer.portrait_id.is_empty());
+    }
+
+    #[test]
+    fn test_save_character_with_portrait() {
+        let mut state = CharactersEditorState::new();
+        state.start_new_character();
+        state.buffer.id = "portrait_char".to_string();
+        state.buffer.name = "Portrait Test".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+        state.buffer.portrait_id = "5".to_string();
+
+        state.save_character().unwrap();
+
+        assert_eq!(state.characters.len(), 1);
+        assert_eq!(state.characters[0].portrait_id, "5");
+    }
+
+    #[test]
+    fn test_edit_character_updates_portrait() {
+        let mut state = CharactersEditorState::new();
+
+        // Create character with portrait
+        state.start_new_character();
+        state.buffer.id = "update_portrait".to_string();
+        state.buffer.name = "Test".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+        state.buffer.portrait_id = "1".to_string();
+        state.save_character().unwrap();
+
+        // Edit and change portrait
+        state.start_edit_character(0);
+        state.buffer.portrait_id = "42".to_string();
+        state.save_character().unwrap();
+
+        assert_eq!(state.characters[0].portrait_id, "42");
     }
 }

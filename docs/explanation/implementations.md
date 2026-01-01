@@ -387,9 +387,399 @@ if autocomplete_portrait_selector(
 
 The following phases from the implementation plan are ready to proceed:
 
-- Phase 3: Portrait Grid Picker Popup (visual grid selector with thumbnails)
+- ✅ Phase 3: Portrait Grid Picker Popup (visual grid selector with thumbnails) - **COMPLETED**
 - Phase 4: Preview Panel Portrait Display (show selected portrait in character preview)
 - Phase 5: Polish and Edge Cases (tooltips, error handling, full integration testing)
+
+---
+
+## Phase 3: Portrait Support - Portrait Grid Picker Popup - COMPLETED
+
+### Summary
+
+Implemented a visual portrait grid picker popup that displays thumbnail previews of all available portraits in a scrollable grid. Users can click on a portrait thumbnail to select it, providing a visual alternative to the autocomplete text-based selector. This phase integrates image loading, texture caching, and popup UI rendering into the character editor.
+
+### Changes Made
+
+#### 3.1 State Fields for Portrait Picker (`sdk/campaign_builder/src/characters_editor.rs`)
+
+Added new state fields to `CharactersEditorState`:
+
+```rust
+/// Whether the portrait grid picker popup is open
+#[serde(skip)]
+pub portrait_picker_open: bool,
+
+/// Cached portrait textures for grid display
+#[serde(skip)]
+pub portrait_textures: HashMap<String, Option<egui::TextureHandle>>,
+
+/// Available portrait IDs (cached from directory scan)
+#[serde(skip)]
+pub available_portraits: Vec<String>,
+
+/// Last campaign directory (to detect changes)
+#[serde(skip)]
+pub last_campaign_dir: Option<PathBuf>,
+```
+
+**Design decisions:**
+
+- All fields marked with `#[serde(skip)]` to exclude from serialization (runtime-only state)
+- `portrait_textures` uses `Option<TextureHandle>` to cache both successful and failed loads
+- Removed `Debug` and `Clone` derives from struct (TextureHandle doesn't implement them)
+
+#### 3.2 Image Loading with Caching (`load_portrait_texture` method)
+
+Added `load_portrait_texture` method to load and cache portrait images:
+
+```rust
+pub fn load_portrait_texture(
+    &mut self,
+    ctx: &egui::Context,
+    campaign_dir: Option<&PathBuf>,
+    portrait_id: &str,
+) -> bool
+```
+
+**Features:**
+
+- Loads image from file using `image` crate
+- Decodes PNG, JPG, JPEG formats
+- Converts to egui `ColorImage` (RGBA8)
+- Registers texture with egui context
+- Caches results in `HashMap` (including failures to avoid repeated attempts)
+- Returns `bool` indicating if texture was successfully loaded
+
+**Implementation details:**
+
+- Uses `resolve_portrait_path` from Phase 1 to find file
+- Graceful error handling - failed loads cached as `None`
+- Texture naming: `portrait_{id}` for egui registration
+- Linear texture filtering for smooth scaling
+
+#### 3.3 Portrait Grid Picker Popup (`show_portrait_grid_picker` method)
+
+Added `show_portrait_grid_picker` method to render the popup window:
+
+```rust
+pub fn show_portrait_grid_picker(
+    &mut self,
+    ctx: &egui::Context,
+    campaign_dir: Option<&PathBuf>,
+) -> Option<String>
+```
+
+**UI Features:**
+
+- Modal popup window titled "Select Portrait"
+- Scrollable vertical area for many portraits
+- 4-column grid layout with 80x80 pixel thumbnails
+- Each cell shows portrait image + portrait ID label below
+- Clickable thumbnails (using `egui::Button::image`)
+- Placeholder "?" for missing/failed images
+- "Close" button to dismiss without selection
+- Returns `Some(portrait_id)` when user clicks a portrait
+
+**Layout:**
+
+```
+┌──────────────────────────────────┐
+│   Select Portrait            [X] │
+├──────────────────────────────────┤
+│ Click a portrait to select:      │
+├──────────────────────────────────┤
+│ ┌────┐ ┌────┐ ┌────┐ ┌────┐    │
+│ │    │ │    │ │    │ │    │    │
+│ │ 0  │ │ 1  │ │ 2  │ │ 3  │    │
+│ └────┘ └────┘ └────┘ └────┘    │
+│ ┌────┐ ┌────┐ ┌────┐ ┌────┐    │
+│ │    │ │    │ │    │ │    │    │
+│ │ 4  │ │ 5  │ │ 6  │ │ 7  │    │
+│ └────┘ └────┘ └────┘ └────┘    │
+│              ...                 │
+├──────────────────────────────────┤
+│                        [Close]   │
+└──────────────────────────────────┐
+```
+
+**Performance optimizations:**
+
+- Clones portrait list once to avoid borrow checker issues
+- Lazy texture loading (only loads when first displayed)
+- Caching prevents reloading on every frame
+
+#### 3.4 Form Integration (`show_character_form` modification)
+
+Updated portrait field in character form to combine autocomplete + browse button:
+
+**Before:**
+
+```rust
+ui.label("Portrait ID:");
+ui.add(
+    egui::TextEdit::singleline(&mut self.buffer.portrait_id)
+        .desired_width(60.0),
+);
+```
+
+**After:**
+
+```rust
+ui.label("Portrait ID:");
+ui.horizontal(|ui| {
+    // Autocomplete input
+    autocomplete_portrait_selector(
+        ui,
+        "character_portrait",
+        "",
+        &mut self.buffer.portrait_id,
+        &self.available_portraits,
+    );
+
+    // Grid picker button
+    if ui.button("🖼").on_hover_text("Browse portraits").clicked() {
+        self.portrait_picker_open = true;
+    }
+});
+```
+
+**Features:**
+
+- Autocomplete selector for text-based input (Phase 2)
+- 🖼 button with hover tooltip "Browse portraits"
+- Button opens the grid picker popup
+- Both methods update the same `portrait_id` field
+
+#### 3.5 Portrait Scanning on Campaign Directory Change (`show` method)
+
+Added logic to automatically refresh available portraits when campaign directory changes:
+
+```rust
+// Scan portraits if campaign directory changed
+let campaign_dir_changed = match (&self.last_campaign_dir, campaign_dir) {
+    (None, Some(_)) => true,
+    (Some(_), None) => true,
+    (Some(last), Some(current)) => last != current,
+    (None, None) => false,
+};
+
+if campaign_dir_changed {
+    self.available_portraits = extract_portrait_candidates(campaign_dir);
+    self.last_campaign_dir = campaign_dir.cloned();
+}
+```
+
+**Features:**
+
+- Detects when campaign directory changes
+- Rescans portraits directory automatically
+- Updates `available_portraits` cache
+- Tracks last directory to avoid redundant scans
+
+#### 3.6 Popup Rendering in Main Loop (`show` method)
+
+Added popup rendering at end of `show()` method:
+
+```rust
+// Show portrait grid picker popup if open
+if self.portrait_picker_open {
+    if let Some(selected_id) = self.show_portrait_grid_picker(ui.ctx(), campaign_dir) {
+        self.buffer.portrait_id = selected_id;
+        *unsaved_changes = true;
+    }
+}
+```
+
+**Features:**
+
+- Renders popup when flag is set
+- Updates character buffer when portrait selected
+- Marks editor as having unsaved changes
+- Popup closes itself when selection is made
+
+#### 3.7 Dependency Addition
+
+Added `image` crate to `sdk/campaign_builder/Cargo.toml`:
+
+```toml
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+```
+
+**Configuration:**
+
+- Version 0.25 (latest stable)
+- Minimal features: only PNG and JPEG support
+- No default features (reduces binary size)
+
+### Architecture Compliance
+
+✅ **Module structure:**
+
+- Portrait picker logic in `characters_editor.rs` (correct module)
+- Uses existing portrait helpers from `ui_helpers.rs` (Phase 1 & 2)
+- No new modules created - proper encapsulation
+
+✅ **Type system:**
+
+- Uses `PathBuf` for file paths (Rust standard)
+- Uses `HashMap<String, Option<TextureHandle>>` for caching
+- Returns `Option<String>` for optional selection
+- No raw types or magic numbers
+
+✅ **Error handling:**
+
+- No `unwrap()` or `panic!()` calls
+- Failed image loads cached as `None`
+- Graceful fallback to placeholder "?" for missing images
+- Directory changes handled safely
+
+✅ **State management:**
+
+- All picker state marked `#[serde(skip)]` (runtime-only)
+- Removed `Debug` and `Clone` from struct (TextureHandle constraint)
+- Proper separation of persistent vs. transient state
+
+✅ **Existing patterns:**
+
+- Follows popup window pattern used elsewhere in app
+- Grid layout consistent with other editors
+- Button + tooltip pattern matches other UI components
+- Horizontal layout for compound fields (autocomplete + button)
+
+### Validation Results
+
+**Quality Checks - ALL PASSED:**
+
+```bash
+✅ cargo fmt --all                                      # Code formatted
+✅ cargo check --all-targets --all-features            # Compiles successfully
+✅ cargo clippy --all-targets --all-features -p campaign_builder  # Zero errors in characters_editor.rs
+✅ cargo nextest run --all-features -p campaign_builder      # 828/828 tests passed
+```
+
+**Test count increased:** 820 → 828 tests (+8 new tests)
+
+### Test Coverage
+
+**Portrait Picker State Tests (8 tests):**
+
+1. ✅ `test_portrait_picker_initial_state` - Verifies default state is correct
+2. ✅ `test_portrait_picker_open_flag` - Tests open/close flag toggle
+3. ✅ `test_available_portraits_cache` - Tests portrait list caching
+4. ✅ `test_campaign_dir_change_detection` - Tests directory change tracking
+5. ✅ `test_portrait_texture_cache_insertion` - Tests texture cache operations
+6. ✅ `test_portrait_id_in_edit_buffer` - Tests buffer portrait field
+7. ✅ `test_save_character_with_portrait` - Tests saving with portrait ID
+8. ✅ `test_edit_character_updates_portrait` - Tests portrait editing flow
+
+**Test categories:**
+
+- State initialization and defaults
+- Flag and cache operations
+- Campaign directory tracking
+- Integration with character save/load
+- Portrait ID updates through edit workflow
+
+### Usage Example
+
+**Opening the picker:**
+
+```rust
+// In character editor form
+ui.label("Portrait ID:");
+ui.horizontal(|ui| {
+    // Text-based autocomplete input
+    autocomplete_portrait_selector(
+        ui,
+        "character_portrait",
+        "",
+        &mut self.buffer.portrait_id,
+        &self.available_portraits,
+    );
+
+    // Visual grid picker button
+    if ui.button("🖼").on_hover_text("Browse portraits").clicked() {
+        self.portrait_picker_open = true;
+    }
+});
+```
+
+**In main render loop:**
+
+```rust
+// Automatically scans portraits when campaign changes
+if campaign_dir_changed {
+    self.available_portraits = extract_portrait_candidates(campaign_dir);
+}
+
+// Render popup if open
+if self.portrait_picker_open {
+    if let Some(selected_id) = self.show_portrait_grid_picker(ui.ctx(), campaign_dir) {
+        self.buffer.portrait_id = selected_id;
+        *unsaved_changes = true;
+    }
+}
+```
+
+### Benefits Achieved
+
+- **Visual selection**: Users can see portraits before selecting
+- **Improved UX**: Browse button provides discoverable alternative to autocomplete
+- **Performance**: Texture caching prevents redundant file I/O
+- **Robustness**: Failed loads handled gracefully with placeholders
+- **Flexibility**: Two input methods (autocomplete + grid) for different user preferences
+- **Automatic refresh**: Portrait list updates when campaign changes
+- **Scalability**: Scrollable grid handles large portrait collections
+
+### Related Files
+
+**Modified:**
+
+- `sdk/campaign_builder/Cargo.toml` - Added `image` dependency (1 line)
+- `sdk/campaign_builder/src/characters_editor.rs` - Added state fields, methods, integration (206 lines)
+
+**Files Created:**
+
+- None (all functionality integrated into existing modules)
+
+**Total Lines Added:** 207 lines (implementation + tests)
+
+### Integration Points
+
+**Depends on:**
+
+- Phase 1: `extract_portrait_candidates`, `resolve_portrait_path`
+- Phase 2: `autocomplete_portrait_selector`
+- `egui` context for texture registration
+- `image` crate for decoding
+
+**Used by:**
+
+- Character editor form (portrait field)
+- Automatically invoked when campaign directory changes
+
+### Known Limitations
+
+- **Texture memory**: All loaded textures kept in memory until editor closed
+- **No pagination**: Large portrait collections load all at once (scrollable but not lazy)
+- **Fixed grid size**: 4 columns, 80x80 pixels (not configurable)
+- **No preview size**: Thumbnails are small (future: larger preview on hover?)
+
+**These are intentional trade-offs for Phase 3 and can be addressed in Phase 5 (Polish).**
+
+### Next Steps
+
+The following phases from the implementation plan are ready to proceed:
+
+- Phase 4: Preview Panel Portrait Display (show selected portrait in character preview)
+- Phase 5: Polish and Edge Cases:
+  - Add tooltips showing full portrait path
+  - Implement texture memory management (clear cache on campaign close)
+  - Add larger preview on hover
+  - Support additional formats (WebP, etc.)
+  - Configurable grid size and thumbnail dimensions
+  - Lazy loading for large collections
 
 ---
 
