@@ -2858,6 +2858,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Races,
                     EditorTab::Characters,
                     EditorTab::Dialogues,
+                    EditorTab::NPCs,
                     EditorTab::Assets,
                     EditorTab::Validation,
                 ];

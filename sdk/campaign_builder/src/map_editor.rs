@@ -1547,7 +1547,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                             .iter()
                             .any(|p| p.position == pos);
 
-                    let color = Self::tile_color(&tile, event_type.as_ref(), has_npc_placement);
+                    let color = Self::tile_color(tile, event_type.as_ref(), has_npc_placement);
 
                     let rect = Rect::from_min_size(
                         to_screen(x, y),

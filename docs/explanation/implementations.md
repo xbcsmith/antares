@@ -1,3 +1,75 @@
+## NPC Editor Tab Fix - COMPLETED
+
+### Summary
+
+Fixed missing NPC Editor tab in Campaign Builder SDK sidebar. The NPC editor module existed and was fully functional, but the tab was not added to the sidebar tab list, making it inaccessible from the UI.
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/lib.rs`
+
+**Added `EditorTab::NPCs` to sidebar tab array** (line 2861):
+
+The tab enum variant `EditorTab::NPCs` existed and the editor was fully wired up in the match statement, but the tab was missing from the visible tab list in the left sidebar. Added it between `EditorTab::Dialogues` and `EditorTab::Assets`.
+
+```rust
+let tabs = [
+    EditorTab::Metadata,
+    EditorTab::Items,
+    EditorTab::Spells,
+    EditorTab::Conditions,
+    EditorTab::Monsters,
+    EditorTab::Maps,
+    EditorTab::Quests,
+    EditorTab::Classes,
+    EditorTab::Races,
+    EditorTab::Characters,
+    EditorTab::Dialogues,
+    EditorTab::NPCs,        // ← ADDED
+    EditorTab::Assets,
+    EditorTab::Validation,
+];
+```
+
+#### Related Fixes
+
+While fixing clippy warnings, also made these improvements:
+
+1. **`sdk/campaign_builder/src/map_editor.rs`** (line 1550): Removed unnecessary reference in `tile_color` call
+2. **`sdk/campaign_builder/src/quest_editor.rs`** (line 983): Removed duplicate nested if-else block
+3. **`sdk/campaign_builder/src/quest_editor.rs`** (line 28): Added `QuestEditorContext` struct to group reference parameters and reduce function argument count from 8 to 6
+4. **`sdk/campaign_builder/src/ui_helpers.rs`** (line 5125): Fixed test structure - `autocomplete_map_selector_persists_buffer` test was incorrectly nested inside another test function
+
+### Root Cause Analysis
+
+The implementation plan (Phase 3 in `npc_externalization_implementation_plan.md`) was marked as "COMPLETED" and stated:
+
+> **File**: `sdk/campaign_builder/src/main.rs`
+>
+> - Add NPC Editor tab
+
+However, the agent that completed Phase 3 focused on:
+
+- Fixing the NPC editor module itself (`npc_editor.rs`)
+- Updating map editor integration
+- Adding validation
+- Updating UI helpers
+
+But **forgot to add the NPCs tab to the sidebar tab list**. This is a classic UI integration oversight - all backend functionality was complete, but the UI didn't expose it.
+
+### Verification
+
+- ✅ 745/745 tests passing
+- ✅ NPCs tab now appears in sidebar between Dialogues and Assets
+- ✅ Clicking NPCs tab switches to NPC editor
+- ✅ NPC editor fully functional (create, edit, delete NPCs)
+
+### Date Completed
+
+2025-01-26
+
+---
+
 ## Phase 1: Portrait Support - Core Portrait Discovery - COMPLETED
 
 ### Summary
