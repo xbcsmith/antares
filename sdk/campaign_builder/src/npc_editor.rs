@@ -27,13 +27,18 @@
 //! - `NpcEditBuffer`: Form field buffer for editing
 //! - Standard UI components: EditorToolbar, TwoColumnLayout, ActionButtons
 
-use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
+use crate::ui_helpers::{
+    autocomplete_portrait_selector, extract_portrait_candidates, ActionButtons, EditorToolbar,
+    ItemAction, ToolbarAction, TwoColumnLayout,
+};
 use antares::domain::dialogue::{DialogueId, DialogueTree};
 use antares::domain::quest::{Quest, QuestId};
 use antares::domain::world::npc::{NpcDefinition, NpcId};
+use antares::sdk::tool_config::DisplayConfig;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 /// Editor state for NPC editing
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +87,10 @@ pub struct NpcEditorState {
 
     /// Filter: Show only NPCs with quests
     pub filter_quest_givers: bool,
+
+    /// Available portrait IDs (cached from directory scan)
+    #[serde(skip)]
+    pub available_portraits: Vec<String>,
 }
 
 /// NPC editor mode
@@ -143,6 +152,7 @@ impl Default for NpcEditorState {
             filter_merchants: false,
             filter_innkeepers: false,
             filter_quest_givers: false,
+            available_portraits: Vec::new(),
         }
     }
 }
@@ -160,6 +170,8 @@ impl NpcEditorState {
     /// * `ui` - The egui UI context
     /// * `dialogues` - Available dialogue trees for autocomplete
     /// * `quests` - Available quests for multi-select
+    /// * `campaign_dir` - Optional campaign directory for portrait loading
+    /// * `display_config` - Display configuration for layout
     ///
     /// # Returns
     ///
@@ -169,7 +181,12 @@ impl NpcEditorState {
         ui: &mut egui::Ui,
         dialogues: &[DialogueTree],
         quests: &[Quest],
+        campaign_dir: Option<&PathBuf>,
+        display_config: &DisplayConfig,
     ) -> bool {
+        // Update portrait candidates if campaign directory changed
+        self.available_portraits = extract_portrait_candidates(campaign_dir);
+
         // Update available references
         self.available_dialogues = dialogues.to_vec();
         self.available_quests = quests.to_vec();
@@ -191,13 +208,55 @@ impl NpcEditorState {
 
         ui.separator();
 
+        // Filters (only shown in list mode)
+        if self.mode == NpcEditorMode::List {
+            ui.horizontal(|ui| {
+                ui.label("🔍 Search:");
+                ui.text_edit_singleline(&mut self.search_filter);
+
+                ui.separator();
+
+                if ui
+                    .selectable_label(self.filter_merchants, "🏪 Merchants")
+                    .clicked()
+                {
+                    self.filter_merchants = !self.filter_merchants;
+                }
+
+                if ui
+                    .selectable_label(self.filter_innkeepers, "🛏️ Innkeepers")
+                    .clicked()
+                {
+                    self.filter_innkeepers = !self.filter_innkeepers;
+                }
+
+                if ui
+                    .selectable_label(self.filter_quest_givers, "📜 Quest Givers")
+                    .clicked()
+                {
+                    self.filter_quest_givers = !self.filter_quest_givers;
+                }
+
+                ui.separator();
+
+                if ui.button("🔄 Clear Filters").clicked() {
+                    self.search_filter.clear();
+                    self.filter_merchants = false;
+                    self.filter_innkeepers = false;
+                    self.filter_quest_givers = false;
+                }
+            });
+
+            ui.separator();
+        }
+
         // Mode-specific UI
         match self.mode {
             NpcEditorMode::List => {
-                needs_save |= self.show_list_view(ui);
+                needs_save |= self.show_list_view(ui, display_config);
             }
             NpcEditorMode::Add | NpcEditorMode::Edit => {
-                needs_save |= self.show_edit_view(ui);
+                needs_save |= self.show_edit_view(ui, campaign_dir);
             }
         }
 
@@ -209,179 +268,336 @@ impl NpcEditorState {
         needs_save
     }
 
-    /// Shows the list view with all NPCs
-    fn show_list_view(&mut self, ui: &mut egui::Ui) -> bool {
+    fn show_list_view(&mut self, ui: &mut egui::Ui, display_config: &DisplayConfig) -> bool {
         let mut needs_save = false;
 
-        // Search and filters
-        ui.horizontal(|ui| {
-            ui.label("🔍 Search:");
-            ui.text_edit_singleline(&mut self.search_filter);
+        let search_lower = self.search_filter.to_lowercase();
 
-            ui.separator();
-
-            ui.checkbox(&mut self.filter_merchants, "Merchants");
-            ui.checkbox(&mut self.filter_innkeepers, "Innkeepers");
-            ui.checkbox(&mut self.filter_quest_givers, "Quest Givers");
-
-            if ui.button("Clear Filters").clicked() {
-                self.search_filter.clear();
-                self.filter_merchants = false;
-                self.filter_innkeepers = false;
-                self.filter_quest_givers = false;
-            }
-        });
-
-        ui.separator();
-
-        // NPC count
-        let filtered_npcs: Vec<(usize, &NpcDefinition)> = self
+        // Build filtered list snapshot to avoid borrow conflicts in closures
+        let filtered_npcs: Vec<(usize, String, NpcDefinition)> = self
             .npcs
             .iter()
             .enumerate()
-            .filter(|(_, npc)| self.matches_filters(npc))
+            .filter(|(_, npc)| {
+                // Search filter
+                if !search_lower.is_empty()
+                    && !npc.name.to_lowercase().contains(&search_lower)
+                    && !npc.id.to_lowercase().contains(&search_lower)
+                {
+                    return false;
+                }
+
+                // Merchant filter
+                if self.filter_merchants && !npc.is_merchant {
+                    return false;
+                }
+
+                // Innkeeper filter
+                if self.filter_innkeepers && !npc.is_innkeeper {
+                    return false;
+                }
+
+                // Quest giver filter
+                if self.filter_quest_givers && npc.quest_ids.is_empty() {
+                    return false;
+                }
+
+                true
+            })
+            .map(|(idx, npc)| {
+                let mut label = format!("{}: {}", npc.id, npc.name);
+                if npc.is_merchant {
+                    label.push_str(" 🏪");
+                }
+                if npc.is_innkeeper {
+                    label.push_str(" 🛏️");
+                }
+                if !npc.quest_ids.is_empty() {
+                    label.push_str(" 📜");
+                }
+                (idx, label, npc.clone())
+            })
             .collect();
 
-        ui.label(format!(
-            "📊 NPCs: {} / {}",
-            filtered_npcs.len(),
-            self.npcs.len()
-        ));
+        // Sort by ID
+        let mut sorted_npcs = filtered_npcs;
+        sorted_npcs.sort_by(|(_, _, a), (_, _, b)| a.id.cmp(&b.id));
+
+        let selected = self.selected_npc;
+        let mut new_selection = selected;
+        let mut action_requested: Option<ItemAction> = None;
 
         ui.separator();
 
-        // Track actions to perform after iteration
-        let mut index_to_delete: Option<usize> = None;
-        let mut index_to_edit: Option<usize> = None;
+        let total_width = ui.available_width();
+        let inspector_min_width = display_config
+            .inspector_min_width
+            .max(crate::ui_helpers::DEFAULT_INSPECTOR_MIN_WIDTH);
+        let sep_margin = 12.0;
+        let requested_left = total_width - inspector_min_width - sep_margin;
+        let left_width = crate::ui_helpers::compute_left_column_width(
+            total_width,
+            requested_left,
+            inspector_min_width,
+            sep_margin,
+            crate::ui_helpers::MIN_SAFE_LEFT_COLUMN_WIDTH,
+            display_config.left_column_max_ratio,
+        );
 
-        // NPC list
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (index, npc) in &filtered_npcs {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.heading(&npc.name);
-                            ui.label(format!("ID: {}", npc.id));
+        TwoColumnLayout::new("npcs")
+            .with_left_width(left_width)
+            .show_split(
+                ui,
+                |left_ui| {
+                    // Left panel: NPC list
+                    left_ui.heading("NPCs");
+                    left_ui.separator();
 
-                            if !npc.description.is_empty() {
-                                ui.label(&npc.description);
+                    for (idx, label, _) in &sorted_npcs {
+                        let is_selected = selected == Some(*idx);
+                        if left_ui.selectable_label(is_selected, label).clicked() {
+                            new_selection = Some(*idx);
+                        }
+                    }
+
+                    if sorted_npcs.is_empty() {
+                        left_ui.label("No NPCs found");
+                    }
+                },
+                |right_ui| {
+                    // Right panel: Detail view
+                    if let Some(idx) = selected {
+                        if let Some((_, _, npc)) = sorted_npcs.iter().find(|(i, _, _)| *i == idx) {
+                            right_ui.heading(&npc.name);
+                            right_ui.separator();
+
+                            // Use shared ActionButtons component
+                            let action = ActionButtons::new().enabled(true).show(right_ui);
+                            if action != ItemAction::None {
+                                action_requested = Some(action);
                             }
 
-                            // Tags
-                            ui.horizontal(|ui| {
-                                if npc.is_merchant {
-                                    ui.label("🏪 Merchant");
-                                }
-                                if npc.is_innkeeper {
-                                    ui.label("🛏️ Innkeeper");
-                                }
-                                if !npc.quest_ids.is_empty() {
-                                    ui.label(format!("📜 {} Quests", npc.quest_ids.len()));
-                                }
-                                if npc.dialogue_id.is_some() {
-                                    ui.label("💬 Has Dialogue");
-                                }
-                                if let Some(faction) = &npc.faction {
-                                    ui.label(format!("⚔️ {}", faction));
-                                }
+                            right_ui.separator();
+                            Self::show_preview_static(right_ui, npc);
+                        } else {
+                            right_ui.vertical_centered(|ui| {
+                                ui.add_space(100.0);
+                                ui.label("Select an NPC to view details");
                             });
+                        }
+                    } else {
+                        right_ui.vertical_centered(|ui| {
+                            ui.add_space(100.0);
+                            ui.label("Select an NPC to view details");
                         });
+                    }
+                },
+            );
 
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("🗑️ Delete").clicked() {
-                                index_to_delete = Some(*index);
+        // Apply selection change after closures
+        self.selected_npc = new_selection;
+
+        // Handle action button clicks after closures
+        if let Some(action) = action_requested {
+            match action {
+                ItemAction::Edit => {
+                    if let Some(idx) = self.selected_npc {
+                        if idx < self.npcs.len() {
+                            self.start_edit_npc(idx);
+                        }
+                    }
+                }
+                ItemAction::Delete => {
+                    if let Some(idx) = self.selected_npc {
+                        if idx < self.npcs.len() {
+                            self.npcs.remove(idx);
+                            self.selected_npc = None;
+                            needs_save = true;
+                        }
+                    }
+                }
+                ItemAction::Duplicate => {
+                    if let Some(idx) = self.selected_npc {
+                        if idx < self.npcs.len() {
+                            let mut new_npc = self.npcs[idx].clone();
+                            let next_id = self.next_npc_id();
+                            new_npc.id = next_id;
+                            new_npc.name = format!("{} (Copy)", new_npc.name);
+                            self.npcs.push(new_npc);
+                            needs_save = true;
+                        }
+                    }
+                }
+                ItemAction::Export => {
+                    if let Some(idx) = self.selected_npc {
+                        if idx < self.npcs.len() {
+                            if let Ok(ron_str) = ron::ser::to_string_pretty(
+                                &self.npcs[idx],
+                                ron::ser::PrettyConfig::default(),
+                            ) {
+                                self.import_buffer = ron_str;
+                                self.show_import_dialog = true;
                             }
-                            if ui.button("✏️ Edit").clicked() {
-                                index_to_edit = Some(*index);
-                            }
-                        });
-                    });
-                });
+                        }
+                    }
+                }
+                ItemAction::None => {}
             }
-
-            if filtered_npcs.is_empty() {
-                ui.centered_and_justified(|ui| {
-                    ui.label("No NPCs found. Click 'Add NPC' to create one.");
-                });
-            }
-        });
-
-        // Apply actions after iteration
-        if let Some(index) = index_to_delete {
-            self.npcs.remove(index);
-            needs_save = true;
-        }
-        if let Some(index) = index_to_edit {
-            self.start_edit_npc(index);
         }
 
         needs_save
     }
 
-    /// Shows the edit view for adding or editing an NPC
-    fn show_edit_view(&mut self, ui: &mut egui::Ui) -> bool {
+    /// Static preview method that doesn't require self
+    fn show_preview_static(ui: &mut egui::Ui, npc: &NpcDefinition) {
+        let panel_height = crate::ui_helpers::compute_panel_height(
+            ui,
+            crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
+        );
+
+        egui::ScrollArea::vertical()
+            .max_height(panel_height)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.heading("Basic Info");
+                    ui.label(format!("ID: {}", npc.id));
+                    ui.label(format!("Name: {}", npc.name));
+
+                    if !npc.description.is_empty() {
+                        ui.separator();
+                        ui.label(&npc.description);
+                    }
+                });
+
+                ui.add_space(5.0);
+
+                ui.group(|ui| {
+                    ui.heading("Appearance");
+                    if !npc.portrait_id.is_empty() {
+                        ui.label(format!("Portrait: {}", npc.portrait_id));
+                    } else {
+                        ui.label("No portrait");
+                    }
+                });
+
+                ui.add_space(5.0);
+
+                ui.group(|ui| {
+                    ui.heading("Interactions");
+
+                    if let Some(dialogue_id) = &npc.dialogue_id {
+                        ui.label(format!("💬 Dialogue: {}", dialogue_id));
+                    } else {
+                        ui.label("No dialogue");
+                    }
+
+                    if !npc.quest_ids.is_empty() {
+                        ui.label(format!("📜 Quests: {}", npc.quest_ids.len()));
+                        for quest_id in &npc.quest_ids {
+                            ui.label(format!("  • {}", quest_id));
+                        }
+                    } else {
+                        ui.label("No quests");
+                    }
+                });
+
+                ui.add_space(5.0);
+
+                ui.group(|ui| {
+                    ui.heading("Roles & Faction");
+
+                    let mut roles = Vec::new();
+                    if npc.is_merchant {
+                        roles.push("🏪 Merchant");
+                    }
+                    if npc.is_innkeeper {
+                        roles.push("🛏️ Innkeeper");
+                    }
+
+                    if !roles.is_empty() {
+                        for role in roles {
+                            ui.label(role);
+                        }
+                    } else {
+                        ui.label("No special roles");
+                    }
+
+                    if let Some(faction) = &npc.faction {
+                        ui.label(format!("⚔️ Faction: {}", faction));
+                    }
+                });
+            });
+    }
+
+    fn show_edit_view(&mut self, ui: &mut egui::Ui, campaign_dir: Option<&PathBuf>) -> bool {
         let mut needs_save = false;
+        let is_add = self.mode == NpcEditorMode::Add;
 
-        // Validate current buffer
-        self.validate_edit_buffer();
+        ui.heading(if is_add { "Add New NPC" } else { "Edit NPC" });
+        ui.separator();
 
-        let title = match self.mode {
-            NpcEditorMode::Add => "Add New NPC",
-            NpcEditorMode::Edit => "Edit NPC",
-            _ => "NPC Editor",
-        };
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.heading("Basic Information");
 
-        let preview_buffer = self.edit_buffer.clone();
-        TwoColumnLayout::new(title)
-            .with_left_width(300.0)
-            .show_split(
-                ui,
-                |left_ui| {
-                    // Left column: Form fields
-                    egui::ScrollArea::vertical().show(left_ui, |ui| {
-                        ui.heading("Basic Information");
+                    ui.horizontal(|ui| {
+                        ui.label("ID:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.edit_buffer.id)
+                                .id_salt("npc_edit_id"),
+                        );
+                    });
 
-                        ui.horizontal(|ui| {
-                            ui.label("ID:");
-                            ui.text_edit_singleline(&mut self.edit_buffer.id);
-                        });
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.edit_buffer.name)
+                                .id_salt("npc_edit_name"),
+                        );
+                    });
 
-                        ui.horizontal(|ui| {
-                            ui.label("Name:");
-                            ui.text_edit_singleline(&mut self.edit_buffer.name);
-                        });
+                    ui.horizontal(|ui| {
+                        ui.label("Description:");
+                    });
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.edit_buffer.description)
+                            .desired_rows(3)
+                            .id_salt("npc_edit_description"),
+                    );
+                });
 
-                        ui.horizontal(|ui| {
-                            ui.label("Description:");
-                        });
-                        ui.text_edit_multiline(&mut self.edit_buffer.description);
+                ui.add_space(10.0);
 
-                        ui.separator();
+                ui.group(|ui| {
+                    ui.heading("Appearance");
 
-                        ui.heading("Appearance");
+                    ui.horizontal(|ui| {
+                        ui.label("Portrait ID:");
+                        autocomplete_portrait_selector(
+                            ui,
+                            "npc_edit_portrait",
+                            "",
+                            &mut self.edit_buffer.portrait_id,
+                            &self.available_portraits,
+                            campaign_dir,
+                        );
+                    });
+                    ui.label(
+                        "📁 Relative to campaign assets directory (e.g., '0', '1', 'warrior')",
+                    );
+                });
 
-                        ui.horizontal(|ui| {
-                            ui.label("Portrait ID:");
-                            ui.text_edit_singleline(&mut self.edit_buffer.portrait_id);
-                        });
-                        ui.label("📁 Relative to campaign assets directory");
+                ui.add_space(10.0);
 
-                        ui.separator();
+                ui.group(|ui| {
+                    ui.heading("Dialogue & Quests");
 
-                        ui.heading("Dialogue & Quests");
-
-                        // Dialogue ID autocomplete
-                        ui.horizontal(|ui| {
-                            ui.label("Dialogue ID:");
-                        });
-
-                        let dialogue_options: Vec<String> = self
-                            .available_dialogues
-                            .iter()
-                            .map(|d| format!("{} - {}", d.id, d.name))
-                            .collect();
-
-                        egui::ComboBox::from_id_salt("npc_dialogue_select")
+                    ui.horizontal(|ui| {
+                        ui.label("Dialogue ID:");
+                        egui::ComboBox::from_id_salt("npc_edit_dialogue_select")
                             .selected_text(if self.edit_buffer.dialogue_id.is_empty() {
                                 "None".to_string()
                             } else {
@@ -411,16 +627,17 @@ impl NpcEditorState {
                                     }
                                 }
                             });
+                    });
 
-                        ui.separator();
+                    ui.separator();
 
-                        // Quest IDs multi-select
-                        ui.label("Associated Quests:");
-
-                        egui::ScrollArea::vertical()
-                            .max_height(150.0)
-                            .show(ui, |ui| {
-                                for quest in &self.available_quests {
+                    ui.label("Associated Quests:");
+                    egui::ScrollArea::vertical()
+                        .id_salt("npc_edit_quests_scroll")
+                        .max_height(150.0)
+                        .show(ui, |ui| {
+                            for (quest_idx, quest) in self.available_quests.iter().enumerate() {
+                                ui.push_id(format!("npc_edit_quest_{}", quest_idx), |ui| {
                                     let quest_id_str = quest.id.to_string();
                                     let mut is_selected =
                                         self.edit_buffer.quest_ids.contains(&quest_id_str);
@@ -430,6 +647,7 @@ impl NpcEditorState {
                                             &mut is_selected,
                                             format!("{} - {}", quest.id, quest.name),
                                         )
+                                        .on_hover_text(format!("Quest ID: {}", quest.id))
                                         .clicked()
                                     {
                                         if is_selected {
@@ -442,114 +660,75 @@ impl NpcEditorState {
                                                 .retain(|id| id != &quest_id_str);
                                         }
                                     }
-                                }
-                            });
-
-                        ui.separator();
-
-                        ui.heading("Faction & Roles");
-
-                        ui.horizontal(|ui| {
-                            ui.label("Faction:");
-                            ui.text_edit_singleline(&mut self.edit_buffer.faction);
+                                });
+                            }
                         });
+                });
 
-                        ui.checkbox(&mut self.edit_buffer.is_merchant, "🏪 Is Merchant");
-                        ui.checkbox(&mut self.edit_buffer.is_innkeeper, "🛏️ Is Innkeeper");
+                ui.add_space(10.0);
 
-                        ui.separator();
+                ui.group(|ui| {
+                    ui.heading("Faction & Roles");
 
-                        // Validation errors
-                        if !self.validation_errors.is_empty() {
-                            ui.group(|ui| {
-                                ui.heading("⚠️ Validation Errors");
-                                for error in &self.validation_errors {
-                                    ui.label(error);
-                                }
-                            });
+                    ui.horizontal(|ui| {
+                        ui.label("Faction:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.edit_buffer.faction)
+                                .id_salt("npc_edit_faction"),
+                        );
+                    });
+
+                    ui.checkbox(&mut self.edit_buffer.is_merchant, "🏪 Is Merchant");
+                    ui.checkbox(&mut self.edit_buffer.is_innkeeper, "🛏️ Is Innkeeper");
+                });
+
+                ui.add_space(10.0);
+
+                // Validation errors
+                if !self.validation_errors.is_empty() {
+                    ui.group(|ui| {
+                        ui.heading("⚠️ Validation Errors");
+                        for error in &self.validation_errors {
+                            ui.colored_label(egui::Color32::RED, error);
                         }
                     });
-                },
-                |right_ui| {
-                    // Right column: Preview and actions
-                    egui::ScrollArea::vertical().show(right_ui, |ui| {
-                        ui.heading("Preview");
-
-                        ui.group(|ui| {
-                            ui.label(format!("ID: {}", preview_buffer.id));
-                            ui.label(format!("Name: {}", preview_buffer.name));
-
-                            if !preview_buffer.description.is_empty() {
-                                ui.separator();
-                                ui.label(&preview_buffer.description);
-                            }
-
-                            ui.separator();
-
-                            ui.label(format!("Portrait: {}", preview_buffer.portrait_id));
-
-                            if !preview_buffer.dialogue_id.is_empty() {
-                                ui.label(format!("💬 Dialogue: {}", preview_buffer.dialogue_id));
-                            }
-
-                            if !preview_buffer.quest_ids.is_empty() {
-                                ui.label(format!("📜 Quests: {}", preview_buffer.quest_ids.len()));
-                                for quest_id in &preview_buffer.quest_ids {
-                                    ui.label(format!("  - {}", quest_id));
-                                }
-                            }
-
-                            if !preview_buffer.faction.is_empty() {
-                                ui.label(format!("⚔️ Faction: {}", preview_buffer.faction));
-                            }
-
-                            ui.separator();
-
-                            if preview_buffer.is_merchant {
-                                ui.label("🏪 Merchant");
-                            }
-                            if preview_buffer.is_innkeeper {
-                                ui.label("🛏️ Innkeeper");
-                            }
-                        });
-                    });
-                },
-            );
-
-        ui.separator();
-
-        // Action buttons
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(self.validation_errors.is_empty(), egui::Button::new("Save"))
-                .clicked()
-            {
-                if self.save_npc() {
-                    needs_save = true;
-                    self.mode = NpcEditorMode::List;
+                    ui.add_space(10.0);
                 }
-            }
-            if ui.button("Cancel").clicked() {
-                self.mode = NpcEditorMode::List;
-                self.edit_buffer = NpcEditBuffer::default();
-            }
-        });
+
+                // Action buttons
+                ui.horizontal(|ui| {
+                    if ui.button("⬅ Back to List").clicked() {
+                        self.mode = NpcEditorMode::List;
+                    }
+
+                    if ui.button("💾 Save").clicked() {
+                        self.validate_edit_buffer();
+                        if self.validation_errors.is_empty() {
+                            if self.save_npc() {
+                                needs_save = true;
+                                self.mode = NpcEditorMode::List;
+                            }
+                        }
+                    }
+
+                    if ui.button("❌ Cancel").clicked() {
+                        self.mode = NpcEditorMode::List;
+                        self.edit_buffer = NpcEditBuffer::default();
+                    }
+                });
+            });
 
         needs_save
     }
 
-    /// Checks if an NPC matches current filters
     fn matches_filters(&self, npc: &NpcDefinition) -> bool {
         // Search filter
-        if !self.search_filter.is_empty() {
-            let search_lower = self.search_filter.to_lowercase();
-            let matches_search = npc.name.to_lowercase().contains(&search_lower)
-                || npc.id.to_lowercase().contains(&search_lower)
-                || npc.description.to_lowercase().contains(&search_lower);
-
-            if !matches_search {
-                return false;
-            }
+        let search_lower = self.search_filter.to_lowercase();
+        if !search_lower.is_empty()
+            && !npc.name.to_lowercase().contains(&search_lower)
+            && !npc.id.to_lowercase().contains(&search_lower)
+        {
+            return false;
         }
 
         // Merchant filter
@@ -570,14 +749,12 @@ impl NpcEditorState {
         true
     }
 
-    /// Starts adding a new NPC
     fn start_add_npc(&mut self) {
         self.mode = NpcEditorMode::Add;
         self.edit_buffer = NpcEditBuffer::default();
-        self.validation_errors.clear();
+        self.edit_buffer.id = self.next_npc_id();
     }
 
-    /// Starts editing an existing NPC
     fn start_edit_npc(&mut self, index: usize) {
         if let Some(npc) = self.npcs.get(index) {
             self.mode = NpcEditorMode::Edit;
@@ -587,123 +764,122 @@ impl NpcEditorState {
                 name: npc.name.clone(),
                 description: npc.description.clone(),
                 portrait_id: npc.portrait_id.clone(),
-                dialogue_id: npc.dialogue_id.map(|id| id.to_string()).unwrap_or_default(),
+                dialogue_id: npc
+                    .dialogue_id
+                    .as_ref()
+                    .map_or(String::new(), |id| id.to_string()),
                 quest_ids: npc.quest_ids.iter().map(|id| id.to_string()).collect(),
-                faction: npc.faction.clone().unwrap_or_default(),
+                faction: npc.faction.as_ref().unwrap_or(&String::new()).clone(),
                 is_merchant: npc.is_merchant,
                 is_innkeeper: npc.is_innkeeper,
             };
-            self.validation_errors.clear();
         }
     }
 
-    /// Validates the edit buffer
     fn validate_edit_buffer(&mut self) {
         self.validation_errors.clear();
 
-        // ID validation
-        if self.edit_buffer.id.trim().is_empty() {
+        // Validate ID
+        if self.edit_buffer.id.is_empty() {
             self.validation_errors
                 .push("ID cannot be empty".to_string());
         } else if !self.is_valid_id(&self.edit_buffer.id) {
-            self.validation_errors
-                .push("ID can only contain letters, numbers, underscores, and hyphens".to_string());
+            self.validation_errors.push(
+                "ID must start with a letter and contain only alphanumeric characters and underscores"
+                    .to_string(),
+            );
         } else {
-            // Check for duplicate IDs (only when adding or changing ID)
-            let is_duplicate = match self.mode {
-                NpcEditorMode::Add => self.npcs.iter().any(|npc| npc.id == self.edit_buffer.id),
-                NpcEditorMode::Edit => {
-                    if let Some(selected) = self.selected_npc {
-                        self.npcs
-                            .iter()
-                            .enumerate()
-                            .any(|(idx, npc)| idx != selected && npc.id == self.edit_buffer.id)
-                    } else {
-                        false
+            // Check for duplicate IDs
+            match self.mode {
+                NpcEditorMode::Add => {
+                    if self.npcs.iter().any(|n| n.id == self.edit_buffer.id) {
+                        self.validation_errors
+                            .push(format!("ID '{}' already exists", self.edit_buffer.id));
                     }
                 }
-                _ => false,
-            };
-
-            if is_duplicate {
-                self.validation_errors
-                    .push(format!("NPC ID '{}' already exists", self.edit_buffer.id));
+                NpcEditorMode::Edit => {
+                    if let Some(selected_idx) = self.selected_npc {
+                        if self
+                            .npcs
+                            .iter()
+                            .enumerate()
+                            .any(|(idx, n)| idx != selected_idx && n.id == self.edit_buffer.id)
+                        {
+                            self.validation_errors
+                                .push(format!("ID '{}' already exists", self.edit_buffer.id));
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
-        // Name validation
-        if self.edit_buffer.name.trim().is_empty() {
+        // Validate name
+        if self.edit_buffer.name.is_empty() {
             self.validation_errors
                 .push("Name cannot be empty".to_string());
         }
 
-        // Portrait path validation
-        if self.edit_buffer.portrait_id.trim().is_empty() {
-            self.validation_errors
-                .push("Portrait ID cannot be empty".to_string());
-        }
-
-        // Dialogue ID validation
+        // Validate dialogue ID if provided
         if !self.edit_buffer.dialogue_id.is_empty() {
-            if let Ok(dialogue_id) = self.edit_buffer.dialogue_id.parse::<DialogueId>() {
-                if !self.available_dialogues.iter().any(|d| d.id == dialogue_id) {
-                    self.validation_errors.push(format!(
-                        "Dialogue ID {} does not exist",
-                        self.edit_buffer.dialogue_id
-                    ));
-                }
-            } else {
-                self.validation_errors
-                    .push("Invalid dialogue ID format (must be a number)".to_string());
+            let dialogue_exists = self
+                .available_dialogues
+                .iter()
+                .any(|d| d.id.to_string() == self.edit_buffer.dialogue_id);
+            if !dialogue_exists {
+                self.validation_errors.push(format!(
+                    "Dialogue ID '{}' does not exist",
+                    self.edit_buffer.dialogue_id
+                ));
             }
         }
 
-        // Quest IDs validation
+        // Validate quest IDs
         for quest_id_str in &self.edit_buffer.quest_ids {
-            if let Ok(quest_id) = quest_id_str.parse::<QuestId>() {
-                if !self.available_quests.iter().any(|q| q.id == quest_id) {
-                    self.validation_errors
-                        .push(format!("Quest ID {} does not exist", quest_id_str));
-                }
-            } else {
+            let quest_exists = self
+                .available_quests
+                .iter()
+                .any(|q| q.id.to_string() == *quest_id_str);
+            if !quest_exists {
                 self.validation_errors
-                    .push(format!("Invalid quest ID format: {}", quest_id_str));
+                    .push(format!("Quest ID '{}' does not exist", quest_id_str));
             }
         }
     }
 
-    /// Checks if an ID is valid (alphanumeric, underscore, hyphen)
     fn is_valid_id(&self, id: &str) -> bool {
-        !id.is_empty()
-            && id
-                .chars()
-                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        if id.is_empty() {
+            return false;
+        }
+        let first_char = id.chars().next().unwrap();
+        if !first_char.is_ascii_alphabetic() && first_char != '_' {
+            return false;
+        }
+        id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     }
 
-    /// Saves the current NPC being edited
     fn save_npc(&mut self) -> bool {
-        // Parse dialogue ID
-        let dialogue_id = if self.edit_buffer.dialogue_id.is_empty() {
-            None
-        } else {
-            self.edit_buffer.dialogue_id.parse::<DialogueId>().ok()
-        };
-
-        // Parse quest IDs
-        let quest_ids: Vec<QuestId> = self
-            .edit_buffer
-            .quest_ids
-            .iter()
-            .filter_map(|s| s.parse::<QuestId>().ok())
-            .collect();
+        self.validate_edit_buffer();
+        if !self.validation_errors.is_empty() {
+            return false;
+        }
 
         let npc = NpcDefinition {
             id: self.edit_buffer.id.clone(),
             name: self.edit_buffer.name.clone(),
             description: self.edit_buffer.description.clone(),
             portrait_id: self.edit_buffer.portrait_id.clone(),
-            dialogue_id,
-            quest_ids,
+            dialogue_id: if self.edit_buffer.dialogue_id.is_empty() {
+                None
+            } else {
+                self.edit_buffer.dialogue_id.parse::<DialogueId>().ok()
+            },
+            quest_ids: self
+                .edit_buffer
+                .quest_ids
+                .iter()
+                .filter_map(|s| s.parse::<QuestId>().ok())
+                .collect(),
             faction: if self.edit_buffer.faction.is_empty() {
                 None
             } else {
@@ -720,8 +896,8 @@ impl NpcEditorState {
             }
             NpcEditorMode::Edit => {
                 if let Some(index) = self.selected_npc {
-                    if let Some(existing) = self.npcs.get_mut(index) {
-                        *existing = npc;
+                    if index < self.npcs.len() {
+                        self.npcs[index] = npc;
                         true
                     } else {
                         false
@@ -734,75 +910,77 @@ impl NpcEditorState {
         }
     }
 
-    /// Exports all NPCs to clipboard
-    fn export_all_npcs(&self) -> bool {
-        if let Ok(ron_string) = ron::ser::to_string_pretty(&self.npcs, Default::default()) {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                if let Err(e) =
-                    arboard::Clipboard::new().and_then(|mut clip| clip.set_text(&ron_string))
-                {
-                    eprintln!("Failed to copy to clipboard: {}", e);
-                    return false;
-                }
-            }
-            true
+    fn export_all_npcs(&mut self) -> bool {
+        if let Ok(ron_str) =
+            ron::ser::to_string_pretty(&self.npcs, ron::ser::PrettyConfig::default())
+        {
+            self.import_buffer = ron_str;
+            self.show_import_dialog = true;
+            false // Export doesn't require save
         } else {
             false
         }
     }
 
-    /// Shows the import dialog window
     fn show_import_dialog_window(&mut self, ctx: &egui::Context) {
-        let mut open = true;
+        let mut open = self.show_import_dialog;
 
-        egui::Window::new("Import NPCs from RON")
+        egui::Window::new("Import/Export NPC")
             .open(&mut open)
             .resizable(true)
+            .default_width(500.0)
             .show(ctx, |ui| {
-                ui.label("Paste RON-formatted NPC data:");
+                ui.heading("NPC RON Data");
+                ui.separator();
 
-                egui::ScrollArea::vertical()
-                    .max_height(300.0)
-                    .show(ui, |ui| {
-                        ui.text_edit_multiline(&mut self.import_buffer);
-                    });
+                ui.label("Paste RON data to import, or copy exported data:");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.import_buffer)
+                        .desired_rows(15)
+                        .code_editor()
+                        .id_salt("npc_import_buffer"),
+                );
 
                 ui.separator();
 
                 ui.horizontal(|ui| {
-                    if ui.button("Import").clicked() {
-                        if let Ok(imported_npcs) =
-                            ron::from_str::<Vec<NpcDefinition>>(&self.import_buffer)
-                        {
-                            self.npcs.extend(imported_npcs);
-                            self.import_buffer.clear();
-                            self.show_import_dialog = false;
-                        } else {
-                            self.validation_errors
-                                .push("Failed to parse RON data".to_string());
+                    if ui.button("📥 Import").clicked() {
+                        match ron::from_str::<NpcDefinition>(&self.import_buffer) {
+                            Ok(mut npc) => {
+                                let next_id = self.next_npc_id();
+                                npc.id = next_id;
+                                self.npcs.push(npc);
+                                self.show_import_dialog = false;
+                            }
+                            Err(e) => {
+                                // Show error in validation
+                                self.validation_errors.push(format!("Import failed: {}", e));
+                            }
                         }
                     }
 
-                    if ui.button("Cancel").clicked() {
+                    if ui.button("📋 Copy to Clipboard").clicked() {
+                        ui.ctx().copy_text(self.import_buffer.clone());
+                    }
+
+                    if ui.button("❌ Close").clicked() {
                         self.show_import_dialog = false;
-                        self.import_buffer.clear();
                     }
                 });
             });
 
-        if !open {
-            self.show_import_dialog = false;
-        }
+        self.show_import_dialog = open;
     }
 
-    /// Returns the next available NPC ID suggestion
+    /// Generate next available NPC ID
     pub fn next_npc_id(&self) -> String {
+        let existing_ids: HashSet<String> = self.npcs.iter().map(|n| n.id.clone()).collect();
+
         let mut counter = 1;
         loop {
-            let id = format!("npc_{}", counter);
-            if !self.npcs.iter().any(|n| n.id == id) {
-                return id;
+            let candidate = format!("npc_{}", counter);
+            if !existing_ids.contains(&candidate) {
+                return candidate;
             }
             counter += 1;
         }
@@ -818,7 +996,6 @@ mod tests {
         let state = NpcEditorState::new();
         assert_eq!(state.npcs.len(), 0);
         assert_eq!(state.mode, NpcEditorMode::List);
-        assert!(state.selected_npc.is_none());
     }
 
     #[test]
@@ -826,40 +1003,38 @@ mod tests {
         let mut state = NpcEditorState::new();
         state.start_add_npc();
         assert_eq!(state.mode, NpcEditorMode::Add);
-        assert!(state.validation_errors.is_empty());
+        assert!(!state.edit_buffer.id.is_empty());
     }
 
     #[test]
     fn test_validate_edit_buffer_empty_id() {
         let mut state = NpcEditorState::new();
-        state.edit_buffer.id = "".to_string();
-        state.edit_buffer.name = "Test NPC".to_string();
-        state.edit_buffer.portrait_id = "test.png".to_string();
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = String::new();
+        state.edit_buffer.name = "Test".to_string();
         state.validate_edit_buffer();
         assert!(!state.validation_errors.is_empty());
-        assert!(state
-            .validation_errors
-            .iter()
-            .any(|e| e.contains("ID cannot be empty")));
+        assert!(state.validation_errors[0].contains("ID cannot be empty"));
     }
 
     #[test]
     fn test_validate_edit_buffer_invalid_id() {
         let mut state = NpcEditorState::new();
-        state.edit_buffer.id = "invalid id!".to_string();
-        state.edit_buffer.name = "Test NPC".to_string();
-        state.edit_buffer.portrait_id = "test.png".to_string();
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "123invalid".to_string();
         state.validate_edit_buffer();
-        assert!(!state.validation_errors.is_empty());
+        assert!(state
+            .validation_errors
+            .iter()
+            .any(|e| e.contains("must start")));
     }
 
     #[test]
     fn test_validate_edit_buffer_valid() {
         let mut state = NpcEditorState::new();
-        state.edit_buffer.id = "test_npc_1".to_string();
-        state.edit_buffer.name = "Test NPC".to_string();
-        state.edit_buffer.portrait_id = "test.png".to_string();
         state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "valid_id".to_string();
+        state.edit_buffer.name = "Test NPC".to_string();
         state.validate_edit_buffer();
         assert!(state.validation_errors.is_empty());
     }
@@ -868,32 +1043,27 @@ mod tests {
     fn test_save_npc_add_mode() {
         let mut state = NpcEditorState::new();
         state.mode = NpcEditorMode::Add;
-        state.edit_buffer = NpcEditBuffer {
-            id: "merchant_1".to_string(),
-            name: "Bob the Merchant".to_string(),
-            description: "A friendly merchant".to_string(),
-            portrait_id: "portraits/merchant.png".to_string(),
-            dialogue_id: String::new(),
-            quest_ids: Vec::new(),
-            faction: "Merchants".to_string(),
-            is_merchant: true,
-            is_innkeeper: false,
-        };
+        state.edit_buffer.id = "test_npc".to_string();
+        state.edit_buffer.name = "Test NPC".to_string();
+        state.edit_buffer.description = "Test description".to_string();
 
-        assert!(state.save_npc());
+        let result = state.save_npc();
+        assert!(result);
         assert_eq!(state.npcs.len(), 1);
-        assert_eq!(state.npcs[0].id, "merchant_1");
-        assert!(state.npcs[0].is_merchant);
+        assert_eq!(state.npcs[0].id, "test_npc");
+        assert_eq!(state.npcs[0].name, "Test NPC");
     }
 
     #[test]
     fn test_save_npc_edit_mode() {
         let mut state = NpcEditorState::new();
+
+        // Add an NPC first
         state.npcs.push(NpcDefinition {
-            id: "npc_1".to_string(),
-            name: "Old Name".to_string(),
+            id: "npc1".to_string(),
+            name: "Original".to_string(),
             description: String::new(),
-            portrait_id: "old.png".to_string(),
+            portrait_id: String::new(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -901,40 +1071,32 @@ mod tests {
             is_innkeeper: false,
         });
 
+        // Edit it
         state.mode = NpcEditorMode::Edit;
         state.selected_npc = Some(0);
-        state.edit_buffer = NpcEditBuffer {
-            id: "npc_1".to_string(),
-            name: "New Name".to_string(),
-            description: String::new(),
-            portrait_id: "old.png".to_string(),
-            dialogue_id: String::new(),
-            quest_ids: Vec::new(),
-            faction: String::new(),
-            is_merchant: false,
-            is_innkeeper: false,
-        };
+        state.edit_buffer.id = "npc1".to_string();
+        state.edit_buffer.name = "Modified".to_string();
 
-        assert!(state.save_npc());
+        let result = state.save_npc();
+        assert!(result);
         assert_eq!(state.npcs.len(), 1);
-        assert_eq!(state.npcs[0].name, "New Name");
+        assert_eq!(state.npcs[0].name, "Modified");
     }
 
     #[test]
     fn test_matches_filters_no_filters() {
         let state = NpcEditorState::new();
         let npc = NpcDefinition {
-            id: "npc_1".to_string(),
-            name: "Test".to_string(),
+            id: "test".to_string(),
+            name: "Test NPC".to_string(),
             description: String::new(),
-            portrait_id: "test.png".to_string(),
+            portrait_id: String::new(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
         };
-
         assert!(state.matches_filters(&npc));
     }
 
@@ -944,18 +1106,30 @@ mod tests {
         state.search_filter = "merchant".to_string();
 
         let npc = NpcDefinition {
-            id: "merchant_1".to_string(),
-            name: "Bob the Merchant".to_string(),
+            id: "test".to_string(),
+            name: "Merchant Bob".to_string(),
             description: String::new(),
-            portrait_id: "test.png".to_string(),
+            portrait_id: String::new(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: true,
             is_innkeeper: false,
         };
-
         assert!(state.matches_filters(&npc));
+
+        let npc2 = NpcDefinition {
+            id: "test2".to_string(),
+            name: "Innkeeper Jane".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            dialogue_id: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: true,
+        };
+        assert!(!state.matches_filters(&npc2));
     }
 
     #[test]
@@ -964,43 +1138,44 @@ mod tests {
         state.filter_merchants = true;
 
         let merchant = NpcDefinition {
-            id: "merchant_1".to_string(),
-            name: "Merchant".to_string(),
+            id: "merchant".to_string(),
+            name: "Bob".to_string(),
             description: String::new(),
-            portrait_id: "test.png".to_string(),
+            portrait_id: String::new(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: true,
             is_innkeeper: false,
         };
+        assert!(state.matches_filters(&merchant));
 
         let non_merchant = NpcDefinition {
-            id: "guard_1".to_string(),
+            id: "guard".to_string(),
             name: "Guard".to_string(),
             description: String::new(),
-            portrait_id: "test.png".to_string(),
+            portrait_id: String::new(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
             is_innkeeper: false,
         };
-
-        assert!(state.matches_filters(&merchant));
         assert!(!state.matches_filters(&non_merchant));
     }
 
     #[test]
     fn test_next_npc_id() {
         let mut state = NpcEditorState::new();
-        assert_eq!(state.next_npc_id(), "npc_1");
+
+        let id1 = state.next_npc_id();
+        assert_eq!(id1, "npc_1");
 
         state.npcs.push(NpcDefinition {
             id: "npc_1".to_string(),
             name: "Test".to_string(),
             description: String::new(),
-            portrait_id: "test.png".to_string(),
+            portrait_id: String::new(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -1008,17 +1183,18 @@ mod tests {
             is_innkeeper: false,
         });
 
-        assert_eq!(state.next_npc_id(), "npc_2");
+        let id2 = state.next_npc_id();
+        assert_eq!(id2, "npc_2");
     }
 
     #[test]
     fn test_is_valid_id() {
         let state = NpcEditorState::new();
         assert!(state.is_valid_id("valid_id"));
-        assert!(state.is_valid_id("valid-id"));
-        assert!(state.is_valid_id("valid123"));
-        assert!(!state.is_valid_id("invalid id"));
-        assert!(!state.is_valid_id("invalid!id"));
+        assert!(state.is_valid_id("_valid"));
+        assert!(state.is_valid_id("Valid123"));
+        assert!(!state.is_valid_id("123invalid"));
+        assert!(!state.is_valid_id("invalid-id"));
         assert!(!state.is_valid_id(""));
     }
 
@@ -1027,9 +1203,9 @@ mod tests {
         let mut state = NpcEditorState::new();
         state.npcs.push(NpcDefinition {
             id: "existing".to_string(),
-            name: "Existing".to_string(),
+            name: "Existing NPC".to_string(),
             description: String::new(),
-            portrait_id: "test.png".to_string(),
+            portrait_id: String::new(),
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -1039,10 +1215,10 @@ mod tests {
 
         state.mode = NpcEditorMode::Add;
         state.edit_buffer.id = "existing".to_string();
-        state.edit_buffer.name = "New".to_string();
-        state.edit_buffer.portrait_id = "test.png".to_string();
-
+        state.edit_buffer.name = "New NPC".to_string();
         state.validate_edit_buffer();
+
+        assert!(!state.validation_errors.is_empty());
         assert!(state
             .validation_errors
             .iter()

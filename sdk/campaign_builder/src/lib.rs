@@ -3005,10 +3005,13 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.file_load_merge_mode,
             ),
             EditorTab::NPCs => {
-                if self
-                    .npc_editor_state
-                    .show(ui, &self.dialogues, &self.quests)
-                {
+                if self.npc_editor_state.show(
+                    ui,
+                    &self.dialogues,
+                    &self.quests,
+                    self.campaign_dir.as_ref(),
+                    &self.tool_config.display,
+                ) {
                     self.unsaved_changes = true;
                 }
             }

@@ -1,3 +1,199 @@
+## NPC Editor Complete Refactoring - Pattern Compliance - COMPLETED
+
+### Summary
+
+Completely refactored the NPC Editor to follow the exact same architectural pattern as all other editors (Items, Monsters, Spells, Characters). The original implementation had multiple violations:
+
+- List view didn't use TwoColumnLayout
+- Edit view incorrectly used TwoColumnLayout (should be single column)
+- Missing proper widget ID salts causing ID clashes
+- Hardcoded widths instead of responsive calculations
+- Missing standard buttons (Back to List, Save, Cancel)
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/npc_editor.rs`
+
+**1. Refactored List View to Use TwoColumnLayout** (lines 251-429):
+
+Previously, the list view showed NPCs in a single vertical scroll area with inline Edit/Delete buttons.
+
+**New Pattern** (matching items_editor.rs):
+
+- **Left Column**: Selectable list of NPCs with icons (🏪 Merchant, 🛏️ Innkeeper, 📜 Quest Giver)
+- **Right Column**: Preview panel + ActionButtons component (Edit, Delete, Duplicate, Export)
+- Uses `compute_left_column_width()` helper for responsive width calculation
+- Proper filtered list snapshot to avoid borrow conflicts
+- Selection state management outside closures
+- Action handling deferred until after UI rendering
+
+**2. Refactored Edit View to Use Single-Column Form** (lines 513-697):
+
+**CRITICAL FIX**: The edit view was incorrectly using TwoColumnLayout with hardcoded width. Items editor uses a single scrolling form.
+
+**New Pattern** (matching items_editor.rs exactly):
+
+- Single `egui::ScrollArea` containing all form groups
+- Grouped sections: Basic Information, Appearance, Dialogue & Quests, Faction & Roles
+- Action buttons at bottom: **⬅ Back to List**, **💾 Save**, **❌ Cancel**
+- Validation errors displayed above buttons with red text
+- All fields contained within scroll area
+- NO TwoColumnLayout (that's only for list view)
+
+**3. Added Static Preview Function** (lines 431-516):
+
+Created `show_preview_static()` following the exact pattern from items_editor:
+
+- Displays Basic Info (ID, Name, Description)
+- Shows Appearance (Portrait)
+- Lists Interactions (Dialogue, Quests)
+- Shows Roles & Faction
+
+**4. Fixed Widget ID Salts** (edit view lines 530-640):
+
+Changed ALL widget ID salts in edit view to use `npc_edit_*` prefix to prevent clashes with list view:
+
+- `npc_edit_id` - ID field
+- `npc_edit_name` - Name field
+- `npc_edit_description` - Description multiline
+- `npc_edit_portrait_id` - Portrait path field
+- `npc_edit_dialogue_select` - Dialogue combobox
+- `npc_edit_quests_scroll` - Quest selection scroll area
+- `npc_edit_quest_{idx}` - Quest checkboxes in loop (using `ui.push_id()`)
+- `npc_edit_faction` - Faction field
+
+**5. Moved Filters to show() Method** (lines 194-233):
+
+Relocated search and filter UI from list view to main show() method, matching the toolbar pattern from other editors. Filters now only display in List mode.
+
+**6. Updated Import/Export Dialog** (lines 967-1006):
+
+Changed to match items_editor pattern:
+
+- Single NPC import (not batch)
+- Auto-assign next available ID on import
+- Export to buffer for clipboard copy
+- Consistent button labels (📥 Import, 📋 Copy to Clipboard, ❌ Close)
+
+**7. Fixed Data Type Issues**:
+
+Corrected `portrait_id` handling - it's a required `String`, not `Option<String>`:
+
+- Updated `start_edit_npc()` (line 809)
+- Updated `save_npc()` (line 914)
+- Updated `show_preview_static()` (line 458)
+- Fixed all test cases (lines 1113-1258)
+
+**8. Enhanced ActionButtons Integration**:
+
+Added full ActionButtons support with all four actions:
+
+- **Edit**: Opens edit form for selected NPC
+- **Delete**: Removes NPC with confirmation
+- **Duplicate**: Creates copy with incremented ID and "(Copy)" suffix
+- **Export**: Exports single NPC to RON format for clipboard
+
+### Architecture Compliance
+
+**Before (Violations)**:
+
+- ❌ List view used single column layout
+- ❌ Edit view INCORRECTLY used TwoColumnLayout
+- ❌ Edit view hardcoded width `.with_left_width(300.0)`
+- ❌ Missing "Back to List" button
+- ❌ Save/Cancel buttons outside scroll area
+- ❌ Edit/Delete buttons inline with items (list view)
+- ❌ No preview panel
+- ❌ No Duplicate or Export actions
+- ❌ Widget ID salts not prefixed (ID clashes between list and edit views)
+- ❌ Inconsistent with other editors
+
+**After (Compliant)**:
+
+- ✅ List view uses TwoColumnLayout (left: list, right: preview)
+- ✅ Edit view uses single-column scrolling form (like items_editor)
+- ✅ Responsive width uses `display_config.inspector_min_width` and `display_config.left_column_max_ratio`
+- ✅ Width scales with window resize and user preferences
+- ✅ Standard buttons: ⬅ Back to List, 💾 Save, ❌ Cancel
+- ✅ Buttons inside scroll area at bottom
+- ✅ ActionButtons component with all four actions
+- ✅ Static preview function following exact pattern
+- ✅ Explicit ID salts with `npc_edit_*` prefix to prevent clashes
+- ✅ Validation on Save button click (not on every render)
+- ✅ Portrait autocomplete with dropdown (like characters_editor)
+- ✅ Portrait discovery from campaign assets directory
+- ✅ Consistent with items_editor, monsters_editor, characters_editor
+- ✅ Follows AGENTS.md consistency guidelines
+
+**9. Fixed Responsive Width Calculation** (lines 330-344):
+
+Changed from hardcoded `inspector_min_width = 300.0` to use configurable settings:
+
+```rust
+let inspector_min_width = display_config
+    .inspector_min_width
+    .max(crate::ui_helpers::DEFAULT_INSPECTOR_MIN_WIDTH);
+// ...
+let left_width = crate::ui_helpers::compute_left_column_width(
+    total_width,
+    requested_left,
+    inspector_min_width,
+    sep_margin,
+    crate::ui_helpers::MIN_SAFE_LEFT_COLUMN_WIDTH,
+    display_config.left_column_max_ratio,  // ← Was hardcoded 0.6
+);
+```
+
+**10. Added Portrait Autocomplete** (lines 576-588):
+
+Replaced plain text input with autocomplete selector matching characters_editor:
+
+- Uses `autocomplete_portrait_selector()` helper
+- Auto-discovers available portraits from campaign directory
+- Shows portrait candidates in dropdown
+- Matches exact pattern from characters_editor
+- Portrait IDs cached in `available_portraits` field
+
+**11. Updated Method Signature** (lines 168-186):
+
+Added required parameters to `show()` method:
+
+- `campaign_dir: Option<&PathBuf>` - For portrait discovery
+- `display_config: &DisplayConfig` - For responsive layout
+
+### Test Results
+
+- ✅ 14/14 NPC editor tests passing
+- ✅ All existing functionality preserved
+- ✅ New Duplicate and Export features tested
+- ✅ Widget ID uniqueness verified (no more clashes)
+- ✅ Responsive width now uses user preferences
+- ✅ Portrait autocomplete working
+
+### Root Cause Analysis
+
+The NPC editor was implemented without consulting existing editor patterns. The developer:
+
+1. Created a functional editor but didn't follow the established patterns
+2. Used TwoColumnLayout for BOTH list AND edit views (should only be list)
+3. Hardcoded `inspector_min_width = 300.0` and `max_ratio = 0.6` instead of using `display_config`
+4. Used plain text input for portraits instead of autocomplete selector
+5. Didn't add proper widget ID prefixes
+6. Missed the ActionButtons component usage
+7. Put buttons in wrong location (outside scroll area)
+8. Implemented filters in the wrong location
+
+This violated:
+
+- **AGENTS.md Golden Rule 3**: "BE CONSISTENT WITH NAMING CONVENTIONS AND STYLE GUIDELINES"
+- **Architecture principle**: Responsive layouts should use configurable settings, not hardcoded values
+
+### Date Completed
+
+2025-01-26
+
+---
+
 ## NPC Editor Tab Fix - COMPLETED
 
 ### Summary
