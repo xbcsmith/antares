@@ -42,6 +42,8 @@
 //! - [`extract_proficiency_candidates`] - Extracts searchable proficiency candidates
 //! - [`extract_item_tag_candidates`] - Extracts unique item tags from items
 //! - [`extract_special_ability_candidates`] - Extracts special abilities from races
+//! - [`extract_portrait_candidates`] - Extracts available portrait IDs from campaign assets
+//! - [`resolve_portrait_path`] - Resolves portrait ID to full file path
 //! - [`AutocompleteCandidateCache`] - Performance cache for candidate lists (invalidate on data changes)
 //!
 //! ## Entity Validation Warnings (Phase 3)
@@ -3353,6 +3355,104 @@ pub fn autocomplete_monster_list_selector(
     changed
 }
 
+/// Portrait selector widget with autocomplete functionality
+///
+/// Provides an autocomplete text input for selecting a portrait by ID.
+/// The widget displays available portrait IDs as suggestions and allows
+/// the user to type and select from the list.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `id_salt` - Unique identifier for this widget instance
+/// * `label` - Text label to display before the input
+/// * `selected_portrait_id` - Mutable reference to the currently selected portrait ID
+/// * `available_portraits` - Slice of available portrait IDs to choose from
+///
+/// # Returns
+///
+/// Returns `true` if the selection changed during this frame, `false` otherwise
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::ui_helpers::autocomplete_portrait_selector;
+///
+/// fn show_character_editor(ui: &mut egui::Ui, portrait_id: &mut String, portraits: &[String]) {
+///     if autocomplete_portrait_selector(ui, "char_portrait", "Portrait:", portrait_id, portraits, campaign_dir) {
+///         println!("Portrait selection changed to: {}", portrait_id);
+///     }
+/// }
+/// ```
+pub fn autocomplete_portrait_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_portrait_id: &mut String,
+    available_portraits: &[String],
+    campaign_dir: Option<&PathBuf>,
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        ui.label(label);
+
+        // Get current portrait ID display value
+        let current_value = selected_portrait_id.clone();
+
+        let buffer_id = make_autocomplete_id(ui, "portrait", id_salt);
+
+        // Build candidates from available portraits
+        let candidates: Vec<String> = available_portraits.to_vec();
+
+        // Persistent buffer logic
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_value.clone());
+
+        let mut response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder("Start typing portrait ID...")
+            .show(ui, &mut text_buffer);
+
+        // Add tooltip showing full portrait path for current selection
+        if !selected_portrait_id.is_empty() {
+            if let Some(path) = resolve_portrait_path(campaign_dir, selected_portrait_id) {
+                response = response.on_hover_text(format!("Portrait path: {}", path.display()));
+            } else {
+                response = response.on_hover_text(format!(
+                    "⚠ Portrait '{}' not found in campaign assets/portraits",
+                    selected_portrait_id
+                ));
+            }
+        }
+
+        // Commit valid selections
+        if response.changed() && !text_buffer.is_empty() && text_buffer != current_value {
+            if available_portraits.contains(&text_buffer) {
+                *selected_portrait_id = text_buffer.clone();
+                changed = true;
+            }
+        }
+
+        // Show clear button
+        if !selected_portrait_id.is_empty()
+            && ui
+                .small_button("✖")
+                .on_hover_text("Clear selection")
+                .clicked()
+        {
+            selected_portrait_id.clear();
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
+            changed = true;
+        }
+
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+    });
+
+    changed
+}
+
 /// Extracts monster name candidates from a list of monster definitions.
 ///
 /// Returns a vector of monster names suitable for autocomplete widgets.
@@ -3863,6 +3963,128 @@ pub fn extract_npc_candidates(maps: &[antares::domain::world::Map]) -> Vec<(Stri
         }
     }
     candidates
+}
+
+/// Extracts portrait candidates from the campaign's portrait assets directory.
+///
+/// Scans the `campaign_dir/assets/portraits` directory for image files (`.png`, `.jpg`, `.jpeg`)
+/// and returns a sorted list of portrait ID strings extracted from filenames.
+///
+/// # Arguments
+///
+/// * `campaign_dir` - Optional path to the campaign directory
+///
+/// # Returns
+///
+/// A vector of portrait ID strings sorted numerically (e.g., ["0", "1", "2", "10", "20"])
+/// Returns an empty vector if the campaign directory is None or the portraits directory doesn't exist.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::PathBuf;
+/// use campaign_builder::ui_helpers::extract_portrait_candidates;
+///
+/// let campaign_dir = PathBuf::from("/path/to/campaign");
+/// let portraits = extract_portrait_candidates(Some(&campaign_dir));
+/// // Returns portrait IDs found in /path/to/campaign/assets/portraits/
+/// // e.g., ["0", "1", "2"] if files 0.png, 1.png, 2.png exist
+/// ```
+pub fn extract_portrait_candidates(campaign_dir: Option<&PathBuf>) -> Vec<String> {
+    let Some(dir) = campaign_dir else {
+        return Vec::new();
+    };
+
+    let portraits_dir = dir.join("assets").join("portraits");
+
+    // Return empty if directory doesn't exist
+    if !portraits_dir.exists() || !portraits_dir.is_dir() {
+        return Vec::new();
+    }
+
+    let Ok(entries) = std::fs::read_dir(&portraits_dir) else {
+        return Vec::new();
+    };
+
+    let mut portrait_ids = Vec::new();
+    let valid_extensions = ["png", "jpg", "jpeg"];
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        // Only process files with valid image extensions
+        if let Some(extension) = path.extension() {
+            let ext_str = extension.to_string_lossy().to_lowercase();
+            if valid_extensions.contains(&ext_str.as_str()) {
+                // Extract filename without extension as portrait ID
+                if let Some(file_stem) = path.file_stem() {
+                    let portrait_id = file_stem.to_string_lossy().to_string();
+
+                    // Prioritize PNG files - if we already have this ID from a different format, skip
+                    if ext_str == "png" {
+                        // Remove any existing entry for this ID and add PNG version
+                        portrait_ids.retain(|id| id != &portrait_id);
+                        portrait_ids.push(portrait_id);
+                    } else if !portrait_ids.contains(&portrait_id) {
+                        portrait_ids.push(portrait_id);
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort numerically if possible, otherwise alphabetically
+    portrait_ids.sort_by(|a, b| match (a.parse::<u32>(), b.parse::<u32>()) {
+        (Ok(a_num), Ok(b_num)) => a_num.cmp(&b_num),
+        _ => a.cmp(b),
+    });
+
+    portrait_ids
+}
+
+/// Resolves a portrait ID to its full file path.
+///
+/// Attempts to find the portrait file in the campaign's assets/portraits directory.
+/// Prioritizes PNG format, but will also check for JPG/JPEG if PNG is not found.
+///
+/// # Arguments
+///
+/// * `campaign_dir` - Optional path to the campaign directory
+/// * `portrait_id` - The portrait ID (filename without extension)
+///
+/// # Returns
+///
+/// `Some(PathBuf)` if the portrait file exists, `None` otherwise.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::PathBuf;
+/// use campaign_builder::ui_helpers::resolve_portrait_path;
+///
+/// let campaign_dir = PathBuf::from("/path/to/campaign");
+/// let portrait_path = resolve_portrait_path(Some(&campaign_dir), "0");
+/// // Returns Some(/path/to/campaign/assets/portraits/0.png) if it exists
+/// ```
+pub fn resolve_portrait_path(campaign_dir: Option<&PathBuf>, portrait_id: &str) -> Option<PathBuf> {
+    let dir = campaign_dir?;
+    let portraits_dir = dir.join("assets").join("portraits");
+
+    // Prioritize PNG format
+    let png_path = portraits_dir.join(format!("{}.png", portrait_id));
+    if png_path.exists() {
+        return Some(png_path);
+    }
+
+    // Try other supported formats
+    for ext in ["jpg", "jpeg"] {
+        let path = portraits_dir.join(format!("{}.{}", portrait_id, ext));
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    None
 }
 
 // =============================================================================
@@ -5823,5 +6045,459 @@ mod tests {
         // Should maintain input order
         assert_eq!(candidates[0].1, 10);
         assert_eq!(candidates[1].1, 5);
+    }
+
+    // =========================================================================
+    // Portrait Discovery Tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_portrait_candidates_no_campaign_dir() {
+        let candidates = extract_portrait_candidates(None);
+        assert_eq!(candidates.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_portrait_candidates_nonexistent_directory() {
+        let campaign_dir = PathBuf::from("/nonexistent/path/to/campaign");
+        let candidates = extract_portrait_candidates(Some(&campaign_dir));
+        assert_eq!(candidates.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_portrait_candidates_empty_directory() {
+        // Create temporary directory structure
+        let temp_dir = std::env::temp_dir().join("antares_test_portraits_empty");
+        let portraits_dir = temp_dir.join("assets").join("portraits");
+
+        // Clean up any existing test directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // Create the portraits directory
+        std::fs::create_dir_all(&portraits_dir).expect("Failed to create test directory");
+
+        let candidates = extract_portrait_candidates(Some(&temp_dir));
+        assert_eq!(candidates.len(), 0);
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).expect("Failed to cleanup test directory");
+    }
+
+    #[test]
+    fn test_extract_portrait_candidates_with_png_files() {
+        // Create temporary directory structure with portrait files
+        let temp_dir = std::env::temp_dir().join("antares_test_portraits_png");
+        let portraits_dir = temp_dir.join("assets").join("portraits");
+
+        // Clean up any existing test directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // Create the portraits directory
+        std::fs::create_dir_all(&portraits_dir).expect("Failed to create test directory");
+
+        // Create test portrait files
+        std::fs::write(portraits_dir.join("0.png"), b"fake png data")
+            .expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("1.png"), b"fake png data")
+            .expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("10.png"), b"fake png data")
+            .expect("Failed to create test file");
+
+        let candidates = extract_portrait_candidates(Some(&temp_dir));
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates, vec!["0", "1", "10"]);
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).expect("Failed to cleanup test directory");
+    }
+
+    #[test]
+    fn test_extract_portrait_candidates_numeric_sort() {
+        // Create temporary directory with numerically named portraits
+        let temp_dir = std::env::temp_dir().join("antares_test_portraits_numeric");
+        let portraits_dir = temp_dir.join("assets").join("portraits");
+
+        // Clean up any existing test directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        std::fs::create_dir_all(&portraits_dir).expect("Failed to create test directory");
+
+        // Create files in non-sorted order
+        std::fs::write(portraits_dir.join("2.png"), b"data").expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("10.png"), b"data").expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("1.png"), b"data").expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("20.png"), b"data").expect("Failed to create test file");
+
+        let candidates = extract_portrait_candidates(Some(&temp_dir));
+        assert_eq!(candidates.len(), 4);
+        // Should be sorted numerically: 1, 2, 10, 20 (not "1", "10", "2", "20")
+        assert_eq!(candidates, vec!["1", "2", "10", "20"]);
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).expect("Failed to cleanup test directory");
+    }
+
+    #[test]
+    fn test_extract_portrait_candidates_mixed_extensions() {
+        // Create temporary directory with mixed image formats
+        let temp_dir = std::env::temp_dir().join("antares_test_portraits_mixed");
+        let portraits_dir = temp_dir.join("assets").join("portraits");
+
+        // Clean up any existing test directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        std::fs::create_dir_all(&portraits_dir).expect("Failed to create test directory");
+
+        // Create files with different extensions
+        std::fs::write(portraits_dir.join("0.png"), b"png data")
+            .expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("1.jpg"), b"jpg data")
+            .expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("2.jpeg"), b"jpeg data")
+            .expect("Failed to create test file");
+
+        let candidates = extract_portrait_candidates(Some(&temp_dir));
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates, vec!["0", "1", "2"]);
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).expect("Failed to cleanup test directory");
+    }
+
+    #[test]
+    fn test_extract_portrait_candidates_png_priority() {
+        // Test that PNG files are prioritized over other formats
+        let temp_dir = std::env::temp_dir().join("antares_test_portraits_priority");
+        let portraits_dir = temp_dir.join("assets").join("portraits");
+
+        // Clean up any existing test directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        std::fs::create_dir_all(&portraits_dir).expect("Failed to create test directory");
+
+        // Create both PNG and JPG versions of same portrait ID
+        std::fs::write(portraits_dir.join("0.jpg"), b"jpg data")
+            .expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("0.png"), b"png data")
+            .expect("Failed to create test file");
+
+        let candidates = extract_portrait_candidates(Some(&temp_dir));
+        // Should only have one entry for "0", prioritizing PNG
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0], "0");
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).expect("Failed to cleanup test directory");
+    }
+
+    #[test]
+    fn test_extract_portrait_candidates_ignores_non_images() {
+        // Test that non-image files are ignored
+        let temp_dir = std::env::temp_dir().join("antares_test_portraits_filter");
+        let portraits_dir = temp_dir.join("assets").join("portraits");
+
+        // Clean up any existing test directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        std::fs::create_dir_all(&portraits_dir).expect("Failed to create test directory");
+
+        // Create various file types
+        std::fs::write(portraits_dir.join("0.png"), b"png data")
+            .expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("readme.txt"), b"text file")
+            .expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("data.json"), b"json data")
+            .expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("script.ron"), b"ron data")
+            .expect("Failed to create test file");
+
+        let candidates = extract_portrait_candidates(Some(&temp_dir));
+        // Should only find the PNG file
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0], "0");
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).expect("Failed to cleanup test directory");
+    }
+
+    #[test]
+    fn test_resolve_portrait_path_no_campaign_dir() {
+        let path = resolve_portrait_path(None, "0");
+        assert!(path.is_none());
+    }
+
+    #[test]
+    fn test_resolve_portrait_path_nonexistent_file() {
+        let campaign_dir = PathBuf::from("/nonexistent/path");
+        let path = resolve_portrait_path(Some(&campaign_dir), "999");
+        assert!(path.is_none());
+    }
+
+    #[test]
+    fn test_resolve_portrait_path_finds_png() {
+        // Create temporary directory with PNG portrait
+        let temp_dir = std::env::temp_dir().join("antares_test_resolve_png");
+        let portraits_dir = temp_dir.join("assets").join("portraits");
+
+        // Clean up any existing test directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        std::fs::create_dir_all(&portraits_dir).expect("Failed to create test directory");
+        std::fs::write(portraits_dir.join("0.png"), b"png data")
+            .expect("Failed to create test file");
+
+        let path = resolve_portrait_path(Some(&temp_dir), "0");
+        assert!(path.is_some());
+        assert_eq!(path.unwrap(), portraits_dir.join("0.png"));
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).expect("Failed to cleanup test directory");
+    }
+
+    #[test]
+    fn test_resolve_portrait_path_finds_jpg() {
+        // Create temporary directory with JPG portrait
+        let temp_dir = std::env::temp_dir().join("antares_test_resolve_jpg");
+        let portraits_dir = temp_dir.join("assets").join("portraits");
+
+        // Clean up any existing test directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        std::fs::create_dir_all(&portraits_dir).expect("Failed to create test directory");
+        std::fs::write(portraits_dir.join("1.jpg"), b"jpg data")
+            .expect("Failed to create test file");
+
+        let path = resolve_portrait_path(Some(&temp_dir), "1");
+        assert!(path.is_some());
+        assert_eq!(path.unwrap(), portraits_dir.join("1.jpg"));
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).expect("Failed to cleanup test directory");
+    }
+
+    #[test]
+    fn test_resolve_portrait_path_finds_jpeg() {
+        // Create temporary directory with JPEG portrait
+        let temp_dir = std::env::temp_dir().join("antares_test_resolve_jpeg");
+        let portraits_dir = temp_dir.join("assets").join("portraits");
+
+        // Clean up any existing test directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        std::fs::create_dir_all(&portraits_dir).expect("Failed to create test directory");
+        std::fs::write(portraits_dir.join("2.jpeg"), b"jpeg data")
+            .expect("Failed to create test file");
+
+        let path = resolve_portrait_path(Some(&temp_dir), "2");
+        assert!(path.is_some());
+        assert_eq!(path.unwrap(), portraits_dir.join("2.jpeg"));
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).expect("Failed to cleanup test directory");
+    }
+
+    #[test]
+    fn test_resolve_portrait_path_prioritizes_png() {
+        // Test that PNG is prioritized when multiple formats exist
+        let temp_dir = std::env::temp_dir().join("antares_test_resolve_priority");
+        let portraits_dir = temp_dir.join("assets").join("portraits");
+
+        // Clean up any existing test directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        std::fs::create_dir_all(&portraits_dir).expect("Failed to create test directory");
+
+        // Create multiple formats
+        std::fs::write(portraits_dir.join("0.jpg"), b"jpg data")
+            .expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("0.png"), b"png data")
+            .expect("Failed to create test file");
+        std::fs::write(portraits_dir.join("0.jpeg"), b"jpeg data")
+            .expect("Failed to create test file");
+
+        let path = resolve_portrait_path(Some(&temp_dir), "0");
+        assert!(path.is_some());
+        // Should return PNG path
+        assert_eq!(path.unwrap(), portraits_dir.join("0.png"));
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).expect("Failed to cleanup test directory");
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_basic_selection() {
+        // Test basic portrait selection functionality
+        let ctx = egui::Context::default();
+        let mut portrait_id = String::new();
+        let available_portraits = vec!["0".to_string(), "1".to_string(), "2".to_string()];
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Initially no selection
+                assert_eq!(portrait_id, "");
+
+                // Simulate selecting portrait "1"
+                portrait_id = "1".to_string();
+                let changed = autocomplete_portrait_selector(
+                    ui,
+                    "test_portrait",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                    None,
+                );
+
+                // Since we manually set it, the widget should see it
+                assert_eq!(portrait_id, "1");
+            });
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_clear_button() {
+        // Test that clear button functionality is present
+        let ctx = egui::Context::default();
+        let mut portrait_id = "5".to_string();
+        let available_portraits = vec!["5".to_string(), "10".to_string()];
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Portrait is selected
+                assert_eq!(portrait_id, "5");
+
+                // Call the selector (clear button should be available)
+                autocomplete_portrait_selector(
+                    ui,
+                    "test_clear",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                    None,
+                );
+
+                // Portrait should still be selected after just rendering
+                assert_eq!(portrait_id, "5");
+            });
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_empty_candidates() {
+        // Test behavior with no available portraits
+        let ctx = egui::Context::default();
+        let mut portrait_id = String::new();
+        let available_portraits: Vec<String> = vec![];
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let changed = autocomplete_portrait_selector(
+                    ui,
+                    "test_empty",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                    None,
+                );
+
+                // Should not change with empty candidates
+                assert!(!changed);
+                assert_eq!(portrait_id, "");
+            });
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_validates_selection() {
+        // Test that selection must be from available portraits
+        let ctx = egui::Context::default();
+        let mut portrait_id = String::new();
+        let available_portraits = vec!["0".to_string(), "1".to_string()];
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Try to set an invalid portrait ID
+                portrait_id = "999".to_string();
+
+                autocomplete_portrait_selector(
+                    ui,
+                    "test_validate",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                    None,
+                );
+
+                // The widget should accept the value but won't auto-clear it
+                // (validation happens on change, not on initial display)
+                assert_eq!(portrait_id, "999");
+            });
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_numeric_ids() {
+        // Test with numeric portrait IDs (common case)
+        let ctx = egui::Context::default();
+        let mut portrait_id = String::new();
+        let available_portraits = vec![
+            "0".to_string(),
+            "1".to_string(),
+            "10".to_string(),
+            "100".to_string(),
+        ];
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                autocomplete_portrait_selector(
+                    ui,
+                    "test_numeric",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                    None,
+                );
+
+                // Should render without errors
+                assert_eq!(portrait_id, "");
+            });
+        });
+    }
+
+    #[test]
+    fn test_autocomplete_portrait_selector_preserves_buffer() {
+        // Test that widget state persists across frames
+        let ctx = egui::Context::default();
+        let mut portrait_id = "0".to_string();
+        let available_portraits = vec!["0".to_string(), "1".to_string()];
+
+        // Frame 1
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                autocomplete_portrait_selector(
+                    ui,
+                    "test_persist",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                    None,
+                );
+            });
+        });
+
+        // Frame 2 - buffer should be persisted
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                autocomplete_portrait_selector(
+                    ui,
+                    "test_persist",
+                    "Portrait:",
+                    &mut portrait_id,
+                    &available_portraits,
+                    None,
+                );
+                // Portrait ID should still be "0"
+                assert_eq!(portrait_id, "0");
+            });
+        });
     }
 }
