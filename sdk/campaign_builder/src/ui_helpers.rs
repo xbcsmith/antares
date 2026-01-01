@@ -3379,7 +3379,7 @@ pub fn autocomplete_monster_list_selector(
 /// use campaign_builder::ui_helpers::autocomplete_portrait_selector;
 ///
 /// fn show_character_editor(ui: &mut egui::Ui, portrait_id: &mut String, portraits: &[String]) {
-///     if autocomplete_portrait_selector(ui, "char_portrait", "Portrait:", portrait_id, portraits) {
+///     if autocomplete_portrait_selector(ui, "char_portrait", "Portrait:", portrait_id, portraits, campaign_dir) {
 ///         println!("Portrait selection changed to: {}", portrait_id);
 ///     }
 /// }
@@ -3390,6 +3390,7 @@ pub fn autocomplete_portrait_selector(
     label: &str,
     selected_portrait_id: &mut String,
     available_portraits: &[String],
+    campaign_dir: Option<&PathBuf>,
 ) -> bool {
     use crate::ui_helpers::AutocompleteInput;
 
@@ -3410,9 +3411,21 @@ pub fn autocomplete_portrait_selector(
         let mut text_buffer =
             load_autocomplete_buffer(ui.ctx(), buffer_id, || current_value.clone());
 
-        let response = AutocompleteInput::new(id_salt, &candidates)
+        let mut response = AutocompleteInput::new(id_salt, &candidates)
             .with_placeholder("Start typing portrait ID...")
             .show(ui, &mut text_buffer);
+
+        // Add tooltip showing full portrait path for current selection
+        if !selected_portrait_id.is_empty() {
+            if let Some(path) = resolve_portrait_path(campaign_dir, selected_portrait_id) {
+                response = response.on_hover_text(format!("Portrait path: {}", path.display()));
+            } else {
+                response = response.on_hover_text(format!(
+                    "⚠ Portrait '{}' not found in campaign assets/portraits",
+                    selected_portrait_id
+                ));
+            }
+        }
 
         // Commit valid selections
         if response.changed() && !text_buffer.is_empty() && text_buffer != current_value {
@@ -6331,6 +6344,7 @@ mod tests {
                     "Portrait:",
                     &mut portrait_id,
                     &available_portraits,
+                    None,
                 );
 
                 // Since we manually set it, the widget should see it
@@ -6358,6 +6372,7 @@ mod tests {
                     "Portrait:",
                     &mut portrait_id,
                     &available_portraits,
+                    None,
                 );
 
                 // Portrait should still be selected after just rendering
@@ -6381,6 +6396,7 @@ mod tests {
                     "Portrait:",
                     &mut portrait_id,
                     &available_portraits,
+                    None,
                 );
 
                 // Should not change with empty candidates
@@ -6408,6 +6424,7 @@ mod tests {
                     "Portrait:",
                     &mut portrait_id,
                     &available_portraits,
+                    None,
                 );
 
                 // The widget should accept the value but won't auto-clear it
@@ -6437,6 +6454,7 @@ mod tests {
                     "Portrait:",
                     &mut portrait_id,
                     &available_portraits,
+                    None,
                 );
 
                 // Should render without errors
@@ -6461,6 +6479,7 @@ mod tests {
                     "Portrait:",
                     &mut portrait_id,
                     &available_portraits,
+                    None,
                 );
             });
         });
@@ -6474,6 +6493,7 @@ mod tests {
                     "Portrait:",
                     &mut portrait_id,
                     &available_portraits,
+                    None,
                 );
                 // Portrait ID should still be "0"
                 assert_eq!(portrait_id, "0");

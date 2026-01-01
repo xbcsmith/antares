@@ -522,15 +522,27 @@ impl CharactersEditorState {
             return self.portrait_textures.get(portrait_id).unwrap().is_some();
         }
 
-        // Attempt to load and decode image
+        // Attempt to load and decode image with error logging
         let texture_handle = (|| {
             let path = resolve_portrait_path(campaign_dir, portrait_id)?;
 
-            // Read image file
-            let image_bytes = std::fs::read(&path).ok()?;
+            // Read image file with error handling
+            let image_bytes = match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    eprintln!("Failed to read portrait file '{}': {}", path.display(), e);
+                    return None;
+                }
+            };
 
-            // Decode image using image crate
-            let dynamic_image = image::load_from_memory(&image_bytes).ok()?;
+            // Decode image using image crate with error handling
+            let dynamic_image = match image::load_from_memory(&image_bytes) {
+                Ok(img) => img,
+                Err(e) => {
+                    eprintln!("Failed to decode portrait '{}': {}", portrait_id, e);
+                    return None;
+                }
+            };
 
             // Convert to RGBA8
             let rgba_image = dynamic_image.to_rgba8();
@@ -552,6 +564,13 @@ impl CharactersEditorState {
 
         // Cache result (even None for failed loads to avoid repeated attempts)
         let loaded = texture_handle.is_some();
+        if !loaded {
+            eprintln!(
+                "Portrait '{}' could not be loaded or was not found",
+                portrait_id
+            );
+        }
+
         self.portrait_textures
             .insert(portrait_id.to_string(), texture_handle);
 
@@ -634,6 +653,19 @@ impl CharactersEditorState {
                                         .and_then(|opt| opt.as_ref())
                                         .is_some();
 
+                                    // Build tooltip text with portrait path
+                                    let tooltip_text = if let Some(path) =
+                                        resolve_portrait_path(campaign_dir, portrait_id)
+                                    {
+                                        format!(
+                                            "Portrait ID: {}\nPath: {}",
+                                            portrait_id,
+                                            path.display()
+                                        )
+                                    } else {
+                                        format!("Portrait ID: {}\n⚠ File not found", portrait_id)
+                                    };
+
                                     // Create image button or placeholder
                                     let button_response = if has_texture {
                                         let texture = self
@@ -650,6 +682,7 @@ impl CharactersEditorState {
                                             )
                                             .frame(true),
                                         )
+                                        .on_hover_text(&tooltip_text)
                                     } else {
                                         // Placeholder for failed/missing images
                                         let (rect, response) = ui.allocate_exact_size(
@@ -668,7 +701,7 @@ impl CharactersEditorState {
                                             egui::FontId::proportional(24.0),
                                             egui::Color32::from_gray(150),
                                         );
-                                        response
+                                        response.on_hover_text(&tooltip_text)
                                     };
 
                                     // Check if clicked
@@ -889,7 +922,7 @@ impl CharactersEditorState {
                 self.show_list(ui, items, campaign_dir, unsaved_changes);
             }
             CharactersEditorMode::Add | CharactersEditorMode::Edit => {
-                self.show_character_form(ui, races, classes, items);
+                self.show_character_form(ui, races, classes, items, campaign_dir);
             }
         }
 
@@ -1335,6 +1368,7 @@ impl CharactersEditorState {
         races: &[RaceDefinition],
         classes: &[ClassDefinition],
         items: &[Item],
+        campaign_dir: Option<&PathBuf>,
     ) {
         let title = if self.mode == CharactersEditorMode::Add {
             "New Character"
@@ -1436,6 +1470,7 @@ impl CharactersEditorState {
                                 "",
                                 &mut self.buffer.portrait_id,
                                 &self.available_portraits,
+                                campaign_dir,
                             );
 
                             // Grid picker button
@@ -2518,5 +2553,277 @@ mod tests {
 
         // Should not attempt to load empty portrait
         assert!(state.portrait_textures.is_empty());
+    }
+
+    // Phase 5: Polish and Edge Cases Tests
+
+    #[test]
+    fn test_portrait_texture_error_handling_missing_file() {
+        // Test that missing portrait files are handled gracefully
+        let mut state = CharactersEditorState::new();
+        let ctx = egui::Context::default();
+        let campaign_dir = PathBuf::from("/nonexistent/path");
+
+        // Attempt to load a portrait that doesn't exist
+        let loaded = state.load_portrait_texture(&ctx, Some(&campaign_dir), "999");
+
+        // Should return false and cache the failure
+        assert!(!loaded);
+        assert!(state.portrait_textures.contains_key("999"));
+        assert!(state.portrait_textures.get("999").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_portrait_texture_error_handling_no_campaign_dir() {
+        // Test behavior when no campaign directory is provided
+        let mut state = CharactersEditorState::new();
+        let ctx = egui::Context::default();
+
+        // Attempt to load portrait without campaign directory
+        let loaded = state.load_portrait_texture(&ctx, None, "0");
+
+        // Should fail gracefully and cache the failure
+        assert!(!loaded);
+        assert!(state.portrait_textures.contains_key("0"));
+        assert!(state.portrait_textures.get("0").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_new_character_creation_workflow_with_portrait() {
+        // Test complete workflow: create new character with portrait
+        let mut state = CharactersEditorState::new();
+
+        // Start new character creation
+        state.start_new_character();
+        assert_eq!(state.mode, CharactersEditorMode::Add);
+
+        // Set portrait ID and other required fields
+        state.buffer.portrait_id = "5".to_string();
+        state.buffer.id = "test_char".to_string();
+        state.buffer.name = "Test Hero".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+
+        // Save character
+        let result = state.save_character();
+        assert!(result.is_ok());
+
+        // Verify portrait ID was saved
+        let saved_char = state.characters.iter().find(|c| c.id == "test_char");
+        assert!(saved_char.is_some());
+        assert_eq!(saved_char.unwrap().portrait_id, "5");
+    }
+
+    #[test]
+    fn test_edit_character_workflow_updates_portrait() {
+        // Test complete workflow: edit existing character's portrait
+        let mut state = CharactersEditorState::new();
+
+        // Create initial character using proper constructor
+        let mut character = CharacterDefinition::new(
+            "hero1".to_string(),
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.portrait_id = "0".to_string();
+        state.characters.push(character);
+
+        // Start editing (using index)
+        state.start_edit_character(0);
+        assert_eq!(state.mode, CharactersEditorMode::Edit);
+        assert_eq!(state.buffer.portrait_id, "0");
+
+        // Change portrait
+        state.buffer.portrait_id = "10".to_string();
+
+        // Save changes
+        let result = state.save_character();
+        assert!(result.is_ok());
+
+        // Verify portrait was updated
+        let updated_char = state.characters.iter().find(|c| c.id == "hero1");
+        assert!(updated_char.is_some());
+        assert_eq!(updated_char.unwrap().portrait_id, "10");
+    }
+
+    #[test]
+    fn test_character_list_scrolling_preserves_portrait_state() {
+        // Test that scrolling through character list doesn't lose portrait data
+        let mut state = CharactersEditorState::new();
+
+        // Create multiple characters with different portraits
+        for i in 0..10 {
+            let mut character = CharacterDefinition::new(
+                format!("char_{}", i),
+                format!("Character {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            character.portrait_id = i.to_string();
+            state.characters.push(character);
+        }
+
+        // Select different characters
+        state.selected_character = Some(5);
+        assert_eq!(state.selected_character, Some(5));
+
+        state.selected_character = Some(7);
+        assert_eq!(state.selected_character, Some(7));
+
+        // Verify all characters still have correct portraits
+        assert_eq!(state.characters[5].portrait_id, "5");
+        assert_eq!(state.characters[7].portrait_id, "7");
+    }
+
+    #[test]
+    fn test_save_load_roundtrip_preserves_portraits() {
+        // Test that portrait IDs survive save/load cycle
+        let mut state = CharactersEditorState::new();
+
+        // Create characters with portraits
+        let mut char1 = CharacterDefinition::new(
+            "hero1".to_string(),
+            "Hero One".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        char1.portrait_id = "5".to_string();
+
+        let mut char2 = CharacterDefinition::new(
+            "hero2".to_string(),
+            "Hero Two".to_string(),
+            "elf".to_string(),
+            "archer".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        char2.portrait_id = "12".to_string();
+
+        state.characters.push(char1);
+        state.characters.push(char2);
+
+        // Save to RON format
+        let ron_data = ron::ser::to_string_pretty(&state.characters, Default::default());
+        assert!(ron_data.is_ok());
+
+        // Load back from RON
+        let loaded_characters: Result<Vec<CharacterDefinition>, _> =
+            ron::from_str(&ron_data.unwrap());
+        assert!(loaded_characters.is_ok());
+
+        let characters = loaded_characters.unwrap();
+        assert_eq!(characters.len(), 2);
+        assert_eq!(characters[0].portrait_id, "5");
+        assert_eq!(characters[1].portrait_id, "12");
+    }
+
+    #[test]
+    fn test_filter_operations_preserve_portrait_data() {
+        // Test that filtering characters doesn't affect portrait data
+        let mut state = CharactersEditorState::new();
+
+        // Create characters with different attributes and portraits
+        let mut char1 = CharacterDefinition::new(
+            "knight1".to_string(),
+            "Knight".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        char1.portrait_id = "5".to_string();
+        char1.is_premade = true;
+
+        let mut char2 = CharacterDefinition::new(
+            "mage1".to_string(),
+            "Mage".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        char2.portrait_id = "10".to_string();
+        char2.is_premade = false;
+
+        state.characters.push(char1);
+        state.characters.push(char2);
+
+        // Apply race filter
+        state.filter_race = Some("human".to_string());
+        let filtered = state.filtered_characters();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].1.portrait_id, "5");
+
+        // Change to class filter
+        state.filter_race = None;
+        state.filter_class = Some("sorcerer".to_string());
+        let filtered = state.filtered_characters();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].1.portrait_id, "10");
+
+        // Verify original data unchanged
+        assert_eq!(state.characters[0].portrait_id, "5");
+        assert_eq!(state.characters[1].portrait_id, "10");
+    }
+
+    #[test]
+    fn test_portrait_texture_cache_efficiency() {
+        // Test that portrait textures are cached and not reloaded
+        let mut state = CharactersEditorState::new();
+        let ctx = egui::Context::default();
+        let campaign_dir = PathBuf::from("/test/campaign");
+
+        // First load attempt
+        let loaded1 = state.load_portrait_texture(&ctx, Some(&campaign_dir), "test_portrait");
+
+        // Second load attempt should use cache
+        let loaded2 = state.load_portrait_texture(&ctx, Some(&campaign_dir), "test_portrait");
+
+        // Both should return same result (cached)
+        assert_eq!(loaded1, loaded2);
+
+        // Cache should only have one entry for this portrait
+        assert_eq!(
+            state
+                .portrait_textures
+                .keys()
+                .filter(|k| k.as_str() == "test_portrait")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_multiple_characters_different_portraits() {
+        // Test creating multiple characters with different portraits
+        let mut state = CharactersEditorState::new();
+
+        // Create 5 characters with different portraits
+        for i in 0..5 {
+            state.start_new_character();
+            state.buffer.id = format!("char_{}", i);
+            state.buffer.name = format!("Character {}", i);
+            state.buffer.race_id = "human".to_string();
+            state.buffer.class_id = "knight".to_string();
+            state.buffer.portrait_id = (i * 2).to_string(); // 0, 2, 4, 6, 8
+
+            let result = state.save_character();
+            assert!(result.is_ok());
+        }
+
+        // Verify all have different portraits
+        assert_eq!(state.characters.len(), 5);
+        assert_eq!(state.characters[0].portrait_id, "0");
+        assert_eq!(state.characters[1].portrait_id, "2");
+        assert_eq!(state.characters[2].portrait_id, "4");
+        assert_eq!(state.characters[3].portrait_id, "6");
+        assert_eq!(state.characters[4].portrait_id, "8");
     }
 }
