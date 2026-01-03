@@ -7608,21 +7608,6 @@
     ],
     events: {
         (
-            x: 14,
-            y: 1,
-        ): Encounter(
-            name: "Skeletons from the Past",
-            description: "The burial cave is haunted by the skeletons of fallen warriors.",
-            monster_group: [
-                11,
-                11,
-                11,
-                11,
-                11,
-                11,
-            ],
-        ),
-        (
             x: 12,
             y: 10,
         ): Encounter(
@@ -7638,6 +7623,21 @@
                 1,
                 1,
                 1,
+            ],
+        ),
+        (
+            x: 14,
+            y: 1,
+        ): Encounter(
+            name: "Skeletons from the Past",
+            description: "The burial cave is haunted by the skeletons of fallen warriors.",
+            monster_group: [
+                11,
+                11,
+                11,
+                11,
+                11,
+                11,
             ],
         ),
         (

@@ -12,7 +12,9 @@
         damage: None,
         duration: 0,
         saving_throw: false,
-        applied_conditions: [],
+        applied_conditions: [
+            "awake",
+        ],
     ),
     (
         id: 258,
