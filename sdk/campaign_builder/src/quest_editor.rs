@@ -25,6 +25,13 @@ use antares::domain::world::Map;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Context containing reference data for quest editor
+pub struct QuestEditorContext<'a> {
+    pub items: &'a [Item],
+    pub monsters: &'a [MonsterDefinition],
+    pub maps: &'a [Map],
+}
+
 /// Editor state for quest designer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuestEditorState {
@@ -983,11 +990,7 @@ impl QuestEditorState {
         quest.quest_giver_npc = if self.quest_buffer.quest_giver_npc.is_empty() {
             None
         } else {
-            if self.quest_buffer.quest_giver_npc.is_empty() {
-                None
-            } else {
-                Some(self.quest_buffer.quest_giver_npc.clone())
-            }
+            Some(self.quest_buffer.quest_giver_npc.clone())
         };
         quest.quest_giver_map = if self.quest_buffer.quest_giver_map.is_empty() {
             None
@@ -1314,15 +1317,12 @@ impl QuestEditorState {
             }
             QuestEditorMode::Creating | QuestEditorMode::Editing => {
                 // Full-screen quest form editor
-                self.show_quest_form(
-                    ui,
-                    quests,
+                let ctx = QuestEditorContext {
                     items,
                     monsters,
                     maps,
-                    unsaved_changes,
-                    status_message,
-                );
+                };
+                self.show_quest_form(ui, quests, &ctx, unsaved_changes, status_message);
             }
         }
     }
@@ -1581,9 +1581,7 @@ impl QuestEditorState {
         &mut self,
         ui: &mut egui::Ui,
         quests: &mut Vec<Quest>,
-        items: &[Item],
-        monsters: &[MonsterDefinition],
-        maps: &[Map],
+        ctx: &QuestEditorContext,
         unsaved_changes: &mut bool,
         status_message: &mut String,
     ) {
@@ -1662,7 +1660,7 @@ impl QuestEditorState {
                             "quest_giver_npc",
                             "",
                             &mut self.quest_buffer.quest_giver_npc,
-                            maps,
+                            ctx.maps,
                         ) {
                             // The selector returns "map_id:npc_id"
                             if let Some((map_id_str, npc_id_str)) =
@@ -1670,7 +1668,7 @@ impl QuestEditorState {
                             {
                                 if let Ok(map_id) = map_id_str.parse::<MapId>() {
                                     let npc_id = npc_id_str.to_string();
-                                    if let Some(map) = maps.iter().find(|m| m.id == map_id) {
+                                    if let Some(map) = ctx.maps.iter().find(|m| m.id == map_id) {
                                         if let Some(npc) =
                                             map.npc_placements.iter().find(|n| n.npc_id == npc_id)
                                         {
@@ -1686,7 +1684,7 @@ impl QuestEditorState {
                                 let npc_id = self.quest_buffer.quest_giver_npc.clone();
                                 if !npc_id.is_empty() {
                                     // Fallback for manual ID entry
-                                    for map in maps {
+                                    for map in ctx.maps {
                                         if let Some(npc) =
                                             map.npc_placements.iter().find(|n| n.npc_id == npc_id)
                                         {
@@ -1710,7 +1708,7 @@ impl QuestEditorState {
                             "quest_giver_map",
                             "",
                             &mut self.quest_buffer.quest_giver_map,
-                            maps,
+                            ctx.maps,
                         );
                     });
 
@@ -1726,12 +1724,19 @@ impl QuestEditorState {
                 ui.add_space(10.0);
 
                 // Stages editor
-                self.show_quest_stages_editor(ui, quests, items, monsters, maps, unsaved_changes);
+                self.show_quest_stages_editor(
+                    ui,
+                    quests,
+                    ctx.items,
+                    ctx.monsters,
+                    ctx.maps,
+                    unsaved_changes,
+                );
 
                 ui.add_space(10.0);
 
                 // Rewards editor
-                self.show_quest_rewards_editor(ui, quests, items, unsaved_changes);
+                self.show_quest_rewards_editor(ui, quests, ctx.items, unsaved_changes);
 
                 ui.add_space(10.0);
 

@@ -7608,14 +7608,6 @@
     ],
     events: {
         (
-            x: 5,
-            y: 10,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store\'s wares and services.",
-            text: "General Store - Buy and Sell items for your party!",
-        ),
-        (
             x: 18,
             y: 18,
         ): Teleport(
@@ -7638,19 +7630,27 @@
         ),
         (
             x: 13,
-            y: 3,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice outside the temple detailing its services.",
-            text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
-            x: 13,
             y: 18,
         ): Sign(
             name: "Directional Sign",
             description: "A wooden sign pointing toward the Dark Forrest.",
             text: "To the Dark Forrest",
+        ),
+        (
+            x: 5,
+            y: 10,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store\'s wares and services.",
+            text: "General Store - Buy and Sell items for your party!",
+        ),
+        (
+            x: 13,
+            y: 3,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice outside the temple detailing its services.",
+            text: "Temple of Healing - The priests can restore your health.",
         ),
         (
             x: 5,

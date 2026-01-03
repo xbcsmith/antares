@@ -5122,45 +5122,43 @@ mod tests {
             });
             assert_eq!(val2.as_deref(), Some("Sw"));
         });
+    }
 
-        #[test]
-        fn autocomplete_map_selector_persists_buffer() {
-            let ctx = egui::Context::default();
-            let mut raw_input = egui::RawInput::default();
-            raw_input.screen_rect = Some(egui::Rect::from_min_size(
-                egui::pos2(0.0, 0.0),
-                egui::vec2(800.0, 600.0),
-            ));
-            ctx.begin_pass(raw_input);
+    #[test]
+    fn autocomplete_map_selector_persists_buffer() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        ));
+        ctx.begin_pass(raw_input);
 
-            egui::CentralPanel::default().show(&ctx, |ui| {
-                let mut selected_map_id: String = String::new();
-                let maps: Vec<antares::domain::world::Map> = vec![];
-                // First call should initialize persistent buffer
-                let _ =
-                    autocomplete_map_selector(ui, "map_test", "Map:", &mut selected_map_id, &maps);
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            let mut selected_map_id: String = String::new();
+            let maps: Vec<antares::domain::world::Map> = vec![];
+            // First call should initialize persistent buffer
+            let _ = autocomplete_map_selector(ui, "map_test", "Map:", &mut selected_map_id, &maps);
 
-                // Confirm memory has an entry
-                let id = make_autocomplete_id(ui, "map", "map_test");
-                let val = ui.ctx().memory(|mem| mem.data.get_temp::<String>(id));
-                assert!(val.is_some(), "Buffer map should contain entry for widget");
+            // Confirm memory has an entry
+            let id = make_autocomplete_id(ui, "map", "map_test");
+            let val = ui.ctx().memory(|mem| mem.data.get_temp::<String>(id));
+            assert!(val.is_some(), "Buffer map should contain entry for widget");
 
-                // Simulate typing by modifying the buffer
-                ui.ctx().memory_mut(|mem| {
-                    let buf = mem
-                        .data
-                        .get_temp_mut_or_insert_with::<String>(id, || String::new());
-                    *buf = "Over".to_string();
-                });
-
-                // Second call should not overwrite the typed content
-                let _ =
-                    autocomplete_map_selector(ui, "map_test", "Map:", &mut selected_map_id, &maps);
-
-                let val2 = ui.ctx().memory_mut(|mem| mem.data.get_temp::<String>(id));
-                assert_eq!(val2.as_deref(), Some("Over"));
+            // Simulate typing by modifying the buffer
+            ui.ctx().memory_mut(|mem| {
+                let buf = mem
+                    .data
+                    .get_temp_mut_or_insert_with::<String>(id, || String::new());
+                *buf = "Over".to_string();
             });
-        }
+
+            // Second call should not overwrite the typed content
+            let _ = autocomplete_map_selector(ui, "map_test", "Map:", &mut selected_map_id, &maps);
+
+            let val2 = ui.ctx().memory_mut(|mem| mem.data.get_temp::<String>(id));
+            assert_eq!(val2.as_deref(), Some("Over"));
+        });
     }
 
     #[test]
