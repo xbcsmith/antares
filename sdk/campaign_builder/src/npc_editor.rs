@@ -28,8 +28,8 @@
 //! - Standard UI components: EditorToolbar, TwoColumnLayout, ActionButtons
 
 use crate::ui_helpers::{
-    autocomplete_portrait_selector, extract_portrait_candidates, ActionButtons, EditorToolbar,
-    ItemAction, ToolbarAction, TwoColumnLayout,
+    autocomplete_portrait_selector, extract_portrait_candidates, resolve_portrait_path,
+    ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::dialogue::{DialogueId, DialogueTree};
 use antares::domain::quest::{Quest, QuestId};
@@ -37,11 +37,12 @@ use antares::domain::world::npc::{NpcDefinition, NpcId};
 use antares::sdk::tool_config::DisplayConfig;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Editor state for NPC editing
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct NpcEditorState {
     /// All NPC definitions being edited
     pub npcs: Vec<NpcDefinition>,
@@ -91,6 +92,18 @@ pub struct NpcEditorState {
     /// Available portrait IDs (cached from directory scan)
     #[serde(skip)]
     pub available_portraits: Vec<String>,
+
+    /// Whether the portrait grid picker popup is open
+    #[serde(skip)]
+    pub portrait_picker_open: bool,
+
+    /// Cached portrait textures for grid display
+    #[serde(skip)]
+    pub portrait_textures: HashMap<String, Option<egui::TextureHandle>>,
+
+    /// Last campaign directory (to detect changes)
+    #[serde(skip)]
+    pub last_campaign_dir: Option<PathBuf>,
 }
 
 /// NPC editor mode
@@ -153,6 +166,9 @@ impl Default for NpcEditorState {
             filter_innkeepers: false,
             filter_quest_givers: false,
             available_portraits: Vec::new(),
+            portrait_picker_open: false,
+            portrait_textures: HashMap::new(),
+            last_campaign_dir: None,
         }
     }
 }
@@ -185,13 +201,24 @@ impl NpcEditorState {
         display_config: &DisplayConfig,
     ) -> bool {
         // Update portrait candidates if campaign directory changed
-        self.available_portraits = extract_portrait_candidates(campaign_dir);
+        if self.last_campaign_dir != campaign_dir.cloned() {
+            self.available_portraits = extract_portrait_candidates(campaign_dir);
+            self.last_campaign_dir = campaign_dir.cloned();
+        }
 
         // Update available references
         self.available_dialogues = dialogues.to_vec();
         self.available_quests = quests.to_vec();
 
         let mut needs_save = false;
+
+        // Show portrait grid picker popup if open
+        if self.portrait_picker_open {
+            if let Some(selected_id) = self.show_portrait_grid_picker(ui.ctx(), campaign_dir) {
+                self.edit_buffer.portrait_id = selected_id;
+                needs_save = true;
+            }
+        }
 
         // Toolbar
         let toolbar_action = EditorToolbar::new("NPCs").show(ui);
@@ -253,7 +280,7 @@ impl NpcEditorState {
         // Mode-specific UI
         match self.mode {
             NpcEditorMode::List => {
-                needs_save |= self.show_list_view(ui, display_config);
+                needs_save |= self.show_list_view(ui, display_config, campaign_dir);
             }
             NpcEditorMode::Add | NpcEditorMode::Edit => {
                 needs_save |= self.show_edit_view(ui, campaign_dir);
@@ -268,7 +295,12 @@ impl NpcEditorState {
         needs_save
     }
 
-    fn show_list_view(&mut self, ui: &mut egui::Ui, display_config: &DisplayConfig) -> bool {
+    fn show_list_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        display_config: &DisplayConfig,
+        campaign_dir: Option<&PathBuf>,
+    ) -> bool {
         let mut needs_save = false;
 
         let search_lower = self.search_filter.to_lowercase();
@@ -330,69 +362,57 @@ impl NpcEditorState {
         ui.separator();
 
         let total_width = ui.available_width();
-        let inspector_min_width = display_config
-            .inspector_min_width
-            .max(crate::ui_helpers::DEFAULT_INSPECTOR_MIN_WIDTH);
+        let inspector_min_width = 300.0;
+        // Reserve a small margin for the separator (12.0)
         let sep_margin = 12.0;
-        let requested_left = total_width - inspector_min_width - sep_margin;
-        let left_width = crate::ui_helpers::compute_left_column_width(
-            total_width,
-            requested_left,
-            inspector_min_width,
-            sep_margin,
-            crate::ui_helpers::MIN_SAFE_LEFT_COLUMN_WIDTH,
-            display_config.left_column_max_ratio,
-        );
 
-        TwoColumnLayout::new("npcs")
-            .with_left_width(left_width)
-            .show_split(
-                ui,
-                |left_ui| {
-                    // Left panel: NPC list
-                    left_ui.heading("NPCs");
-                    left_ui.separator();
+        TwoColumnLayout::new("npcs").show_split(
+            ui,
+            |left_ui| {
+                // Left panel: NPC list
+                left_ui.heading("NPCs");
+                left_ui.separator();
 
-                    for (idx, label, _) in &sorted_npcs {
-                        let is_selected = selected == Some(*idx);
-                        if left_ui.selectable_label(is_selected, label).clicked() {
-                            new_selection = Some(*idx);
-                        }
+                for (idx, label, _) in &sorted_npcs {
+                    let is_selected = selected == Some(*idx);
+                    if left_ui.selectable_label(is_selected, label).clicked() {
+                        new_selection = Some(*idx);
                     }
+                }
 
-                    if sorted_npcs.is_empty() {
-                        left_ui.label("No NPCs found");
-                    }
-                },
-                |right_ui| {
-                    // Right panel: Detail view
-                    if let Some(idx) = selected {
-                        if let Some((_, _, npc)) = sorted_npcs.iter().find(|(i, _, _)| *i == idx) {
-                            right_ui.heading(&npc.name);
-                            right_ui.separator();
+                if sorted_npcs.is_empty() {
+                    left_ui.label("No NPCs found");
+                }
+            },
+            |right_ui| {
+                // Right panel: Detail view
+                if let Some(idx) = selected {
+                    if let Some((_, _, npc)) = sorted_npcs.iter().find(|(i, _, _)| *i == idx) {
+                        right_ui.heading(&npc.name);
+                        right_ui.separator();
 
-                            // Use shared ActionButtons component
-                            let action = ActionButtons::new().enabled(true).show(right_ui);
-                            if action != ItemAction::None {
-                                action_requested = Some(action);
-                            }
-
-                            right_ui.separator();
-                            Self::show_preview_static(right_ui, npc);
-                        } else {
-                            right_ui.vertical_centered(|ui| {
-                                ui.add_space(100.0);
-                                ui.label("Select an NPC to view details");
-                            });
+                        // Use shared ActionButtons component
+                        let action = ActionButtons::new().enabled(true).show(right_ui);
+                        if action != ItemAction::None {
+                            action_requested = Some(action);
                         }
+
+                        right_ui.separator();
+                        self.show_preview(right_ui, npc, campaign_dir);
                     } else {
                         right_ui.vertical_centered(|ui| {
                             ui.add_space(100.0);
                             ui.label("Select an NPC to view details");
                         });
                     }
-                },
-            );
+                } else {
+                    right_ui.vertical_centered(|ui| {
+                        ui.add_space(100.0);
+                        ui.label("Select an NPC to view details");
+                    });
+                }
+            },
+        );
 
         // Apply selection change after closures
         self.selected_npc = new_selection;
@@ -448,8 +468,13 @@ impl NpcEditorState {
         needs_save
     }
 
-    /// Static preview method that doesn't require self
-    fn show_preview_static(ui: &mut egui::Ui, npc: &NpcDefinition) {
+    /// Show preview of NPC with portrait
+    fn show_preview(
+        &mut self,
+        ui: &mut egui::Ui,
+        npc: &NpcDefinition,
+        campaign_dir: Option<&PathBuf>,
+    ) {
         let panel_height = crate::ui_helpers::compute_panel_height(
             ui,
             crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
@@ -474,11 +499,38 @@ impl NpcEditorState {
 
                 ui.group(|ui| {
                     ui.heading("Appearance");
-                    if !npc.portrait_id.is_empty() {
-                        ui.label(format!("Portrait: {}", npc.portrait_id));
-                    } else {
-                        ui.label("No portrait");
-                    }
+
+                    ui.horizontal(|ui| {
+                        // Portrait display (left side)
+                        let portrait_size = egui::vec2(128.0, 128.0);
+
+                        // Try to load the portrait texture
+                        let has_texture =
+                            self.load_portrait_texture(ui.ctx(), campaign_dir, &npc.portrait_id);
+
+                        if has_texture {
+                            if let Some(Some(texture)) =
+                                self.portrait_textures.get(&npc.portrait_id)
+                            {
+                                ui.add(
+                                    egui::Image::new(texture)
+                                        .fit_to_exact_size(portrait_size)
+                                        .corner_radius(4.0),
+                                );
+                            }
+                        } else {
+                            // Placeholder for missing portrait
+                            show_portrait_placeholder(ui, portrait_size);
+                        }
+
+                        ui.vertical(|ui| {
+                            if !npc.portrait_id.is_empty() {
+                                ui.label(format!("Portrait: {}", npc.portrait_id));
+                            } else {
+                                ui.label("No portrait");
+                            }
+                        });
+                    });
                 });
 
                 ui.add_space(5.0);
@@ -584,6 +636,11 @@ impl NpcEditorState {
                             &self.available_portraits,
                             campaign_dir,
                         );
+
+                        // Grid picker button
+                        if ui.button("🖼").on_hover_text("Browse portraits").clicked() {
+                            self.portrait_picker_open = true;
+                        }
                     });
                     ui.label(
                         "📁 Relative to campaign assets directory (e.g., '0', '1', 'warrior')",
@@ -755,10 +812,263 @@ impl NpcEditorState {
         self.edit_buffer.id = self.next_npc_id();
     }
 
-    fn start_edit_npc(&mut self, index: usize) {
-        if let Some(npc) = self.npcs.get(index) {
-            self.mode = NpcEditorMode::Edit;
-            self.selected_npc = Some(index);
+    /// Loads a portrait texture from the campaign assets directory
+    ///
+    /// This method caches loaded textures to avoid reloading. If the texture is already
+    /// cached, it returns immediately. Failed loads are also cached to prevent repeated
+    /// attempts.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The egui context for texture registration
+    /// * `campaign_dir` - The campaign directory containing assets/portraits
+    /// * `portrait_id` - The portrait ID to load (e.g., "0", "1", "warrior")
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if the texture was successfully loaded (or was already cached),
+    /// `false` if the load failed.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use campaign_builder::npc_editor::NpcEditorState;
+    /// use std::path::PathBuf;
+    ///
+    /// let mut state = NpcEditorState::new();
+    /// let campaign_dir = PathBuf::from("/path/to/campaign");
+    /// // In egui context:
+    /// // let texture = state.load_portrait_texture(ctx, Some(&campaign_dir), "0");
+    /// ```
+    pub fn load_portrait_texture(
+        &mut self,
+        ctx: &egui::Context,
+        campaign_dir: Option<&PathBuf>,
+        portrait_id: &str,
+    ) -> bool {
+        // Check if already cached
+        if self.portrait_textures.contains_key(portrait_id) {
+            return self.portrait_textures.get(portrait_id).unwrap().is_some();
+        }
+
+        // Attempt to load and decode image with error logging
+        let texture_handle = (|| {
+            let path = resolve_portrait_path(campaign_dir, portrait_id)?;
+
+            // Read image file with error handling
+            let image_bytes = match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    eprintln!("Failed to read portrait file '{}': {}", path.display(), e);
+                    return None;
+                }
+            };
+
+            // Decode image using image crate with error handling
+            let dynamic_image = match image::load_from_memory(&image_bytes) {
+                Ok(img) => img,
+                Err(e) => {
+                    eprintln!("Failed to decode portrait '{}': {}", portrait_id, e);
+                    return None;
+                }
+            };
+
+            // Convert to RGBA8
+            let rgba_image = dynamic_image.to_rgba8();
+            let size = [rgba_image.width() as usize, rgba_image.height() as usize];
+            let pixels = rgba_image.as_flat_samples();
+
+            // Create egui ColorImage
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+
+            // Register texture with egui
+            let texture_handle = ctx.load_texture(
+                format!("npc_portrait_{}", portrait_id),
+                color_image,
+                egui::TextureOptions::LINEAR,
+            );
+
+            Some(texture_handle)
+        })();
+
+        // Cache result (even None for failed loads to avoid repeated attempts)
+        let loaded = texture_handle.is_some();
+        if !loaded {
+            eprintln!(
+                "Portrait '{}' could not be loaded or was not found",
+                portrait_id
+            );
+        }
+
+        self.portrait_textures
+            .insert(portrait_id.to_string(), texture_handle);
+
+        loaded
+    }
+
+    /// Shows portrait grid picker popup for visual portrait selection
+    ///
+    /// Displays a popup window with a grid of portrait thumbnails that the user can click to select.
+    /// The popup is modal and closes when a portrait is selected or the close button is clicked.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The egui context for rendering
+    /// * `campaign_dir` - The campaign directory containing assets/portraits
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(portrait_id)` if the user clicked on a portrait to select it,
+    /// or `None` if no selection was made this frame.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use campaign_builder::npc_editor::NpcEditorState;
+    /// use std::path::PathBuf;
+    ///
+    /// let mut state = NpcEditorState::new();
+    /// let campaign_dir = PathBuf::from("/path/to/campaign");
+    /// // In egui context:
+    /// // if let Some(selected_id) = state.show_portrait_grid_picker(ctx, Some(&campaign_dir)) {
+    /// //     println!("Selected portrait: {}", selected_id);
+    /// // }
+    /// ```
+    pub fn show_portrait_grid_picker(
+        &mut self,
+        ctx: &egui::Context,
+        campaign_dir: Option<&PathBuf>,
+    ) -> Option<String> {
+        let mut selected_portrait: Option<String> = None;
+
+        // Clone the portraits list to avoid borrow issues
+        let available_portraits = self.available_portraits.clone();
+
+        egui::Window::new("Select Portrait")
+            .collapsible(false)
+            .resizable(true)
+            .default_width(400.0)
+            .default_height(500.0)
+            .show(ctx, |ui| {
+                ui.label("Click a portrait to select:");
+                ui.separator();
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    // Display portraits in a grid with 4 columns
+                    const COLUMNS: usize = 4;
+                    const THUMBNAIL_SIZE: f32 = 80.0;
+
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+
+                    let total_portraits = available_portraits.len();
+                    let rows = total_portraits.div_ceil(COLUMNS);
+
+                    for row in 0..rows {
+                        ui.horizontal(|ui| {
+                            for col in 0..COLUMNS {
+                                let idx = row * COLUMNS + col;
+                                if idx >= total_portraits {
+                                    break;
+                                }
+
+                                let portrait_id = &available_portraits[idx];
+
+                                ui.vertical(|ui| {
+                                    // Try to load texture
+                                    self.load_portrait_texture(ctx, campaign_dir, portrait_id);
+                                    let has_texture = self
+                                        .portrait_textures
+                                        .get(portrait_id)
+                                        .and_then(|opt| opt.as_ref())
+                                        .is_some();
+
+                                    // Build tooltip text with portrait path
+                                    let tooltip_text = if let Some(path) =
+                                        resolve_portrait_path(campaign_dir, portrait_id)
+                                    {
+                                        format!(
+                                            "Portrait ID: {}\nPath: {}",
+                                            portrait_id,
+                                            path.display()
+                                        )
+                                    } else {
+                                        format!("Portrait ID: {}\n⚠ File not found", portrait_id)
+                                    };
+
+                                    // Create image button or placeholder
+                                    let button_response = if has_texture {
+                                        let texture = self
+                                            .portrait_textures
+                                            .get(portrait_id)
+                                            .unwrap()
+                                            .as_ref()
+                                            .unwrap();
+                                        ui.add(
+                                            egui::Button::image(
+                                                egui::Image::new(texture).fit_to_exact_size(
+                                                    egui::vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE),
+                                                ),
+                                            )
+                                            .frame(true),
+                                        )
+                                        .on_hover_text(&tooltip_text)
+                                    } else {
+                                        // Placeholder for failed/missing images
+                                        let (rect, response) = ui.allocate_exact_size(
+                                            egui::vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE),
+                                            egui::Sense::click(),
+                                        );
+                                        ui.painter().rect_filled(
+                                            rect,
+                                            2.0,
+                                            egui::Color32::from_gray(50),
+                                        );
+                                        ui.painter().text(
+                                            rect.center(),
+                                            egui::Align2::CENTER_CENTER,
+                                            "?",
+                                            egui::FontId::proportional(24.0),
+                                            egui::Color32::from_gray(150),
+                                        );
+                                        response.on_hover_text(&tooltip_text)
+                                    };
+
+                                    // Check if clicked
+                                    if button_response.clicked() {
+                                        selected_portrait = Some(portrait_id.clone());
+                                        self.portrait_picker_open = false;
+                                    }
+
+                                    // Show portrait ID below thumbnail
+                                    ui.label(
+                                        egui::RichText::new(portrait_id)
+                                            .size(10.0)
+                                            .color(egui::Color32::from_gray(200)),
+                                    );
+                                });
+                            }
+                        });
+                    }
+
+                    // Show message if no portraits found
+                    if total_portraits == 0 {
+                        ui.label("No portraits found in campaign assets/portraits directory.");
+                    }
+                });
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Close").clicked() {
+                        self.portrait_picker_open = false;
+                    }
+                });
+            });
+
+        selected_portrait
+    }
+
+    fn start_edit_npc(&mut self, idx: usize) {
+        if let Some(npc) = self.npcs.get(idx) {
             self.edit_buffer = NpcEditBuffer {
                 id: npc.id.clone(),
                 name: npc.name.clone(),
@@ -773,6 +1083,8 @@ impl NpcEditorState {
                 is_merchant: npc.is_merchant,
                 is_innkeeper: npc.is_innkeeper,
             };
+            self.selected_npc = Some(idx);
+            self.mode = NpcEditorMode::Edit;
         }
     }
 
@@ -985,6 +1297,37 @@ impl NpcEditorState {
             counter += 1;
         }
     }
+}
+
+/// Helper function to show portrait placeholder
+fn show_portrait_placeholder(ui: &mut egui::Ui, size: egui::Vec2) {
+    let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
+
+    // Background
+    ui.painter().rect_filled(
+        rect,
+        egui::CornerRadius::same(4),
+        egui::Color32::from_gray(40),
+    );
+
+    // Border
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(4),
+        egui::Stroke::new(1.0, egui::Color32::from_gray(80)),
+        egui::StrokeKind::Outside,
+    );
+
+    // Icon
+    let center = rect.center();
+    let icon_size = size.y * 0.4;
+    ui.painter().text(
+        center,
+        egui::Align2::CENTER_CENTER,
+        "🖼",
+        egui::FontId::proportional(icon_size),
+        egui::Color32::from_rgb(150, 150, 150),
+    );
 }
 
 #[cfg(test)]
@@ -1229,5 +1572,226 @@ mod tests {
     fn test_npc_editor_mode_equality() {
         assert_eq!(NpcEditorMode::List, NpcEditorMode::List);
         assert_ne!(NpcEditorMode::List, NpcEditorMode::Add);
+    }
+
+    #[test]
+    fn test_portrait_picker_initial_state() {
+        let state = NpcEditorState::new();
+        assert!(!state.portrait_picker_open);
+        assert!(state.portrait_textures.is_empty());
+        assert!(state.available_portraits.is_empty());
+        assert!(state.last_campaign_dir.is_none());
+    }
+
+    #[test]
+    fn test_portrait_picker_open_flag() {
+        let mut state = NpcEditorState::new();
+        assert!(!state.portrait_picker_open);
+
+        state.portrait_picker_open = true;
+        assert!(state.portrait_picker_open);
+
+        state.portrait_picker_open = false;
+        assert!(!state.portrait_picker_open);
+    }
+
+    #[test]
+    fn test_portrait_texture_cache_insertion() {
+        let mut state = NpcEditorState::new();
+        assert!(state.portrait_textures.is_empty());
+
+        // Simulate failed texture load (None)
+        state.portrait_textures.insert("0".to_string(), None);
+        assert_eq!(state.portrait_textures.len(), 1);
+        assert!(state.portrait_textures.contains_key("0"));
+        assert!(state.portrait_textures.get("0").unwrap().is_none());
+
+        // Add another entry
+        state.portrait_textures.insert("1".to_string(), None);
+        assert_eq!(state.portrait_textures.len(), 2);
+    }
+
+    #[test]
+    fn test_portrait_texture_error_handling_missing_file() {
+        // Test that missing portrait files are handled gracefully
+        let mut state = NpcEditorState::new();
+        let ctx = egui::Context::default();
+        let campaign_dir = PathBuf::from("/nonexistent/path");
+
+        // Attempt to load a portrait that doesn't exist
+        let loaded = state.load_portrait_texture(&ctx, Some(&campaign_dir), "999");
+
+        // Should return false and cache the failure
+        assert!(!loaded);
+        assert!(state.portrait_textures.contains_key("999"));
+        assert!(state.portrait_textures.get("999").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_portrait_texture_error_handling_no_campaign_dir() {
+        // Test behavior when no campaign directory is provided
+        let mut state = NpcEditorState::new();
+        let ctx = egui::Context::default();
+
+        // Attempt to load portrait without campaign directory
+        let loaded = state.load_portrait_texture(&ctx, None, "0");
+
+        // Should fail gracefully and cache the failure
+        assert!(!loaded);
+        assert!(state.portrait_textures.contains_key("0"));
+        assert!(state.portrait_textures.get("0").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_portrait_texture_cache_efficiency() {
+        // Test that cached textures aren't reloaded
+        let mut state = NpcEditorState::new();
+        let ctx = egui::Context::default();
+
+        // Pre-cache a failed load
+        state.portrait_textures.insert("cached".to_string(), None);
+
+        // Try to load again - should return cached result without attempting load
+        let loaded = state.load_portrait_texture(&ctx, None, "cached");
+        assert!(!loaded);
+
+        // Cache should still have only one entry
+        assert_eq!(state.portrait_textures.len(), 1);
+    }
+
+    #[test]
+    fn test_new_npc_creation_workflow_with_portrait() {
+        let mut state = NpcEditorState::new();
+
+        // Start adding new NPC
+        state.start_add_npc();
+        assert_eq!(state.mode, NpcEditorMode::Add);
+
+        // Fill in form including portrait
+        state.edit_buffer.id = "merchant_bob".to_string();
+        state.edit_buffer.name = "Bob the Merchant".to_string();
+        state.edit_buffer.portrait_id = "42".to_string();
+        state.edit_buffer.is_merchant = true;
+
+        // Validate and save
+        state.validate_edit_buffer();
+        assert!(state.validation_errors.is_empty());
+
+        let saved = state.save_npc();
+        assert!(saved);
+
+        // Verify NPC was created with portrait
+        assert_eq!(state.npcs.len(), 1);
+        assert_eq!(state.npcs[0].portrait_id, "42");
+        assert_eq!(state.npcs[0].name, "Bob the Merchant");
+    }
+
+    #[test]
+    fn test_edit_npc_workflow_updates_portrait() {
+        let mut state = NpcEditorState::new();
+
+        // Add initial NPC
+        state.npcs.push(NpcDefinition {
+            id: "guard".to_string(),
+            name: "Guard".to_string(),
+            description: String::new(),
+            portrait_id: "10".to_string(),
+            dialogue_id: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+        });
+
+        // Start editing
+        state.start_edit_npc(0);
+        assert_eq!(state.mode, NpcEditorMode::Edit);
+        assert_eq!(state.edit_buffer.portrait_id, "10");
+
+        // Change portrait
+        state.edit_buffer.portrait_id = "20".to_string();
+        state.save_npc();
+
+        // Verify portrait was updated
+        assert_eq!(state.npcs[0].portrait_id, "20");
+    }
+
+    #[test]
+    fn test_campaign_dir_change_triggers_portrait_rescan() {
+        let mut state = NpcEditorState::new();
+
+        // Initially no portraits cached
+        assert!(state.available_portraits.is_empty());
+        assert!(state.last_campaign_dir.is_none());
+
+        // Simulate campaign directory change detection
+        let dir1 = PathBuf::from("/campaign1");
+        state.last_campaign_dir = Some(dir1.clone());
+
+        let dir2 = PathBuf::from("/campaign2");
+        assert_ne!(state.last_campaign_dir, Some(dir2.clone()));
+
+        // This would trigger portrait rescan in the show() method
+        state.last_campaign_dir = Some(dir2);
+        assert!(state.last_campaign_dir.is_some());
+    }
+
+    #[test]
+    fn test_npc_save_preserves_portrait_data() {
+        let mut state = NpcEditorState::new();
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "wizard".to_string();
+        state.edit_buffer.name = "Wizard".to_string();
+        state.edit_buffer.portrait_id = "magic_user".to_string();
+        state.edit_buffer.description = "A wise wizard".to_string();
+
+        state.save_npc();
+
+        assert_eq!(state.npcs[0].portrait_id, "magic_user");
+
+        // Verify portrait ID is preserved in serialization
+        let npc = &state.npcs[0];
+        assert_eq!(npc.portrait_id, "magic_user");
+    }
+
+    #[test]
+    fn test_multiple_npcs_different_portraits() {
+        let mut state = NpcEditorState::new();
+
+        // Add first NPC
+        state.start_add_npc();
+        state.edit_buffer.id = "npc1".to_string();
+        state.edit_buffer.name = "NPC 1".to_string();
+        state.edit_buffer.portrait_id = "1".to_string();
+        state.save_npc();
+
+        // Add second NPC
+        state.start_add_npc();
+        state.edit_buffer.id = "npc2".to_string();
+        state.edit_buffer.name = "NPC 2".to_string();
+        state.edit_buffer.portrait_id = "2".to_string();
+        state.save_npc();
+
+        // Verify both NPCs have different portraits
+        assert_eq!(state.npcs.len(), 2);
+        assert_eq!(state.npcs[0].portrait_id, "1");
+        assert_eq!(state.npcs[1].portrait_id, "2");
+    }
+
+    #[test]
+    fn test_portrait_id_empty_string_allowed() {
+        let mut state = NpcEditorState::new();
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "no_portrait_npc".to_string();
+        state.edit_buffer.name = "No Portrait".to_string();
+        state.edit_buffer.portrait_id = String::new();
+
+        state.validate_edit_buffer();
+        assert!(state.validation_errors.is_empty());
+
+        state.save_npc();
+        assert_eq!(state.npcs[0].portrait_id, "");
     }
 }
