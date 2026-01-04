@@ -137,6 +137,22 @@ fn handle_events(
                     }
                 }
             }
+            MapEvent::RecruitableCharacter {
+                character_id,
+                name,
+                description,
+                ..
+            } => {
+                let msg = format!("{} - {}", name, description);
+                println!("{}", msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
+                // Recruitment dialog will be triggered by a separate system
+                // that listens for recruitment events and shows the UI
+                // For now, just log that the character was encountered
+                let _ = character_id; // TODO: Trigger recruitment dialog
+            }
         }
     }
 }

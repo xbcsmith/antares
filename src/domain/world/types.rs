@@ -482,6 +482,17 @@ pub enum MapEvent {
         /// NPC identifier (string-based ID for NPC database lookup)
         npc_id: crate::domain::world::NpcId,
     },
+    /// Recruitable character encounter
+    RecruitableCharacter {
+        /// Event name
+        #[serde(default)]
+        name: String,
+        /// Event description
+        #[serde(default)]
+        description: String,
+        /// Character definition ID for recruitment
+        character_id: String,
+    },
 }
 
 // ===== Resolved NPC =====

@@ -326,6 +326,9 @@ pub struct GameState {
     pub time: GameTime,
     /// Quest log
     pub quests: QuestLog,
+    /// Tracks which characters have been encountered on maps (prevents re-recruiting)
+    #[serde(default)]
+    pub encountered_characters: std::collections::HashSet<String>,
 }
 
 /// Errors returned by `GameState::initialize_roster`.
@@ -356,6 +359,38 @@ pub enum MoveHandleError {
     CombatInit(#[from] crate::domain::combat::database::MonsterDatabaseError),
 }
 
+/// Errors that can occur during character recruitment from map encounters
+#[derive(thiserror::Error, Debug)]
+pub enum RecruitmentError {
+    #[error("Character '{0}' has already been encountered and cannot be recruited again")]
+    AlreadyEncountered(String),
+
+    #[error("Character definition '{0}' not found in database")]
+    CharacterNotFound(String),
+
+    #[error("Character definition error: {0}")]
+    CharacterDefinition(#[from] crate::domain::character_definition::CharacterDefinitionError),
+
+    #[error("Character operation error: {0}")]
+    CharacterError(#[from] crate::domain::character::CharacterError),
+
+    #[error("Party manager error: {0}")]
+    PartyManager(#[from] crate::domain::party_manager::PartyManagementError),
+}
+
+/// Result of attempting to recruit a character from a map encounter
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecruitResult {
+    /// Character was successfully added to the party
+    AddedToParty,
+
+    /// Party was full, character was sent to the specified inn
+    SentToInn(crate::domain::types::TownId),
+
+    /// Character recruitment was declined by the player
+    Declined,
+}
+
 impl GameState {
     /// Creates a new game state with default values (no campaign)
     ///
@@ -378,6 +413,7 @@ impl GameState {
             mode: GameMode::Exploration,
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
             quests: QuestLog::new(),
+            encountered_characters: std::collections::HashSet::new(),
         }
     }
 
@@ -446,6 +482,7 @@ impl GameState {
             mode: GameMode::Exploration,
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
             quests: QuestLog::new(),
+            encountered_characters: std::collections::HashSet::new(),
         };
 
         // Phase 2: Initialize roster from content database (premade characters)
@@ -696,6 +733,141 @@ impl GameState {
         // TODO: Implement once Inn/Town location system is complete
         // For now, default to inn 1 or extract from world state
         None
+    }
+
+    // ===== Map Recruitment System =====
+
+    /// Finds the nearest inn to the party's current position
+    ///
+    /// This is a simplified implementation that returns the campaign's starting inn
+    /// as a fallback. A full implementation would use pathfinding to find the
+    /// closest inn across maps.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(TownId)` for the nearest/default inn, or `None` if no campaign loaded.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::application::GameState;
+    /// use antares::sdk::campaign_loader::CampaignLoader;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = CampaignLoader::new("campaigns");
+    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let (state, _db) = GameState::new_game(campaign)?;
+    ///
+    /// let inn_id = state.find_nearest_inn();
+    /// assert!(inn_id.is_some());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn find_nearest_inn(&self) -> Option<TownId> {
+        // Simple implementation: return campaign starting inn
+        self.campaign.as_ref().map(|c| c.config.starting_inn)
+    }
+
+    /// Attempts to recruit a character from a map encounter
+    ///
+    /// When the player encounters a recruitable NPC on the map, this method handles
+    /// the recruitment logic:
+    /// - Checks if character was already encountered (prevents duplicates)
+    /// - Loads character definition from content database
+    /// - Adds to party if space available, otherwise sends to nearest inn
+    /// - Marks character as encountered to prevent re-recruitment
+    ///
+    /// # Arguments
+    ///
+    /// * `character_id` - The character definition ID (e.g., "npc_old_gareth")
+    /// * `content_db` - Content database containing character definitions
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(RecruitResult)` indicating where the character was placed:
+    /// - `AddedToParty` if party had room
+    /// - `SentToInn(inn_id)` if party was full
+    /// - `Declined` should not be returned by this method (handled by UI)
+    ///
+    /// # Errors
+    ///
+    /// Returns `RecruitmentError` if:
+    /// - Character was already encountered (`AlreadyEncountered`)
+    /// - Character definition not found in database (`CharacterNotFound`)
+    /// - Character instantiation fails (`CharacterDefinition`)
+    /// - Roster/party operations fail (`PartyManager`, `CharacterError`)
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::application::GameState;
+    /// use antares::sdk::campaign_loader::CampaignLoader;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = CampaignLoader::new("campaigns");
+    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let (mut state, content_db) = GameState::new_game(campaign)?;
+    ///
+    /// // Player encounters "npc_old_gareth" on the map
+    /// let result = state.recruit_from_map("npc_old_gareth", &content_db)?;
+    /// match result {
+    ///     antares::application::RecruitResult::AddedToParty => {
+    ///         println!("Character joined the party!");
+    ///     }
+    ///     antares::application::RecruitResult::SentToInn(inn_id) => {
+    ///         println!("Party full - character sent to inn {}", inn_id);
+    ///     }
+    ///     antares::application::RecruitResult::Declined => {
+    ///         // Not used in this method
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn recruit_from_map(
+        &mut self,
+        character_id: &str,
+        content_db: &ContentDatabase,
+    ) -> Result<RecruitResult, RecruitmentError> {
+        use crate::domain::character::CharacterLocation;
+
+        // Check if character was already encountered
+        if self.encountered_characters.contains(character_id) {
+            return Err(RecruitmentError::AlreadyEncountered(
+                character_id.to_string(),
+            ));
+        }
+
+        // Get character definition from database
+        let char_def = content_db
+            .characters
+            .get_character(character_id)
+            .ok_or_else(|| RecruitmentError::CharacterNotFound(character_id.to_string()))?;
+
+        // Instantiate character from definition
+        let character =
+            char_def.instantiate(&content_db.races, &content_db.classes, &content_db.items)?;
+
+        // Mark as encountered to prevent re-recruitment
+        self.encountered_characters.insert(character_id.to_string());
+
+        // Determine where to place the character
+        if self.party.size() < crate::domain::character::Party::MAX_MEMBERS {
+            // Party has room - add directly to party
+            self.party.add_member(character.clone())?;
+            self.roster
+                .add_character(character, CharacterLocation::InParty)?;
+
+            Ok(RecruitResult::AddedToParty)
+        } else {
+            // Party is full - send to nearest inn
+            let inn_id = self.find_nearest_inn().unwrap_or(1); // Fallback to inn 1 if no campaign
+
+            self.roster
+                .add_character(character, CharacterLocation::AtInn(inn_id))?;
+
+            Ok(RecruitResult::SentToInn(inn_id))
+        }
     }
 
     // ===== Game Mode Transitions =====

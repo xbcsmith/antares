@@ -53,6 +53,11 @@ pub enum EventResult {
         /// NPC identifier (string-based ID for NPC database lookup)
         npc_id: crate::domain::world::NpcId,
     },
+    /// Recruitable character encounter
+    RecruitableCharacter {
+        /// Character definition ID for recruitment
+        character_id: String,
+    },
 }
 
 /// Errors that can occur during event processing
@@ -188,6 +193,18 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
             // NPC dialogues are repeatable - don't remove
             EventResult::NpcDialogue {
                 npc_id: npc_id.clone(),
+            }
+        }
+
+        MapEvent::RecruitableCharacter { character_id, .. } => {
+            // Recruitment encounters are one-time - remove after triggered
+            world
+                .get_current_map_mut()
+                .ok_or(EventError::MapNotFound(current_map_id))?
+                .remove_event(position);
+
+            EventResult::RecruitableCharacter {
+                character_id: character_id.clone(),
             }
         }
     };

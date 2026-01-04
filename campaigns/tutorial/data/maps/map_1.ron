@@ -7660,6 +7660,30 @@
             ),
             map_id: 4,
         ),
+        (
+            x: 15,
+            y: 8,
+        ): RecruitableCharacter(
+            name: "Old Gareth",
+            description: "A grizzled dwarf veteran stands here, repairing armor.",
+            character_id: "npc_old_gareth",
+        ),
+        (
+            x: 7,
+            y: 15,
+        ): RecruitableCharacter(
+            name: "Whisper",
+            description: "A nimble elf watches from the shadows near the alley.",
+            character_id: "npc_whisper",
+        ),
+        (
+            x: 11,
+            y: 6,
+        ): RecruitableCharacter(
+            name: "Apprentice Zara",
+            description: "A young gnome apprentice studies a spellbook intently.",
+            character_id: "npc_apprentice_zara",
+        ),
     },
     npc_placements: [
         (

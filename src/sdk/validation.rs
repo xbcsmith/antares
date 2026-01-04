@@ -540,6 +540,18 @@ impl<'a> Validator<'a> {
                         });
                     }
                 }
+                crate::domain::world::MapEvent::RecruitableCharacter { character_id, .. } => {
+                    // Validate character exists in database
+                    if self.db.characters.get_character(character_id).is_none() {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Error,
+                            message: format!(
+                                "Map {} has recruitable character event for non-existent character '{}' at ({}, {})",
+                                map.id, character_id, pos.x, pos.y
+                            ),
+                        });
+                    }
+                }
             }
         }
 

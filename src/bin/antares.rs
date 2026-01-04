@@ -256,6 +256,7 @@ impl Plugin for AntaresPlugin {
         app.add_plugins(antares::game::systems::dialogue::DialoguePlugin);
         app.add_plugins(antares::game::systems::quest::QuestPlugin);
         app.add_plugins(antares::game::systems::inn_ui::InnUiPlugin);
+        app.add_plugins(antares::game::systems::recruitment_dialog::RecruitmentDialogPlugin);
     }
 }
 
