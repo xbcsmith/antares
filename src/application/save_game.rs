@@ -387,7 +387,21 @@ impl SaveGameManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::character::{Character, CharacterLocation};
+    use crate::domain::types::TownId;
     use tempfile::TempDir;
+
+    // Helper to create a test character
+    fn create_test_character(name: &str) -> Character {
+        use crate::domain::character::{Alignment, Sex};
+        Character::new(
+            name.to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        )
+    }
 
     #[test]
     fn test_save_game_new() {
@@ -560,5 +574,466 @@ mod tests {
         assert_eq!(campaign_ref.id, "tutorial");
         assert_eq!(campaign_ref.version, "1.0.0");
         assert_eq!(campaign_ref.name, "Tutorial Campaign");
+    }
+
+    // ===== Phase 5: Party Management Persistence Tests =====
+
+    #[test]
+    fn test_save_party_locations() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut game_state = GameState::new();
+
+        // Add 3 characters to party
+        let char1 = create_test_character("Knight");
+        let char2 = create_test_character("Archer");
+        let char3 = create_test_character("Cleric");
+
+        game_state
+            .roster
+            .add_character(char1, CharacterLocation::InParty)
+            .unwrap();
+        game_state
+            .roster
+            .add_character(char2, CharacterLocation::InParty)
+            .unwrap();
+        game_state
+            .roster
+            .add_character(char3, CharacterLocation::InParty)
+            .unwrap();
+
+        // Add to party
+        game_state.party.members = vec![
+            game_state.roster.characters[0].clone(),
+            game_state.roster.characters[1].clone(),
+            game_state.roster.characters[2].clone(),
+        ];
+
+        // Save and load
+        manager.save("party_test", &game_state).unwrap();
+        let loaded_state = manager.load("party_test").unwrap();
+
+        // Verify party locations preserved
+        assert_eq!(loaded_state.roster.character_locations.len(), 3);
+        assert_eq!(
+            loaded_state.roster.character_locations[0],
+            CharacterLocation::InParty
+        );
+        assert_eq!(
+            loaded_state.roster.character_locations[1],
+            CharacterLocation::InParty
+        );
+        assert_eq!(
+            loaded_state.roster.character_locations[2],
+            CharacterLocation::InParty
+        );
+
+        // Verify party members preserved
+        assert_eq!(loaded_state.party.members.len(), 3);
+        assert_eq!(loaded_state.party.members[0].name, "Knight");
+        assert_eq!(loaded_state.party.members[1].name, "Archer");
+        assert_eq!(loaded_state.party.members[2].name, "Cleric");
+    }
+
+    #[test]
+    fn test_save_inn_locations() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut game_state = GameState::new();
+
+        // Add characters at different inns
+        let char1 = create_test_character("InnChar1");
+        let char2 = create_test_character("InnChar2");
+        let char3 = create_test_character("InnChar3");
+
+        let inn1: TownId = 1;
+        let inn2: TownId = 2;
+        let inn3: TownId = 5;
+
+        game_state
+            .roster
+            .add_character(char1, CharacterLocation::AtInn(inn1))
+            .unwrap();
+        game_state
+            .roster
+            .add_character(char2, CharacterLocation::AtInn(inn2))
+            .unwrap();
+        game_state
+            .roster
+            .add_character(char3, CharacterLocation::AtInn(inn3))
+            .unwrap();
+
+        // Save and load
+        manager.save("inn_test", &game_state).unwrap();
+        let loaded_state = manager.load("inn_test").unwrap();
+
+        // Verify inn locations preserved
+        assert_eq!(loaded_state.roster.character_locations.len(), 3);
+        assert_eq!(
+            loaded_state.roster.character_locations[0],
+            CharacterLocation::AtInn(1)
+        );
+        assert_eq!(
+            loaded_state.roster.character_locations[1],
+            CharacterLocation::AtInn(2)
+        );
+        assert_eq!(
+            loaded_state.roster.character_locations[2],
+            CharacterLocation::AtInn(5)
+        );
+
+        // Verify characters preserved
+        assert_eq!(loaded_state.roster.characters.len(), 3);
+        assert_eq!(loaded_state.roster.characters[0].name, "InnChar1");
+        assert_eq!(loaded_state.roster.characters[1].name, "InnChar2");
+        assert_eq!(loaded_state.roster.characters[2].name, "InnChar3");
+    }
+
+    #[test]
+    fn test_save_encountered_characters() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut game_state = GameState::new();
+
+        // Mark some characters as encountered
+        game_state
+            .encountered_characters
+            .insert("npc_gareth".to_string());
+        game_state
+            .encountered_characters
+            .insert("npc_whisper".to_string());
+        game_state
+            .encountered_characters
+            .insert("npc_zara".to_string());
+
+        // Save and load
+        manager.save("encounter_test", &game_state).unwrap();
+        let loaded_state = manager.load("encounter_test").unwrap();
+
+        // Verify encounter tracking preserved
+        assert_eq!(loaded_state.encountered_characters.len(), 3);
+        assert!(loaded_state.encountered_characters.contains("npc_gareth"));
+        assert!(loaded_state.encountered_characters.contains("npc_whisper"));
+        assert!(loaded_state.encountered_characters.contains("npc_zara"));
+    }
+
+    #[test]
+    fn test_save_migration_from_old_format() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        // Create a save without encountered_characters (simulating old format)
+        let mut game_state = GameState::new();
+        game_state
+            .roster
+            .add_character(create_test_character("OldChar"), CharacterLocation::InParty)
+            .unwrap();
+
+        // Save normally
+        manager.save("migration_test", &game_state).unwrap();
+
+        // Load the save file as RON string
+        let save_path = manager.save_path("migration_test");
+        let mut ron_content = std::fs::read_to_string(&save_path).unwrap();
+
+        // Remove encountered_characters field to simulate old format
+        // This simulates a save file created before encountered_characters existed
+        if let Some(start) = ron_content.find("encountered_characters:") {
+            if let Some(end) = ron_content[start..].find("},") {
+                let full_end = start + end + 2;
+                ron_content.replace_range(start..full_end, "");
+            }
+        }
+
+        // Write back the modified save (old format)
+        std::fs::write(&save_path, &ron_content).unwrap();
+
+        // Load should succeed with default empty set
+        let loaded_state = manager.load("migration_test").unwrap();
+
+        // Verify encountered_characters defaults to empty
+        assert_eq!(loaded_state.encountered_characters.len(), 0);
+
+        // Verify other state preserved
+        assert_eq!(loaded_state.roster.characters.len(), 1);
+        assert_eq!(loaded_state.roster.characters[0].name, "OldChar");
+    }
+
+    #[test]
+    fn test_save_recruited_character() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut game_state = GameState::new();
+
+        // Simulate recruiting a character
+        let recruited = create_test_character("RecruitedNPC");
+        game_state
+            .roster
+            .add_character(recruited, CharacterLocation::InParty)
+            .unwrap();
+        game_state
+            .party
+            .members
+            .push(game_state.roster.characters[0].clone());
+
+        // Mark as encountered
+        game_state
+            .encountered_characters
+            .insert("npc_recruited".to_string());
+
+        // Save and load
+        manager.save("recruit_test", &game_state).unwrap();
+        let loaded_state = manager.load("recruit_test").unwrap();
+
+        // Verify recruited character state
+        assert_eq!(loaded_state.roster.characters.len(), 1);
+        assert_eq!(loaded_state.roster.characters[0].name, "RecruitedNPC");
+        assert_eq!(
+            loaded_state.roster.character_locations[0],
+            CharacterLocation::InParty
+        );
+        assert_eq!(loaded_state.party.members.len(), 1);
+        assert_eq!(loaded_state.party.members[0].name, "RecruitedNPC");
+
+        // Verify encounter tracking
+        assert!(loaded_state
+            .encountered_characters
+            .contains("npc_recruited"));
+    }
+
+    #[test]
+    fn test_save_full_roster_state() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut game_state = GameState::new();
+
+        // Mix of party members, inn characters, and map characters
+        game_state
+            .roster
+            .add_character(
+                create_test_character("PartyMember1"),
+                CharacterLocation::InParty,
+            )
+            .unwrap();
+        game_state
+            .roster
+            .add_character(
+                create_test_character("PartyMember2"),
+                CharacterLocation::InParty,
+            )
+            .unwrap();
+        game_state
+            .roster
+            .add_character(
+                create_test_character("InnChar1"),
+                CharacterLocation::AtInn(1),
+            )
+            .unwrap();
+        game_state
+            .roster
+            .add_character(
+                create_test_character("InnChar2"),
+                CharacterLocation::AtInn(2),
+            )
+            .unwrap();
+        game_state
+            .roster
+            .add_character(
+                create_test_character("MapChar"),
+                CharacterLocation::OnMap(5),
+            )
+            .unwrap();
+
+        // Add party members to party
+        game_state
+            .party
+            .members
+            .push(game_state.roster.characters[0].clone());
+        game_state
+            .party
+            .members
+            .push(game_state.roster.characters[1].clone());
+
+        // Some encountered characters
+        game_state
+            .encountered_characters
+            .insert("npc_1".to_string());
+        game_state
+            .encountered_characters
+            .insert("npc_2".to_string());
+
+        // Save and load
+        manager.save("full_roster_test", &game_state).unwrap();
+        let loaded_state = manager.load("full_roster_test").unwrap();
+
+        // Verify all locations preserved
+        assert_eq!(loaded_state.roster.character_locations.len(), 5);
+        assert_eq!(
+            loaded_state.roster.character_locations[0],
+            CharacterLocation::InParty
+        );
+        assert_eq!(
+            loaded_state.roster.character_locations[1],
+            CharacterLocation::InParty
+        );
+        assert_eq!(
+            loaded_state.roster.character_locations[2],
+            CharacterLocation::AtInn(1)
+        );
+        assert_eq!(
+            loaded_state.roster.character_locations[3],
+            CharacterLocation::AtInn(2)
+        );
+        assert_eq!(
+            loaded_state.roster.character_locations[4],
+            CharacterLocation::OnMap(5)
+        );
+
+        // Verify party state
+        assert_eq!(loaded_state.party.members.len(), 2);
+        assert_eq!(loaded_state.party.members[0].name, "PartyMember1");
+        assert_eq!(loaded_state.party.members[1].name, "PartyMember2");
+
+        // Verify encounters
+        assert_eq!(loaded_state.encountered_characters.len(), 2);
+        assert!(loaded_state.encountered_characters.contains("npc_1"));
+        assert!(loaded_state.encountered_characters.contains("npc_2"));
+    }
+
+    #[test]
+    fn test_save_load_preserves_character_invariants() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut game_state = GameState::new();
+
+        // Add characters with specific locations
+        for i in 0..5 {
+            let char_name = format!("Char{}", i);
+            let location = if i < 2 {
+                CharacterLocation::InParty
+            } else if i < 4 {
+                CharacterLocation::AtInn((i - 1) as TownId)
+            } else {
+                CharacterLocation::OnMap((i + 10) as u16)
+            };
+
+            game_state
+                .roster
+                .add_character(create_test_character(&char_name), location)
+                .unwrap();
+        }
+
+        // Add party members
+        game_state
+            .party
+            .members
+            .push(game_state.roster.characters[0].clone());
+        game_state
+            .party
+            .members
+            .push(game_state.roster.characters[1].clone());
+
+        // Save and load
+        manager.save("invariant_test", &game_state).unwrap();
+        let loaded_state = manager.load("invariant_test").unwrap();
+
+        // Verify roster/location vector lengths match
+        assert_eq!(
+            loaded_state.roster.characters.len(),
+            loaded_state.roster.character_locations.len()
+        );
+
+        // Verify no data corruption
+        assert_eq!(loaded_state.roster.characters.len(), 5);
+        assert_eq!(loaded_state.party.members.len(), 2);
+
+        // Verify location types preserved
+        assert!(matches!(
+            loaded_state.roster.character_locations[0],
+            CharacterLocation::InParty
+        ));
+        assert!(matches!(
+            loaded_state.roster.character_locations[2],
+            CharacterLocation::AtInn(_)
+        ));
+        assert!(matches!(
+            loaded_state.roster.character_locations[4],
+            CharacterLocation::OnMap(_)
+        ));
+    }
+
+    #[test]
+    fn test_save_empty_encountered_characters() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let game_state = GameState::new();
+
+        // Save with no encounters
+        manager.save("empty_encounter_test", &game_state).unwrap();
+        let loaded_state = manager.load("empty_encounter_test").unwrap();
+
+        // Verify empty set preserved
+        assert_eq!(loaded_state.encountered_characters.len(), 0);
+    }
+
+    #[test]
+    fn test_save_multiple_party_changes() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut game_state = GameState::new();
+
+        // Initial state: 2 in party, 2 at inn
+        for i in 0..4 {
+            let location = if i < 2 {
+                CharacterLocation::InParty
+            } else {
+                CharacterLocation::AtInn(1)
+            };
+            game_state
+                .roster
+                .add_character(create_test_character(&format!("Char{}", i)), location)
+                .unwrap();
+        }
+
+        game_state
+            .party
+            .members
+            .push(game_state.roster.characters[0].clone());
+        game_state
+            .party
+            .members
+            .push(game_state.roster.characters[1].clone());
+
+        // Save initial state
+        manager.save("multi_change_test", &game_state).unwrap();
+
+        // Simulate swap: move char[1] to inn, char[2] to party
+        game_state.roster.character_locations[1] = CharacterLocation::AtInn(1);
+        game_state.roster.character_locations[2] = CharacterLocation::InParty;
+        game_state.party.members[1] = game_state.roster.characters[2].clone();
+
+        // Save changed state
+        manager.save("multi_change_test", &game_state).unwrap();
+
+        // Load and verify swapped state
+        let loaded_state = manager.load("multi_change_test").unwrap();
+
+        assert_eq!(
+            loaded_state.roster.character_locations[1],
+            CharacterLocation::AtInn(1)
+        );
+        assert_eq!(
+            loaded_state.roster.character_locations[2],
+            CharacterLocation::InParty
+        );
+        assert_eq!(loaded_state.party.members[1].name, "Char2");
     }
 }
