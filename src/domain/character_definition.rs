@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
+use tracing::warn;
 
 // ===== Error Types =====
 
@@ -401,6 +402,7 @@ impl Default for BaseStats {
 ///     sex: Sex::Male,
 ///     alignment: Alignment::Good,
 ///     base_stats: BaseStats::new(16, 8, 10, 14, 12, 14, 10),
+///     hp_base: None,
 ///     portrait_id: "1".to_string(),
 ///     starting_gold: 100,
 ///     starting_gems: 0,
@@ -436,6 +438,18 @@ pub struct CharacterDefinition {
 
     /// Base statistics before race/class modifiers
     pub base_stats: BaseStats,
+    /// Base HP value for characters created from this definition (pre-modifiers)
+    /// Optional: when present this value overrides calculated starting HP.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hp_base: Option<u16>,
+
+    /// Optional current HP value for characters created from this definition.
+    /// When present, this value sets the instantiated character's `hp.current`.
+    /// If larger than the computed or overridden base HP, it will be clamped to `hp.base`.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hp_current: Option<u16>,
 
     /// Portrait/avatar identifier (filename stem / unique string)
     #[serde(default)]
@@ -521,6 +535,8 @@ impl CharacterDefinition {
             sex,
             alignment,
             base_stats: BaseStats::default(),
+            hp_base: None,
+            hp_current: None,
             portrait_id: String::new(),
             starting_gold: 0,
             starting_gems: 0,
@@ -724,7 +740,34 @@ impl CharacterDefinition {
         let stats = apply_race_modifiers(&self.base_stats, race_def);
 
         // Calculate starting HP based on class and endurance
-        let hp = calculate_starting_hp(class_def, stats.endurance.base);
+        // Use a definition-level override if the author specified one in the CharacterDefinition.
+        let mut hp = calculate_starting_hp(class_def, stats.endurance.base);
+
+        // If an author-specified base override is present, apply it. Respect an optional explicit
+        // current value (`hp_current`) by clamping it to the effective base. If only `hp_current`
+        // is present, clamp it to the computed base.
+        if let Some(hp_override) = self.hp_base {
+            hp.base = hp_override;
+            if let Some(hp_cur) = self.hp_current {
+                if hp_cur > hp.base {
+                    warn!(
+                        "instantiate: hp_current {} exceeds hp_base {}; clamping for character '{}'",
+                        hp_cur, hp.base, self.id
+                    );
+                }
+                hp.current = hp_cur.min(hp.base);
+            } else {
+                hp.current = hp_override;
+            }
+        } else if let Some(hp_cur) = self.hp_current {
+            if hp_cur > hp.base {
+                warn!(
+                    "instantiate: hp_current {} exceeds calculated base {}; clamping for character '{}'",
+                    hp_cur, hp.base, self.id
+                );
+            }
+            hp.current = hp_cur.min(hp.base);
+        }
 
         // Calculate starting SP based on class and relevant stat
         let sp = calculate_starting_sp(class_def, &stats);
@@ -1469,6 +1512,38 @@ impl CharacterDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::character::{Alignment, Sex};
+
+    #[test]
+    fn test_character_definition_hp_is_optional() {
+        let def = CharacterDefinition::new(
+            "test_char".to_string(),
+            "Test Character".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        assert!(def.hp_base.is_none());
+    }
+
+    #[test]
+    fn test_character_definition_hp_roundtrip() {
+        let mut def = CharacterDefinition::new(
+            "test_char".to_string(),
+            "Test Character".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        def.hp_base = Some(25u16);
+
+        let ron_str = ron::ser::to_string(&def).expect("Failed to serialize character to RON");
+        let parsed: CharacterDefinition =
+            ron::from_str(&ron_str).expect("Failed to deserialize character from RON");
+        assert_eq!(parsed.hp_base, Some(25u16));
+    }
 
     // ===== StartingEquipment Tests =====
 
@@ -1589,6 +1664,86 @@ mod tests {
     }
 
     // ===== CharacterDefinition Tests =====
+
+    #[test]
+    fn test_instantiate_respects_hp_current_and_hp_base() {
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let mut def = CharacterDefinition::new(
+            "test_char".to_string(),
+            "Test Character".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        def.hp_base = Some(50u16);
+        def.hp_current = Some(25u16);
+
+        let character = def
+            .instantiate(&races, &classes, &items)
+            .expect("Instantiation failed");
+        assert_eq!(character.hp.base, 50u16);
+        assert_eq!(character.hp.current, 25u16);
+    }
+
+    #[test]
+    fn test_instantiate_hp_current_clamped_to_base() {
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let mut def = CharacterDefinition::new(
+            "test_char2".to_string(),
+            "Test Character 2".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        def.hp_base = Some(30u16);
+        def.hp_current = Some(100u16);
+
+        let character = def
+            .instantiate(&races, &classes, &items)
+            .expect("Instantiation failed");
+        assert_eq!(character.hp.base, 30u16);
+        assert_eq!(character.hp.current, 30u16); // clamped to base
+    }
+
+    #[test]
+    fn test_instantiate_hp_current_without_hp_base_clamped_to_calculated_base() {
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let mut def = CharacterDefinition::new(
+            "test_char3".to_string(),
+            "Test Character 3".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        def.hp_current = Some(1u16);
+
+        let character = def
+            .instantiate(&races, &classes, &items)
+            .expect("Instantiation failed");
+        assert!(character.hp.base >= 1u16);
+        assert_eq!(character.hp.current, 1u16.min(character.hp.base));
+    }
 
     fn create_test_knight() -> CharacterDefinition {
         CharacterDefinition::new(
@@ -2829,6 +2984,8 @@ mod tests {
             sex: Sex::Male,
             alignment: Alignment::Good,
             base_stats: BaseStats::new(14, 10, 10, 12, 10, 12, 10),
+            hp_base: None,
+            hp_current: None,
             portrait_id: "1".to_string(),
             starting_gold: 100,
             starting_gems: 5,
@@ -3004,17 +3161,21 @@ mod tests {
         let definition = CharacterDefinition {
             id: "test_sorcerer".to_string(),
             name: "Test Sorcerer".to_string(),
-            race_id: "gnome".to_string(),
+            race_id: "human".to_string(),
             class_id: "sorcerer".to_string(),
             sex: Sex::Female,
             alignment: Alignment::Neutral,
-            base_stats: BaseStats::new(8, 16, 10, 8, 10, 10, 12),
+            base_stats: BaseStats::new(6, 18, 6, 8, 6, 8, 6),
+            hp_base: None,
+            hp_current: None,
             portrait_id: "2".to_string(),
             starting_gold: 50,
             starting_gems: 10,
             starting_food: 10,
-            starting_items: vec![],
-            starting_equipment: StartingEquipment::default(),
+            starting_items: vec![], // No items
+            starting_equipment: StartingEquipment {
+                ..Default::default()
+            },
             description: "A test sorcerer".to_string(),
             is_premade: true,
         };
@@ -3052,6 +3213,8 @@ mod tests {
             sex: Sex::Male,
             alignment: Alignment::Good,
             base_stats: BaseStats::new(16, 16, 10, 14, 10, 14, 10),
+            hp_base: None,
+            hp_current: None,
             portrait_id: "1".to_string(),
             starting_gold: 100,
             starting_gems: 0,

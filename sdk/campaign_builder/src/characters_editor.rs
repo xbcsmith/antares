@@ -104,6 +104,10 @@ pub struct CharacterEditBuffer {
     pub speed: String,
     pub accuracy: String,
     pub luck: String,
+    /// Starting HP base as text input (parsed to u16 on save)
+    pub hp_base: String,
+    /// Starting HP current as text input (parsed to u16 on save). Empty = use base/current=base.
+    pub hp_current: String,
     // Other fields
     pub portrait_id: String,
     pub starting_gold: String,
@@ -139,6 +143,8 @@ impl Default for CharacterEditBuffer {
             speed: "10".to_string(),
             accuracy: "10".to_string(),
             luck: "10".to_string(),
+            hp_base: String::new(),
+            hp_current: String::new(),
             portrait_id: String::new(),
             starting_gold: "100".to_string(),
             starting_gems: "0".to_string(),
@@ -211,6 +217,11 @@ impl CharactersEditorState {
                 speed: character.base_stats.speed.to_string(),
                 accuracy: character.base_stats.accuracy.to_string(),
                 luck: character.base_stats.luck.to_string(),
+                hp_base: character.hp_base.map(|v| v.to_string()).unwrap_or_default(),
+                hp_current: character
+                    .hp_current
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
                 portrait_id: character.portrait_id.to_string(),
                 starting_gold: character.starting_gold.to_string(),
                 starting_gems: character.starting_gems.to_string(),
@@ -287,6 +298,38 @@ impl CharactersEditorState {
             .luck
             .parse::<u8>()
             .map_err(|_| "Invalid Luck value")?;
+        // Parse optional HP base (16-bit). Empty string means "use derived value".
+        let hp_base: Option<u16> = if self.buffer.hp_base.trim().is_empty() {
+            None
+        } else {
+            Some(
+                self.buffer
+                    .hp_base
+                    .trim()
+                    .parse::<u16>()
+                    .map_err(|_| "Invalid HP value")?,
+            )
+        };
+
+        // Parse optional HP current (16-bit). Empty string means default to base/current=base.
+        let hp_current: Option<u16> = if self.buffer.hp_current.trim().is_empty() {
+            None
+        } else {
+            Some(
+                self.buffer
+                    .hp_current
+                    .trim()
+                    .parse::<u16>()
+                    .map_err(|_| "Invalid current HP value")?,
+            )
+        };
+
+        // Validate relationship: if both present, current cannot exceed base
+        if let (Some(base), Some(cur)) = (hp_base, hp_current) {
+            if cur > base {
+                return Err("Current HP cannot be greater than Base HP".to_string());
+            }
+        }
 
         // Parse other fields
         // Portrait IDs are now strings (filename stems). Accept whatever the user typed
@@ -364,6 +407,8 @@ impl CharactersEditorState {
                 accuracy,
                 luck,
             ),
+            hp_base,
+            hp_current,
             portrait_id,
             starting_gold,
             starting_gems,
@@ -1272,6 +1317,23 @@ impl CharactersEditorState {
                 ui.end_row();
             });
 
+        ui.add_space(6.0);
+        // Show HP override/current or indicate derived
+        ui.horizontal(|ui| {
+            ui.label("HP:");
+            let hp_display =
+                if let (Some(cur), Some(base)) = (character.hp_current, character.hp_base) {
+                    format!("{}/{}", cur, base)
+                } else if let Some(base) = character.hp_base {
+                    format!("{}/{}", base, base)
+                } else if let Some(cur) = character.hp_current {
+                    format!("{}/(derived)", cur)
+                } else {
+                    "(derived)".to_string()
+                };
+            ui.label(hp_display);
+        });
+
         ui.add_space(10.0);
         ui.heading("Starting Resources");
         ui.separator();
@@ -1530,6 +1592,20 @@ impl CharactersEditorState {
                         ui.add(
                             egui::TextEdit::singleline(&mut self.buffer.luck).desired_width(40.0),
                         );
+                        ui.end_row();
+
+                        // HP base (optional; leave blank to derive from class/endurance)
+                        ui.label("HP:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.buffer.hp_base)
+                                .desired_width(60.0),
+                        );
+                        ui.label("Current:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.buffer.hp_current)
+                                .desired_width(60.0),
+                        );
+                        ui.label("(leave blank to derive)");
                         ui.end_row();
                     });
 
@@ -2050,6 +2126,8 @@ mod tests {
         assert_eq!(buffer.sex, Sex::Male);
         assert_eq!(buffer.alignment, Alignment::Neutral);
         assert_eq!(buffer.might, "10");
+        assert_eq!(buffer.hp_base, "");
+        assert_eq!(buffer.hp_current, "");
         assert!(buffer.is_premade);
     }
 
@@ -2175,6 +2253,7 @@ mod tests {
             class_id: "knight".to_string(),
             sex: Sex::Male,
             alignment: Alignment::Good,
+            hp_current: None,
             base_stats: BaseStats::new(10, 10, 10, 10, 10, 10, 10),
             portrait_id: "0".to_string(),
             starting_gold: 100,
@@ -2297,6 +2376,34 @@ mod tests {
         let result = state.save_character();
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Invalid Might value");
+    }
+
+    #[test]
+    fn test_save_character_invalid_hp() {
+        let mut state = CharactersEditorState::new();
+        state.start_new_character();
+        state.buffer.id = "invalid_hp".to_string();
+        state.buffer.name = "Test".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+        state.buffer.hp_base = "not_a_number".to_string();
+
+        let result = state.save_character();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_character_invalid_current_hp() {
+        let mut state = CharactersEditorState::new();
+        state.start_new_character();
+        state.buffer.id = "invalid_hp2".to_string();
+        state.buffer.name = "Test".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+        state.buffer.hp_current = "not_a_number".to_string();
+
+        let result = state.save_character();
+        assert!(result.is_err());
     }
 
     #[test]
@@ -2717,11 +2824,53 @@ mod tests {
         let loaded_characters: Result<Vec<CharacterDefinition>, _> =
             ron::from_str(&ron_data.unwrap());
         assert!(loaded_characters.is_ok());
+    }
+
+    #[test]
+    fn test_character_hp_base_roundtrip() {
+        use crate::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+
+        let mut def = CharacterDefinition::new(
+            "test_char".to_string(),
+            "Test Character".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        def.hp_base = Some(42u16);
+
+        let ron_str = ron::ser::to_string(&def).expect("Failed to serialize character to RON");
+        let parsed: CharacterDefinition =
+            ron::from_str(&ron_str).expect("Failed to deserialize character from RON");
+        assert_eq!(parsed.hp_base, Some(42u16));
 
         let characters = loaded_characters.unwrap();
         assert_eq!(characters.len(), 2);
         assert_eq!(characters[0].portrait_id, "5");
         assert_eq!(characters[1].portrait_id, "12");
+    }
+
+    #[test]
+    fn test_character_hp_current_roundtrip() {
+        use crate::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+
+        let mut def = CharacterDefinition::new(
+            "test_char_cur".to_string(),
+            "Test Character".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        def.hp_current = Some(10u16);
+
+        let ron_str = ron::ser::to_string(&def).expect("Failed to serialize character to RON");
+        let parsed: CharacterDefinition =
+            ron::from_str(&ron_str).expect("Failed to deserialize character from RON");
+        assert_eq!(parsed.hp_current, Some(10u16));
     }
 
     #[test]

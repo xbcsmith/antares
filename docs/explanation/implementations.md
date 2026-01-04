@@ -5959,7 +5959,8 @@ What changed:
 - Tests: Added/updated tests that:
   - Verify portraits are enumerated and indexed correctly from the campaign assets directory,
   - Exercise loaded-vs-placeholder behavior by inserting an Image into `Assets<Image>` (using a tiny inline image via `Image::new_fill`) so tests can assert the HUD switches from placeholder to image once the asset is considered present/loaded.
-- Observability: Added debug and warning logs showing discovered portrait files, any unapproved/failed loads, and the campaign-scoped asset path used for loading.
+  - Verify `update_hud` guards against division-by-zero when a character has zero `hp.base` and clamps HP fill (test: `test_update_hud_handles_zero_base`).
+- Observability: Added debug and warning logs showing discovered portrait files, any unapproved/failed loads, and the campaign-scoped asset path used for loading. The loader now emits an explicit warning when the `AssetServer` returns a default handle for a portrait path (this usually indicates an unapproved path or missing loader); the warning includes actionable guidance (e.g., verify `BEVY_ASSET_ROOT` and `AssetPlugin.file_path`) so failures are easier to diagnose from standard runtime logs.
 
 Why this fixes the issue:
 
@@ -6107,3 +6108,82 @@ This is a draft plan for review. I will NOT begin implementation until you confi
 3. Default `Character::portrait_id` preference: empty `""` or legacy `"0"`? (Empty / `"0"`)
 
 Please review and confirm. Once confirmed I will produce an ordered checklist of concrete PR-sized tasks and testing steps for implementation.
+
+## Console & File Logging - Mute cosmic_text relayout messages and add `--log` flag - COMPLETED
+
+Summary
+
+- Mute noisy debug logs emitted by the Cosmic Text buffer (e.g. "relayout: 1.5µs") so the terminal is readable.
+- Add a `--log <FILE>` CLI flag to the `antares` binary so logs are also written to a file (tee-like behavior) for debugging and post-mortem analysis.
+
+Files changed
+
+- `src/bin/antares.rs`
+  - Added `--log` CLI option to `Args`.
+  - Added `antares_console_fmt_layer()` which filters console output and suppresses DEBUG/TRACE messages from the `cosmic_text::buffer` target to stop the relayout spam from flooding the terminal.
+  - Added `antares_file_custom_layer()` and a small file writer so logs are also written to the file path set via `--log`.
+  - Configured `LogPlugin` so when `--log` is provided the global level becomes DEBUG (so the file receives debug logs), while the console layer still filters out the noisy `cosmic_text::buffer` debug lines.
+- `Cargo.toml` — no runtime dependency changes were required; only a small dev/test helper was used.
+
+Implementation highlights
+
+- Console filtering (mute cosmic_text relayout debug lines):
+
+```antares/src/bin/antares.rs#L149-159
+fn antares_console_fmt_layer(_app: &mut App) -> Option<BoxedFmtLayer> {
+    let fmt_layer = tracing_subscriber::fmt::Layer::default()
+        .with_writer(std::io::stderr)
+        .with_filter(FilterFn::new(|meta| {
+            // Mute DEBUG/TRACE level logs from cosmic_text::buffer to avoid overwhelming the console
+            if meta.target() == "cosmic_text::buffer" {
+                match *meta.level() {
+                    tracing::Level::DEBUG | tracing::Level::TRACE => return false,
+                    _ => {}
+                }
+            }
+            true
+        }));
+    Some(Box::new(fmt_layer))
+}
+```
+
+- File logging (tee logs to file when `--log` is set):
+  - Set via CLI: `antares --log /path/to/antares.log`
+  - The launcher sets `ANTARES_LOG_FILE`, and the plugin factory adds a writer layer that appends formatted logs to that file (no ANSI colors).
+
+```antares/src/bin/antares.rs#L180-190
+fn antares_file_custom_layer(_app: &mut App) -> Option<BoxedLayer> {
+    if let Ok(path_str) = std::env::var("ANTARES_LOG_FILE") {
+        let path = std::path::PathBuf::from(path_str);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            Ok(file) => {
+                let arc = Arc::new(Mutex::new(file));
+                let make_writer = {
+                    let arc = arc.clone();
+                    move || ArcFileWriter(arc.clone())
+                };
+```
+
+How to use
+
+- Run with file logging: `cargo run -- --log /tmp/antares.log` or use installed binary: `antares --log /tmp/antares.log`.
+- Console: noisy cosmic_text relayout messages are suppressed so you can see meaningful debug/info/warn output.
+- File: the log file contains full debug output (global level set to DEBUG when `--log` is provided), useful when investigating issues you need more detail on.
+
+Tests added
+
+- Unit tests for the logging helpers were added to `src/bin/antares.rs`:
+
+```antares/src/bin/antares.rs#L485-507
+fn test_console_fmt_layer_present() { ... }
+fn test_file_custom_layer_none_when_env_unset() { ... }
+fn test_file_custom_layer_some_when_env_set() { ... }
+```
+
+Notes & follow-ups
+
+- Current behavior mutes all DEBUG/TRACE logs from `cosmic_text::buffer` at the console. If you prefer a more surgical approach (e.g., suppress only messages that contain the substring `relayout:`), I can implement a custom layer that inspects the event fields and filters only those messages. Let me know which behavior you prefer.
+- `RUST_LOG` (if set) may still override the plugin's default filter behavior by design; the `--log` flag sets the LogPlugin level to DEBUG to capture more verbose output in the file.

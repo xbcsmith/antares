@@ -7608,16 +7608,28 @@
     ],
     events: {
         (
-            x: 18,
-            y: 18,
-        ): Teleport(
-            name: "Town Exit Teleport",
-            description: "A teleport pad that transports the party to Dark Forrest (map 4) at (0,10).",
-            destination: (
-                x: 0,
-                y: 10,
-            ),
-            map_id: 4,
+            x: 5,
+            y: 4,
+        ): Sign(
+            name: "Inn Sign",
+            description: "A sign outside the inn welcoming travelers and adventurers.",
+            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+        ),
+        (
+            x: 13,
+            y: 3,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice outside the temple detailing its services.",
+            text: "Temple of Healing - The priests can restore your health.",
+        ),
+        (
+            x: 5,
+            y: 10,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store\'s wares and services.",
+            text: "General Store - Buy and Sell items for your party!",
         ),
         (
             x: 9,
@@ -7637,28 +7649,16 @@
             text: "To the Dark Forrest",
         ),
         (
-            x: 5,
-            y: 10,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store\'s wares and services.",
-            text: "General Store - Buy and Sell items for your party!",
-        ),
-        (
-            x: 13,
-            y: 3,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice outside the temple detailing its services.",
-            text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
-            x: 5,
-            y: 4,
-        ): Sign(
-            name: "Inn Sign",
-            description: "A sign outside the inn welcoming travelers and adventurers.",
-            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+            x: 18,
+            y: 18,
+        ): Teleport(
+            name: "Town Exit Teleport",
+            description: "A teleport pad that transports the party to Dark Forrest (map 4) at (0,10).",
+            destination: (
+                x: 0,
+                y: 10,
+            ),
+            map_id: 4,
         ),
     },
     npc_placements: [
