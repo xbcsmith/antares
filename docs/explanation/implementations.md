@@ -1,3 +1,201 @@
+## Phase 3: Inn UI System (Bevy/egui) - COMPLETED
+
+### Summary
+
+Implemented the Inn UI System for party management using Bevy's egui integration. This provides a visual interface for players to recruit characters from inns, dismiss party members to inns, and swap party members with characters stored at inns. The system integrates with the Phase 2 Party Management domain logic.
+
+### Changes Made
+
+#### File: `src/application/mod.rs`
+
+**1. Added `InnManagement` Game Mode Variant** (lines 49-106):
+
+- Added `InnManagement(InnManagementState)` variant to `GameMode` enum
+- Created `InnManagementState` struct to track current inn and selected slots
+- Implements `Serialize` and `Deserialize` for save/load support
+- Added `new()` constructor and `clear_selection()` helper method
+
+**Key Features:**
+
+- Tracks `current_inn_id` to know which inn the party is visiting
+- Stores `selected_party_slot` and `selected_roster_slot` for swap operations
+- Fully documented with examples
+
+#### File: `src/game/systems/inn_ui.rs` (NEW)
+
+**1. Created `InnUiPlugin`** (lines 18-28):
+
+Bevy plugin that registers all inn management systems and messages:
+
+- Registers 4 message types: `InnRecruitCharacter`, `InnDismissCharacter`, `InnSwapCharacters`, `ExitInn`
+- Adds two systems in chain: `inn_ui_system` (renders UI) and `inn_action_system` (processes actions)
+
+**2. Defined Inn Action Messages** (lines 32-56):
+
+Four message types using Bevy's `Message` trait:
+
+- `InnRecruitCharacter { roster_index }` - Add character from inn to party
+- `InnDismissCharacter { party_index }` - Send party member to current inn
+- `InnSwapCharacters { party_index, roster_index }` - Atomic swap operation
+- `ExitInn` - Return to exploration mode
+
+**3. Implemented `inn_ui_system()`** (lines 62-260):
+
+Main UI rendering system using egui panels:
+
+**Layout:**
+
+- Central panel with heading showing current inn/town ID
+- Active Party section (6 slots, shows empty slots)
+- Available at Inn section (filters roster by current inn location)
+- Exit button and instructions
+
+**Features:**
+
+- Party member cards show: name, level, HP, SP, class, race
+- Inn character cards show: name, race, class, level, HP
+- Recruit button disabled when party is full
+- Dismiss button on each party member
+- Swap mode: select party member, then click Swap on inn character
+- Color-coded selection highlighting (yellow for party, light blue for inn)
+- Real-time party state display
+
+**4. Implemented `inn_action_system()`** (lines 276-327):
+
+Action processing system that:
+
+- Reads messages from `MessageReader` for each action type
+- Calls `GameState` methods: `recruit_character()`, `dismiss_character()`, `swap_party_member()`
+- Writes success/error messages to `GameLog`
+- Returns to `GameMode::Exploration` on exit
+- Handles all error cases gracefully with user-friendly messages
+
+**5. Comprehensive Test Suite** (lines 346-536):
+
+Nine unit tests covering:
+
+- `InnManagementState` creation and selection clearing
+- Game mode integration
+- Recruit, dismiss, and swap operations
+- Error cases: party full, party empty
+- Plugin registration
+
+All tests use domain-level assertions (check `GameState` directly) rather than UI-level tests.
+
+#### File: `src/game/systems/mod.rs`
+
+**1. Added Module Export** (line 9):
+
+- Added `pub mod inn_ui;` to export the new inn UI module
+
+#### File: `src/bin/antares.rs`
+
+**1. Registered Plugin** (line 258):
+
+- Added `app.add_plugins(antares::game::systems::inn_ui::InnUiPlugin);` to register the inn UI plugin alongside dialogue and quest plugins
+
+### Technical Decisions
+
+**1. Message-Based Architecture:**
+
+- Used Bevy's `Message` trait (replacing deprecated `Event`)
+- `MessageWriter`/`MessageReader` for type-safe message passing
+- Decouples UI events from game logic execution
+
+**2. Roster Location Lookup:**
+
+- Characters at inn are found by iterating `roster.character_locations`
+- Matches `CharacterLocation::AtInn(inn_id)` with current inn
+- Displays character details from parallel `roster.characters` vec
+
+**3. Selection State Management:**
+
+- Selection state stored in `InnManagementState` within `GameMode`
+- Current implementation clears selection on any action (simplified UX)
+- Future enhancement: maintain selections across operations
+
+**4. Error Handling:**
+
+- All actions return `Result` from domain layer
+- UI displays error messages via `GameLog`
+- No unwrapping or panicking in production code paths
+
+**5. Party Size Constraints:**
+
+- Enforces max 6 party members (recruit button disabled)
+- Enforces min 2 party members for dismiss (Phase 2 constraint)
+- Swap operation maintains party size atomically
+
+### Integration with Phase 2
+
+The Inn UI directly uses Phase 2's `GameState` methods:
+
+- `recruit_character(roster_index)` - Calls `PartyManager::recruit_to_party()`
+- `dismiss_character(party_index, inn_id)` - Calls `PartyManager::dismiss_to_inn()`
+- `swap_party_member(party_index, roster_index)` - Calls `PartyManager::swap_party_member()`
+
+All business logic remains in the domain layer; UI is purely presentation and event handling.
+
+### Testing Results
+
+**Quality Checks:**
+
+- ✅ `cargo fmt --all` - All code formatted
+- ✅ `cargo check --all-targets --all-features` - Compiles without errors
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - Zero warnings
+- ✅ `cargo nextest run --all-features inn_ui party_manager` - 25/25 tests pass
+
+**Test Coverage:**
+
+- 9 new tests for inn UI system
+- 16 existing tests for party manager domain logic
+- All Phase 2 + Phase 3 tests passing (100%)
+
+### Future Enhancements (Out of Scope for Phase 3)
+
+1. **Map Integration:**
+
+   - Add `EnterInn { inn_id }` event to map events
+   - Trigger `GameMode::InnManagement(state)` when entering inn tiles
+   - Add inn locations to campaign map data
+
+2. **Visual Improvements:**
+
+   - Load and display character portraits in cards
+   - Add character stat details in tooltips
+   - Animate panel transitions
+
+3. **Enhanced UX:**
+
+   - Persistent selection state across operations
+   - Drag-and-drop for swapping
+   - Keyboard shortcuts for common actions
+
+4. **Inn Services:**
+   - Extend UI to include healing, resurrect, uncurse services
+   - Item storage/banking functionality
+   - Inn-specific quest givers
+
+### Files Modified
+
+- `src/application/mod.rs` - Added `InnManagement` mode and state struct
+- `src/game/systems/inn_ui.rs` - NEW - Full inn UI implementation (536 lines)
+- `src/game/systems/mod.rs` - Added module export
+- `src/bin/antares.rs` - Registered plugin
+
+### Deliverables Completed
+
+✅ Task 1: Add `InnManagementState` and `GameMode::InnManagement` variant
+✅ Task 2: Create `InnUiPlugin` with message types
+✅ Task 3: Implement `inn_ui_system()` rendering
+✅ Task 4: Implement `inn_action_system()` for event processing
+✅ Task 5: Register plugin in main application
+✅ Task 6: Write comprehensive tests
+✅ Task 7: Pass all quality checks
+✅ Task 8: Update documentation
+
+---
+
 ## NPC Editor Portrait Grid Picker - COMPLETED
 
 ### Summary

@@ -255,6 +255,7 @@ impl Plugin for AntaresPlugin {
         // Register dialogue and quest plugins so their systems are available
         app.add_plugins(antares::game::systems::dialogue::DialoguePlugin);
         app.add_plugins(antares::game::systems::quest::QuestPlugin);
+        app.add_plugins(antares::game::systems::inn_ui::InnUiPlugin);
     }
 }
 

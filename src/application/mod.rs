@@ -46,6 +46,64 @@ pub enum GameMode {
     Menu,
     /// NPC dialogue and interactions
     Dialogue(crate::application::dialogue::DialogueState),
+    /// Inn party management interface
+    InnManagement(InnManagementState),
+}
+
+/// State for inn party management mode
+///
+/// Tracks which inn the party is at and any active selections
+/// for recruit/dismiss/swap operations.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::InnManagementState;
+/// use antares::domain::types::TownId;
+///
+/// let state = InnManagementState::new(TownId::from(1));
+/// assert_eq!(state.current_inn_id, TownId::from(1));
+/// assert_eq!(state.selected_party_slot, None);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InnManagementState {
+    /// ID of the inn currently being visited
+    pub current_inn_id: TownId,
+    /// Currently selected party member slot (0-5) for swap operations
+    pub selected_party_slot: Option<usize>,
+    /// Currently selected roster index for swap operations
+    pub selected_roster_slot: Option<usize>,
+}
+
+impl InnManagementState {
+    /// Creates a new inn management state for the given inn
+    ///
+    /// # Arguments
+    ///
+    /// * `inn_id` - The ID of the inn being visited
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::InnManagementState;
+    /// use antares::domain::types::TownId;
+    ///
+    /// let state = InnManagementState::new(TownId::from(1));
+    /// assert_eq!(state.current_inn_id, TownId::from(1));
+    /// ```
+    pub fn new(inn_id: TownId) -> Self {
+        Self {
+            current_inn_id: inn_id,
+            selected_party_slot: None,
+            selected_roster_slot: None,
+        }
+    }
+
+    /// Clears all selections
+    pub fn clear_selection(&mut self) {
+        self.selected_party_slot = None;
+        self.selected_roster_slot = None;
+    }
 }
 
 // ===== Active Spell Effects =====

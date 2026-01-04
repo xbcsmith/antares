@@ -6,6 +6,7 @@ pub mod camera;
 pub mod dialogue;
 pub mod events;
 pub mod hud;
+pub mod inn_ui;
 pub mod input;
 pub mod map;
 pub mod quest;
