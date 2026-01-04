@@ -54,6 +54,7 @@ fn handle_events(
     mut dialogue_writer: MessageWriter<StartDialogue>,
     content: Res<GameContent>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
+    mut global_state: ResMut<GlobalState>,
 ) {
     for trigger in event_reader.read() {
         match &trigger.event {
@@ -152,6 +153,31 @@ fn handle_events(
                 // that listens for recruitment events and shows the UI
                 // For now, just log that the character was encountered
                 let _ = character_id; // TODO: Trigger recruitment dialog
+            }
+            MapEvent::EnterInn {
+                name,
+                description,
+                inn_id,
+            } => {
+                let msg = format!("{} - {}", name, description);
+                println!("{}", msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
+
+                // Transition GameMode to InnManagement
+                use crate::application::{GameMode, InnManagementState};
+                global_state.0.mode = GameMode::InnManagement(InnManagementState {
+                    current_inn_id: *inn_id,
+                    selected_party_slot: None,
+                    selected_roster_slot: None,
+                });
+
+                let inn_msg = format!("Entering inn (ID: {})", inn_id);
+                println!("{}", inn_msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(inn_msg);
+                }
             }
         }
     }
@@ -460,5 +486,119 @@ mod tests {
             "Expected error message in game log. Actual entries: {:?}",
             entries
         );
+    }
+
+    #[test]
+    fn test_enter_inn_event_transitions_to_inn_management_mode() {
+        use crate::application::GameMode;
+        use crate::game::systems::ui::GameLog;
+
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_plugins(EventPlugin);
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let event_pos = Position::new(5, 5);
+        map.add_event(
+            event_pos,
+            MapEvent::EnterInn {
+                name: "Cozy Inn Entrance".to_string(),
+                description: "A welcoming inn".to_string(),
+                inn_id: 1,
+            },
+        );
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+        // Start in Exploration mode
+        game_state.mode = GameMode::Exploration;
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
+        app.insert_resource(GameLog::new());
+
+        // Act
+        app.update(); // First update: check_for_events writes MapEventTriggered
+        app.update(); // Second update: handle_events processes MapEventTriggered and transitions mode
+
+        // Assert - GameMode should be InnManagement with correct inn_id
+        let global_state = app.world().resource::<GlobalState>();
+        match &global_state.0.mode {
+            GameMode::InnManagement(state) => {
+                assert_eq!(state.current_inn_id, 1, "Expected inn_id to be 1");
+                assert_eq!(
+                    state.selected_party_slot, None,
+                    "Expected no selected party slot initially"
+                );
+                assert_eq!(
+                    state.selected_roster_slot, None,
+                    "Expected no selected roster slot initially"
+                );
+            }
+            other_mode => panic!("Expected GameMode::InnManagement, but got {:?}", other_mode),
+        }
+
+        // Assert - GameLog should contain inn entry message
+        let game_log = app.world().resource::<GameLog>();
+        let entries = game_log.entries();
+        assert!(
+            entries.iter().any(|e| e.contains("Entering inn (ID: 1)")),
+            "Expected inn entry message in game log. Actual entries: {:?}",
+            entries
+        );
+    }
+
+    #[test]
+    fn test_enter_inn_event_with_different_inn_ids() {
+        use crate::application::GameMode;
+
+        // Test that different inn_ids are correctly set in InnManagementState
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_plugins(EventPlugin);
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let event_pos = Position::new(10, 10);
+        map.add_event(
+            event_pos,
+            MapEvent::EnterInn {
+                name: "Dragon's Rest Inn".to_string(),
+                description: "An upscale inn".to_string(),
+                inn_id: 5,
+            },
+        );
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+        game_state.mode = GameMode::Exploration;
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
+
+        // Act
+        app.update();
+        app.update();
+
+        // Assert
+        let global_state = app.world().resource::<GlobalState>();
+        match &global_state.0.mode {
+            GameMode::InnManagement(state) => {
+                assert_eq!(state.current_inn_id, 5, "Expected inn_id to be 5");
+            }
+            other_mode => panic!("Expected GameMode::InnManagement, but got {:?}", other_mode),
+        }
     }
 }

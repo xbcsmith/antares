@@ -493,6 +493,17 @@ pub enum MapEvent {
         /// Character definition ID for recruitment
         character_id: String,
     },
+    /// Enter an inn for party management
+    EnterInn {
+        /// Event name
+        #[serde(default)]
+        name: String,
+        /// Event description
+        #[serde(default)]
+        description: String,
+        /// Inn/town identifier (u8 for town ID)
+        inn_id: u8,
+    },
 }
 
 // ===== Resolved NPC =====

@@ -7610,10 +7610,10 @@
         (
             x: 5,
             y: 4,
-        ): Sign(
-            name: "Inn Sign",
-            description: "A sign outside the inn welcoming travelers and adventurers.",
-            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+        ): EnterInn(
+            name: "Cozy Inn Entrance",
+            description: "A welcoming inn where you can rest and manage your party.",
+            inn_id: 1,
         ),
         (
             x: 13,

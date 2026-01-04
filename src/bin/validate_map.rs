@@ -262,6 +262,10 @@ fn print_map_summary(map: &Map) {
                 // Count recruitable characters (could add separate counter if needed)
                 dialogues += 1
             }
+            MapEvent::EnterInn { .. } => {
+                // Count inn entrances (could add separate counter if needed)
+                signs += 1
+            }
         }
     }
 

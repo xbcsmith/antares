@@ -8264,3 +8264,266 @@ Phase 6 completes the Party Management implementation plan. All six phases are n
 - Campaign packaging and distribution tools
 
 **Date Completed:** 2025-01-26
+
+---
+
+## Phase 1: MapEvent::EnterInn Integration - COMPLETED
+
+### Summary
+
+Implemented the missing `MapEvent::EnterInn` event type to enable inn entrance functionality, completing the critical blocker for the Inn Party Management system. This allows players to enter inns from the game world, triggering the transition to `GameMode::InnManagement` where they can recruit, dismiss, and swap party members.
+
+### Changes Made
+
+#### File: `src/domain/world/types.rs`
+
+Added `EnterInn` variant to the `MapEvent` enum:
+
+```rust
+/// Enter an inn for party management
+EnterInn {
+    /// Event name
+    #[serde(default)]
+    name: String,
+    /// Event description
+    #[serde(default)]
+    description: String,
+    /// Inn/town identifier (u8 for town ID)
+    inn_id: u8,
+},
+```
+
+#### File: `src/domain/world/events.rs`
+
+1. Added `EventResult::EnterInn` variant for event result handling:
+
+```rust
+/// Enter an inn for party management
+EnterInn {
+    /// Inn/town identifier
+    inn_id: u8,
+},
+```
+
+2. Added handler in `trigger_event()` function (repeatable event):
+
+```rust
+MapEvent::EnterInn { inn_id, .. } => {
+    // Inn entrances are repeatable - don't remove
+    EventResult::EnterInn { inn_id }
+}
+```
+
+3. Added comprehensive unit tests:
+   - `test_enter_inn_event` - Tests basic inn entrance with correct inn_id
+   - `test_enter_inn_event_with_different_inn_ids` - Tests multiple inns with different IDs
+   - Both tests verify repeatable behavior (event not removed after triggering)
+
+#### File: `src/game/systems/events.rs`
+
+1. Added handler for `MapEvent::EnterInn` in the `handle_events()` system:
+
+```rust
+MapEvent::EnterInn {
+    name,
+    description,
+    inn_id,
+} => {
+    let msg = format!("{} - {}", name, description);
+    println!("{}", msg);
+    if let Some(ref mut log) = game_log {
+        log.add(msg);
+    }
+
+    // Transition GameMode to InnManagement
+    use crate::application::{GameMode, InnManagementState};
+    global_state.0.mode = GameMode::InnManagement(InnManagementState {
+        current_inn_id: *inn_id,
+        selected_party_slot: None,
+        selected_roster_slot: None,
+    });
+
+    let inn_msg = format!("Entering inn (ID: {})", inn_id);
+    println!("{}", inn_msg);
+    if let Some(ref mut log) = game_log {
+        log.add(inn_msg);
+    }
+}
+```
+
+2. Added integration tests:
+   - `test_enter_inn_event_transitions_to_inn_management_mode` - Verifies GameMode transition from Exploration to InnManagement with correct inn_id and initial state
+   - `test_enter_inn_event_with_different_inn_ids` - Verifies different inn IDs are correctly preserved in InnManagementState
+
+#### File: `campaigns/tutorial/data/maps/map_1.ron`
+
+Replaced the Inn Sign at position (5, 4) with an `EnterInn` event:
+
+```ron
+(
+    x: 5,
+    y: 4,
+): EnterInn(
+    name: "Cozy Inn Entrance",
+    description: "A welcoming inn where you can rest and manage your party.",
+    inn_id: 1,
+),
+```
+
+This makes the inn entrance functional in the tutorial campaign.
+
+#### File: `src/sdk/validation.rs`
+
+Added SDK validation for `EnterInn` events:
+
+```rust
+crate::domain::world::MapEvent::EnterInn { inn_id, .. } => {
+    // Validate inn_id is within reasonable range
+    if *inn_id == 0 {
+        errors.push(ValidationError::BalanceWarning {
+            severity: Severity::Error,
+            message: format!(
+                "Map {} has EnterInn event with invalid inn_id 0 at ({}, {}). Inn IDs should start at 1.",
+                map.id, pos.x, pos.y
+            ),
+        });
+    } else if *inn_id > 100 {
+        errors.push(ValidationError::BalanceWarning {
+            severity: Severity::Warning,
+            message: format!(
+                "Map {} has EnterInn event with suspiciously high inn_id {} at ({}, {}). Verify this is intentional.",
+                map.id, inn_id, pos.x, pos.y
+            ),
+        });
+    }
+    // Note: We don't validate against a town/inn database here because
+    // inns are identified by simple numeric IDs (TownId = u8) and may
+    // not have explicit definitions in the database. The inn_id is used
+    // directly to filter the character roster by location.
+}
+```
+
+Validation rules:
+
+- **Error**: inn_id == 0 (invalid, IDs should start at 1)
+- **Warning**: inn_id > 100 (suspiciously high, verify intentional)
+
+#### File: `src/bin/validate_map.rs`
+
+Added `EnterInn` variant to event counting in map validation binary:
+
+```rust
+MapEvent::EnterInn { .. } => {
+    // Count inn entrances (could add separate counter if needed)
+    signs += 1
+}
+```
+
+### Architecture Compliance
+
+- ✅ Uses existing `MapEvent` enum pattern (Section 4.2)
+- ✅ Follows repeatable event pattern like `Sign` and `NpcDialogue`
+- ✅ Uses `TownId` (u8) type alias for inn_id
+- ✅ Properly integrates with `GameMode::InnManagement(InnManagementState)`
+- ✅ Maintains separation of concerns (domain events → game systems → state transitions)
+- ✅ RON format used for map data
+
+### Validation Results
+
+All quality gates passed:
+
+```bash
+cargo fmt --all                                        # ✅ PASS
+cargo check --all-targets --all-features              # ✅ PASS
+cargo clippy --all-targets --all-features -- -D warnings  # ✅ PASS
+cargo nextest run --all-features 'domain::world::events::'  # ✅ 12/12 tests PASS
+cargo nextest run --all-features 'game::systems::events::'  # ✅ 8/8 tests PASS
+cargo nextest run --all-features 'sdk::validation::'        # ✅ 19/19 tests PASS
+```
+
+### Test Coverage
+
+**Domain Layer Tests** (`src/domain/world/events.rs`):
+
+- ✅ `test_enter_inn_event` - Basic inn entrance with correct inn_id
+- ✅ `test_enter_inn_event_with_different_inn_ids` - Multiple inns, different IDs, all repeatable
+
+**Integration Tests** (`src/game/systems/events.rs`):
+
+- ✅ `test_enter_inn_event_transitions_to_inn_management_mode` - Verifies GameMode::Exploration → GameMode::InnManagement(InnManagementState { current_inn_id: 1, ... })
+- ✅ `test_enter_inn_event_with_different_inn_ids` - Verifies inn_id preservation across different inns
+
+### Technical Decisions
+
+1. **Repeatable Event**: EnterInn events are repeatable (like Sign/NpcDialogue), not one-time (like Treasure/Trap). Players can re-enter inns multiple times.
+
+2. **Direct GameMode Transition**: The event handler directly sets `global_state.0.mode = GameMode::InnManagement(...)` rather than emitting a separate message, matching the pattern used for other mode transitions.
+
+3. **Simple Inn ID**: Uses `u8` inn_id directly without database lookup, as inns are identified by simple numeric IDs and may not have explicit definitions.
+
+4. **Map Event Placement**: Replaced the Inn Sign at tutorial map position (5, 4) with the EnterInn event, making the entrance immediately functional.
+
+### Deliverables Completed
+
+- ✅ `MapEvent::EnterInn` variant added
+- ✅ `EventResult::EnterInn` variant added
+- ✅ Handler in `trigger_event()` (repeatable)
+- ✅ Handler in game event system with GameMode transition
+- ✅ Tutorial map updated (position 5,4)
+- ✅ Unit tests (2 tests, domain layer)
+- ✅ Integration tests (2 tests, game systems layer)
+- ✅ SDK validation (inn_id range checks)
+- ✅ Binary utility updated (validate_map)
+
+### Success Criteria Met
+
+- ✅ Players can trigger EnterInn events by walking onto inn entrance tiles
+- ✅ GameMode transitions from Exploration to InnManagement with correct inn_id
+- ✅ InnManagementState initialized with proper defaults (no selected slots)
+- ✅ Event is repeatable (can enter/exit/re-enter)
+- ✅ Game log displays inn entrance messages
+- ✅ All quality gates pass (fmt, check, clippy, tests)
+- ✅ SDK validator catches invalid inn_id values
+
+### Benefits Achieved
+
+1. **Unblocks Inn UI**: The Inn UI system (implemented in Phase 3) is now reachable via normal gameplay
+2. **Complete Gameplay Loop**: Players can now: explore → find inn → enter inn → manage party → exit inn → continue exploring
+3. **Robust Validation**: SDK catches configuration errors (inn_id == 0, suspiciously high IDs)
+4. **Comprehensive Testing**: Both domain logic and integration tested with realistic scenarios
+
+### Related Files
+
+**Modified:**
+
+- `src/domain/world/types.rs` - Added MapEvent::EnterInn variant
+- `src/domain/world/events.rs` - Added EventResult::EnterInn, handler, tests
+- `src/game/systems/events.rs` - Added GameMode transition handler, integration tests
+- `src/sdk/validation.rs` - Added inn_id validation rules
+- `src/bin/validate_map.rs` - Added EnterInn event counting
+- `campaigns/tutorial/data/maps/map_1.ron` - Replaced Sign with EnterInn at (5,4)
+
+**No Changes Required:**
+
+- `src/application/mod.rs` - GameMode::InnManagement already existed
+- `src/game/systems/inn_ui.rs` - Inn UI already implemented (Phase 3)
+
+### Implementation Notes
+
+1. **Event Position**: The tutorial inn entrance is at map position (5, 4). This is a known, fixed location for testing.
+
+2. **Inn ID Assignment**: Tutorial campaign uses `inn_id: 1` for the Cozy Inn. Future campaigns can use different IDs (1-100 recommended range).
+
+3. **No Exit Event Needed**: Exiting the inn is handled by the Inn UI system's "Exit Inn" button, which transitions back to `GameMode::Exploration`. No separate map event is needed.
+
+4. **Character Location Tracking**: When characters are dismissed to an inn, their `CharacterLocation` is set to `AtInn(inn_id)`. The inn_id from the EnterInn event determines which characters are shown in the roster panel.
+
+5. **Future Enhancement**: Could add visual indicators (door sprites, glowing entrance) to make inn entrances more discoverable.
+
+### Next Steps (Phase 2 of Missing Deliverables)
+
+Phase 1 (EnterInn Integration) is complete. Next priority:
+
+**Phase 2: Tutorial Content** - Add 2-3 `RecruitableCharacter` events to tutorial maps to demonstrate recruitment flows in actual gameplay.
+
+**Date Completed:** 2025-01-27

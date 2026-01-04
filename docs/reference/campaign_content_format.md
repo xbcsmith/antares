@@ -207,7 +207,7 @@ The `starts_in_party` field controls party membership at game start:
             is_premade: true,
             starts_in_party: true,  // Starts in party
         ),
-        
+
         // Optional recruit - starts at inn
         (
             id: "recruit_mage",
@@ -240,7 +240,7 @@ The `starts_in_party` field controls party membership at game start:
 The campaign validator checks:
 
 1. **Unique IDs**: No duplicate character IDs
-2. **Valid References**: 
+2. **Valid References**:
    - `race_id` must exist in `races.ron`
    - `class_id` must exist in `classes.ron`
    - All item IDs in `starting_items` and `starting_equipment` must exist in `items.ron`

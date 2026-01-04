@@ -603,6 +603,30 @@ impl<'a> Validator<'a> {
                         });
                     }
                 }
+                crate::domain::world::MapEvent::EnterInn { inn_id, .. } => {
+                    // Validate inn_id is within reasonable range
+                    if *inn_id == 0 {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Error,
+                            message: format!(
+                                "Map {} has EnterInn event with invalid inn_id 0 at ({}, {}). Inn IDs should start at 1.",
+                                map.id, pos.x, pos.y
+                            ),
+                        });
+                    } else if *inn_id > 100 {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Warning,
+                            message: format!(
+                                "Map {} has EnterInn event with suspiciously high inn_id {} at ({}, {}). Verify this is intentional.",
+                                map.id, inn_id, pos.x, pos.y
+                            ),
+                        });
+                    }
+                    // Note: We don't validate against a town/inn database here because
+                    // inns are identified by simple numeric IDs (TownId = u8) and may
+                    // not have explicit definitions in the database. The inn_id is used
+                    // directly to filter the character roster by location.
+                }
             }
         }
 
