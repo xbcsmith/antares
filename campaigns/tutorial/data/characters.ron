@@ -35,6 +35,7 @@
         ),
         description: "A young warrior eager to prove herself. Kira\'s straightforward fighting style makes her an excellent choice for players learning the basics of combat.",
         is_premade: true,
+        starts_in_party: true,
     ),
     (
         id: "tutorial_elf_sorcerer",
@@ -73,6 +74,7 @@
         ),
         description: "A curious elven mage who delights in teaching others about the arcane arts. Sage is perfect for players who want to learn how spellcasting works.",
         is_premade: true,
+        starts_in_party: true,
     ),
     (
         id: "tutorial_human_cleric",
@@ -111,6 +113,7 @@
         ),
         description: "A kind-hearted healer from the local temple. Mira\'s divine magic can mend wounds and cure ailments, teaching players the value of support characters.",
         is_premade: true,
+        starts_in_party: true,
     ),
     (
         id: "npc_old_gareth",

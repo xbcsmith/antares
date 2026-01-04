@@ -10,6 +10,7 @@ CampaignMetadata(
     starting_direction: "North",
     starting_gold: 100,
     starting_food: 10,
+    starting_inn: 1,
     max_party_size: 6,
     max_roster_size: 20,
     difficulty: Normal,

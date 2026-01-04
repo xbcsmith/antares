@@ -90,7 +90,7 @@ pub enum CharacterLocation {
 ```rust
 pub struct CharacterDefinition {
     // ... existing fields ...
-    
+
     /// Whether this character should start in the active party (new games only)
     #[serde(default)]
     pub starts_in_party: bool,
@@ -112,7 +112,7 @@ pub struct CharacterDefinition {
 ```rust
 pub struct CampaignConfig {
     // ... existing fields ...
-    
+
     /// Default inn where non-party premade characters start (default: 1)
     #[serde(default = "default_starting_inn")]
     pub starting_inn: TownId,
@@ -182,7 +182,7 @@ impl PartyManager {
         roster: &mut Roster,
         roster_index: usize,
     ) -> Result<(), PartyManagementError>;
-    
+
     /// Moves character from party to inn
     pub fn dismiss_to_inn(
         party: &mut Party,
@@ -190,7 +190,7 @@ impl PartyManager {
         party_index: usize,
         inn_id: TownId,
     ) -> Result<Character, PartyManagementError>;
-    
+
     /// Swaps party member with roster character (atomic operation)
     pub fn swap_party_member(
         party: &mut Party,
@@ -198,7 +198,7 @@ impl PartyManager {
         party_index: usize,
         roster_index: usize,
     ) -> Result<(), PartyManagementError>;
-    
+
     /// Validates party transfer is legal
     fn can_recruit(party: &Party, character: &Character) -> Result<(), PartyManagementError>;
 }
@@ -207,26 +207,26 @@ impl PartyManager {
 pub enum PartyManagementError {
     #[error("Party is full (max {0} members)")]
     PartyFull(usize),
-    
+
     #[error("Party must have at least 1 member")]
     PartyEmpty,
-    
+
     #[error("Character {0} not found in roster")]
     CharacterNotFound(usize),
-    
+
     #[error("Character is already in party")]
     AlreadyInParty,
-    
+
     #[error("Character is not at current inn")]
     NotAtInn,
-    
+
     #[error("Invalid party index {0}")]
     InvalidPartyIndex(usize),
 }
 ```
 
 **Implementation details:**
-- `recruit_to_party`: 
+- `recruit_to_party`:
   - Verify party not full
   - Verify character location is `AtInn(_)` or `OnMap(_)` (not already `InParty`)
   - Clone character from roster, add to party
@@ -251,17 +251,17 @@ impl GameState {
     pub fn recruit_character(&mut self, roster_index: usize) -> Result<(), PartyManagementError> {
         PartyManager::recruit_to_party(&mut self.party, &mut self.roster, roster_index)
     }
-    
+
     /// Dismisses party member to current inn
     pub fn dismiss_character(&mut self, party_index: usize, inn_id: TownId) -> Result<Character, PartyManagementError> {
         PartyManager::dismiss_to_inn(&mut self.party, &mut self.roster, party_index, inn_id)
     }
-    
+
     /// Swaps party member with roster character
     pub fn swap_party_member(&mut self, party_index: usize, roster_index: usize) -> Result<(), PartyManagementError> {
         PartyManager::swap_party_member(&mut self.party, &mut self.roster, party_index, roster_index)
     }
-    
+
     /// Gets current inn ID from world state (helper)
     pub fn current_inn_id(&self) -> Option<TownId> {
         // Implementation depends on world/location system
@@ -433,7 +433,7 @@ fn inn_action_system(
             Err(e) => game_log.add(format!("Cannot recruit: {}", e)),
         }
     }
-    
+
     // Process dismiss events (similar)
     // Process swap events (similar)
     // Process exit events → set GameMode back to Exploration
@@ -530,7 +530,7 @@ When player triggers `RecruitableCharacter` event:
 impl GameState {
     /// Tracks which characters have been encountered on maps
     pub encountered_characters: HashSet<String>, // CharacterDefinition IDs
-    
+
     /// Attempts to recruit character from map encounter
     pub fn recruit_from_map(
         &mut self,
@@ -714,12 +714,12 @@ Add documentation for new fields:
 
 ### CharacterDefinition Fields
 
-- `starts_in_party` (bool, optional, default: false): If true, this character 
-  will be added to the starting party when creating a new game. Maximum 6 
+- `starts_in_party` (bool, optional, default: false): If true, this character
+  will be added to the starting party when creating a new game. Maximum 6
   characters can have this flag set to true (enforced at campaign load time).
-  
+
   Use case: Pre-made tutorial characters that should immediately be available.
-  
+
   Example:
   ```ron
   (
@@ -744,14 +744,14 @@ impl Campaign {
             .premade_characters()
             .filter(|c| c.starts_in_party)
             .count();
-        
+
         if starting_party_count > 6 {
             return Err(ValidationError::TooManyStartingPartyMembers {
                 count: starting_party_count,
                 max: 6,
             });
         }
-        
+
         Ok(())
     }
 }

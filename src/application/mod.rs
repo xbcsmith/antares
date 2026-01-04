@@ -280,6 +280,9 @@ pub enum RosterInitializationError {
 
     #[error("Character operation error: {0}")]
     CharacterError(#[from] crate::domain::character::CharacterError),
+
+    #[error("Too many starting party members: {count} characters have starts_in_party=true, but max party size is {max}")]
+    TooManyStartingPartyMembers { count: usize, max: usize },
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -434,11 +437,46 @@ impl GameState {
         &mut self,
         content_db: &ContentDatabase,
     ) -> Result<(), RosterInitializationError> {
+        use crate::domain::character::CharacterLocation;
+
+        // Get starting inn from campaign config (default to 1)
+        let starting_inn = self
+            .campaign
+            .as_ref()
+            .map(|c| c.config.starting_inn)
+            .unwrap_or(1);
+
+        // Track how many characters have starts_in_party set
+        let mut starting_party_count = 0;
+
         for def in content_db.characters.premade_characters() {
             let character =
                 def.instantiate(&content_db.races, &content_db.classes, &content_db.items)?;
-            self.roster.add_character(character, None)?;
+
+            // Determine initial location
+            let location = if def.starts_in_party {
+                starting_party_count += 1;
+
+                // Enforce party size limit
+                if starting_party_count > crate::domain::character::Party::MAX_MEMBERS {
+                    return Err(RosterInitializationError::TooManyStartingPartyMembers {
+                        count: starting_party_count,
+                        max: crate::domain::character::Party::MAX_MEMBERS,
+                    });
+                }
+
+                // Add to active party
+                self.party.add_member(character.clone())?;
+                CharacterLocation::InParty
+            } else {
+                // Non-party premades go to starting inn
+                CharacterLocation::AtInn(starting_inn)
+            };
+
+            // Add to roster with location tracking
+            self.roster.add_character(character, location)?;
         }
+
         Ok(())
     }
 
@@ -547,6 +585,7 @@ impl Default for GameState {
 mod tests {
     use super::*;
     use crate::domain::character::{Alignment, Character, Sex};
+    use crate::domain::character_definition::CharacterDefinition;
 
     #[test]
     fn test_game_state_creation() {
@@ -842,5 +881,387 @@ mod tests {
                 crate::domain::character_definition::CharacterDefinitionError::InvalidRaceId { .. }
             ))
         ));
+    }
+
+    #[test]
+    fn test_initialize_roster_populates_starting_party() {
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Add required class and race
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Create character definitions with starts_in_party
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        let mut kira = CharacterDefinition::new(
+            "kira".to_string(),
+            "Kira".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        kira.is_premade = true;
+        kira.starts_in_party = true;
+
+        let mut sage = CharacterDefinition::new(
+            "sage".to_string(),
+            "Sage".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        sage.is_premade = true;
+        sage.starts_in_party = true;
+
+        let mut other = CharacterDefinition::new(
+            "other".to_string(),
+            "Other".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        other.is_premade = true;
+        other.starts_in_party = false;
+
+        char_db.add_character(kira).unwrap();
+        char_db.add_character(sage).unwrap();
+        char_db.add_character(other).unwrap();
+        db.characters = char_db;
+
+        // Create campaign with starting inn
+        let campaign = crate::sdk::campaign_loader::Campaign {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            version: "1.0.0".to_string(),
+            author: "Test".to_string(),
+            description: "Test".to_string(),
+            engine_version: "0.1.0".to_string(),
+            required_features: vec![],
+            config: crate::sdk::campaign_loader::CampaignConfig {
+                starting_map: 1,
+                starting_position: crate::domain::types::Position::new(0, 0),
+                starting_direction: crate::domain::types::Direction::North,
+                starting_gold: 100,
+                starting_food: 50,
+                starting_inn: 1,
+                max_party_size: 6,
+                max_roster_size: 20,
+                difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
+                permadeath: false,
+                allow_multiclassing: false,
+                starting_level: 1,
+                max_level: 20,
+            },
+            data: crate::sdk::campaign_loader::CampaignData {
+                items: "items.ron".to_string(),
+                spells: "spells.ron".to_string(),
+                monsters: "monsters.ron".to_string(),
+                classes: "classes.ron".to_string(),
+                races: "races.ron".to_string(),
+                maps: "maps".to_string(),
+                quests: "quests.ron".to_string(),
+                dialogues: "dialogues.ron".to_string(),
+                characters: "characters.ron".to_string(),
+            },
+            assets: crate::sdk::campaign_loader::CampaignAssets {
+                tilesets: "tilesets".to_string(),
+                music: "music".to_string(),
+                sounds: "sounds".to_string(),
+                images: "images".to_string(),
+            },
+            root_path: std::path::PathBuf::from("test"),
+            game_config: crate::sdk::game_config::GameConfig::default(),
+        };
+
+        let mut state = GameState::new();
+        state.campaign = Some(campaign);
+        state.initialize_roster(&db).unwrap();
+
+        // Verify party has 2 members (kira and sage)
+        assert_eq!(state.party.size(), 2);
+        let party_names: Vec<&str> = state
+            .party
+            .members
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert!(party_names.contains(&"Kira"));
+        assert!(party_names.contains(&"Sage"));
+
+        // Verify roster has 3 characters
+        assert_eq!(state.roster.characters.len(), 3);
+        assert_eq!(state.roster.character_locations.len(), 3);
+
+        // Verify locations are correct by checking characters_in_party and characters_at_inn
+        let in_party = state.roster.characters_in_party();
+        assert_eq!(in_party.len(), 2);
+        let party_names_roster: Vec<&str> = in_party.iter().map(|(_, c)| c.name.as_str()).collect();
+        assert!(party_names_roster.contains(&"Kira"));
+        assert!(party_names_roster.contains(&"Sage"));
+
+        let at_inn = state.roster.characters_at_inn(1);
+        assert_eq!(at_inn.len(), 1);
+        assert_eq!(at_inn[0].1.name, "Other");
+    }
+
+    #[test]
+    fn test_initialize_roster_sets_party_locations() {
+        use crate::domain::character::CharacterLocation;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        let mut hero = CharacterDefinition::new(
+            "hero".to_string(),
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.is_premade = true;
+        hero.starts_in_party = true;
+
+        char_db.add_character(hero).unwrap();
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        state.initialize_roster(&db).unwrap();
+
+        // Verify location is InParty
+        assert_eq!(state.roster.character_locations.len(), 1);
+        assert_eq!(
+            state.roster.character_locations[0],
+            CharacterLocation::InParty
+        );
+
+        // Verify character is in party
+        let in_party = state.roster.characters_in_party();
+        assert_eq!(in_party.len(), 1);
+        assert_eq!(in_party[0].1.name, "Hero");
+    }
+
+    #[test]
+    fn test_initialize_roster_sets_inn_locations() {
+        use crate::domain::character::CharacterLocation;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        let mut npc = CharacterDefinition::new(
+            "npc".to_string(),
+            "NPC".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        npc.is_premade = true;
+        npc.starts_in_party = false;
+
+        char_db.add_character(npc).unwrap();
+        db.characters = char_db;
+
+        let campaign = crate::sdk::campaign_loader::Campaign {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            version: "1.0.0".to_string(),
+            author: "Test".to_string(),
+            description: "Test".to_string(),
+            engine_version: "0.1.0".to_string(),
+            required_features: vec![],
+            config: crate::sdk::campaign_loader::CampaignConfig {
+                starting_map: 1,
+                starting_position: crate::domain::types::Position::new(0, 0),
+                starting_direction: crate::domain::types::Direction::North,
+                starting_gold: 100,
+                starting_food: 50,
+                starting_inn: 5,
+                max_party_size: 6,
+                max_roster_size: 20,
+                difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
+                permadeath: false,
+                allow_multiclassing: false,
+                starting_level: 1,
+                max_level: 20,
+            },
+            data: crate::sdk::campaign_loader::CampaignData {
+                items: "items.ron".to_string(),
+                spells: "spells.ron".to_string(),
+                monsters: "monsters.ron".to_string(),
+                classes: "classes.ron".to_string(),
+                races: "races.ron".to_string(),
+                maps: "maps".to_string(),
+                quests: "quests.ron".to_string(),
+                dialogues: "dialogues.ron".to_string(),
+                characters: "characters.ron".to_string(),
+            },
+            assets: crate::sdk::campaign_loader::CampaignAssets {
+                tilesets: "tilesets".to_string(),
+                music: "music".to_string(),
+                sounds: "sounds".to_string(),
+                images: "images".to_string(),
+            },
+            root_path: std::path::PathBuf::from("test"),
+            game_config: crate::sdk::game_config::GameConfig::default(),
+        };
+
+        let mut state = GameState::new();
+        state.campaign = Some(campaign);
+        state.initialize_roster(&db).unwrap();
+
+        // Verify location is AtInn(5)
+        assert_eq!(state.roster.character_locations.len(), 1);
+        assert_eq!(
+            state.roster.character_locations[0],
+            CharacterLocation::AtInn(5)
+        );
+
+        // Verify character is at inn 5
+        let at_inn = state.roster.characters_at_inn(5);
+        assert_eq!(at_inn.len(), 1);
+        assert_eq!(at_inn[0].1.name, "NPC");
+
+        // Verify party is empty
+        assert_eq!(state.party.size(), 0);
+    }
+
+    #[test]
+    fn test_initialize_roster_party_overflow_error() {
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        // Create 7 characters with starts_in_party = true (exceeds max of 6)
+        for i in 0..7 {
+            let mut char = CharacterDefinition::new(
+                format!("char_{}", i),
+                format!("Character {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            char.is_premade = true;
+            char.starts_in_party = true;
+            char_db.add_character(char).unwrap();
+        }
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        let res = state.initialize_roster(&db);
+
+        // Should error with TooManyStartingPartyMembers
+        assert!(matches!(
+            res,
+            Err(RosterInitializationError::TooManyStartingPartyMembers { count: 7, max: 6 })
+        ));
+    }
+
+    #[test]
+    fn test_initialize_roster_respects_max_party_size() {
+        use crate::domain::character::CharacterLocation;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        // Create exactly 6 characters with starts_in_party = true (at max)
+        for i in 0..6 {
+            let mut char = CharacterDefinition::new(
+                format!("char_{}", i),
+                format!("Character {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            char.is_premade = true;
+            char.starts_in_party = true;
+            char_db.add_character(char).unwrap();
+        }
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        state.initialize_roster(&db).unwrap();
+
+        // Verify party has exactly 6 members
+        assert_eq!(state.party.size(), 6);
+
+        // Verify all are marked as InParty
+        for i in 0..6 {
+            assert_eq!(
+                state.roster.character_locations[i],
+                CharacterLocation::InParty
+            );
+        }
     }
 }

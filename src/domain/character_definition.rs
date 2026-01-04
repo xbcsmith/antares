@@ -482,6 +482,14 @@ pub struct CharacterDefinition {
     /// True for pre-made characters, false for templates
     #[serde(default)]
     pub is_premade: bool,
+
+    /// Whether this character should start in the active party (new games only)
+    ///
+    /// When true, this character will be automatically added to the party
+    /// when a new game is started. Maximum of 6 characters can have this
+    /// flag set (PARTY_MAX_SIZE constraint).
+    #[serde(default)]
+    pub starts_in_party: bool,
 }
 
 /// Default starting food value (10 units)
@@ -545,6 +553,7 @@ impl CharacterDefinition {
             starting_equipment: StartingEquipment::new(),
             description: String::new(),
             is_premade: false,
+            starts_in_party: false,
         }
     }
 
@@ -2998,6 +3007,7 @@ mod tests {
             },
             description: "A test knight".to_string(),
             is_premade: true,
+            starts_in_party: false,
         };
 
         let character = definition
@@ -3178,6 +3188,7 @@ mod tests {
             },
             description: "A test sorcerer".to_string(),
             is_premade: true,
+            starts_in_party: false,
         };
 
         let character = definition
@@ -3223,6 +3234,7 @@ mod tests {
             starting_equipment: StartingEquipment::default(),
             description: "Test".to_string(),
             is_premade: true,
+            starts_in_party: false,
         };
 
         let character = definition
