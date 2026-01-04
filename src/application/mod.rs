@@ -17,7 +17,8 @@ pub mod resources;
 pub mod save_game;
 
 use crate::domain::character::{Party, Roster};
-use crate::domain::types::GameTime;
+use crate::domain::party_manager::{PartyManagementError, PartyManager};
+use crate::domain::types::{GameTime, TownId};
 use crate::domain::world::World;
 use crate::sdk::campaign_loader::{Campaign, CampaignError};
 use crate::sdk::database::ContentDatabase;
@@ -479,6 +480,167 @@ impl GameState {
 
         Ok(())
     }
+
+    // ===== Party Management Operations =====
+
+    /// Recruits a character from the roster to the active party
+    ///
+    /// Moves a character from inn/map storage to the active adventuring party.
+    /// The character must not already be in the party, and the party must have
+    /// space available.
+    ///
+    /// # Arguments
+    ///
+    /// * `roster_index` - Index of the character in the roster to recruit
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if recruitment succeeds, otherwise returns a
+    /// `PartyManagementError` explaining why the operation failed.
+    ///
+    /// # Errors
+    ///
+    /// - `PartyManagementError::PartyFull` if party is at maximum size (6 members)
+    /// - `PartyManagementError::AlreadyInParty` if character is already in party
+    /// - `PartyManagementError::InvalidRosterIndex` if roster_index is out of bounds
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::application::GameState;
+    /// use antares::sdk::campaign_loader::CampaignLoader;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = CampaignLoader::new("campaigns");
+    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let (mut state, _db) = GameState::new_game(campaign)?;
+    ///
+    /// // Recruit character at roster index 0 (if not already in party)
+    /// state.recruit_character(0)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn recruit_character(&mut self, roster_index: usize) -> Result<(), PartyManagementError> {
+        PartyManager::recruit_to_party(&mut self.party, &mut self.roster, roster_index)
+    }
+
+    /// Dismisses a party member to an inn
+    ///
+    /// Removes a character from the active party and stores them at the specified inn.
+    /// The party must have at least one member remaining after dismissal.
+    ///
+    /// # Arguments
+    ///
+    /// * `party_index` - Index of the character in the party to dismiss (0-5)
+    /// * `inn_id` - Town/inn ID where the character will be stored
+    ///
+    /// # Returns
+    ///
+    /// Returns the dismissed `Character` if successful, otherwise returns a
+    /// `PartyManagementError`.
+    ///
+    /// # Errors
+    ///
+    /// - `PartyManagementError::PartyEmpty` if dismissing would leave party empty
+    /// - `PartyManagementError::InvalidPartyIndex` if party_index is out of bounds
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::application::GameState;
+    /// use antares::sdk::campaign_loader::CampaignLoader;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = CampaignLoader::new("campaigns");
+    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let (mut state, _db) = GameState::new_game(campaign)?;
+    ///
+    /// // Assuming we have multiple party members, dismiss index 0 to inn 1
+    /// if state.party.size() > 1 {
+    ///     let dismissed = state.dismiss_character(0, 1)?;
+    ///     println!("Dismissed {}", dismissed.name);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn dismiss_character(
+        &mut self,
+        party_index: usize,
+        inn_id: TownId,
+    ) -> Result<crate::domain::character::Character, PartyManagementError> {
+        PartyManager::dismiss_to_inn(&mut self.party, &mut self.roster, party_index, inn_id)
+    }
+
+    /// Swaps a party member with a roster character
+    ///
+    /// Atomically exchanges a character in the active party with a character
+    /// from the roster. This ensures the party never becomes empty during the
+    /// operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `party_index` - Index of the character in the party to swap out (0-5)
+    /// * `roster_index` - Index of the character in the roster to swap in
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if swap succeeds, otherwise returns a `PartyManagementError`.
+    ///
+    /// # Errors
+    ///
+    /// - `PartyManagementError::InvalidPartyIndex` if party_index is out of bounds
+    /// - `PartyManagementError::InvalidRosterIndex` if roster_index is out of bounds
+    /// - `PartyManagementError::AlreadyInParty` if roster character is already in party
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::application::GameState;
+    /// use antares::sdk::campaign_loader::CampaignLoader;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = CampaignLoader::new("campaigns");
+    /// let campaign = loader.load_campaign("tutorial")?;
+    /// let (mut state, _db) = GameState::new_game(campaign)?;
+    ///
+    /// // Swap party member 0 with roster character 3
+    /// state.swap_party_member(0, 3)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn swap_party_member(
+        &mut self,
+        party_index: usize,
+        roster_index: usize,
+    ) -> Result<(), PartyManagementError> {
+        PartyManager::swap_party_member(
+            &mut self.party,
+            &mut self.roster,
+            party_index,
+            roster_index,
+        )
+    }
+
+    /// Gets the current inn ID from game state
+    ///
+    /// Returns the inn/town ID where the party is currently located, if any.
+    /// This is used to determine where dismissed characters should be stored.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(TownId)` if party is at an inn/town, `None` otherwise.
+    ///
+    /// # Note
+    ///
+    /// This is a placeholder implementation. Full implementation requires
+    /// world/location tracking to be completed.
+    pub fn current_inn_id(&self) -> Option<TownId> {
+        // TODO: Implement once Inn/Town location system is complete
+        // For now, default to inn 1 or extract from world state
+        None
+    }
+
+    // ===== Game Mode Transitions =====
 
     /// Enters combat mode (default handicap: Even)
     ///
@@ -1263,5 +1425,401 @@ mod tests {
                 CharacterLocation::InParty
             );
         }
+    }
+
+    // ===== Phase 2: Party Management Integration Tests =====
+
+    #[test]
+    fn test_game_state_recruit_character() {
+        use crate::domain::character::CharacterLocation;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        // Create one character in party, one at inn
+        let mut char1 = CharacterDefinition::new(
+            "char1".to_string(),
+            "Character 1".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        char1.is_premade = true;
+        char1.starts_in_party = true;
+
+        let mut char2 = CharacterDefinition::new(
+            "char2".to_string(),
+            "Character 2".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        char2.is_premade = true;
+        char2.starts_in_party = false;
+
+        char_db.add_character(char1).unwrap();
+        char_db.add_character(char2).unwrap();
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        state.initialize_roster(&db).unwrap();
+
+        // Initially: 1 in party, 1 at inn
+        assert_eq!(state.party.size(), 1);
+
+        // Find the character at the inn (not already in party)
+        let inn_char_index = state
+            .roster
+            .character_locations
+            .iter()
+            .enumerate()
+            .find(|(_, loc)| matches!(loc, CharacterLocation::AtInn(_)))
+            .map(|(idx, _)| idx)
+            .expect("Should have at least one character at inn");
+
+        // Recruit the character at the inn
+        let result = state.recruit_character(inn_char_index);
+        assert!(result.is_ok());
+        assert_eq!(state.party.size(), 2);
+        assert_eq!(
+            state.roster.character_locations[inn_char_index],
+            CharacterLocation::InParty
+        );
+    }
+
+    #[test]
+    fn test_game_state_recruit_when_party_full() {
+        use crate::domain::party_manager::PartyManagementError;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        // Create 6 in party, 1 at inn
+        for i in 0..7 {
+            let mut char = CharacterDefinition::new(
+                format!("char_{}", i),
+                format!("Character {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            char.is_premade = true;
+            char.starts_in_party = i < 6;
+            char_db.add_character(char).unwrap();
+        }
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        state.initialize_roster(&db).unwrap();
+
+        // Try to recruit 7th character when party is full
+        let result = state.recruit_character(6);
+        assert!(matches!(result, Err(PartyManagementError::PartyFull(6))));
+    }
+
+    #[test]
+    fn test_game_state_dismiss_character() {
+        use crate::domain::character::CharacterLocation;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        // Create 2 characters in party
+        for i in 0..2 {
+            let mut char = CharacterDefinition::new(
+                format!("char_{}", i),
+                format!("Character {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            char.is_premade = true;
+            char.starts_in_party = true;
+            char_db.add_character(char).unwrap();
+        }
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        state.initialize_roster(&db).unwrap();
+
+        assert_eq!(state.party.size(), 2);
+
+        // Dismiss first character to inn 2
+        let result = state.dismiss_character(0, 2);
+        assert!(result.is_ok());
+        let dismissed = result.unwrap();
+        assert_eq!(dismissed.name, "Character 0");
+        assert_eq!(state.party.size(), 1);
+        assert_eq!(
+            state.roster.character_locations[0],
+            CharacterLocation::AtInn(2)
+        );
+    }
+
+    #[test]
+    fn test_game_state_dismiss_last_member_fails() {
+        use crate::domain::party_manager::PartyManagementError;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        let mut char1 = CharacterDefinition::new(
+            "char1".to_string(),
+            "Character 1".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        char1.is_premade = true;
+        char1.starts_in_party = true;
+        char_db.add_character(char1).unwrap();
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        state.initialize_roster(&db).unwrap();
+
+        // Try to dismiss only party member
+        let result = state.dismiss_character(0, 1);
+        assert!(matches!(result, Err(PartyManagementError::PartyEmpty)));
+    }
+
+    #[test]
+    fn test_game_state_swap_party_member() {
+        use crate::domain::character::CharacterLocation;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        // Create 1 in party, 1 at inn
+        let mut char1 = CharacterDefinition::new(
+            "warrior".to_string(),
+            "Warrior".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        char1.is_premade = true;
+        char1.starts_in_party = true;
+
+        let mut char2 = CharacterDefinition::new(
+            "mage".to_string(),
+            "Mage".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        char2.is_premade = true;
+        char2.starts_in_party = false;
+
+        char_db.add_character(char1).unwrap();
+        char_db.add_character(char2).unwrap();
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        state.initialize_roster(&db).unwrap();
+
+        // Find the character at the inn (to swap with)
+        let inn_char_index = state
+            .roster
+            .character_locations
+            .iter()
+            .enumerate()
+            .find(|(_, loc)| matches!(loc, CharacterLocation::AtInn(_)))
+            .map(|(idx, _)| idx)
+            .expect("Should have at least one character at inn");
+
+        let inn_char_name = state.roster.characters[inn_char_index].name.clone();
+
+        // Swap first party member with character at inn
+        let result = state.swap_party_member(0, inn_char_index);
+        assert!(result.is_ok());
+
+        // Verify swap
+        assert_eq!(state.party.size(), 1);
+        assert_eq!(state.party.members[0].name, inn_char_name);
+
+        assert_eq!(
+            state.roster.character_locations[inn_char_index],
+            CharacterLocation::InParty
+        );
+    }
+
+    #[test]
+    fn test_party_management_maintains_invariants() {
+        use crate::domain::character::CharacterLocation;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let mut char_db = crate::domain::character_definition::CharacterDatabase::new();
+
+        // Create 4 characters: 2 in party, 2 at inn
+        for i in 0..4 {
+            let mut char = CharacterDefinition::new(
+                format!("char_{}", i),
+                format!("Character {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            char.is_premade = true;
+            char.starts_in_party = i < 2;
+            char_db.add_character(char).unwrap();
+        }
+        db.characters = char_db;
+
+        let mut state = GameState::new();
+        state.initialize_roster(&db).unwrap();
+
+        // Find characters at inn (not in party)
+        let inn_chars: Vec<usize> = state
+            .roster
+            .character_locations
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, loc)| {
+                if matches!(loc, CharacterLocation::AtInn(_)) {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert!(
+            inn_chars.len() >= 2,
+            "Need at least 2 characters at inn for test"
+        );
+
+        // Perform several operations
+        state.recruit_character(inn_chars[0]).unwrap(); // Recruit first inn char
+        state.dismiss_character(0, 1).unwrap(); // Dismiss first party member to inn 1
+
+        // Find a character at inn for swap
+        let inn_char_for_swap = state
+            .roster
+            .character_locations
+            .iter()
+            .enumerate()
+            .find(|(_, loc)| matches!(loc, CharacterLocation::AtInn(_)))
+            .map(|(idx, _)| idx)
+            .expect("Should have at least one character at inn");
+
+        state.swap_party_member(0, inn_char_for_swap).unwrap(); // Swap party member with inn char
+
+        // Verify invariants
+        let party_count_in_roster = state
+            .roster
+            .character_locations
+            .iter()
+            .filter(|loc| **loc == CharacterLocation::InParty)
+            .count();
+        assert_eq!(party_count_in_roster, state.party.size());
+
+        // Verify no duplicate InParty locations
+        let in_party_indices: Vec<usize> = state
+            .roster
+            .character_locations
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, loc)| {
+                if *loc == CharacterLocation::InParty {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(in_party_indices.len(), state.party.size());
     }
 }
