@@ -1,6 +1,6 @@
 # Lessons Learned - Antares Development
 
-**Last Updated:** 2025-01-25  
+**Last Updated:** 2025-01-25
 **Compiled From:** All implementation phases documented in `implementations.md`
 
 ---
@@ -37,8 +37,8 @@
 pub struct PartyManager;
 impl PartyManager {
     pub fn recruit_to_party(
-        party: &mut Party, 
-        roster: &mut Roster, 
+        party: &mut Party,
+        roster: &mut Roster,
         roster_index: usize
     ) -> Result<(), PartyManagementError> {
         // Pure logic, no side effects
@@ -128,7 +128,7 @@ impl TileVisualMetadata {
         self.height = Some(height);
         self
     }
-    
+
     pub fn with_color_tint(mut self, r: f32, g: f32, b: f32) -> Self {
         self.color_tint = Some([r, g, b]);
         self
@@ -149,7 +149,7 @@ let visual = TileVisualMetadata::default()
 ```rust
 impl TileVisualMetadata {
     pub const DEFAULT_HEIGHT: f32 = 1.0;
-    
+
     pub fn effective_height(&self) -> f32 {
         self.height.unwrap_or(Self::DEFAULT_HEIGHT)
     }
@@ -206,8 +206,8 @@ pub struct Roster {
 
 impl Roster {
     pub fn add_character(
-        &mut self, 
-        character: Character, 
+        &mut self,
+        character: Character,
         location: CharacterLocation
     ) -> Result<(), CharacterError> {
         // Maintain invariant: same length
@@ -227,7 +227,7 @@ impl Roster {
 fn test_roster_invariants() {
     let roster = create_test_roster();
     assert_eq!(
-        roster.characters.len(), 
+        roster.characters.len(),
         roster.character_locations.len()
     );
 }
@@ -300,10 +300,10 @@ pub fn equip_item(character: u32, item: u32) -> Result<()>;
 fn test_save_party_locations() {
     let mut state = GameState::new();
     add_characters_to_party(&mut state, 3);
-    
+
     manager.save("test", &state).unwrap();
     let loaded = manager.load("test").unwrap();
-    
+
     // Verify behavior: party state preserved
     assert_eq!(loaded.party.members.len(), 3);
     assert_eq!(loaded.roster.character_locations[0], CharacterLocation::InParty);
@@ -330,10 +330,10 @@ fn test_recruit_character_to_party() {
     let mut state = GameState::new();
     let character = create_test_character("Hero");
     state.roster.add_character(character, CharacterLocation::AtInn(1)).unwrap();
-    
+
     // ACT: Perform the operation
     let result = state.recruit_character(0);
-    
+
     // ASSERT: Verify outcomes
     assert!(result.is_ok());
     assert_eq!(state.party.size(), 1);
@@ -350,12 +350,12 @@ fn test_recruit_character_to_party() {
 #[test]
 fn test_party_max_members() {
     let mut party = Party::new();
-    
+
     // Fill to max (6)
     for i in 0..Party::MAX_MEMBERS {
         party.add_member(create_character(i)).unwrap();
     }
-    
+
     // Try adding one more - should fail
     let result = party.add_member(create_character(99));
     assert!(matches!(result, Err(CharacterError::PartyFull(_))));
@@ -364,7 +364,7 @@ fn test_party_max_members() {
 #[test]
 fn test_dismiss_last_member_fails() {
     let mut state = create_state_with_one_character();
-    
+
     let result = state.dismiss_character(0, 1);
     assert!(matches!(result, Err(PartyManagementError::PartyEmpty)));
 }
@@ -382,9 +382,9 @@ fn test_party_manager_recruit() {
     let mut party = Party::new();
     let mut roster = Roster::new();
     roster.add_character(char, CharacterLocation::AtInn(1)).unwrap();
-    
+
     let result = PartyManager::recruit_to_party(&mut party, &mut roster, 0);
-    
+
     assert!(result.is_ok());
 }
 ```
@@ -397,12 +397,12 @@ fn test_full_save_load_cycle_with_recruitment() {
     let temp_dir = TempDir::new().unwrap();
     let manager = SaveGameManager::new(temp_dir.path()).unwrap();
     let mut state = GameState::new();
-    
+
     // Full workflow: recruit → save → load
     add_characters(&mut state);
     state.recruit_character(0).unwrap();
     manager.save("test", &state).unwrap();
-    
+
     let loaded = manager.load("test").unwrap();
     assert_eq!(loaded.party.size(), 1);
     assert!(loaded.encountered_characters.contains("npc_id"));
@@ -445,13 +445,13 @@ fn test_something() {
 fn test_save_migration_from_old_format() {
     // Save normally
     manager.save("test", &state).unwrap();
-    
+
     // Manually remove new field to simulate old format
     let save_path = manager.save_path("test");
     let mut ron_content = std::fs::read_to_string(&save_path).unwrap();
     ron_content = remove_field(&ron_content, "encountered_characters");
     std::fs::write(&save_path, &ron_content).unwrap();
-    
+
     // Load should succeed with defaults
     let loaded = manager.load("test").unwrap();
     assert_eq!(loaded.encountered_characters.len(), 0); // Default
@@ -517,13 +517,13 @@ pub fn autocomplete_portrait_selector(
     label: &str,
 ) {
     ui.text_edit_singleline(current_value);
-    
+
     // Filter candidates based on input
     let matches: Vec<_> = candidates
         .iter()
         .filter(|c| c.contains(current_value.as_str()))
         .collect();
-    
+
     // Show dropdown with matches
     if !matches.is_empty() {
         egui::ComboBox::from_label(label)
@@ -583,7 +583,7 @@ if ui.button("🎨").on_hover_text("Open portrait picker").clicked() {
 pub struct GameState {
     pub world: World,
     pub roster: Roster,
-    
+
     // NEW field - old saves won't have this
     #[serde(default)]
     pub encountered_characters: HashSet<String>,
@@ -605,12 +605,12 @@ pub struct GameState {
 def migrate_map(map_path):
     with open(map_path) as f:
         data = ron.load(f)
-    
+
     # Remove deprecated fields
     for tile in data['tiles']:
         if 'on_step' in tile:
             del tile['on_step']
-    
+
     # Write back
     with open(map_path, 'w') as f:
         ron.dump(data, f)
@@ -651,7 +651,7 @@ impl SaveGame {
 ```rust
 pub struct CharacterDefinition {
     pub base_stats: BaseStats,
-    
+
     // Optional overrides
     pub hp_base: Option<u16>, // If Some, use this instead of calculation
     pub sp_base: Option<u16>,
@@ -681,13 +681,13 @@ use thiserror::Error;
 pub enum PartyManagementError {
     #[error("Party is full (max {0} members)")]
     PartyFull(usize),
-    
+
     #[error("Cannot dismiss last party member")]
     PartyEmpty,
-    
+
     #[error("Character at roster index {0} not found")]
     InvalidRosterIndex(usize),
-    
+
     #[error("Character error: {0}")]
     CharacterError(#[from] CharacterError),
 }
@@ -705,8 +705,8 @@ pub enum PartyManagementError {
 **Pattern:**
 ```rust
 // ✅ GOOD: Returns Result
-pub fn recruit_character(&mut self, roster_index: usize) 
-    -> Result<(), PartyManagementError> 
+pub fn recruit_character(&mut self, roster_index: usize)
+    -> Result<(), PartyManagementError>
 {
     if self.party.is_full() {
         return Err(PartyManagementError::PartyFull(Party::MAX_MEMBERS));
@@ -741,7 +741,7 @@ pub fn swap_party_member(
     if roster_index >= roster.characters.len() {
         return Err(PartyManagementError::InvalidRosterIndex(roster_index));
     }
-    
+
     // Now perform operation knowing inputs are valid
     // ...
 }
@@ -843,7 +843,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 /// let mut state = GameState::new();
 /// state.recruit_character(0)?;
 /// ```
-pub fn recruit_character(&mut self, roster_index: usize) 
+pub fn recruit_character(&mut self, roster_index: usize)
     -> Result<(), PartyManagementError>
 {
     // ...
@@ -1026,7 +1026,7 @@ pub fn load_portrait_texture(
     if let Some(handle) = self.portrait_cache.get(portrait_id) {
         return Some(handle.clone());
     }
-    
+
     // Load and cache
     if let Ok(texture) = load_image_from_path(portrait_path) {
         let handle = ctx.load_texture(portrait_id, texture, Default::default());
@@ -1181,6 +1181,6 @@ These lessons learned represent months of development across multiple feature ar
 
 ---
 
-**Document maintained by:** Development Team  
-**Based on:** All phases documented in `implementations.md`  
+**Document maintained by:** Development Team
+**Based on:** All phases documented in `implementations.md`
 **Next update:** As new phases are completed

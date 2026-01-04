@@ -728,7 +728,7 @@ Add documentation for new fields:
       // ... other fields ...
       starts_in_party: true, // This character starts in party
   )
-  ```
+
 ```
 
 #### 6.2 Campaign Validation
