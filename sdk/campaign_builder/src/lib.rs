@@ -1373,10 +1373,10 @@ impl CampaignBuilderApp {
 
             if npcs_path.exists() {
                 let contents =
-                    std::fs::read_to_string(&npcs_path).map_err(|e| CampaignError::Io(e))?;
+                    std::fs::read_to_string(&npcs_path).map_err(CampaignError::Io)?;
 
                 let npcs: Vec<antares::domain::world::npc::NpcDefinition> =
-                    ron::from_str(&contents).map_err(|e| CampaignError::Deserialization(e))?;
+                    ron::from_str(&contents).map_err(CampaignError::Deserialization)?;
 
                 self.npc_editor_state.npcs = npcs;
                 self.logger.log(
@@ -1838,11 +1838,59 @@ impl CampaignBuilderApp {
         self.campaign_editor_state.has_unsaved_changes = false;
         self.campaign_editor_state.mode = campaign_editor::CampaignEditorMode::List;
 
+        // Clear all loaded campaign content and reset editor states so the new
+        // campaign starts with an empty workspace rather than retaining the
+        // previously opened campaign's data.
+        self.items.clear();
+        self.items_editor_state = ItemsEditorState::new();
+
+        self.spells.clear();
+        self.spells_editor_state = SpellsEditorState::new();
+
+        self.monsters.clear();
+        self.monsters_editor_state = MonstersEditorState::new();
+
+        self.conditions.clear();
+        self.conditions_editor_state = ConditionsEditorState::new();
+
+        self.maps.clear();
+        self.maps_editor_state = MapsEditorState::new();
+
+        self.quests.clear();
+        self.quest_editor_state = QuestEditorState::default();
+
+        self.dialogues.clear();
+        self.dialogue_editor_state = DialogueEditorState::default();
+
+        // Reset NPCs, characters, classes and races editors
+        self.npc_editor_state = npc_editor::NpcEditorState::default();
+        self.characters_editor_state = characters_editor::CharactersEditorState::new();
+        self.classes_editor_state = classes_editor::ClassesEditorState::default();
+        self.races_editor_state = races_editor::RacesEditorState::default();
+
+        // Reset campaign file/path-related state
         self.campaign_path = None;
         self.campaign_dir = None;
         self.unsaved_changes = false;
         self.validation_errors.clear();
         self.file_tree.clear();
+
+        // Clear undo/redo history and any remembered content in the manager's state
+        self.undo_redo_manager.clear();
+        {
+            let s = self.undo_redo_manager.state_mut();
+            s.items.clear();
+            s.spells.clear();
+            s.monsters.clear();
+            s.maps.clear();
+            s.quests.clear();
+            s.dialogues.clear();
+            s.metadata_changed = false;
+        }
+
+        // Drop asset manager to avoid referencing previous campaign assets
+        self.asset_manager = None;
+
         self.status_message = "New campaign created.".to_string();
     }
 
@@ -3011,6 +3059,7 @@ impl eframe::App for CampaignBuilderApp {
                     &self.quests,
                     self.campaign_dir.as_ref(),
                     &self.tool_config.display,
+                    &self.campaign.npcs_file,
                 ) {
                     self.unsaved_changes = true;
                 }
@@ -4026,6 +4075,91 @@ mod tests {
     use antares::domain::combat::monster::MonsterCondition;
     use antares::domain::quest::QuestStage;
     use antares::domain::races::RaceDefinition;
+
+    #[test]
+    fn test_do_new_campaign_clears_loaded_data() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Populate editors and domain data to simulate an open campaign
+        app.items.push(ItemsEditorState::default_item());
+        app.items_editor_state.search_query = "sword".to_string();
+
+        app.spells.push(CampaignBuilderApp::default_spell());
+        app.spells_editor_state.search_query = "fire".to_string();
+
+        app.monsters.push(CampaignBuilderApp::default_monster());
+        app.monsters_editor_state.edit_buffer.name = "Orc".to_string();
+
+        // Add a simple condition definition
+        use antares::domain::conditions::{ConditionDefinition, ConditionDuration};
+        app.conditions.push(ConditionDefinition {
+            id: "cond_1".to_string(),
+            name: "Test Condition".to_string(),
+            description: String::new(),
+            effects: Vec::new(),
+            default_duration: ConditionDuration::Permanent,
+            icon_id: None,
+        });
+
+        // Add a map and a quest
+        use antares::domain::world::Map;
+        app.maps.push(Map::new(
+            1,
+            "test_map".to_string(),
+            "desc".to_string(),
+            10,
+            10,
+        ));
+        app.quests
+            .push(antares::domain::quest::Quest::new(1, "Test Quest", "desc"));
+
+        // Add a dialogue tree
+        use antares::domain::dialogue::DialogueTree;
+        let dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        app.dialogues.push(dialogue);
+        app.dialogue_editor_state.selected_dialogue = Some(0);
+
+        // Add an NPC
+        app.npc_editor_state
+            .npcs
+            .push(antares::domain::world::npc::NpcDefinition::new(
+                "npc_1",
+                "NPC 1",
+                "portrait_1",
+            ));
+
+        // Sanity checks: ensure data present before invoking the method under test
+        assert!(!app.items.is_empty());
+        assert!(!app.spells.is_empty());
+        assert!(!app.monsters.is_empty());
+        assert!(!app.maps.is_empty());
+        assert!(!app.quests.is_empty());
+        assert!(!app.dialogues.is_empty());
+        assert!(!app.npc_editor_state.npcs.is_empty());
+
+        // Call the method under test
+        app.do_new_campaign();
+
+        // Assert everything cleared and editors reset
+        assert!(app.items.is_empty());
+        assert!(app.spells.is_empty());
+        assert!(app.monsters.is_empty());
+        assert!(app.maps.is_empty());
+        assert!(app.quests.is_empty());
+        assert!(app.dialogues.is_empty());
+        assert!(app.npc_editor_state.npcs.is_empty());
+
+        // Editor states reset
+        assert!(app.items_editor_state.search_query.is_empty());
+        assert!(app.spells_editor_state.search_query.is_empty());
+        assert_eq!(
+            app.monsters_editor_state.edit_buffer.name,
+            MonstersEditorState::new().edit_buffer.name,
+            "Monster editor buffer should be reset to default"
+        );
+        assert!(app.asset_manager.is_none());
+        assert!(!app.unsaved_changes);
+    }
 
     #[test]
     fn test_generate_category_status_checks_empty_races_shows_info() {

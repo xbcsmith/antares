@@ -1169,14 +1169,14 @@ mod tests {
 
         let (state, _content_db) = GameState::new_game(campaign).expect("new_game failed");
 
-        // Sage is an elf sorcerer with base intellect 16 and elf +2 modifier
-        let sage = state
+        // Sirius is an elf sorcerer with base intellect 16 and elf +2 modifier
+        let sirius = state
             .roster
             .characters
             .iter()
-            .find(|c| c.name == "Sage")
-            .expect("Sage not found in roster");
-        assert_eq!(sage.stats.intellect.base, 18);
+            .find(|c| c.name == "Sirius")
+            .expect("Sirius not found in roster");
+        assert_eq!(sirius.stats.intellect.base, 18);
     }
 
     #[test]
@@ -1188,14 +1188,14 @@ mod tests {
 
         let (state, _content_db) = GameState::new_game(campaign).expect("new_game failed");
 
-        let sage = state
+        let sirius = state
             .roster
             .characters
             .iter()
-            .find(|c| c.name == "Sage")
-            .expect("Sage not found in roster");
+            .find(|c| c.name == "Sirius")
+            .expect("Sirius not found in roster");
 
-        assert_eq!(sage.sp.base, 8); // 18 intellect -> 8 SP for a pure caster
+        assert_eq!(sirius.sp.base, 8); // 18 intellect -> 8 SP for a pure caster
     }
 
     #[test]

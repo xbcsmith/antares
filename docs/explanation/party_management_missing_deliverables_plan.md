@@ -57,8 +57,8 @@ This plan addresses the remaining 3 missing deliverables from the Party Manageme
 
 ### Phase 1: MapEvent::EnterInn Integration
 
-**Priority**: CRITICAL - Unblocks Inn UI access  
-**Estimated Effort**: 2-4 hours  
+**Priority**: CRITICAL - Unblocks Inn UI access
+**Estimated Effort**: 2-4 hours
 **Dependencies**: None (all infrastructure exists)
 
 #### 1.1 Add MapEvent::EnterInn Variant
@@ -229,55 +229,76 @@ In `campaigns/tutorial/data/maps/map_1.ron`, replace the Inn Sign event at posit
 
 ---
 
-### Phase 2: Tutorial Content Population
+### Phase 2: Tutorial Content Population - COMPLETED ✅
 
-**Priority**: MEDIUM - Demonstrates recruitment system  
-**Estimated Effort**: 1-2 hours  
+**Priority**: MEDIUM - Demonstrates recruitment system
+**Estimated Effort**: 1-2 hours
 **Dependencies**: Phase 1 complete (for manual testing)
 
-#### 2.1 Add Recruitable Character Events to Maps
+**Status**: ✅ COMPLETED - All recruitable NPCs added to tutorial maps with proper character definitions
 
-**Target Maps**: map_2.ron (Dark Forest), map_3.ron (Dungeon), or map_4.ron (wilderness)
+#### 2.1 Add Recruitable Character Events to Maps - ✅ COMPLETED
+
+**Target Maps**: map_2.ron (Fizban's Cave), map_3.ron (Ancient Ruins), map_4.ron (Dark Forest)
 
 **NPCs Available** (from `campaigns/tutorial/data/characters.ron`):
 
-- `old_gareth` - Dwarf fighter (line ~117)
-- `whisper` - Elf rogue/ranger (line ~154)
-- `apprentice_zara` - Gnome mage (line ~191)
+- ✅ `old_gareth` - Dwarf fighter (line 119)
+- ✅ `whisper` - Elf rogue/ranger (line 156)
+- ✅ `apprentice_zara` - Gnome mage (line 193)
 
-**Implementation**:
+**Implementation - COMPLETED**:
 
-Add 2-3 `RecruitableCharacter` events to appropriate maps. Example for map_2.ron:
+Added 3 `RecruitableCharacter` events to tutorial maps:
+
+**Map 2 (Fizban's Cave) - Position (12, 8)**:
 
 ```ron
-events: {
-    (x: 12, y: 8): RecruitableCharacter(
-        name: "Old Gareth",
-        description: "A grizzled dwarf warrior resting by the roadside. He looks experienced but weary.",
-        character_id: "old_gareth",
-    ),
-    (x: 7, y: 15): RecruitableCharacter(
-        name: "Whisper",
-        description: "An elven scout emerges from the shadows, watching you intently.",
-        character_id: "whisper",
-    ),
-    // ... other existing events
-}
+RecruitableCharacter(
+    name: "Old Gareth",
+    description: "A grizzled dwarf warrior resting near the cave wall. He looks experienced but weary, his armor showing signs of many battles.",
+    character_id: "old_gareth",
+)
 ```
 
-**Placement Strategy**:
+**Map 3 (Ancient Ruins) - Position (7, 15)**:
 
-- Old Gareth: Early map (map_2) for easy access
-- Whisper: Mid-game map (map_3) to demonstrate inn placement when party is full
-- Apprentice Zara: Optional encounter on map_4
+```ron
+RecruitableCharacter(
+    name: "Whisper",
+    description: "An elven scout emerges from the shadows, watching you intently. Her nimble fingers toy with a lockpick as she sizes up your party.",
+    character_id: "whisper",
+)
+```
 
-#### 2.2 Verify Character Definitions
+**Map 4 (Dark Forest) - Position (8, 12)**:
 
-Ensure recruitable NPCs have `starts_in_party: false` (or no field, defaults to false):
+```ron
+RecruitableCharacter(
+    name: "Apprentice Zara",
+    description: "An enthusiastic gnome apprentice sitting on a fallen log, studying a spellbook. She looks up hopefully as you approach.",
+    character_id: "apprentice_zara",
+)
+```
 
-**Check** `campaigns/tutorial/data/characters.ron` lines 117-227:
+**Placement Strategy** (Implemented):
 
-- All non-starting characters should NOT have `starts_in_party: true`
+- ✅ Old Gareth: Early map (map_2) for easy access
+- ✅ Whisper: Mid-game map (map_3) to demonstrate inn placement when party is full
+- ✅ Apprentice Zara: Optional encounter on map_4 when party at capacity
+
+#### 2.2 Verify Character Definitions - ✅ COMPLETED
+
+Updated recruitable NPCs to have `starts_in_party: false`:
+
+**Modified** `campaigns/tutorial/data/characters.ron`:
+
+- ✅ Line 153: `old_gareth` - Changed `starts_in_party: true` → `starts_in_party: false`
+- ✅ Line 190: `whisper` - Changed `starts_in_party: true` → `starts_in_party: false`
+- ✅ Line 227: `apprentice_zara` - Changed `starts_in_party: true` → `starts_in_party: false`
+
+**Result**: Tutorial now starts with 3-member party (Kira, Sage, Mira) with room to recruit 3 additional NPCs
+
 - Verify `old_gareth`, `whisper`, `apprentice_zara` have complete stat blocks
 - Verify they have valid `race_id` and `class_id` references
 
@@ -326,8 +347,8 @@ Ensure recruitable NPCs have `starts_in_party: false` (or no field, defaults to 
 
 ### Phase 3: Manual Testing & Validation
 
-**Priority**: MEDIUM - Quality assurance  
-**Estimated Effort**: 1-2 hours  
+**Priority**: MEDIUM - Quality assurance
+**Estimated Effort**: 1-2 hours
 **Dependencies**: Phases 1 and 2 complete
 
 #### 3.1 Inn UI Manual Testing Checklist
@@ -717,7 +738,7 @@ Upon completion, all 39/39 deliverables from the original party management imple
 
 ---
 
-**Plan Version**: 1.0  
-**Created**: 2025-01-XX  
-**Target Completion**: Within 1-2 working days  
+**Plan Version**: 1.0
+**Created**: 2025-01-XX
+**Target Completion**: Within 1-2 working days
 **Next Review**: After Phase 1 completion

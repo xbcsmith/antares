@@ -74,6 +74,14 @@ pub struct CharactersEditorState {
     /// Last campaign directory (to detect changes)
     #[serde(skip)]
     pub last_campaign_dir: Option<PathBuf>,
+
+    /// Last characters filename (cached from show() call)
+    #[serde(skip)]
+    pub last_characters_file: Option<String>,
+
+    /// Whether the autocomplete buffers should be reset on next form render
+    #[serde(skip)]
+    pub reset_autocomplete_buffers: bool,
 }
 
 /// Editor mode
@@ -115,6 +123,9 @@ pub struct CharacterEditBuffer {
     pub starting_food: String,
     pub description: String,
     pub is_premade: bool,
+    /// Whether this character should start in the active party when a new game begins.
+    /// When false, the character is intended to be recruitable / managed via inns.
+    pub starts_in_party: bool,
     // Starting items as typed vector of IDs
     pub starting_items: Vec<ItemId>,
     // Starting equipment (using ItemId, 0 = empty slot)
@@ -151,6 +162,7 @@ impl Default for CharacterEditBuffer {
             starting_food: "10".to_string(),
             description: String::new(),
             is_premade: true,
+            starts_in_party: false,
             starting_items: Vec::new(),
             weapon_id: 0,
             armor_id: 0,
@@ -180,6 +192,8 @@ impl Default for CharactersEditorState {
             portrait_textures: HashMap::new(),
             available_portraits: Vec::new(),
             last_campaign_dir: None,
+            last_characters_file: None,
+            reset_autocomplete_buffers: false,
         }
     }
 }
@@ -195,6 +209,8 @@ impl CharactersEditorState {
         self.mode = CharactersEditorMode::Add;
         self.selected_character = None;
         self.buffer = CharacterEditBuffer::default();
+        // Reset persistent autocomplete buffers so the form reflects the fresh buffer
+        self.reset_autocomplete_buffers = true;
     }
 
     /// Starts editing an existing character
@@ -228,6 +244,7 @@ impl CharactersEditorState {
                 starting_food: character.starting_food.to_string(),
                 description: character.description.clone(),
                 is_premade: character.is_premade,
+                starts_in_party: character.starts_in_party,
                 starting_items: character.starting_items.clone(),
                 weapon_id: character.starting_equipment.weapon.unwrap_or(0),
                 armor_id: character.starting_equipment.armor.unwrap_or(0),
@@ -237,6 +254,8 @@ impl CharactersEditorState {
                 accessory1_id: character.starting_equipment.accessory1.unwrap_or(0),
                 accessory2_id: character.starting_equipment.accessory2.unwrap_or(0),
             };
+            // Ensure autocomplete widgets show values from the newly loaded buffer
+            self.reset_autocomplete_buffers = true;
         }
     }
 
@@ -425,6 +444,7 @@ impl CharactersEditorState {
             },
             description: self.buffer.description.clone(),
             is_premade: self.buffer.is_premade,
+            starts_in_party: self.buffer.starts_in_party,
         };
 
         if let Some(idx) = self.selected_character {
@@ -440,6 +460,21 @@ impl CharactersEditorState {
         self.has_unsaved_changes = true;
         self.mode = CharactersEditorMode::List;
         self.selected_character = None;
+
+        // Attempt to persist immediately if a campaign directory & filename are known
+        if let (Some(dir), Some(filename)) = (&self.last_campaign_dir, &self.last_characters_file) {
+            let path = dir.join(filename);
+            match self.save_to_file(&path) {
+                Ok(_) => {
+                    // Successfully persisted: clear unsaved flag
+                    self.has_unsaved_changes = false;
+                }
+                Err(e) => {
+                    eprintln!("Failed to persist characters to {}: {}", path.display(), e);
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -794,6 +829,19 @@ impl CharactersEditorState {
         Ok(())
     }
 
+    /// Apply a portrait selection (for example returned by the portrait grid picker).
+    ///
+    /// This method is small and testable on its own so unit tests can verify that a
+    /// portrait selection is applied to the editor buffer and that the picker state
+    /// and `has_unsaved_changes` are updated.
+    pub(crate) fn apply_selected_portrait(&mut self, selected: Option<String>) {
+        if let Some(id) = selected {
+            self.buffer.portrait_id = id;
+            self.portrait_picker_open = false;
+            self.has_unsaved_changes = true;
+        }
+    }
+
     /// Saves characters to a file path
     pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
@@ -844,6 +892,9 @@ impl CharactersEditorState {
             self.available_portraits = extract_portrait_candidates(campaign_dir);
             self.last_campaign_dir = campaign_dir.cloned();
         }
+
+        // Cache the characters file name so `save_character()` can persist immediately
+        self.last_characters_file = Some(characters_file.to_string());
 
         ui.heading("👤 Characters Editor");
         ui.add_space(5.0);
@@ -967,15 +1018,22 @@ impl CharactersEditorState {
                 self.show_list(ui, items, campaign_dir, unsaved_changes);
             }
             CharactersEditorMode::Add | CharactersEditorMode::Edit => {
-                self.show_character_form(ui, races, classes, items, campaign_dir);
+                self.show_character_form(ui, races, classes, items, campaign_dir, characters_file);
             }
         }
 
         // Show portrait grid picker popup if open
         if self.portrait_picker_open {
             if let Some(selected_id) = self.show_portrait_grid_picker(ui.ctx(), campaign_dir) {
-                self.buffer.portrait_id = selected_id;
-                *unsaved_changes = true;
+                // Use a small helper so tests can exercise selection logic directly
+                self.apply_selected_portrait(Some(selected_id));
+                // Persist the selected portrait into the autocomplete buffer so the input
+                // shows the new selection immediately (avoids stale typed text).
+                crate::ui_helpers::store_autocomplete_buffer(
+                    ui.ctx(),
+                    egui::Id::new("autocomplete:portrait:character_portrait".to_string()),
+                    &self.buffer.portrait_id,
+                );
             }
         }
     }
@@ -1431,12 +1489,32 @@ impl CharactersEditorState {
         classes: &[ClassDefinition],
         items: &[Item],
         campaign_dir: Option<&PathBuf>,
+        characters_file: &str,
     ) {
         let title = if self.mode == CharactersEditorMode::Add {
             "New Character"
         } else {
             "Edit Character"
         };
+
+        // If requested, reset persistent autocomplete buffers so the form displays
+        // values from the newly loaded buffer rather than stale typed text.
+        if self.reset_autocomplete_buffers {
+            let ctx = ui.ctx();
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:race:race_select".to_string()),
+            );
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:class:class_select".to_string()),
+            );
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:portrait:character_portrait".to_string()),
+            );
+            self.reset_autocomplete_buffers = false;
+        }
 
         ui.heading(title);
         ui.separator();
@@ -1676,7 +1754,33 @@ impl CharactersEditorState {
                     }
                     if ui.button("💾 Save").clicked() {
                         match self.save_character() {
-                            Ok(_) => {}
+                            Ok(_) => {
+                                if let Some(dir) = campaign_dir {
+                                    let path = dir.join(characters_file);
+                                    match self.save_to_file(&path) {
+                                        Ok(_) => {
+                                            // Persisted to disk; clear unsaved changes flag
+                                            self.has_unsaved_changes = false;
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "Saved {}",
+                                                    path.display()
+                                                ))
+                                                .color(egui::Color32::from_rgb(80, 200, 120)),
+                                            );
+                                        }
+                                        Err(e) => {
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "Failed to save characters: {}",
+                                                    e
+                                                ))
+                                                .color(egui::Color32::RED),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                             Err(e) => {
                                 // Show error - in real impl this would be a toast/status
                                 ui.label(egui::RichText::new(e).color(egui::Color32::RED));
@@ -2253,6 +2357,7 @@ mod tests {
             class_id: "knight".to_string(),
             sex: Sex::Male,
             alignment: Alignment::Good,
+            hp_base: None,
             hp_current: None,
             base_stats: BaseStats::new(10, 10, 10, 10, 10, 10, 10),
             portrait_id: "0".to_string(),
@@ -2271,6 +2376,7 @@ mod tests {
             },
             description: String::new(),
             is_premade: true,
+            starts_in_party: false,
         };
 
         state.characters.push(character);
@@ -2455,6 +2561,51 @@ mod tests {
 
         state.portrait_picker_open = false;
         assert!(!state.portrait_picker_open);
+    }
+
+    #[test]
+    fn test_load_characters_populates_buffer_portrait_id() {
+        let mut state = CharactersEditorState::new();
+
+        // Build a minimal characters RON containing a portrait_id to avoid relying on
+        // repository paths in unit tests.
+        let ron = r#"[
+            (
+                id: "temp_char",
+                name: "Temp",
+                race_id: "human",
+                class_id: "knight",
+                sex: Female,
+                alignment: Good,
+                base_stats: (might: 10, intellect: 10, personality: 10, endurance: 10, speed: 10, accuracy: 10, luck: 10),
+                portrait_id: "portrait_test",
+                is_premade: true,
+                starts_in_party: false,
+            ),
+        ]"#;
+
+        let tmp_path = std::env::temp_dir().join(format!("chars_test_{}.ron", std::process::id()));
+        std::fs::write(&tmp_path, ron).expect("Failed to write temp characters file");
+
+        state
+            .load_from_file(&tmp_path)
+            .expect("Failed to load characters from file");
+        state.start_edit_character(0);
+
+        assert_eq!(state.buffer.portrait_id, "portrait_test");
+    }
+
+    #[test]
+    fn test_apply_selected_portrait_sets_buffer() {
+        let mut state = CharactersEditorState::new();
+        state.buffer.portrait_id.clear();
+        state.portrait_picker_open = true;
+
+        state.apply_selected_portrait(Some("new_portrait".to_string()));
+
+        assert_eq!(state.buffer.portrait_id, "new_portrait");
+        assert!(!state.portrait_picker_open);
+        assert!(state.has_unsaved_changes);
     }
 
     #[test]
@@ -2757,6 +2908,121 @@ mod tests {
     }
 
     #[test]
+    fn test_start_edit_character_resets_autocomplete_buffers() {
+        // Ensure stored autocomplete buffers are cleared when starting an edit so the
+        // UI shows values from the loaded buffer rather than stale typed text.
+        let mut state = CharactersEditorState::new();
+        let ctx = egui::Context::default();
+
+        // Populate stale buffers
+        crate::ui_helpers::store_autocomplete_buffer(
+            &ctx,
+            egui::Id::new("autocomplete:race:race_select"),
+            "OLD_RACE",
+        );
+        crate::ui_helpers::store_autocomplete_buffer(
+            &ctx,
+            egui::Id::new("autocomplete:class:class_select"),
+            "OLD_CLASS",
+        );
+        crate::ui_helpers::store_autocomplete_buffer(
+            &ctx,
+            egui::Id::new("autocomplete:portrait:character_portrait"),
+            "character_040",
+        );
+
+        // Available races/classes for the form
+        let races = vec![antares::domain::races::RaceDefinition::new(
+            "elf".to_string(),
+            "Elf".to_string(),
+            "".to_string(),
+        )];
+        let classes = vec![antares::domain::classes::ClassDefinition::new(
+            "robber".to_string(),
+            "Robber".to_string(),
+        )];
+        let items: Vec<Item> = Vec::new();
+
+        // Create a character and start editing it
+        let mut character = CharacterDefinition::new(
+            "whisper".to_string(),
+            "Whisper".to_string(),
+            "elf".to_string(),
+            "robber".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        character.portrait_id = "character_055".to_string();
+        state.characters.push(character);
+
+        state.start_edit_character(0);
+        assert!(state.reset_autocomplete_buffers);
+
+        // Render the form (this will clear previous buffers and store current values)
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                state.show_character_form(
+                    ui,
+                    &races,
+                    &classes,
+                    &items,
+                    None,
+                    "data/characters.ron",
+                );
+            });
+        });
+
+        // Buffers should now match the character's values (not the stale ones)
+        let race_buf = crate::ui_helpers::load_autocomplete_buffer(
+            &ctx,
+            egui::Id::new("autocomplete:race:race_select"),
+            || String::new(),
+        );
+        assert_eq!(race_buf, "Elf");
+
+        let class_buf = crate::ui_helpers::load_autocomplete_buffer(
+            &ctx,
+            egui::Id::new("autocomplete:class:class_select"),
+            || String::new(),
+        );
+        assert_eq!(class_buf, "Robber");
+
+        let portrait_buf = crate::ui_helpers::load_autocomplete_buffer(
+            &ctx,
+            egui::Id::new("autocomplete:portrait:character_portrait"),
+            || String::new(),
+        );
+        assert_eq!(portrait_buf, "character_055");
+    }
+
+    #[test]
+    fn test_save_character_persists_when_campaign_dir_known() {
+        // Verify save_character() will persist to disk when a campaign dir & filename are known.
+        let tmp = tempfile::tempdir().expect("Failed to create tempdir");
+        let dir = tmp.path().to_path_buf();
+
+        let mut state = CharactersEditorState::new();
+
+        // Tell the editor where characters should be written
+        state.last_campaign_dir = Some(dir.clone());
+        state.last_characters_file = Some("data/characters.ron".to_string());
+
+        // Create and save a new character
+        state.start_new_character();
+        state.buffer.id = "test_char".to_string();
+        state.buffer.name = "Test Character".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+
+        state.save_character().unwrap();
+
+        let path = dir.join("data/characters.ron");
+        assert!(path.exists());
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("test_char"));
+    }
+
+    #[test]
     fn test_character_list_scrolling_preserves_portrait_state() {
         // Test that scrolling through character list doesn't lose portrait data
         let mut state = CharactersEditorState::new();
@@ -2828,8 +3094,8 @@ mod tests {
 
     #[test]
     fn test_character_hp_base_roundtrip() {
-        use crate::character::{Alignment, Sex};
-        use crate::domain::character_definition::CharacterDefinition;
+        use antares::domain::character::{Alignment, Sex};
+        use antares::domain::character_definition::CharacterDefinition;
 
         let mut def = CharacterDefinition::new(
             "test_char".to_string(),
@@ -2845,17 +3111,12 @@ mod tests {
         let parsed: CharacterDefinition =
             ron::from_str(&ron_str).expect("Failed to deserialize character from RON");
         assert_eq!(parsed.hp_base, Some(42u16));
-
-        let characters = loaded_characters.unwrap();
-        assert_eq!(characters.len(), 2);
-        assert_eq!(characters[0].portrait_id, "5");
-        assert_eq!(characters[1].portrait_id, "12");
     }
 
     #[test]
     fn test_character_hp_current_roundtrip() {
-        use crate::character::{Alignment, Sex};
-        use crate::domain::character_definition::CharacterDefinition;
+        use antares::domain::character::{Alignment, Sex};
+        use antares::domain::character_definition::CharacterDefinition;
 
         let mut def = CharacterDefinition::new(
             "test_char_cur".to_string(),

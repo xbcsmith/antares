@@ -379,7 +379,8 @@ impl<'a> Validator<'a> {
     /// let db = ContentDatabase::new();
     /// let validator = Validator::new(&db);
     ///
-    /// let errors = validator.validate_characters();
+    /// // Run the public validation entrypoint (includes character-related checks)
+    /// let errors = validator.validate();
     /// // Check for party size violations
     /// ```
     fn validate_characters(&self) -> Vec<ValidationError> {

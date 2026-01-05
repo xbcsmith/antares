@@ -23,7 +23,7 @@
 //! let mut roster = Roster::new();
 //!
 //! // Add a character to the roster at an inn
-//! let char1 = Character::new("Hero", 1, 1, Sex::Male, Alignment::Good, Stats::new(10, 10, 10, 10, 10, 10, 10));
+//! let char1 = Character::new("Hero".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
 //! roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
 //!
 //! // Recruit to party
@@ -105,7 +105,7 @@ impl PartyManager {
     /// let mut party = Party::new();
     /// let mut roster = Roster::new();
     ///
-    /// let char1 = Character::new("Warrior", 1, 1, Sex::Male, Alignment::Good, Stats::new(15, 10, 10, 10, 10, 10, 10));
+    /// let char1 = Character::new("Warrior".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
     /// roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
     ///
     /// // Recruit the warrior
@@ -178,8 +178,8 @@ impl PartyManager {
     /// let mut roster = Roster::new();
     ///
     /// // Add two characters to roster and recruit both
-    /// let char1 = Character::new("Warrior", 1, 1, Sex::Male, Alignment::Good, Stats::new(15, 10, 10, 10, 10, 10, 10));
-    /// let char2 = Character::new("Mage", 2, 2, Sex::Female, Alignment::Good, Stats::new(8, 16, 10, 10, 10, 10, 10));
+    /// let char1 = Character::new("Warrior".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
+    /// let char2 = Character::new("Mage".to_string(), "gnome".to_string(), "sorcerer".to_string(), Sex::Female, Alignment::Good);
     /// roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
     /// roster.add_character(char2, CharacterLocation::AtInn(1)).unwrap();
     ///
@@ -283,8 +283,8 @@ impl PartyManager {
     /// let mut roster = Roster::new();
     ///
     /// // Add characters to roster
-    /// let char1 = Character::new("Warrior", 1, 1, Sex::Male, Alignment::Good, Stats::new(15, 10, 10, 10, 10, 10, 10));
-    /// let char2 = Character::new("Mage", 2, 2, Sex::Female, Alignment::Good, Stats::new(8, 16, 10, 10, 10, 10, 10));
+    /// let char1 = Character::new("Warrior".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
+    /// let char2 = Character::new("Mage".to_string(), "gnome".to_string(), "sorcerer".to_string(), Sex::Female, Alignment::Good);
     /// roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
     /// roster.add_character(char2, CharacterLocation::AtInn(1)).unwrap();
     ///
@@ -390,7 +390,7 @@ impl PartyManager {
     /// let party = Party::new();
     /// let mut roster = Roster::new();
     ///
-    /// let char1 = Character::new("Hero", 1, 1, Sex::Male, Alignment::Good, Stats::new(10, 10, 10, 10, 10, 10, 10));
+    /// let char1 = Character::new("Hero".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
     /// roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
     ///
     /// let result = PartyManager::can_recruit(&party, &roster, 0);

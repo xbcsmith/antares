@@ -1328,7 +1328,7 @@ impl Roster {
     /// use antares::domain::character::Stats;
     ///
     /// let mut roster = Roster::new();
-    /// let char1 = Character::new("Hero", 1, 1, Sex::Male, Alignment::Good, Stats::new(10, 10, 10, 10, 10, 10, 10));
+    /// let char1 = Character::new("Hero".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
     /// roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
     ///
     /// let at_inn_1 = roster.characters_at_inn(1);
@@ -1360,7 +1360,7 @@ impl Roster {
     /// use antares::domain::character::Stats;
     ///
     /// let mut roster = Roster::new();
-    /// let char1 = Character::new("Hero", 1, 1, Sex::Male, Alignment::Good, Stats::new(10, 10, 10, 10, 10, 10, 10));
+    /// let char1 = Character::new("Hero".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
     /// roster.add_character(char1, CharacterLocation::InParty).unwrap();
     ///
     /// let in_party = roster.characters_in_party();

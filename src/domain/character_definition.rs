@@ -2406,19 +2406,19 @@ mod tests {
             );
         }
 
-        // Verify NPC characters exist and are not pre-made
-        let npc_ids = ["npc_old_gareth", "npc_whisper", "npc_apprentice_zara"];
+        // Verify recruitable NPC characters exist and are pre-made
+        let npc_ids = ["old_gareth", "whisper", "apprentice_zara"];
 
         for id in &npc_ids {
             let char_def = db.get_character(id);
             assert!(
                 char_def.is_some(),
-                "Expected NPC character '{}' not found",
+                "Expected recruitable NPC character '{}' not found",
                 id
             );
             assert!(
-                !char_def.unwrap().is_premade,
-                "NPC '{}' should not be pre-made",
+                char_def.unwrap().is_premade,
+                "Recruitable NPC '{}' should be pre-made",
                 id
             );
         }

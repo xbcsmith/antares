@@ -7608,12 +7608,29 @@
     ],
     events: {
         (
+            x: 9,
+            y: 9,
+        ): Trap(
+            name: "Water Trap",
+            description: "A trap in the town square fountain",
+            damage: 10,
+            effect: Some("Poison"),
+        ),
+        (
             x: 5,
             y: 4,
         ): EnterInn(
             name: "Cozy Inn Entrance",
             description: "A welcoming inn where you can rest and manage your party.",
             inn_id: 1,
+        ),
+        (
+            x: 11,
+            y: 6,
+        ): RecruitableCharacter(
+            name: "Apprentice Zara",
+            description: "A young gnome apprentice studies a spellbook intently.",
+            character_id: "npc_apprentice_zara",
         ),
         (
             x: 13,
@@ -7624,29 +7641,20 @@
             text: "Temple of Healing - The priests can restore your health.",
         ),
         (
-            x: 5,
-            y: 10,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store\'s wares and services.",
-            text: "General Store - Buy and Sell items for your party!",
-        ),
-        (
-            x: 9,
-            y: 9,
-        ): Trap(
-            name: "Water Trap",
-            description: "A trap in the town square fountain",
-            damage: 10,
-            effect: Some("Poison"),
-        ),
-        (
             x: 13,
             y: 18,
         ): Sign(
             name: "Directional Sign",
             description: "A wooden sign pointing toward the Dark Forrest.",
             text: "To the Dark Forrest",
+        ),
+        (
+            x: 5,
+            y: 10,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store\'s wares and services.",
+            text: "General Store - Buy and Sell items for your party!",
         ),
         (
             x: 18,
@@ -7675,14 +7683,6 @@
             name: "Whisper",
             description: "A nimble elf watches from the shadows near the alley.",
             character_id: "npc_whisper",
-        ),
-        (
-            x: 11,
-            y: 6,
-        ): RecruitableCharacter(
-            name: "Apprentice Zara",
-            description: "A young gnome apprentice studies a spellbook intently.",
-            character_id: "npc_apprentice_zara",
         ),
     },
     npc_placements: [
