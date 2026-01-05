@@ -192,8 +192,10 @@ impl Default for CampaignMetadataEditBuffer {
 /// # Examples
 ///
 /// ```
-/// let mut state = campaign_editor::CampaignMetadataEditorState::new();
-/// assert_eq!(state.mode, campaign_editor::CampaignEditorMode::List);
+/// use campaign_builder::campaign_editor::{CampaignMetadataEditorState, CampaignEditorMode};
+///
+/// let mut state = CampaignMetadataEditorState::new();
+/// assert_eq!(state.mode, CampaignEditorMode::List);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CampaignMetadataEditorState {
@@ -289,7 +291,9 @@ impl CampaignMetadataEditorState {
     /// # Examples
     ///
     /// ```
-    /// let mut state = campaign_editor::CampaignMetadataEditorState::new();
+    /// use campaign_builder::campaign_editor::CampaignMetadataEditorState;
+    ///
+    /// let mut state = CampaignMetadataEditorState::new();
     /// state.start_edit();
     /// state.buffer.id = "my_campaign".to_string();
     /// state.apply_buffer_to_metadata();
@@ -309,7 +313,9 @@ impl CampaignMetadataEditorState {
     /// # Examples
     ///
     /// ```
-    /// let mut state = campaign_editor::CampaignMetadataEditorState::new();
+    /// use campaign_builder::campaign_editor::CampaignMetadataEditorState;
+    ///
+    /// let mut state = CampaignMetadataEditorState::new();
     /// state.validate_requested = true;
     /// assert!(state.consume_validate_request());
     /// assert!(!state.validate_requested);
@@ -327,7 +333,9 @@ impl CampaignMetadataEditorState {
     /// # Examples
     ///
     /// ```
-    /// let state = campaign_editor::CampaignMetadataEditorState::new();
+    /// use campaign_builder::campaign_editor::CampaignMetadataEditorState;
+    ///
+    /// let state = CampaignMetadataEditorState::new();
     /// let tmpdir = tempfile::tempdir().unwrap();
     /// let path = tmpdir.path().join("campaign_save.ron");
     /// let _ = state.save_to_file(path.as_path());
@@ -343,7 +351,9 @@ impl CampaignMetadataEditorState {
     /// # Examples
     ///
     /// ```
-    /// let mut state = campaign_editor::CampaignMetadataEditorState::new();
+    /// use campaign_builder::campaign_editor::CampaignMetadataEditorState;
+    ///
+    /// let mut state = CampaignMetadataEditorState::new();
     /// let tmpdir = tempfile::tempdir().unwrap();
     /// let path = tmpdir.path().join("campaign_load.ron");
     /// // If a valid RON file exists at `path`, the following loads the metadata.

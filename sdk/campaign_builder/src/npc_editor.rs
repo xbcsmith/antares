@@ -327,54 +327,17 @@ impl NpcEditorState {
         let search_lower = self.search_filter.to_lowercase();
 
         // Build filtered list snapshot to avoid borrow conflicts in closures
-        let filtered_npcs: Vec<(usize, String, NpcDefinition)> = self
+        let filtered_npcs: Vec<(usize, NpcDefinition)> = self
             .npcs
             .iter()
             .enumerate()
-            .filter(|(_, npc)| {
-                // Search filter
-                if !search_lower.is_empty()
-                    && !npc.name.to_lowercase().contains(&search_lower)
-                    && !npc.id.to_lowercase().contains(&search_lower)
-                {
-                    return false;
-                }
-
-                // Merchant filter
-                if self.filter_merchants && !npc.is_merchant {
-                    return false;
-                }
-
-                // Innkeeper filter
-                if self.filter_innkeepers && !npc.is_innkeeper {
-                    return false;
-                }
-
-                // Quest giver filter
-                if self.filter_quest_givers && npc.quest_ids.is_empty() {
-                    return false;
-                }
-
-                true
-            })
-            .map(|(idx, npc)| {
-                let mut label = format!("{}: {}", npc.id, npc.name);
-                if npc.is_merchant {
-                    label.push_str(" 🏪");
-                }
-                if npc.is_innkeeper {
-                    label.push_str(" 🛏️");
-                }
-                if !npc.quest_ids.is_empty() {
-                    label.push_str(" 📜");
-                }
-                (idx, label, npc.clone())
-            })
+            .filter(|(_, npc)| self.matches_filters(npc))
+            .map(|(idx, npc)| (idx, npc.clone()))
             .collect();
 
         // Sort by ID
         let mut sorted_npcs = filtered_npcs;
-        sorted_npcs.sort_by(|(_, _, a), (_, _, b)| a.id.cmp(&b.id));
+        sorted_npcs.sort_by(|(_, a), (_, b)| a.id.cmp(&b.id));
 
         let selected = self.selected_npc;
         let mut new_selection = selected;
@@ -390,25 +353,72 @@ impl NpcEditorState {
         TwoColumnLayout::new("npcs").show_split(
             ui,
             |left_ui| {
-                // Left panel: NPC list
+                // Left panel: NPC list (styled to match Characters editor)
                 left_ui.heading("NPCs");
                 left_ui.separator();
 
-                for (idx, label, _) in &sorted_npcs {
-                    let is_selected = selected == Some(*idx);
-                    if left_ui.selectable_label(is_selected, label).clicked() {
-                        new_selection = Some(*idx);
-                    }
-                }
-
                 if sorted_npcs.is_empty() {
                     left_ui.label("No NPCs found");
+                } else {
+                    for (idx, npc) in &sorted_npcs {
+                        let is_selected = selected == Some(*idx);
+
+                        // Primary selectable label (name)
+                        let response = left_ui.selectable_label(is_selected, &npc.name);
+                        if response.clicked() {
+                            new_selection = Some(*idx);
+                        }
+
+                        // Badges and metadata (indented like Characters list)
+                        left_ui.horizontal(|ui| {
+                            ui.add_space(20.0);
+
+                            if npc.is_merchant {
+                                ui.label(
+                                    egui::RichText::new("🏪 Merchant")
+                                        .small()
+                                        .color(egui::Color32::GOLD),
+                                );
+                            }
+
+                            if npc.is_innkeeper {
+                                ui.label(
+                                    egui::RichText::new("🛏️ Innkeeper")
+                                        .small()
+                                        .color(egui::Color32::LIGHT_BLUE),
+                                );
+                            }
+
+                            if !npc.quest_ids.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "📜 Quests: {}",
+                                        npc.quest_ids.len()
+                                    ))
+                                    .small()
+                                    .color(egui::Color32::from_rgb(150, 200, 120)),
+                                );
+                            }
+
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "| Faction: {} | ID: {}",
+                                    npc.faction.as_deref().unwrap_or("None"),
+                                    npc.id
+                                ))
+                                .small()
+                                .weak(),
+                            );
+                        });
+
+                        left_ui.add_space(4.0);
+                    }
                 }
             },
             |right_ui| {
                 // Right panel: Detail view
                 if let Some(idx) = selected {
-                    if let Some((_, _, npc)) = sorted_npcs.iter().find(|(i, _, _)| *i == idx) {
+                    if let Some((_, npc)) = sorted_npcs.iter().find(|(i, _)| *i == idx) {
                         right_ui.heading(&npc.name);
                         right_ui.separator();
 

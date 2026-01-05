@@ -137,6 +137,10 @@ pub enum AssetReference {
         id: antares::domain::dialogue::DialogueId,
         name: String,
     },
+    /// Referenced by a character
+    Character { id: String, name: String },
+    /// Referenced by an NPC
+    Npc { id: String, name: String },
 }
 
 impl AssetReference {
@@ -149,6 +153,8 @@ impl AssetReference {
             AssetReference::Map { id, name } => format!("Map #{}: {}", id, name),
             AssetReference::Quest { id, name } => format!("Quest #{}: {}", id, name),
             AssetReference::Dialogue { id, name } => format!("Dialogue #{}: {}", id, name),
+            AssetReference::Character { id, name } => format!("Character {}: {}", id, name),
+            AssetReference::Npc { id, name } => format!("NPC {}: {}", id, name),
         }
     }
 
@@ -161,6 +167,8 @@ impl AssetReference {
             AssetReference::Map { .. } => "Map",
             AssetReference::Quest { .. } => "Quest",
             AssetReference::Dialogue { .. } => "Dialogue",
+            AssetReference::Character { .. } => "Character",
+            AssetReference::Npc { .. } => "NPC",
         }
     }
 }
@@ -788,8 +796,8 @@ impl AssetManager {
 
     /// Scans campaign data to identify which assets are referenced
     ///
-    /// This method examines items, spells, monsters, maps, quests, dialogues, and classes
-    /// to determine which assets are actively used in the campaign.
+    /// This method examines items, spells, monsters, maps, quests, dialogues, classes,
+    /// characters, and NPCs to determine which assets are actively used in the campaign.
     ///
     /// # Arguments
     ///
@@ -798,6 +806,8 @@ impl AssetManager {
     /// * `dialogues` - List of campaign dialogues
     /// * `maps` - List of campaign maps
     /// * `classes` - List of campaign classes
+    /// * `characters` - List of campaign characters
+    /// * `npcs` - List of campaign NPCs
     ///
     /// # Examples
     ///
@@ -807,6 +817,8 @@ impl AssetManager {
     /// use antares::domain::dialogue::DialogueTree;
     /// use antares::domain::world::Map;
     /// use antares::domain::classes::ClassDefinition;
+    /// use antares::domain::character_definition::CharacterDefinition;
+    /// use antares::domain::world::npc::NpcDefinition;
     /// use std::path::PathBuf;
     ///
     /// let mut manager = campaign_builder::asset_manager::AssetManager::new(PathBuf::from("/tmp/campaign"));
@@ -815,7 +827,9 @@ impl AssetManager {
     /// let dialogues = vec![];
     /// let maps = vec![];
     /// let classes = vec![];
-    /// manager.scan_references(&items, &quests, &dialogues, &maps, &classes);
+    /// let characters = vec![];
+    /// let npcs = vec![];
+    /// manager.scan_references(&items, &quests, &dialogues, &maps, &classes, &characters, &npcs);
     /// ```
     pub fn scan_references(
         &mut self,
@@ -824,6 +838,8 @@ impl AssetManager {
         dialogues: &[antares::domain::dialogue::DialogueTree],
         maps: &[antares::domain::world::Map],
         classes: &[antares::domain::classes::ClassDefinition],
+        characters: &[antares::domain::character_definition::CharacterDefinition],
+        npcs: &[antares::domain::world::npc::NpcDefinition],
     ) {
         // Reset all reference tracking
         for asset in self.assets.values_mut() {
@@ -845,6 +861,12 @@ impl AssetManager {
 
         // Scan classes for asset references (e.g., class icons)
         self.scan_classes_references(classes);
+
+        // Scan characters for asset references (e.g., portrait images)
+        self.scan_characters_references(characters);
+
+        // Scan NPCs for asset references (e.g., portrait images)
+        self.scan_npcs_references(npcs);
     }
 
     /// Scans items for asset references
@@ -1024,6 +1046,91 @@ impl AssetManager {
                         asset.references.push(AssetReference::Item {
                             id: 0, // Classes don't have numeric IDs
                             name: format!("Class: {}", class.name),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Scans characters for asset references (portrait images)
+    fn scan_characters_references(
+        &mut self,
+        characters: &[antares::domain::character_definition::CharacterDefinition],
+    ) {
+        for character in characters {
+            // Characters reference portrait images via portrait_id field
+            let portrait_id = &character.portrait_id;
+
+            // Skip empty portrait IDs
+            if portrait_id.is_empty() {
+                continue;
+            }
+
+            // Try common portrait path patterns
+            let potential_paths = vec![
+                format!("assets/portraits/{}.png", portrait_id),
+                format!("portraits/{}.png", portrait_id),
+                format!("assets/portraits/{}.jpg", portrait_id),
+                format!("portraits/{}.jpg", portrait_id),
+            ];
+
+            for path_str in potential_paths {
+                let path = PathBuf::from(&path_str);
+                if let Some(asset) = self.assets.get_mut(&path) {
+                    asset.is_referenced = true;
+                    // Only add reference if not already added for this character
+                    if !asset.references.iter().any(|r| {
+                        if let AssetReference::Character { id, .. } = r {
+                            id == &character.id
+                        } else {
+                            false
+                        }
+                    }) {
+                        asset.references.push(AssetReference::Character {
+                            id: character.id.clone(),
+                            name: character.name.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Scans NPCs for asset references (portrait images)
+    fn scan_npcs_references(&mut self, npcs: &[antares::domain::world::npc::NpcDefinition]) {
+        for npc in npcs {
+            // NPCs reference portrait images via portrait_id field
+            let portrait_id = &npc.portrait_id;
+
+            // Skip empty portrait IDs
+            if portrait_id.is_empty() {
+                continue;
+            }
+
+            // Try common portrait path patterns
+            let potential_paths = vec![
+                format!("assets/portraits/{}.png", portrait_id),
+                format!("portraits/{}.png", portrait_id),
+                format!("assets/portraits/{}.jpg", portrait_id),
+                format!("portraits/{}.jpg", portrait_id),
+            ];
+
+            for path_str in potential_paths {
+                let path = PathBuf::from(&path_str);
+                if let Some(asset) = self.assets.get_mut(&path) {
+                    asset.is_referenced = true;
+                    // Only add reference if not already added for this NPC
+                    if !asset.references.iter().any(|r| {
+                        if let AssetReference::Npc { id, .. } = r {
+                            id == &npc.id
+                        } else {
+                            false
+                        }
+                    }) {
+                        asset.references.push(AssetReference::Npc {
+                            id: npc.id.clone(),
+                            name: npc.name.clone(),
                         });
                     }
                 }
@@ -1588,7 +1695,7 @@ mod tests {
         };
 
         // Scan references
-        manager.scan_references(&[item], &[], &[], &[], &[]);
+        manager.scan_references(&[item], &[], &[], &[], &[], &[], &[]);
 
         // Check that the asset was marked as referenced
         let asset = manager.assets.get(&asset_path).unwrap();
@@ -1747,7 +1854,7 @@ mod tests {
             quest_giver_position: None,
         };
 
-        manager.scan_references(&[], &[quest], &[], &[], &[]);
+        manager.scan_references(&[], &[quest], &[], &[], &[], &[], &[]);
 
         let asset = manager.assets.get(&quest_icon_path).unwrap();
         assert!(asset.is_referenced);
@@ -1800,11 +1907,199 @@ mod tests {
             associated_quest: None,
         };
 
-        manager.scan_references(&[], &[], &[dialogue], &[], &[]);
+        manager.scan_references(&[], &[], &[dialogue], &[], &[], &[], &[]);
 
         let asset = manager.assets.get(&portrait_path).unwrap();
         assert!(asset.is_referenced);
         assert_eq!(asset.references.len(), 1);
         assert_eq!(asset.references[0].category(), "Dialogue");
+    }
+
+    #[test]
+    fn test_scan_characters_references() {
+        use antares::domain::character::Alignment;
+        use antares::domain::character::Sex;
+        use antares::domain::character_definition::{
+            BaseStats, CharacterDefinition, StartingEquipment,
+        };
+        use std::path::PathBuf;
+
+        let mut manager = AssetManager::new(PathBuf::from("/tmp/test_campaign"));
+
+        let portrait_path = PathBuf::from("assets/portraits/character_040.png");
+        manager.assets.insert(
+            portrait_path.clone(),
+            Asset {
+                path: portrait_path.clone(),
+                asset_type: AssetType::Portrait,
+                size: 4096,
+                modified: SystemTime::now(),
+                is_referenced: false,
+                references: Vec::new(),
+            },
+        );
+
+        let character = CharacterDefinition {
+            id: "test_knight".to_string(),
+            name: "Sir Lancelot".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Good,
+            base_stats: BaseStats::default(),
+            hp_base: Some(10),
+            hp_current: None,
+            portrait_id: "character_040".to_string(),
+            starting_gold: 100,
+            starting_gems: 0,
+            starting_food: 15,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment::default(),
+            description: "A brave knight".to_string(),
+            is_premade: true,
+            starts_in_party: true,
+        };
+
+        manager.scan_references(&[], &[], &[], &[], &[], &[character], &[]);
+
+        let asset = manager.assets.get(&portrait_path).unwrap();
+        assert!(asset.is_referenced);
+        assert_eq!(asset.references.len(), 1);
+        assert_eq!(asset.references[0].category(), "Character");
+        match &asset.references[0] {
+            AssetReference::Character { id, name } => {
+                assert_eq!(id, "test_knight");
+                assert_eq!(name, "Sir Lancelot");
+            }
+            _ => panic!("Expected Character reference"),
+        }
+    }
+
+    #[test]
+    fn test_scan_npcs_references() {
+        use antares::domain::world::npc::NpcDefinition;
+        use std::path::PathBuf;
+
+        let mut manager = AssetManager::new(PathBuf::from("/tmp/test_campaign"));
+
+        let portrait_path = PathBuf::from("assets/portraits/elder_1.png");
+        manager.assets.insert(
+            portrait_path.clone(),
+            Asset {
+                path: portrait_path.clone(),
+                asset_type: AssetType::Portrait,
+                size: 3072,
+                modified: SystemTime::now(),
+                is_referenced: false,
+                references: Vec::new(),
+            },
+        );
+
+        let npc = NpcDefinition {
+            id: "village_elder".to_string(),
+            name: "Village Elder".to_string(),
+            description: "The wise elder of the village".to_string(),
+            portrait_id: "elder_1".to_string(),
+            dialogue_id: None,
+            quest_ids: vec![],
+            faction: Some("Village".to_string()),
+            is_merchant: false,
+            is_innkeeper: false,
+        };
+
+        manager.scan_references(&[], &[], &[], &[], &[], &[], &[npc]);
+
+        let asset = manager.assets.get(&portrait_path).unwrap();
+        assert!(asset.is_referenced);
+        assert_eq!(asset.references.len(), 1);
+        assert_eq!(asset.references[0].category(), "NPC");
+        match &asset.references[0] {
+            AssetReference::Npc { id, name } => {
+                assert_eq!(id, "village_elder");
+                assert_eq!(name, "Village Elder");
+            }
+            _ => panic!("Expected NPC reference"),
+        }
+    }
+
+    #[test]
+    fn test_scan_multiple_characters_same_portrait() {
+        use antares::domain::character::Alignment;
+        use antares::domain::character::Sex;
+        use antares::domain::character_definition::{
+            BaseStats, CharacterDefinition, StartingEquipment,
+        };
+        use std::path::PathBuf;
+
+        let mut manager = AssetManager::new(PathBuf::from("/tmp/test_campaign"));
+
+        let portrait_path = PathBuf::from("portraits/character_046.png");
+        manager.assets.insert(
+            portrait_path.clone(),
+            Asset {
+                path: portrait_path.clone(),
+                asset_type: AssetType::Portrait,
+                size: 4096,
+                modified: SystemTime::now(),
+                is_referenced: false,
+                references: Vec::new(),
+            },
+        );
+
+        let character1 = CharacterDefinition {
+            id: "fighter1".to_string(),
+            name: "Fighter One".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Neutral,
+            base_stats: BaseStats::default(),
+            hp_base: Some(12),
+            hp_current: None,
+            portrait_id: "character_046".to_string(),
+            starting_gold: 50,
+            starting_gems: 0,
+            starting_food: 10,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment::default(),
+            description: "First fighter".to_string(),
+            is_premade: false,
+            starts_in_party: false,
+        };
+
+        let character2 = CharacterDefinition {
+            id: "fighter2".to_string(),
+            name: "Fighter Two".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Male,
+            alignment: Alignment::Neutral,
+            base_stats: BaseStats::default(),
+            hp_base: Some(12),
+            hp_current: None,
+            portrait_id: "character_046".to_string(),
+            starting_gold: 50,
+            starting_gems: 0,
+            starting_food: 10,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment::default(),
+            description: "Second fighter".to_string(),
+            is_premade: false,
+            starts_in_party: false,
+        };
+
+        manager.scan_references(&[], &[], &[], &[], &[], &[character1, character2], &[]);
+
+        let asset = manager.assets.get(&portrait_path).unwrap();
+        assert!(asset.is_referenced);
+        assert_eq!(asset.references.len(), 2);
+        assert!(asset
+            .references
+            .iter()
+            .any(|r| matches!(r, AssetReference::Character { id, .. } if id == "fighter1")));
+        assert!(asset
+            .references
+            .iter()
+            .any(|r| matches!(r, AssetReference::Character { id, .. } if id == "fighter2")));
     }
 }

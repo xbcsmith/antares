@@ -169,7 +169,7 @@
             luck: 15,
         ),
         hp_base: Some(8),
-        portrait_id: "character_055",
+        portrait_id: "character_061",
         starting_gold: 150,
         starting_gems: 1,
         starting_food: 5,

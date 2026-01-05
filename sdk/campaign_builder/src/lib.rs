@@ -447,6 +447,8 @@ struct CampaignBuilderApp {
     show_validation_report: bool,
     validation_report: String,
     show_balance_stats: bool,
+    show_cleanup_candidates: bool,
+    cleanup_candidates_selected: std::collections::HashSet<PathBuf>,
 
     // File I/O pattern state
     file_load_merge_mode: bool,
@@ -547,6 +549,8 @@ impl Default for CampaignBuilderApp {
             show_validation_report: false,
             validation_report: String::new(),
             show_balance_stats: false,
+            show_cleanup_candidates: false,
+            cleanup_candidates_selected: std::collections::HashSet::new(),
 
             file_load_merge_mode: true, // Default to merge mode
 
@@ -2092,6 +2096,8 @@ impl CampaignBuilderApp {
                             &self.dialogues,
                             &self.maps,
                             &self.classes_editor_state.classes,
+                            &self.characters_editor_state.characters,
+                            &self.npc_editor_state.npcs,
                         );
                         manager.mark_data_files_as_referenced();
                     }
@@ -3792,6 +3798,8 @@ impl CampaignBuilderApp {
                         &self.dialogues,
                         &self.maps,
                         &self.classes_editor_state.classes,
+                        &self.characters_editor_state.characters,
+                        &self.npc_editor_state.npcs,
                     );
                     // Mark successfully loaded data files as referenced
                     manager.mark_data_files_as_referenced();
@@ -3942,29 +3950,157 @@ impl CampaignBuilderApp {
                                 ))
                                 .clicked()
                             {
-                                // Show confirmation or perform cleanup
-                                match manager.cleanup_unused(true) {
-                                    Ok(would_delete) => {
-                                        self.status_message = format!(
-                                            "Would delete {} assets (dry run)",
-                                            would_delete.len()
-                                        );
-                                    }
-                                    Err(e) => {
-                                        self.status_message = format!("Cleanup error: {}", e);
-                                    }
-                                }
+                                // Toggle the cleanup candidates display
+                                self.show_cleanup_candidates = !self.show_cleanup_candidates;
                             }
                             ui.label(egui::RichText::new("(Safe cleanup preview)").small().weak());
                         });
+
+                        // Show the cleanup candidates list if toggled
+                        if self.show_cleanup_candidates {
+                            ui.add_space(5.0);
+                            ui.separator();
+                            ui.label(egui::RichText::new("Cleanup Candidates:").strong());
+
+                            // Clone candidates to avoid borrow issues when deleting
+                            let candidates: Vec<PathBuf> = manager.get_cleanup_candidates()
+                                .iter()
+                                .map(|p| (*p).clone())
+                                .collect();
+
+                            // Action buttons
+                            ui.horizontal(|ui| {
+                                if ui.button("Select All").clicked() {
+                                    self.cleanup_candidates_selected.clear();
+                                    for path in &candidates {
+                                        self.cleanup_candidates_selected.insert(path.clone());
+                                    }
+                                }
+
+                                if ui.button("Deselect All").clicked() {
+                                    self.cleanup_candidates_selected.clear();
+                                }
+
+                                ui.separator();
+
+                                let selected_count = self.cleanup_candidates_selected.len();
+                                if selected_count > 0 {
+                                    if ui.button(format!("🗑️ Delete {} Selected", selected_count))
+                                        .clicked()
+                                    {
+                                        // Calculate total size of selected files
+                                        let mut total_size = 0u64;
+                                        for path in &self.cleanup_candidates_selected {
+                                            if let Some(asset) = manager.assets().get(path) {
+                                                total_size += asset.size;
+                                            }
+                                        }
+
+                                        // Format size
+                                        let size_str = if total_size < 1024 {
+                                            format!("{} B", total_size)
+                                        } else if total_size < 1024 * 1024 {
+                                            format!("{:.1} KB", total_size as f64 / 1024.0)
+                                        } else {
+                                            format!("{:.1} MB", total_size as f64 / (1024.0 * 1024.0))
+                                        };
+
+                                        self.status_message = format!(
+                                            "⚠️ About to delete {} files ({}) - Click again to confirm",
+                                            selected_count,
+                                            size_str
+                                        );
+
+                                        // Perform deletion
+                                        let mut deleted_count = 0;
+                                        let mut failed_deletions = Vec::new();
+
+                                        for path in self.cleanup_candidates_selected.iter() {
+                                            match manager.remove_asset(path) {
+                                                Ok(_) => deleted_count += 1,
+                                                Err(e) => failed_deletions.push(format!("{}: {}", path.display(), e)),
+                                            }
+                                        }
+
+                                        // Update status message
+                                        if failed_deletions.is_empty() {
+                                            self.status_message = format!(
+                                                "✅ Successfully deleted {} files ({})",
+                                                deleted_count,
+                                                size_str
+                                            );
+                                        } else {
+                                            self.status_message = format!(
+                                                "⚠️ Deleted {} files, {} failed: {}",
+                                                deleted_count,
+                                                failed_deletions.len(),
+                                                failed_deletions.join(", ")
+                                            );
+                                        }
+
+                                        // Clear selection after deletion
+                                        self.cleanup_candidates_selected.clear();
+                                    }
+                                } else {
+                                    ui.label(egui::RichText::new("Select files to delete").weak());
+                                }
+                            });
+
+                            ui.add_space(5.0);
+
+                            egui::ScrollArea::vertical()
+                                .max_height(200.0)
+                                .show(ui, |ui| {
+                                    for candidate_path in &candidates {
+                                        let is_selected = self.cleanup_candidates_selected.contains(candidate_path);
+
+                                        ui.horizontal(|ui| {
+                                            let mut selected = is_selected;
+                                            if ui.checkbox(&mut selected, "").changed() {
+                                                if selected {
+                                                    self.cleanup_candidates_selected.insert(candidate_path.clone());
+                                                } else {
+                                                    self.cleanup_candidates_selected.remove(candidate_path);
+                                                }
+                                            }
+
+                                            ui.label("🗑️");
+                                            ui.label(candidate_path.display().to_string());
+
+                                            // Show file size
+                                            if let Some(asset) = manager.assets().get(candidate_path) {
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(egui::Align::Center),
+                                                    |ui| {
+                                                        ui.label(
+                                                            egui::RichText::new(asset.size_string())
+                                                                .small()
+                                                                .weak()
+                                                        );
+                                                    }
+                                                );
+                                            }
+                                        });
+                                    }
+                                });
+
+                            ui.add_space(5.0);
+                            ui.label(egui::RichText::new(
+                                "These files are not referenced by any campaign data and could be safely removed."
+                            ).small().weak());
+                        }
                     }
                 });
                 ui.separator();
             }
 
-            // Asset list with usage context
+            // Asset list with usage context (sorted by path)
             egui::ScrollArea::vertical().show(ui, |ui| {
-                for (path, asset) in manager.assets() {
+                // Convert HashMap to sorted Vec for consistent display
+                let mut sorted_assets: Vec<_> = manager.assets().iter().collect();
+                sorted_assets.sort_by(|a, b| a.0.cmp(b.0));
+
+                for (path, asset) in sorted_assets {
                     ui.group(|ui| {
                         ui.vertical(|ui| {
                             // Asset header
