@@ -3753,7 +3753,18 @@ impl CampaignBuilderApp {
                         &self.campaign.dialogue_file,
                         Some("data/conditions.ron"),
                     );
-                    // DEBUG: Show the number of scanned assets to aid troubleshooting (temporary)
+                    // Scan references on initial load so portraits are properly marked as referenced
+                    manager.scan_references(
+                        &self.items,
+                        &self.quests,
+                        &self.dialogues,
+                        &self.maps,
+                        &self.classes_editor_state.classes,
+                        &self.characters_editor_state.characters,
+                        &self.npc_editor_state.npcs,
+                    );
+                    manager.mark_data_files_as_referenced();
+
                     self.status_message = format!("Scanned {} assets", manager.assets().len());
                     self.asset_manager = Some(manager);
 
@@ -3786,7 +3797,19 @@ impl CampaignBuilderApp {
                     if let Err(e) = manager.scan_directory() {
                         self.status_message = format!("Failed to refresh assets: {}", e);
                     } else {
-                        self.status_message = "Assets refreshed".to_string();
+                        // After refreshing assets, rescan references to properly mark portraits
+                        // referenced by characters and NPCs
+                        manager.scan_references(
+                            &self.items,
+                            &self.quests,
+                            &self.dialogues,
+                            &self.maps,
+                            &self.classes_editor_state.classes,
+                            &self.characters_editor_state.characters,
+                            &self.npc_editor_state.npcs,
+                        );
+                        manager.mark_data_files_as_referenced();
+                        self.status_message = "Assets refreshed and references scanned".to_string();
                     }
                 }
 

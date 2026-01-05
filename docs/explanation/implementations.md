@@ -1,3 +1,165 @@
+## Campaign Builder Asset Manager Portrait Reference Scanning Fix - COMPLETED
+
+### Summary
+
+Fixed the Asset Manager in the Campaign Builder to properly detect and display portraits referenced by characters and NPCs. Previously, all portraits were incorrectly marked as "Unreferenced" even when they were actively used by character and NPC definitions in `characters.ron` and `npcs.ron`.
+
+### Root Cause Analysis
+
+The issue had two causes:
+
+1. **Initial Asset Manager Creation**: When the Assets Editor tab was first opened, the AssetManager was created and scanned the directory, but this happened before scanning references. The initial scan would show all portraits as unreferenced.
+
+2. **Refresh Button Behavior**: The "🔄 Refresh" button called `scan_directory()` to rescan assets, which reset all reference tracking, but it did NOT call `scan_references()` afterward, leaving all portraits marked as unreferenced.
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/lib.rs`
+
+**1. Added Reference Scanning on Initial Asset Manager Load** (lines ~3753-3766):
+
+Added automatic reference scanning when the Asset Manager is first initialized in the Assets Editor:
+
+```rust
+// Scan references on initial load so portraits are properly marked as referenced
+manager.scan_references(
+    &self.items,
+    &self.quests,
+    &self.dialogues,
+    &self.maps,
+    &self.classes_editor_state.classes,
+    &self.characters_editor_state.characters,
+    &self.npc_editor_state.npcs,
+);
+manager.mark_data_files_as_referenced();
+```
+
+**Rationale**: Ensures that when users first open the Assets Editor, portraits referenced by already-loaded characters and NPCs are immediately marked as referenced.
+
+**2. Fixed Refresh Button to Rescan References** (lines ~3800-3812):
+
+Modified the "🔄 Refresh" button handler to rescan references after refreshing assets:
+
+```rust
+// After refreshing assets, rescan references to properly mark portraits
+// referenced by characters and NPCs
+manager.scan_references(
+    &self.items,
+    &self.quests,
+    &self.dialogues,
+    &self.maps,
+    &self.classes_editor_state.classes,
+    &self.characters_editor_state.characters,
+    &self.npc_editor_state.npcs,
+);
+manager.mark_data_files_as_referenced();
+self.status_message = "Assets refreshed and references scanned".to_string();
+```
+
+**Rationale**: Prevents the refresh operation from clearing reference tracking without restoring it, ensuring portraits remain properly marked after refresh.
+
+#### File: `sdk/campaign_builder/src/asset_manager.rs`
+
+**1. Added Clippy Allow Annotation** (line ~834):
+
+Added `#[allow(clippy::too_many_arguments)]` to the `scan_references` function to suppress clippy warning about having 8 parameters (7 data slices + self).
+
+**Rationale**: The function needs to accept multiple campaign data types to scan for references. Grouping them into a struct would require changing all call sites without providing significant benefit.
+
+**2. Added Integration Test** (lines ~2183-2280):
+
+Added `test_scan_with_actual_tutorial_campaign_data()` test that:
+
+- Loads the actual tutorial campaign's `characters.ron` and `npcs.ron` files
+- Scans the real `campaigns/tutorial/assets/portraits/` directory
+- Verifies that portraits like `character_040.png`, `elder_1.png`, and `merchant_1.png` are correctly marked as referenced
+- Validates that references show the correct character/NPC names
+
+**3. Added Path Matching Test** (lines ~2055-2179):
+
+Added `test_scan_portrait_path_matching()` test that verifies the exact path formats used in real campaigns are correctly matched by the scanning logic.
+
+### Testing
+
+**Unit Tests Added:**
+
+- `test_scan_portrait_path_matching`: Verifies path matching with realistic campaign structure
+- `test_scan_with_actual_tutorial_campaign_data`: Integration test with real campaign files
+
+**Existing Tests:**
+
+- `test_scan_characters_references`: Validates character portrait scanning
+- `test_scan_npcs_references`: Validates NPC portrait scanning
+- `test_scan_multiple_characters_same_portrait`: Validates multiple references to same portrait
+
+**Test Results:**
+
+```
+cargo nextest run -p campaign_builder
+Summary: 875 tests run: 875 passed, 2 skipped
+```
+
+**Quality Checks:**
+
+- ✅ `cargo fmt --all` - Applied successfully
+- ✅ `cargo check -p campaign_builder` - No errors
+- ✅ `cargo clippy -p campaign_builder -- -D warnings` - No warnings
+- ✅ All 875 tests pass
+
+### User-Visible Changes
+
+**Before Fix:**
+
+- All portraits shown with "⚠️ Unreferenced" status
+- No indication which data files use which portraits
+- Portraits incorrectly included in cleanup candidates
+
+**After Fix:**
+
+- Portraits referenced by characters/NPCs show "✅ Referenced" status
+- UI displays "Referenced by N item(s):" with details like "Character: Kira" or "NPC: Village Elder"
+- Referenced portraits correctly excluded from cleanup candidates
+- Refresh button maintains reference tracking
+
+### Example Portrait References
+
+From the tutorial campaign, these portraits are now correctly marked:
+
+**Character Portraits:**
+
+- `character_040.png` → Referenced by "Kira" (tutorial_human_knight)
+- `character_042.png` → Referenced by "Silas" (tutorial_elf_sorcerer)
+- `character_041.png` → Referenced by "Mira" (tutorial_human_cleric)
+- `character_060.png` → Referenced by "Old Gareth" (old_gareth)
+- `character_055.png` → Referenced by "Whisper" (whisper)
+- `character_071.png` → Referenced by "Apprentice Zara" (apprentice_zara)
+
+**NPC Portraits:**
+
+- `elder_1.png` → Referenced by "Village Elder" (tutorial_elder_village)
+- `merchant_1.png` → Referenced by "Merchant" (tutorial_merchant_town)
+- `priestess_1.png` → Referenced by "High Priestess" (tutorial_priestess_town)
+- `old_wizard_1.png` → Referenced by "Fizban" (tutorial_wizard_fizban)
+- `npc_015.png` → Referenced by "Fizban Brother" (tutorial_wizard_fizban_brother)
+- `ranger_1.png` → Referenced by "Lost Ranger" (tutorial_ranger_lost)
+- `goblin_1.png` → Referenced by "Dying Goblin" (tutorial_goblin_dying)
+
+### Limitations and Future Improvements
+
+**Current Behavior:**
+
+- Portrait path matching tries common patterns: `assets/portraits/{id}.png`, `portraits/{id}.png`, and `.jpg` variants
+- Only portraits in the standard `assets/portraits/` directory are detected
+
+**Potential Future Enhancements:**
+
+- Add support for custom portrait directory configurations
+- Detect unused portraits with similar names (e.g., `character_040_old.png`)
+- Add UI to preview portraits directly in the asset list
+- Support for other image formats (`.webp`, `.gif`, etc.)
+
+---
+
 ## Phase 2: Tutorial Content Population - COMPLETED
 
 ### Summary
@@ -8678,6 +8840,7 @@ Enhanced the Campaign Builder Asset Manager to correctly detect and track portra
 #### File: `sdk/campaign_builder/src/asset_manager.rs`
 
 **1. Extended `AssetReference` enum** (lines 109-167):
+
 - Added `Character` variant with `id: String` and `name: String` fields
 - Added `Npc` variant with `id: String` and `name: String` fields
 - Updated `display_string()` method to format Character and NPC references
@@ -8749,12 +8912,14 @@ fn scan_npcs_references(&mut self, npcs: &[antares::domain::world::npc::NpcDefin
 ```
 
 **3. Updated `scan_references` method signature** (line 834):
+
 - Added `characters: &[antares::domain::character_definition::CharacterDefinition]` parameter
 - Added `npcs: &[antares::domain::world::npc::NpcDefinition]` parameter
 - Integrated calls to `scan_characters_references()` and `scan_npcs_references()`
 - Updated documentation and examples
 
 **4. Added comprehensive tests** (lines 1917-2102):
+
 - `test_scan_characters_references`: Verifies character portrait detection
 - `test_scan_npcs_references`: Verifies NPC portrait detection
 - `test_scan_multiple_characters_same_portrait`: Tests multiple characters using same portrait
@@ -8762,21 +8927,25 @@ fn scan_npcs_references(&mut self, npcs: &[antares::domain::world::npc::NpcDefin
 #### File: `sdk/campaign_builder/src/lib.rs`
 
 **1. Added state variable** (line 450):
+
 - Added `show_cleanup_candidates: bool` to `CampaignBuilderApp` struct
 - Initialized to `false` in Default impl (line 551)
 
 **2. Updated `scan_references` calls** (lines 2097, 3797):
+
 - Added `&self.characters_editor_state.characters` parameter
 - Added `&self.npc_editor_state.npcs` parameter
 - Updated both call sites: in `do_open_campaign` and `show_assets_editor`
 
 **3. Improved cleanup candidates UI** (lines 3947-3973):
+
 - Changed button to toggle `show_cleanup_candidates` state
 - Added collapsible section showing list of cleanup candidate files
 - Added ScrollArea with max height for better UX
 - Added descriptive text explaining what cleanup candidates are
 
 **4. Added asset list sorting** (lines 3979-3982):
+
 - Converted HashMap to sorted Vec before display
 - Sorted by path using `sort_by` with path comparison
 - Maintains consistent, alphabetical display order
@@ -8784,17 +8953,20 @@ fn scan_npcs_references(&mut self, npcs: &[antares::domain::world::npc::NpcDefin
 ### Technical Decisions
 
 **Portrait Path Detection Strategy:**
+
 - Checks both `assets/portraits/` and `portraits/` directories
 - Supports both `.png` and `.jpg` extensions
 - Uses portrait_id as the filename stem (without extension)
 - Matches the actual portrait loading logic in characters_editor and npc_editor
 
 **Reference Deduplication:**
+
 - Each scanning method checks if a reference already exists before adding
 - Prevents duplicate references when the same portrait is used multiple times
 - Uses pattern matching to compare reference types and IDs
 
 **UI State Management:**
+
 - Toggle button approach for cleanup candidates avoids modal dialogs
 - Collapsible section keeps the Asset Manager panel self-contained
 - Sorted asset list improves user experience when looking for specific files
@@ -8811,18 +8983,21 @@ fn scan_npcs_references(&mut self, npcs: &[antares::domain::world::npc::NpcDefin
 ### Test Coverage
 
 #### Test 1: `test_scan_characters_references`
+
 - Creates a CharacterDefinition with portrait_id "character_040"
 - Adds a matching portrait asset at "assets/portraits/character_040.png"
 - Verifies the asset is marked as referenced
 - Verifies the reference is of type Character with correct id and name
 
 #### Test 2: `test_scan_npcs_references`
+
 - Creates an NpcDefinition with portrait_id "elder_1"
 - Adds a matching portrait asset at "assets/portraits/elder_1.png"
 - Verifies the asset is marked as referenced
 - Verifies the reference is of type NPC with correct id and name
 
 #### Test 3: `test_scan_multiple_characters_same_portrait`
+
 - Creates two CharacterDefinitions using the same portrait_id "character_046"
 - Verifies the asset has 2 references (one for each character)
 - Verifies both character IDs are present in the references list
@@ -8859,17 +9034,20 @@ fn scan_npcs_references(&mut self, npcs: &[antares::domain::world::npc::NpcDefin
 ### Benefits Achieved
 
 **User Experience:**
+
 - Users can now see which characters/NPCs use each portrait
 - Sorted asset list makes finding specific files much easier
 - Cleanup candidates review helps identify unused assets safely
 - Reduces false positives for "unreferenced" warnings
 
 **Developer Experience:**
+
 - Clear test coverage for portrait scanning logic
 - Extensible pattern for adding more reference types
 - Well-documented implementation
 
 **Maintainability:**
+
 - Follows established patterns in codebase
 - Comprehensive test suite prevents regressions
 - Clear separation of scanning logic per content type
@@ -8877,10 +9055,12 @@ fn scan_npcs_references(&mut self, npcs: &[antares::domain::world::npc::NpcDefin
 ### Related Files
 
 **Modified:**
+
 - `sdk/campaign_builder/src/asset_manager.rs` - Core scanning logic and tests
 - `sdk/campaign_builder/src/lib.rs` - UI integration and state management
 
 **Referenced:**
+
 - `src/domain/character_definition.rs` - CharacterDefinition type
 - `src/domain/world/npc.rs` - NpcDefinition type
 - `campaigns/tutorial/data/characters.ron` - Test data
@@ -8895,6 +9075,7 @@ fn scan_npcs_references(&mut self, npcs: &[antares::domain::world::npc::NpcDefin
 3. **Empty Portrait IDs**: Characters/NPCs with empty portrait_id fields are skipped during scanning (no error or warning).
 
 4. **Reference Display**: The Asset Manager now shows references like:
+
    - "Character tutorial_human_knight: Kira"
    - "NPC tutorial_elder_village: Village Elder"
 
@@ -8928,6 +9109,7 @@ Enhanced the "Review Cleanup Candidates" feature to allow users to select and de
 #### File: `sdk/campaign_builder/src/lib.rs`
 
 **1. Added selection tracking state** (line 451):
+
 - Added `cleanup_candidates_selected: std::collections::HashSet<PathBuf>` to `CampaignBuilderApp`
 - Tracks which cleanup candidate files the user has selected for deletion
 - Initialized as empty HashSet in Default impl
@@ -8935,11 +9117,13 @@ Enhanced the "Review Cleanup Candidates" feature to allow users to select and de
 **2. Enhanced cleanup candidates UI** (lines 3963-4080):
 
 **Selection Controls:**
+
 - "Select All" button - selects all cleanup candidates
 - "Deselect All" button - clears selection
 - Individual checkboxes for each file - toggle selection per file
 
 **Delete Functionality:**
+
 - "Delete X Selected" button appears when files are selected
 - Shows total size of selected files before deletion
 - Performs actual file deletion via `manager.remove_asset()`
@@ -8948,11 +9132,13 @@ Enhanced the "Review Cleanup Candidates" feature to allow users to select and de
 - Clears selection after successful deletion
 
 **File Display:**
+
 - Each candidate shows: checkbox, icon, path, and file size
 - File sizes displayed in right-aligned column for easy scanning
 - Uses weak/small text styling for file sizes
 
 **3. Borrow checker fix** (line 3965):
+
 - Cloned candidates list to avoid immutable borrow conflicts
 - Allows mutation of manager during deletion while iterating candidates
 - Prevents compilation errors from simultaneous immutable and mutable borrows
@@ -8960,6 +9146,7 @@ Enhanced the "Review Cleanup Candidates" feature to allow users to select and de
 ### Technical Implementation
 
 **Selection State Management:**
+
 ```rust
 // Track selected files in HashSet for O(1) lookup
 cleanup_candidates_selected: std::collections::HashSet<PathBuf>
@@ -8975,6 +9162,7 @@ if ui.checkbox(&mut selected, "").changed() {
 ```
 
 **Deletion Process:**
+
 ```rust
 // Calculate total size before deletion
 let mut total_size = 0u64;
@@ -9018,16 +9206,19 @@ self.cleanup_candidates_selected.clear();
 ### Safety Features
 
 **Size Display:**
+
 - Shows total size of selected files before deletion
 - Helps users understand storage impact
 - Format: "Delete 5 files (1.2 MB)"
 
 **Error Handling:**
+
 - Tracks which deletions succeed and which fail
 - Shows detailed error messages for failures
 - Partial failures don't prevent other deletions
 
 **Clear Feedback:**
+
 - Success: "✅ Successfully deleted X files (size)"
 - Partial failure: "⚠️ Deleted X files, Y failed: [error details]"
 - Status message persists so user can review results
@@ -9050,16 +9241,19 @@ self.cleanup_candidates_selected.clear();
 ### Benefits Achieved
 
 **Productivity:**
+
 - Users can clean up unused assets without leaving the Campaign Builder
 - Bulk selection saves time when cleaning up many files
 - File size information helps prioritize cleanup efforts
 
 **Safety:**
+
 - Clear confirmation with size information reduces accidental deletions
 - Checkbox-based selection is familiar and intuitive
 - Error messages help diagnose permission or file system issues
 
 **Usability:**
+
 - "Select All" / "Deselect All" for convenience
 - Visual feedback with checkboxes and file sizes
 - Persistent status messages for review
@@ -9083,6 +9277,7 @@ self.cleanup_candidates_selected.clear();
 ### Testing Notes
 
 The delete functionality uses the existing `AssetManager::remove_asset()` method which is already tested. The UI integration was manually verified but could benefit from integration tests that:
+
 - Verify selection state updates correctly
 - Test deletion success/failure scenarios
 - Verify asset list updates after deletion
@@ -9090,9 +9285,11 @@ The delete functionality uses the existing `AssetManager::remove_asset()` method
 ### Related Files
 
 **Modified:**
+
 - `sdk/campaign_builder/src/lib.rs` - Added selection state and delete UI
 
 **Used:**
+
 - `sdk/campaign_builder/src/asset_manager.rs` - `remove_asset()` method
 
 **Date Completed:** 2025-01-28

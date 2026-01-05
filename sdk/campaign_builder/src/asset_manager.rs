@@ -831,6 +831,7 @@ impl AssetManager {
     /// let npcs = vec![];
     /// manager.scan_references(&items, &quests, &dialogues, &maps, &classes, &characters, &npcs);
     /// ```
+    #[allow(clippy::too_many_arguments)]
     pub fn scan_references(
         &mut self,
         items: &[antares::domain::items::types::Item],
@@ -2019,6 +2020,275 @@ mod tests {
                 assert_eq!(name, "Village Elder");
             }
             _ => panic!("Expected NPC reference"),
+        }
+    }
+
+    #[test]
+    fn test_scan_portrait_path_matching() {
+        use antares::domain::character::Alignment;
+        use antares::domain::character::Sex;
+        use antares::domain::character_definition::{
+            BaseStats, CharacterDefinition, StartingEquipment,
+        };
+        use std::path::PathBuf;
+
+        let mut manager = AssetManager::new(PathBuf::from("/tmp/test_campaign"));
+
+        // Add assets with the EXACT path format used in real campaigns
+        let paths = vec![
+            "assets/portraits/character_040.png",
+            "assets/portraits/elder_1.png",
+            "assets/portraits/merchant_1.png",
+            "assets/portraits/npc_015.png",
+        ];
+
+        for path_str in &paths {
+            let path = PathBuf::from(path_str);
+            manager.assets.insert(
+                path.clone(),
+                Asset {
+                    path: path.clone(),
+                    asset_type: AssetType::Portrait,
+                    size: 4096,
+                    modified: SystemTime::now(),
+                    is_referenced: false,
+                    references: Vec::new(),
+                },
+            );
+        }
+
+        // Create characters matching the actual npcs.ron and characters.ron
+        let characters = vec![CharacterDefinition {
+            id: "tutorial_human_knight".to_string(),
+            name: "Kira".to_string(),
+            race_id: "human".to_string(),
+            class_id: "knight".to_string(),
+            sex: Sex::Female,
+            alignment: Alignment::Good,
+            base_stats: BaseStats::default(),
+            hp_base: Some(10),
+            hp_current: None,
+            portrait_id: "character_040".to_string(),
+            starting_gold: 100,
+            starting_gems: 0,
+            starting_food: 15,
+            starting_items: vec![],
+            starting_equipment: StartingEquipment::default(),
+            description: "A young warrior".to_string(),
+            is_premade: true,
+            starts_in_party: true,
+        }];
+
+        let npcs = vec![
+            antares::domain::world::npc::NpcDefinition {
+                id: "tutorial_elder_village".to_string(),
+                name: "Village Elder".to_string(),
+                description: "The wise elder".to_string(),
+                portrait_id: "elder_1".to_string(),
+                dialogue_id: None,
+                quest_ids: vec![5],
+                faction: Some("Village".to_string()),
+                is_merchant: false,
+                is_innkeeper: false,
+            },
+            antares::domain::world::npc::NpcDefinition {
+                id: "tutorial_merchant_town".to_string(),
+                name: "Merchant".to_string(),
+                description: "A traveling merchant".to_string(),
+                portrait_id: "merchant_1".to_string(),
+                dialogue_id: None,
+                quest_ids: vec![],
+                faction: Some("Merchants Guild".to_string()),
+                is_merchant: true,
+                is_innkeeper: false,
+            },
+            antares::domain::world::npc::NpcDefinition {
+                id: "tutorial_wizard_fizban_brother".to_string(),
+                name: "Fizban Brother".to_string(),
+                description: "A local villager".to_string(),
+                portrait_id: "npc_015".to_string(),
+                dialogue_id: None,
+                quest_ids: vec![1, 3],
+                faction: Some("Village".to_string()),
+                is_merchant: false,
+                is_innkeeper: false,
+            },
+        ];
+
+        // Scan references
+        manager.scan_references(&[], &[], &[], &[], &[], &characters, &npcs);
+
+        // Verify character portrait is referenced
+        let character_portrait = manager
+            .assets
+            .get(&PathBuf::from("assets/portraits/character_040.png"))
+            .unwrap();
+        assert!(
+            character_portrait.is_referenced,
+            "Character portrait should be referenced"
+        );
+        assert_eq!(character_portrait.references.len(), 1);
+        match &character_portrait.references[0] {
+            AssetReference::Character { id, name } => {
+                assert_eq!(id, "tutorial_human_knight");
+                assert_eq!(name, "Kira");
+            }
+            _ => panic!("Expected Character reference"),
+        }
+
+        // Verify NPC portraits are referenced
+        let elder_portrait = manager
+            .assets
+            .get(&PathBuf::from("assets/portraits/elder_1.png"))
+            .unwrap();
+        assert!(
+            elder_portrait.is_referenced,
+            "Elder portrait should be referenced"
+        );
+        assert_eq!(elder_portrait.references.len(), 1);
+        match &elder_portrait.references[0] {
+            AssetReference::Npc { id, name } => {
+                assert_eq!(id, "tutorial_elder_village");
+                assert_eq!(name, "Village Elder");
+            }
+            _ => panic!("Expected Npc reference"),
+        }
+
+        let merchant_portrait = manager
+            .assets
+            .get(&PathBuf::from("assets/portraits/merchant_1.png"))
+            .unwrap();
+        assert!(
+            merchant_portrait.is_referenced,
+            "Merchant portrait should be referenced"
+        );
+
+        let npc_portrait = manager
+            .assets
+            .get(&PathBuf::from("assets/portraits/npc_015.png"))
+            .unwrap();
+        assert!(
+            npc_portrait.is_referenced,
+            "NPC portrait should be referenced"
+        );
+    }
+
+    #[test]
+    fn test_scan_with_actual_tutorial_campaign_data() {
+        use std::path::PathBuf;
+
+        // This test uses the actual tutorial campaign data to verify portrait scanning works
+        let campaign_dir = PathBuf::from("campaigns/tutorial");
+
+        // Skip test if campaign directory doesn't exist (e.g., in CI)
+        if !campaign_dir.exists() {
+            eprintln!("Skipping test - tutorial campaign not found");
+            return;
+        }
+
+        let mut manager = AssetManager::new(campaign_dir.clone());
+
+        // Scan the campaign directory for assets
+        if let Err(e) = manager.scan_directory() {
+            panic!("Failed to scan campaign directory: {}", e);
+        }
+
+        // Load actual characters from characters.ron
+        let characters_path = campaign_dir.join("data/characters.ron");
+        let characters: Vec<antares::domain::character_definition::CharacterDefinition> =
+            if characters_path.exists() {
+                let contents = std::fs::read_to_string(&characters_path)
+                    .expect("Failed to read characters.ron");
+                ron::from_str(&contents).expect("Failed to parse characters.ron")
+            } else {
+                eprintln!("Skipping test - characters.ron not found");
+                return;
+            };
+
+        // Load actual NPCs from npcs.ron
+        let npcs_path = campaign_dir.join("data/npcs.ron");
+        let npcs: Vec<antares::domain::world::npc::NpcDefinition> = if npcs_path.exists() {
+            let contents = std::fs::read_to_string(&npcs_path).expect("Failed to read npcs.ron");
+            ron::from_str(&contents).expect("Failed to parse npcs.ron")
+        } else {
+            eprintln!("Skipping test - npcs.ron not found");
+            return;
+        };
+
+        eprintln!(
+            "Loaded {} characters and {} NPCs",
+            characters.len(),
+            npcs.len()
+        );
+        eprintln!("Found {} total assets", manager.assets().len());
+
+        // Count portrait assets before scanning
+        let portrait_count_before = manager.assets_by_type(AssetType::Portrait).len();
+        eprintln!("Found {} portrait assets", portrait_count_before);
+
+        // Scan references
+        manager.scan_references(&[], &[], &[], &[], &[], &characters, &npcs);
+
+        // Verify that portraits referenced by characters and NPCs are marked as referenced
+        let mut referenced_portraits = 0;
+        let mut unreferenced_portraits = 0;
+
+        for (path, asset) in manager.assets() {
+            if asset.asset_type == AssetType::Portrait {
+                if asset.is_referenced {
+                    referenced_portraits += 1;
+                    eprintln!(
+                        "Referenced: {} by {} references",
+                        path.display(),
+                        asset.references.len()
+                    );
+                } else {
+                    unreferenced_portraits += 1;
+                    eprintln!("Unreferenced: {}", path.display());
+                }
+            }
+        }
+
+        eprintln!(
+            "Summary: {} referenced portraits, {} unreferenced portraits",
+            referenced_portraits, unreferenced_portraits
+        );
+
+        // We should have at least some referenced portraits from the characters and NPCs
+        assert!(
+            referenced_portraits > 0,
+            "Expected at least some portraits to be marked as referenced. Characters: {}, NPCs: {}",
+            characters.len(),
+            npcs.len()
+        );
+
+        // Specifically check a few known portraits from the actual data files
+        // From characters.ron: character_040, character_042, character_041
+        // From npcs.ron: elder_1, merchant_1, old_wizard_1, etc.
+
+        let test_portraits = vec![
+            (
+                "assets/portraits/character_040.png",
+                "character from characters.ron",
+            ),
+            ("assets/portraits/elder_1.png", "NPC from npcs.ron"),
+            ("assets/portraits/merchant_1.png", "NPC from npcs.ron"),
+        ];
+
+        for (portrait_path, description) in test_portraits {
+            let path = PathBuf::from(portrait_path);
+            if let Some(asset) = manager.assets().get(&path) {
+                assert!(
+                    asset.is_referenced,
+                    "Portrait {} ({}) should be marked as referenced",
+                    portrait_path, description
+                );
+                assert!(
+                    !asset.references.is_empty(),
+                    "Portrait {} should have at least one reference",
+                    portrait_path
+                );
+            }
         }
     }
 
