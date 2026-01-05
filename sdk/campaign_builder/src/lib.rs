@@ -1372,8 +1372,7 @@ impl CampaignBuilderApp {
             let npcs_path = dir.join(&self.campaign.npcs_file);
 
             if npcs_path.exists() {
-                let contents =
-                    std::fs::read_to_string(&npcs_path).map_err(CampaignError::Io)?;
+                let contents = std::fs::read_to_string(&npcs_path).map_err(CampaignError::Io)?;
 
                 let npcs: Vec<antares::domain::world::npc::NpcDefinition> =
                     ron::from_str(&contents).map_err(CampaignError::Deserialization)?;
