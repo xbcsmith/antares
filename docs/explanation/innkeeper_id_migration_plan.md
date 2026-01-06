@@ -536,7 +536,7 @@ grep -r "inn_id:" src/
 **Serialization Impact**: `CharacterLocation::AtInn` now serializes as `AtInn(String)` instead of `AtInn(u8)`.
 
 **RON Format Change**:
-- **Old**: `AtInn(1)` 
+- **Old**: `AtInn(1)`
 - **New**: `AtInn("tutorial_innkeeper_town")`
 
 **No Migration Needed**: Since backwards compatibility is not required, simply update save/load to work with new format.
@@ -571,11 +571,11 @@ roster.add_character(char1, CharacterLocation::AtInn("tutorial_innkeeper_town".t
 #[test]
 fn test_character_location_ron_serialization() {
     let location = CharacterLocation::AtInn("test_innkeeper".to_string());
-    
+
     // Serialize to RON
     let ron_string = ron::to_string(&location).unwrap();
     assert!(ron_string.contains("test_innkeeper"));
-    
+
     // Deserialize from RON
     let deserialized: CharacterLocation = ron::from_str(&ron_string).unwrap();
     assert_eq!(location, deserialized);
@@ -1155,13 +1155,13 @@ Added UI control for the `starting_innkeeper` field in the Campaign Builder's Ca
 - **Inn System Migration**: Changed from numeric inn IDs to innkeeper NPC IDs
   - **Type Removal**: `TownId = u8` type removed entirely
   - **Type Addition**: `InnkeeperId = String` type added
-  - **CharacterLocation**: `AtInn(u8)` → `AtInn(String)` 
+  - **CharacterLocation**: `AtInn(u8)` → `AtInn(String)`
   - **MapEvent**: `EnterInn { inn_id: u8 }` → `EnterInn { innkeeper_id: String }`
   - **CampaignConfig**: `starting_inn: u8` → `starting_innkeeper: String`
   - **Save Game Format**: Breaking change - old saves will not load
   - **Campaign Format**: Breaking change - old campaigns must update to use string innkeeper IDs
   - **Example**: `AtInn(1)` → `AtInn("tutorial_innkeeper_town")`
-  
+
 - **Benefits**:
   - Validation: Innkeeper IDs are validated against NPC database
   - Better UX: UI shows innkeeper names and portraits
@@ -1180,7 +1180,7 @@ Added UI control for the `starting_innkeeper` field in the Campaign Builder's Ca
 # Unit tests
 cargo test --lib
 
-# Integration tests  
+# Integration tests
 cargo test --test '*'
 
 # All features
@@ -1370,31 +1370,31 @@ All required systems already exist. No external APIs or new crates needed.
   - Update type aliases, enums, exports
   - Remove all TownId references
   - Update basic unit tests
-  
+
 - Phase 2: Application Logic Updates - 2 days
   - Update all application and domain logic
   - Update all test cases to use string IDs
   - Verify compilation and tests
-  
+
 - Phase 3: Save/Load System Updates - 0.5 days
   - Update save/load tests
   - Verify RON serialization
-  
+
 - Phase 4: Campaign Configuration Updates - 0.5 days
   - Update config structs
   - Add validation
   - Update tests
-  
+
 - Phase 5: SDK UI Updates - 1 day
   - Update edit buffer
   - Implement NPC dropdown
   - Update tests
-  
+
 - Phase 6: Campaign Data Migration - 0.5 days
   - Update tutorial campaign.ron
   - Update map events
   - Verify NPC data
-  
+
 - Phase 7: Documentation and Validation - 1 day
   - Update all documentation
   - Run full test suite
@@ -1430,7 +1430,7 @@ This migration replaces arbitrary numeric inn IDs with meaningful innkeeper NPC 
 - Benefits far outweigh migration cost
 - Clean break is better than maintaining compatibility layers
 
-**Recommendation**: 
+**Recommendation**:
 Execute all phases as a single feature branch to ensure consistency and avoid partial migration states. Test thoroughly after each phase but merge everything together.
 
 **Next Steps After Plan Approval**:

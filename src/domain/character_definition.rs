@@ -403,6 +403,7 @@ impl Default for BaseStats {
 ///     alignment: Alignment::Good,
 ///     base_stats: BaseStats::new(16, 8, 10, 14, 12, 14, 10),
 ///     hp_base: None,
+///     hp_current: None,
 ///     portrait_id: "1".to_string(),
 ///     starting_gold: 100,
 ///     starting_gems: 0,
@@ -411,6 +412,7 @@ impl Default for BaseStats {
 ///     starting_equipment: StartingEquipment::default(),
 ///     description: "A noble knight seeking glory.".to_string(),
 ///     is_premade: true,
+///     starts_in_party: false,
 /// };
 ///
 /// assert_eq!(knight.name, "Sir Galahad");

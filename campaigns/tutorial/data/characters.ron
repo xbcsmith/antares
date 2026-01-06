@@ -39,7 +39,7 @@
     ),
     (
         id: "tutorial_elf_sorcerer",
-        name: "Silas",
+        name: "Sirius",
         race_id: "elf",
         class_id: "sorcerer",
         sex: Male,
@@ -72,7 +72,7 @@
             accessory1: None,
             accessory2: None,
         ),
-        description: "A relentless elven mage who delights in using the arcane arts against others. Silas is perfect for players who want to learn how spellcasting works.",
+        description: "A relentless elven mage who delights in using the arcane arts against others. Sirius is perfect for players who want to learn how spellcasting works.",
         is_premade: true,
         starts_in_party: true,
     ),

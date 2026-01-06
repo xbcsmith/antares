@@ -6878,6 +6878,12 @@ fn antares_console_fmt_layer(_app: &mut App) -> Option<BoxedFmtLayer> {
   - Set via CLI: `antares --log /path/to/antares.log`
   - The launcher sets `ANTARES_LOG_FILE`, and the plugin factory adds a writer layer that appends formatted logs to that file (no ANSI colors).
 
+Note on tests:
+
+- Unit tests that manipulate `ANTARES_LOG_FILE` may race when tests run in parallel. Tests that set or unset this environment
+  variable now serialize access with a module-level mutex and restore the original environment value after running to avoid
+  intermittent failures.
+
 ```antares/src/bin/antares.rs#L180-190
 fn antares_file_custom_layer(_app: &mut App) -> Option<BoxedLayer> {
     if let Ok(path_str) = std::env::var("ANTARES_LOG_FILE") {

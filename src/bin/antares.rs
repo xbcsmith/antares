@@ -288,6 +288,10 @@ pub struct GraphicsConfigResource {
 mod tests {
     use super::*;
     use antares::sdk::game_config::{CameraConfig, ControlsConfig, GameConfig, GraphicsConfig};
+    use std::sync::Mutex;
+
+    // Serialize tests that modify the process environment to avoid races when tests run in parallel.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     /// Helper to create a test campaign with custom graphics config
     fn create_test_campaign(graphics: GraphicsConfig) -> Campaign {
@@ -502,18 +506,38 @@ mod tests {
     #[test]
     fn test_file_custom_layer_none_when_env_unset() {
         // When ANTARES_LOG_FILE is unset, the custom file layer factory returns None
+        // Lock to prevent races with other tests that modify the environment.
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let original = std::env::var_os("ANTARES_LOG_FILE");
         std::env::remove_var("ANTARES_LOG_FILE");
+
         let mut app = App::new();
         assert!(antares_file_custom_layer(&mut app).is_none());
+
+        // Restore original env var state
+        match original {
+            Some(val) => std::env::set_var("ANTARES_LOG_FILE", val),
+            None => std::env::remove_var("ANTARES_LOG_FILE"),
+        }
     }
 
     #[test]
     fn test_file_custom_layer_some_when_env_set() {
         // When ANTARES_LOG_FILE is set to a writable path, the custom file layer factory returns Some
+        // Lock to prevent races with other tests that modify the environment.
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let original = std::env::var_os("ANTARES_LOG_FILE");
+
         let tmp = tempfile::NamedTempFile::new().expect("create tmp file");
         std::env::set_var("ANTARES_LOG_FILE", tmp.path().to_string_lossy().to_string());
+
         let mut app = App::new();
         assert!(antares_file_custom_layer(&mut app).is_some());
-        std::env::remove_var("ANTARES_LOG_FILE");
+
+        // Restore original env var state
+        match original {
+            Some(val) => std::env::set_var("ANTARES_LOG_FILE", val),
+            None => std::env::remove_var("ANTARES_LOG_FILE"),
+        }
     }
 }

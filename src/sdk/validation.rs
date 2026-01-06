@@ -380,7 +380,7 @@ impl<'a> Validator<'a> {
     /// let validator = Validator::new(&db);
     ///
     /// // Run the public validation entrypoint (includes character-related checks)
-    /// let errors = validator.validate();
+    /// let errors = validator.validate_all().expect("validation failed");
     /// // Check for party size violations
     /// ```
     fn validate_characters(&self) -> Vec<ValidationError> {
