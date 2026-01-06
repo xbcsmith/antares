@@ -2,8 +2,8 @@
     id: 2,
     width: 20,
     height: 20,
-    name: "Fizban\'s Cave",
-    description: "A mysterious cave belonging to the wizard Fizban",
+    name: "Arcturus\'s Cave",
+    description: "A mysterious cave belonging to the wizard Arcturus",
     tiles: [
         (
             terrain: Stone,
@@ -7608,26 +7608,6 @@
     ],
     events: {
         (
-            x: 19,
-            y: 17,
-        ): Teleport(
-            name: "Dungeon Portal",
-            description: "A portal that teleports the party to Dark Forrest (map 4) at (19,10).",
-            destination: (
-                x: 19,
-                y: 10,
-            ),
-            map_id: 4,
-        ),
-        (
-            x: 9,
-            y: 7,
-        ): Sign(
-            name: "Cave Entrance Sign",
-            description: "Sign marking the entrance to the Cave of Fizban.",
-            text: "The Cave of Fizban!",
-        ),
-        (
             x: 2,
             y: 2,
         ): Encounter(
@@ -7639,10 +7619,38 @@
                 2,
             ],
         ),
+        (
+            x: 12,
+            y: 8,
+        ): RecruitableCharacter(
+            name: "Old Gareth",
+            description: "A grizzled dwarf warrior resting near the cave wall. He looks experienced but weary, his armor showing signs of many battles.",
+            character_id: "old_gareth",
+        ),
+        (
+            x: 9,
+            y: 7,
+        ): Sign(
+            name: "Cave Entrance Sign",
+            description: "Sign marking the entrance to the Cave of Arcturus.",
+            text: "The Cave of Arcturus!",
+        ),
+        (
+            x: 19,
+            y: 17,
+        ): Teleport(
+            name: "Dungeon Portal",
+            description: "A portal that teleports the party to Dark Forrest (map 4) at (19,10).",
+            destination: (
+                x: 19,
+                y: 10,
+            ),
+            map_id: 4,
+        ),
     },
     npc_placements: [
         (
-            npc_id: "tutorial_wizard_fizban",
+            npc_id: "tutorial_wizard_arcturus",
             position: (
                 x: 13,
                 y: 4,
@@ -7651,7 +7659,7 @@
             dialogue_override: None,
         ),
         (
-            npc_id: "tutorial_wizard_fizban_brother",
+            npc_id: "tutorial_wizard_arcturus_brother",
             position: (
                 x: 3,
                 y: 16,

@@ -104,6 +104,14 @@ pub struct NpcEditorState {
     /// Last campaign directory (to detect changes)
     #[serde(skip)]
     pub last_campaign_dir: Option<PathBuf>,
+
+    /// Last NPCs filename (cached from show() call)
+    #[serde(skip)]
+    pub last_npcs_file: Option<String>,
+
+    /// Whether the autocomplete buffers should be reset on next form render
+    #[serde(skip)]
+    pub reset_autocomplete_buffers: bool,
 }
 
 /// NPC editor mode
@@ -169,6 +177,8 @@ impl Default for NpcEditorState {
             portrait_picker_open: false,
             portrait_textures: HashMap::new(),
             last_campaign_dir: None,
+            last_npcs_file: None,
+            reset_autocomplete_buffers: false,
         }
     }
 }
@@ -199,12 +209,16 @@ impl NpcEditorState {
         quests: &[Quest],
         campaign_dir: Option<&PathBuf>,
         display_config: &DisplayConfig,
+        npcs_file: &str,
     ) -> bool {
         // Update portrait candidates if campaign directory changed
         if self.last_campaign_dir != campaign_dir.cloned() {
             self.available_portraits = extract_portrait_candidates(campaign_dir);
             self.last_campaign_dir = campaign_dir.cloned();
         }
+
+        // Cache the npcs filename so Save from the editor can persist immediately
+        self.last_npcs_file = Some(npcs_file.to_string());
 
         // Update available references
         self.available_dialogues = dialogues.to_vec();
@@ -217,6 +231,13 @@ impl NpcEditorState {
             if let Some(selected_id) = self.show_portrait_grid_picker(ui.ctx(), campaign_dir) {
                 self.edit_buffer.portrait_id = selected_id;
                 needs_save = true;
+                // Persist the selected portrait into the autocomplete buffer so the input
+                // shows the new selection immediately (avoids stale typed text).
+                crate::ui_helpers::store_autocomplete_buffer(
+                    ui.ctx(),
+                    egui::Id::new("autocomplete:portrait:npc_edit_portrait".to_string()),
+                    &self.edit_buffer.portrait_id,
+                );
             }
         }
 
@@ -283,7 +304,7 @@ impl NpcEditorState {
                 needs_save |= self.show_list_view(ui, display_config, campaign_dir);
             }
             NpcEditorMode::Add | NpcEditorMode::Edit => {
-                needs_save |= self.show_edit_view(ui, campaign_dir);
+                needs_save |= self.show_edit_view(ui, campaign_dir, npcs_file);
             }
         }
 
@@ -306,54 +327,17 @@ impl NpcEditorState {
         let search_lower = self.search_filter.to_lowercase();
 
         // Build filtered list snapshot to avoid borrow conflicts in closures
-        let filtered_npcs: Vec<(usize, String, NpcDefinition)> = self
+        let filtered_npcs: Vec<(usize, NpcDefinition)> = self
             .npcs
             .iter()
             .enumerate()
-            .filter(|(_, npc)| {
-                // Search filter
-                if !search_lower.is_empty()
-                    && !npc.name.to_lowercase().contains(&search_lower)
-                    && !npc.id.to_lowercase().contains(&search_lower)
-                {
-                    return false;
-                }
-
-                // Merchant filter
-                if self.filter_merchants && !npc.is_merchant {
-                    return false;
-                }
-
-                // Innkeeper filter
-                if self.filter_innkeepers && !npc.is_innkeeper {
-                    return false;
-                }
-
-                // Quest giver filter
-                if self.filter_quest_givers && npc.quest_ids.is_empty() {
-                    return false;
-                }
-
-                true
-            })
-            .map(|(idx, npc)| {
-                let mut label = format!("{}: {}", npc.id, npc.name);
-                if npc.is_merchant {
-                    label.push_str(" 🏪");
-                }
-                if npc.is_innkeeper {
-                    label.push_str(" 🛏️");
-                }
-                if !npc.quest_ids.is_empty() {
-                    label.push_str(" 📜");
-                }
-                (idx, label, npc.clone())
-            })
+            .filter(|(_, npc)| self.matches_filters(npc))
+            .map(|(idx, npc)| (idx, npc.clone()))
             .collect();
 
         // Sort by ID
         let mut sorted_npcs = filtered_npcs;
-        sorted_npcs.sort_by(|(_, _, a), (_, _, b)| a.id.cmp(&b.id));
+        sorted_npcs.sort_by(|(_, a), (_, b)| a.id.cmp(&b.id));
 
         let selected = self.selected_npc;
         let mut new_selection = selected;
@@ -369,25 +353,72 @@ impl NpcEditorState {
         TwoColumnLayout::new("npcs").show_split(
             ui,
             |left_ui| {
-                // Left panel: NPC list
+                // Left panel: NPC list (styled to match Characters editor)
                 left_ui.heading("NPCs");
                 left_ui.separator();
 
-                for (idx, label, _) in &sorted_npcs {
-                    let is_selected = selected == Some(*idx);
-                    if left_ui.selectable_label(is_selected, label).clicked() {
-                        new_selection = Some(*idx);
-                    }
-                }
-
                 if sorted_npcs.is_empty() {
                     left_ui.label("No NPCs found");
+                } else {
+                    for (idx, npc) in &sorted_npcs {
+                        let is_selected = selected == Some(*idx);
+
+                        // Primary selectable label (name)
+                        let response = left_ui.selectable_label(is_selected, &npc.name);
+                        if response.clicked() {
+                            new_selection = Some(*idx);
+                        }
+
+                        // Badges and metadata (indented like Characters list)
+                        left_ui.horizontal(|ui| {
+                            ui.add_space(20.0);
+
+                            if npc.is_merchant {
+                                ui.label(
+                                    egui::RichText::new("🏪 Merchant")
+                                        .small()
+                                        .color(egui::Color32::GOLD),
+                                );
+                            }
+
+                            if npc.is_innkeeper {
+                                ui.label(
+                                    egui::RichText::new("🛏️ Innkeeper")
+                                        .small()
+                                        .color(egui::Color32::LIGHT_BLUE),
+                                );
+                            }
+
+                            if !npc.quest_ids.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "📜 Quests: {}",
+                                        npc.quest_ids.len()
+                                    ))
+                                    .small()
+                                    .color(egui::Color32::from_rgb(150, 200, 120)),
+                                );
+                            }
+
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "| Faction: {} | ID: {}",
+                                    npc.faction.as_deref().unwrap_or("None"),
+                                    npc.id
+                                ))
+                                .small()
+                                .weak(),
+                            );
+                        });
+
+                        left_ui.add_space(4.0);
+                    }
                 }
             },
             |right_ui| {
                 // Right panel: Detail view
                 if let Some(idx) = selected {
-                    if let Some((_, _, npc)) = sorted_npcs.iter().find(|(i, _, _)| *i == idx) {
+                    if let Some((_, npc)) = sorted_npcs.iter().find(|(i, _)| *i == idx) {
                         right_ui.heading(&npc.name);
                         right_ui.separator();
 
@@ -582,12 +613,28 @@ impl NpcEditorState {
             });
     }
 
-    fn show_edit_view(&mut self, ui: &mut egui::Ui, campaign_dir: Option<&PathBuf>) -> bool {
+    fn show_edit_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        campaign_dir: Option<&PathBuf>,
+        npcs_file: &str,
+    ) -> bool {
         let mut needs_save = false;
         let is_add = self.mode == NpcEditorMode::Add;
 
         ui.heading(if is_add { "Add New NPC" } else { "Edit NPC" });
         ui.separator();
+
+        // If requested, reset persistent autocomplete buffers so the form displays
+        // values from the newly loaded buffer rather than stale typed text.
+        if self.reset_autocomplete_buffers {
+            let ctx = ui.ctx();
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:portrait:npc_edit_portrait".to_string()),
+            );
+            self.reset_autocomplete_buffers = false;
+        }
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -763,6 +810,30 @@ impl NpcEditorState {
                         if self.validation_errors.is_empty() {
                             if self.save_npc() {
                                 needs_save = true;
+                                if let Some(dir) = campaign_dir {
+                                    let path = dir.join(npcs_file);
+                                    match self.save_to_file(&path) {
+                                        Ok(_) => {
+                                            self.has_unsaved_changes = false;
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "Saved {}",
+                                                    path.display()
+                                                ))
+                                                .color(egui::Color32::from_rgb(80, 200, 120)),
+                                            );
+                                        }
+                                        Err(e) => {
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "Failed to save NPCs: {}",
+                                                    e
+                                                ))
+                                                .color(egui::Color32::RED),
+                                            );
+                                        }
+                                    }
+                                }
                                 self.mode = NpcEditorMode::List;
                             }
                         }
@@ -810,6 +881,8 @@ impl NpcEditorState {
         self.mode = NpcEditorMode::Add;
         self.edit_buffer = NpcEditBuffer::default();
         self.edit_buffer.id = self.next_npc_id();
+        // Ensure autocomplete widgets show values from the fresh buffer
+        self.reset_autocomplete_buffers = true;
     }
 
     /// Loads a portrait texture from the campaign assets directory
@@ -1085,6 +1158,8 @@ impl NpcEditorState {
             };
             self.selected_npc = Some(idx);
             self.mode = NpcEditorMode::Edit;
+            // Reset persistent autocomplete buffers so the form displays fresh values
+            self.reset_autocomplete_buffers = true;
         }
     }
 
@@ -1201,7 +1276,8 @@ impl NpcEditorState {
             is_innkeeper: self.edit_buffer.is_innkeeper,
         };
 
-        match self.mode {
+        // Perform the in-memory save and remember the result
+        let saved = match self.mode {
             NpcEditorMode::Add => {
                 self.npcs.push(npc);
                 true
@@ -1219,7 +1295,40 @@ impl NpcEditorState {
                 }
             }
             _ => false,
+        };
+
+        // If saved, attempt immediate persistence when we have campaign dir & filename
+        if saved {
+            // Mark unsaved until we can persist successfully
+            self.has_unsaved_changes = true;
+
+            if let (Some(dir), Some(filename)) = (&self.last_campaign_dir, &self.last_npcs_file) {
+                let path = dir.join(filename);
+                match self.save_to_file(&path) {
+                    Ok(_) => {
+                        // Persisted successfully; clear unsaved flag
+                        self.has_unsaved_changes = false;
+                    }
+                    Err(e) => {
+                        // Log error; leave unsaved flag true so user is aware
+                        eprintln!("Failed to persist NPCs to {}: {}", path.display(), e);
+                    }
+                }
+            }
         }
+
+        saved
+    }
+
+    fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+        let content = ron::ser::to_string_pretty(&self.npcs, ron::ser::PrettyConfig::default())
+            .map_err(|e| format!("Failed to serialize npcs: {}", e))?;
+        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+        Ok(())
     }
 
     fn export_all_npcs(&mut self) -> bool {
@@ -1539,6 +1648,77 @@ mod tests {
         assert!(!state.is_valid_id("123invalid"));
         assert!(!state.is_valid_id("invalid-id"));
         assert!(!state.is_valid_id(""));
+    }
+
+    #[test]
+    fn test_start_edit_npc_resets_autocomplete_buffers() {
+        // Ensure stored autocomplete buffers are cleared when starting an edit so the
+        // UI shows values from the loaded buffer rather than stale typed text.
+        let mut state = NpcEditorState::new();
+        let ctx = egui::Context::default();
+
+        // Populate stale buffer
+        crate::ui_helpers::store_autocomplete_buffer(
+            &ctx,
+            egui::Id::new("autocomplete:portrait:npc_edit_portrait"),
+            "character_040",
+        );
+
+        // Create NPC and start editing it
+        state.npcs.push(NpcDefinition {
+            id: "whisper".to_string(),
+            name: "Whisper".to_string(),
+            description: String::new(),
+            portrait_id: "character_055".to_string(),
+            dialogue_id: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+        });
+
+        state.start_edit_npc(0);
+        assert!(state.reset_autocomplete_buffers);
+
+        // Render the form (this will clear previous buffer and store current value)
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                state.show_edit_view(ui, None, "data/npcs.ron");
+            });
+        });
+
+        let portrait_buf = crate::ui_helpers::load_autocomplete_buffer(
+            &ctx,
+            egui::Id::new("autocomplete:portrait:npc_edit_portrait"),
+            || String::new(),
+        );
+        assert_eq!(portrait_buf, "character_055");
+    }
+
+    #[test]
+    fn test_save_npc_persists_when_campaign_dir_known() {
+        // Verify save_npc() will persist to disk when a campaign dir & filename are known.
+        let tmp = tempfile::tempdir().expect("Failed to create tempdir");
+        let dir = tmp.path().to_path_buf();
+
+        let mut state = NpcEditorState::new();
+
+        // Tell the editor where NPCs should be written
+        state.last_campaign_dir = Some(dir.clone());
+        state.last_npcs_file = Some("data/npcs.ron".to_string());
+
+        // Create and save a new NPC
+        state.start_add_npc();
+        state.edit_buffer.id = "test_npc".to_string();
+        state.edit_buffer.name = "Test NPC".to_string();
+        state.edit_buffer.description = "Test description".to_string();
+
+        assert!(state.save_npc());
+
+        let path = dir.join("data/npcs.ron");
+        assert!(path.exists());
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("test_npc"));
     }
 
     #[test]

@@ -289,6 +289,17 @@ impl ErrorFormatter {
                     "Use --no-balance-checks to skip balance validation".to_string(),
                 ]
             }
+
+            ValidationError::TooManyStartingPartyMembers { count, max } => {
+                vec![
+                    format!("Found {count} characters with starts_in_party=true, but max is {max}"),
+                    "Edit data/characters.ron and set starts_in_party=false for some characters"
+                        .to_string(),
+                    "Characters with starts_in_party=false will start at the starting inn"
+                        .to_string(),
+                    "Players can recruit them from the inn during gameplay".to_string(),
+                ]
+            }
         }
     }
 

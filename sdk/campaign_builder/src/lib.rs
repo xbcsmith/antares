@@ -141,6 +141,8 @@ pub struct CampaignMetadata {
     starting_direction: String,
     starting_gold: u32,
     starting_food: u32,
+    #[serde(default = "default_starting_inn")]
+    starting_inn: u8,
     max_party_size: usize,
     max_roster_size: usize,
     difficulty: Difficulty,
@@ -192,6 +194,10 @@ impl Difficulty {
     }
 }
 
+fn default_starting_inn() -> u8 {
+    1
+}
+
 impl Default for CampaignMetadata {
     fn default() -> Self {
         Self {
@@ -207,6 +213,7 @@ impl Default for CampaignMetadata {
             starting_direction: "North".to_string(),
             starting_gold: 100,
             starting_food: 10,
+            starting_inn: 1,
             max_party_size: 6,
             max_roster_size: 20,
             difficulty: Difficulty::Normal,
@@ -447,6 +454,8 @@ struct CampaignBuilderApp {
     show_validation_report: bool,
     validation_report: String,
     show_balance_stats: bool,
+    show_cleanup_candidates: bool,
+    cleanup_candidates_selected: std::collections::HashSet<PathBuf>,
 
     // File I/O pattern state
     file_load_merge_mode: bool,
@@ -547,6 +556,8 @@ impl Default for CampaignBuilderApp {
             show_validation_report: false,
             validation_report: String::new(),
             show_balance_stats: false,
+            show_cleanup_candidates: false,
+            cleanup_candidates_selected: std::collections::HashSet::new(),
 
             file_load_merge_mode: true, // Default to merge mode
 
@@ -1372,11 +1383,10 @@ impl CampaignBuilderApp {
             let npcs_path = dir.join(&self.campaign.npcs_file);
 
             if npcs_path.exists() {
-                let contents =
-                    std::fs::read_to_string(&npcs_path).map_err(|e| CampaignError::Io(e))?;
+                let contents = std::fs::read_to_string(&npcs_path).map_err(CampaignError::Io)?;
 
                 let npcs: Vec<antares::domain::world::npc::NpcDefinition> =
-                    ron::from_str(&contents).map_err(|e| CampaignError::Deserialization(e))?;
+                    ron::from_str(&contents).map_err(CampaignError::Deserialization)?;
 
                 self.npc_editor_state.npcs = npcs;
                 self.logger.log(
@@ -1838,11 +1848,59 @@ impl CampaignBuilderApp {
         self.campaign_editor_state.has_unsaved_changes = false;
         self.campaign_editor_state.mode = campaign_editor::CampaignEditorMode::List;
 
+        // Clear all loaded campaign content and reset editor states so the new
+        // campaign starts with an empty workspace rather than retaining the
+        // previously opened campaign's data.
+        self.items.clear();
+        self.items_editor_state = ItemsEditorState::new();
+
+        self.spells.clear();
+        self.spells_editor_state = SpellsEditorState::new();
+
+        self.monsters.clear();
+        self.monsters_editor_state = MonstersEditorState::new();
+
+        self.conditions.clear();
+        self.conditions_editor_state = ConditionsEditorState::new();
+
+        self.maps.clear();
+        self.maps_editor_state = MapsEditorState::new();
+
+        self.quests.clear();
+        self.quest_editor_state = QuestEditorState::default();
+
+        self.dialogues.clear();
+        self.dialogue_editor_state = DialogueEditorState::default();
+
+        // Reset NPCs, characters, classes and races editors
+        self.npc_editor_state = npc_editor::NpcEditorState::default();
+        self.characters_editor_state = characters_editor::CharactersEditorState::new();
+        self.classes_editor_state = classes_editor::ClassesEditorState::default();
+        self.races_editor_state = races_editor::RacesEditorState::default();
+
+        // Reset campaign file/path-related state
         self.campaign_path = None;
         self.campaign_dir = None;
         self.unsaved_changes = false;
         self.validation_errors.clear();
         self.file_tree.clear();
+
+        // Clear undo/redo history and any remembered content in the manager's state
+        self.undo_redo_manager.clear();
+        {
+            let s = self.undo_redo_manager.state_mut();
+            s.items.clear();
+            s.spells.clear();
+            s.monsters.clear();
+            s.maps.clear();
+            s.quests.clear();
+            s.dialogues.clear();
+            s.metadata_changed = false;
+        }
+
+        // Drop asset manager to avoid referencing previous campaign assets
+        self.asset_manager = None;
+
         self.status_message = "New campaign created.".to_string();
     }
 
@@ -2045,6 +2103,8 @@ impl CampaignBuilderApp {
                             &self.dialogues,
                             &self.maps,
                             &self.classes_editor_state.classes,
+                            &self.characters_editor_state.characters,
+                            &self.npc_editor_state.npcs,
                         );
                         manager.mark_data_files_as_referenced();
                     }
@@ -3011,6 +3071,7 @@ impl eframe::App for CampaignBuilderApp {
                     &self.quests,
                     self.campaign_dir.as_ref(),
                     &self.tool_config.display,
+                    &self.campaign.npcs_file,
                 ) {
                     self.unsaved_changes = true;
                 }
@@ -3699,7 +3760,18 @@ impl CampaignBuilderApp {
                         &self.campaign.dialogue_file,
                         Some("data/conditions.ron"),
                     );
-                    // DEBUG: Show the number of scanned assets to aid troubleshooting (temporary)
+                    // Scan references on initial load so portraits are properly marked as referenced
+                    manager.scan_references(
+                        &self.items,
+                        &self.quests,
+                        &self.dialogues,
+                        &self.maps,
+                        &self.classes_editor_state.classes,
+                        &self.characters_editor_state.characters,
+                        &self.npc_editor_state.npcs,
+                    );
+                    manager.mark_data_files_as_referenced();
+
                     self.status_message = format!("Scanned {} assets", manager.assets().len());
                     self.asset_manager = Some(manager);
 
@@ -3732,7 +3804,19 @@ impl CampaignBuilderApp {
                     if let Err(e) = manager.scan_directory() {
                         self.status_message = format!("Failed to refresh assets: {}", e);
                     } else {
-                        self.status_message = "Assets refreshed".to_string();
+                        // After refreshing assets, rescan references to properly mark portraits
+                        // referenced by characters and NPCs
+                        manager.scan_references(
+                            &self.items,
+                            &self.quests,
+                            &self.dialogues,
+                            &self.maps,
+                            &self.classes_editor_state.classes,
+                            &self.characters_editor_state.characters,
+                            &self.npc_editor_state.npcs,
+                        );
+                        manager.mark_data_files_as_referenced();
+                        self.status_message = "Assets refreshed and references scanned".to_string();
                     }
                 }
 
@@ -3744,6 +3828,8 @@ impl CampaignBuilderApp {
                         &self.dialogues,
                         &self.maps,
                         &self.classes_editor_state.classes,
+                        &self.characters_editor_state.characters,
+                        &self.npc_editor_state.npcs,
                     );
                     // Mark successfully loaded data files as referenced
                     manager.mark_data_files_as_referenced();
@@ -3894,29 +3980,157 @@ impl CampaignBuilderApp {
                                 ))
                                 .clicked()
                             {
-                                // Show confirmation or perform cleanup
-                                match manager.cleanup_unused(true) {
-                                    Ok(would_delete) => {
-                                        self.status_message = format!(
-                                            "Would delete {} assets (dry run)",
-                                            would_delete.len()
-                                        );
-                                    }
-                                    Err(e) => {
-                                        self.status_message = format!("Cleanup error: {}", e);
-                                    }
-                                }
+                                // Toggle the cleanup candidates display
+                                self.show_cleanup_candidates = !self.show_cleanup_candidates;
                             }
                             ui.label(egui::RichText::new("(Safe cleanup preview)").small().weak());
                         });
+
+                        // Show the cleanup candidates list if toggled
+                        if self.show_cleanup_candidates {
+                            ui.add_space(5.0);
+                            ui.separator();
+                            ui.label(egui::RichText::new("Cleanup Candidates:").strong());
+
+                            // Clone candidates to avoid borrow issues when deleting
+                            let candidates: Vec<PathBuf> = manager.get_cleanup_candidates()
+                                .iter()
+                                .map(|p| (*p).clone())
+                                .collect();
+
+                            // Action buttons
+                            ui.horizontal(|ui| {
+                                if ui.button("Select All").clicked() {
+                                    self.cleanup_candidates_selected.clear();
+                                    for path in &candidates {
+                                        self.cleanup_candidates_selected.insert(path.clone());
+                                    }
+                                }
+
+                                if ui.button("Deselect All").clicked() {
+                                    self.cleanup_candidates_selected.clear();
+                                }
+
+                                ui.separator();
+
+                                let selected_count = self.cleanup_candidates_selected.len();
+                                if selected_count > 0 {
+                                    if ui.button(format!("🗑️ Delete {} Selected", selected_count))
+                                        .clicked()
+                                    {
+                                        // Calculate total size of selected files
+                                        let mut total_size = 0u64;
+                                        for path in &self.cleanup_candidates_selected {
+                                            if let Some(asset) = manager.assets().get(path) {
+                                                total_size += asset.size;
+                                            }
+                                        }
+
+                                        // Format size
+                                        let size_str = if total_size < 1024 {
+                                            format!("{} B", total_size)
+                                        } else if total_size < 1024 * 1024 {
+                                            format!("{:.1} KB", total_size as f64 / 1024.0)
+                                        } else {
+                                            format!("{:.1} MB", total_size as f64 / (1024.0 * 1024.0))
+                                        };
+
+                                        self.status_message = format!(
+                                            "⚠️ About to delete {} files ({}) - Click again to confirm",
+                                            selected_count,
+                                            size_str
+                                        );
+
+                                        // Perform deletion
+                                        let mut deleted_count = 0;
+                                        let mut failed_deletions = Vec::new();
+
+                                        for path in self.cleanup_candidates_selected.iter() {
+                                            match manager.remove_asset(path) {
+                                                Ok(_) => deleted_count += 1,
+                                                Err(e) => failed_deletions.push(format!("{}: {}", path.display(), e)),
+                                            }
+                                        }
+
+                                        // Update status message
+                                        if failed_deletions.is_empty() {
+                                            self.status_message = format!(
+                                                "✅ Successfully deleted {} files ({})",
+                                                deleted_count,
+                                                size_str
+                                            );
+                                        } else {
+                                            self.status_message = format!(
+                                                "⚠️ Deleted {} files, {} failed: {}",
+                                                deleted_count,
+                                                failed_deletions.len(),
+                                                failed_deletions.join(", ")
+                                            );
+                                        }
+
+                                        // Clear selection after deletion
+                                        self.cleanup_candidates_selected.clear();
+                                    }
+                                } else {
+                                    ui.label(egui::RichText::new("Select files to delete").weak());
+                                }
+                            });
+
+                            ui.add_space(5.0);
+
+                            egui::ScrollArea::vertical()
+                                .max_height(200.0)
+                                .show(ui, |ui| {
+                                    for candidate_path in &candidates {
+                                        let is_selected = self.cleanup_candidates_selected.contains(candidate_path);
+
+                                        ui.horizontal(|ui| {
+                                            let mut selected = is_selected;
+                                            if ui.checkbox(&mut selected, "").changed() {
+                                                if selected {
+                                                    self.cleanup_candidates_selected.insert(candidate_path.clone());
+                                                } else {
+                                                    self.cleanup_candidates_selected.remove(candidate_path);
+                                                }
+                                            }
+
+                                            ui.label("🗑️");
+                                            ui.label(candidate_path.display().to_string());
+
+                                            // Show file size
+                                            if let Some(asset) = manager.assets().get(candidate_path) {
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(egui::Align::Center),
+                                                    |ui| {
+                                                        ui.label(
+                                                            egui::RichText::new(asset.size_string())
+                                                                .small()
+                                                                .weak()
+                                                        );
+                                                    }
+                                                );
+                                            }
+                                        });
+                                    }
+                                });
+
+                            ui.add_space(5.0);
+                            ui.label(egui::RichText::new(
+                                "These files are not referenced by any campaign data and could be safely removed."
+                            ).small().weak());
+                        }
                     }
                 });
                 ui.separator();
             }
 
-            // Asset list with usage context
+            // Asset list with usage context (sorted by path)
             egui::ScrollArea::vertical().show(ui, |ui| {
-                for (path, asset) in manager.assets() {
+                // Convert HashMap to sorted Vec for consistent display
+                let mut sorted_assets: Vec<_> = manager.assets().iter().collect();
+                sorted_assets.sort_by(|a, b| a.0.cmp(b.0));
+
+                for (path, asset) in sorted_assets {
                     ui.group(|ui| {
                         ui.vertical(|ui| {
                             // Asset header
@@ -4026,6 +4240,91 @@ mod tests {
     use antares::domain::combat::monster::MonsterCondition;
     use antares::domain::quest::QuestStage;
     use antares::domain::races::RaceDefinition;
+
+    #[test]
+    fn test_do_new_campaign_clears_loaded_data() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Populate editors and domain data to simulate an open campaign
+        app.items.push(ItemsEditorState::default_item());
+        app.items_editor_state.search_query = "sword".to_string();
+
+        app.spells.push(CampaignBuilderApp::default_spell());
+        app.spells_editor_state.search_query = "fire".to_string();
+
+        app.monsters.push(CampaignBuilderApp::default_monster());
+        app.monsters_editor_state.edit_buffer.name = "Orc".to_string();
+
+        // Add a simple condition definition
+        use antares::domain::conditions::{ConditionDefinition, ConditionDuration};
+        app.conditions.push(ConditionDefinition {
+            id: "cond_1".to_string(),
+            name: "Test Condition".to_string(),
+            description: String::new(),
+            effects: Vec::new(),
+            default_duration: ConditionDuration::Permanent,
+            icon_id: None,
+        });
+
+        // Add a map and a quest
+        use antares::domain::world::Map;
+        app.maps.push(Map::new(
+            1,
+            "test_map".to_string(),
+            "desc".to_string(),
+            10,
+            10,
+        ));
+        app.quests
+            .push(antares::domain::quest::Quest::new(1, "Test Quest", "desc"));
+
+        // Add a dialogue tree
+        use antares::domain::dialogue::DialogueTree;
+        let dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        app.dialogues.push(dialogue);
+        app.dialogue_editor_state.selected_dialogue = Some(0);
+
+        // Add an NPC
+        app.npc_editor_state
+            .npcs
+            .push(antares::domain::world::npc::NpcDefinition::new(
+                "npc_1",
+                "NPC 1",
+                "portrait_1",
+            ));
+
+        // Sanity checks: ensure data present before invoking the method under test
+        assert!(!app.items.is_empty());
+        assert!(!app.spells.is_empty());
+        assert!(!app.monsters.is_empty());
+        assert!(!app.maps.is_empty());
+        assert!(!app.quests.is_empty());
+        assert!(!app.dialogues.is_empty());
+        assert!(!app.npc_editor_state.npcs.is_empty());
+
+        // Call the method under test
+        app.do_new_campaign();
+
+        // Assert everything cleared and editors reset
+        assert!(app.items.is_empty());
+        assert!(app.spells.is_empty());
+        assert!(app.monsters.is_empty());
+        assert!(app.maps.is_empty());
+        assert!(app.quests.is_empty());
+        assert!(app.dialogues.is_empty());
+        assert!(app.npc_editor_state.npcs.is_empty());
+
+        // Editor states reset
+        assert!(app.items_editor_state.search_query.is_empty());
+        assert!(app.spells_editor_state.search_query.is_empty());
+        assert_eq!(
+            app.monsters_editor_state.edit_buffer.name,
+            MonstersEditorState::new().edit_buffer.name,
+            "Monster editor buffer should be reset to default"
+        );
+        assert!(app.asset_manager.is_none());
+        assert!(!app.unsaved_changes);
+    }
 
     #[test]
     fn test_generate_category_status_checks_empty_races_shows_info() {
@@ -4622,6 +4921,7 @@ mod tests {
             starting_direction: "North".to_string(),
             starting_gold: 200,
             starting_food: 20,
+            starting_inn: 1,
             max_party_size: 6,
             max_roster_size: 20,
             difficulty: Difficulty::Hard,

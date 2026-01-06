@@ -13,6 +13,7 @@ use antares::game::systems::hud::HudPlugin;
 use antares::game::systems::map::MapRenderingPlugin;
 use antares::sdk::campaign_loader::{Campaign, CampaignLoader};
 use antares::sdk::game_config::ShadowQuality;
+use bevy::log::{BoxedFmtLayer, BoxedLayer, LogPlugin, DEFAULT_FILTER};
 use bevy::prelude::*;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 use bevy::render::RenderPlugin;
@@ -20,6 +21,9 @@ use bevy::window::{MonitorSelection, PresentMode, WindowMode};
 use bevy_egui::EguiPlugin;
 use clap::Parser;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tracing::Level;
+use tracing_subscriber::{filter::FilterFn, Layer};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -27,10 +31,20 @@ struct Args {
     /// Path to campaign directory
     #[arg(short, long)]
     campaign: Option<String>,
+
+    /// Path to log file to write logs to (tee)
+    #[arg(long, value_name = "FILE")]
+    log: Option<PathBuf>,
 }
 
 fn main() {
     let args = Args::parse();
+
+    if let Some(log_path) = &args.log {
+        // Make log file path available to our LogPlugin custom layer
+        std::env::set_var("ANTARES_LOG_FILE", log_path.to_string_lossy().to_string());
+        eprintln!("Logging to file: {}", log_path.display());
+    }
 
     // Let Bevy's LogPlugin initialize logging to avoid double-initialization.
     // Tracing/log setup is handled by the engine's LogPlugin now.
@@ -100,6 +114,18 @@ fn main() {
                     ..default()
                 }),
                 ..default()
+            })
+            .set(LogPlugin {
+                // Keep bevy defaults; when `--log` is provided raise the global level so debug messages
+                // are captured in the file, while the console fmt layer still mutes noisy cosmic_text debug lines.
+                filter: DEFAULT_FILTER.to_string(),
+                level: if args.log.is_some() {
+                    Level::DEBUG
+                } else {
+                    Level::INFO
+                },
+                custom_layer: antares_file_custom_layer,
+                fmt_layer: antares_console_fmt_layer,
             }),
     )
     .insert_resource(GraphicsConfigResource {
@@ -121,6 +147,71 @@ fn main() {
 
     // .add_plugins(antares::game::systems::ui::UiPlugin) // Temporarily disabled due to egui context issue
     app.run();
+}
+
+/// Console fmt layer that suppresses noisy relayout debug messages from cosmic_text
+fn antares_console_fmt_layer(_app: &mut App) -> Option<BoxedFmtLayer> {
+    let fmt_layer = tracing_subscriber::fmt::Layer::default()
+        .with_writer(std::io::stderr)
+        .with_filter(FilterFn::new(|meta| {
+            // Mute DEBUG/TRACE level logs from cosmic_text::buffer to avoid overwhelming the console
+            if meta.target() == "cosmic_text::buffer" {
+                match *meta.level() {
+                    tracing::Level::DEBUG | tracing::Level::TRACE => return false,
+                    _ => {}
+                }
+            }
+            true
+        }));
+    Some(Box::new(fmt_layer))
+}
+
+/// Simple writer that delegates to an Arc<Mutex<File>> so the MakeWriter closure can clone it
+struct ArcFileWriter(Arc<Mutex<std::fs::File>>);
+
+impl std::io::Write for ArcFileWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut f = self.0.lock().unwrap();
+        f.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut f = self.0.lock().unwrap();
+        f.flush()
+    }
+}
+
+/// If ANTARES_LOG_FILE is set, provide an extra file fmt layer so logs are also written to that file.
+fn antares_file_custom_layer(_app: &mut App) -> Option<BoxedLayer> {
+    if let Ok(path_str) = std::env::var("ANTARES_LOG_FILE") {
+        let path = std::path::PathBuf::from(path_str);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            Ok(file) => {
+                let arc = Arc::new(Mutex::new(file));
+                let make_writer = {
+                    let arc = arc.clone();
+                    move || ArcFileWriter(arc.clone())
+                };
+                let file_layer = tracing_subscriber::fmt::Layer::default()
+                    .with_writer(make_writer)
+                    .with_ansi(false);
+                // Keep the layer; the Arc ensures file stays alive
+                Some(Box::new(file_layer))
+            }
+            Err(e) => {
+                eprintln!("Failed to open log file '{}': {}", path.display(), e);
+                None
+            }
+        }
+    } else {
+        None
+    }
 }
 
 /// Main game plugin organizing all systems
@@ -164,6 +255,8 @@ impl Plugin for AntaresPlugin {
         // Register dialogue and quest plugins so their systems are available
         app.add_plugins(antares::game::systems::dialogue::DialoguePlugin);
         app.add_plugins(antares::game::systems::quest::QuestPlugin);
+        app.add_plugins(antares::game::systems::inn_ui::InnUiPlugin);
+        app.add_plugins(antares::game::systems::recruitment_dialog::RecruitmentDialogPlugin);
     }
 }
 
@@ -195,6 +288,10 @@ pub struct GraphicsConfigResource {
 mod tests {
     use super::*;
     use antares::sdk::game_config::{CameraConfig, ControlsConfig, GameConfig, GraphicsConfig};
+    use std::sync::Mutex;
+
+    // Serialize tests that modify the process environment to avoid races when tests run in parallel.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     /// Helper to create a test campaign with custom graphics config
     fn create_test_campaign(graphics: GraphicsConfig) -> Campaign {
@@ -216,6 +313,7 @@ mod tests {
                 starting_direction: antares::domain::types::Direction::North,
                 starting_gold: 100,
                 starting_food: 50,
+                starting_inn: 1,
                 max_party_size: 6,
                 max_roster_size: 20,
                 difficulty: antares::sdk::campaign_loader::Difficulty::Normal,
@@ -396,5 +494,50 @@ mod tests {
         let debug_output = format!("{:?}", resource);
         assert!(debug_output.contains("msaa_samples"));
         assert!(debug_output.contains("shadow_quality"));
+    }
+
+    #[test]
+    fn test_console_fmt_layer_present() {
+        // Ensure the console fmt layer factory is present and returns a layer
+        let mut app = App::new();
+        assert!(antares_console_fmt_layer(&mut app).is_some());
+    }
+
+    #[test]
+    fn test_file_custom_layer_none_when_env_unset() {
+        // When ANTARES_LOG_FILE is unset, the custom file layer factory returns None
+        // Lock to prevent races with other tests that modify the environment.
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let original = std::env::var_os("ANTARES_LOG_FILE");
+        std::env::remove_var("ANTARES_LOG_FILE");
+
+        let mut app = App::new();
+        assert!(antares_file_custom_layer(&mut app).is_none());
+
+        // Restore original env var state
+        match original {
+            Some(val) => std::env::set_var("ANTARES_LOG_FILE", val),
+            None => std::env::remove_var("ANTARES_LOG_FILE"),
+        }
+    }
+
+    #[test]
+    fn test_file_custom_layer_some_when_env_set() {
+        // When ANTARES_LOG_FILE is set to a writable path, the custom file layer factory returns Some
+        // Lock to prevent races with other tests that modify the environment.
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let original = std::env::var_os("ANTARES_LOG_FILE");
+
+        let tmp = tempfile::NamedTempFile::new().expect("create tmp file");
+        std::env::set_var("ANTARES_LOG_FILE", tmp.path().to_string_lossy().to_string());
+
+        let mut app = App::new();
+        assert!(antares_file_custom_layer(&mut app).is_some());
+
+        // Restore original env var state
+        match original {
+            Some(val) => std::env::set_var("ANTARES_LOG_FILE", val),
+            None => std::env::remove_var("ANTARES_LOG_FILE"),
+        }
     }
 }

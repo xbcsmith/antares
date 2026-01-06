@@ -53,6 +53,16 @@ pub enum EventResult {
         /// NPC identifier (string-based ID for NPC database lookup)
         npc_id: crate::domain::world::NpcId,
     },
+    /// Recruitable character encounter
+    RecruitableCharacter {
+        /// Character definition ID for recruitment
+        character_id: String,
+    },
+    /// Enter an inn for party management
+    EnterInn {
+        /// Inn/town identifier
+        inn_id: u8,
+    },
 }
 
 /// Errors that can occur during event processing
@@ -189,6 +199,23 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
             EventResult::NpcDialogue {
                 npc_id: npc_id.clone(),
             }
+        }
+
+        MapEvent::RecruitableCharacter { character_id, .. } => {
+            // Recruitment encounters are one-time - remove after triggered
+            world
+                .get_current_map_mut()
+                .ok_or(EventError::MapNotFound(current_map_id))?
+                .remove_event(position);
+
+            EventResult::RecruitableCharacter {
+                character_id: character_id.clone(),
+            }
+        }
+
+        MapEvent::EnterInn { inn_id, .. } => {
+            // Inn entrances are repeatable - don't remove
+            EventResult::EnterInn { inn_id }
         }
     };
 
@@ -502,6 +529,107 @@ mod tests {
         assert!(matches!(
             trigger_event(&mut world, pos1),
             Ok(EventResult::Sign { .. })
+        ));
+    }
+
+    #[test]
+    fn test_enter_inn_event() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
+
+        let pos = Position::new(10, 10);
+        map.add_event(
+            pos,
+            MapEvent::EnterInn {
+                name: "Cozy Inn".to_string(),
+                description: "A welcoming inn".to_string(),
+                inn_id: 1,
+            },
+        );
+
+        world.add_map(map);
+        world.set_current_map(1);
+
+        let result = trigger_event(&mut world, pos);
+        assert!(result.is_ok());
+        match result.unwrap() {
+            EventResult::EnterInn { inn_id } => {
+                assert_eq!(inn_id, 1);
+            }
+            _ => panic!("Expected EnterInn event"),
+        }
+
+        // Inn entrance should still be there (repeatable)
+        let result2 = trigger_event(&mut world, pos);
+        assert!(result2.is_ok());
+        match result2.unwrap() {
+            EventResult::EnterInn { inn_id } => {
+                assert_eq!(inn_id, 1);
+            }
+            _ => panic!("Expected EnterInn event on repeat"),
+        }
+    }
+
+    #[test]
+    fn test_enter_inn_event_with_different_inn_ids() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
+
+        let pos1 = Position::new(5, 5);
+        let pos2 = Position::new(10, 10);
+        let pos3 = Position::new(15, 15);
+
+        // Add three different inns
+        map.add_event(
+            pos1,
+            MapEvent::EnterInn {
+                name: "Cozy Inn".to_string(),
+                description: "A warm inn".to_string(),
+                inn_id: 1,
+            },
+        );
+        map.add_event(
+            pos2,
+            MapEvent::EnterInn {
+                name: "Dragon's Rest".to_string(),
+                description: "An upscale inn".to_string(),
+                inn_id: 2,
+            },
+        );
+        map.add_event(
+            pos3,
+            MapEvent::EnterInn {
+                name: "Wayfarer's Lodge".to_string(),
+                description: "A rustic inn".to_string(),
+                inn_id: 3,
+            },
+        );
+
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // Trigger each inn entrance and verify correct inn_id
+        let r1 = trigger_event(&mut world, pos1);
+        assert!(matches!(r1, Ok(EventResult::EnterInn { inn_id: 1 })));
+
+        let r2 = trigger_event(&mut world, pos2);
+        assert!(matches!(r2, Ok(EventResult::EnterInn { inn_id: 2 })));
+
+        let r3 = trigger_event(&mut world, pos3);
+        assert!(matches!(r3, Ok(EventResult::EnterInn { inn_id: 3 })));
+
+        // Verify all inn entrances are repeatable
+        assert!(matches!(
+            trigger_event(&mut world, pos1),
+            Ok(EventResult::EnterInn { inn_id: 1 })
+        ));
+        assert!(matches!(
+            trigger_event(&mut world, pos2),
+            Ok(EventResult::EnterInn { inn_id: 2 })
+        ));
+        assert!(matches!(
+            trigger_event(&mut world, pos3),
+            Ok(EventResult::EnterInn { inn_id: 3 })
         ));
     }
 }

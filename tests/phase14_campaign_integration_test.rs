@@ -31,6 +31,7 @@ fn create_test_campaign(id: &str, name: &str, version: &str) -> Campaign {
             starting_direction: Direction::North,
             starting_gold: 500,
             starting_food: 100,
+            starting_inn: 1,
             max_party_size: 6,
             max_roster_size: 20,
             difficulty: Difficulty::Normal,

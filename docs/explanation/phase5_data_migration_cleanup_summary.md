@@ -32,7 +32,7 @@ All 6 tutorial campaign maps were successfully migrated from inline NPC definiti
 | Map | Name | Legacy NPCs | New Placements |
 |-----|------|-------------|----------------|
 | Map 1 | Town Square | 4 | 4 |
-| Map 2 | Fizban's Cave | 2 | 2 |
+| Map 2 | Arcturus's Cave | 2 | 2 |
 | Map 3 | Ancient Ruins | 0 | 0 |
 | Map 4 | Dark Forest | 1 | 1 |
 | Map 5 | Mountain Pass | 4 | 4 |
@@ -49,8 +49,8 @@ Map 1:
   ID 4 "High Priestess" → "tutorial_priestess_town"
 
 Map 2:
-  ID 10 "Fizban"         → "tutorial_wizard_fizban"
-  ID 11 "Fizban Brother" → "tutorial_wizard_fizban_brother"
+  ID 10 "Arcturus"         → "tutorial_wizard_arcturus"
+  ID 11 "Arcturus Brother" → "tutorial_wizard_arcturus_brother"
 
 Map 4:
   ID 5 "Lost Ranger" → "tutorial_ranger_lost"
@@ -234,7 +234,7 @@ Created temporary test to verify all migrated maps load correctly:
 
 ```
 ✅ Map 1 (Town Square) - 4 NPC placements, 6 events
-✅ Map 2 (Fizban's Cave) - 2 NPC placements, 3 events
+✅ Map 2 (Arcturus's Cave) - 2 NPC placements, 3 events
 ✅ Map 3 (Ancient Ruins) - 0 NPC placements, 10 events
 ✅ Map 4 (Dark Forest) - 1 NPC placement, 15 events
 ✅ Map 5 (Mountain Pass) - 4 NPC placements, 5 events

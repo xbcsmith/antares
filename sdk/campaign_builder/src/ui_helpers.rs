@@ -149,6 +149,7 @@ fn make_autocomplete_id(_ui: &egui::Ui, prefix: &str, id_salt: &str) -> egui::Id
 /// * `ctx` - the `egui::Context` (e.g. `ui.ctx()`)
 /// * `id` - the `egui::Id` identifying the buffer
 /// * `default` - fallback factory invoked when no buffer exists
+#[allow(clippy::map_clone)]
 pub fn load_autocomplete_buffer(
     ctx: &egui::Context,
     id: egui::Id,
@@ -2820,7 +2821,7 @@ pub fn autocomplete_item_list_selector(
 
         // Read persistent add buffer into a local String, render the Autocomplete widget
         // with it, then persist the edited buffer back into egui Memory so it survives frames.
-        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || String::new());
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
 
         ui.horizontal(|ui| {
             ui.label("Add item:");
@@ -2919,7 +2920,7 @@ pub fn autocomplete_proficiency_list_selector(
         // Read the persisted add buffer into a local String so the widget can
         // mutate it without holding a long-lived mutable borrow of egui Memory.
         // After rendering, write the updated buffer back into Memory.
-        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || String::new());
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
 
         ui.horizontal(|ui| {
             ui.label("Add proficiency:");
@@ -3014,7 +3015,7 @@ pub fn autocomplete_tag_list_selector(
 
         // Read persistent add buffer into a local String so the widget can mutate it
         // without holding a long-lived borrow into egui Memory. After rendering, write the updated value back.
-        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || String::new());
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
 
         ui.horizontal(|ui| {
             ui.label("Add tag:");
@@ -3107,7 +3108,7 @@ pub fn autocomplete_ability_list_selector(
 
         // Read persistent add buffer into a local String so the widget can mutate it
         // without holding a long-lived borrow into egui Memory. After rendering, write the updated value back.
-        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || String::new());
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
 
         ui.horizontal(|ui| {
             ui.label("Add ability:");
@@ -3313,7 +3314,7 @@ pub fn autocomplete_monster_list_selector(
         let buffer_id = make_autocomplete_id(ui, "monster_add", id_salt);
         let candidates: Vec<String> = monsters.iter().map(|m| m.name.clone()).collect();
 
-        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || String::new());
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
 
         ui.horizontal(|ui| {
             ui.label("Add monster:");
@@ -5107,7 +5108,7 @@ mod tests {
                 ui.ctx().memory_mut(|mem| {
                     let buf = mem
                         .data
-                        .get_temp_mut_or_insert_with::<String>(id, || String::new());
+                        .get_temp_mut_or_insert_with::<String>(id, String::new);
                     *buf = "Sw".to_string();
                 });
             });
@@ -5149,7 +5150,7 @@ mod tests {
             ui.ctx().memory_mut(|mem| {
                 let buf = mem
                     .data
-                    .get_temp_mut_or_insert_with::<String>(id, || String::new());
+                    .get_temp_mut_or_insert_with::<String>(id, String::new);
                 *buf = "Over".to_string();
             });
 
