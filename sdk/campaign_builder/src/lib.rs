@@ -141,8 +141,8 @@ pub struct CampaignMetadata {
     starting_direction: String,
     starting_gold: u32,
     starting_food: u32,
-    #[serde(default = "default_starting_inn")]
-    starting_inn: u8,
+    #[serde(default = "default_starting_innkeeper")]
+    starting_innkeeper: String,
     max_party_size: usize,
     max_roster_size: usize,
     difficulty: Difficulty,
@@ -194,8 +194,8 @@ impl Difficulty {
     }
 }
 
-fn default_starting_inn() -> u8 {
-    1
+fn default_starting_innkeeper() -> String {
+    "tutorial_innkeeper_town".to_string()
 }
 
 impl Default for CampaignMetadata {
@@ -213,7 +213,7 @@ impl Default for CampaignMetadata {
             starting_direction: "North".to_string(),
             starting_gold: 100,
             starting_food: 10,
-            starting_inn: 1,
+            starting_innkeeper: "tutorial_innkeeper_town".to_string(),
             max_party_size: 6,
             max_roster_size: 20,
             difficulty: Difficulty::Normal,
@@ -4593,6 +4593,61 @@ mod tests {
     }
 
     #[test]
+    fn test_validation_starting_innkeeper_missing() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+        app.campaign.name = "Test".to_string();
+        app.campaign.starting_map = "test_map".to_string();
+
+        // No NPCs loaded - starting_innkeeper should be flagged as missing
+        app.campaign.starting_innkeeper = "does_not_exist".to_string();
+        app.validate_campaign();
+
+        let has_inn_error = app.validation_errors.iter().any(|e| {
+            e.category == validation::ValidationCategory::Configuration
+                && e.is_error()
+                && e.message.contains("Starting innkeeper")
+        });
+        assert!(has_inn_error);
+    }
+
+    #[test]
+    fn test_validation_starting_innkeeper_not_innkeeper() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+        app.campaign.name = "Test".to_string();
+        app.campaign.starting_map = "test_map".to_string();
+
+        // Add an NPC that exists but is NOT an innkeeper
+        app.npc_editor_state
+            .npcs
+            .push(crate::domain::world::npc::NpcDefinition::new(
+                "npc_not_inn".to_string(),
+                "NPC Not Inn".to_string(),
+                "portrait.png".to_string(),
+            ));
+
+        app.campaign.starting_innkeeper = "npc_not_inn".to_string();
+        app.validate_campaign();
+
+        let has_inn_error = app.validation_errors.iter().any(|e| {
+            e.category == validation::ValidationCategory::Configuration
+                && e.is_error()
+                && e.message.contains("is not marked as is_innkeeper")
+        });
+        assert!(has_inn_error);
+    }
+
+    #[test]
+    fn test_default_starting_innkeeper() {
+        let metadata = CampaignMetadata::default();
+        assert_eq!(
+            metadata.starting_innkeeper,
+            "tutorial_innkeeper_town".to_string()
+        );
+    }
+
+    #[test]
     fn test_metadata_editor_validate_triggers_validation_and_switches_tab() {
         let mut app = CampaignBuilderApp::default();
 
@@ -4921,7 +4976,7 @@ mod tests {
             starting_direction: "North".to_string(),
             starting_gold: 200,
             starting_food: 20,
-            starting_inn: 1,
+            starting_innkeeper: "tutorial_innkeeper_town".to_string(),
             max_party_size: 6,
             max_roster_size: 20,
             difficulty: Difficulty::Hard,

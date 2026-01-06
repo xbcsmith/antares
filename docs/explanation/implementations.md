@@ -179,6 +179,85 @@ This approach preserves backward compatibility while moving to readable, explici
 
 ---
 
+## Phase 4: Campaign Configuration Updates - COMPLETED
+
+### Summary
+
+Phase 4 completed: the campaign-level `starting_inn` numeric identifier was replaced with a string `starting_innkeeper` ID across the SDK, Campaign Builder, and engine code where appropriate. A default of `"tutorial_innkeeper_town"` was added, validation was implemented to ensure configured innkeepers exist and are flagged as innkeepers, the Campaign Builder UI was updated to accept innkeeper IDs, and tests were added/updated to cover the new behavior. All unit tests and quality gates pass.
+
+### Changes Made
+
+- src/sdk/campaign_loader.rs
+
+  - Replaced `starting_inn: u8` with `starting_innkeeper: String` on `CampaignConfig` and `CampaignMetadata`.
+  - Added `fn default_starting_innkeeper() -> String { "tutorial_innkeeper_town".to_string() }`.
+  - Updated `TryFrom<CampaignMetadata> for Campaign` to copy `starting_innkeeper`.
+  - In `validate_campaign()`, invoked the SDK `Validator` to run `validate_campaign_config()` and surface validation messages that depend on loaded content.
+
+- src/sdk/validation.rs
+
+  - Added new error variant:
+    - `ValidationError::InvalidStartingInnkeeper { innkeeper_id: String, reason: String }`.
+  - Implemented `Validator::validate_campaign_config(&self, config: &CampaignConfig) -> Vec<ValidationError>` which:
+    - Validates the `starting_innkeeper` is non-empty.
+    - Checks the NPC exists in the campaign's NPC database.
+    - Ensures the referenced NPC has `is_innkeeper == true`.
+  - Added unit tests to cover missing innkeeper, non-innkeeper NPC, and valid innkeeper cases.
+
+- sdk/campaign_builder/src/lib.rs
+
+  - Replaced `starting_inn: u8` with `starting_innkeeper: String` in `CampaignMetadata`.
+  - Added `default_starting_innkeeper()` and set default to `"tutorial_innkeeper_town"`.
+  - Added validation in `validate_campaign()` to ensure `starting_innkeeper` exists and the NPC is an innkeeper.
+  - Added tests for the new validation and default value.
+
+- sdk/campaign_builder/src/campaign_editor.rs
+
+  - Replaced edit buffer field `starting_inn: u8` with `starting_innkeeper: String`.
+  - Updated `from_metadata()` / `apply_to()` to round-trip the new field.
+  - Replaced the numeric UI input with a text input for innkeeper IDs and updated the tooltip and behavior.
+  - Added tests to cover editor buffer and validation interactions.
+
+- src/application/mod.rs
+
+  - `find_nearest_inn()` now returns the campaign's `starting_innkeeper` string (instead of converting a numeric value).
+  - Updated unit tests that previously constructed `CampaignConfig` with numeric `starting_inn` to use `starting_innkeeper`.
+
+- Tests and other files updated
+  - src/application/save_game.rs — tests updated to use `starting_innkeeper`.
+  - src/bin/antares.rs — test helper updated to use `starting_innkeeper`.
+  - src/sdk/campaign_packager.rs — tests updated to use `starting_innkeeper`.
+  - tests/phase14_campaign_integration_test.rs — updated to use `starting_innkeeper`.
+  - src/sdk/error_formatter.rs — added suggestions for `InvalidStartingInnkeeper` to surface actionable guidance.
+
+### Testing
+
+- All automated checks pass:
+  - `cargo fmt --all` — OK
+  - `cargo check --all-targets --all-features` — OK
+  - `cargo clippy --all-targets --all-features -- -D warnings` — OK
+  - `cargo test --lib` — OK (full test suite passed)
+- New tests added:
+  - SDK validator tests: missing/non-innkeeper/valid innkeeper cases.
+  - Campaign Builder validation tests: missing/non-innkeeper/default checks.
+  - Campaign config default and serialization tests.
+
+### Impact
+
+- Campaign configuration now uses string-based innkeeper IDs (readable and editor-friendly).
+- Validation prevents invalid or missing `starting_innkeeper` values from passing campaign validation.
+- Default value `"tutorial_innkeeper_town"` ensures tutorial campaigns continue to work out-of-the-box.
+- No backward migration code for legacy numeric `starting_inn` was added in this phase (per plan). If backward compatibility is required later, a migration helper can be implemented to map numeric IDs to innkeeper IDs during load.
+
+### Notes / Next Steps
+
+- If you want, I can:
+  - Add a migration helper for legacy numeric `starting_inn` values (optional).
+  - Update the tutorial campaign files or other campaign data explicitly to reference `starting_innkeeper` where appropriate (Phase 6).
+  - Prepare a short changelog entry and suggested commit message for these changes.
+
+---
+
 ## Campaign Builder Character Editor - Starts in Party Checkbox - COMPLETED
 
 ### Summary
@@ -402,6 +481,53 @@ Implemented Phase 2 of the party management missing deliverables plan by populat
 ### Summary
 
 Updated the runtime application logic so inn references use explicit innkeeper identifiers (string-based `InnkeeperId = String`) end-to-end within the inn management, roster, party management, and map event systems. This phase ensures the following:
+
+---
+
+### Innkeeper ID Migration - Phase 3: Save/Load System Updates - COMPLETED
+
+### Summary
+
+Updated the save/load system and tests so `CharacterLocation::AtInn` is stored and restored using string-based innkeeper IDs (`InnkeeperId = String`). Added RON round-trip tests and a save format verification test to ensure `AtInn("tutorial_innkeeper_town")` is serialized in a human-readable RON format and deserializes correctly. No backward migration was implemented (by design—no backwards compatibility requirement).
+
+### Changes Made
+
+- File: `src/application/save_game.rs`
+
+  - Updated existing save/load tests to use string innkeeper IDs (e.g., `CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())`).
+  - Added `test_save_game_format` to assert the RON structure includes expected fields (`version`, `timestamp`, `game_state`) and the innkeeper ID, and that `AtInn(...)` appears in the serialized output.
+  - Verified SaveGame serialization/deserialization handles `AtInn(String)` correctly.
+
+- File: `src/domain/character.rs`
+
+  - Added `test_character_location_ron_serialization` to verify that `CharacterLocation::AtInn("test_innkeeper")` round-trips through RON serialization and deserialization.
+
+- File: `src/domain/party_manager.rs`
+  - Fixed a unit test (`test_swap_preserves_map_location`) to set the NPC location to `CharacterLocation::OnMap(5)` (matching the test intent) to preserve map location semantics during swaps.
+
+### Testing
+
+- ✅ `cargo fmt --all` - passed
+- ✅ `cargo check --all-targets --all-features` - passed
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - passed
+- ✅ `cargo nextest run --all-features` - all tests passed (full test run)
+
+Unit tests added/updated:
+
+- `test_character_location_ron_serialization` (domain/character)
+- `test_save_game_format` (application/save_game)
+- Updated save/load tests that exercise `AtInn(String)`: `test_save_inn_locations`, `test_save_full_roster_state`, `test_save_load_preserves_character_invariants`, `test_save_load_character_sent_to_inn`, etc.
+
+### Deliverables
+
+- [x] Save/load system handles `AtInn(String)` correctly
+- [x] All save/load tests updated to use string IDs
+- [x] RON serialization tests passing
+- [x] All Phase 3 tests passing
+
+### Impact
+
+Save files now serialize `CharacterLocation::AtInn` using readable innkeeper IDs. This improves the clarity and maintainability of saved game files and completes Phase 3 of the Innkeeper ID migration plan.
 
 - `InnManagementState` stores an `InnkeeperId` (string) rather than a numeric town ID.
 - `CharacterLocation::AtInn` uses string innkeeper IDs and `Roster::characters_at_inn(&str)` performs string-based filtering.

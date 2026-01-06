@@ -536,11 +536,19 @@ impl GameState {
         use crate::domain::character::CharacterLocation;
 
         // Get starting innkeeper id from campaign config (default to tutorial innkeeper)
-        let starting_innkeeper = self
-            .campaign
-            .as_ref()
-            .map(|_| "tutorial_innkeeper_town".to_string())
-            .unwrap_or("tutorial_innkeeper_town".to_string());
+        //
+        // Prefer the configured campaign `starting_innkeeper` (string ID). If the
+        // campaign is missing or the configured value is empty, fall back to the
+        // tutorial innkeeper ID so behavior remains consistent for legacy tests.
+        let starting_innkeeper = if let Some(c) = &self.campaign {
+            if c.config.starting_innkeeper.trim().is_empty() {
+                "tutorial_innkeeper_town".to_string()
+            } else {
+                c.config.starting_innkeeper.clone()
+            }
+        } else {
+            "tutorial_innkeeper_town".to_string()
+        };
 
         // Track how many characters have starts_in_party set
         let mut starting_party_count = 0;
@@ -739,9 +747,9 @@ impl GameState {
 
     /// Finds the nearest inn to the party's current position
     ///
-    /// This is a simplified implementation that returns the campaign's starting innkeeper
-    /// identifier as a fallback. A full implementation would use pathfinding to find the
-    /// closest inn across maps and validate innkeeper NPC IDs.
+    /// This simplified implementation returns the campaign's configured
+    /// `starting_innkeeper` as a fallback. A full implementation would use
+    /// pathfinding across maps to locate the closest valid inn.
     ///
     /// # Returns
     ///
@@ -764,11 +772,11 @@ impl GameState {
     /// # }
     /// ```
     pub fn find_nearest_inn(&self) -> Option<InnkeeperId> {
-        // Temporary implementation: convert campaign numeric `starting_inn` to a string id.
-        // This is transitional until campaign metadata uses `starting_innkeeper: String`.
+        // Return the configured starting innkeeper ID from the loaded campaign as a fallback.
+        // A full implementation would find the nearest inn using pathfinding.
         self.campaign
             .as_ref()
-            .map(|c| c.config.starting_inn.to_string())
+            .map(|c| c.config.starting_innkeeper.clone())
     }
 
     /// Attempts to recruit a character from a map encounter
@@ -1471,7 +1479,7 @@ mod tests {
                 starting_direction: crate::domain::types::Direction::North,
                 starting_gold: 100,
                 starting_food: 50,
-                starting_inn: 1,
+                starting_innkeeper: "tutorial_innkeeper_town".to_string(),
                 max_party_size: 6,
                 max_roster_size: 20,
                 difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
@@ -1632,7 +1640,7 @@ mod tests {
                 starting_direction: crate::domain::types::Direction::North,
                 starting_gold: 100,
                 starting_food: 50,
-                starting_inn: 5,
+                starting_innkeeper: "tutorial_innkeeper_town".to_string(),
                 max_party_size: 6,
                 max_roster_size: 20,
                 difficulty: crate::sdk::campaign_loader::Difficulty::Normal,

@@ -885,10 +885,7 @@ mod tests {
         // NPC on map 5
         let char2 = create_test_character("NPC", "elf", "mage");
         roster
-            .add_character(
-                char2,
-                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
-            )
+            .add_character(char2, CharacterLocation::OnMap(5))
             .unwrap();
 
         // Recruit warrior

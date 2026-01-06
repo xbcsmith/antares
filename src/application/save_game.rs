@@ -433,7 +433,7 @@ mod tests {
                 starting_direction: Direction::North,
                 starting_gold: 100,
                 starting_food: 50,
-                starting_inn: 1,
+                starting_innkeeper: "tutorial_innkeeper_town".to_string(),
                 max_party_size: 6,
                 max_roster_size: 20,
                 difficulty: Difficulty::Normal,
@@ -689,6 +689,34 @@ mod tests {
         assert_eq!(loaded_state.roster.characters[0].name, "InnChar1");
         assert_eq!(loaded_state.roster.characters[1].name, "InnChar2");
         assert_eq!(loaded_state.roster.characters[2].name, "InnChar3");
+    }
+
+    #[test]
+    fn test_save_game_format() {
+        let temp_dir = TempDir::new().unwrap();
+        let _manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut game_state = GameState::new();
+
+        // Add a single character located at an inn so the save contains AtInn(...)
+        let char1 = create_test_character("FormatChar");
+        let inn = "tutorial_innkeeper_town".to_string();
+        game_state
+            .roster
+            .add_character(char1, CharacterLocation::AtInn(inn.clone()))
+            .unwrap();
+
+        // Build a SaveGame and serialize it to RON
+        let save = SaveGame::new(game_state);
+        let ron_str = ron::ser::to_string_pretty(&save, Default::default())
+            .expect("Failed to serialize save");
+
+        // Verify the RON contains expected fields and the innkeeper ID
+        assert!(ron_str.contains("version"));
+        assert!(ron_str.contains("timestamp"));
+        assert!(ron_str.contains("game_state"));
+        assert!(ron_str.contains(&inn));
+        assert!(ron_str.contains("AtInn"));
     }
 
     #[test]

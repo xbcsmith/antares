@@ -825,12 +825,12 @@ InvalidStartingInnkeeper {
 
 #### 4.6 Deliverables
 
-- [ ] `CampaignConfig::starting_innkeeper` field added (String type)
-- [ ] `CampaignMetadata::starting_innkeeper` field added (both in antares and SDK)
-- [ ] Default value set to "tutorial_innkeeper_town"
-- [ ] Validation logic added to check innkeeper exists and has `is_innkeeper=true`
-- [ ] `ValidationError::InvalidStartingInnkeeper` variant added
-- [ ] All Phase 4 tests passing
+- [x] `CampaignConfig::starting_innkeeper` field added (String type)
+- [x] `CampaignMetadata::starting_innkeeper` field added (both in antares and SDK)
+- [x] Default value set to "tutorial_innkeeper_town"
+- [x] Validation logic added to check innkeeper exists and has `is_innkeeper=true`
+- [x] `ValidationError::InvalidStartingInnkeeper` variant added
+- [x] All Phase 4 tests passing
 
 #### 4.7 Success Criteria
 

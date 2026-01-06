@@ -131,6 +131,20 @@ pub enum ValidationError {
     /// Too many starting party members
     #[error("Too many starting party members: {count} characters have starts_in_party=true, but max party size is {max}")]
     TooManyStartingPartyMembers { count: usize, max: usize },
+
+    /// Error indicating the campaign `starting_innkeeper` configuration is invalid.
+    ///
+    /// This occurs when the configured innkeeper ID is:
+    /// - empty,
+    /// - not present in the campaign's NPC database, or
+    /// - present but not marked as an innkeeper (`is_innkeeper = true`).
+    #[error("Invalid starting innkeeper '{innkeeper_id}': {reason}")]
+    InvalidStartingInnkeeper {
+        /// The innkeeper ID from the campaign configuration that failed validation.
+        innkeeper_id: String,
+        /// Human-readable reason describing why the configured innkeeper is invalid.
+        reason: String,
+    },
 }
 
 impl ValidationError {
@@ -155,7 +169,8 @@ impl ValidationError {
             | ValidationError::MissingItem { .. }
             | ValidationError::MissingMonster { .. }
             | ValidationError::MissingSpell { .. }
-            | ValidationError::DuplicateId { .. } => Severity::Error,
+            | ValidationError::DuplicateId { .. }
+            | ValidationError::InvalidStartingInnkeeper { .. } => Severity::Error,
 
             ValidationError::DisconnectedMap { .. } => Severity::Warning,
 
@@ -410,6 +425,80 @@ impl<'a> Validator<'a> {
     ///
     /// Ensures that every map is reachable from the starting location
     /// through a chain of map transitions.
+    /// Validates campaign configuration values that depend on loaded content.
+    ///
+    /// Ensures configuration fields that reference content (NPCs, maps, etc.)
+    /// are valid with respect to the provided `ContentDatabase`. Currently this
+    /// performs checks for the `starting_innkeeper` value:
+    ///
+    /// - The `starting_innkeeper` ID is non-empty.
+    /// - The referenced NPC exists in the NPC database.
+    /// - The referenced NPC has `is_innkeeper == true`.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Campaign configuration to validate
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::database::ContentDatabase;
+    /// use antares::sdk::validation::Validator;
+    /// use antares::sdk::campaign_loader::CampaignConfig;
+    ///
+    /// let db = ContentDatabase::new();
+    /// let validator = Validator::new(&db);
+    /// let config = CampaignConfig {
+    ///     starting_map: 1,
+    ///     starting_position: crate::domain::types::Position::new(0, 0),
+    ///     starting_direction: crate::domain::types::Direction::North,
+    ///     starting_gold: 0,
+    ///     starting_food: 0,
+    ///     starting_innkeeper: "nonexistent_inn".to_string(),
+    ///     max_party_size: 6,
+    ///     max_roster_size: 20,
+    ///     difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
+    ///     permadeath: false,
+    ///     allow_multiclassing: false,
+    ///     starting_level: 1,
+    ///     max_level: 20,
+    /// };
+    ///
+    /// let errors = validator.validate_campaign_config(&config);
+    /// assert!(errors.iter().any(|e| matches!(e, crate::sdk::validation::ValidationError::InvalidStartingInnkeeper { .. })));
+    /// ```
+    pub fn validate_campaign_config(
+        &self,
+        config: &crate::sdk::campaign_loader::CampaignConfig,
+    ) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+
+        // Validate starting_innkeeper exists and is an innkeeper
+        if config.starting_innkeeper.is_empty() {
+            errors.push(ValidationError::InvalidStartingInnkeeper {
+                innkeeper_id: config.starting_innkeeper.clone(),
+                reason: "Starting innkeeper ID is empty".to_string(),
+            });
+        } else if let Some(npc) = self.db.npcs.get_npc(&config.starting_innkeeper) {
+            if !npc.is_innkeeper {
+                errors.push(ValidationError::InvalidStartingInnkeeper {
+                    innkeeper_id: config.starting_innkeeper.clone(),
+                    reason: format!(
+                        "NPC '{}' exists but is not marked as is_innkeeper=true",
+                        npc.name
+                    ),
+                });
+            }
+        } else {
+            errors.push(ValidationError::InvalidStartingInnkeeper {
+                innkeeper_id: config.starting_innkeeper.clone(),
+                reason: "NPC not found in database".to_string(),
+            });
+        }
+
+        errors
+    }
+
     fn validate_connectivity(&self) -> Vec<ValidationError> {
         let errors = Vec::new();
 
@@ -852,6 +941,123 @@ mod tests {
         assert!(
             errors.is_empty(),
             "Expected no validation errors for a valid innkeeper reference, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_validate_starting_innkeeper_missing() {
+        // If the campaign's starting_innkeeper references an NPC that does not exist,
+        // Validator::validate_campaign_config should return an InvalidStartingInnkeeper error.
+        let db = ContentDatabase::new();
+        let validator = Validator::new(&db);
+
+        let config = crate::sdk::campaign_loader::CampaignConfig {
+            starting_map: 1,
+            starting_position: crate::domain::types::Position::new(0, 0),
+            starting_direction: crate::domain::types::Direction::North,
+            starting_gold: 100,
+            starting_food: 50,
+            starting_innkeeper: "missing_inn".to_string(),
+            max_party_size: 6,
+            max_roster_size: 20,
+            difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
+            permadeath: false,
+            allow_multiclassing: false,
+            starting_level: 1,
+            max_level: 20,
+        };
+
+        let errors = validator.validate_campaign_config(&config);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                ValidationError::InvalidStartingInnkeeper { innkeeper_id, reason }
+                if innkeeper_id == "missing_inn" && reason == "NPC not found in database"
+            )),
+            "Expected InvalidStartingInnkeeper for missing NPC, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_validate_starting_innkeeper_not_innkeeper() {
+        // If the campaign's starting_innkeeper references an NPC that exists but
+        // isn't flagged as an innkeeper, the validator should return an error.
+        let mut db = ContentDatabase::new();
+
+        // Add an NPC that is NOT an innkeeper
+        let npc = crate::domain::world::npc::NpcDefinition::new(
+            "not_inn".to_string(),
+            "Not Inn".to_string(),
+            "portrait.png".to_string(),
+        );
+        db.npcs.add_npc(npc).expect("Failed to add NPC");
+
+        let validator = Validator::new(&db);
+
+        let config = crate::sdk::campaign_loader::CampaignConfig {
+            starting_map: 1,
+            starting_position: crate::domain::types::Position::new(0, 0),
+            starting_direction: crate::domain::types::Direction::North,
+            starting_gold: 100,
+            starting_food: 50,
+            starting_innkeeper: "not_inn".to_string(),
+            max_party_size: 6,
+            max_roster_size: 20,
+            difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
+            permadeath: false,
+            allow_multiclassing: false,
+            starting_level: 1,
+            max_level: 20,
+        };
+
+        let errors = validator.validate_campaign_config(&config);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                ValidationError::InvalidStartingInnkeeper { innkeeper_id, reason }
+                if innkeeper_id == "not_inn" && reason.contains("not marked as is_innkeeper")
+            )),
+            "Expected InvalidStartingInnkeeper for existing non-innkeeper NPC, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_validate_starting_innkeeper_valid() {
+        // A valid innkeeper reference should produce no validation errors.
+        let mut db = ContentDatabase::new();
+
+        let inn = crate::domain::world::npc::NpcDefinition::innkeeper(
+            "inn_good".to_string(),
+            "Good Inn".to_string(),
+            "portrait.png".to_string(),
+        );
+        db.npcs.add_npc(inn).expect("Failed to add NPC");
+
+        let validator = Validator::new(&db);
+
+        let config = crate::sdk::campaign_loader::CampaignConfig {
+            starting_map: 1,
+            starting_position: crate::domain::types::Position::new(0, 0),
+            starting_direction: crate::domain::types::Direction::North,
+            starting_gold: 100,
+            starting_food: 50,
+            starting_innkeeper: "inn_good".to_string(),
+            max_party_size: 6,
+            max_roster_size: 20,
+            difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
+            permadeath: false,
+            allow_multiclassing: false,
+            starting_level: 1,
+            max_level: 20,
+        };
+
+        let errors = validator.validate_campaign_config(&config);
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors for a valid starting_innkeeper, got: {:?}",
             errors
         );
     }

@@ -1695,6 +1695,23 @@ mod tests {
         assert_eq!(deserialized.class_id, "knight");
     }
 
+    #[test]
+    fn test_character_location_ron_serialization() {
+        use super::CharacterLocation;
+
+        let location = CharacterLocation::AtInn("test_innkeeper".to_string());
+
+        // Serialize to RON and ensure the innkeeper ID appears in the output
+        let ron_string =
+            ron::to_string(&location).expect("Failed to serialize CharacterLocation to RON");
+        assert!(ron_string.contains("test_innkeeper"));
+
+        // Deserialize from RON and verify round-trip equality
+        let deserialized: CharacterLocation =
+            ron::from_str(&ron_string).expect("Failed to deserialize CharacterLocation from RON");
+        assert_eq!(location, deserialized);
+    }
+
     // ===== SpellBook Tests =====
 
     #[test]

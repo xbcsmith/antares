@@ -313,7 +313,7 @@ mod tests {
                 starting_direction: antares::domain::types::Direction::North,
                 starting_gold: 100,
                 starting_food: 50,
-                starting_inn: 1,
+                starting_innkeeper: "tutorial_innkeeper_town".to_string(),
                 max_party_size: 6,
                 max_roster_size: 20,
                 difficulty: antares::sdk::campaign_loader::Difficulty::Normal,

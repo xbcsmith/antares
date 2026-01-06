@@ -149,12 +149,12 @@ pub struct CampaignConfig {
     /// Starting food units
     pub starting_food: u32,
 
-    /// Default inn where non-party premade characters start (default: 1)
+    /// Default innkeeper where non-party premade characters start (ID string)
     ///
     /// When a new game is started, premade characters that don't have
-    /// `starts_in_party: true` will be placed at this inn location.
-    #[serde(default = "default_starting_inn")]
-    pub starting_inn: u8,
+    /// `starts_in_party: true` will be placed at this innkeeper's inn.
+    #[serde(default = "default_starting_innkeeper")]
+    pub starting_innkeeper: String,
 
     /// Maximum party size (default: 6)
     #[serde(default = "default_max_party_size")]
@@ -185,8 +185,8 @@ pub struct CampaignConfig {
     pub max_level: u8,
 }
 
-fn default_starting_inn() -> u8 {
-    1
+fn default_starting_innkeeper() -> String {
+    "tutorial_innkeeper_town".to_string()
 }
 
 fn default_max_party_size() -> usize {
@@ -424,8 +424,8 @@ pub struct CampaignMetadata {
     pub starting_direction: String,
     pub starting_gold: u32,
     pub starting_food: u32,
-    #[serde(default = "default_starting_inn")]
-    pub starting_inn: u8,
+    #[serde(default = "default_starting_innkeeper")]
+    pub starting_innkeeper: String,
     pub max_party_size: usize,
     pub max_roster_size: usize,
     pub difficulty: Difficulty,
@@ -486,7 +486,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 starting_direction,
                 starting_gold: metadata.starting_gold,
                 starting_food: metadata.starting_food,
-                starting_inn: metadata.starting_inn,
+                starting_innkeeper: metadata.starting_innkeeper.clone(),
                 max_party_size: metadata.max_party_size,
                 max_roster_size: metadata.max_roster_size,
                 difficulty: metadata.difficulty,
@@ -653,6 +653,17 @@ impl CampaignLoader {
                 if stats.map_count == 0 {
                     errors.push("No maps defined - campaign cannot be played".to_string());
                 }
+
+                // Run SDK validator to perform deeper content checks (e.g., starting innkeeper)
+                let validator = crate::sdk::validation::Validator::new(&db);
+                let config_errors = validator.validate_campaign_config(&campaign.config);
+                for ve in config_errors {
+                    if ve.is_error() {
+                        errors.push(ve.to_string());
+                    } else {
+                        warnings.push(ve.to_string());
+                    }
+                }
             }
             Err(e) => {
                 errors.push(format!("Failed to load content: {}", e));
@@ -734,7 +745,7 @@ mod tests {
             starting_direction: Direction::North,
             starting_gold: 100,
             starting_food: 50,
-            starting_inn: default_starting_inn(),
+            starting_innkeeper: default_starting_innkeeper(),
             max_party_size: default_max_party_size(),
             max_roster_size: default_max_roster_size(),
             difficulty: Difficulty::default(),
