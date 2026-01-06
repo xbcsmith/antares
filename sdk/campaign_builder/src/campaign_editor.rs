@@ -215,6 +215,9 @@ pub struct CampaignMetadataEditorState {
     /// Search filter (future)
     pub search_filter: String,
 
+    /// Search filter for the Starting Innkeeper ComboBox (case-insensitive)
+    pub innkeeper_search: String,
+
     /// Selected left-side section
     pub selected_section: Option<CampaignSection>,
 
@@ -236,6 +239,7 @@ impl Default for CampaignMetadataEditorState {
             metadata: crate::CampaignMetadata::default(),
             buffer: CampaignMetadataEditBuffer::default(),
             search_filter: String::new(),
+            innkeeper_search: String::new(),
             selected_section: Some(CampaignSection::Overview),
             has_unsaved_changes: false,
             show_import_dialog: false,
@@ -317,6 +321,36 @@ impl CampaignMetadataEditorState {
         self.buffer.starting_innkeeper = id.into();
         self.has_unsaved_changes = true;
         *unsaved_changes = true;
+    }
+
+    /// Returns innkeeper NPCs filtered by the current `innkeeper_search` string.
+    ///
+    /// The search is case-insensitive and matches against the NPC's `id` or `name`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::npc::NpcDefinition;
+    /// let mut state = CampaignMetadataEditorState::new();
+    /// state.innkeeper_search = "mary".to_string();
+    /// let filtered = state.visible_innkeepers(&[NpcDefinition::innkeeper("inn_mary", "Mary", "p.png")]);
+    /// assert_eq!(filtered.len(), 1);
+    /// ```
+    pub fn visible_innkeepers<'a>(
+        &self,
+        npcs: &'a [crate::domain::world::npc::NpcDefinition],
+    ) -> Vec<&'a crate::domain::world::npc::NpcDefinition> {
+        let search = self.innkeeper_search.trim().to_lowercase();
+        npcs.iter()
+            .filter(|n| n.is_innkeeper)
+            .filter(|n| {
+                if search.is_empty() {
+                    true
+                } else {
+                    n.id.to_lowercase().contains(&search) || n.name.to_lowercase().contains(&search)
+                }
+            })
+            .collect()
     }
 
     /// Consume the current validation request flag.
@@ -919,13 +953,14 @@ impl CampaignMetadataEditorState {
 
                                     ui.label("Starting Innkeeper:")
                                         .on_hover_text("Default innkeeper NPC where non-party premade characters start (choose an innkeeper or enter a custom ID)");
-                                    // Build the list of innkeeper NPCs (filtered)
-                                    let innkeeper_list: Vec<_> =
-                                        npcs.iter().filter(|n| n.is_innkeeper).collect();
+                                    // Build the list of innkeeper NPCs (filtered by search)
+                                    let innkeeper_list = self.visible_innkeepers(npcs);
 
                                     ui.horizontal(|ui| {
                                         if !innkeeper_list.is_empty() {
-                                            let selected_text = innkeeper_list
+                                            // Display selected NPC name/id if it exists in the full npc list,
+                                            // otherwise show raw buffer content.
+                                            let selected_text = npcs
                                                 .iter()
                                                 .find(|n| n.id == self.buffer.starting_innkeeper)
                                                 .map(|npc| format!("{} ({})", npc.name, npc.id))
@@ -934,7 +969,21 @@ impl CampaignMetadataEditorState {
                                             egui::ComboBox::from_id_salt("campaign_starting_innkeeper")
                                                 .selected_text(selected_text)
                                                 .show_ui(ui, |ui| {
-                                                    for npc in &innkeeper_list {
+                                                    // Simple in-dropdown search box (updates `innkeeper_search` in state)
+                                                    ui.horizontal(|ui| {
+                                                        ui.label("Search:");
+                                                        if ui
+                                                            .add(
+                                                                egui::TextEdit::singleline(&mut self.innkeeper_search)
+                                                                    .desired_width(180.0),
+                                                            )
+                                                            .changed()
+                                                        {
+                                                            // Search term updated; filtered list will reflect it
+                                                        }
+                                                    });
+
+                                                    for npc in innkeeper_list {
                                                         let label = format!("{} ({})", npc.name, npc.id);
                                                         if ui
                                                             .selectable_label(
@@ -1338,5 +1387,35 @@ mod tests {
         s.buffer.starting_innkeeper = "innkeeper_abc".to_string();
         s.apply_buffer_to_metadata();
         assert_eq!(s.metadata.starting_innkeeper, "innkeeper_abc".to_string());
+    }
+
+    /// visible_innkeepers filters by `is_innkeeper` and search term
+    #[test]
+    fn test_visible_innkeepers_filters_and_matches() {
+        use crate::domain::world::npc::NpcDefinition;
+
+        let mut s = CampaignMetadataEditorState::new();
+        let npcs = vec![
+            NpcDefinition::innkeeper("inn_mary", "Mary the Innkeeper", "p.png"),
+            NpcDefinition::new("npc_bob", "Bob the Merchant", "p.png"),
+            NpcDefinition::innkeeper("inn_joe", "Joe's Inn", "p2.png"),
+        ];
+
+        // empty search => returns all innkeepers (2)
+        s.innkeeper_search = "".to_string();
+        let all = s.visible_innkeepers(&npcs);
+        assert_eq!(all.len(), 2);
+
+        // search by name substring (case-insensitive)
+        s.innkeeper_search = "mary".to_string();
+        let mary = s.visible_innkeepers(&npcs);
+        assert_eq!(mary.len(), 1);
+        assert_eq!(mary[0].id, "inn_mary");
+
+        // search by id substring
+        s.innkeeper_search = "inn_jo".to_string();
+        let joe = s.visible_innkeepers(&npcs);
+        assert_eq!(joe.len(), 1);
+        assert_eq!(joe[0].id, "inn_joe");
     }
 }

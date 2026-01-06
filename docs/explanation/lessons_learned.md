@@ -27,11 +27,13 @@
 **Lesson:** Keep domain logic, UI, and infrastructure strictly separated.
 
 **Evidence from implementations:**
+
 - Party management domain logic (`PartyManager`) is pure and testable
 - UI systems (`InnUiPlugin`, `RecruitmentDialogPlugin`) handle only presentation
 - Application layer (`GameState`) orchestrates domain and infrastructure
 
 **Best Practice:**
+
 ```rust
 // ✅ GOOD: Pure domain logic
 pub struct PartyManager;
@@ -58,6 +60,7 @@ fn inn_action_system(
 ```
 
 **Anti-Pattern:**
+
 ```rust
 // ❌ BAD: UI contains business logic
 fn inn_ui_system() {
@@ -76,6 +79,7 @@ fn inn_ui_system() {
 **Lesson:** Use message passing for decoupling UI from game state.
 
 **Pattern from Inn UI and Recruitment Dialog:**
+
 ```rust
 // 1. Define messages
 #[derive(Message)]
@@ -106,6 +110,7 @@ fn action_system(
 ```
 
 **Benefits:**
+
 - UI and logic can be tested independently
 - Easy to add new message types without changing existing code
 - Clear data flow direction
@@ -115,6 +120,7 @@ fn action_system(
 **Lesson:** Use builder methods for structures with optional fields.
 
 **Evidence from TileVisualMetadata:**
+
 ```rust
 pub struct TileVisualMetadata {
     pub height: Option<f32>,
@@ -146,6 +152,7 @@ let visual = TileVisualMetadata::default()
 **Lesson:** Provide "effective value" methods that handle Option unwrapping with defaults.
 
 **Pattern:**
+
 ```rust
 impl TileVisualMetadata {
     pub const DEFAULT_HEIGHT: f32 = 1.0;
@@ -160,6 +167,7 @@ let height = tile.visual.effective_height(); // Never panics
 ```
 
 **Benefits:**
+
 - Callers don't need to handle Option
 - Centralized default value logic
 - Easier to read and maintain
@@ -173,21 +181,23 @@ let height = tile.visual.effective_height(); // Never panics
 **Lesson:** Use enums instead of multiple boolean flags or Option<T> for location tracking.
 
 **Evidence from CharacterLocation migration:**
+
 ```rust
 // ❌ BAD: Old approach
 pub struct Character {
-    pub at_inn: Option<TownId>, // None = in party, Some = at inn
+    pub at_inn: Option<InnkeeperId>, // None = in party, Some = at inn (innkeeper ID)
 }
 
 // ✅ GOOD: New approach
 pub enum CharacterLocation {
     InParty,
-    AtInn(TownId),
+    AtInn(InnkeeperId),
     OnMap(MapId),
 }
 ```
 
 **Benefits:**
+
 - Type-safe state representation
 - Impossible to represent invalid states
 - Clear intent in code
@@ -198,6 +208,7 @@ pub enum CharacterLocation {
 **Lesson:** When you need 1:1 associated data, use parallel vectors with invariant enforcement.
 
 **Evidence from Roster:**
+
 ```rust
 pub struct Roster {
     pub characters: Vec<Character>,
@@ -219,9 +230,11 @@ impl Roster {
 ```
 
 **Invariant to maintain:**
+
 - `characters.len() == character_locations.len()` ALWAYS
 
 **Test for invariants:**
+
 ```rust
 #[test]
 fn test_roster_invariants() {
@@ -238,6 +251,7 @@ fn test_roster_invariants() {
 **CRITICAL LESSON:** Never assume HashMap iteration order in tests or logic.
 
 **Evidence from test fixes:**
+
 ```rust
 // ❌ BAD: Assumes insertion order
 for i in 0..2 {
@@ -252,10 +266,12 @@ let expected_name = first_char.name.clone();
 ```
 
 **Collections with non-deterministic iteration:**
+
 - `HashMap<K, V>` - hash-based, randomized order
 - `HashSet<T>` - hash-based, randomized order
 
 **Use instead:**
+
 - `BTreeMap` / `BTreeSet` - sorted, deterministic
 - `Vec` - insertion order preserved
 - Or query by key/ID instead of assuming position
@@ -265,6 +281,7 @@ let expected_name = first_char.name.clone();
 **Lesson:** Use type aliases to make domain concepts explicit.
 
 **Pattern:**
+
 ```rust
 pub type ItemId = u32;
 pub type SpellId = u32;
@@ -281,6 +298,7 @@ pub fn equip_item(character: u32, item: u32) -> Result<()>;
 ```
 
 **Benefits:**
+
 - Self-documenting code
 - Easy to change underlying type later
 - Prevents mixing up parameters
@@ -294,6 +312,7 @@ pub fn equip_item(character: u32, item: u32) -> Result<()>;
 **Lesson:** Tests should verify what the system does, not how it does it.
 
 **Evidence from save/load tests:**
+
 ```rust
 // ✅ GOOD: Tests observable behavior
 #[test]
@@ -323,6 +342,7 @@ fn test_save_uses_ron_format() {
 **Lesson:** Organize tests into Arrange-Act-Assert pattern.
 
 **Pattern:**
+
 ```rust
 #[test]
 fn test_recruit_character_to_party() {
@@ -346,6 +366,7 @@ fn test_recruit_character_to_party() {
 **Lesson:** Always test limits, not just happy paths.
 
 **Evidence from party management tests:**
+
 ```rust
 #[test]
 fn test_party_max_members() {
@@ -375,6 +396,7 @@ fn test_dismiss_last_member_fails() {
 **Lesson:** Use both unit tests (fast, focused) and integration tests (realistic, end-to-end).
 
 **Unit Test Pattern:**
+
 ```rust
 // Fast, isolated, tests one function
 #[test]
@@ -390,6 +412,7 @@ fn test_party_manager_recruit() {
 ```
 
 **Integration Test Pattern:**
+
 ```rust
 // Slower, realistic, tests full workflow
 #[test]
@@ -414,6 +437,7 @@ fn test_full_save_load_cycle_with_recruitment() {
 **Lesson:** Create helper functions to reduce boilerplate and improve readability.
 
 **Pattern:**
+
 ```rust
 // Helper function
 fn create_test_character(name: &str) -> Character {
@@ -440,6 +464,7 @@ fn test_something() {
 **Lesson:** Test migration by simulating old save formats.
 
 **Evidence from save migration test:**
+
 ```rust
 #[test]
 fn test_save_migration_from_old_format() {
@@ -467,6 +492,7 @@ fn test_save_migration_from_old_format() {
 **Lesson:** Keep UI state separate from game state.
 
 **Evidence from RecruitmentDialog:**
+
 ```rust
 #[derive(Resource, Default)]
 pub struct RecruitmentDialogState {
@@ -489,6 +515,7 @@ pub struct GameState {
 **Lesson:** Always provide immediate visual feedback.
 
 **Pattern from Map Editor:**
+
 ```rust
 // Selection highlighting
 if is_selected {
@@ -509,6 +536,7 @@ ui.add_enabled(can_recruit, egui::Button::new("Recruit"));
 **Lesson:** Provide autocomplete for IDs and references to reduce errors.
 
 **Evidence from Portrait Selector:**
+
 ```rust
 pub fn autocomplete_portrait_selector(
     ui: &mut egui::Ui,
@@ -542,6 +570,7 @@ pub fn autocomplete_portrait_selector(
 **Lesson:** Show previews of user choices before applying changes.
 
 **Evidence from Portrait Grid Picker:**
+
 ```rust
 // Show portrait preview
 if let Some(texture) = self.load_portrait_texture(ctx, portrait_id) {
@@ -560,6 +589,7 @@ if ui.button("Select").clicked() {
 **Lesson:** Add tooltips to explain functionality, especially for IDs.
 
 **Pattern:**
+
 ```rust
 ui.text_edit_singleline(&mut self.portrait_id)
     .on_hover_text("Portrait asset ID (e.g., '10', 'hero_1'). \
@@ -579,6 +609,7 @@ if ui.button("🎨").on_hover_text("Open portrait picker").clicked() {
 **Lesson:** Add `#[serde(default)]` to new fields for backward compatibility.
 
 **Evidence from encountered_characters:**
+
 ```rust
 pub struct GameState {
     pub world: World,
@@ -591,6 +622,7 @@ pub struct GameState {
 ```
 
 **Benefits:**
+
 - Old saves deserialize successfully
 - New field gets default value automatically
 - No explicit migration code needed
@@ -600,6 +632,7 @@ pub struct GameState {
 **Lesson:** Create migration scripts for bulk data updates.
 
 **Evidence from event trigger removal:**
+
 ```rust
 // migrations/remove_event_triggers.py
 def migrate_map(map_path):
@@ -621,6 +654,7 @@ def migrate_map(map_path):
 **Lesson:** Always include version numbers in serialized data.
 
 **Pattern:**
+
 ```rust
 #[derive(Serialize, Deserialize)]
 pub struct SaveGame {
@@ -648,6 +682,7 @@ impl SaveGame {
 **Lesson:** Allow data files to override calculated values for flexibility.
 
 **Evidence from CharacterDefinition:**
+
 ```rust
 pub struct CharacterDefinition {
     pub base_stats: BaseStats,
@@ -674,6 +709,7 @@ let hp = def.hp_base.unwrap_or_else(|| {
 **Lesson:** Define domain-specific error types with thiserror.
 
 **Pattern:**
+
 ```rust
 use thiserror::Error;
 
@@ -694,6 +730,7 @@ pub enum PartyManagementError {
 ```
 
 **Benefits:**
+
 - Descriptive error messages
 - Automatic Display implementation
 - Easy error propagation with `?`
@@ -703,6 +740,7 @@ pub enum PartyManagementError {
 **Lesson:** Use `Result<T, E>` for all operations that can fail.
 
 **Pattern:**
+
 ```rust
 // ✅ GOOD: Returns Result
 pub fn recruit_character(&mut self, roster_index: usize)
@@ -727,6 +765,7 @@ pub fn recruit_character(&mut self, roster_index: usize) {
 **Lesson:** Validate inputs at function entry.
 
 **Pattern:**
+
 ```rust
 pub fn swap_party_member(
     party: &mut Party,
@@ -752,6 +791,7 @@ pub fn swap_party_member(
 **Lesson:** Create specific error variants rather than generic messages.
 
 **Pattern:**
+
 ```rust
 // ✅ GOOD: Specific variants
 pub enum RecruitmentError {
@@ -775,6 +815,7 @@ pub enum RecruitmentError {
 **Lesson:** Every commit must pass all four checks.
 
 **Mandatory checks:**
+
 ```bash
 # 1. Formatting (auto-fixes)
 cargo fmt --all
@@ -790,6 +831,7 @@ cargo nextest run --all-features
 ```
 
 **Integration into workflow:**
+
 - Run before every commit
 - Add as pre-commit hooks
 - Required in CI/CD pipeline
@@ -799,12 +841,14 @@ cargo nextest run --all-features
 **Lesson:** Treat warnings as errors to maintain code quality.
 
 **Configuration:**
+
 ```bash
 # In CI/CD and locally:
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
 **Common clippy catches:**
+
 - Unused variables
 - Unnecessary clones
 - Complex boolean expressions
@@ -815,7 +859,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 **Lesson:** Every public item needs doc comments with examples.
 
 **Pattern:**
-```rust
+
+````rust
 /// Recruits a character from the roster to the active party
 ///
 /// Moves a character from inn/map storage to the active adventuring party.
@@ -848,13 +893,14 @@ pub fn recruit_character(&mut self, roster_index: usize)
 {
     // ...
 }
-```
+````
 
 ### 4. Validation at Multiple Layers
 
 **Lesson:** Validate data at SDK, domain, and application layers.
 
 **Layers:**
+
 ```rust
 // Layer 1: SDK validation (campaign authoring time)
 impl MapBlueprint {
@@ -995,6 +1041,7 @@ pub struct CharacterEditorState {
 **Lesson:** Cache expensive operations keyed by input parameters.
 
 **Evidence from TileVisualMetadata rendering:**
+
 ```rust
 type MeshDimensions = (f32, f32, f32); // (height, width_x, width_z)
 type MeshCache = HashMap<MeshDimensions, Handle<Mesh>>;
@@ -1015,6 +1062,7 @@ fn get_or_create_mesh(
 **Lesson:** Load textures/assets on-demand, not all upfront.
 
 **Evidence from Portrait Grid Picker:**
+
 ```rust
 // Load on first access
 pub fn load_portrait_texture(
@@ -1063,25 +1111,32 @@ pub fn get_character(&self, index: usize) -> Option<Character> {
 **Lesson:** Document WHAT was implemented, WHY decisions were made, and HOW to use it.
 
 **Template:**
+
 ```markdown
 ## Phase X: Feature Name - COMPLETED
 
 ### Summary
+
 One-paragraph overview of what was implemented.
 
 ### Changes Made
+
 Detailed list of files and functions modified.
 
 ### Technical Decisions
+
 Explain WHY you chose this approach over alternatives.
 
 ### Testing
+
 List test coverage and results.
 
 ### Known Limitations
+
 Be honest about what doesn't work yet.
 
 ### Next Steps
+
 Point to follow-up work needed.
 ```
 
@@ -1111,7 +1166,8 @@ for def in db.characters.premade_characters() {
 **Lesson:** Every public function should have a usage example.
 
 **Pattern:**
-```rust
+
+````rust
 /// # Examples
 ///
 /// ```
@@ -1122,51 +1178,59 @@ for def in db.characters.premade_characters() {
 /// state.roster.add_character(character, CharacterLocation::InParty)?;
 /// assert_eq!(state.party.size(), 1);
 /// ```
-```
+````
 
 ---
 
 ## Summary of Key Takeaways
 
 ### Architecture
+
 1. ✅ Separate domain, UI, and infrastructure layers
 2. ✅ Use message-based architecture for decoupling
 3. ✅ Keep game state pure and serializable
 
 ### Data Structures
+
 4. ✅ Use enums over booleans for state representation
 5. ✅ HashMap iteration is non-deterministic - query by key
 6. ✅ Maintain parallel vector invariants rigorously
 7. ✅ Type aliases make domain concepts explicit
 
 ### Testing
+
 8. ✅ Test behavior, not implementation
 9. ✅ Always test edge cases and boundaries
 10. ✅ Use both unit and integration tests
 11. ✅ Create test helpers to reduce boilerplate
 
 ### Error Handling
+
 12. ✅ Use `Result<T, E>` everywhere
 13. ✅ Define specific error types with thiserror
 14. ✅ Validate early, fail fast
 
 ### Quality
+
 15. ✅ Four quality gates: fmt, check, clippy, test
 16. ✅ Treat warnings as errors
 17. ✅ Document all public APIs with examples
 
 ### Backward Compatibility
+
 18. ✅ Use `#[serde(default)]` for new fields
 19. ✅ Version all serialized data
 20. ✅ Test migration from old formats
 
 ### UI/UX
+
 21. ✅ Keep UI state separate from game state
 22. ✅ Provide visual feedback for all actions
 23. ✅ Use autocomplete for ID entry
 24. ✅ Show previews before committing changes
 
 ### Performance
+
 25. ✅ Cache expensive operations
 26. ✅ Lazy load heavy resources
 27. ✅ Avoid unnecessary clones

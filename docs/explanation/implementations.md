@@ -2,17 +2,17 @@
 
 ### Summary
 
-Added missing UI control for the `starting_inn` field in the Campaign Builder's Campaign Metadata Editor. This field is a numeric identifier (1-255) that determines which "inn location" non-party premade characters are placed at when a new game begins.
+Added UI control for the `starting_innkeeper` field in the Campaign Builder's Campaign Metadata Editor. This field is a string-based NPC identifier (NpcId) (e.g., `"tutorial_innkeeper_town"`) that determines which innkeeper (inn location) non-party premade characters are placed at when a new game begins.
 
 ### Context
 
-Per the Party Management System Implementation Plan (Phase 6.1), the `CampaignMetadata` struct includes a `starting_inn: u8` field (with a default value of 1) that specifies where premade characters with `starts_in_party: false` should be placed when initializing a new game roster.
+Per the Party Management System Implementation Plan (Phase 6.1), the `CampaignMetadata` struct now includes a `starting_innkeeper: String` field (with a default value of `"tutorial_innkeeper_town"`) that specifies which innkeeper NPC (by ID) premade characters with `starts_in_party: false` should be placed at when initializing a new game roster.
 
-**Important**: `starting_inn` is simply a numeric identifier (type alias `TownId = u8`), not a reference to a database entity. There is no "Inn" or "Town" data structure in the game. This ID is used by:
+**Important**: `starting_innkeeper` is a string-based NPC identifier (type alias `InnkeeperId = String`) that references an NPC defined in `npcs.ron` (the referenced NPC must have `is_innkeeper: true`). Campaigns may still include legacy numeric `starting_inn: u8` values as a fallback, but map events and runtime logic use `starting_innkeeper` string IDs. This identifier is used by:
 
 - `MapEvent::EnterInn { innkeeper_id: NpcId, ... }` - map events that trigger inn interactions
 - `CharacterLocation::AtInn(InnkeeperId)` - tracking where characters are located
-- Party management logic to know which "inn ID" to assign characters to
+- Party management logic to know which innkeeper (string ID) to assign characters to
 
 The ID is arbitrary and campaign-specific. Campaign authors decide what each ID represents in their game world.
 
@@ -27,14 +27,14 @@ This field was:
 
 #### File: `sdk/campaign_builder/src/lib.rs`
 
-**1. Added `starting_inn` field to `CampaignMetadata` struct** (line 144):
+**1. Added `starting_innkeeper` field to `CampaignMetadata` struct** (line 144):
 
 ```rust
 pub struct CampaignMetadata {
     // ... existing fields ...
     starting_food: u32,
-    #[serde(default = "default_starting_inn")]
-    starting_inn: u8,
+    #[serde(default = "default_starting_innkeeper")]
+    starting_innkeeper: String,
     max_party_size: usize,
     // ...
 }
@@ -45,8 +45,8 @@ pub struct CampaignMetadata {
 **2. Added default function and default implementation** (lines 195-211):
 
 ```rust
-fn default_starting_inn() -> u8 {
-    1
+fn default_starting_innkeeper() -> String {
+    "tutorial_innkeeper_town".to_string()
 }
 
 impl Default for CampaignMetadata {
@@ -54,7 +54,7 @@ impl Default for CampaignMetadata {
         Self {
             // ... existing fields ...
             starting_food: 10,
-            starting_inn: 1,
+            starting_innkeeper: default_starting_innkeeper(),
             max_party_size: 6,
             // ...
         }
@@ -62,13 +62,13 @@ impl Default for CampaignMetadata {
 }
 ```
 
-**3. Updated test to include `starting_inn`** (line 4919):
+**3. Updated test to include `starting_innkeeper`** (line 4919):
 
 ```rust
 let campaign = CampaignMetadata {
     // ... existing fields ...
     starting_food: 20,
-    starting_inn: 1,
+    starting_innkeeper: "tutorial_innkeeper_town".to_string(),
     max_party_size: 6,
     // ...
 };
@@ -76,13 +76,13 @@ let campaign = CampaignMetadata {
 
 #### File: `sdk/campaign_builder/src/campaign_editor.rs`
 
-**1. Added `starting_inn` to `CampaignMetadataEditBuffer`** (line 92):
+**1. Added `starting_innkeeper` to `CampaignMetadataEditBuffer`** (line 92):
 
 ```rust
 pub struct CampaignMetadataEditBuffer {
     // ... existing fields ...
     pub starting_food: u32,
-    pub starting_inn: u8,
+    pub starting_innkeeper: String,
     pub max_party_size: usize,
     // ...
 }
@@ -94,7 +94,7 @@ pub struct CampaignMetadataEditBuffer {
 Self {
     // ... existing fields ...
     starting_food: m.starting_food,
-    starting_inn: m.starting_inn,
+    starting_innkeeper: m.starting_innkeeper.clone(),
     max_party_size: m.max_party_size,
     // ...
 }
@@ -106,7 +106,7 @@ Self {
 pub fn apply_to(&self, dest: &mut crate::CampaignMetadata) {
     // ... existing assignments ...
     dest.starting_food = self.starting_food;
-    dest.starting_inn = self.starting_inn;
+    dest.starting_innkeeper = self.starting_innkeeper.clone();
     dest.max_party_size = self.max_party_size;
     // ...
 }
@@ -115,14 +115,14 @@ pub fn apply_to(&self, dest: &mut crate::CampaignMetadata) {
 **4. Added UI control in campaign settings form** (lines 879-889):
 
 ```rust
-ui.label("Starting Inn:")
-    .on_hover_text("Default inn where non-party premade characters start (default: 1)");
-let mut inn = self.buffer.starting_inn as i32;
+ui.label("Starting Innkeeper:")
+    .on_hover_text("Default innkeeper NPC ID where non-party premade characters start (default: \"tutorial_innkeeper_town\")");
+let mut inn = self.buffer.starting_innkeeper.clone();
 if ui
-    .add(egui::DragValue::new(&mut inn).range(1..=255))
+    .add(egui::TextEdit::singleline(&mut inn))
     .changed()
 {
-    self.buffer.starting_inn = (inn.max(1)) as u8;
+    self.buffer.starting_innkeeper = inn.trim().to_string();
     self.has_unsaved_changes = true;
     *unsaved_changes = true;
 }
@@ -155,19 +155,19 @@ The field has a tooltip explaining its purpose: "Default inn where non-party pre
 - Field has sensible default of 1, so existing campaigns without this field will continue to work via `#[serde(default)]`
 - Placed in the campaign settings form after "Starting Food" for logical grouping
 
-### Important Clarification: What is "starting_inn"?
+### Important Clarification: What is "starting_innkeeper"?
 
-The `starting_inn` field is **not** a reference to an Inn database entry or Town entity. There is no Inn or Town data structure in the game.
+The `starting_innkeeper` field is a string identifier (NpcId) that references an innkeeper NPC (the NPC must have `is_innkeeper: true`). Use `starting_innkeeper` in campaign metadata to indicate where non-party premade characters should start at game initialization.
 
-Historically, `starting_inn` has been a numeric identifier (e.g., `TownId = u8`) used by campaigns for backward compatibility. The numeric `starting_inn` value is still supported in campaign metadata as a fallback/legacy field, but the runtime systems and map data now use explicit innkeeper NPC identifiers (string-based `InnkeeperId`) to reference inns.
+Historically, `starting_inn` was a numeric identifier (e.g., `TownId = u8`). Numeric fallback values may still appear in legacy campaigns and can be mapped by tooling, but runtime systems and map events use `starting_innkeeper` string IDs.
 
 In practice this means:
 
-1. **Campaign-level numeric fallback** — `starting_inn: 1` (u8) remains a legacy/configuration value and may be mapped to a specific innkeeper NPC by campaign tooling.
-2. **Runtime innkeeper reference** — Map events and roster locations use innkeeper IDs (strings). For example:
+1. **Campaign-level numeric fallback** — `starting_inn: 1` (u8) may appear in older campaigns and can be mapped by tooling to an innkeeper ID.
+2. **Runtime innkeeper reference** — Map events and roster locations use `starting_innkeeper` string IDs. For example:
    - `MapEvent::EnterInn { innkeeper_id: "tutorial_innkeeper_town", name: "Cozy Inn", ... }`
    - `CharacterLocation::AtInn("tutorial_innkeeper_town")` (InnkeeperId = String)
-3. **An arbitrary campaign mapping** — campaign authors decide how legacy numeric IDs map to innkeeper NPC IDs in their campaign content.
+3. **Campaign mapping** — Campaign authors decide how numeric IDs (if present) map to innkeeper NPC IDs.
 
 **Example Usage**:
 
@@ -222,7 +222,7 @@ These Phase 6 changes ensure the tutorial campaign is explicit, self-consistent,
 
   - Replaced edit buffer field `starting_inn: u8` with `starting_innkeeper: String`.
   - Updated `from_metadata()` / `apply_to()` to round-trip the new field.
-  - Replaced the numeric UI input with a text input for innkeeper IDs and updated the tooltip and behavior.
+  - Replaced the numeric UI input with a searchable ComboBox that lists innkeeper NPCs (displaying "Name (id)"), includes an inline filter box for live substring search, and retains a manual text-input fallback for custom IDs. Added `innkeeper_search` UI state, implemented `CampaignMetadataEditorState::visible_innkeepers()` (case-insensitive filtering by id/name), and added unit tests covering the filtering and search behavior.
   - Added tests to cover editor buffer and validation interactions.
 
 - src/application/mod.rs
@@ -7153,8 +7153,8 @@ pub enum CharacterLocation {
     /// Character is in the active party
     InParty,
 
-    /// Character is stored at a specific inn/town
-    AtInn(TownId),
+    /// Character is stored at a specific innkeeper's inn
+    AtInn(InnkeeperId),
 
     /// Character is available on a specific map (for recruitment encounters)
     OnMap(MapId),
@@ -7169,7 +7169,7 @@ Changed `character_locations` from `Vec<Option<TownId>>` to `Vec<CharacterLocati
 - `get_character(&self, index: usize) -> Option<&Character>`: Safe indexed access
 - `get_character_mut(&mut self, index: usize) -> Option<&mut Character>`: Mutable access
 - `update_location(&mut self, index: usize, location: CharacterLocation) -> Result<(), CharacterError>`: Update location tracking
-- `characters_at_inn(&self, town_id: TownId) -> Vec<(usize, &Character)>`: Get all characters at specific inn
+- `characters_at_inn(&self, innkeeper_id: InnkeeperId) -> Vec<(usize, &Character)>`: Get all characters at a specific inn
 - `characters_in_party(&self) -> Vec<(usize, &Character)>`: Get all characters marked InParty
 
 #### 1.3 CharacterDefinition Enhancement (`src/domain/character_definition.rs`)
@@ -7230,7 +7230,7 @@ Updated `campaigns/tutorial/campaign.ron`:
 ### Architecture Compliance
 
 ✅ Data structures match architecture.md Section 4 definitions exactly
-✅ Type aliases used consistently (TownId, MapId, CharacterId)
+✅ Type aliases used consistently (InnkeeperId, MapId, CharacterId)
 ✅ Module placement follows Section 3.2 structure
 ✅ No architectural deviations introduced
 ✅ Proper separation of concerns maintained
@@ -7316,7 +7316,7 @@ Summary [0.014s] 5 tests run: 5 passed, 1049 skipped
 
 **Type System Usage:**
 
-- `TownId` (u8) for inn identifiers
+- `InnkeeperId` (String) for innkeeper NPC identifiers
 - `MapId` (u16) for map locations
 - `CharacterId` (usize) for roster indices
 - All type aliases used consistently per architecture.md Section 4.6
@@ -7368,8 +7368,8 @@ See `docs/explanation/party_management_implementation_plan.md` for complete road
 
 **Breaking Changes:**
 
-- `Roster::add_character` signature changed from `location: Option<TownId>` to `location: CharacterLocation`
-- Existing code creating Roster entries will need to use `CharacterLocation::AtInn(1)` instead of `None` or `Some(id)`
+- `Roster::add_character` signature changed from `location: Option<InnkeeperId>` to `location: CharacterLocation`
+- Existing code creating Roster entries will need to use `CharacterLocation::AtInn("tutorial_innkeeper_town")` instead of `None` or `Some(id)`
 
 **Migration Path:**
 
@@ -7469,7 +7469,7 @@ impl GameState {
         roster_index: usize,
     ) -> Result<(), PartyManagementError>;
 
-    pub fn current_inn_id(&self) -> Option<TownId>;
+    pub fn current_inn_id(&self) -> Option<InnkeeperId>;
 }
 ```
 
@@ -7491,7 +7491,7 @@ pub use party_manager::{PartyManagementError, PartyManager};
 
 **✓ Domain Layer Separation:** PartyManager is pure domain logic with no infrastructure dependencies
 
-**✓ Type System Adherence:** Uses `TownId`, `CharacterId` type aliases consistently
+**✓ Type System Adherence:** Uses `InnkeeperId`, `CharacterId` type aliases consistently
 
 **✓ Error Handling Pattern:** Uses `thiserror::Error` with descriptive error messages
 
@@ -7806,14 +7806,14 @@ Comprehensive error handling for recruitment operations:
 Indicates outcome of recruitment attempt:
 
 - `AddedToParty` - Character joined active party
-- `SentToInn(TownId)` - Party full, sent to inn
+- `SentToInn(InnkeeperId)` - Party full, sent to inn
 - `Declined` - Player declined recruitment (handled by UI)
 
 **4. Implemented `find_nearest_inn()` Method** (lines 737-767):
 
 Simple implementation that returns campaign's starting inn as default:
 
-- Returns `Some(TownId)` for the fallback inn
+- Returns `Some(InnkeeperId)` for the fallback inn
 - Returns `None` if no campaign loaded
 - TODO: Full pathfinding implementation for closest inn
 
@@ -8040,7 +8040,7 @@ cargo nextest run --all-features recruitment_dialog       # ✅ 9/9 tests passin
 
 ### Architecture Compliance
 
-✅ Uses type aliases consistently (`TownId`, `ItemId`, `MapId`)
+✅ Uses type aliases consistently (`InnkeeperId`, `ItemId`, `MapId`)
 ✅ No `unwrap()` calls - all errors handled with `Result` types
 ✅ All public functions have comprehensive doc comments with examples
 ✅ RON format for map event data
@@ -8136,7 +8136,7 @@ Old save games will have empty `encountered_characters` set. Future phase should
 **Phase 5: Persistence & Save Game Integration**
 
 - Update save game schema to include `encountered_characters`
-- Implement migration from old save format (`Option<TownId>` → `CharacterLocation`)
+- Implement migration from old save format (`Option<InnkeeperId>` → `CharacterLocation::AtInn(InnkeeperId)`)
 - Add save/load tests for encounter tracking
 - Test full save/load cycle with recruited characters
 - Document save format version and migration strategy
@@ -8327,7 +8327,7 @@ pub struct Roster {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CharacterLocation {
     InParty,
-    AtInn(TownId),
+    AtInn(InnkeeperId),
     OnMap(MapId),
 }
 ```

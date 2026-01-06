@@ -21,8 +21,8 @@ This plan implements a comprehensive party management system for Antares, enabli
   - `remove_member(&mut self, index: usize)`: Removes by index, returns `Option<Character>`
   - `is_full()`, `is_empty()`, `size()` helper methods
 - `Roster`: All created characters (up to 18, `MAX_CHARACTERS = 18`)
-  - `add_character(&mut self, character: Character, location: Option<TownId>)`: Adds to roster with location
-  - `character_locations: Vec<Option<TownId>>`: Parallel array tracking where each roster character is stored
+  - `add_character(&mut self, character: Character, location: Option<InnkeeperId>)`: Adds to roster with location (InnkeeperId string)
+  - `character_locations: Vec<Option<InnkeeperId>>`: Parallel array tracking where each roster character is stored (legacy; replaced by `Vec<CharacterLocation>`)
 
 **Game State (antares/src/application/mod.rs)**
 
@@ -78,7 +78,7 @@ pub enum CharacterLocation {
     /// Character is in the active party
     InParty,
     /// Character is stored at a specific inn/town
-    AtInn(TownId),
+    AtInn(InnkeeperId),
     /// Character is available on a specific map (for encounters)
     OnMap(MapId),
 }
@@ -92,7 +92,7 @@ pub enum CharacterLocation {
   - `get_character(&self, index: usize) -> Option<&Character>`: Safe indexed access
   - `get_character_mut(&mut self, index: usize) -> Option<&mut Character>`: Mutable access
   - `update_location(&mut self, index: usize, location: CharacterLocation)`: Update location tracking
-  - `characters_at_inn(&self, town_id: TownId) -> Vec<(usize, &Character)>`: Get all characters at specific inn
+  - `characters_at_inn(&self, innkeeper_id: InnkeeperId) -> Vec<(usize, &Character)>`: Get all characters at a specific inn
   - `characters_in_party(&self) -> Vec<(usize, &Character)>`: Get all characters marked `InParty`
 
 **Add `starts_in_party` to `CharacterDefinition` (antares/src/domain/character_definition.rs)**
@@ -114,8 +114,8 @@ pub struct CharacterDefinition {
 - After adding character to roster, check `def.starts_in_party`
 - If true, attempt `self.party.add_member(character.clone())` (clone before adding to roster)
 - Set roster location to `CharacterLocation::InParty` for party members
-- Set roster location to `CharacterLocation::AtInn(starting_inn_id)` for non-party premades
-  - Add `starting_inn: TownId` to `CampaignConfig` (default to 1)
+- Set roster location to `CharacterLocation::AtInn(starting_innkeeper.clone())` for non-party premades
+- Add `starting_innkeeper: String` to `CampaignConfig` (default: `"tutorial_innkeeper_town"`)
 - Handle party overflow: if party full, log warning and place at starting inn instead
 - Return `RosterInitializationError::PartyOverflow` if more than `Party::MAX_MEMBERS` have `starts_in_party: true`
 
@@ -125,13 +125,13 @@ pub struct CharacterDefinition {
 pub struct CampaignConfig {
     // ... existing fields ...
 
-    /// Default inn where non-party premade characters start (default: 1)
-    #[serde(default = "default_starting_inn")]
-    pub starting_inn: TownId,
+    /// Default innkeeper NPC ID where non-party premade characters start
+    #[serde(default = "default_starting_innkeeper")]
+    pub starting_innkeeper: String,
 }
 
-fn default_starting_inn() -> TownId {
-    1
+fn default_starting_innkeeper() -> String {
+    "tutorial_innkeeper_town".to_string()
 }
 ```
 

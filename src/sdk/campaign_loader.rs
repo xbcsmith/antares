@@ -835,21 +835,25 @@ mod tests {
             .validate_campaign("tutorial")
             .expect("validate_campaign failed");
 
-        // Only assert that there are no innkeeper-related validation errors.
-        // Other unrelated configuration issues (e.g., missing README.md) may be
-        // present in the test environment and are not relevant to this migration.
-        let innkeeper_errors: Vec<_> = report
-            .errors
-            .iter()
-            .filter(|e| {
-                let el = e.to_lowercase();
-                el.contains("innkeeper") || el.contains("innkeeper_id") || el.contains("enterinn")
-            })
-            .collect();
+        // The tutorial campaign should be fully valid (no errors or warnings).
+        // Previously this test only asserted there were no innkeeper-related errors
+        // because the tutorial lacked a README. A README has been added and the
+        // tutorial campaign should now validate cleanly end-to-end.
         assert!(
-            innkeeper_errors.is_empty(),
-            "Expected no innkeeper-related validation errors, got: {:?}",
-            innkeeper_errors
+            report.is_valid,
+            "Expected campaign to be valid; errors: {:?}, warnings: {:?}",
+            report.errors, report.warnings
+        );
+        assert!(
+            !report.has_warnings(),
+            "Expected no warnings, got: {:?}",
+            report.warnings
+        );
+        assert_eq!(
+            report.issue_count(),
+            0,
+            "Expected no issues, got {} issues",
+            report.issue_count()
         );
     }
 }
