@@ -5708,12 +5708,16 @@
     ],
     events: {
         (
-            x: 18,
+            x: 19,
             y: 7,
-        ): Sign(
-            name: "Forest Direction Sign",
-            description: "A directional sign pointing to the nearby forest.",
-            text: "To the Forrest",
+        ): Teleport(
+            name: "Portal to Dark Forrest",
+            description: "A portal that transports the party to Dark Forrest (map 4) at (10,19).",
+            destination: (
+                x: 10,
+                y: 19,
+            ),
+            map_id: 4,
         ),
         (
             x: 15,
@@ -5732,24 +5736,20 @@
             text: "Temple of Healing - The priests can restore your health.",
         ),
         (
+            x: 18,
+            y: 7,
+        ): Sign(
+            name: "Forest Direction Sign",
+            description: "A directional sign pointing to the nearby forest.",
+            text: "To the Forrest",
+        ),
+        (
             x: 4,
             y: 4,
         ): Sign(
             name: "Inn Sign",
             description: "A welcoming sign for the Cozy Inn offering rest and lodging.",
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
-        ),
-        (
-            x: 19,
-            y: 7,
-        ): Teleport(
-            name: "Portal to Dark Forrest",
-            description: "A portal that transports the party to Dark Forrest (map 4) at (10,19).",
-            destination: (
-                x: 10,
-                y: 19,
-            ),
-            map_id: 4,
         ),
     },
     npc_placements: [

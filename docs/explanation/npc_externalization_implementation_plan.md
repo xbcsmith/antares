@@ -374,7 +374,7 @@ For each map:
 **Maps Migrated**:
 
 - Map 1 (Town Square): 4 NPC placements
-- Map 2 (Fizban's Cave): 2 NPC placements
+- Map 2 (Arcturus's Cave): 2 NPC placements
 - Map 3 (Ancient Ruins): 0 NPC placements
 - Map 4 (Dark Forest): 1 NPC placement
 - Map 5 (Mountain Pass): 4 NPC placements

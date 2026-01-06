@@ -258,6 +258,14 @@ fn print_map_summary(map: &Map) {
             MapEvent::Trap { .. } => traps += 1,
             MapEvent::Sign { .. } => signs += 1,
             MapEvent::NpcDialogue { .. } => dialogues += 1,
+            MapEvent::RecruitableCharacter { .. } => {
+                // Count recruitable characters (could add separate counter if needed)
+                dialogues += 1
+            }
+            MapEvent::EnterInn { .. } => {
+                // Count inn entrances (could add separate counter if needed)
+                signs += 1
+            }
         }
     }
 

@@ -12,7 +12,7 @@
 //! See `docs/reference/stat_ranges.md` for detailed stat range documentation.
 
 use crate::domain::classes::{ClassDatabase, ClassId, SpellSchool as ClassSpellSchool};
-use crate::domain::types::{ItemId, RaceId, SpellId, TownId};
+use crate::domain::types::{CharacterId, ItemId, MapId, RaceId, SpellId, TownId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -410,6 +410,38 @@ pub enum Alignment {
     Good,
     Neutral,
     Evil,
+}
+
+/// Character location tracking for party and roster management
+///
+/// This enum tracks where a character currently resides in the game world.
+/// Characters can be in the active party, stored at an inn, or available
+/// as recruitable characters on specific maps.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::CharacterLocation;
+///
+/// // Character in active party
+/// let loc = CharacterLocation::InParty;
+///
+/// // Character stored at inn ID 1
+/// let loc = CharacterLocation::AtInn(1);
+///
+/// // Character available for recruitment on map 5
+/// let loc = CharacterLocation::OnMap(5);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CharacterLocation {
+    /// Character is in the active party
+    InParty,
+
+    /// Character is stored at a specific inn/town
+    AtInn(TownId),
+
+    /// Character is available on a specific map (for recruitment encounters)
+    OnMap(MapId),
 }
 
 // ===== Condition Flags =====
@@ -1183,8 +1215,8 @@ impl Default for Party {
 pub struct Roster {
     /// Up to 18 characters total
     pub characters: Vec<Character>,
-    /// Where inactive characters are stored
-    pub character_locations: Vec<Option<TownId>>,
+    /// Where each character is located (party, inn, or map)
+    pub character_locations: Vec<CharacterLocation>,
 }
 
 impl Roster {
@@ -1203,7 +1235,7 @@ impl Roster {
     pub fn add_character(
         &mut self,
         character: Character,
-        location: Option<TownId>,
+        location: CharacterLocation,
     ) -> Result<(), CharacterError> {
         if self.characters.len() >= Self::MAX_CHARACTERS {
             return Err(CharacterError::RosterFull(Self::MAX_CHARACTERS));
@@ -1211,6 +1243,141 @@ impl Roster {
         self.characters.push(character);
         self.character_locations.push(location);
         Ok(())
+    }
+
+    /// Finds a character in the roster by character ID
+    ///
+    /// Returns the roster index if found.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Character ID to search for
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(index)` if character found, `None` otherwise
+    pub fn find_character_by_id(&self, id: CharacterId) -> Option<usize> {
+        // Character ID is the roster index in the current implementation
+        if id < self.characters.len() {
+            Some(id)
+        } else {
+            None
+        }
+    }
+
+    /// Gets a reference to a character by roster index
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - Roster index of the character
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(&Character)` if index valid, `None` otherwise
+    pub fn get_character(&self, index: usize) -> Option<&Character> {
+        self.characters.get(index)
+    }
+
+    /// Gets a mutable reference to a character by roster index
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - Roster index of the character
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(&mut Character)` if index valid, `None` otherwise
+    pub fn get_character_mut(&mut self, index: usize) -> Option<&mut Character> {
+        self.characters.get_mut(index)
+    }
+
+    /// Updates the location of a character in the roster
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - Roster index of the character
+    /// * `location` - New location for the character
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if successful, `Err(CharacterError::CharacterNotFound)` if index invalid
+    pub fn update_location(
+        &mut self,
+        index: usize,
+        location: CharacterLocation,
+    ) -> Result<(), CharacterError> {
+        if index >= self.character_locations.len() {
+            return Err(CharacterError::CharacterNotFound(index));
+        }
+        self.character_locations[index] = location;
+        Ok(())
+    }
+
+    /// Gets all characters currently at a specific inn
+    ///
+    /// Returns a vector of tuples containing (roster_index, character_reference)
+    ///
+    /// # Arguments
+    ///
+    /// * `town_id` - The town/inn ID to search for
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Roster, Character, CharacterLocation, Sex, Alignment};
+    /// use antares::domain::character::Stats;
+    ///
+    /// let mut roster = Roster::new();
+    /// let char1 = Character::new("Hero".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
+    /// roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
+    ///
+    /// let at_inn_1 = roster.characters_at_inn(1);
+    /// assert_eq!(at_inn_1.len(), 1);
+    /// ```
+    pub fn characters_at_inn(&self, town_id: TownId) -> Vec<(usize, &Character)> {
+        self.character_locations
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, loc)| {
+                if let CharacterLocation::AtInn(tid) = loc {
+                    if *tid == town_id {
+                        return self.characters.get(idx).map(|c| (idx, c));
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+
+    /// Gets all characters currently in the active party
+    ///
+    /// Returns a vector of tuples containing (roster_index, character_reference)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Roster, Character, CharacterLocation, Sex, Alignment};
+    /// use antares::domain::character::Stats;
+    ///
+    /// let mut roster = Roster::new();
+    /// let char1 = Character::new("Hero".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
+    /// roster.add_character(char1, CharacterLocation::InParty).unwrap();
+    ///
+    /// let in_party = roster.characters_in_party();
+    /// assert_eq!(in_party.len(), 1);
+    /// ```
+    pub fn characters_in_party(&self) -> Vec<(usize, &Character)> {
+        self.character_locations
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, loc)| {
+                if *loc == CharacterLocation::InParty {
+                    self.characters.get(idx).map(|c| (idx, c))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 

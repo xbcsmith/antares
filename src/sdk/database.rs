@@ -2517,30 +2517,30 @@ mod tests {
             db.has_npc("tutorial_elder_village"),
             "Village elder not found"
         );
-        assert!(db.has_npc("tutorial_wizard_fizban"), "Fizban not found");
+        assert!(db.has_npc("tutorial_wizard_arcturus"), "Arcturus not found");
         assert!(
-            db.has_npc("tutorial_wizard_fizban_brother"),
-            "Fizban's brother not found"
+            db.has_npc("tutorial_wizard_arcturus_brother"),
+            "Arcturus's brother not found"
         );
         assert!(db.has_npc("tutorial_ranger_lost"), "Lost ranger not found");
 
-        // Verify Fizban's properties (quest giver with dialogue)
-        let fizban = db
-            .get_npc("tutorial_wizard_fizban")
-            .expect("Fizban not found");
-        assert_eq!(fizban.name, "Fizban");
+        // Verify Arcturus's properties (quest giver with dialogue)
+        let arcturus = db
+            .get_npc("tutorial_wizard_arcturus")
+            .expect("Arcturus not found");
+        assert_eq!(arcturus.name, "Arcturus");
         assert_eq!(
-            fizban.dialogue_id,
+            arcturus.dialogue_id,
             Some(1),
-            "Fizban should reference dialogue 1"
+            "Arcturus should reference dialogue 1"
         );
-        assert_eq!(fizban.quest_ids, vec![0], "Fizban should give quest 0");
-        assert_eq!(fizban.faction, Some("Wizards".to_string()));
+        assert_eq!(arcturus.quest_ids, vec![0], "Arcturus should give quest 0");
+        assert_eq!(arcturus.faction, Some("Wizards".to_string()));
 
-        // Verify Fizban's brother (multiple quests)
+        // Verify Arcturus's brother (multiple quests)
         let brother = db
-            .get_npc("tutorial_wizard_fizban_brother")
-            .expect("Fizban's brother not found");
+            .get_npc("tutorial_wizard_arcturus_brother")
+            .expect("Arcturus's brother not found");
         assert_eq!(
             brother.quest_ids,
             vec![1, 3],

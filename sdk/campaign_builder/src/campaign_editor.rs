@@ -89,6 +89,7 @@ pub struct CampaignMetadataEditBuffer {
     pub starting_direction: String,
     pub starting_gold: u32,
     pub starting_food: u32,
+    pub starting_inn: u8,
     pub max_party_size: usize,
     pub max_roster_size: usize,
     pub difficulty: crate::Difficulty,
@@ -125,6 +126,7 @@ impl CampaignMetadataEditBuffer {
             starting_direction: m.starting_direction.clone(),
             starting_gold: m.starting_gold,
             starting_food: m.starting_food,
+            starting_inn: m.starting_inn,
             max_party_size: m.max_party_size,
             max_roster_size: m.max_roster_size,
             difficulty: m.difficulty,
@@ -158,6 +160,7 @@ impl CampaignMetadataEditBuffer {
         dest.starting_direction = self.starting_direction.clone();
         dest.starting_gold = self.starting_gold;
         dest.starting_food = self.starting_food;
+        dest.starting_inn = self.starting_inn;
         dest.max_party_size = self.max_party_size;
         dest.max_roster_size = self.max_roster_size;
         dest.difficulty = self.difficulty;
@@ -192,8 +195,10 @@ impl Default for CampaignMetadataEditBuffer {
 /// # Examples
 ///
 /// ```
-/// let mut state = campaign_editor::CampaignMetadataEditorState::new();
-/// assert_eq!(state.mode, campaign_editor::CampaignEditorMode::List);
+/// use campaign_builder::campaign_editor::{CampaignMetadataEditorState, CampaignEditorMode};
+///
+/// let mut state = CampaignMetadataEditorState::new();
+/// assert_eq!(state.mode, CampaignEditorMode::List);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CampaignMetadataEditorState {
@@ -289,7 +294,9 @@ impl CampaignMetadataEditorState {
     /// # Examples
     ///
     /// ```
-    /// let mut state = campaign_editor::CampaignMetadataEditorState::new();
+    /// use campaign_builder::campaign_editor::CampaignMetadataEditorState;
+    ///
+    /// let mut state = CampaignMetadataEditorState::new();
     /// state.start_edit();
     /// state.buffer.id = "my_campaign".to_string();
     /// state.apply_buffer_to_metadata();
@@ -309,7 +316,9 @@ impl CampaignMetadataEditorState {
     /// # Examples
     ///
     /// ```
-    /// let mut state = campaign_editor::CampaignMetadataEditorState::new();
+    /// use campaign_builder::campaign_editor::CampaignMetadataEditorState;
+    ///
+    /// let mut state = CampaignMetadataEditorState::new();
     /// state.validate_requested = true;
     /// assert!(state.consume_validate_request());
     /// assert!(!state.validate_requested);
@@ -327,7 +336,9 @@ impl CampaignMetadataEditorState {
     /// # Examples
     ///
     /// ```
-    /// let state = campaign_editor::CampaignMetadataEditorState::new();
+    /// use campaign_builder::campaign_editor::CampaignMetadataEditorState;
+    ///
+    /// let state = CampaignMetadataEditorState::new();
     /// let tmpdir = tempfile::tempdir().unwrap();
     /// let path = tmpdir.path().join("campaign_save.ron");
     /// let _ = state.save_to_file(path.as_path());
@@ -343,7 +354,9 @@ impl CampaignMetadataEditorState {
     /// # Examples
     ///
     /// ```
-    /// let mut state = campaign_editor::CampaignMetadataEditorState::new();
+    /// use campaign_builder::campaign_editor::CampaignMetadataEditorState;
+    ///
+    /// let mut state = CampaignMetadataEditorState::new();
     /// let tmpdir = tempfile::tempdir().unwrap();
     /// let path = tmpdir.path().join("campaign_load.ron");
     /// // If a valid RON file exists at `path`, the following loads the metadata.
@@ -858,6 +871,19 @@ impl CampaignMetadataEditorState {
                                     {
                                         self.buffer.starting_food =
                                             (food.max(FOOD_MIN as i64)) as u32;
+                                        self.has_unsaved_changes = true;
+                                        *unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Starting Inn:")
+                                        .on_hover_text("Default inn where non-party premade characters start (default: 1)");
+                                    let mut inn = self.buffer.starting_inn as i32;
+                                    if ui
+                                        .add(egui::DragValue::new(&mut inn).range(1..=255))
+                                        .changed()
+                                    {
+                                        self.buffer.starting_inn = (inn.max(1)) as u8;
                                         self.has_unsaved_changes = true;
                                         *unsaved_changes = true;
                                     }

@@ -71,6 +71,12 @@ const EVENT_COLOR_SIGN: Color32 = Color32::from_rgb(86, 182, 194);
 /// Magenta for NPC Dialogue events - rgb(198, 120, 221) / #c678dd
 const EVENT_COLOR_NPC_DIALOGUE: Color32 = Color32::from_rgb(198, 120, 221);
 
+/// Orange for Recruitable Character events - rgb(255, 179, 71) / #ffb347
+const EVENT_COLOR_RECRUITABLE: Color32 = Color32::from_rgb(255, 179, 71);
+
+/// Teal for Enter Inn events - rgb(120, 200, 160)
+const EVENT_COLOR_ENTER_INN: Color32 = Color32::from_rgb(120, 200, 160);
+
 // ===== Editor Mode =====
 
 /// Editor mode for the maps editor
@@ -1050,11 +1056,16 @@ pub struct EventEditorState {
     pub sign_text: String,
     // NPC Dialogue fields
     pub npc_id: String,
+    // Recruitable Character fields
+    pub recruit_character_id: String,
+    // Inn fields
+    pub inn_id_input_buffer: String,
 
     // Autocomplete input buffers
     pub trap_effect_input_buffer: String,
     pub teleport_map_input_buffer: String,
     pub npc_id_input_buffer: String,
+    pub recruit_character_id_input_buffer: String,
 }
 
 impl Default for EventEditorState {
@@ -1078,9 +1089,12 @@ impl Default for EventEditorState {
             trap_effect: String::new(),
             sign_text: String::new(),
             npc_id: String::new(),
+            recruit_character_id: String::new(),
+            inn_id_input_buffer: String::new(),
             trap_effect_input_buffer: String::new(),
             teleport_map_input_buffer: String::new(),
             npc_id_input_buffer: String::new(),
+            recruit_character_id_input_buffer: String::new(),
         }
     }
 }
@@ -1093,6 +1107,8 @@ pub enum EventType {
     Trap,
     Sign,
     NpcDialogue,
+    RecruitableCharacter,
+    EnterInn,
 }
 
 impl Default for EventType {
@@ -1110,6 +1126,8 @@ impl EventType {
             EventType::Trap => "Trap",
             EventType::Sign => "Sign",
             EventType::NpcDialogue => "NPC Dialogue",
+            EventType::RecruitableCharacter => "Recruitable Character",
+            EventType::EnterInn => "Enter Inn",
         }
     }
 
@@ -1121,6 +1139,8 @@ impl EventType {
             EventType::Trap => "🪤",
             EventType::Sign => "📜",
             EventType::NpcDialogue => "💬",
+            EventType::RecruitableCharacter => "🤝",
+            EventType::EnterInn => "🏨",
         }
     }
 
@@ -1146,6 +1166,8 @@ impl EventType {
             EventType::Trap => EVENT_COLOR_TRAP,
             EventType::Sign => EVENT_COLOR_SIGN,
             EventType::NpcDialogue => EVENT_COLOR_NPC_DIALOGUE,
+            EventType::RecruitableCharacter => EVENT_COLOR_RECRUITABLE,
+            EventType::EnterInn => EVENT_COLOR_ENTER_INN,
         }
     }
 
@@ -1157,6 +1179,8 @@ impl EventType {
             EventType::Trap,
             EventType::Sign,
             EventType::NpcDialogue,
+            EventType::RecruitableCharacter,
+            EventType::EnterInn,
         ]
     }
 }
@@ -1252,6 +1276,34 @@ impl EventEditorState {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     npc_id,
+                })
+            }
+            EventType::RecruitableCharacter => {
+                // Prefer an explicit selected ID if present, otherwise use the freeform buffer
+                let character_id = if !self.recruit_character_id.is_empty() {
+                    self.recruit_character_id.clone()
+                } else {
+                    self.recruit_character_id_input_buffer.trim().to_string()
+                };
+                if character_id.is_empty() {
+                    return Err("Character ID cannot be empty".to_string());
+                }
+                Ok(MapEvent::RecruitableCharacter {
+                    name: self.name.clone(),
+                    description: self.description.clone(),
+                    character_id,
+                })
+            }
+            EventType::EnterInn => {
+                let inn_id = self
+                    .inn_id_input_buffer
+                    .trim()
+                    .parse::<u8>()
+                    .map_err(|_| "Invalid Inn ID")?;
+                Ok(MapEvent::EnterInn {
+                    name: self.name.clone(),
+                    description: self.description.clone(),
+                    inn_id,
                 })
             }
         }
@@ -1352,7 +1404,28 @@ impl EventEditorState {
                 s.event_type = EventType::NpcDialogue;
                 s.name = name.clone();
                 s.description = description.clone();
-                s.npc_id = npc_id.to_string();
+                s.npc_id = npc_id.clone();
+            }
+            MapEvent::RecruitableCharacter {
+                name,
+                description,
+                character_id,
+            } => {
+                s.event_type = EventType::RecruitableCharacter;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.recruit_character_id = character_id.clone();
+                s.recruit_character_id_input_buffer = character_id.clone();
+            }
+            MapEvent::EnterInn {
+                name,
+                description,
+                inn_id,
+            } => {
+                s.event_type = EventType::EnterInn;
+                s.name = name.clone();
+                s.description = description.clone();
+                s.inn_id_input_buffer = inn_id.to_string();
             }
         }
         s
@@ -1535,6 +1608,10 @@ impl<'a> Widget for MapGridWidget<'a> {
                             MapEvent::Trap { .. } => EventType::Trap,
                             MapEvent::Sign { .. } => EventType::Sign,
                             MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
+                            MapEvent::RecruitableCharacter { .. } => {
+                                EventType::RecruitableCharacter
+                            }
+                            MapEvent::EnterInn { .. } => EventType::EnterInn,
                         })
                     } else {
                         None
@@ -1716,6 +1793,8 @@ impl<'a> Widget for MapPreviewWidget<'a> {
                         MapEvent::Trap { .. } => EventType::Trap,
                         MapEvent::Sign { .. } => EventType::Sign,
                         MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
+                        MapEvent::RecruitableCharacter { .. } => EventType::RecruitableCharacter,
+                        MapEvent::EnterInn { .. } => EventType::EnterInn,
                     });
                     let has_npc_placement =
                         self.map.npc_placements.iter().any(|p| p.position == pos);
@@ -2829,10 +2908,7 @@ impl MapsEditorState {
                             map_id,
                             ..
                         } => {
-                            ui.label(format!(
-                                "Teleport to map {} at ({}, {})",
-                                map_id, destination.x, destination.y
-                            ));
+                            ui.label(format!("Teleport → {} @ {:?}", map_id, destination));
                         }
                         MapEvent::Trap { damage, effect, .. } => {
                             ui.label(format!("Trap: {} damage", damage));
@@ -2845,6 +2921,14 @@ impl MapsEditorState {
                         }
                         MapEvent::NpcDialogue { npc_id, .. } => {
                             ui.label(format!("NPC Dialogue: {}", npc_id));
+                        }
+                        MapEvent::RecruitableCharacter {
+                            character_id, name, ..
+                        } => {
+                            ui.label(format!("Recruitable: {} ({})", character_id, name));
+                        }
+                        MapEvent::EnterInn { inn_id, name, .. } => {
+                            ui.label(format!("Inn Entry: {} ({})", inn_id, name));
                         }
                     }
 
@@ -2935,6 +3019,12 @@ impl MapsEditorState {
                 name, description, ..
             } => (name.clone(), description.clone()),
             MapEvent::NpcDialogue {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::RecruitableCharacter {
+                name, description, ..
+            } => (name.clone(), description.clone()),
+            MapEvent::EnterInn {
                 name, description, ..
             } => (name.clone(), description.clone()),
         }
@@ -3238,6 +3328,30 @@ impl MapsEditorState {
                     ui.horizontal(|ui| {
                         ui.label("Or enter NPC ID manually:");
                         if ui.text_edit_singleline(&mut event_editor.npc_id).changed() {
+                            editor.has_changes = true;
+                        }
+                    });
+                }
+                EventType::RecruitableCharacter => {
+                    ui.horizontal(|ui| {
+                        ui.label("Character ID:");
+                        if ui
+                            .text_edit_singleline(
+                                &mut event_editor.recruit_character_id_input_buffer,
+                            )
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    });
+                }
+                EventType::EnterInn => {
+                    ui.horizontal(|ui| {
+                        ui.label("Inn ID:");
+                        if ui
+                            .text_edit_singleline(&mut event_editor.inn_id_input_buffer)
+                            .changed()
+                        {
                             editor.has_changes = true;
                         }
                     });
@@ -4127,6 +4241,87 @@ mod tests {
     }
 
     #[test]
+    fn test_event_editor_state_to_recruitable() {
+        let editor = EventEditorState {
+            event_type: EventType::RecruitableCharacter,
+            name: "Old Gareth".to_string(),
+            description: "A grizzled dwarf".to_string(),
+            recruit_character_id_input_buffer: "old_gareth".to_string(),
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().unwrap();
+        match event {
+            MapEvent::RecruitableCharacter {
+                name,
+                description,
+                character_id,
+            } => {
+                assert_eq!(name, "Old Gareth".to_string());
+                assert_eq!(description, "A grizzled dwarf".to_string());
+                assert_eq!(character_id, "old_gareth".to_string());
+            }
+            _ => panic!("Expected RecruitableCharacter event"),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_state_from_recruitable() {
+        let event = MapEvent::RecruitableCharacter {
+            name: "Whisper".to_string(),
+            description: "An elven scout".to_string(),
+            character_id: "whisper".to_string(),
+        };
+
+        let state = EventEditorState::from_map_event(Position::new(0, 0), &event);
+        assert_eq!(state.event_type, EventType::RecruitableCharacter);
+        assert_eq!(state.name, "Whisper".to_string());
+        assert_eq!(
+            state.recruit_character_id_input_buffer,
+            "whisper".to_string()
+        );
+    }
+
+    #[test]
+    fn test_event_editor_state_to_enterinn() {
+        let editor = EventEditorState {
+            event_type: EventType::EnterInn,
+            name: "Cozy Inn Entrance".to_string(),
+            description: "A welcoming inn".to_string(),
+            inn_id_input_buffer: "3".to_string(),
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().unwrap();
+        match event {
+            MapEvent::EnterInn {
+                name,
+                description,
+                inn_id,
+            } => {
+                assert_eq!(name, "Cozy Inn Entrance".to_string());
+                assert_eq!(description, "A welcoming inn".to_string());
+                assert_eq!(inn_id, 3u8);
+            }
+            _ => panic!("Expected EnterInn event"),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_state_from_enterinn() {
+        let event = MapEvent::EnterInn {
+            name: "Cozy Inn Entrance".to_string(),
+            description: "A welcoming inn".to_string(),
+            inn_id: 3u8,
+        };
+
+        let state = EventEditorState::from_map_event(Position::new(0, 0), &event);
+        assert_eq!(state.event_type, EventType::EnterInn);
+        assert_eq!(state.name, "Cozy Inn Entrance".to_string());
+        assert_eq!(state.inn_id_input_buffer, "3".to_string());
+    }
+
+    #[test]
     fn test_event_editor_state_to_teleport_with_selected_fallback() {
         let editor = EventEditorState {
             event_type: EventType::Teleport,
@@ -4185,10 +4380,15 @@ mod tests {
     #[test]
     fn test_event_type_all() {
         let types = EventType::all();
-        assert_eq!(types.len(), 6);
+        assert_eq!(types.len(), 8);
         assert!(types.contains(&EventType::Encounter));
         assert!(types.contains(&EventType::Treasure));
+        assert!(types.contains(&EventType::Teleport));
+        assert!(types.contains(&EventType::Trap));
         assert!(types.contains(&EventType::Sign));
+        assert!(types.contains(&EventType::NpcDialogue));
+        assert!(types.contains(&EventType::RecruitableCharacter));
+        assert!(types.contains(&EventType::EnterInn));
     }
 
     #[test]

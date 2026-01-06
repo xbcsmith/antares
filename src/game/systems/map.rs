@@ -62,6 +62,9 @@ pub enum MapEventType {
     TreasureChest {
         loot_table_id: u8,
     },
+    RecruitableCharacter {
+        character_id: String,
+    },
 }
 
 /// Message used to request a map change (teleportation, portal, etc.)
@@ -155,6 +158,11 @@ fn map_event_to_event_type(ev: &world::MapEvent) -> Option<MapEventType> {
         world::MapEvent::Treasure { loot, .. } => {
             let lid = *loot.first().unwrap_or(&0);
             Some(MapEventType::TreasureChest { loot_table_id: lid })
+        }
+        world::MapEvent::RecruitableCharacter { character_id, .. } => {
+            Some(MapEventType::RecruitableCharacter {
+                character_id: character_id.clone(),
+            })
         }
         _ => None,
     }

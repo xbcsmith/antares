@@ -548,6 +548,7 @@ impl SpellsEditorState {
             });
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_form(
         &mut self,
         ui: &mut egui::Ui,

@@ -149,6 +149,13 @@ pub struct CampaignConfig {
     /// Starting food units
     pub starting_food: u32,
 
+    /// Default inn where non-party premade characters start (default: 1)
+    ///
+    /// When a new game is started, premade characters that don't have
+    /// `starts_in_party: true` will be placed at this inn location.
+    #[serde(default = "default_starting_inn")]
+    pub starting_inn: u8,
+
     /// Maximum party size (default: 6)
     #[serde(default = "default_max_party_size")]
     pub max_party_size: usize,
@@ -176,6 +183,10 @@ pub struct CampaignConfig {
     /// Maximum character level
     #[serde(default = "default_max_level")]
     pub max_level: u8,
+}
+
+fn default_starting_inn() -> u8 {
+    1
 }
 
 fn default_max_party_size() -> usize {
@@ -413,6 +424,8 @@ pub struct CampaignMetadata {
     pub starting_direction: String,
     pub starting_gold: u32,
     pub starting_food: u32,
+    #[serde(default = "default_starting_inn")]
+    pub starting_inn: u8,
     pub max_party_size: usize,
     pub max_roster_size: usize,
     pub difficulty: Difficulty,
@@ -473,6 +486,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 starting_direction,
                 starting_gold: metadata.starting_gold,
                 starting_food: metadata.starting_food,
+                starting_inn: metadata.starting_inn,
                 max_party_size: metadata.max_party_size,
                 max_roster_size: metadata.max_roster_size,
                 difficulty: metadata.difficulty,
@@ -720,6 +734,7 @@ mod tests {
             starting_direction: Direction::North,
             starting_gold: 100,
             starting_food: 50,
+            starting_inn: default_starting_inn(),
             max_party_size: default_max_party_size(),
             max_roster_size: default_max_roster_size(),
             difficulty: Difficulty::default(),

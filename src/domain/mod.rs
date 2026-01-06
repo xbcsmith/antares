@@ -23,6 +23,7 @@ pub mod conditions;
 pub mod dialogue;
 pub mod items;
 pub mod magic;
+pub mod party_manager;
 pub mod proficiency;
 pub mod progression;
 pub mod quest;
@@ -46,3 +47,6 @@ pub use proficiency::{
     has_proficiency_union, is_item_compatible_with_race, ProficiencyCategory, ProficiencyDatabase,
     ProficiencyDefinition, ProficiencyError, ProficiencyId,
 };
+
+// Re-export party management types
+pub use party_manager::{PartyManagementError, PartyManager};

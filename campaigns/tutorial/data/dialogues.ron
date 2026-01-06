@@ -1,7 +1,7 @@
 [
     (
         id: 1,
-        name: "Fizban Story",
+        name: "Arcturus Story",
         root_node: 1,
         nodes: {
             2: (
@@ -15,7 +15,7 @@
             ),
             1: (
                 id: 1,
-                text: "I am the Great Fizban!",
+                text: "I am the Great Arcturus!",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -23,7 +23,7 @@
                 is_terminal: false,
             ),
         },
-        speaker_name: Some("Fizban"),
+        speaker_name: Some("Arcturus"),
         repeatable: true,
         associated_quest: Some(10),
     ),

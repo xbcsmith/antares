@@ -333,7 +333,12 @@ fn update_hud(
     // Update HP bars
     for (hp_bar, mut node, mut bg_color) in hp_bar_query.iter_mut() {
         if let Some(character) = party.members.get(hp_bar.party_index) {
-            let hp_percent = character.hp.current as f32 / character.hp.base as f32;
+            // Guard against division by zero and clamp percent to [0.0, 1.0]
+            let hp_percent = if character.hp.base == 0 {
+                0.0
+            } else {
+                (character.hp.current as f32 / character.hp.base as f32).clamp(0.0, 1.0)
+            };
             node.width = Val::Percent(hp_percent * 100.0);
             *bg_color = BackgroundColor(hp_bar_color(hp_percent));
         } else {
@@ -421,7 +426,7 @@ fn update_portraits(
     for (portrait, mut bg_color, mut image_node) in portrait_query.iter_mut() {
         if let Some(character) = party.members.get(portrait.party_index) {
             debug!(
-                "update_portraits: checking slot {} for character '{}' (portrait_id={})",
+                "update_portraits: slot {} checking for character '{}' (portrait_id={})",
                 portrait.party_index, character.name, character.portrait_id
             );
 
@@ -432,6 +437,11 @@ fn update_portraits(
                 .to_lowercase()
                 .replace(' ', "_");
             let name_key = character.name.to_lowercase().replace(' ', "_");
+
+            debug!(
+                "update_portraits: slot {} normalized keys => portrait_key='{}', name_key='{}'",
+                portrait.party_index, portrait_key, name_key
+            );
 
             // Helper to check if a handle is loaded. We consider a handle 'loaded' if:
             // - It's present in the `Assets<Image>` storage (useful for tests where assets
@@ -462,12 +472,29 @@ fn update_portraits(
             // Lookup by explicit portrait_id key first (if provided)
             if !portrait_key.is_empty() {
                 if let Some(handle) = portraits.handles_by_name.get(&portrait_key) {
+                    debug!(
+                        "update_portraits: slot {} found handle for key '{}' (handle id={:?})",
+                        portrait.party_index,
+                        portrait_key,
+                        handle.id()
+                    );
                     if is_handle_loaded(handle) {
+                        debug!(
+                            "update_portraits: slot {} applying loaded portrait '{}' (handle id={:?})",
+                            portrait.party_index,
+                            portrait_key,
+                            handle.id()
+                        );
                         image_node.image = handle.clone();
                         image_node.color = Color::WHITE;
                         *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
                         continue;
                     } else {
+                        debug!(
+                            "update_portraits: slot {} found portrait '{}' but not yet loaded; showing placeholder color",
+                            portrait.party_index,
+                            portrait_key
+                        );
                         // Keep placeholder until asset is fully loaded
                         image_node.image = Handle::<Image>::default();
                         image_node.color = Color::WHITE;
@@ -479,11 +506,23 @@ fn update_portraits(
 
             // Then try lookup by normalized name
             if let Some(handle) = portraits.handles_by_name.get(&name_key) {
+                debug!(
+                    "update_portraits: slot {} fallback found handle for name '{}' (handle id={:?})",
+                    portrait.party_index, name_key, handle.id()
+                );
                 if is_handle_loaded(handle) {
+                    debug!(
+                        "update_portraits: slot {} applying loaded portrait for name '{}'",
+                        portrait.party_index, name_key
+                    );
                     image_node.image = handle.clone();
                     image_node.color = Color::WHITE;
                     *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
                 } else {
+                    debug!(
+                        "update_portraits: slot {} handle for name '{}' not yet loaded; using placeholder color",
+                        portrait.party_index, name_key
+                    );
                     // No image available / not yet loaded -> fallback to deterministic color
                     image_node.image = Handle::<Image>::default();
                     image_node.color = Color::WHITE;
@@ -496,13 +535,17 @@ fn update_portraits(
                 }
             } else {
                 // No image available -> fallback to deterministic color based on portrait_key or name_key
-                image_node.image = Handle::<Image>::default();
-                image_node.color = Color::WHITE;
                 let color_key = if !portrait_key.is_empty() {
                     portrait_key.as_str()
                 } else {
                     name_key.as_str()
                 };
+                debug!(
+                    "update_portraits: slot {} no image found for '{}'/'{}'; using placeholder color key='{}'",
+                    portrait.party_index, portrait_key, name_key, color_key
+                );
+                image_node.image = Handle::<Image>::default();
+                image_node.color = Color::WHITE;
                 *bg_color = BackgroundColor(get_portrait_color(color_key));
             }
         } else {
@@ -615,22 +658,35 @@ fn ensure_portraits_loaded(
 
                         // Load relative to the campaign (BEVY_ASSET_ROOT points to the campaign directory)
                         debug!(
-                            "ensure_portraits_loaded: loading portrait via relative asset path '{}'",
-                            rel_str
+                            "ensure_portraits_loaded: loading portrait via relative asset path '{}' (abs={})",
+                            rel_str,
+                            path.display()
                         );
 
-                        // Attempt a normal load first. If the AssetServer refuses (returns a default handle)
-                        // attempt `load_override` as a fallback so assets living outside the default
-                        // approved locations can still be loaded in single-campaign runs.
+                        // Attempt a normal load first.
                         let mut handle: Handle<Image> = asset_server.load(rel_str.clone());
 
+                        // Log immediate handle id and load state for debugging
+                        debug!(
+                            "ensure_portraits_loaded: after load(): handle id={:?}, load_state={:?}",
+                            handle.id(),
+                            asset_server.get_load_state(handle.id())
+                        );
+
                         if handle == Handle::default() {
-                            debug!(
-                                "ensure_portraits_loaded: standard load returned default handle for '{}', trying load_override",
-                                rel_str
+                            warn!(
+                                "ensure_portraits_loaded: AssetServer returned default handle when loading '{}' (likely unapproved path or missing loader); attempting load_override (campaign='{}')",
+                                rel_str, campaign.id
                             );
                             let override_handle: Handle<Image> =
                                 asset_server.load_override(rel_str.clone());
+
+                            debug!(
+                                "ensure_portraits_loaded: after load_override(): handle id={:?}, load_state={:?}",
+                                override_handle.id(),
+                                asset_server.get_load_state(override_handle.id())
+                            );
+
                             if override_handle != Handle::default() {
                                 handle = override_handle;
                             } else {
@@ -650,9 +706,10 @@ fn ensure_portraits_loaded(
                                 .handles_by_name
                                 .insert(key.clone(), handle.clone());
                             debug!(
-                                "ensure_portraits_loaded: indexed '{}' as key '{}'",
+                                "ensure_portraits_loaded: indexed '{}' as key '{}' (handle id={:?})",
                                 path.display(),
-                                key
+                                key,
+                                handle.id()
                             );
                         } else {
                             // Defensive: shouldn't normally happen because of checks above.
@@ -1249,6 +1306,109 @@ mod tests {
 
         assert!(name_found, "Character name text not populated for slot 0");
         assert!(hp_found, "HP text not populated for slot 0");
+    }
+
+    #[test]
+    fn test_update_hud_handles_zero_base() {
+        use super::{GlobalState, HpBarFill, HudPlugin, HP_CRITICAL_COLOR};
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, AttributePair16, Character, Sex};
+        use bevy::prelude::*;
+
+        // Prepare GameState with a single character (slot 0) that has a zero base HP
+        let mut state = GameState::new();
+        let mut ch = Character::new(
+            "Zero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.hp = AttributePair16 {
+            base: 0,
+            current: 10,
+        };
+        state.party.add_member(ch).unwrap();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+
+        // Run startup and one update so HUD is populated
+        app.update();
+        app.update();
+
+        // Verify HP bar width is 0% and color is critical
+        {
+            let world = app.world_mut();
+            let mut q = world.query::<(&HpBarFill, &Node, &BackgroundColor)>();
+            let mut found = false;
+            for (hp_bar, node, bg_color) in q.iter(world) {
+                if hp_bar.party_index == 0 {
+                    assert_eq!(node.width, Val::Percent(0.0));
+                    assert_eq!(*bg_color, BackgroundColor(HP_CRITICAL_COLOR));
+                    found = true;
+                }
+            }
+            assert!(found, "HP bar not found for slot 0");
+        }
+    }
+
+    #[test]
+    fn test_update_portraits_skip_default_handle_shows_placeholder() {
+        use super::{get_portrait_color, GlobalState, HudPlugin, PortraitAssets};
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, Character, Sex};
+        use bevy::prelude::*;
+
+        // Prepare GameState with a character that has portrait_id = 10
+        let mut state = GameState::new();
+        let mut ch = Character::new(
+            "Painter".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        ch.portrait_id = "10".to_string();
+        state.party.add_member(ch).unwrap();
+
+        // Build App and add HUD plugin
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+
+        // Insert a default handle for name '10' to simulate an AssetServer refusal
+        {
+            let world = app.world_mut();
+            let mut portraits = world.resource_mut::<PortraitAssets>();
+            portraits
+                .handles_by_name
+                .insert("10".to_string(), Handle::<Image>::default());
+        }
+
+        // Run startup and an update so placeholders are applied
+        app.update();
+        app.update();
+
+        // Verify placeholder color is used (not transparent) and image is default
+        {
+            let world = app.world_mut();
+            let mut portrait_query =
+                world.query::<(&CharacterPortrait, &BackgroundColor, &ImageNode)>();
+            let mut found_placeholder = false;
+            for (portrait, bg_color, image_node) in portrait_query.iter(world) {
+                if portrait.party_index == 0 {
+                    assert_eq!(*bg_color, BackgroundColor(get_portrait_color("10")));
+                    assert_eq!(image_node.image, Handle::<Image>::default());
+                    found_placeholder = true;
+                }
+            }
+            assert!(found_placeholder, "Portrait color not set for slot 0");
+        }
     }
 
     /// Verifies portrait placeholder behavior and that inserting a portrait handle

@@ -127,6 +127,10 @@ pub enum ValidationError {
     /// Balance warning
     #[error("Balance issue ({severity}): {message}")]
     BalanceWarning { severity: Severity, message: String },
+
+    /// Too many starting party members
+    #[error("Too many starting party members: {count} characters have starts_in_party=true, but max party size is {max}")]
+    TooManyStartingPartyMembers { count: usize, max: usize },
 }
 
 impl ValidationError {
@@ -156,6 +160,8 @@ impl ValidationError {
             ValidationError::DisconnectedMap { .. } => Severity::Warning,
 
             ValidationError::BalanceWarning { severity, .. } => *severity,
+
+            ValidationError::TooManyStartingPartyMembers { .. } => Severity::Error,
         }
     }
 
@@ -225,6 +231,7 @@ impl<'a> Validator<'a> {
     ///
     /// This performs comprehensive validation including:
     /// - Cross-reference validation (checking all ID references)
+    /// - Character validation (party size limits, valid references)
     /// - Connectivity validation (ensuring maps are reachable)
     /// - Balance checking (identifying potential balance issues)
     ///
@@ -259,6 +266,9 @@ impl<'a> Validator<'a> {
 
         // Validate cross-references
         errors.extend(self.validate_references());
+
+        // Validate characters (party size, references)
+        errors.extend(self.validate_characters());
 
         // Validate map connectivity
         errors.extend(self.validate_connectivity());
@@ -349,6 +359,48 @@ impl<'a> Validator<'a> {
                     });
                 }
             }
+        }
+
+        errors
+    }
+
+    /// Validates character definitions for party management constraints
+    ///
+    /// Checks that:
+    /// - No more than 6 characters have `starts_in_party: true`
+    /// - All character references are valid (handled by validate_character_references)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::database::ContentDatabase;
+    /// use antares::sdk::validation::Validator;
+    ///
+    /// let db = ContentDatabase::new();
+    /// let validator = Validator::new(&db);
+    ///
+    /// // Run the public validation entrypoint (includes character-related checks)
+    /// let errors = validator.validate_all().expect("validation failed");
+    /// // Check for party size violations
+    /// ```
+    fn validate_characters(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+
+        // Count characters with starts_in_party = true
+        let starting_party_count = self
+            .db
+            .characters
+            .premade_characters()
+            .filter(|c| c.starts_in_party)
+            .count();
+
+        // Enforce max party size of 6
+        const MAX_PARTY_SIZE: usize = 6;
+        if starting_party_count > MAX_PARTY_SIZE {
+            errors.push(ValidationError::TooManyStartingPartyMembers {
+                count: starting_party_count,
+                max: MAX_PARTY_SIZE,
+            });
         }
 
         errors
@@ -539,6 +591,42 @@ impl<'a> Validator<'a> {
                             ),
                         });
                     }
+                }
+                crate::domain::world::MapEvent::RecruitableCharacter { character_id, .. } => {
+                    // Validate character exists in database
+                    if self.db.characters.get_character(character_id).is_none() {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Error,
+                            message: format!(
+                                "Map {} has recruitable character event for non-existent character '{}' at ({}, {})",
+                                map.id, character_id, pos.x, pos.y
+                            ),
+                        });
+                    }
+                }
+                crate::domain::world::MapEvent::EnterInn { inn_id, .. } => {
+                    // Validate inn_id is within reasonable range
+                    if *inn_id == 0 {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Error,
+                            message: format!(
+                                "Map {} has EnterInn event with invalid inn_id 0 at ({}, {}). Inn IDs should start at 1.",
+                                map.id, pos.x, pos.y
+                            ),
+                        });
+                    } else if *inn_id > 100 {
+                        errors.push(ValidationError::BalanceWarning {
+                            severity: Severity::Warning,
+                            message: format!(
+                                "Map {} has EnterInn event with suspiciously high inn_id {} at ({}, {}). Verify this is intentional.",
+                                map.id, inn_id, pos.x, pos.y
+                            ),
+                        });
+                    }
+                    // Note: We don't validate against a town/inn database here because
+                    // inns are identified by simple numeric IDs (TownId = u8) and may
+                    // not have explicit definitions in the database. The inn_id is used
+                    // directly to filter the character roster by location.
                 }
             }
         }
@@ -950,5 +1038,200 @@ mod tests {
             2,
             "Should detect both missing equipment item references"
         );
+    }
+
+    #[test]
+    fn test_validator_party_size_limit_valid() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add valid race and class
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add exactly 6 characters with starts_in_party = true (at limit)
+        for i in 0..6 {
+            let mut char = CharacterDefinition::new(
+                format!("char_{}", i),
+                format!("Character {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            char.is_premade = true;
+            char.starts_in_party = true;
+            db.characters.add_character(char).unwrap();
+        }
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+
+        // Should NOT have TooManyStartingPartyMembers error
+        let party_size_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::TooManyStartingPartyMembers { .. }))
+            .collect();
+        assert_eq!(
+            party_size_errors.len(),
+            0,
+            "Should not have party size error with exactly 6 starting members"
+        );
+    }
+
+    #[test]
+    fn test_validator_party_size_limit_exceeded() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add valid race and class
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add 7 characters with starts_in_party = true (exceeds limit)
+        for i in 0..7 {
+            let mut char = CharacterDefinition::new(
+                format!("char_{}", i),
+                format!("Character {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            char.is_premade = true;
+            char.starts_in_party = true;
+            db.characters.add_character(char).unwrap();
+        }
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+
+        // Should have TooManyStartingPartyMembers error
+        let party_size_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::TooManyStartingPartyMembers { .. }))
+            .collect();
+        assert_eq!(
+            party_size_errors.len(),
+            1,
+            "Should detect party size violation"
+        );
+
+        // Verify error details
+        if let Some(ValidationError::TooManyStartingPartyMembers { count, max }) =
+            party_size_errors.first()
+        {
+            assert_eq!(*count, 7, "Should report 7 starting party members");
+            assert_eq!(*max, 6, "Should report max of 6");
+        } else {
+            panic!("Expected TooManyStartingPartyMembers error");
+        }
+    }
+
+    #[test]
+    fn test_validator_party_size_ignores_non_starting_characters() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::classes::ClassDefinition;
+        use crate::domain::races::RaceDefinition;
+
+        let mut db = ContentDatabase::new();
+
+        // Add valid race and class
+        let human_race = RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "A versatile race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let knight_class = ClassDefinition::new("knight".to_string(), "Knight".to_string());
+        db.classes.add_class(knight_class).unwrap();
+
+        // Add 3 characters with starts_in_party = true
+        for i in 0..3 {
+            let mut char = CharacterDefinition::new(
+                format!("starting_char_{}", i),
+                format!("Starting Character {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            char.is_premade = true;
+            char.starts_in_party = true;
+            db.characters.add_character(char).unwrap();
+        }
+
+        // Add 10 more characters with starts_in_party = false
+        for i in 0..10 {
+            let mut char = CharacterDefinition::new(
+                format!("recruit_char_{}", i),
+                format!("Recruitable Character {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            char.is_premade = true;
+            char.starts_in_party = false; // NOT starting in party
+            db.characters.add_character(char).unwrap();
+        }
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().unwrap();
+
+        // Should NOT have TooManyStartingPartyMembers error (only 3 starting)
+        let party_size_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::TooManyStartingPartyMembers { .. }))
+            .collect();
+        assert_eq!(
+            party_size_errors.len(),
+            0,
+            "Should only count characters with starts_in_party=true"
+        );
+    }
+
+    #[test]
+    fn test_validation_error_party_size_severity() {
+        let error = ValidationError::TooManyStartingPartyMembers { count: 7, max: 6 };
+
+        assert_eq!(error.severity(), Severity::Error);
+        assert!(error.is_error());
+        assert!(!error.is_warning());
+        assert!(!error.is_info());
+    }
+
+    #[test]
+    fn test_validation_error_party_size_display() {
+        let error = ValidationError::TooManyStartingPartyMembers { count: 8, max: 6 };
+
+        let message = error.to_string();
+        assert!(message.contains("8"));
+        assert!(message.contains("6"));
+        assert!(message.contains("starts_in_party"));
     }
 }

@@ -161,6 +161,42 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                             pos
                         );
                     }
+                    MapEvent::RecruitableCharacter {
+                        name,
+                        description,
+                        character_id: _,
+                    } => {
+                        assert!(
+                            !name.trim().is_empty(),
+                            "RecruitableCharacter in map {} at {:?} has empty name",
+                            path.display(),
+                            pos
+                        );
+                        assert!(
+                            !description.trim().is_empty(),
+                            "RecruitableCharacter in map {} at {:?} has empty description",
+                            path.display(),
+                            pos
+                        );
+                    }
+                    MapEvent::EnterInn {
+                        name,
+                        description,
+                        inn_id: _,
+                    } => {
+                        assert!(
+                            !name.trim().is_empty(),
+                            "EnterInn in map {} at {:?} has empty name",
+                            path.display(),
+                            pos
+                        );
+                        assert!(
+                            !description.trim().is_empty(),
+                            "EnterInn in map {} at {:?} has empty description",
+                            path.display(),
+                            pos
+                        );
+                    }
                 }
             }
 
