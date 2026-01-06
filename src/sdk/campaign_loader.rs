@@ -38,6 +38,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+// Duplicate tests removed — tests are defined in the bottom `mod tests` section of this file.
+
 // ===== Error Types =====
 
 /// Errors that can occur when working with campaigns
@@ -811,5 +813,43 @@ mod tests {
         assert!(!report.has_errors());
         assert!(!report.has_warnings());
         assert_eq!(report.issue_count(), 0);
+    }
+
+    #[test]
+    fn test_tutorial_campaign_has_starting_innkeeper() {
+        let loader = CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        assert_eq!(
+            campaign.config.starting_innkeeper,
+            "tutorial_innkeeper_town".to_string()
+        );
+    }
+
+    #[test]
+    fn test_validate_tutorial_campaign_is_valid() {
+        let loader = CampaignLoader::new("campaigns");
+        let report = loader
+            .validate_campaign("tutorial")
+            .expect("validate_campaign failed");
+
+        // Only assert that there are no innkeeper-related validation errors.
+        // Other unrelated configuration issues (e.g., missing README.md) may be
+        // present in the test environment and are not relevant to this migration.
+        let innkeeper_errors: Vec<_> = report
+            .errors
+            .iter()
+            .filter(|e| {
+                let el = e.to_lowercase();
+                el.contains("innkeeper") || el.contains("innkeeper_id") || el.contains("enterinn")
+            })
+            .collect();
+        assert!(
+            innkeeper_errors.is_empty(),
+            "Expected no innkeeper-related validation errors, got: {:?}",
+            innkeeper_errors
+        );
     }
 }

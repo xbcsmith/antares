@@ -185,6 +185,13 @@ This approach preserves backward compatibility while moving to readable, explici
 
 Phase 4 completed: the campaign-level `starting_inn` numeric identifier was replaced with a string `starting_innkeeper` ID across the SDK, Campaign Builder, and engine code where appropriate. A default of `"tutorial_innkeeper_town"` was added, validation was implemented to ensure configured innkeepers exist and are flagged as innkeepers, the Campaign Builder UI was updated to accept innkeeper IDs, and tests were added/updated to cover the new behavior. All unit tests and quality gates pass.
 
+Phase 6 completed: the tutorial campaign data was updated and validated to use string-based innkeeper IDs. The tutorial campaign's metadata now explicitly includes `starting_innkeeper: "tutorial_innkeeper_town"`. All `EnterInn` events in the tutorial maps reference `innkeeper_id` string IDs and were verified; the corresponding NPC definitions were checked to ensure they have `is_innkeeper: true`. Validation coverage was expanded and tests were added/updated to enforce these constraints:
+
+- `sdk/campaign_builder/tests/map_data_validation.rs` now validates `EnterInn` references against the campaign's `npcs.ron` (or map placements when appropriate) and asserts referenced NPCs are innkeepers when resolvable.
+- `src/sdk/campaign_loader.rs` includes tests asserting the tutorial campaign loads and validates cleanly with the expected `starting_innkeeper`.
+
+These Phase 6 changes ensure the tutorial campaign is explicit, self-consistent, and covered by automated checks to prevent regressions.
+
 ### Changes Made
 
 - src/sdk/campaign_loader.rs

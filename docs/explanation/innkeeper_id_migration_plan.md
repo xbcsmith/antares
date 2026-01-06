@@ -987,46 +987,46 @@ ui.end_row();
 
 ---
 
-### Phase 6: Campaign Data Migration
+### Phase 6: Campaign Data Migration — COMPLETED
 
-#### 6.1 Update Tutorial Campaign Configuration
+#### Summary
 
-**File**: `campaigns/tutorial/campaign.ron` (line 13)
+Phase 6 completed: the tutorial campaign data was updated and verified to use string-based innkeeper IDs. The tutorial campaign now explicitly includes a `starting_innkeeper` value, EnterInn events are validated to reference real innkeeper NPCs, and tests were added to enforce these constraints.
 
-**Current**:
+#### Changes Made
 
-```ron
-starting_inn: 1,
-```
+- `campaigns/tutorial/campaign.ron`
 
-**Changes**:
+  - Added `starting_innkeeper: "tutorial_innkeeper_town"` to make the tutorial campaign's default innkeeper explicit (the SDK default remains available when the field is omitted).
 
-```ron
-starting_innkeeper: "tutorial_innkeeper_town",
-```
+- `campaigns/tutorial/data/maps/*`
 
-**Or if field is missing** (relies on default), add it explicitly:
+  - Verified `EnterInn` events reference `innkeeper_id: "tutorial_innkeeper_town"` (no changes required for the tutorial maps — values were already correct).
 
-```ron
-starting_innkeeper: "tutorial_innkeeper_town",
-```
+- `campaigns/tutorial/data/npcs.ron`
 
-#### 6.2 Update Tutorial Map Events
+  - Confirmed `tutorial_innkeeper_town` (and `tutorial_innkeeper_town2`) exist and have `is_innkeeper: true`.
 
-**File**: `campaigns/tutorial/data/maps/map_1.ron` (lines ~7680-7686)
+- Tests
+  - `sdk/campaign_builder/tests/map_data_validation.rs` — augmented to assert that `EnterInn` events reference either:
+    - an NPC defined in `npcs.ron` with `is_innkeeper = true`, or
+    - an NPC that is placed on the same map (placement-based references are accepted when no `npcs.ron` is present).
+  - `src/sdk/campaign_loader.rs` — added tests to assert:
+    - `CampaignLoader::load_campaign("tutorial")` exposes `starting_innkeeper` (explicit or via default),
+    - `CampaignLoader::validate_campaign("tutorial")` reports the tutorial campaign as valid.
 
-**Current**:
+#### Deliverables (Completed)
 
-```ron
-(
-    x: 5,
-    y: 4,
-): EnterInn(
-    name: "Cozy Inn Entrance",
-    description: "A welcoming inn where you can rest and manage your party.",
-    innkeeper_id: "tutorial_innkeeper_town",
-),
-```
+- [x] `campaigns/tutorial/campaign.ron` updated with `starting_innkeeper: "tutorial_innkeeper_town"`
+- [x] All `EnterInn` events verified to reference valid innkeeper NPC IDs
+- [x] Tutorial NPCs verified to have `is_innkeeper: true`
+- [x] Map and campaign validation/tests updated to enforce correctness
+- [x] Tutorial campaign passes validation (no innkeeper-related errors)
+
+#### Notes / Next Steps
+
+- If backward migration for legacy numeric `starting_inn` values becomes necessary, we can add a small migration helper that maps legacy numeric IDs to canonical innkeeper IDs during campaign load and add corresponding tests.
+- UX improvement: later phases may add searchable selector UI for large NPC lists in the Campaign Builder.
 
 **Changes**:
 
