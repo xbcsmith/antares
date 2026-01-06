@@ -337,7 +337,7 @@ pub struct Party {
 /// Character roster (character pool)
 pub struct Roster {
     pub characters: Vec<Character>,              // Up to 18 characters total
-    pub character_locations: Vec<Option<TownId>>, // Where inactive characters are stored
+    pub character_locations: Vec<CharacterLocation>, // Where each character's location is stored (InParty, AtInn(InnkeeperId), OnMap(MapId))
 }
 
 /// Party-wide active spell effects (separate from character conditions)
@@ -883,7 +883,7 @@ pub type SpellId = u16;      // High byte = school, low byte = spell number
 pub type MonsterId = u8;
 pub type MapId = u16;
 pub type CharacterId = usize;
-pub type TownId = u8;
+pub type InnkeeperId = String;
 pub type EventId = u16;
 pub type CharacterDefinitionId = String;
 pub type RaceId = String;

@@ -7682,7 +7682,7 @@
         ): EnterInn(
             name: "Cozy Inn Entrance",
             description: "A welcoming inn where you can rest and manage your party.",
-            inn_id: 1,
+            innkeeper_id: "tutorial_innkeeper_town",
         ),
     },
     npc_placements: [

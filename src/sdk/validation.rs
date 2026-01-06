@@ -604,29 +604,48 @@ impl<'a> Validator<'a> {
                         });
                     }
                 }
-                crate::domain::world::MapEvent::EnterInn { inn_id, .. } => {
-                    // Validate inn_id is within reasonable range
-                    if *inn_id == 0 {
+                crate::domain::world::MapEvent::EnterInn { innkeeper_id, .. } => {
+                    // Validate `innkeeper_id` references a valid innkeeper NPC (non-empty and exists)
+                    let innkeeper_id_trimmed = innkeeper_id.trim();
+                    if innkeeper_id_trimmed.is_empty() {
                         errors.push(ValidationError::BalanceWarning {
                             severity: Severity::Error,
                             message: format!(
-                                "Map {} has EnterInn event with invalid inn_id 0 at ({}, {}). Inn IDs should start at 1.",
+                                "Map {} has EnterInn event with empty innkeeper_id at ({}, {}).",
                                 map.id, pos.x, pos.y
                             ),
                         });
-                    } else if *inn_id > 100 {
-                        errors.push(ValidationError::BalanceWarning {
-                            severity: Severity::Warning,
-                            message: format!(
-                                "Map {} has EnterInn event with suspiciously high inn_id {} at ({}, {}). Verify this is intentional.",
-                                map.id, inn_id, pos.x, pos.y
-                            ),
-                        });
+                    } else {
+                        // Check if NPC exists in the database or as a placement on this map
+                        let npc_exists_in_db = self.db.npcs.has_npc(innkeeper_id_trimmed);
+                        let npc_placed_on_map = map
+                            .npc_placements
+                            .iter()
+                            .any(|p| p.npc_id == innkeeper_id_trimmed);
+
+                        if !npc_exists_in_db && !npc_placed_on_map {
+                            errors.push(ValidationError::BalanceWarning {
+                                severity: Severity::Error,
+                                message: format!(
+                                    "Map {} has EnterInn event referencing non-existent NPC '{}' at ({}, {}).",
+                                    map.id, innkeeper_id, pos.x, pos.y
+                                ),
+                            });
+                        } else if npc_exists_in_db {
+                            // If NPC is present in DB, ensure it's marked as an innkeeper
+                            if let Some(npc_def) = self.db.npcs.get_npc(innkeeper_id_trimmed) {
+                                if !npc_def.is_innkeeper {
+                                    errors.push(ValidationError::BalanceWarning {
+                                        severity: Severity::Error,
+                                        message: format!(
+                                            "Map {} has EnterInn event referencing NPC '{}' which is not an innkeeper at ({}, {}). Set `is_innkeeper: true` on the NPC definition.",
+                                            map.id, innkeeper_id, pos.x, pos.y
+                                        ),
+                                    });
+                                }
+                            }
+                        }
                     }
-                    // Note: We don't validate against a town/inn database here because
-                    // inns are identified by simple numeric IDs (TownId = u8) and may
-                    // not have explicit definitions in the database. The inn_id is used
-                    // directly to filter the character roster by location.
                 }
             }
         }
@@ -735,6 +754,106 @@ mod tests {
         let display = error.to_string();
         assert!(display.contains("42"));
         assert!(display.contains("Loot table"));
+    }
+
+    #[test]
+    fn test_validate_map_enterinn_nonexistent_npc() {
+        // An EnterInn referencing a non-existent NPC should produce a validation error
+        let db = ContentDatabase::new();
+
+        // Build a map with an EnterInn event referencing "nonexistent_inn"
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = crate::domain::types::Position::new(1, 1);
+        map.add_event(
+            pos,
+            crate::domain::world::MapEvent::EnterInn {
+                name: "Cozy Inn Entrance".to_string(),
+                description: "A cozy entrance".to_string(),
+                innkeeper_id: "nonexistent_inn".to_string(),
+            },
+        );
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_map(&map).expect("Validation failed");
+
+        assert!(
+            errors.iter().any(|e| matches!(e, ValidationError::BalanceWarning { severity: Severity::Error, message } if message.contains("non-existent NPC") || message.contains("referencing non-existent NPC"))),
+            "Expected an error about a non-existent NPC for EnterInn, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_validate_map_enterinn_not_innkeeper() {
+        // An EnterInn referencing an NPC that exists but isn't an innkeeper should produce an error
+        let mut db = ContentDatabase::new();
+
+        // Add an NPC that is NOT an innkeeper
+        let npc = crate::domain::world::npc::NpcDefinition::new(
+            "not_inn".to_string(),
+            "Not Inn".to_string(),
+            "portrait.png".to_string(),
+        );
+        db.npcs.add_npc(npc).expect("Failed to add NPC");
+
+        // Build a map with EnterInn referencing that NPC
+        let mut map =
+            crate::domain::world::Map::new(2, "Test2".to_string(), "Desc".to_string(), 10, 10);
+        let pos = crate::domain::types::Position::new(2, 2);
+        map.add_event(
+            pos,
+            crate::domain::world::MapEvent::EnterInn {
+                name: "Fake Inn".to_string(),
+                description: "This NPC isn't an innkeeper".to_string(),
+                innkeeper_id: "not_inn".to_string(),
+            },
+        );
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_map(&map).expect("Validation failed");
+
+        assert!(
+            errors.iter().any(|e| matches!(e, ValidationError::BalanceWarning { severity: Severity::Error, message } if message.contains("not an innkeeper") || message.contains("which is not an innkeeper"))),
+            "Expected an error about NPC not being an innkeeper, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_validate_map_enterinn_valid() {
+        // An EnterInn referencing a valid innkeeper NPC should produce no errors
+        let mut db = ContentDatabase::new();
+
+        // Add an NPC that IS an innkeeper
+        let innkeeper = crate::domain::world::npc::NpcDefinition::innkeeper(
+            "inn_good".to_string(),
+            "Good Inn".to_string(),
+            "portrait.png".to_string(),
+        );
+        db.npcs.add_npc(innkeeper).expect("Failed to add NPC");
+
+        // Build a map with EnterInn referencing that innkeeper
+        let mut map =
+            crate::domain::world::Map::new(3, "Test3".to_string(), "Desc".to_string(), 10, 10);
+        let pos = crate::domain::types::Position::new(3, 3);
+        map.add_event(
+            pos,
+            crate::domain::world::MapEvent::EnterInn {
+                name: "Good Inn Entrance".to_string(),
+                description: "A proper inn entrance".to_string(),
+                innkeeper_id: "inn_good".to_string(),
+            },
+        );
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_map(&map).expect("Validation failed");
+
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors for a valid innkeeper reference, got: {:?}",
+            errors
+        );
     }
 
     #[test]

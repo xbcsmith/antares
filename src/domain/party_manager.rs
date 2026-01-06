@@ -22,9 +22,9 @@
 //! let mut party = Party::new();
 //! let mut roster = Roster::new();
 //!
-//! // Add a character to the roster at an inn
+//! // Add a character to the roster at an inn (by innkeeper NPC ID)
 //! let char1 = Character::new("Hero".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
-//! roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
+//! roster.add_character(char1, CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())).unwrap();
 //!
 //! // Recruit to party
 //! PartyManager::recruit_to_party(&mut party, &mut roster, 0).unwrap();
@@ -32,7 +32,7 @@
 //! ```
 
 use crate::domain::character::{Character, CharacterError, CharacterLocation, Party, Roster};
-use crate::domain::types::TownId;
+use crate::domain::types::InnkeeperId;
 use thiserror::Error;
 
 // ===== Error Types =====
@@ -106,7 +106,7 @@ impl PartyManager {
     /// let mut roster = Roster::new();
     ///
     /// let char1 = Character::new("Warrior".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
-    /// roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
+    /// roster.add_character(char1, CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())).unwrap();
     ///
     /// // Recruit the warrior
     /// let result = PartyManager::recruit_to_party(&mut party, &mut roster, 0);
@@ -132,8 +132,9 @@ impl PartyManager {
         }
 
         // Check character location - must not already be in party
-        let location = roster.character_locations[roster_index];
-        if location == CharacterLocation::InParty {
+        // Borrow the location reference to avoid moving `CharacterLocation`
+        let location = &roster.character_locations[roster_index];
+        if matches!(location, CharacterLocation::InParty) {
             return Err(PartyManagementError::AlreadyInParty);
         }
 
@@ -157,7 +158,7 @@ impl PartyManager {
     /// * `party` - Mutable reference to the active party
     /// * `roster` - Mutable reference to the character roster
     /// * `party_index` - Index of character in party to dismiss (0-5)
-    /// * `inn_id` - Town/inn ID where character will be stored
+    /// * `innkeeper_id` - Innkeeper NPC ID (string) where character will be stored
     ///
     /// # Returns
     ///
@@ -180,14 +181,14 @@ impl PartyManager {
     /// // Add two characters to roster and recruit both
     /// let char1 = Character::new("Warrior".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
     /// let char2 = Character::new("Mage".to_string(), "gnome".to_string(), "sorcerer".to_string(), Sex::Female, Alignment::Good);
-    /// roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
-    /// roster.add_character(char2, CharacterLocation::AtInn(1)).unwrap();
+    /// roster.add_character(char1, CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())).unwrap();
+    /// roster.add_character(char2, CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())).unwrap();
     ///
     /// PartyManager::recruit_to_party(&mut party, &mut roster, 0).unwrap();
     /// PartyManager::recruit_to_party(&mut party, &mut roster, 1).unwrap();
     ///
-    /// // Dismiss the first character to inn 2
-    /// let dismissed = PartyManager::dismiss_to_inn(&mut party, &mut roster, 0, 2).unwrap();
+    /// // Dismiss the first character to inn 'tutorial_innkeeper_town2'
+    /// let dismissed = PartyManager::dismiss_to_inn(&mut party, &mut roster, 0, "tutorial_innkeeper_town2".to_string()).unwrap();
     /// assert_eq!(dismissed.name, "Warrior");
     /// assert_eq!(party.size(), 1);
     /// ```
@@ -195,7 +196,7 @@ impl PartyManager {
         party: &mut Party,
         roster: &mut Roster,
         party_index: usize,
-        inn_id: TownId,
+        innkeeper_id: InnkeeperId,
     ) -> Result<Character, PartyManagementError> {
         // Enforce minimum party size
         if party.size() <= 1 {
@@ -218,7 +219,7 @@ impl PartyManager {
             .iter()
             .enumerate()
             .filter_map(|(idx, loc)| {
-                if *loc == CharacterLocation::InParty {
+                if matches!(loc, CharacterLocation::InParty) {
                     Some(idx)
                 } else {
                     None
@@ -246,7 +247,7 @@ impl PartyManager {
                 ))?;
 
         // Update roster location to AtInn
-        roster.update_location(roster_index, CharacterLocation::AtInn(inn_id))?;
+        roster.update_location(roster_index, CharacterLocation::AtInn(innkeeper_id))?;
 
         Ok(character)
     }
@@ -285,8 +286,8 @@ impl PartyManager {
     /// // Add characters to roster
     /// let char1 = Character::new("Warrior".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
     /// let char2 = Character::new("Mage".to_string(), "gnome".to_string(), "sorcerer".to_string(), Sex::Female, Alignment::Good);
-    /// roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
-    /// roster.add_character(char2, CharacterLocation::AtInn(1)).unwrap();
+    /// roster.add_character(char1, CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())).unwrap();
+    /// roster.add_character(char2, CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())).unwrap();
     ///
     /// // Recruit warrior
     /// PartyManager::recruit_to_party(&mut party, &mut roster, 0).unwrap();
@@ -317,7 +318,8 @@ impl PartyManager {
         }
 
         // Check that roster character is not already in party
-        let roster_location = roster.character_locations[roster_index];
+        // Clone because `CharacterLocation` is no longer `Copy`
+        let roster_location = roster.character_locations[roster_index].clone();
         if roster_location == CharacterLocation::InParty {
             return Err(PartyManagementError::AlreadyInParty);
         }
@@ -328,7 +330,7 @@ impl PartyManager {
             .iter()
             .enumerate()
             .filter_map(|(idx, loc)| {
-                if *loc == CharacterLocation::InParty {
+                if matches!(loc, CharacterLocation::InParty) {
                     Some(idx)
                 } else {
                     None
@@ -346,11 +348,14 @@ impl PartyManager {
         let party_member_roster_index = party_chars_in_roster[party_index];
 
         // Store the location where the removed party member will go
-        // (preserve their previous location if it was an inn, otherwise use inn 1)
+        // (preserve their previous location if it was an inn, otherwise use tutorial innkeeper)
         let dismissed_location = match roster_location {
             CharacterLocation::AtInn(inn_id) => CharacterLocation::AtInn(inn_id),
             CharacterLocation::OnMap(map_id) => CharacterLocation::OnMap(map_id),
-            CharacterLocation::InParty => CharacterLocation::AtInn(1), // Fallback (shouldn't happen)
+            CharacterLocation::InParty => {
+                // Fallback to a sensible tutorial innkeeper ID (transitional)
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
+            }
         };
 
         // Perform atomic swap:
@@ -391,7 +396,7 @@ impl PartyManager {
     /// let mut roster = Roster::new();
     ///
     /// let char1 = Character::new("Hero".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
-    /// roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
+    /// roster.add_character(char1, CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())).unwrap();
     ///
     /// let result = PartyManager::can_recruit(&party, &roster, 0);
     /// assert!(result.is_ok());
@@ -414,9 +419,9 @@ impl PartyManager {
             ));
         }
 
-        // Check location
-        let location = roster.character_locations[roster_index];
-        if location == CharacterLocation::InParty {
+        // Check location (borrow to avoid moving `CharacterLocation`)
+        let location = &roster.character_locations[roster_index];
+        if matches!(location, CharacterLocation::InParty) {
             return Err(PartyManagementError::AlreadyInParty);
         }
 
@@ -446,7 +451,10 @@ mod tests {
 
         let char1 = create_test_character("Warrior", "human", "knight");
         roster
-            .add_character(char1, CharacterLocation::AtInn(1))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         let result = PartyManager::recruit_to_party(&mut party, &mut roster, 0);
@@ -465,7 +473,10 @@ mod tests {
         for i in 0..Party::MAX_MEMBERS {
             let character = create_test_character(&format!("Char{}", i), "human", "knight");
             roster
-                .add_character(character.clone(), CharacterLocation::AtInn(1))
+                .add_character(
+                    character.clone(),
+                    CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+                )
                 .unwrap();
             PartyManager::recruit_to_party(&mut party, &mut roster, i).unwrap();
         }
@@ -473,7 +484,10 @@ mod tests {
         // Add one more to roster
         let extra_char = create_test_character("Extra", "human", "knight");
         roster
-            .add_character(extra_char, CharacterLocation::AtInn(1))
+            .add_character(
+                extra_char,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         // Try to recruit when party is full
@@ -488,7 +502,10 @@ mod tests {
 
         let char1 = create_test_character("Warrior", "human", "knight");
         roster
-            .add_character(char1, CharacterLocation::AtInn(1))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         // Recruit once
@@ -520,23 +537,37 @@ mod tests {
         let char1 = create_test_character("Warrior", "human", "knight");
         let char2 = create_test_character("Mage", "elf", "mage");
         roster
-            .add_character(char1, CharacterLocation::AtInn(1))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
         roster
-            .add_character(char2, CharacterLocation::AtInn(1))
+            .add_character(
+                char2,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         // Recruit both
         PartyManager::recruit_to_party(&mut party, &mut roster, 0).unwrap();
         PartyManager::recruit_to_party(&mut party, &mut roster, 1).unwrap();
 
-        // Dismiss first to inn 2
-        let result = PartyManager::dismiss_to_inn(&mut party, &mut roster, 0, 2);
+        // Dismiss first to inn 'tutorial_innkeeper_town2'
+        let result = PartyManager::dismiss_to_inn(
+            &mut party,
+            &mut roster,
+            0,
+            "tutorial_innkeeper_town2".to_string(),
+        );
         assert!(result.is_ok());
         let dismissed = result.unwrap();
         assert_eq!(dismissed.name, "Warrior");
         assert_eq!(party.size(), 1);
-        assert_eq!(roster.character_locations[0], CharacterLocation::AtInn(2));
+        assert_eq!(
+            roster.character_locations[0],
+            CharacterLocation::AtInn("tutorial_innkeeper_town2".to_string())
+        );
     }
 
     #[test]
@@ -546,13 +577,21 @@ mod tests {
 
         let char1 = create_test_character("Warrior", "human", "knight");
         roster
-            .add_character(char1, CharacterLocation::AtInn(1))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         PartyManager::recruit_to_party(&mut party, &mut roster, 0).unwrap();
 
         // Try to dismiss the only party member
-        let result = PartyManager::dismiss_to_inn(&mut party, &mut roster, 0, 1);
+        let result = PartyManager::dismiss_to_inn(
+            &mut party,
+            &mut roster,
+            0,
+            "tutorial_innkeeper_town".to_string(),
+        );
         assert!(matches!(result, Err(PartyManagementError::PartyEmpty)));
     }
 
@@ -562,19 +601,30 @@ mod tests {
         let mut roster = Roster::new();
 
         let char1 = create_test_character("Warrior", "human", "knight");
-        let char2 = create_test_character("Mage", "elf", "mage");
         roster
-            .add_character(char1, CharacterLocation::AtInn(1))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
+        let char2 = create_test_character("Mage", "gnome", "sorcerer");
         roster
-            .add_character(char2, CharacterLocation::AtInn(1))
+            .add_character(
+                char2,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         PartyManager::recruit_to_party(&mut party, &mut roster, 0).unwrap();
         PartyManager::recruit_to_party(&mut party, &mut roster, 1).unwrap();
 
         // Try to dismiss index 5 when only 2 members
-        let result = PartyManager::dismiss_to_inn(&mut party, &mut roster, 5, 1);
+        let result = PartyManager::dismiss_to_inn(
+            &mut party,
+            &mut roster,
+            5,
+            "tutorial_innkeeper_town".to_string(),
+        );
         assert!(matches!(
             result,
             Err(PartyManagementError::InvalidPartyIndex(5, 2))
@@ -590,10 +640,16 @@ mod tests {
         let char1 = create_test_character("Warrior", "human", "knight");
         let char2 = create_test_character("Mage", "elf", "mage");
         roster
-            .add_character(char1, CharacterLocation::AtInn(1))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
         roster
-            .add_character(char2, CharacterLocation::AtInn(1))
+            .add_character(
+                char2,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         // Recruit warrior
@@ -607,7 +663,10 @@ mod tests {
         // Verify swap
         assert_eq!(party.size(), 1);
         assert_eq!(party.members[0].name, "Mage");
-        assert_eq!(roster.character_locations[0], CharacterLocation::AtInn(1));
+        assert_eq!(
+            roster.character_locations[0],
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
+        );
         assert_eq!(roster.character_locations[1], CharacterLocation::InParty);
     }
 
@@ -619,10 +678,16 @@ mod tests {
         let char1 = create_test_character("Warrior", "human", "knight");
         let char2 = create_test_character("Mage", "elf", "mage");
         roster
-            .add_character(char1, CharacterLocation::AtInn(1))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
         roster
-            .add_character(char2, CharacterLocation::AtInn(1))
+            .add_character(
+                char2,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         PartyManager::recruit_to_party(&mut party, &mut roster, 0).unwrap();
@@ -642,7 +707,10 @@ mod tests {
 
         let char1 = create_test_character("Warrior", "human", "knight");
         roster
-            .add_character(char1, CharacterLocation::AtInn(1))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         PartyManager::recruit_to_party(&mut party, &mut roster, 0).unwrap();
@@ -663,10 +731,16 @@ mod tests {
         let char1 = create_test_character("Warrior", "human", "knight");
         let char2 = create_test_character("Mage", "elf", "mage");
         roster
-            .add_character(char1, CharacterLocation::AtInn(1))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
         roster
-            .add_character(char2, CharacterLocation::AtInn(1))
+            .add_character(
+                char2,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         PartyManager::recruit_to_party(&mut party, &mut roster, 0).unwrap();
@@ -686,7 +760,10 @@ mod tests {
         for i in 0..4 {
             let character = create_test_character(&format!("Char{}", i), "human", "knight");
             roster
-                .add_character(character, CharacterLocation::AtInn(1))
+                .add_character(
+                    character.clone(),
+                    CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+                )
                 .unwrap();
         }
 
@@ -697,8 +774,14 @@ mod tests {
         // Verify locations
         assert_eq!(roster.character_locations[0], CharacterLocation::InParty);
         assert_eq!(roster.character_locations[1], CharacterLocation::InParty);
-        assert_eq!(roster.character_locations[2], CharacterLocation::AtInn(1));
-        assert_eq!(roster.character_locations[3], CharacterLocation::AtInn(1));
+        assert_eq!(
+            roster.character_locations[2],
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
+        );
+        assert_eq!(
+            roster.character_locations[3],
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
+        );
 
         // Verify party count
         let party_count = roster
@@ -717,7 +800,10 @@ mod tests {
 
         let char1 = create_test_character("Warrior", "human", "knight");
         roster
-            .add_character(char1, CharacterLocation::AtInn(1))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         // Should be able to recruit
@@ -741,7 +827,10 @@ mod tests {
         for i in 0..Party::MAX_MEMBERS {
             let character = create_test_character(&format!("Char{}", i), "human", "knight");
             roster
-                .add_character(character.clone(), CharacterLocation::AtInn(1))
+                .add_character(
+                    character.clone(),
+                    CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+                )
                 .unwrap();
             PartyManager::recruit_to_party(&mut party, &mut roster, i).unwrap();
         }
@@ -749,7 +838,10 @@ mod tests {
         // Add one more to roster
         let extra = create_test_character("Extra", "human", "knight");
         roster
-            .add_character(extra, CharacterLocation::AtInn(1))
+            .add_character(
+                extra,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         // Should not be able to recruit
@@ -764,7 +856,10 @@ mod tests {
 
         let char1 = create_test_character("NPC", "human", "knight");
         roster
-            .add_character(char1, CharacterLocation::OnMap(5))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         let result = PartyManager::recruit_to_party(&mut party, &mut roster, 0);
@@ -781,13 +876,19 @@ mod tests {
         // Party member at inn 1
         let char1 = create_test_character("Warrior", "human", "knight");
         roster
-            .add_character(char1, CharacterLocation::AtInn(1))
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         // NPC on map 5
         let char2 = create_test_character("NPC", "elf", "mage");
         roster
-            .add_character(char2, CharacterLocation::OnMap(5))
+            .add_character(
+                char2,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
 
         // Recruit warrior

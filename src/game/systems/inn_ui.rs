@@ -79,7 +79,7 @@ fn inn_ui_system(
         Err(_) => return,
     };
 
-    let current_inn_id = inn_state.current_inn_id;
+    let current_inn_id = inn_state.current_inn_id.clone();
     let selected_party = inn_state.selected_party_slot;
     let selected_roster = inn_state.selected_roster_slot;
 
@@ -173,7 +173,7 @@ fn inn_ui_system(
             if let Some(CharacterLocation::AtInn(inn_id)) =
                 global_state.0.roster.character_locations.get(roster_idx)
             {
-                if *inn_id == current_inn_id {
+                if inn_id == &current_inn_id {
                     inn_characters.push((roster_idx, character));
                 }
             }
@@ -284,9 +284,9 @@ fn inn_action_system(
     mut global_state: ResMut<GlobalState>,
     mut game_log: ResMut<GameLog>,
 ) {
-    // Get current inn ID before processing events
+    // Get current inn ID before processing events (clone to avoid moving out of state)
     let current_inn_id = match &global_state.0.mode {
-        GameMode::InnManagement(state) => state.current_inn_id,
+        GameMode::InnManagement(state) => state.current_inn_id.clone(),
         _ => return, // Not in inn mode
     };
 
@@ -308,7 +308,7 @@ fn inn_action_system(
     for event in dismiss_events.read() {
         match global_state
             .0
-            .dismiss_character(event.party_index, current_inn_id)
+            .dismiss_character(event.party_index, current_inn_id.clone())
         {
             Ok(_) => {
                 game_log.add("Party member dismissed to inn.".to_string());
@@ -351,15 +351,15 @@ mod tests {
 
     #[test]
     fn test_inn_management_state_creation() {
-        let state = InnManagementState::new(1);
-        assert_eq!(state.current_inn_id, 1);
+        let state = InnManagementState::new("tutorial_innkeeper_town".to_string());
+        assert_eq!(state.current_inn_id, "tutorial_innkeeper_town".to_string());
         assert_eq!(state.selected_party_slot, None);
         assert_eq!(state.selected_roster_slot, None);
     }
 
     #[test]
     fn test_inn_management_state_clear_selection() {
-        let mut state = InnManagementState::new(1);
+        let mut state = InnManagementState::new("tutorial_innkeeper_town".to_string());
         state.selected_party_slot = Some(2);
         state.selected_roster_slot = Some(5);
 
@@ -371,20 +371,20 @@ mod tests {
 
     #[test]
     fn test_game_mode_inn_management() {
-        let state = InnManagementState::new(1);
+        let state = InnManagementState::new("tutorial_innkeeper_town".to_string());
         let mode = GameMode::InnManagement(state.clone());
 
         assert!(matches!(mode, GameMode::InnManagement(_)));
 
         if let GameMode::InnManagement(inner) = mode {
-            assert_eq!(inner.current_inn_id, 1);
+            assert_eq!(inner.current_inn_id, "tutorial_innkeeper_town".to_string());
         }
     }
 
     #[test]
     fn test_recruit_character_from_inn() {
         let mut game_state = GameState::new();
-        let inn_id = 1;
+        let inn_id = "tutorial_innkeeper_town".to_string();
 
         // Create character at inn
         let character = Character::new(
@@ -396,7 +396,7 @@ mod tests {
         );
         game_state
             .roster
-            .add_character(character, CharacterLocation::AtInn(inn_id))
+            .add_character(character, CharacterLocation::AtInn(inn_id.clone()))
             .unwrap();
 
         // Recruit character
@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn test_dismiss_character_to_inn() {
         let mut game_state = GameState::new();
-        let inn_id = 1;
+        let inn_id = "tutorial_innkeeper_town".to_string();
 
         // Create two characters in party (need 2+ to dismiss one)
         let char1 = Character::new(
@@ -442,7 +442,7 @@ mod tests {
         game_state.party.add_member(char2_clone).unwrap();
 
         // Dismiss first character
-        let result = game_state.dismiss_character(0, inn_id);
+        let result = game_state.dismiss_character(0, inn_id.clone());
         assert!(result.is_ok(), "Dismiss failed: {:?}", result.err());
         assert_eq!(game_state.party.members.len(), 1);
         assert!(matches!(
@@ -454,7 +454,7 @@ mod tests {
     #[test]
     fn test_swap_party_member_with_inn_character() {
         let mut game_state = GameState::new();
-        let inn_id = 1;
+        let inn_id = "tutorial_innkeeper_town".to_string();
 
         // Create two characters
         let char1 = Character::new(
@@ -478,7 +478,7 @@ mod tests {
             .unwrap();
         game_state
             .roster
-            .add_character(char2, CharacterLocation::AtInn(inn_id))
+            .add_character(char2, CharacterLocation::AtInn(inn_id.clone()))
             .unwrap();
 
         let char_clone = game_state.roster.characters[0].clone();
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn test_recruit_fails_when_party_full() {
         let mut game_state = GameState::new();
-        let inn_id = 1;
+        let inn_id = "tutorial_innkeeper_town".to_string();
 
         // Fill party with 6 members
         for i in 0..6 {
@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn test_dismiss_fails_when_party_empty() {
         let mut game_state = GameState::new();
-        let inn_id = 1;
+        let inn_id = "tutorial_innkeeper_town".to_string();
 
         // Attempt to dismiss from empty party should fail
         let result = game_state.dismiss_character(0, inn_id);

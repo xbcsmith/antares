@@ -182,7 +182,7 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                     MapEvent::EnterInn {
                         name,
                         description,
-                        inn_id: _,
+                        innkeeper_id: _,
                     } => {
                         assert!(
                             !name.trim().is_empty(),

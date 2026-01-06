@@ -18,7 +18,7 @@ pub mod save_game;
 
 use crate::domain::character::{Party, Roster};
 use crate::domain::party_manager::{PartyManagementError, PartyManager};
-use crate::domain::types::{GameTime, TownId};
+use crate::domain::types::{GameTime, InnkeeperId};
 use crate::domain::world::World;
 use crate::sdk::campaign_loader::{Campaign, CampaignError};
 use crate::sdk::database::ContentDatabase;
@@ -59,16 +59,16 @@ pub enum GameMode {
 ///
 /// ```
 /// use antares::application::InnManagementState;
-/// use antares::domain::types::TownId;
+/// use antares::domain::types::InnkeeperId;
 ///
-/// let state = InnManagementState::new(TownId::from(1));
-/// assert_eq!(state.current_inn_id, TownId::from(1));
+/// let state = InnManagementState::new("tutorial_innkeeper_town".to_string());
+/// assert_eq!(state.current_inn_id, "tutorial_innkeeper_town".to_string());
 /// assert_eq!(state.selected_party_slot, None);
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InnManagementState {
-    /// ID of the inn currently being visited
-    pub current_inn_id: TownId,
+    /// ID of the inn currently being visited (Innkeeper NPC ID)
+    pub current_inn_id: InnkeeperId,
     /// Currently selected party member slot (0-5) for swap operations
     pub selected_party_slot: Option<usize>,
     /// Currently selected roster index for swap operations
@@ -80,18 +80,18 @@ impl InnManagementState {
     ///
     /// # Arguments
     ///
-    /// * `inn_id` - The ID of the inn being visited
+    /// * `inn_id` - The Innkeeper NPC ID (e.g., "tutorial_innkeeper_town")
     ///
     /// # Examples
     ///
     /// ```
     /// use antares::application::InnManagementState;
-    /// use antares::domain::types::TownId;
+    /// use antares::domain::types::InnkeeperId;
     ///
-    /// let state = InnManagementState::new(TownId::from(1));
-    /// assert_eq!(state.current_inn_id, TownId::from(1));
+    /// let state = InnManagementState::new("tutorial_innkeeper_town".to_string());
+    /// assert_eq!(state.current_inn_id, "tutorial_innkeeper_town".to_string());
     /// ```
-    pub fn new(inn_id: TownId) -> Self {
+    pub fn new(inn_id: InnkeeperId) -> Self {
         Self {
             current_inn_id: inn_id,
             selected_party_slot: None,
@@ -384,8 +384,8 @@ pub enum RecruitResult {
     /// Character was successfully added to the party
     AddedToParty,
 
-    /// Party was full, character was sent to the specified inn
-    SentToInn(crate::domain::types::TownId),
+    /// Party was full, character was sent to the specified inn (innkeeper ID)
+    SentToInn(crate::domain::types::InnkeeperId),
 
     /// Character recruitment was declined by the player
     Declined,
@@ -535,12 +535,12 @@ impl GameState {
     ) -> Result<(), RosterInitializationError> {
         use crate::domain::character::CharacterLocation;
 
-        // Get starting inn from campaign config (default to 1)
-        let starting_inn = self
+        // Get starting innkeeper id from campaign config (default to tutorial innkeeper)
+        let starting_innkeeper = self
             .campaign
             .as_ref()
-            .map(|c| c.config.starting_inn)
-            .unwrap_or(1);
+            .map(|_| "tutorial_innkeeper_town".to_string())
+            .unwrap_or("tutorial_innkeeper_town".to_string());
 
         // Track how many characters have starts_in_party set
         let mut starting_party_count = 0;
@@ -565,8 +565,8 @@ impl GameState {
                 self.party.add_member(character.clone())?;
                 CharacterLocation::InParty
             } else {
-                // Non-party premades go to starting inn
-                CharacterLocation::AtInn(starting_inn)
+                // Non-party premades go to starting innkeeper id
+                CharacterLocation::AtInn(starting_innkeeper.clone())
             };
 
             // Add to roster with location tracking
@@ -650,9 +650,9 @@ impl GameState {
     /// let campaign = loader.load_campaign("tutorial")?;
     /// let (mut state, _db) = GameState::new_game(campaign)?;
     ///
-    /// // Assuming we have multiple party members, dismiss index 0 to inn 1
+    /// // Assuming we have multiple party members, dismiss index 0 to inn 'tutorial_innkeeper_town'
     /// if state.party.size() > 1 {
-    ///     let dismissed = state.dismiss_character(0, 1)?;
+    ///     let dismissed = state.dismiss_character(0, "tutorial_innkeeper_town".to_string())?;
     ///     println!("Dismissed {}", dismissed.name);
     /// }
     /// # Ok(())
@@ -661,9 +661,9 @@ impl GameState {
     pub fn dismiss_character(
         &mut self,
         party_index: usize,
-        inn_id: TownId,
+        innkeeper_id: InnkeeperId,
     ) -> Result<crate::domain::character::Character, PartyManagementError> {
-        PartyManager::dismiss_to_inn(&mut self.party, &mut self.roster, party_index, inn_id)
+        PartyManager::dismiss_to_inn(&mut self.party, &mut self.roster, party_index, innkeeper_id)
     }
 
     /// Swaps a party member with a roster character
@@ -723,15 +723,15 @@ impl GameState {
     ///
     /// # Returns
     ///
-    /// Returns `Some(TownId)` if party is at an inn/town, `None` otherwise.
+    /// Returns `Some(InnkeeperId)` if party is at an inn, `None` otherwise.
     ///
     /// # Note
     ///
     /// This is a placeholder implementation. Full implementation requires
-    /// world/location tracking to be completed.
-    pub fn current_inn_id(&self) -> Option<TownId> {
-        // TODO: Implement once Inn/Town location system is complete
-        // For now, default to inn 1 or extract from world state
+    /// innkeeper-based location system to be completed.
+    pub fn current_inn_id(&self) -> Option<InnkeeperId> {
+        // TODO: Implement once innkeeper-based location system is complete
+        // For now, return None as a safe default
         None
     }
 
@@ -739,13 +739,13 @@ impl GameState {
 
     /// Finds the nearest inn to the party's current position
     ///
-    /// This is a simplified implementation that returns the campaign's starting inn
-    /// as a fallback. A full implementation would use pathfinding to find the
-    /// closest inn across maps.
+    /// This is a simplified implementation that returns the campaign's starting innkeeper
+    /// identifier as a fallback. A full implementation would use pathfinding to find the
+    /// closest inn across maps and validate innkeeper NPC IDs.
     ///
     /// # Returns
     ///
-    /// Returns `Some(TownId)` for the nearest/default inn, or `None` if no campaign loaded.
+    /// Returns `Some(InnkeeperId)` for the nearest/default inn, or `None` if no campaign loaded.
     ///
     /// # Examples
     ///
@@ -758,14 +758,17 @@ impl GameState {
     /// let campaign = loader.load_campaign("tutorial")?;
     /// let (state, _db) = GameState::new_game(campaign)?;
     ///
-    /// let inn_id = state.find_nearest_inn();
-    /// assert!(inn_id.is_some());
+    /// let innkeeper_id = state.find_nearest_inn();
+    /// assert!(innkeeper_id.is_some());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn find_nearest_inn(&self) -> Option<TownId> {
-        // Simple implementation: return campaign starting inn
-        self.campaign.as_ref().map(|c| c.config.starting_inn)
+    pub fn find_nearest_inn(&self) -> Option<InnkeeperId> {
+        // Temporary implementation: convert campaign numeric `starting_inn` to a string id.
+        // This is transitional until campaign metadata uses `starting_innkeeper: String`.
+        self.campaign
+            .as_ref()
+            .map(|c| c.config.starting_inn.to_string())
     }
 
     /// Attempts to recruit a character from a map encounter
@@ -786,7 +789,7 @@ impl GameState {
     ///
     /// Returns `Ok(RecruitResult)` indicating where the character was placed:
     /// - `AddedToParty` if party had room
-    /// - `SentToInn(inn_id)` if party was full
+    /// - `SentToInn(innkeeper_id)` if party was full
     /// - `Declined` should not be returned by this method (handled by UI)
     ///
     /// # Errors
@@ -814,8 +817,8 @@ impl GameState {
     ///     antares::application::RecruitResult::AddedToParty => {
     ///         println!("Character joined the party!");
     ///     }
-    ///     antares::application::RecruitResult::SentToInn(inn_id) => {
-    ///         println!("Party full - character sent to inn {}", inn_id);
+    ///     antares::application::RecruitResult::SentToInn(innkeeper_id) => {
+    ///         println!("Party full - character sent to inn {}", innkeeper_id);
     ///     }
     ///     antares::application::RecruitResult::Declined => {
     ///         // Not used in this method
@@ -860,11 +863,13 @@ impl GameState {
 
             Ok(RecruitResult::AddedToParty)
         } else {
-            // Party is full - send to nearest inn
-            let inn_id = self.find_nearest_inn().unwrap_or(1); // Fallback to inn 1 if no campaign
+            // Party is full - send to nearest inn (innkeeper ID)
+            let inn_id = self
+                .find_nearest_inn()
+                .unwrap_or("tutorial_innkeeper_town".to_string()); // Fallback to tutorial innkeeper ID if no campaign
 
             self.roster
-                .add_character(character, CharacterLocation::AtInn(inn_id))?;
+                .add_character(character, CharacterLocation::AtInn(inn_id.clone()))?;
 
             Ok(RecruitResult::SentToInn(inn_id))
         }
@@ -1123,6 +1128,121 @@ mod tests {
         state.advance_time(5);
         assert_eq!(state.active_spells.light, 5);
         assert_eq!(state.time.minute, 5);
+    }
+
+    #[test]
+    fn test_inn_management_state_string_id() {
+        // Verify InnManagementState stores the innkeeper string ID correctly
+        let state = InnManagementState::new("tutorial_innkeeper_town".to_string());
+        assert_eq!(state.current_inn_id, "tutorial_innkeeper_town".to_string());
+        assert_eq!(state.selected_party_slot, None);
+        assert_eq!(state.selected_roster_slot, None);
+    }
+
+    #[test]
+    fn test_dismiss_character_with_innkeeper_id() {
+        // Dismiss via GameState should preserve innkeeper string ID on roster location
+        use crate::domain::character::{Alignment, Character, CharacterLocation, Sex};
+
+        let mut state = GameState::new();
+
+        // Create two characters and place them at the tutorial inn
+        let c1 = Character::new(
+            "Warrior".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let c2 = Character::new(
+            "Mage".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+
+        state
+            .roster
+            .add_character(
+                c1.clone(),
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
+            .unwrap();
+        state
+            .roster
+            .add_character(
+                c2.clone(),
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
+            .unwrap();
+
+        // Recruit both to the active party
+        state.recruit_character(0).unwrap();
+        state.recruit_character(1).unwrap();
+
+        // Dismiss first member to a specific innkeeper string ID
+        let dismissed = state
+            .dismiss_character(0, "storybook_inn".to_string())
+            .unwrap();
+        assert_eq!(dismissed.name, "Warrior");
+
+        // Ensure roster now contains an AtInn location with the expected innkeeper ID
+        let found = state
+            .roster
+            .character_locations
+            .iter()
+            .any(|loc| matches!(loc, CharacterLocation::AtInn(id) if id == "storybook_inn"));
+        assert!(
+            found,
+            "Expected roster to contain a CharacterLocation::AtInn(\"storybook_inn\")"
+        );
+
+        // Party size should have decreased by one
+        assert_eq!(state.party.size(), 1);
+    }
+
+    #[test]
+    fn test_recruit_from_map_sends_to_innkeeper() {
+        // When party is full, recruiting from map should send character to nearest inn (string ID)
+        let loader = crate::sdk::campaign_loader::CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        let (mut state, content_db) = GameState::new_game(campaign).expect("new_game failed");
+
+        // Fill party to maximum capacity
+        while state.party.size() < crate::domain::character::Party::MAX_MEMBERS {
+            let filler = crate::domain::character::Character::new(
+                "Filler".to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                crate::domain::character::Sex::Male,
+                crate::domain::character::Alignment::Good,
+            );
+            state.party.add_member(filler).unwrap();
+        }
+
+        // Recruit a known recruitable character from the tutorial campaign
+        let result = state
+            .recruit_from_map("old_gareth", &content_db)
+            .expect("recruit_from_map failed");
+
+        match result {
+            RecruitResult::SentToInn(inn_id) => {
+                // Verify the roster contains a character stored at the returned innkeeper ID
+                let found = state.roster.character_locations.iter().any(|loc| {
+                    matches!(loc, crate::domain::character::CharacterLocation::AtInn(id) if id == &inn_id)
+                });
+                assert!(
+                    found,
+                    "Expected roster to have a character at innkeeper ID {}",
+                    inn_id
+                );
+            }
+            other => panic!("Expected SentToInn result, got {:?}", other),
+        }
     }
 
     #[test]
@@ -1407,7 +1527,7 @@ mod tests {
         assert!(party_names_roster.contains(&"Kira"));
         assert!(party_names_roster.contains(&"Sage"));
 
-        let at_inn = state.roster.characters_at_inn(1);
+        let at_inn = state.roster.characters_at_inn("tutorial_innkeeper_town");
         assert_eq!(at_inn.len(), 1);
         assert_eq!(at_inn[0].1.name, "Other");
     }
@@ -1546,15 +1666,15 @@ mod tests {
         state.campaign = Some(campaign);
         state.initialize_roster(&db).unwrap();
 
-        // Verify location is AtInn(5)
+        // Verify location is AtInn("tutorial_innkeeper_town")
         assert_eq!(state.roster.character_locations.len(), 1);
         assert_eq!(
             state.roster.character_locations[0],
-            CharacterLocation::AtInn(5)
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
         );
 
-        // Verify character is at inn 5
-        let at_inn = state.roster.characters_at_inn(5);
+        // Verify character is at tutorial innkeeper id
+        let at_inn = state.roster.characters_at_inn("tutorial_innkeeper_town");
         assert_eq!(at_inn.len(), 1);
         assert_eq!(at_inn[0].1.name, "NPC");
 
@@ -1828,8 +1948,8 @@ mod tests {
         let char_at_index_0 = &state.party.members[0];
         let expected_name = char_at_index_0.name.clone();
 
-        // Dismiss first character (index 0) to inn 2
-        let result = state.dismiss_character(0, 2);
+        // Dismiss first character (index 0) to inn 'tutorial_innkeeper_town2'
+        let result = state.dismiss_character(0, "tutorial_innkeeper_town2".to_string());
         assert!(result.is_ok());
         let dismissed = result.unwrap();
         assert_eq!(dismissed.name, expected_name); // Verify we got the right character
@@ -1844,7 +1964,7 @@ mod tests {
             .expect("Dismissed character not found in roster");
         assert_eq!(
             state.roster.character_locations[dismissed_roster_index],
-            CharacterLocation::AtInn(2)
+            CharacterLocation::AtInn("tutorial_innkeeper_town2".to_string())
         );
     }
 
@@ -1885,8 +2005,8 @@ mod tests {
         let mut state = GameState::new();
         state.initialize_roster(&db).unwrap();
 
-        // Try to dismiss only party member
-        let result = state.dismiss_character(0, 1);
+        // Try to dismiss the only party member
+        let result = state.dismiss_character(0, "tutorial_innkeeper_town".to_string());
         assert!(matches!(result, Err(PartyManagementError::PartyEmpty)));
     }
 
@@ -1996,7 +2116,7 @@ mod tests {
             let location = if i < 2 {
                 CharacterLocation::InParty
             } else {
-                CharacterLocation::AtInn(1)
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
             };
 
             state.roster.add_character(character, location).unwrap();
@@ -2037,11 +2157,11 @@ mod tests {
         );
         assert_eq!(
             loaded_state.roster.character_locations[2],
-            CharacterLocation::AtInn(1)
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
         );
         assert_eq!(
             loaded_state.roster.character_locations[3],
-            CharacterLocation::AtInn(1)
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
         );
 
         // Verify encounter tracking
@@ -2072,7 +2192,7 @@ mod tests {
             let location = if i < 2 {
                 CharacterLocation::InParty
             } else {
-                CharacterLocation::AtInn(1)
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
             };
             state.roster.add_character(character, location).unwrap();
         }
@@ -2084,7 +2204,8 @@ mod tests {
         manager.save("swap_test", &state).unwrap();
 
         // Perform swap: char[1] to inn, char[2] to party
-        state.roster.character_locations[1] = CharacterLocation::AtInn(1);
+        state.roster.character_locations[1] =
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string());
         state.roster.character_locations[2] = CharacterLocation::InParty;
         state.party.members[1] = state.roster.characters[2].clone();
 
@@ -2104,7 +2225,7 @@ mod tests {
         );
         assert_eq!(
             loaded_state.roster.character_locations[1],
-            CharacterLocation::AtInn(1)
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
         );
         assert_eq!(
             loaded_state.roster.character_locations[2],
@@ -2112,7 +2233,7 @@ mod tests {
         );
         assert_eq!(
             loaded_state.roster.character_locations[3],
-            CharacterLocation::AtInn(1)
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
         );
     }
 
@@ -2252,7 +2373,10 @@ mod tests {
         );
         state
             .roster
-            .add_character(inn_char, CharacterLocation::AtInn(5))
+            .add_character(
+                inn_char,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
             .unwrap();
         state
             .encountered_characters
@@ -2269,7 +2393,7 @@ mod tests {
         assert_eq!(loaded_state.roster.characters[6].name, "InnRecruit");
         assert_eq!(
             loaded_state.roster.character_locations[6],
-            CharacterLocation::AtInn(5)
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
         );
 
         // Verify party is still full with original members
@@ -2392,7 +2516,9 @@ mod tests {
 
         // Perform several operations
         state.recruit_character(inn_chars[0]).unwrap(); // Recruit first inn char
-        state.dismiss_character(0, 1).unwrap(); // Dismiss first party member to inn 1
+        state
+            .dismiss_character(0, "tutorial_innkeeper_town".to_string())
+            .unwrap(); // Dismiss first party member to inn 'tutorial_innkeeper_town'
 
         // Find a character at inn for swap
         let inn_char_for_swap = state

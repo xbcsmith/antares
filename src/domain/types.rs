@@ -34,8 +34,8 @@ pub type MapId = u16;
 /// Character identifier (index in roster or party)
 pub type CharacterId = usize;
 
-/// Town identifier
-pub type TownId = u8;
+/// Innkeeper NPC identifier (references NpcId with is_innkeeper=true)
+pub type InnkeeperId = String;
 
 /// Event identifier
 pub type EventId = u16;

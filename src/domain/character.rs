@@ -12,7 +12,7 @@
 //! See `docs/reference/stat_ranges.md` for detailed stat range documentation.
 
 use crate::domain::classes::{ClassDatabase, ClassId, SpellSchool as ClassSpellSchool};
-use crate::domain::types::{CharacterId, ItemId, MapId, RaceId, SpellId, TownId};
+use crate::domain::types::{CharacterId, InnkeeperId, ItemId, MapId, RaceId, SpellId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -426,19 +426,19 @@ pub enum Alignment {
 /// // Character in active party
 /// let loc = CharacterLocation::InParty;
 ///
-/// // Character stored at inn ID 1
-/// let loc = CharacterLocation::AtInn(1);
+/// // Character stored at an inn by innkeeper NPC ID (string)
+/// let loc = CharacterLocation::AtInn("tutorial_innkeeper_town".to_string());
 ///
 /// // Character available for recruitment on map 5
 /// let loc = CharacterLocation::OnMap(5);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CharacterLocation {
     /// Character is in the active party
     InParty,
 
-    /// Character is stored at a specific inn/town
-    AtInn(TownId),
+    /// Character is stored at a specific inn (references an innkeeper NPC)
+    AtInn(InnkeeperId),
 
     /// Character is available on a specific map (for recruitment encounters)
     OnMap(MapId),
@@ -1319,7 +1319,7 @@ impl Roster {
     ///
     /// # Arguments
     ///
-    /// * `town_id` - The town/inn ID to search for
+    /// * `innkeeper_id` - The innkeeper NPC ID (string) to search for
     ///
     /// # Examples
     ///
@@ -1329,18 +1329,18 @@ impl Roster {
     ///
     /// let mut roster = Roster::new();
     /// let char1 = Character::new("Hero".to_string(), "human".to_string(), "knight".to_string(), Sex::Male, Alignment::Good);
-    /// roster.add_character(char1, CharacterLocation::AtInn(1)).unwrap();
+    /// roster.add_character(char1, CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())).unwrap();
     ///
-    /// let at_inn_1 = roster.characters_at_inn(1);
+    /// let at_inn_1 = roster.characters_at_inn("tutorial_innkeeper_town");
     /// assert_eq!(at_inn_1.len(), 1);
     /// ```
-    pub fn characters_at_inn(&self, town_id: TownId) -> Vec<(usize, &Character)> {
+    pub fn characters_at_inn(&self, innkeeper_id: &str) -> Vec<(usize, &Character)> {
         self.character_locations
             .iter()
             .enumerate()
             .filter_map(|(idx, loc)| {
-                if let CharacterLocation::AtInn(tid) = loc {
-                    if *tid == town_id {
+                if let CharacterLocation::AtInn(ref id) = loc {
+                    if id == innkeeper_id {
                         return self.characters.get(idx).map(|c| (idx, c));
                     }
                 }
@@ -1397,6 +1397,57 @@ mod tests {
         let attr = AttributePair::new(15);
         assert_eq!(attr.base, 15);
         assert_eq!(attr.current, 15);
+    }
+
+    #[test]
+    fn test_character_location_at_inn_ron_serialization() {
+        // Verify that CharacterLocation::AtInn with a string InnkeeperId
+        // round-trips correctly through RON serialization/deserialization.
+        let original = CharacterLocation::AtInn("tutorial_innkeeper_town".to_string());
+
+        let ron_str = ron::ser::to_string_pretty(&original, Default::default())
+            .expect("Failed to serialize CharacterLocation::AtInn to RON");
+
+        let parsed: CharacterLocation = ron::de::from_str(&ron_str)
+            .expect("Failed to deserialize CharacterLocation::AtInn from RON");
+
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn test_characters_at_inn_string_id() {
+        // Verify that roster.characters_at_inn filters by innkeeper string ID
+        let mut roster = Roster::new();
+
+        let char1 = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let char2 = Character::new(
+            "Mira".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+
+        roster
+            .add_character(
+                char1,
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
+            )
+            .unwrap();
+        roster
+            .add_character(char2, CharacterLocation::AtInn("other_inn".to_string()))
+            .unwrap();
+
+        let at_inn = roster.characters_at_inn("tutorial_innkeeper_town");
+        assert_eq!(at_inn.len(), 1);
+        assert_eq!(at_inn[0].1.name, "Hero");
     }
 
     #[test]

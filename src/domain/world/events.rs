@@ -60,8 +60,8 @@ pub enum EventResult {
     },
     /// Enter an inn for party management
     EnterInn {
-        /// Inn/town identifier
-        inn_id: u8,
+        /// Innkeeper NPC identifier (NpcId string)
+        innkeeper_id: crate::domain::world::NpcId,
     },
 }
 
@@ -213,9 +213,11 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
             }
         }
 
-        MapEvent::EnterInn { inn_id, .. } => {
+        MapEvent::EnterInn { innkeeper_id, .. } => {
             // Inn entrances are repeatable - don't remove
-            EventResult::EnterInn { inn_id }
+            EventResult::EnterInn {
+                innkeeper_id: innkeeper_id.clone(),
+            }
         }
     };
 
@@ -399,15 +401,54 @@ mod tests {
             }
             _ => panic!("Expected Sign event"),
         }
+    }
 
-        // Sign should still be there (repeatable)
+    #[test]
+    fn test_enter_inn_event_with_innkeeper_id() {
+        // Arrange: create a map with an EnterInn event that references an innkeeper ID
+        let mut world = World::new();
+        let mut map = Map::new(
+            1,
+            "Inn Map".to_string(),
+            "Cozy inn for testing".to_string(),
+            10,
+            10,
+        );
+
+        let pos = Position::new(3, 3);
+        let innkeeper_id = "tutorial_innkeeper_town".to_string();
+        map.add_event(
+            pos,
+            MapEvent::EnterInn {
+                name: "Cozy Inn".to_string(),
+                description: "A welcoming inn where travelers rest".to_string(),
+                innkeeper_id: innkeeper_id.clone(),
+            },
+        );
+
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // Act: trigger the event
+        let result = trigger_event(&mut world, pos);
+        assert!(result.is_ok());
+
+        // Assert: EnterInn event contains the correct innkeeper_id
+        match result.unwrap() {
+            EventResult::EnterInn { innkeeper_id: id } => {
+                assert_eq!(id, innkeeper_id);
+            }
+            _ => panic!("Expected EnterInn event"),
+        }
+
+        // EnterInn events are repeatable; triggering again should yield the same result
         let result2 = trigger_event(&mut world, pos);
         assert!(result2.is_ok());
         match result2.unwrap() {
-            EventResult::Sign { text } => {
-                assert_eq!(text, sign_text);
+            EventResult::EnterInn { innkeeper_id: id } => {
+                assert_eq!(id, innkeeper_id);
             }
-            _ => panic!("Expected Sign event on repeat"),
+            _ => panic!("Expected EnterInn event on second trigger as well"),
         }
     }
 
@@ -543,7 +584,7 @@ mod tests {
             MapEvent::EnterInn {
                 name: "Cozy Inn".to_string(),
                 description: "A welcoming inn".to_string(),
-                inn_id: 1,
+                innkeeper_id: "cozy_inn".to_string(),
             },
         );
 
@@ -553,8 +594,8 @@ mod tests {
         let result = trigger_event(&mut world, pos);
         assert!(result.is_ok());
         match result.unwrap() {
-            EventResult::EnterInn { inn_id } => {
-                assert_eq!(inn_id, 1);
+            EventResult::EnterInn { innkeeper_id } => {
+                assert_eq!(innkeeper_id, "cozy_inn".to_string());
             }
             _ => panic!("Expected EnterInn event"),
         }
@@ -563,10 +604,10 @@ mod tests {
         let result2 = trigger_event(&mut world, pos);
         assert!(result2.is_ok());
         match result2.unwrap() {
-            EventResult::EnterInn { inn_id } => {
-                assert_eq!(inn_id, 1);
+            EventResult::EnterInn { innkeeper_id } => {
+                assert_eq!(innkeeper_id, "cozy_inn".to_string());
             }
-            _ => panic!("Expected EnterInn event on repeat"),
+            _ => panic!("Expected EnterInn event"),
         }
     }
 
@@ -585,15 +626,15 @@ mod tests {
             MapEvent::EnterInn {
                 name: "Cozy Inn".to_string(),
                 description: "A warm inn".to_string(),
-                inn_id: 1,
+                innkeeper_id: "cozy_inn".to_string(),
             },
         );
         map.add_event(
             pos2,
             MapEvent::EnterInn {
-                name: "Dragon's Rest".to_string(),
+                name: "Dragon's Rest Inn".to_string(),
                 description: "An upscale inn".to_string(),
-                inn_id: 2,
+                innkeeper_id: "dragons_rest".to_string(),
             },
         );
         map.add_event(
@@ -601,35 +642,41 @@ mod tests {
             MapEvent::EnterInn {
                 name: "Wayfarer's Lodge".to_string(),
                 description: "A rustic inn".to_string(),
-                inn_id: 3,
+                innkeeper_id: "wayfarers_lodge".to_string(),
             },
         );
 
         world.add_map(map);
         world.set_current_map(1);
 
-        // Trigger each inn entrance and verify correct inn_id
+        // Trigger each inn entrance and verify correct innkeeper_id
         let r1 = trigger_event(&mut world, pos1);
-        assert!(matches!(r1, Ok(EventResult::EnterInn { inn_id: 1 })));
+        assert!(
+            matches!(r1, Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "cozy_inn")
+        );
 
         let r2 = trigger_event(&mut world, pos2);
-        assert!(matches!(r2, Ok(EventResult::EnterInn { inn_id: 2 })));
+        assert!(
+            matches!(r2, Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "dragons_rest")
+        );
 
         let r3 = trigger_event(&mut world, pos3);
-        assert!(matches!(r3, Ok(EventResult::EnterInn { inn_id: 3 })));
+        assert!(
+            matches!(r3, Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "wayfarers_lodge")
+        );
 
         // Verify all inn entrances are repeatable
         assert!(matches!(
             trigger_event(&mut world, pos1),
-            Ok(EventResult::EnterInn { inn_id: 1 })
+            Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "cozy_inn"
         ));
         assert!(matches!(
             trigger_event(&mut world, pos2),
-            Ok(EventResult::EnterInn { inn_id: 2 })
+            Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "dragons_rest"
         ));
         assert!(matches!(
             trigger_event(&mut world, pos3),
-            Ok(EventResult::EnterInn { inn_id: 3 })
+            Ok(EventResult::EnterInn { innkeeper_id }) if innkeeper_id == "wayfarers_lodge"
         ));
     }
 }

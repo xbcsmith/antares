@@ -388,7 +388,7 @@ impl SaveGameManager {
 mod tests {
     use super::*;
     use crate::domain::character::{Character, CharacterLocation};
-    use crate::domain::types::TownId;
+    use crate::domain::types::InnkeeperId;
     use tempfile::TempDir;
 
     // Helper to create a test character
@@ -648,9 +648,9 @@ mod tests {
         let char2 = create_test_character("InnChar2");
         let char3 = create_test_character("InnChar3");
 
-        let inn1: TownId = 1;
-        let inn2: TownId = 2;
-        let inn3: TownId = 5;
+        let inn1: InnkeeperId = "tutorial_innkeeper_town".to_string();
+        let inn2: InnkeeperId = "tutorial_innkeeper_town2".to_string();
+        let inn3: InnkeeperId = "tutorial_innkeeper_town3".to_string();
 
         game_state
             .roster
@@ -673,15 +673,15 @@ mod tests {
         assert_eq!(loaded_state.roster.character_locations.len(), 3);
         assert_eq!(
             loaded_state.roster.character_locations[0],
-            CharacterLocation::AtInn(1)
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
         );
         assert_eq!(
             loaded_state.roster.character_locations[1],
-            CharacterLocation::AtInn(2)
+            CharacterLocation::AtInn("tutorial_innkeeper_town2".to_string())
         );
         assert_eq!(
             loaded_state.roster.character_locations[2],
-            CharacterLocation::AtInn(5)
+            CharacterLocation::AtInn("tutorial_innkeeper_town3".to_string())
         );
 
         // Verify characters preserved
@@ -831,14 +831,14 @@ mod tests {
             .roster
             .add_character(
                 create_test_character("InnChar1"),
-                CharacterLocation::AtInn(1),
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string()),
             )
             .unwrap();
         game_state
             .roster
             .add_character(
                 create_test_character("InnChar2"),
-                CharacterLocation::AtInn(2),
+                CharacterLocation::AtInn("tutorial_innkeeper_town2".to_string()),
             )
             .unwrap();
         game_state
@@ -883,11 +883,11 @@ mod tests {
         );
         assert_eq!(
             loaded_state.roster.character_locations[2],
-            CharacterLocation::AtInn(1)
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
         );
         assert_eq!(
             loaded_state.roster.character_locations[3],
-            CharacterLocation::AtInn(2)
+            CharacterLocation::AtInn("tutorial_innkeeper_town2".to_string())
         );
         assert_eq!(
             loaded_state.roster.character_locations[4],
@@ -918,7 +918,7 @@ mod tests {
             let location = if i < 2 {
                 CharacterLocation::InParty
             } else if i < 4 {
-                CharacterLocation::AtInn((i - 1) as TownId)
+                CharacterLocation::AtInn(format!("tutorial_innkeeper_{}", i - 1))
             } else {
                 CharacterLocation::OnMap((i + 10) as u16)
             };
@@ -995,7 +995,7 @@ mod tests {
             let location = if i < 2 {
                 CharacterLocation::InParty
             } else {
-                CharacterLocation::AtInn(1)
+                CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
             };
             game_state
                 .roster
@@ -1016,7 +1016,8 @@ mod tests {
         manager.save("multi_change_test", &game_state).unwrap();
 
         // Simulate swap: move char[1] to inn, char[2] to party
-        game_state.roster.character_locations[1] = CharacterLocation::AtInn(1);
+        game_state.roster.character_locations[1] =
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string());
         game_state.roster.character_locations[2] = CharacterLocation::InParty;
         game_state.party.members[1] = game_state.roster.characters[2].clone();
 
@@ -1028,7 +1029,7 @@ mod tests {
 
         assert_eq!(
             loaded_state.roster.character_locations[1],
-            CharacterLocation::AtInn(1)
+            CharacterLocation::AtInn("tutorial_innkeeper_town".to_string())
         );
         assert_eq!(
             loaded_state.roster.character_locations[2],
