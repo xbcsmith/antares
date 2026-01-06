@@ -239,7 +239,7 @@ In `campaigns/tutorial/data/maps/map_1.ron`, replace the Inn Sign event at posit
 
 #### 2.1 Add Recruitable Character Events to Maps - ✅ COMPLETED
 
-**Target Maps**: map_2.ron (Fizban's Cave), map_3.ron (Ancient Ruins), map_4.ron (Dark Forest)
+**Target Maps**: map_2.ron (Arcturus's Cave), map_3.ron (Ancient Ruins), map_4.ron (Dark Forest)
 
 **NPCs Available** (from `campaigns/tutorial/data/characters.ron`):
 
@@ -251,7 +251,7 @@ In `campaigns/tutorial/data/maps/map_1.ron`, replace the Inn Sign event at posit
 
 Added 3 `RecruitableCharacter` events to tutorial maps:
 
-**Map 2 (Fizban's Cave) - Position (12, 8)**:
+**Map 2 (Arcturus's Cave) - Position (12, 8)**:
 
 ```ron
 RecruitableCharacter(

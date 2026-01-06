@@ -2103,8 +2103,8 @@ mod tests {
                 is_innkeeper: false,
             },
             antares::domain::world::npc::NpcDefinition {
-                id: "tutorial_wizard_fizban_brother".to_string(),
-                name: "Fizban Brother".to_string(),
+                id: "tutorial_wizard_arcturus_brother".to_string(),
+                name: "Arcturus Brother".to_string(),
                 description: "A local villager".to_string(),
                 portrait_id: "npc_015".to_string(),
                 dialogue_id: None,

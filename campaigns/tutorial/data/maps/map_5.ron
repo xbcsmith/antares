@@ -5720,20 +5720,20 @@
             map_id: 4,
         ),
         (
-            x: 4,
-            y: 4,
-        ): Sign(
-            name: "Inn Sign",
-            description: "A welcoming sign for the Cozy Inn offering rest and lodging.",
-            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
-        ),
-        (
             x: 15,
             y: 4,
         ): Sign(
             name: "General Store Sign",
             description: "A sign advertising the general store where adventurers can buy and sell goods.",
             text: "General Store - Buy and sell items for your adventures.",
+        ),
+        (
+            x: 10,
+            y: 10,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice describing the Temple of Healing and the services it provides.",
+            text: "Temple of Healing - The priests can restore your health.",
         ),
         (
             x: 18,
@@ -5744,12 +5744,12 @@
             text: "To the Forrest",
         ),
         (
-            x: 10,
-            y: 10,
+            x: 4,
+            y: 4,
         ): Sign(
-            name: "Temple Sign",
-            description: "A notice describing the Temple of Healing and the services it provides.",
-            text: "Temple of Healing - The priests can restore your health.",
+            name: "Inn Sign",
+            description: "A welcoming sign for the Cozy Inn offering rest and lodging.",
+            text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
     },
     npc_placements: [

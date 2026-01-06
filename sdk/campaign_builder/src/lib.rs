@@ -141,6 +141,8 @@ pub struct CampaignMetadata {
     starting_direction: String,
     starting_gold: u32,
     starting_food: u32,
+    #[serde(default = "default_starting_inn")]
+    starting_inn: u8,
     max_party_size: usize,
     max_roster_size: usize,
     difficulty: Difficulty,
@@ -192,6 +194,10 @@ impl Difficulty {
     }
 }
 
+fn default_starting_inn() -> u8 {
+    1
+}
+
 impl Default for CampaignMetadata {
     fn default() -> Self {
         Self {
@@ -207,6 +213,7 @@ impl Default for CampaignMetadata {
             starting_direction: "North".to_string(),
             starting_gold: 100,
             starting_food: 10,
+            starting_inn: 1,
             max_party_size: 6,
             max_roster_size: 20,
             difficulty: Difficulty::Normal,
@@ -4914,6 +4921,7 @@ mod tests {
             starting_direction: "North".to_string(),
             starting_gold: 200,
             starting_food: 20,
+            starting_inn: 1,
             max_party_size: 6,
             max_roster_size: 20,
             difficulty: Difficulty::Hard,

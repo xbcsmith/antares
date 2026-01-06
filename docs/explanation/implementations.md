@@ -1,3 +1,231 @@
+## Campaign Builder SDK - Starting Inn UI Control - COMPLETED
+
+### Summary
+
+Added missing UI control for the `starting_inn` field in the Campaign Builder's Campaign Metadata Editor. This field is a numeric identifier (1-255) that determines which "inn location" non-party premade characters are placed at when a new game begins.
+
+### Context
+
+Per the Party Management System Implementation Plan (Phase 6.1), the `CampaignMetadata` struct includes a `starting_inn: u8` field (with a default value of 1) that specifies where premade characters with `starts_in_party: false` should be placed when initializing a new game roster.
+
+**Important**: `starting_inn` is simply a numeric identifier (type alias `TownId = u8`), not a reference to a database entity. There is no "Inn" or "Town" data structure in the game. This ID is used by:
+
+- `MapEvent::EnterInn { inn_id: u8, ... }` - map events that trigger inn interactions
+- `CharacterLocation::AtInn(TownId)` - tracking where characters are located
+- Party management logic to know which "inn ID" to assign characters to
+
+The ID is arbitrary and campaign-specific. Campaign authors decide what each ID represents in their game world.
+
+This field was:
+
+- ✅ Defined in `CampaignMetadata` and `CampaignConfig`
+- ✅ Used by the backend initialization logic
+- ✅ Had a sensible default value via `#[serde(default)]`
+- ❌ **Missing from the SDK UI** - no control to actually set the value
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/lib.rs`
+
+**1. Added `starting_inn` field to `CampaignMetadata` struct** (line 144):
+
+```rust
+pub struct CampaignMetadata {
+    // ... existing fields ...
+    starting_food: u32,
+    #[serde(default = "default_starting_inn")]
+    starting_inn: u8,
+    max_party_size: usize,
+    // ...
+}
+```
+
+**Note**: The `#[serde(default)]` attribute is critical for backwards compatibility with existing campaign.ron files that don't have this field.
+
+**2. Added default function and default implementation** (lines 195-211):
+
+```rust
+fn default_starting_inn() -> u8 {
+    1
+}
+
+impl Default for CampaignMetadata {
+    fn default() -> Self {
+        Self {
+            // ... existing fields ...
+            starting_food: 10,
+            starting_inn: 1,
+            max_party_size: 6,
+            // ...
+        }
+    }
+}
+```
+
+**3. Updated test to include `starting_inn`** (line 4919):
+
+```rust
+let campaign = CampaignMetadata {
+    // ... existing fields ...
+    starting_food: 20,
+    starting_inn: 1,
+    max_party_size: 6,
+    // ...
+};
+```
+
+#### File: `sdk/campaign_builder/src/campaign_editor.rs`
+
+**1. Added `starting_inn` to `CampaignMetadataEditBuffer`** (line 92):
+
+```rust
+pub struct CampaignMetadataEditBuffer {
+    // ... existing fields ...
+    pub starting_food: u32,
+    pub starting_inn: u8,
+    pub max_party_size: usize,
+    // ...
+}
+```
+
+**2. Added field to buffer initialization** (line 129):
+
+```rust
+Self {
+    // ... existing fields ...
+    starting_food: m.starting_food,
+    starting_inn: m.starting_inn,
+    max_party_size: m.max_party_size,
+    // ...
+}
+```
+
+**3. Added field to buffer-to-metadata sync** (line 163):
+
+```rust
+pub fn apply_to(&self, dest: &mut crate::CampaignMetadata) {
+    // ... existing assignments ...
+    dest.starting_food = self.starting_food;
+    dest.starting_inn = self.starting_inn;
+    dest.max_party_size = self.max_party_size;
+    // ...
+}
+```
+
+**4. Added UI control in campaign settings form** (lines 879-889):
+
+```rust
+ui.label("Starting Inn:")
+    .on_hover_text("Default inn where non-party premade characters start (default: 1)");
+let mut inn = self.buffer.starting_inn as i32;
+if ui
+    .add(egui::DragValue::new(&mut inn).range(1..=255))
+    .changed()
+{
+    self.buffer.starting_inn = (inn.max(1)) as u8;
+    self.has_unsaved_changes = true;
+    *unsaved_changes = true;
+}
+ui.end_row();
+```
+
+### Testing
+
+- ✅ `cargo fmt --all` - passed
+- ✅ `cargo check --all-targets --all-features` - passed
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - passed
+- ✅ `cargo nextest run --all-features -p campaign_builder` - 875 tests passed
+
+### Impact
+
+Campaign authors can now:
+
+1. Open the Campaign Metadata Editor in Campaign Builder SDK
+2. Navigate to the "Gameplay" or configuration section
+3. Set the "Starting Inn" value (1-255) using a drag value control
+4. Save the campaign metadata
+5. When a new game is created from this campaign, premade characters with `starts_in_party: false` will be placed at the specified inn
+
+The field has a tooltip explaining its purpose: "Default inn where non-party premade characters start (default: 1)"
+
+### Design Notes
+
+- Used `egui::DragValue` for input (consistent with other numeric fields like starting_gold, starting_food)
+- Range constrained to 1-255 (u8 range, minimum 1 to ensure valid inn ID)
+- Field has sensible default of 1, so existing campaigns without this field will continue to work via `#[serde(default)]`
+- Placed in the campaign settings form after "Starting Food" for logical grouping
+
+### Important Clarification: What is "starting_inn"?
+
+The `starting_inn` field is **not** a reference to an Inn database entry or Town entity. There is no Inn or Town data structure in the game.
+
+Instead, it's simply a numeric identifier (`TownId` = `u8`) that serves as:
+
+1. **A location tag** for characters stored at inns (via `CharacterLocation::AtInn(TownId)`)
+2. **A map event parameter** used in `MapEvent::EnterInn { inn_id: u8, ... }`
+3. **An arbitrary campaign-specific ID** - campaign authors decide what each number represents
+
+**Example Usage**:
+
+- Campaign author creates a map event: `EnterInn { inn_id: 1, name: "Cozy Inn", ... }`
+- Campaign config sets: `starting_inn: 1`
+- When new game starts, non-party characters are marked with `CharacterLocation::AtInn(1)`
+- Player walks to the map tile with the EnterInn event
+- Game enters Inn Management mode for inn_id 1
+- UI shows characters with `CharacterLocation::AtInn(1)`
+
+This simple ID-based system avoids needing a separate Inn database while still allowing flexible party management across multiple inn locations in a campaign.
+
+---
+
+## Campaign Builder Character Editor - Starts in Party Checkbox - COMPLETED
+
+### Summary
+
+Added missing UI checkbox control for the `starts_in_party` field in the Campaign Builder's Character Editor. This field was defined in the data model and functional in the backend, but there was no way for users to set it through the UI.
+
+### Context
+
+Per the Party Management System Implementation Plan (Phase 6.1), the `CharacterDefinition` struct includes a `starts_in_party: bool` field that determines whether a premade character should begin in the active party when a new game starts. This field was:
+
+- ✅ Defined in `CharacterEditBuffer`
+- ✅ Properly saved/loaded to/from RON files
+- ✅ Used by the backend initialization logic in `GameState::initialize_roster()`
+- ❌ **Missing from the UI** - no checkbox to actually set the value
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/characters_editor.rs`
+
+Added checkbox control in the character edit form (after the "Premade" checkbox, around line 1625):
+
+```rust
+ui.label("Starts in Party:");
+ui.checkbox(&mut self.buffer.starts_in_party, "")
+    .on_hover_text("Whether this character begins in the active party at game start");
+ui.end_row();
+```
+
+### Testing
+
+- ✅ `cargo fmt --all` - passed
+- ✅ `cargo check --all-targets --all-features` - passed
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - passed
+
+### Impact
+
+Users can now:
+
+1. Open the Character Editor in Campaign Builder
+2. Create or edit a premade character
+3. Check the "Starts in Party" checkbox to designate this character as a starting party member
+4. Save the character definition
+5. When a new game begins, characters with `starts_in_party=true` will be automatically added to the active party (up to the max party size of 6)
+
+Characters with `starts_in_party=false` will instead be placed at the starting inn (specified in campaign config) where they can be recruited later.
+
+---
+
 ## Campaign Builder Asset Manager Portrait Reference Scanning Fix - COMPLETED
 
 ### Summary
@@ -139,8 +367,8 @@ From the tutorial campaign, these portraits are now correctly marked:
 - `elder_1.png` → Referenced by "Village Elder" (tutorial_elder_village)
 - `merchant_1.png` → Referenced by "Merchant" (tutorial_merchant_town)
 - `priestess_1.png` → Referenced by "High Priestess" (tutorial_priestess_town)
-- `old_wizard_1.png` → Referenced by "Fizban" (tutorial_wizard_fizban)
-- `npc_015.png` → Referenced by "Fizban Brother" (tutorial_wizard_fizban_brother)
+- `old_wizard_1.png` → Referenced by "Arcturus" (tutorial_wizard_arcturus)
+- `npc_015.png` → Referenced by "Arcturus Brother" (tutorial_wizard_arcturus_brother)
 - `ranger_1.png` → Referenced by "Lost Ranger" (tutorial_ranger_lost)
 - `goblin_1.png` → Referenced by "Dying Goblin" (tutorial_goblin_dying)
 
@@ -192,7 +420,7 @@ RecruitableCharacter(
 )
 ```
 
-**Placement Strategy**: Early-game map (Fizban's Cave) for easy access, demonstrates basic recruitment when party has space.
+**Placement Strategy**: Early-game map (Arcturus's Cave) for easy access, demonstrates basic recruitment when party has space.
 
 #### File: `campaigns/tutorial/data/maps/map_3.ron`
 
@@ -276,7 +504,7 @@ RecruitableCharacter(
 **Tutorial Flow**:
 
 1. Player starts with 3-member party (Kira, Sage, Mira) - room for 3 more
-2. Map 2 (Fizban's Cave): Can recruit Old Gareth (dwarf warrior) if desired
+2. Map 2 (Arcturus's Cave): Can recruit Old Gareth (dwarf warrior) if desired
 3. Map 3 (Ancient Ruins): Can recruit Whisper (elf rogue) - party now 5/6 or send to inn
 4. Map 4 (Dark Forest): Can recruit Apprentice Zara (gnome mage) - demonstrates full party/inn mechanics
 
@@ -5919,10 +6147,10 @@ Created RON data files for global and campaign-specific NPC definitions, extract
 - `tutorial_merchant_town` - Merchant services
 - `tutorial_priestess_town` - Temple services
 
-**Map 2: Fizban's Cave (2 NPCs)**
+**Map 2: Arcturus's Cave (2 NPCs)**
 
-- `tutorial_wizard_fizban` - Quest giver (quest 0) with dialogue 1
-- `tutorial_wizard_fizban_brother` - Quest giver (quests 1, 3)
+- `tutorial_wizard_arcturus` - Quest giver (quest 0) with dialogue 1
+- `tutorial_wizard_arcturus_brother` - Quest giver (quests 1, 3)
 
 **Map 4: Forest (1 NPC)**
 
@@ -5941,13 +6169,13 @@ Created RON data files for global and campaign-specific NPC definitions, extract
 
 **Dialogue References:**
 
-- Fizban (NPC id: tutorial_wizard_fizban) → dialogue_id: 1 ("Fizban Story")
+- Arcturus (NPC id: tutorial_wizard_arcturus) → dialogue_id: 1 ("Arcturus Story")
 
 **Quest References:**
 
 - Village Elder → quest 5 (The Lich's Tomb)
-- Fizban → quest 0 (Fizban's Quest)
-- Fizban's Brother → quests 1, 3 (Fizban's Brother's Quest, Kill Monsters)
+- Arcturus → quest 0 (Arcturus's Quest)
+- Arcturus's Brother → quests 1, 3 (Arcturus's Brother's Quest, Kill Monsters)
 
 #### Integration Tests (`src/sdk/database.rs`)
 
@@ -5964,7 +6192,7 @@ Created RON data files for global and campaign-specific NPC definitions, extract
 
    - Loads `campaigns/tutorial/data/npcs.ron`
    - Verifies all 12 tutorial NPCs present
-   - Validates Fizban's dialogue and quest references
+   - Validates Arcturus's dialogue and quest references
    - Tests filtering: merchants(), innkeepers(), quest_givers()
    - Confirms correct count
 
@@ -6008,8 +6236,8 @@ cargo nextest run --all-features                        # ✓ PASS (950/950)
 
 - Core NPCs: 7 archetypes loaded successfully
 - Tutorial NPCs: 12 NPCs loaded successfully
-- Dialogue references: All valid (Fizban → dialogue 1)
-- Quest references: All valid (Elder → 5, Fizban → 0, Brother → 1, 3)
+- Dialogue references: All valid (Arcturus → dialogue 1)
+- Quest references: All valid (Elder → 5, Arcturus → 0, Brother → 1, 3)
 
 ### Architecture Compliance
 
@@ -6272,7 +6500,7 @@ npc_placements: [
 All 6 tutorial maps load successfully with new format:
 
 - Map 1 (Town Square): 4 NPC placements, 6 events
-- Map 2 (Fizban's Cave): 2 NPC placements, 3 events
+- Map 2 (Arcturus's Cave): 2 NPC placements, 3 events
 - Map 3 (Ancient Ruins): 0 NPC placements, 10 events
 - Map 4 (Dark Forest): 1 NPC placement, 15 events
 - Map 5 (Mountain Pass): 4 NPC placements, 5 events
@@ -6316,7 +6544,7 @@ All 6 tutorial maps load successfully with new format:
 ```
 Map 1: 4 NPCs → tutorial_elder_village, tutorial_innkeeper_town,
                 tutorial_merchant_town, tutorial_priestess_town
-Map 2: 2 NPCs → tutorial_wizard_fizban, tutorial_wizard_fizban_brother
+Map 2: 2 NPCs → tutorial_wizard_arcturus, tutorial_wizard_arcturus_brother
 Map 4: 1 NPC  → tutorial_ranger_lost
 Map 5: 4 NPCs → tutorial_elder_village2, tutorial_innkeeper_town2,
                 tutorial_merchant_town2, tutorial_priest_town2
@@ -6395,9 +6623,9 @@ Chose hierarchical naming convention for clarity:
 
 Tutorial NPCs correctly reference existing game data:
 
-- Fizban references dialogue 1 ("Fizban Story" - exists in dialogues.ron)
-- Fizban gives quest 0 ("Fizban's Quest" - exists in quests.ron)
-- Brother gives quests 1, 3 ("Fizban's Brother's Quest", "Kill Monsters")
+- Arcturus references dialogue 1 ("Arcturus Story" - exists in dialogues.ron)
+- Arcturus gives quest 0 ("Arcturus's Quest" - exists in quests.ron)
+- Brother gives quests 1, 3 ("Arcturus's Brother's Quest", "Kill Monsters")
 - Village Elder gives quest 5 ("The Lich's Tomb")
 
 All references validated by integration tests.

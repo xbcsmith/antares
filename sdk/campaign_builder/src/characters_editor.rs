@@ -1623,6 +1623,13 @@ impl CharactersEditorState {
                         ui.label("Premade:");
                         ui.checkbox(&mut self.buffer.is_premade, "");
                         ui.end_row();
+
+                        ui.label("Starts in Party:");
+                        ui.checkbox(&mut self.buffer.starts_in_party, "")
+                            .on_hover_text(
+                                "Whether this character begins in the active party at game start",
+                            );
+                        ui.end_row();
                     });
 
                 ui.add_space(10.0);

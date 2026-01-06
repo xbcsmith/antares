@@ -39,3 +39,9 @@
 ## Character Definition updates
 
 Full domain change: Change `CharacterDefinition` to store `AttributePair`/`AttributePair16` for stats (or an optional `current_stats` structure), update serialization, instantiation, and tests to support base+current for all stats. This is the most consistent but also the most invasive (more tests, docs, and backward-compatibility considerations).
+
+## Metadata Editor
+
+Missing NPC and conditions file paths from the Metadata --> Files editor.
+
+Missing a Proficiencies editor tab.

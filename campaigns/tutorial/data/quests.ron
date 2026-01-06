@@ -1,8 +1,8 @@
 [
     (
         id: 0,
-        name: "Fizban\'s Quest",
-        description: "The Great Fizban\'s Quest for Foo",
+        name: "Arcturus\'s Quest",
+        description: "The Great Arcturus\'s Quest for Foo",
         stages: [
             (
                 stage_number: 1,
@@ -10,7 +10,7 @@
                 description: "Find the Foo in the area",
                 objectives: [
                     TalkToNpc(
-                        npc_id: "tutorial_wizard_fizban",
+                        npc_id: "tutorial_wizard_arcturus",
                         map_id: 2,
                     ),
                     CollectItems(
@@ -23,15 +23,15 @@
             (
                 stage_number: 2,
                 name: "Return the Foo",
-                description: "Return the Foo to Fizban",
+                description: "Return the Foo to Arcturus",
                 objectives: [
                     TalkToNpc(
-                        npc_id: "tutorial_wizard_fizban",
+                        npc_id: "tutorial_wizard_arcturus",
                         map_id: 2,
                     ),
                     DeliverItem(
                         item_id: 102,
-                        npc_id: "tutorial_wizard_fizban",
+                        npc_id: "tutorial_wizard_arcturus",
                         quantity: 1,
                     ),
                 ],
@@ -43,7 +43,7 @@
                 description: "Find the Foo Stand",
                 objectives: [
                     TalkToNpc(
-                        npc_id: "tutorial_wizard_fizban",
+                        npc_id: "tutorial_wizard_arcturus",
                         map_id: 2,
                     ),
                     CollectItems(
@@ -56,15 +56,15 @@
             (
                 stage_number: 4,
                 name: "Return the Foo Stand",
-                description: "Return the Foo Stand to Fizban",
+                description: "Return the Foo Stand to Arcturus",
                 objectives: [
                     TalkToNpc(
-                        npc_id: "tutorial_wizard_fizban",
+                        npc_id: "tutorial_wizard_arcturus",
                         map_id: 2,
                     ),
                     DeliverItem(
                         item_id: 103,
-                        npc_id: "tutorial_wizard_fizban",
+                        npc_id: "tutorial_wizard_arcturus",
                         quantity: 1,
                     ),
                 ],
@@ -80,7 +80,7 @@
         required_quests: [],
         repeatable: false,
         is_main_quest: false,
-        quest_giver_npc: Some("tutorial_wizard_fizban"),
+        quest_giver_npc: Some("tutorial_wizard_arcturus"),
         quest_giver_map: Some(2),
         quest_giver_position: Some((
             x: 13,
@@ -89,8 +89,8 @@
     ),
     (
         id: 1,
-        name: "Fizban\'s Brother\'s Quest",
-        description: "The Great Fizban\'s Brother\'s Quest for Bar",
+        name: "Arcturus\'s Brother\'s Quest",
+        description: "The Great Arcturus\'s Brother\'s Quest for Bar",
         stages: [
             (
                 stage_number: 1,
@@ -98,7 +98,7 @@
                 description: "Find the Bar in the area",
                 objectives: [
                     TalkToNpc(
-                        npc_id: "tutorial_wizard_fizban_brother",
+                        npc_id: "tutorial_wizard_arcturus_brother",
                         map_id: 2,
                     ),
                     CollectItems(
@@ -111,15 +111,15 @@
             (
                 stage_number: 2,
                 name: "Return the Bar",
-                description: "Return the Bar to Fizban\'s Brother",
+                description: "Return the Bar to Arcturus\'s Brother",
                 objectives: [
                     TalkToNpc(
-                        npc_id: "tutorial_wizard_fizban_brother",
+                        npc_id: "tutorial_wizard_arcturus_brother",
                         map_id: 2,
                     ),
                     DeliverItem(
                         item_id: 104,
-                        npc_id: "tutorial_wizard_fizban_brother",
+                        npc_id: "tutorial_wizard_arcturus_brother",
                         quantity: 1,
                     ),
                 ],
@@ -127,11 +127,11 @@
             ),
             (
                 stage_number: 3,
-                name: "Get the Foo from Fizban",
-                description: "Get the Foo and the Foo Stand from Fizban",
+                name: "Get the Foo from Arcturus",
+                description: "Get the Foo and the Foo Stand from Arcturus",
                 objectives: [
                     TalkToNpc(
-                        npc_id: "tutorial_wizard_fizban",
+                        npc_id: "tutorial_wizard_arcturus",
                         map_id: 2,
                     ),
                     CollectItems(
@@ -148,20 +148,20 @@
             (
                 stage_number: 4,
                 name: "Give the Foo and the Foo Stand",
-                description: "Give the Foo and the Foo Stand to Fizban\'s Brother",
+                description: "Give the Foo and the Foo Stand to Arcturus\'s Brother",
                 objectives: [
                     TalkToNpc(
-                        npc_id: "tutorial_wizard_fizban_brother",
+                        npc_id: "tutorial_wizard_arcturus_brother",
                         map_id: 2,
                     ),
                     DeliverItem(
                         item_id: 102,
-                        npc_id: "tutorial_wizard_fizban_brother",
+                        npc_id: "tutorial_wizard_arcturus_brother",
                         quantity: 1,
                     ),
                     DeliverItem(
                         item_id: 103,
-                        npc_id: "tutorial_wizard_fizban_brother",
+                        npc_id: "tutorial_wizard_arcturus_brother",
                         quantity: 1,
                     ),
                 ],
@@ -179,7 +179,7 @@
         ],
         repeatable: false,
         is_main_quest: false,
-        quest_giver_npc: Some("tutorial_wizard_fizban_brother"),
+        quest_giver_npc: Some("tutorial_wizard_arcturus_brother"),
         quest_giver_map: Some(2),
         quest_giver_position: Some((
             x: 3,
@@ -216,7 +216,7 @@
         required_quests: [],
         repeatable: false,
         is_main_quest: false,
-        quest_giver_npc: Some("tutorial_wizard_fizban_brother"),
+        quest_giver_npc: Some("tutorial_wizard_arcturus_brother"),
         quest_giver_map: Some(2),
         quest_giver_position: Some((
             x: 3,
