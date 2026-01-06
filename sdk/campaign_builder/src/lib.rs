@@ -3257,6 +3257,7 @@ impl CampaignBuilderApp {
             self.campaign_dir.as_ref(),
             &mut self.unsaved_changes,
             &mut self.status_message,
+            self.npc_editor_state.npcs.as_slice(),
         );
 
         // If the campaign metadata editor requested validation, run the shared

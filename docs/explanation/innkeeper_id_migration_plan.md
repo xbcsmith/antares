@@ -969,18 +969,21 @@ ui.end_row();
 
 #### 5.5 Deliverables
 
-- [ ] `CampaignMetadataEditBuffer::starting_innkeeper` field updated to String
-- [ ] UI control changed from DragValue to ComboBox/dropdown
-- [ ] UI filters NPCs to only show `is_innkeeper=true`
-- [ ] UI shows innkeeper name and ID for clarity
-- [ ] All Phase 5 tests passing
+- [x] `CampaignMetadataEditBuffer::starting_innkeeper` field updated to String
+- [x] UI control changed from DragValue to ComboBox/dropdown (shows Name (ID) for clarity)
+- [x] UI filters NPCs to only show `is_innkeeper=true` (falls back to manual text input if no innkeepers are loaded)
+- [x] UI shows innkeeper name and ID for clarity
+- [x] All Phase 5 tests passing
+
+**Note**: When no innkeeper NPCs are available in the editor, the UI gracefully falls back to a single-line text input so authors can manually enter an innkeeper ID.
 
 #### 5.6 Success Criteria
 
 - Campaign Builder UI allows selecting innkeeper from NPC list
 - Only NPCs with `is_innkeeper=true` are shown in dropdown
 - Selected innkeeper ID is saved to campaign.ron
-- UI is intuitive and shows helpful information (name + ID)
+- UI is intuitive and shows helpful information (name + ID), and falls back to a manual text input when no innkeeper NPCs are available
+- Phase 5 unit/UI tests pass (editor buffer behavior and round-trip persistence verified)
 
 ---
 

@@ -40,6 +40,7 @@ use crate::ui_helpers::{
     compute_default_panel_height, EditorToolbar, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{FOOD_MAX, FOOD_MIN, PARTY_MAX_SIZE};
+use antares::domain::world::npc::NpcDefinition;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
@@ -308,6 +309,16 @@ impl CampaignMetadataEditorState {
         self.has_unsaved_changes = true;
     }
 
+    /// Set the starting innkeeper ID in the edit buffer, marking the editor as having unsaved changes.
+    ///
+    /// This centralizes the mutation so tests can assert expected side-effects without
+    /// needing to run egui UI interactions.
+    pub fn set_starting_innkeeper(&mut self, id: impl Into<String>, unsaved_changes: &mut bool) {
+        self.buffer.starting_innkeeper = id.into();
+        self.has_unsaved_changes = true;
+        *unsaved_changes = true;
+    }
+
     /// Consume the current validation request flag.
     /// Consume the current validation request flag.
     ///
@@ -388,6 +399,36 @@ impl CampaignMetadataEditorState {
         campaign_dir: Option<&PathBuf>,
         unsaved_changes: &mut bool,
         status_message: &mut String,
+        npcs: &[NpcDefinition],
+    ) {
+        // Render using the provided NPC list so the UI can show the innkeeper dropdown
+        self.render_ui(
+            ui,
+            metadata,
+            campaign_path,
+            campaign_dir,
+            unsaved_changes,
+            status_message,
+            npcs,
+        );
+    }
+
+    // Note: `show_with_npcs()` wrapper removed — call `show(..., npcs)` directly.
+
+    /// Internal renderer shared by `show()` and `show_with_npcs()`.
+    ///
+    /// This function contains the full UI logic previously hosted in `show()`.
+    /// It accepts an `npcs` slice to allow the starting-innkeeper control to
+    /// render a filtered ComboBox when NPCs are available.
+    fn render_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        metadata: &mut crate::CampaignMetadata,
+        campaign_path: &mut Option<PathBuf>,
+        campaign_dir: Option<&PathBuf>,
+        unsaved_changes: &mut bool,
+        status_message: &mut String,
+        npcs: &[NpcDefinition],
     ) {
         ui.heading("Campaign Metadata");
         ui.add_space(5.0);
@@ -876,21 +917,53 @@ impl CampaignMetadataEditorState {
                                     }
                                     ui.end_row();
 
-                                    ui.label("Starting Innkeeper ID:")
-                                        .on_hover_text("Default innkeeper where non-party premade characters start (default: tutorial_innkeeper_town)");
-                                    let mut innkeeper = self.buffer.starting_innkeeper.clone();
-                                    if ui
-                                        .add(egui::TextEdit::singleline(&mut innkeeper).desired_width(200.0))
-                                        .changed()
-                                    {
-                                        // Trim and store the new innkeeper ID
-                                        let new_id = innkeeper.trim().to_string();
-                                        if !new_id.is_empty() {
-                                            self.buffer.starting_innkeeper = new_id;
-                                            self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                    ui.label("Starting Innkeeper:")
+                                        .on_hover_text("Default innkeeper NPC where non-party premade characters start (choose an innkeeper or enter a custom ID)");
+                                    // Build the list of innkeeper NPCs (filtered)
+                                    let innkeeper_list: Vec<_> =
+                                        npcs.iter().filter(|n| n.is_innkeeper).collect();
+
+                                    ui.horizontal(|ui| {
+                                        if !innkeeper_list.is_empty() {
+                                            let selected_text = innkeeper_list
+                                                .iter()
+                                                .find(|n| n.id == self.buffer.starting_innkeeper)
+                                                .map(|npc| format!("{} ({})", npc.name, npc.id))
+                                                .unwrap_or_else(|| self.buffer.starting_innkeeper.clone());
+
+                                            egui::ComboBox::from_id_salt("campaign_starting_innkeeper")
+                                                .selected_text(selected_text)
+                                                .show_ui(ui, |ui| {
+                                                    for npc in &innkeeper_list {
+                                                        let label = format!("{} ({})", npc.name, npc.id);
+                                                        if ui
+                                                            .selectable_label(
+                                                                self.buffer.starting_innkeeper == npc.id,
+                                                                &label,
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            self.set_starting_innkeeper(npc.id.clone(), unsaved_changes);
+                                                        }
+                                                    }
+                                                });
+                                        } else {
+                                            ui.colored_label(egui::Color32::GRAY, "[No innkeepers available]");
                                         }
-                                    }
+
+                                        // Allow manual override or direct entry
+                                        if ui
+                                            .add(
+                                                egui::TextEdit::singleline(&mut self.buffer.starting_innkeeper)
+                                                    .desired_width(200.0),
+                                            )
+                                            .changed()
+                                        {
+                                            // Trim and store the new innkeeper ID
+                                            let new_id = self.buffer.starting_innkeeper.trim().to_string();
+                                            self.set_starting_innkeeper(new_id, unsaved_changes);
+                                        }
+                                    });
                                     ui.end_row();
 
                                     ui.label("Difficulty:");
@@ -1128,6 +1201,10 @@ impl CampaignMetadataEditorState {
 
         // End TwoColumnLayout
     }
+
+    pub fn innkeepers_from_npcs(npcs: &[NpcDefinition]) -> Vec<NpcDefinition> {
+        npcs.iter().filter(|n| n.is_innkeeper).cloned().collect()
+    }
 }
 
 #[cfg(test)]
@@ -1229,5 +1306,37 @@ mod tests {
 
         // After consuming, it should be reset
         assert!(!s.consume_validate_request());
+    }
+
+    /// Test filtering for innkeepers from a mixed NPC list
+    #[test]
+    fn test_innkeepers_filter() {
+        use antares::domain::world::npc::NpcDefinition;
+        let npc_inn = NpcDefinition::innkeeper("inn1", "The Tipsy Tavern", "portrait_inn.png");
+        let npc_non = NpcDefinition::new("npc2", "Villager", "portrait.png");
+        let npcs = vec![npc_inn.clone(), npc_non];
+        let inns = CampaignMetadataEditorState::innkeepers_from_npcs(&npcs);
+        assert_eq!(inns.len(), 1);
+        assert_eq!(inns[0].id, "inn1");
+    }
+
+    /// set_starting_innkeeper should update buffer and mark unsaved flags
+    #[test]
+    fn test_set_starting_innkeeper_marks_unsaved() {
+        let mut s = CampaignMetadataEditorState::new();
+        let mut unsaved = false;
+        s.set_starting_innkeeper("innkeeper_1".to_string(), &mut unsaved);
+        assert_eq!(s.buffer.starting_innkeeper, "innkeeper_1");
+        assert!(s.has_unsaved_changes);
+        assert!(unsaved);
+    }
+
+    /// starting_innkeeper should persist to metadata via apply_buffer_to_metadata
+    #[test]
+    fn test_starting_innkeeper_persists() {
+        let mut s = CampaignMetadataEditorState::new();
+        s.buffer.starting_innkeeper = "innkeeper_abc".to_string();
+        s.apply_buffer_to_metadata();
+        assert_eq!(s.metadata.starting_innkeeper, "innkeeper_abc".to_string());
     }
 }
