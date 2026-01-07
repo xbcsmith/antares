@@ -285,7 +285,7 @@ impl<'de> serde::Deserialize<'de> for AttributePair16 {
 /// assert_eq!(stats.might.base, 15);
 /// assert_eq!(stats.intellect.base, 10);
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stats {
     /// Physical strength, melee damage
     pub might: AttributePair,

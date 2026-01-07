@@ -33,6 +33,7 @@ pub mod types;
 pub mod world;
 
 // Re-export commonly used types from submodules
+#[allow(deprecated)]
 pub use character_definition::{
     BaseStats, CharacterDatabase, CharacterDefinition, CharacterDefinitionError,
     CharacterDefinitionId, StartingEquipment,

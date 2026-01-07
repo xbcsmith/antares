@@ -1500,9 +1500,9 @@ After ALL phases complete and validation passes, update `docs/explanation/implem
 
 ## Implementation Order Summary
 
-**Phase 1: HUD Fixes** → Independent work, unblocks visual testing  
-**Phase 2: Interaction System** → Core functionality, depends on Phase 1 for testing  
-**Phase 3: Visual Markers** → Enhancement, depends on Phase 2 for interaction testing  
+**Phase 1: HUD Fixes** → Independent work, unblocks visual testing
+**Phase 2: Interaction System** → Core functionality, depends on Phase 1 for testing
+**Phase 3: Visual Markers** → Enhancement, depends on Phase 2 for interaction testing
 **Phase 4: Recruitable Characters** → Feature addition, depends on Phase 2 & 3 for interaction and visualization
 
 Total estimated implementation time: 8-10 hours for AI agent execution.
