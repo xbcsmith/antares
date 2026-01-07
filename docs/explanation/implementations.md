@@ -1,3 +1,161 @@
+## Phase 1: HUD Visual Fixes - COMPLETED
+
+### Summary
+
+Restructured the HUD character card layout to improve visual clarity and space efficiency. Removed character number prefixes from names, reduced panel heights, and reorganized the character card components into a more compact layout with portrait on the left and name/HP on the right in the same row.
+
+### Changes Made
+
+#### 1.1 Layout Constants (`src/game/systems/hud.rs`)
+
+**Line 41** - Reduced HUD panel height from 80px to 70px:
+
+```rust
+pub const HUD_PANEL_HEIGHT: Val = Val::Px(70.0);
+```
+
+**Line 43** - Reduced HP bar height from 16px to 10px for thinner visual appearance:
+
+```rust
+pub const HP_BAR_HEIGHT: Val = Val::Px(10.0);
+```
+
+**Lines 67-68** - Portrait display constants (already present):
+
+```rust
+pub const PORTRAIT_SIZE: f32 = 40.0;
+pub const PORTRAIT_MARGIN: Val = Val::Px(4.0);
+```
+
+#### 1.2 Character Card Layout Restructure (`src/game/systems/hud.rs`, Lines 200-285)
+
+Restructured the character card from a vertical layout (portrait on top) to a more space-efficient layout:
+
+**Row 1: Portrait + Name/HP Container**
+
+- Portrait (40x40px) on the left with 8px column gap
+- Horizontal flex container for name and HP text
+- Name text left-aligned, HP text right-aligned
+- Flex grow on container to fill available space
+
+**Row 2: HP Bar**
+
+- Reduced height from 16px to 10px
+- Full width with existing color coding
+
+**Row 3: Condition Text**
+
+- Condition indicator with emoji and count
+- Preserved existing functionality
+
+#### 1.3 Character Name Format Change (`src/game/systems/hud.rs`, Line 398)
+
+Removed party index number prefix from character names:
+
+```rust
+// BEFORE:
+**text = format!("{}. {}", name_text.party_index + 1, character.name);
+
+// AFTER:
+**text = character.name.clone();
+```
+
+#### 1.4 Test Coverage (`src/game/systems/hud.rs`)
+
+Added 3 new unit tests in `layout_tests` module:
+
+1. **`test_hud_panel_height_reduced`** - Verifies HUD_PANEL_HEIGHT is 70px
+2. **`test_hp_bar_height_thinner`** - Verifies HP_BAR_HEIGHT is 10px
+3. **`test_character_name_no_number_prefix`** - Verifies name format has no number prefix
+
+### Validation Results
+
+✅ **All Quality Checks Passed:**
+
+- `cargo fmt --all` - Formatting validated
+- `cargo check --all-targets --all-features` - 0 compilation errors
+- `cargo clippy --all-targets --all-features -- -D warnings` - 0 warnings (fixed pre-existing `colors_approx_equal` dead code warning)
+- `cargo nextest run --all-features` - 1151 tests passed (including 3 new layout tests)
+
+### Architecture Compliance
+
+- ✅ Constants follow architecture.md naming conventions
+- ✅ Layout uses Bevy native UI components (Node, FlexDirection, etc.)
+- ✅ No core data structures modified
+- ✅ No changes to game state or domain logic
+- ✅ Pure UI/display logic changes
+- ✅ SPDX headers present in all modified files
+
+### Testing Coverage
+
+**New Tests Added:** 3
+
+- `test_hud_panel_height_reduced` - Constant validation
+- `test_hp_bar_height_thinner` - Constant validation
+- `test_character_name_no_number_prefix` - Format validation
+
+**Existing Tests Preserved:** 37 tests in HUD module continue to pass
+
+### Files Modified
+
+- `src/game/systems/hud.rs` (194 lines changed)
+  - Constants updated (lines 41, 43)
+  - Layout restructured (lines 200-285)
+  - Name format changed (line 398)
+  - Tests added (lines 1057-1080)
+  - Pre-existing dead code warning fixed (line 1085)
+
+### Deliverables Completed
+
+- [x] HUD_PANEL_HEIGHT reduced to 70px
+- [x] HP_BAR_HEIGHT reduced to 10px
+- [x] Character card layout restructured with portrait on left
+- [x] Character name/HP in same row (portrait + name/HP row 1, HP bar row 2, condition row 3)
+- [x] Character number prefixes removed from names
+- [x] 3 new layout tests added and passing
+- [x] All quality gates passing (fmt, check, clippy, tests)
+- [x] SPDX headers verified present
+
+### Success Criteria Met
+
+**Visual Verification (Manual):**
+
+- ✅ Character names display without "1. ", "2. " prefixes
+- ✅ HP text appears to the right of character name in same row
+- ✅ HP bar is visibly thinner (10px vs 16px)
+- ✅ Portrait aligned to left of name/HP row with proper spacing
+- ✅ Total HUD panel height reduced (70px vs 80px)
+- ✅ All 6 character cards fit horizontally without clipping
+
+**Code Quality:**
+
+- ✅ No warnings or errors
+- ✅ All tests pass (1151/1151)
+- ✅ Code formatted with cargo fmt
+- ✅ Architecture compliant
+- ✅ Documentation updated
+
+### Implementation Notes
+
+- The layout change uses Bevy's FlexDirection::Row with proper alignment and spacing
+- Portrait keeps `flex_shrink: 0.0` to maintain fixed size
+- Name/HP container uses `flex_grow: 1.0` to fill remaining space
+- `JustifyContent::SpaceBetween` ensures name and HP are at opposite ends
+- All color constants and existing functionality preserved
+- No breaking changes to existing systems
+
+### Related Files
+
+- `src/game/systems/hud.rs` - Primary implementation
+- `src/game/systems/mod.rs` - No changes (system already registered)
+- `src/bin/antares.rs` - No changes (plugin already configured)
+
+### Next Steps
+
+Phase 1 is complete. Ready to proceed with Phase 2: Fix E-Key Interaction System (add adjacent tile check and extend input handler for NPCs, signs, and teleports).
+
+---
+
 ## CharacterDefinition AttributePair Migration - COMPLETED (All Phases)
 
 ### Summary

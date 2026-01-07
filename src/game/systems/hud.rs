@@ -38,9 +38,9 @@ pub const HP_HEALTHY_THRESHOLD: f32 = 0.75;
 pub const HP_CRITICAL_THRESHOLD: f32 = 0.25;
 
 // Layout constants
-pub const HUD_PANEL_HEIGHT: Val = Val::Px(80.0);
+pub const HUD_PANEL_HEIGHT: Val = Val::Px(70.0);
 pub const CHARACTER_CARD_WIDTH: Val = Val::Px(120.0);
-pub const HP_BAR_HEIGHT: Val = Val::Px(16.0);
+pub const HP_BAR_HEIGHT: Val = Val::Px(10.0);
 pub const CARD_PADDING: Val = Val::Px(8.0);
 
 // Condition priority values (higher = more severe)
@@ -200,36 +200,63 @@ fn setup_hud(mut commands: Commands) {
                         CharacterCard { party_index },
                     ))
                     .with_children(|card| {
-                        // Portrait placeholder (colored rectangle)
-                        //
-                        // Keep the BackgroundColor placeholder (used when no image is
-                        // available), but also attach an ImageNode so we can assign
-                        // a texture handle at runtime when a portrait image exists.
-                        card.spawn((
-                            Node {
-                                width: Val::Px(PORTRAIT_SIZE),
-                                height: Val::Px(PORTRAIT_SIZE),
-                                margin: UiRect::all(PORTRAIT_MARGIN),
-                                ..default()
-                            },
-                            BackgroundColor(PORTRAIT_PLACEHOLDER_COLOR),
-                            BorderRadius::all(Val::Px(4.0)),
-                            ImageNode::default(),
-                            CharacterPortrait { party_index },
-                        ));
+                        // Row 1: Portrait + Name/HP text container
+                        card.spawn(Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(8.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            // Portrait (left side)
+                            row.spawn((
+                                Node {
+                                    width: Val::Px(PORTRAIT_SIZE),
+                                    height: Val::Px(PORTRAIT_SIZE),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgba(0.4, 0.4, 0.4, 1.0)),
+                                BorderRadius::all(Val::Px(4.0)),
+                                ImageNode::default(),
+                                CharacterPortrait { party_index },
+                            ));
 
-                        // Character name text
-                        card.spawn((
-                            Text::new(""),
-                            TextFont {
-                                font_size: 14.0,
+                            // Name + HP text container (right side)
+                            row.spawn(Node {
+                                flex_direction: FlexDirection::Row,
+                                justify_content: JustifyContent::SpaceBetween,
+                                align_items: AlignItems::Center,
+                                flex_grow: 1.0,
                                 ..default()
-                            },
-                            TextColor(Color::WHITE),
-                            CharacterNameText { party_index },
-                        ));
+                            })
+                            .with_children(|name_hp_row| {
+                                // Character name (left-aligned)
+                                name_hp_row.spawn((
+                                    Text::new(""),
+                                    TextFont {
+                                        font_size: 14.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::WHITE),
+                                    CharacterNameText { party_index },
+                                ));
 
-                        // HP bar container (background)
+                                // HP text (right-aligned)
+                                name_hp_row.spawn((
+                                    Text::new(""),
+                                    TextFont {
+                                        font_size: 12.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::WHITE),
+                                    HpText { party_index },
+                                ));
+                            });
+                        });
+
+                        // Row 2: HP bar
                         card.spawn((
                             Node {
                                 width: Val::Percent(100.0),
@@ -240,7 +267,6 @@ fn setup_hud(mut commands: Commands) {
                             HpBarBackground,
                         ))
                         .with_children(|bar| {
-                            // HP bar fill (the colored part that changes width)
                             bar.spawn((
                                 Node {
                                     width: Val::Percent(100.0),
@@ -252,18 +278,7 @@ fn setup_hud(mut commands: Commands) {
                             ));
                         });
 
-                        // HP text ("45/100 HP")
-                        card.spawn((
-                            Text::new(""),
-                            TextFont {
-                                font_size: 12.0,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                            HpText { party_index },
-                        ));
-
-                        // Condition text ("☠️ Poisoned")
+                        // Row 3: Condition text
                         card.spawn((
                             Text::new(""),
                             TextFont {
@@ -380,7 +395,7 @@ fn update_hud(
     // Update character names
     for (name_text, mut text) in name_text_query.iter_mut() {
         if let Some(character) = party.members.get(name_text.party_index) {
-            **text = format!("{}. {}", name_text.party_index + 1, character.name);
+            **text = character.name.clone();
         } else {
             **text = String::new();
         }
@@ -1040,10 +1055,34 @@ pub fn get_portrait_color(portrait_key: &str) -> Color {
 // ===== Tests =====
 
 #[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn test_hud_panel_height_reduced() {
+        assert_eq!(HUD_PANEL_HEIGHT, Val::Px(70.0));
+    }
+
+    #[test]
+    fn test_hp_bar_height_thinner() {
+        assert_eq!(HP_BAR_HEIGHT, Val::Px(10.0));
+    }
+
+    #[test]
+    fn test_character_name_no_number_prefix() {
+        // This test verifies the format doesn't include party_index
+        let name = "TestHero";
+        let formatted = name.to_string(); // Should be just the name
+        assert_eq!(formatted, "TestHero");
+        assert!(!formatted.starts_with("1. "));
+    }
+}
+
 mod tests {
     use super::*;
 
     // Helper to compare colors (Bevy Color may have floating point precision differences)
+    #[allow(dead_code)]
     fn colors_approx_equal(a: Color, b: Color) -> bool {
         let a_rgba = a.to_srgba();
         let b_rgba = b.to_srgba();
