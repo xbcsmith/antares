@@ -1112,7 +1112,7 @@ mod layout_tests {
 
     #[test]
     fn test_portrait_percent_of_card() {
-        assert_eq!(PORTRAIT_PERCENT_OF_CARD, 90.0);
+        assert_eq!(PORTRAIT_PERCENT_OF_CARD, 80.0);
     }
 
     #[test]
