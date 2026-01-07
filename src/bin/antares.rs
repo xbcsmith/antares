@@ -143,9 +143,9 @@ fn main() {
     .add_plugins(antares::game::systems::events::EventPlugin)
     .add_plugins(antares::game::systems::audio::AudioPlugin {
         config: audio_config,
-    });
+    })
+    .add_plugins(antares::game::systems::ui::UiPlugin);
 
-    // .add_plugins(antares::game::systems::ui::UiPlugin) // Temporarily disabled due to egui context issue
     app.run();
 }
 

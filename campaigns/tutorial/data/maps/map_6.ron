@@ -7622,6 +7622,20 @@
             ],
         ),
         (
+            x: 13,
+            y: 17,
+        ): Encounter(
+            name: "Dragon\'s Lair",
+            description: "The lair of the undead dragon. It guards a hoard of treasure.",
+            monster_group: [
+                30,
+                11,
+                11,
+                11,
+                11,
+            ],
+        ),
+        (
             x: 14,
             y: 1,
         ): Encounter(
@@ -7652,20 +7666,6 @@
                 1,
                 1,
                 1,
-            ],
-        ),
-        (
-            x: 13,
-            y: 17,
-        ): Encounter(
-            name: "Dragon\'s Lair",
-            description: "The lair of the undead dragon. It guards a hoard of treasure.",
-            monster_group: [
-                30,
-                11,
-                11,
-                11,
-                11,
             ],
         ),
     },

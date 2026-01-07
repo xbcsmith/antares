@@ -282,7 +282,7 @@ fn inn_action_system(
     mut swap_events: MessageReader<InnSwapCharacters>,
     mut exit_events: MessageReader<ExitInn>,
     mut global_state: ResMut<GlobalState>,
-    mut game_log: ResMut<GameLog>,
+    mut game_log: Option<ResMut<GameLog>>,
 ) {
     // Get current inn ID before processing events (clone to avoid moving out of state)
     let current_inn_id = match &global_state.0.mode {
@@ -295,11 +295,15 @@ fn inn_action_system(
         match global_state.0.recruit_character(event.roster_index) {
             Ok(_) => {
                 if let Some(character) = global_state.0.roster.characters.get(event.roster_index) {
-                    game_log.add(format!("{} recruited to party!", character.name));
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("{} recruited to party!", character.name));
+                    }
                 }
             }
             Err(e) => {
-                game_log.add(format!("Cannot recruit: {}", e));
+                if let Some(ref mut log) = game_log {
+                    log.add(format!("Cannot recruit: {}", e));
+                }
             }
         }
     }
@@ -311,10 +315,14 @@ fn inn_action_system(
             .dismiss_character(event.party_index, current_inn_id.clone())
         {
             Ok(_) => {
-                game_log.add("Party member dismissed to inn.".to_string());
+                if let Some(ref mut log) = game_log {
+                    log.add("Party member dismissed to inn.".to_string());
+                }
             }
             Err(e) => {
-                game_log.add(format!("Cannot dismiss: {}", e));
+                if let Some(ref mut log) = game_log {
+                    log.add(format!("Cannot dismiss: {}", e));
+                }
             }
         }
     }
@@ -326,10 +334,14 @@ fn inn_action_system(
             .swap_party_member(event.party_index, event.roster_index)
         {
             Ok(_) => {
-                game_log.add("Party members swapped!".to_string());
+                if let Some(ref mut log) = game_log {
+                    log.add("Party members swapped!".to_string());
+                }
             }
             Err(e) => {
-                game_log.add(format!("Cannot swap: {}", e));
+                if let Some(ref mut log) = game_log {
+                    log.add(format!("Cannot swap: {}", e));
+                }
             }
         }
     }
@@ -337,7 +349,9 @@ fn inn_action_system(
     // Process exit events
     for _event in exit_events.read() {
         global_state.0.mode = GameMode::Exploration;
-        game_log.add("Left the inn.".to_string());
+        if let Some(ref mut log) = game_log {
+            log.add("Left the inn.".to_string());
+        }
     }
 }
 

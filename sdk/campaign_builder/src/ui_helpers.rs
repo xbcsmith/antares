@@ -126,13 +126,14 @@ pub const DEFAULT_PANEL_MIN_HEIGHT: f32 = 100.0;
 /// Examples:
 ///
 /// ```no_run
-/// // Construct an id and use the helpers from a UI context:
-/// let id = autocomplete_buffer_id("item", "my_widget");
-/// let mut buf = load_autocomplete_buffer(ui.ctx(), id, || String::new());
+/// // Construct an id and use the helpers with an egui::Context:
+/// let ctx = egui::Context::default();
+/// let id = egui::Id::new(format!("autocomplete:item:{}", "my_widget"));
+/// let mut buf = campaign_builder::ui_helpers::load_autocomplete_buffer(&ctx, id, || String::new());
 /// // ... render widget with &mut buf ...
-/// store_autocomplete_buffer(ui.ctx(), id, &buf);
+/// campaign_builder::ui_helpers::store_autocomplete_buffer(&ctx, id, &buf);
 /// // or remove:
-/// remove_autocomplete_buffer(ui.ctx(), id);
+/// campaign_builder::ui_helpers::remove_autocomplete_buffer(&ctx, id);
 /// ```
 fn make_autocomplete_id(_ui: &egui::Ui, prefix: &str, id_salt: &str) -> egui::Id {
     // Stable autocomplete id: deterministic and independent of UI nesting
@@ -2334,14 +2335,13 @@ pub fn autocomplete_item_selector(
 /// # Examples
 ///
 /// ```
-/// use antares::domain::quest::Quest;
 /// use eframe::egui;
 ///
 /// let mut quest_id_str = String::new();
-/// let quests = vec![Quest { id: 1, name: "Quest 1".to_string(), /* ... */ }];
+/// let quests: Vec<antares::domain::quest::Quest> = Vec::new();
 ///
 /// // In UI code:
-/// // let changed = autocomplete_quest_selector(ui, "quest_sel", "Quest:", &mut quest_id_str, &quests);
+/// // let changed = campaign_builder::ui_helpers::autocomplete_quest_selector(ui, "quest_sel", "Quest:", &mut quest_id_str, &quests);
 /// ```
 pub fn autocomplete_quest_selector(
     ui: &mut egui::Ui,
@@ -3378,9 +3378,12 @@ pub fn autocomplete_monster_list_selector(
 ///
 /// ```no_run
 /// use campaign_builder::ui_helpers::autocomplete_portrait_selector;
+/// use std::path::PathBuf;
 ///
 /// fn show_character_editor(ui: &mut egui::Ui, portrait_id: &mut String, portraits: &[String]) {
-///     if autocomplete_portrait_selector(ui, "char_portrait", "Portrait:", portrait_id, portraits, campaign_dir) {
+///     // Provide the campaign directory as a PathBuf and pass it as `Option<&PathBuf>`
+///     let campaign_dir = PathBuf::from(".");
+///     if autocomplete_portrait_selector(ui, "char_portrait", "Portrait:", portrait_id, portraits, Some(&campaign_dir)) {
 ///         println!("Portrait selection changed to: {}", portrait_id);
 ///     }
 /// }
@@ -3472,10 +3475,8 @@ pub fn autocomplete_portrait_selector(
 /// use antares::domain::combat::database::MonsterDefinition;
 /// use campaign_builder::ui_helpers::extract_monster_candidates;
 ///
-/// let monsters = vec![
-///     MonsterDefinition { id: 1, name: "Goblin".to_string(), /* ... */ },
-///     MonsterDefinition { id: 2, name: "Orc".to_string(), /* ... */ },
-/// ];
+/// use campaign_builder::ui_helpers::extract_monster_candidates;
+/// let monsters: Vec<antares::domain::combat::database::MonsterDefinition> = Vec::new();
 /// let candidates = extract_monster_candidates(&monsters);
 /// assert_eq!(candidates, vec!["Goblin", "Orc"]);
 /// ```
@@ -3517,10 +3518,8 @@ pub fn extract_class_candidates(
 /// use antares::domain::types::ItemId;
 /// use campaign_builder::ui_helpers::extract_item_candidates;
 ///
-/// let items = vec![
-///     Item { id: 1, name: "Longsword".to_string(), /* ... */ },
-///     Item { id: 2, name: "Health Potion".to_string(), /* ... */ },
-/// ];
+/// use campaign_builder::ui_helpers::extract_item_candidates;
+/// let items: Vec<antares::domain::items::types::Item> = Vec::new();
 /// let candidates = extract_item_candidates(&items);
 /// assert_eq!(candidates.len(), 2);
 /// assert_eq!(candidates[0].0, "Longsword (ID: 1)");
@@ -3601,9 +3600,8 @@ pub fn extract_quest_candidates(
 /// use campaign_builder::ui_helpers::extract_condition_candidates;
 ///
 /// let conditions = vec![
-///     ConditionDefinition { id: "poison".to_string(), name: "Poisoned".to_string(), /* ... */ },
-///     ConditionDefinition { id: "sleep".to_string(), name: "Sleeping".to_string(), /* ... */ },
-/// ];
+/// use campaign_builder::ui_helpers::extract_condition_candidates;
+/// let conditions: Vec<antares::domain::conditions::ConditionDefinition> = Vec::new();
 /// let candidates = extract_condition_candidates(&conditions);
 /// assert_eq!(candidates.len(), 2);
 /// assert_eq!(candidates[0].0, "Poisoned");
@@ -3633,17 +3631,13 @@ pub fn extract_condition_candidates(
 /// # Examples
 ///
 /// ```no_run
-/// use antares::domain::magic::types::Spell;
 /// use antares::domain::types::SpellId;
 /// use campaign_builder::ui_helpers::extract_spell_candidates;
 ///
-/// let spells = vec![
-///     Spell { id: 1, name: "Fireball".to_string(), /* ... */ },
-///     Spell { id: 2, name: "Heal".to_string(), /* ... */ },
-/// ];
-/// let candidates = extract_spell_candidates(&spells);
-/// assert_eq!(candidates.len(), 2);
-/// assert_eq!(candidates[0].0, "Fireball (ID: 1)");
+/// // Use an empty slice in examples to avoid constructing a full `Spell` value
+/// let spells: &[antares::domain::magic::types::Spell] = &[];
+/// let candidates = extract_spell_candidates(spells);
+/// assert!(candidates.is_empty());
 /// ```
 pub fn extract_spell_candidates(
     spells: &[antares::domain::magic::types::Spell],

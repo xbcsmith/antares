@@ -4872,23 +4872,14 @@
     ],
     events: {
         (
-            x: 7,
-            y: 15,
-        ): RecruitableCharacter(
-            name: "Whisper",
-            description: "An elven scout emerges from the shadows, watching you intently. Her nimble fingers toy with a lockpick as she sizes up your party.",
-            character_id: "whisper",
-        ),
-        (
-            x: 6,
+            x: 3,
             y: 2,
-        ): Treasure(
-            name: "Buried Stash",
-            description: "A stash hidden in a crevice containing valuable items.",
-            loot: [
-                10,
-                20,
-                30,
+        ): Encounter(
+            name: "Monster Patrol",
+            description: "A small patrol of monsters crossing this area.",
+            monster_group: [
+                1,
+                2,
             ],
         ),
         (
@@ -4903,6 +4894,15 @@
             ],
         ),
         (
+            x: 10,
+            y: 6,
+        ): Trap(
+            name: "Spike Trap",
+            description: "A hidden spike trap that deals 5 points of damage when triggered.",
+            damage: 5,
+            effect: None,
+        ),
+        (
             x: 13,
             y: 2,
         ): Treasure(
@@ -4912,15 +4912,6 @@
                 11,
                 21,
             ],
-        ),
-        (
-            x: 10,
-            y: 6,
-        ): Trap(
-            name: "Spike Trap",
-            description: "A hidden spike trap that deals 5 points of damage when triggered.",
-            damage: 5,
-            effect: None,
         ),
         (
             x: 1,
@@ -4943,27 +4934,12 @@
             ],
         ),
         (
-            x: 10,
-            y: 12,
-        ): Treasure(
-            name: "Worn Chest",
-            description: "A small chest containing assorted loot and coins.",
-            loot: [
-                12,
-                22,
-                31,
-            ],
-        ),
-        (
-            x: 3,
-            y: 2,
-        ): Encounter(
-            name: "Monster Patrol",
-            description: "A small patrol of monsters crossing this area.",
-            monster_group: [
-                1,
-                2,
-            ],
+            x: 7,
+            y: 15,
+        ): RecruitableCharacter(
+            name: "Whisper",
+            description: "An elven scout emerges from the shadows, watching you intently. Her nimble fingers toy with a lockpick as she sizes up your party.",
+            character_id: "whisper",
         ),
         (
             x: 5,
@@ -4987,6 +4963,30 @@
                 y: 0,
             ),
             map_id: 4,
+        ),
+        (
+            x: 10,
+            y: 12,
+        ): Treasure(
+            name: "Worn Chest",
+            description: "A small chest containing assorted loot and coins.",
+            loot: [
+                12,
+                22,
+                31,
+            ],
+        ),
+        (
+            x: 6,
+            y: 2,
+        ): Treasure(
+            name: "Buried Stash",
+            description: "A stash hidden in a crevice containing valuable items.",
+            loot: [
+                10,
+                20,
+                30,
+            ],
         ),
     },
     npc_placements: [],

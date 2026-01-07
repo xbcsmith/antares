@@ -7608,6 +7608,14 @@
     ],
     events: {
         (
+            x: 12,
+            y: 8,
+        ): RecruitableCharacter(
+            name: "Old Gareth",
+            description: "A grizzled dwarf warrior resting near the cave wall. He looks experienced but weary, his armor showing signs of many battles.",
+            character_id: "old_gareth",
+        ),
+        (
             x: 2,
             y: 2,
         ): Encounter(
@@ -7618,14 +7626,6 @@
                 2,
                 2,
             ],
-        ),
-        (
-            x: 12,
-            y: 8,
-        ): RecruitableCharacter(
-            name: "Old Gareth",
-            description: "A grizzled dwarf warrior resting near the cave wall. He looks experienced but weary, his armor showing signs of many battles.",
-            character_id: "old_gareth",
         ),
         (
             x: 9,

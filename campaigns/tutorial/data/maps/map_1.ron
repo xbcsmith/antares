@@ -7608,30 +7608,6 @@
     ],
     events: {
         (
-            x: 11,
-            y: 6,
-        ): RecruitableCharacter(
-            name: "Apprentice Zara",
-            description: "A young gnome apprentice studies a spellbook intently.",
-            character_id: "npc_apprentice_zara",
-        ),
-        (
-            x: 5,
-            y: 10,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store\'s wares and services.",
-            text: "General Store - Buy and Sell items for your party!",
-        ),
-        (
-            x: 15,
-            y: 8,
-        ): RecruitableCharacter(
-            name: "Old Gareth",
-            description: "A grizzled dwarf veteran stands here, repairing armor.",
-            character_id: "npc_old_gareth",
-        ),
-        (
             x: 13,
             y: 18,
         ): Sign(
@@ -7669,12 +7645,20 @@
             map_id: 4,
         ),
         (
-            x: 7,
-            y: 15,
+            x: 11,
+            y: 6,
         ): RecruitableCharacter(
-            name: "Whisper",
-            description: "A nimble elf watches from the shadows near the alley.",
-            character_id: "npc_whisper",
+            name: "Apprentice Zara",
+            description: "A young gnome apprentice studies a spellbook intently.",
+            character_id: "npc_apprentice_zara",
+        ),
+        (
+            x: 5,
+            y: 10,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store\'s wares and services.",
+            text: "General Store - Buy and Sell items for your party!",
         ),
         (
             x: 5,
@@ -7683,6 +7667,22 @@
             name: "Cozy Inn Entrance",
             description: "A welcoming inn where you can rest and manage your party.",
             innkeeper_id: "tutorial_innkeeper_town",
+        ),
+        (
+            x: 15,
+            y: 8,
+        ): RecruitableCharacter(
+            name: "Old Gareth",
+            description: "A grizzled dwarf veteran stands here, repairing armor.",
+            character_id: "npc_old_gareth",
+        ),
+        (
+            x: 7,
+            y: 15,
+        ): RecruitableCharacter(
+            name: "Whisper",
+            description: "A nimble elf watches from the shadows near the alley.",
+            character_id: "npc_whisper",
         ),
     },
     npc_placements: [

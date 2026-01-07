@@ -340,6 +340,23 @@ pub struct Roster {
     pub character_locations: Vec<CharacterLocation>, // Where each character's location is stored (InParty, AtInn(InnkeeperId), OnMap(MapId))
 }
 
+/// Character location tracking used by roster and party management:
+///
+/// - `InParty` — Character is in the active adventuring party
+/// - `AtInn(InnkeeperId)` — Character is stored at the named innkeeper's inn (InnkeeperId is the NPC id string)
+/// - `OnMap(MapId)` — Character is placed on a specific map for recruitment encounters
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CharacterLocation {
+    /// Character is in the active party
+    InParty,
+
+    /// Character is stored at a specific innkeeper's inn
+    AtInn(InnkeeperId),
+
+    /// Character is available on a specific map (for recruitment encounters)
+    OnMap(MapId),
+}
+
 /// Party-wide active spell effects (separate from character conditions)
 /// Each field represents duration remaining (0 = not active)
 pub struct ActiveSpells {
@@ -883,6 +900,15 @@ pub type SpellId = u16;      // High byte = school, low byte = spell number
 pub type MonsterId = u8;
 pub type MapId = u16;
 pub type CharacterId = usize;
+/// Innkeeper NPC identifier (references `NpcId` for NPCs that are marked as innkeepers)
+///
+/// Semantics:
+/// - Used for `CharacterLocation::AtInn(InnkeeperId)` to record where roster characters are stored
+/// - Referenced by map events such as `EnterInn { innkeeper_id: NpcId, ... }` to open inn management
+/// - Campaign metadata uses `starting_innkeeper: String` to indicate the default innkeeper for premade non-party characters
+///
+/// Validation:
+/// - Validators should ensure the referenced NPC exists in `npcs.ron` and has `is_innkeeper == true`
 pub type InnkeeperId = String;
 pub type EventId = u16;
 pub type CharacterDefinitionId = String;
@@ -2418,25 +2444,29 @@ pub fn max_spell_level(character_level: u32, class: Class) -> u8 {
 
 **Inn Mechanics:**
 
-- Each town has an inn
+- Inns are represented by innkeeper NPCs and referenced by string IDs (`InnkeeperId` / `NpcId`), not numeric town IDs
+- Entering an `EnterInn` map event (which references an `innkeeper_id`) prompts the player to sign in and manage the party
 - Party must sign in to save progress
-- Sign in prompt when entering inn
 - Answering "Yes" saves all character data to disk
-- Characters saved with current stats/conditions
+- Characters are saved with current stats/conditions and a location (e.g., `CharacterLocation::AtInn(InnkeeperId)`)
 
 **Save Data:**
 
 - All character statistics
-- Current location (town/inn)
+- Current location (e.g., `CharacterLocation::AtInn(InnkeeperId)` or a map ID)
 - Inventory and equipment
 - Quest progress and flags
 - Party composition
 
 **Loading:**
 
-- Resume from last inn where party signed in
-- Can form different party from roster
-- Each town tracks which characters last visited
+- Resume from the last innkeeper's inn where the party signed in
+- Can form a different party from the roster on load
+- Each inn (identified by its innkeeper ID) tracks which characters last visited and these locations are restored when loading
+
+**Legacy / Migration Notes:**
+
+- Older saves or campaign data that referenced numeric `TownId` values should be migrated to string `InnkeeperId` references (map `inn_id: 1` → `innkeeper_id: "tutorial_innkeeper_town"`). Tooling or migration helpers can be used to map legacy numeric inn references to canonical innkeeper NPC IDs so loads remain consistent with the new `CharacterLocation::AtInn(InnkeeperId)` format.
 
 #### 12.8 Resource Management Commands
 

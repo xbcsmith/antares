@@ -267,30 +267,29 @@ impl StartingEquipment {
     }
 }
 
-// ===== Base Stats =====
+// ===== Base Stats (Deprecated) =====
 
 /// Base statistics for a character definition
 ///
-/// Represents the starting stat values before any race or class modifiers.
-/// Values typically range from 3-18 for standard characters.
+/// **DEPRECATED**: Use `Stats` from `crate::domain::character` instead.
+/// This type is maintained for backward compatibility with existing RON files.
+/// The `Stats` type uses `AttributePair` for each stat, supporting base+current values.
 ///
-/// # Examples
+/// # Migration
 ///
+/// Old format (still supported via custom deserialization):
+/// ```text
+/// base_stats: (might: 14, intellect: 10, ...)
 /// ```
-/// use antares::domain::character_definition::BaseStats;
 ///
-/// let stats = BaseStats {
-///     might: 14,
-///     intellect: 10,
-///     personality: 12,
-///     endurance: 13,
-///     speed: 11,
-///     accuracy: 15,
-///     luck: 10,
-/// };
-///
-/// assert_eq!(stats.might, 14);
+/// New format (preferred):
+/// ```text
+/// base_stats: (might: (base: 14, current: 14), intellect: (base: 10, current: 10), ...)
 /// ```
+#[deprecated(
+    since = "0.2.0",
+    note = "Use Stats from crate::domain::character instead. BaseStats is kept for backward compatibility."
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaseStats {
     /// Physical strength, melee damage
@@ -309,18 +308,13 @@ pub struct BaseStats {
     pub luck: u8,
 }
 
+#[allow(deprecated)]
 impl BaseStats {
     /// Creates a new BaseStats with the specified values
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::character_definition::BaseStats;
-    ///
-    /// let stats = BaseStats::new(14, 10, 12, 13, 11, 15, 10);
-    /// assert_eq!(stats.might, 14);
-    /// assert_eq!(stats.accuracy, 15);
-    /// ```
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use Stats::new() from crate::domain::character instead"
+    )]
     pub fn new(
         might: u8,
         intellect: u8,
@@ -342,17 +336,6 @@ impl BaseStats {
     }
 
     /// Converts BaseStats to the runtime Stats type
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::character_definition::BaseStats;
-    ///
-    /// let base = BaseStats::new(14, 10, 12, 13, 11, 15, 10);
-    /// let stats = base.to_stats();
-    /// assert_eq!(stats.might.base, 14);
-    /// assert_eq!(stats.might.current, 14);
-    /// ```
     pub fn to_stats(&self) -> Stats {
         Stats::new(
             self.might,
@@ -366,6 +349,7 @@ impl BaseStats {
     }
 }
 
+#[allow(deprecated)]
 impl Default for BaseStats {
     fn default() -> Self {
         Self {

@@ -1789,6 +1789,85 @@ impl CampaignBuilderApp {
             }
         }
 
+        // Run SDK validator for deeper content checks (e.g., starting innkeeper)
+        // Only run if NPCs have been loaded into the editor OR the configured starting
+        // innkeeper differs from the default tutorial innkeeper (i.e., user-specified).
+        if !self.npc_editor_state.npcs.is_empty()
+            || self.campaign.starting_innkeeper != default_starting_innkeeper()
+        {
+            // Build a lightweight ContentDatabase containing relevant content so the SDK Validator can
+            // validate content-dependent configuration such as `starting_innkeeper`.
+            let mut db = antares::sdk::database::ContentDatabase::new();
+
+            // Populate NPC database from the editor state
+            for npc in &self.npc_editor_state.npcs {
+                // Ignore insertion errors from the DB helper (should be infrequent)
+                let _ = db.npcs.add_npc(npc.clone());
+            }
+
+            // Invoke SDK validator for campaign config checks
+            let validator = antares::sdk::validation::Validator::new(&db);
+
+            // Build a minimal CampaignConfig for validation - other fields are defaulted to reasonable values
+            let config = antares::sdk::campaign_loader::CampaignConfig {
+                starting_map: 0,
+                starting_position: antares::domain::types::Position { x: 0, y: 0 },
+                starting_direction: antares::domain::types::Direction::North,
+                starting_gold: self.campaign.starting_gold,
+                starting_food: self.campaign.starting_food,
+                starting_innkeeper: self.campaign.starting_innkeeper.clone(),
+                max_party_size: self.campaign.max_party_size as usize,
+                max_roster_size: self.campaign.max_roster_size as usize,
+                difficulty: antares::sdk::campaign_loader::Difficulty::Normal,
+                permadeath: self.campaign.permadeath,
+                allow_multiclassing: self.campaign.allow_multiclassing,
+                starting_level: self.campaign.starting_level,
+                max_level: self.campaign.max_level,
+            };
+
+            let config_errors = validator.validate_campaign_config(&config);
+            for ve in config_errors {
+                match ve {
+                    antares::sdk::validation::ValidationError::InvalidStartingInnkeeper {
+                        innkeeper_id,
+                        reason,
+                    } => {
+                        // Use a message format that matches existing tests' expectations
+                        let msg =
+                            format!("Starting innkeeper '{}' invalid: {}", innkeeper_id, reason);
+                        self.validation_errors
+                            .push(validation::ValidationResult::error(
+                                validation::ValidationCategory::Configuration,
+                                msg,
+                            ));
+                    }
+                    other => match other.severity() {
+                        antares::sdk::validation::Severity::Error => {
+                            self.validation_errors
+                                .push(validation::ValidationResult::error(
+                                    validation::ValidationCategory::Configuration,
+                                    other.to_string(),
+                                ));
+                        }
+                        antares::sdk::validation::Severity::Warning => {
+                            self.validation_errors
+                                .push(validation::ValidationResult::warning(
+                                    validation::ValidationCategory::Configuration,
+                                    other.to_string(),
+                                ));
+                        }
+                        antares::sdk::validation::Severity::Info => {
+                            self.validation_errors
+                                .push(validation::ValidationResult::info(
+                                    validation::ValidationCategory::Configuration,
+                                    other.to_string(),
+                                ));
+                        }
+                    },
+                }
+            }
+        }
+
         // Update status using ValidationSummary
         let summary = validation::ValidationSummary::from_results(&self.validation_errors);
 
@@ -4622,7 +4701,7 @@ mod tests {
         // Add an NPC that exists but is NOT an innkeeper
         app.npc_editor_state
             .npcs
-            .push(crate::domain::world::npc::NpcDefinition::new(
+            .push(antares::domain::world::npc::NpcDefinition::new(
                 "npc_not_inn".to_string(),
                 "NPC Not Inn".to_string(),
                 "portrait.png".to_string(),

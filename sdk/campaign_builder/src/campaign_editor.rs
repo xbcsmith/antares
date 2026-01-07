@@ -263,9 +263,12 @@ impl CampaignMetadataEditorState {
     /// use campaign_builder::campaign_editor::{CampaignMetadataEditorState, CampaignEditorMode};
     ///
     /// let mut state = CampaignMetadataEditorState::new();
-    /// state.metadata.id = "x".to_string();
+    /// // Set initial metadata using the public edit buffer and apply it
+    /// state.buffer.id = "x".to_string();
+    /// state.apply_buffer_to_metadata();
     /// state.start_edit();
     /// assert_eq!(state.mode, CampaignEditorMode::Editing);
+    /// assert_eq!(state.buffer.id, "x");
     /// ```
     pub fn start_edit(&mut self) {
         self.mode = CampaignEditorMode::Editing;
@@ -281,12 +284,14 @@ impl CampaignMetadataEditorState {
     /// use campaign_builder::campaign_editor::{CampaignMetadataEditorState, CampaignEditorMode};
     ///
     /// let mut state = CampaignMetadataEditorState::new();
-    /// state.metadata.id = "orig_id".to_string();
+    /// // Set authoritative metadata via the public buffer API
+    /// state.buffer.id = "orig_id".to_string();
+    /// state.apply_buffer_to_metadata();
     /// state.start_edit();
     /// state.buffer.id = "modified".to_string();
     /// state.cancel_edit();
     /// assert_eq!(state.mode, CampaignEditorMode::List);
-    /// assert_eq!(state.buffer.id, state.metadata.id);
+    /// assert_eq!(state.buffer.id, "orig_id");
     /// ```
     pub fn cancel_edit(&mut self) {
         self.buffer = CampaignMetadataEditBuffer::from_metadata(&self.metadata);
@@ -306,7 +311,10 @@ impl CampaignMetadataEditorState {
     /// state.buffer.id = "my_campaign".to_string();
     /// state.apply_buffer_to_metadata();
     /// assert!(state.has_unsaved_changes);
-    /// assert_eq!(state.metadata.id, "my_campaign");
+    /// // Verify via public API: cancel then restart edit to repopulate the buffer from metadata
+    /// state.cancel_edit();
+    /// state.start_edit();
+    /// assert_eq!(state.buffer.id, "my_campaign");
     /// ```
     pub fn apply_buffer_to_metadata(&mut self) {
         self.buffer.apply_to(&mut self.metadata);
@@ -330,16 +338,14 @@ impl CampaignMetadataEditorState {
     /// # Examples
     ///
     /// ```
+    /// use campaign_builder::campaign_editor::CampaignMetadataEditorState;
     /// use antares::domain::world::npc::NpcDefinition;
     /// let mut state = CampaignMetadataEditorState::new();
     /// state.innkeeper_search = "mary".to_string();
     /// let filtered = state.visible_innkeepers(&[NpcDefinition::innkeeper("inn_mary", "Mary", "p.png")]);
     /// assert_eq!(filtered.len(), 1);
     /// ```
-    pub fn visible_innkeepers<'a>(
-        &self,
-        npcs: &'a [crate::domain::world::npc::NpcDefinition],
-    ) -> Vec<&'a crate::domain::world::npc::NpcDefinition> {
+    pub fn visible_innkeepers<'a>(&self, npcs: &'a [NpcDefinition]) -> Vec<&'a NpcDefinition> {
         let search = self.innkeeper_search.trim().to_lowercase();
         npcs.iter()
             .filter(|n| n.is_innkeeper)
@@ -1392,7 +1398,7 @@ mod tests {
     /// visible_innkeepers filters by `is_innkeeper` and search term
     #[test]
     fn test_visible_innkeepers_filters_and_matches() {
-        use crate::domain::world::npc::NpcDefinition;
+        use antares::domain::world::npc::NpcDefinition;
 
         let mut s = CampaignMetadataEditorState::new();
         let npcs = vec![

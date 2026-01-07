@@ -1,3 +1,360 @@
+## bevy_egui Standardization Scope Analysis - COMPLETED
+
+### Summary
+
+Analyzed the current rendering architecture to determine the scope of work for standardizing on bevy_egui and removing legacy egui code. **Finding**: There is **zero legacy egui code** to remove. All UI systems already use bevy_egui correctly through the `bevy_egui::{egui, EguiContexts}` API.
+
+### Current Architecture
+
+**Native Bevy UI Systems**:
+
+- HUD system (`src/game/systems/hud.rs`) - Party status display with HP bars, conditions, portraits
+
+**bevy_egui Systems**:
+
+- Inn management UI (`src/game/systems/inn_ui.rs`) - Uses `egui::CentralPanel`
+- Recruitment dialogs (`src/game/systems/recruitment_dialog.rs`) - Uses `egui::Window`
+- UiPlugin (`src/game/systems/ui.rs`) - Only initializes `GameLog` resource, no rendering
+
+**No Direct egui Dependency**:
+
+- ✅ No `egui` in Cargo.toml (only `bevy_egui`)
+- ✅ All imports are `use bevy_egui::{egui, EguiContexts};`
+- ✅ All context access via proper `EguiContexts` system parameter
+
+### Analysis Results
+
+The game uses a **hybrid rendering approach** (by design, not by accident):
+
+1. **Native Bevy UI** for persistent, always-visible elements (HUD)
+
+   - Better performance (retained-mode rendering)
+   - Integrates well with 3D viewport
+   - ~1,666 lines of well-tested code
+
+2. **bevy_egui** for modal overlays and temporary UI
+   - Rapid development with rich widget library
+   - Perfect for inns, dialogs, menus
+   - ~991 lines across two systems
+
+### Migration Options Evaluated
+
+**Decision Made: Delete `ui_system`** ✅
+
+The experimental `ui_system` was deleted entirely because:
+
+- HUD already provides party status display
+- Was never fully implemented (experimental/placeholder code)
+- Would require significant refactoring to fix egui lifecycle issues
+- No users or features depend on it
+
+**Alternative Options Considered**:
+
+**Option 1: Migrate HUD to bevy_egui**
+
+- Effort: 3-5 days
+- Risk: High (replacing working code)
+- Performance: Worse (immediate-mode overhead)
+- Recommendation: ❌ Not recommended
+
+**Option 2: Migrate overlays to Native Bevy UI**
+
+- Effort: 5-7 days
+- Risk: High (complex interaction handling)
+- Performance: Better
+- Recommendation: ❌ Not recommended
+
+**Option 3: Keep Hybrid Approach** ✅
+
+- Effort: 1 day (documentation only)
+- Risk: Minimal
+- Performance: Optimal (best of both worlds)
+- Recommendation: ✅ **Recommended**
+
+### Deliverables
+
+Created comprehensive scope document: `docs/explanation/bevy_egui_standardization_scope.md`
+
+**Contents**:
+
+- Current architecture analysis with line counts
+- Three migration options with cost/benefit analysis
+- Recommended action plan (document hybrid strategy)
+- UI development guidelines for future work
+- Style guide requirements for consistency
+- Future upgrade considerations
+
+### Actions Taken
+
+**Phase 1 Cleanup - Completed**:
+
+1. ✅ **Deleted `ui_system` function** from `src/game/systems/ui.rs`
+   - Removed experimental egui panel-based UI (~60 lines)
+   - Kept `UiPlugin` and `GameLog` resource initialization
+   - HUD already provides party status display
+   - Removed dead code that caused egui lifecycle panics
+
+**File Changes**:
+
+- `src/game/systems/ui.rs`: Reduced from 102 lines to 39 lines
+- Now contains only: `UiPlugin`, `GameLog` resource, and helper methods
+
+### Conclusion
+
+**No migration work needed.** The current architecture is sound and uses each technology for its strengths:
+
+- Native Bevy UI for performance-critical persistent display
+- bevy_egui for developer-friendly modal interfaces
+
+**Completed**:
+
+1. ✅ Removed unused `ui_system` function
+2. ✅ Documented the hybrid architecture decision
+
+**Remaining Next Steps**:
+
+1. Document in `docs/reference/architecture.md` (optional)
+2. Create `docs/how-to/create_new_ui.md` guide (optional)
+3. Establish UI style guide for consistency (optional)
+
+**Total Effort Completed**: 1 hour of analysis + cleanup
+
+---
+
+## GameLog Resource and egui Context Bug Fixes - COMPLETED
+
+### Summary
+
+Fixed two related bugs, then removed experimental `ui_system`:
+
+1. Missing `GameLog` resource initialization causing panic in `inn_action_system`
+2. egui context panic in experimental `ui_system` when using `TopBottomPanel` and `SidePanel`
+3. Deleted the problematic `ui_system` function entirely (HUD already provides party display)
+
+### Context
+
+**Bug 1 - Missing GameLog Resource**:
+
+```
+thread 'Compute Task Pool (1)' panicked at bevy_ecs-0.17.3/src/error/handler.rs:125:1:
+Encountered an error in system `antares::game::systems::inn_ui::inn_action_system`:
+Parameter `ResMut<'_, GameLog>` failed validation: Resource does not exist
+```
+
+**Bug 2 - egui Context Panic**:
+
+```
+thread '<unnamed>' panicked at egui-0.33.3/src/pass_state.rs:306:9:
+Called `available_rect()` before `Context::run()`
+Encountered a panic in system `antares::game::systems::ui::ui_system`!
+```
+
+The `UiPlugin` was completely disabled in `src/bin/antares.rs`, which caused two problems:
+
+1. `GameLog` resource was never initialized
+2. The experimental `ui_system` had a real egui lifecycle issue with `TopBottomPanel`/`SidePanel`
+
+**Resolution**: After fixing the `GameLog` issue, the `ui_system` was deleted entirely as it was:
+
+- Experimental/placeholder code never fully implemented
+- Duplicating functionality already provided by the HUD
+- Causing egui context panics that would require significant refactoring to fix
+
+### Changes Made
+
+#### File: `antares/src/game/systems/inn_ui.rs`
+
+**Made `inn_action_system` defensive** by using `Option<ResMut<GameLog>>`:
+
+```rust
+fn inn_action_system(
+    // ... other parameters ...
+    mut game_log: Option<ResMut<GameLog>>,  // Changed from ResMut<GameLog>
+) {
+    // All game_log.add() calls now check if log exists:
+    if let Some(ref mut log) = game_log {
+        log.add(format!("{} recruited to party!", character.name));
+    }
+}
+```
+
+This prevents panics if `GameLog` is unavailable.
+
+#### File: `antares/src/game/systems/ui.rs`
+
+**Deleted `ui_system` and kept only `GameLog` resource**:
+
+```rust
+impl Plugin for UiPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<GameLog>();
+    }
+}
+
+// ui_system function deleted - was experimental code that never fully worked
+// HUD system already provides party status display
+```
+
+The experimental `ui_system` function (~60 lines) was completely removed. Only `UiPlugin` and `GameLog` resource remain.
+
+#### File: `antares/src/bin/antares.rs`
+
+**Re-enabled `UiPlugin`** to initialize `GameLog`:
+
+```rust
+.add_plugins(antares::game::systems::audio::AudioPlugin {
+    config: audio_config,
+})
+.add_plugins(antares::game::systems::ui::UiPlugin);
+```
+
+### Testing
+
+**Quality Checks**: All pass ✅
+
+```bash
+cargo fmt --all                                      # ✅ No formatting issues
+cargo check --all-targets --all-features             # ✅ Compiles successfully
+cargo clippy --all-targets --all-features -- -D warnings  # ✅ No warnings
+cargo nextest run --all-features                     # ✅ 1136/1136 tests passed
+```
+
+**Manual Testing**: Application starts successfully and inn management works without panics.
+
+### Root Cause Analysis
+
+**Why did `ui_system` panic?**
+
+The experimental `ui_system` used `egui::TopBottomPanel` and `egui::SidePanel` which call `available_rect()` internally. These panels expect to be used within a properly initialized egui frame context. The error occurred because:
+
+1. bevy_egui manages the egui context lifecycle
+2. `TopBottomPanel::show()` and `SidePanel::show()` require the context to be in "frame started" state
+3. In bevy_egui 0.38 with Bevy 0.17, using these panels directly in a system causes the panic
+
+**Why do `inn_ui_system` and `recruitment_dialog` work?**
+
+- `inn_ui_system` uses `egui::CentralPanel::default().show()` - designed for full-screen overlays
+- `recruitment_dialog` uses `egui::Window::new().show()` - self-contained floating windows
+- Both of these work correctly with bevy_egui's context management
+
+**Why was `ui_system` deleted instead of fixed?**
+
+- It was experimental/placeholder code never fully implemented
+- The HUD already provides party status display (HP, conditions, etc.)
+- Fixing it would require rewriting to use `egui::Window` instead of panels
+- No functional loss - the code was never enabled in production
+
+### Technical Decisions
+
+**Why not fix `ui_system` to work properly?**
+
+Options considered:
+
+1. **Use `CentralPanel` instead of panels** - Would cover the 3D viewport completely
+2. **Use system ordering with bevy_egui sets** - API not available/documented in bevy_egui 0.38
+3. **Disable `ui_system` but keep `GameLog` initialized** - ✅ **Chosen solution**
+
+The third option was chosen because:
+
+- `GameLog` is needed by other systems (`inn_action_system`)
+- The game already has working UI systems (HUD, inn, recruitment)
+- `ui_system` was experimental/placeholder code
+- Fixing it properly would require deeper bevy_egui integration work
+
+**Future Work**:
+
+To re-enable `ui_system` properly:
+
+- Replace `TopBottomPanel`/`SidePanel` with `Window` widgets
+- Or integrate with the existing `HudPlugin` instead of creating a separate overlay
+- Or investigate bevy_egui system set ordering (may require bevy_egui upgrade)
+
+### Lessons Learned
+
+1. **egui panel APIs have lifecycle requirements**: Not all egui widgets work the same way in bevy_egui. `Window` and `CentralPanel` are safer than `TopBottomPanel`/`SidePanel`.
+
+2. **Resource initialization should be separate from system registration**: The pattern of initializing resources in plugins that also register systems can cause issues when systems need to be disabled.
+
+3. **"Temporary" disables need documentation**: The original comment "Temporarily disabled due to egui context issue" was correct but lacked details about the specific issue and potential solutions.
+
+---
+
+## Tutorial Campaign Dialogue Validation Fix - COMPLETED
+
+### Summary
+
+Fixed dialogue validation errors in the tutorial campaign's `dialogues.ron` file. The campaign validator was reporting three errors related to dialogue structure that prevented the campaign from being marked as valid.
+
+### Context
+
+After completing the Innkeeper ID migration, the campaign validator was run to verify the tutorial campaign. It reported the following errors:
+
+```
+✗ Campaign is INVALID
+
+Errors (3):
+  1. Dialogue 1: Node 2 has no choices and is not marked as terminal
+  2. Dialogue 1: Node 1 has no choices and is not marked as terminal
+  3. Dialogue 1: Node 2 is orphaned (unreachable from root)
+```
+
+The "Arcturus Story" dialogue had structural issues:
+
+- Nodes had no choices and were not marked as terminal
+- Node 2 was unreachable from the root node (node 1)
+- Missing required `ends_dialogue` field in choice structures
+
+### Changes Made
+
+#### File: `campaigns/tutorial/data/dialogues.ron`
+
+**1. Added dialogue choices to node 1** to create proper conversation flow:
+
+- "Tell me more." → transitions to node 2
+- "Farewell." → ends dialogue
+
+**2. Marked node 2 as terminal** (`is_terminal: true`) since it has no choices and ends the conversation.
+
+**3. Added required `ends_dialogue` field** to all `DialogueChoice` structures:
+
+- Set to `false` for choices that transition to another node
+- Set to `true` for choices that end the dialogue
+
+### Testing
+
+**Campaign Validator**:
+
+```bash
+cargo run --bin campaign_validator -- campaigns/tutorial
+```
+
+**Result**: ✅ `✓ Campaign is VALID` - No issues found!
+
+**Quality Checks**:
+
+- ✅ `cargo fmt --all` - No formatting issues
+- ✅ `cargo check --all-targets --all-features` - Compiles successfully
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - Zero warnings
+- ✅ `cargo nextest run --all-features` - 1136/1136 tests passing
+
+### Deliverables
+
+- ✅ Tutorial campaign dialogue structure fixed
+- ✅ Campaign validator passes with no errors
+- ✅ All quality gates pass
+- ✅ Proper dialogue flow: root → choice → terminal node
+
+### Architecture Compliance
+
+Changes follow dialogue system architecture from `docs/reference/architecture.md`:
+
+- `DialogueChoice` structure includes all required fields
+- Dialogue nodes properly connected from root
+- Terminal nodes correctly marked
+- No orphaned nodes
+
+---
+
 ## Campaign Builder SDK - Starting Inn UI Control - COMPLETED
 
 ### Summary
