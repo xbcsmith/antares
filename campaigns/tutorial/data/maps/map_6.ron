@@ -7608,17 +7608,21 @@
     ],
     events: {
         (
-            x: 1,
-            y: 3,
+            x: 12,
+            y: 10,
         ): Encounter(
-            name: "The Undead King",
-            description: "The Lich was once a powerful Wizard King who ruled these lands.",
+            name: "Goblin Tribe",
+            description: "Tribe of Goblins",
             monster_group: [
-                31,
-                11,
-                11,
-                11,
-                11,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
             ],
         ),
         (
@@ -7629,6 +7633,20 @@
             description: "The lair of the undead dragon. It guards a hoard of treasure.",
             monster_group: [
                 30,
+                11,
+                11,
+                11,
+                11,
+            ],
+        ),
+        (
+            x: 1,
+            y: 3,
+        ): Encounter(
+            name: "The Undead King",
+            description: "The Lich was once a powerful Wizard King who ruled these lands.",
+            monster_group: [
+                31,
                 11,
                 11,
                 11,
@@ -7648,24 +7666,6 @@
                 11,
                 11,
                 11,
-            ],
-        ),
-        (
-            x: 12,
-            y: 10,
-        ): Encounter(
-            name: "Goblin Tribe",
-            description: "Tribe of Goblins",
-            monster_group: [
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
             ],
         ),
     },

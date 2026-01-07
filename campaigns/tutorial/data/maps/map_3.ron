@@ -4872,15 +4872,20 @@
     ],
     events: {
         (
-            x: 3,
-            y: 2,
-        ): Encounter(
-            name: "Monster Patrol",
-            description: "A small patrol of monsters crossing this area.",
-            monster_group: [
-                1,
-                2,
-            ],
+            x: 1,
+            y: 7,
+        ): Sign(
+            name: "Exit Sign",
+            description: "A sign marking the path back to town.",
+            text: "Exit to Town",
+        ),
+        (
+            x: 7,
+            y: 15,
+        ): RecruitableCharacter(
+            name: "Whisper",
+            description: "An elven scout emerges from the shadows, watching you intently. Her nimble fingers toy with a lockpick as she sizes up your party.",
+            character_id: "whisper",
         ),
         (
             x: 2,
@@ -4894,15 +4899,6 @@
             ],
         ),
         (
-            x: 10,
-            y: 6,
-        ): Trap(
-            name: "Spike Trap",
-            description: "A hidden spike trap that deals 5 points of damage when triggered.",
-            damage: 5,
-            effect: None,
-        ),
-        (
             x: 13,
             y: 2,
         ): Treasure(
@@ -4914,42 +4910,15 @@
             ],
         ),
         (
-            x: 1,
-            y: 7,
-        ): Sign(
-            name: "Exit Sign",
-            description: "A sign marking the path back to town.",
-            text: "Exit to Town",
-        ),
-        (
-            x: 14,
-            y: 14,
-        ): Encounter(
-            name: "Boss Lair",
-            description: "A concentrated group of powerful monsters guarding a key location.",
-            monster_group: [
-                3,
-                3,
-                3,
-            ],
-        ),
-        (
-            x: 7,
-            y: 15,
-        ): RecruitableCharacter(
-            name: "Whisper",
-            description: "An elven scout emerges from the shadows, watching you intently. Her nimble fingers toy with a lockpick as she sizes up your party.",
-            character_id: "whisper",
-        ),
-        (
-            x: 5,
-            y: 11,
-        ): Encounter(
-            name: "Local Ambush",
-            description: "Monsters that commonly ambush travelers in this part of the dungeon.",
-            monster_group: [
-                1,
-                3,
+            x: 6,
+            y: 2,
+        ): Treasure(
+            name: "Buried Stash",
+            description: "A stash hidden in a crevice containing valuable items.",
+            loot: [
+                10,
+                20,
+                30,
             ],
         ),
         (
@@ -4965,6 +4934,49 @@
             map_id: 4,
         ),
         (
+            x: 5,
+            y: 11,
+        ): Encounter(
+            name: "Local Ambush",
+            description: "Monsters that commonly ambush travelers in this part of the dungeon.",
+            monster_group: [
+                1,
+                3,
+            ],
+        ),
+        (
+            x: 3,
+            y: 2,
+        ): Encounter(
+            name: "Monster Patrol",
+            description: "A small patrol of monsters crossing this area.",
+            monster_group: [
+                1,
+                2,
+            ],
+        ),
+        (
+            x: 10,
+            y: 6,
+        ): Trap(
+            name: "Spike Trap",
+            description: "A hidden spike trap that deals 5 points of damage when triggered.",
+            damage: 5,
+            effect: None,
+        ),
+        (
+            x: 14,
+            y: 14,
+        ): Encounter(
+            name: "Boss Lair",
+            description: "A concentrated group of powerful monsters guarding a key location.",
+            monster_group: [
+                3,
+                3,
+                3,
+            ],
+        ),
+        (
             x: 10,
             y: 12,
         ): Treasure(
@@ -4974,18 +4986,6 @@
                 12,
                 22,
                 31,
-            ],
-        ),
-        (
-            x: 6,
-            y: 2,
-        ): Treasure(
-            name: "Buried Stash",
-            description: "A stash hidden in a crevice containing valuable items.",
-            loot: [
-                10,
-                20,
-                30,
             ],
         ),
     },

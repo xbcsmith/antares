@@ -298,103 +298,6 @@ impl StartingEquipment {
     }
 }
 
-// ===== Base Stats (Deprecated) =====
-
-/// Base statistics for a character definition
-///
-/// **DEPRECATED**: Use `Stats` from `crate::domain::character` instead.
-/// This type is maintained for backward compatibility with existing RON files.
-/// The `Stats` type uses `AttributePair` for each stat, supporting base+current values.
-///
-/// # Migration
-///
-/// Old format (still supported via custom deserialization):
-/// ```text
-/// base_stats: (might: 14, intellect: 10, ...)
-/// ```
-///
-/// New format (preferred):
-/// ```text
-/// base_stats: (might: (base: 14, current: 14), intellect: (base: 10, current: 10), ...)
-/// ```
-#[deprecated(
-    since = "0.2.0",
-    note = "Use Stats from crate::domain::character instead. BaseStats is kept for backward compatibility."
-)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BaseStats {
-    /// Physical strength, melee damage
-    pub might: u8,
-    /// Magical power, spell effectiveness
-    pub intellect: u8,
-    /// Charisma, social interactions
-    pub personality: u8,
-    /// Constitution, HP calculation
-    pub endurance: u8,
-    /// Initiative, dodging, turn order
-    pub speed: u8,
-    /// Hit chance, ranged attacks
-    pub accuracy: u8,
-    /// Critical hits, random events, loot
-    pub luck: u8,
-}
-
-#[allow(deprecated)]
-impl BaseStats {
-    /// Creates a new BaseStats with the specified values
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use Stats::new() from crate::domain::character instead"
-    )]
-    pub fn new(
-        might: u8,
-        intellect: u8,
-        personality: u8,
-        endurance: u8,
-        speed: u8,
-        accuracy: u8,
-        luck: u8,
-    ) -> Self {
-        Self {
-            might,
-            intellect,
-            personality,
-            endurance,
-            speed,
-            accuracy,
-            luck,
-        }
-    }
-
-    /// Converts BaseStats to the runtime Stats type
-    pub fn to_stats(&self) -> Stats {
-        Stats::new(
-            self.might,
-            self.intellect,
-            self.personality,
-            self.endurance,
-            self.speed,
-            self.accuracy,
-            self.luck,
-        )
-    }
-}
-
-#[allow(deprecated)]
-impl Default for BaseStats {
-    fn default() -> Self {
-        Self {
-            might: 10,
-            intellect: 10,
-            personality: 10,
-            endurance: 10,
-            speed: 10,
-            accuracy: 10,
-            luck: 10,
-        }
-    }
-}
-
 // ===== Character Definition =====
 
 /// Complete definition of a character template
@@ -807,8 +710,8 @@ impl CharacterDefinition {
     /// # Examples
     ///
     /// ```no_run
-    /// use antares::domain::character_definition::{CharacterDefinition, BaseStats};
-    /// use antares::domain::character::{Sex, Alignment};
+    /// use antares::domain::character_definition::CharacterDefinition;
+    /// use antares::domain::character::{Sex, Alignment, Stats};
     /// use antares::domain::races::RaceDatabase;
     /// use antares::domain::classes::ClassDatabase;
     /// use antares::domain::items::ItemDatabase;
@@ -1792,55 +1695,6 @@ mod tests {
         let deserialized: StartingEquipment = ron::from_str(&serialized).unwrap();
 
         assert_eq!(equipment, deserialized);
-    }
-
-    // ===== BaseStats Tests (Deprecated) =====
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_base_stats_new() {
-        let stats = BaseStats::new(14, 10, 12, 13, 11, 15, 10);
-        assert_eq!(stats.might, 14);
-        assert_eq!(stats.intellect, 10);
-        assert_eq!(stats.personality, 12);
-        assert_eq!(stats.endurance, 13);
-        assert_eq!(stats.speed, 11);
-        assert_eq!(stats.accuracy, 15);
-        assert_eq!(stats.luck, 10);
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_base_stats_default() {
-        let stats = BaseStats::default();
-        assert_eq!(stats.might, 10);
-        assert_eq!(stats.intellect, 10);
-        assert_eq!(stats.personality, 10);
-        assert_eq!(stats.endurance, 10);
-        assert_eq!(stats.speed, 10);
-        assert_eq!(stats.accuracy, 10);
-        assert_eq!(stats.luck, 10);
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_base_stats_to_stats() {
-        let base = BaseStats::new(14, 10, 12, 13, 11, 15, 10);
-        let stats = base.to_stats();
-
-        assert_eq!(stats.might.base, 14);
-        assert_eq!(stats.might.current, 14);
-        assert_eq!(stats.intellect.base, 10);
-        assert_eq!(stats.accuracy.base, 15);
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_base_stats_serialization() {
-        let stats = BaseStats::new(16, 8, 10, 14, 12, 14, 10);
-        let serialized = ron::to_string(&stats).unwrap();
-        let deserialized: BaseStats = ron::from_str(&serialized).unwrap();
-        assert_eq!(stats, deserialized);
     }
 
     // ===== Stats Tests =====

@@ -1,4 +1,4 @@
-## CharacterDefinition AttributePair Migration - COMPLETED (Phases 1 & 2)
+## CharacterDefinition AttributePair Migration - COMPLETED (All Phases)
 
 ### Summary
 
@@ -277,6 +277,100 @@ Updated all SDK tests to use new types:
 
 - Replaced `BaseStats::new()` with `Stats::new()`
 - Replaced `hp_base`/`hp_current` with `hp_override`
+
+---
+
+### Phase 4: Documentation and Cleanup - ✅ COMPLETED
+
+**Summary**: Cleaned up deprecated code and updated documentation to reflect the completed migration.
+
+**Changes Made**:
+
+1. **Removed Deprecated Types** (`src/domain/character_definition.rs`)
+
+   - Removed `BaseStats` struct (deprecated since 0.2.0)
+   - Removed `BaseStats::new()` constructor
+   - Removed `BaseStats::to_stats()` conversion method
+   - Removed `BaseStats::default()` implementation
+   - Removed all deprecated BaseStats tests (4 tests):
+     - `test_base_stats_new()`
+     - `test_base_stats_default()`
+     - `test_base_stats_to_stats()`
+     - `test_base_stats_serialization()`
+   - Removed orphaned BaseStats documentation comment
+
+2. **Updated Module Exports** (`src/domain/mod.rs`)
+
+   - Removed `BaseStats` from public re-exports
+   - Removed `#[allow(deprecated)]` attribute
+
+3. **Updated Architecture Documentation** (`docs/reference/architecture.md`)
+
+   - Removed deprecated `BaseStats` struct documentation
+   - Updated `CharacterDefinition` to show `Stats` with `AttributePair` fields
+   - Updated `CharacterDefinition` to show `hp_override: Option<AttributePair16>`
+   - Changed `portrait_id` type from `u8` to `String` (matches implementation)
+   - Updated `instantiate()` flow documentation to reflect AttributePair usage
+   - Updated instantiation flow steps to explain hp_override and AttributePair.base values
+   - Added documentation for backward-compatible deserialization formats
+
+4. **Updated Lessons Learned** (`docs/explanation/lessons_learned.md`)
+
+   - Added new section "5. AttributePair Migration Pattern"
+   - Documented complete 4-phase migration strategy:
+     - Phase 1: Domain Layer (types + backward compatibility)
+     - Phase 2: Data Files (verification + optional updates)
+     - Phase 3: Application/SDK Layer (editors + validation)
+     - Phase 4: Cleanup (after verification period)
+   - Updated CharacterDefinition example to use `Stats` and `hp_override`
+   - Provided complete implementation example with backward compatibility helpers
+   - Documented validation considerations (editor enforces `current <= base`)
+   - Explained key benefits: zero-downtime migration, gradual adoption, clean removal
+
+5. **Updated Migration Plan** (`docs/explanation/character_definition_attribute_pair_migration_plan.md`)
+   - Marked Phase 4 deliverables as complete
+   - Documented completion status for all Phase 4 tasks
+   - Noted that `CharacterDefinitionDef` migration helper is retained for extended verification period
+
+**Quality Gates**:
+
+- ✅ `cargo fmt --all` - passed
+- ✅ `cargo check --all-targets --all-features` - passed
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - passed (0 warnings)
+- ✅ `cargo nextest run --all-features` - passed (1,148/1,148 tests)
+
+**Migration Helper Retained**:
+
+- `CharacterDefinitionDef` struct and `From` implementation remain in codebase
+- Provides backward compatibility for old `hp_base`/`hp_current` fields
+- To be removed in future release after extended verification period
+
+**Technical Notes**:
+
+- Migration pattern documented in lessons_learned.md for future reference
+- Architecture documentation now accurately reflects current implementation
+- All deprecated code removed from codebase (except migration helpers)
+- Zero test failures, zero clippy warnings after cleanup
+
+**Verification Period**:
+
+- Migration helper will remain for at least one release cycle
+- Allows content authors time to verify campaigns load correctly
+- Future cleanup task: remove `CharacterDefinitionDef` after verification
+
+---
+
+### Migration Complete
+
+All four phases of the CharacterDefinition AttributePair migration are now complete:
+
+- ✅ Phase 1: Domain Layer Changes
+- ✅ Phase 2: Campaign Data Migration
+- ✅ Phase 3: SDK Updates
+- ✅ Phase 4: Documentation and Cleanup
+
+The codebase now uses `Stats` with `AttributePair` consistently across domain, data, and SDK layers. Backward compatibility is maintained via migration helpers that will be removed in a future release.
+
 - Updated buffer field names (e.g., `might` → `might_base`/`might_current`)
 - Added tests for HP override with both simple and full formats
 

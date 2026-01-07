@@ -685,20 +685,115 @@ impl SaveGame {
 
 ```rust
 pub struct CharacterDefinition {
-    pub base_stats: BaseStats,
+    pub base_stats: Stats,  // Uses AttributePair for base/current separation
 
-    // Optional overrides
-    pub hp_base: Option<u16>, // If Some, use this instead of calculation
-    pub sp_base: Option<u16>,
+    // Optional HP override (supports both base and current)
+    pub hp_override: Option<AttributePair16>,
 }
 
 // In instantiation:
-let hp = def.hp_base.unwrap_or_else(|| {
-    calculate_hp_from_class_and_endurance(&def, class_def)
-});
+let hp = if let Some(hp_override) = def.hp_override {
+    hp_override  // Use explicit override
+} else {
+    // Calculate from class and endurance
+    let base_hp = calculate_hp_from_class_and_endurance(&def, class_def);
+    AttributePair16::new(base_hp)
+};
 ```
 
 **Use case:** Game designers can balance characters without changing class definitions.
+
+### 5. AttributePair Migration Pattern
+
+**Lesson:** Migrating from simple values to base/current pairs requires careful backward compatibility.
+
+**Migration Strategy (CharacterDefinition AttributePair Migration):**
+
+1. **Phase 1: Domain Layer**
+
+   - Replace simple types with AttributePair types
+   - Implement backward-compatible deserialization using `#[serde(untagged)]`
+   - Support both formats: simple numbers (`15`) and full pairs (`(base: 15, current: 18)`)
+   - Keep deprecated types with `#[deprecated]` attribute for gradual migration
+
+2. **Phase 2: Data Files**
+
+   - Verify existing data loads correctly (backward compatibility)
+   - Optionally update files to new format where needed
+   - Document both formats in comments
+
+3. **Phase 3: Application/SDK Layer**
+
+   - Update editors and tools to expose base/current separately
+   - Add validation: enforce `current <= base` invariants
+   - Implement Display traits for user-facing formatting
+
+4. **Phase 4: Cleanup (after verification period)**
+   - Remove deprecated types
+   - Remove migration helpers
+   - Update documentation
+
+**Implementation Example:**
+
+```rust
+// Before:
+pub struct CharacterDefinition {
+    pub base_stats: BaseStats,  // Simple u8 values
+    pub hp_base: Option<u16>,
+    pub hp_current: Option<u16>,
+}
+
+// After:
+pub struct CharacterDefinition {
+    pub base_stats: Stats,  // AttributePair fields
+    pub hp_override: Option<AttributePair16>,  // Unified base/current
+}
+
+// Migration helper (temporary):
+#[derive(Deserialize)]
+struct CharacterDefinitionDef {
+    pub base_stats: Stats,
+    #[serde(default)]
+    pub hp_base: Option<u16>,      // Old field
+    #[serde(default)]
+    pub hp_current: Option<u16>,   // Old field
+    #[serde(default)]
+    pub hp_override: Option<AttributePair16>,  // New field
+}
+
+impl From<CharacterDefinitionDef> for CharacterDefinition {
+    fn from(def: CharacterDefinitionDef) -> Self {
+        // Priority: new format > old hp_base/hp_current
+        let hp_override = if let Some(override_val) = def.hp_override {
+            Some(override_val)
+        } else if let Some(base) = def.hp_base {
+            let current = def.hp_current.unwrap_or(base);
+            Some(AttributePair16 { base, current: current.min(base) })
+        } else {
+            def.hp_current.map(AttributePair16::new)
+        };
+
+        Self {
+            base_stats: def.base_stats,
+            hp_override,
+            // ... other fields
+        }
+    }
+}
+```
+
+**Key Benefits:**
+
+- Existing RON files continue to work unchanged
+- New files can use explicit base/current where needed
+- Gradual migration without breaking changes
+- Clean removal of deprecated code after verification period
+
+**Validation Considerations:**
+
+- Editor must enforce `current <= base` on save
+- Deserialization should be permissive (allow `current > base` for data migration)
+- Runtime should clamp or validate as appropriate for game logic
 
 ---
 

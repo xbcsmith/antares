@@ -1014,32 +1014,6 @@ impl StartingEquipment {
     }
 }
 
-/// Base stats for character definitions (before race/class modifiers)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BaseStats {
-    pub might: u8,
-    pub intellect: u8,
-    pub personality: u8,
-    pub endurance: u8,
-    pub speed: u8,
-    pub accuracy: u8,
-    pub luck: u8,
-}
-
-impl Default for BaseStats {
-    fn default() -> Self {
-        Self {
-            might: 10,
-            intellect: 10,
-            personality: 10,
-            endurance: 10,
-            speed: 10,
-            accuracy: 10,
-            luck: 10,
-        }
-    }
-}
-
 /// Data-driven character template for premade characters and NPCs
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CharacterDefinition {
@@ -1049,9 +1023,20 @@ pub struct CharacterDefinition {
     pub class_id: ClassId,
     pub sex: Sex,
     pub alignment: Alignment,
-    pub base_stats: BaseStats,
+    /// Base statistics with AttributePair support (base and current values)
+    ///
+    /// Supports backward-compatible simple format (numbers) and full format
+    /// with explicit base/current pairs. See `Stats` documentation.
+    pub base_stats: Stats,
+    /// Optional HP override (base and current)
+    ///
+    /// When present, overrides calculated starting HP. Supports both
+    /// simple format (`Some(50)`) and full format with AttributePair16.
     #[serde(default)]
-    pub portrait_id: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hp_override: Option<AttributePair16>,
+    #[serde(default)]
+    pub portrait_id: String,
     #[serde(default)]
     pub starting_gold: u32,
     #[serde(default)]
@@ -1080,9 +1065,9 @@ impl CharacterDefinition {
     ) -> Result<Character, CharacterDefinitionError> {
         // 1. Validate references exist
         // 2. Convert race_id/class_id to enums
-        // 3. Apply race stat modifiers to base_stats
-        // 4. Calculate starting HP (max roll of class HP die + endurance mod)
-        // 5. Calculate starting SP (based on class spell_stat)
+        // 3. Apply race stat modifiers to base_stats (AttributePair base values)
+        // 4. Calculate starting HP from hp_override or class HP die + endurance
+        // 5. Calculate starting SP (based on class spell_stat from stats)
         // 6. Apply race resistances
         // 7. Populate inventory with starting_items
         // 8. Create equipment from starting_equipment
@@ -1138,9 +1123,9 @@ with runtime Character instances:
 
 1. **Validation**: Verify race_id, class_id, and all item IDs exist in databases
 2. **Enum Conversion**: Convert string IDs to Race/Class enums
-3. **Stat Application**: Apply race modifiers to base stats (clamped to 3-25)
-4. **HP Calculation**: Max roll of class HP die + (endurance - 10) / 2, minimum 1
-5. **SP Calculation**: Based on class spell_stat (Intellect or Personality)
+3. **Stat Application**: Apply race modifiers to base_stats AttributePair base values (clamped to 3-25)
+4. **HP Calculation**: Use hp_override if present, else max roll of class HP die + (endurance - 10) / 2, minimum 1
+5. **SP Calculation**: Based on class spell_stat (Intellect or Personality) from stats.base values
 6. **Resistance Setup**: Copy race resistances to character
 7. **Inventory Population**: Add starting_items to inventory
 8. **Equipment Setup**: Map starting_equipment slots to equipment slots

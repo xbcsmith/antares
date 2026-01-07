@@ -33,10 +33,9 @@ pub mod types;
 pub mod world;
 
 // Re-export commonly used types from submodules
-#[allow(deprecated)]
 pub use character_definition::{
-    BaseStats, CharacterDatabase, CharacterDefinition, CharacterDefinitionError,
-    CharacterDefinitionId, StartingEquipment,
+    CharacterDatabase, CharacterDefinition, CharacterDefinitionError, CharacterDefinitionId,
+    StartingEquipment,
 };
 pub use dialogue::{DialogueId, NodeId};
 pub use quest::QuestId;
