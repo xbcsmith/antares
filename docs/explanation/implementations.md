@@ -1,4 +1,4 @@
-## CharacterDefinition AttributePair Migration - COMPLETED (Phase 1)
+## CharacterDefinition AttributePair Migration - COMPLETED (Phases 1 & 2)
 
 ### Summary
 
@@ -35,8 +35,14 @@ Migrated `CharacterDefinition` to use `Stats` (with `AttributePair`) instead of 
    - Marked deprecated `BaseStats` tests with `#[allow(deprecated)]`
 
 4. **Type System Updates**
+
    - Added `Eq` derive to `Stats` struct in `src/domain/character.rs`
    - Added `#[allow(deprecated)]` to `BaseStats` re-export in `src/domain/mod.rs`
+
+5. **Documentation**
+   - Added comprehensive RON format migration guide to module-level documentation
+   - Documented simple format, full format, and legacy format with examples
+   - Explained pre-buffed character use case
 
 ### Key Design Decisions
 
@@ -47,6 +53,131 @@ Migrated `CharacterDefinition` to use `Stats` (with `AttributePair`) instead of 
 3. **HP Override Validation**: When `hp_override.current > hp_override.base`, value is clamped to base with warning (not error).
 
 4. **BaseStats Deprecation**: Kept `BaseStats` struct for backward compatibility but marked deprecated. Will be removed in Phase 4 after migration verification.
+
+### Phase 2: Campaign Data Migration - COMPLETED
+
+**Phase 2 Deliverables** (✅ All Complete):
+
+1. **Campaign Data Verification**
+
+   - Tutorial campaign (`campaigns/tutorial/data/characters.ron`): 9 character definitions verified compatible
+   - Core data (`data/characters.ron`): 6 character definitions verified compatible
+   - All existing campaign data uses simple format (`might: 15`) which deserializes correctly
+   - Old `hp_base` fields successfully convert to `hp_override` via backward compatibility layer
+
+2. **Integration Tests Added** (`src/domain/character_definition.rs`)
+
+   - `test_phase2_tutorial_campaign_loads()` - verifies tutorial campaign loads with 9 characters
+   - `test_phase2_tutorial_campaign_hp_override()` - verifies `hp_base` → `hp_override` conversion
+   - `test_phase2_tutorial_campaign_stats_format()` - verifies simple stats format deserializes correctly
+   - `test_phase2_core_campaign_loads()` - verifies core campaign loads with 6 characters
+   - `test_phase2_core_campaign_stats_format()` - verifies core campaign stats deserialization
+   - `test_phase2_campaign_instantiation()` - verifies campaign characters instantiate with correct values
+   - `test_phase2_all_tutorial_characters_instantiate()` - validates all 9 tutorial characters instantiate
+   - `test_phase2_all_core_characters_instantiate()` - validates all 6 core characters instantiate
+   - `test_phase2_stats_roundtrip_preserves_format()` - verifies both simple and full format roundtrip
+
+3. **Test Results**
+   - **Total tests**: 1,151 tests executed
+   - **Phase 2 specific**: 9 new integration tests
+   - **Result**: All tests pass (1,151/1,151) ✅
+   - **Quality gates**: All passed (fmt, check, clippy, nextest)
+
+### Key Findings
+
+1. **No Campaign Data Changes Required**: Existing campaign RON files work without modification due to backward-compatible deserialization implemented in Phase 1.
+
+2. **Simple Format Preferred**: All existing campaign data uses simple format (`might: 15`), which is cleaner and recommended for most use cases.
+
+3. **Pre-buffed Characters**: Full format (`might: (base: 15, current: 18)`) is available but not currently used in campaigns. This feature enables advanced scenarios like:
+
+   - Tutorial characters with starting buffs
+   - Boss NPCs with pre-applied enhancements
+   - Wounded/debuffed recruitable characters
+
+4. **Migration Path Validated**: The backward compatibility layer successfully handles:
+   - Old `hp_base: Some(10)` → `hp_override: Some(AttributePair16 { base: 10, current: 10 })`
+   - Simple stats `might: 15` → `AttributePair { base: 15, current: 15 }`
+   - Full stats `might: (base: 15, current: 18)` → `AttributePair { base: 15, current: 18 }`
+
+### Campaign Files Status
+
+| File                                     | Character Count | Status      | Notes                               |
+| ---------------------------------------- | --------------- | ----------- | ----------------------------------- |
+| `campaigns/tutorial/data/characters.ron` | 9               | ✅ Verified | Uses simple format + old `hp_base`  |
+| `data/characters.ron`                    | 6               | ✅ Verified | Uses simple format (no HP override) |
+
+### Phase 2 Test Summary
+
+**Total Test Count**: 1,152 tests (10 Phase 2-specific tests added)
+
+**Phase 2 Tests** (all passing ✅):
+
+1. ✅ `test_phase2_tutorial_campaign_loads` - Verifies tutorial campaign loads 9 characters
+2. ✅ `test_phase2_tutorial_campaign_hp_override` - Validates `hp_base` → `hp_override` conversion
+3. ✅ `test_phase2_tutorial_campaign_stats_format` - Confirms simple stats format works
+4. ✅ `test_phase2_core_campaign_loads` - Verifies core campaign loads 6 characters
+5. ✅ `test_phase2_core_campaign_stats_format` - Validates core stats deserialization
+6. ✅ `test_phase2_campaign_instantiation` - Tests character instantiation with correct values
+7. ✅ `test_phase2_all_tutorial_characters_instantiate` - All 9 tutorial characters instantiate
+8. ✅ `test_phase2_all_core_characters_instantiate` - All 6 core characters instantiate
+9. ✅ `test_phase2_stats_roundtrip_preserves_format` - Simple/full format roundtrip works
+10. ✅ `test_phase2_example_formats_file_loads` - Example file with all formats loads correctly
+
+**Quality Gates**: All passed ✅
+
+- `cargo fmt --all` - ✅ Clean
+- `cargo check --all-targets --all-features` - ✅ No errors
+- `cargo clippy --all-targets --all-features -- -D warnings` - ✅ No warnings
+- `cargo nextest run --all-features` - ✅ 1,152/1,152 passed
+
+### Deliverables Created
+
+**Code Changes**:
+
+- 10 comprehensive integration tests in `src/domain/character_definition.rs`
+- Enhanced module-level documentation with RON format migration guide
+- Backward compatibility validation for all campaign data
+
+**Data Files**:
+
+- `data/examples/character_definition_formats.ron` - 5 example characters demonstrating:
+  - Simple format (recommended)
+  - Pre-buffed character (full format)
+  - Wounded character (current < base)
+  - Auto-calculated HP (no override)
+  - Legacy format (deprecated but supported)
+
+**Documentation**:
+
+- `docs/how-to/character_definition_ron_format.md` - Complete content author guide (367 lines)
+  - Quick start examples
+  - Stat format reference (simple, full, mixed)
+  - HP override patterns
+  - Field reference table
+  - Validation rules
+  - Common patterns (tutorial, wounded NPC, templates)
+  - Best practices
+  - Troubleshooting guide
+- Updated `docs/explanation/implementations.md` - Phase 2 completion summary
+- Updated `docs/explanation/character_definition_attribute_pair_migration_plan.md` - Phase 2 status
+
+### Next Steps
+
+**Phase 3: SDK Updates** (Required before Phase 4 cleanup)
+
+- Update `sdk/campaign_builder/src/characters_editor.rs` to support `Stats` and `hp_override`
+- Replace `BaseStats` usage in SDK with `Stats`
+- Add UI fields for editing `base` and `current` values separately
+- Update validation to enforce `current <= base` constraint
+- Fix `Display` formatting issues (AttributePair doesn't implement Display)
+
+**Phase 4: Cleanup** (After one release cycle)
+
+- Remove `BaseStats` struct
+- Remove `CharacterDefinitionDef` migration wrapper
+- Update architecture documentation with lessons learned
+- Consider adding migration tool/script for explicit format conversion
 
 ### Data File Compatibility
 

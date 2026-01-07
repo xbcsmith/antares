@@ -20,6 +20,37 @@
 //!
 //! Character definitions are separate from runtime `Character` instances.
 //! Definitions are loaded from RON files; instances are created at runtime.
+//!
+//! # RON Format Migration (AttributePair)
+//!
+//! As of Phase 1 migration, `base_stats` uses `Stats` (with `AttributePair` fields) and
+//! `hp_override` uses `AttributePair16`. Both support backward-compatible deserialization:
+//!
+//! **Simple format (recommended for most cases):**
+//! ```ron
+//! base_stats: (
+//!     might: 15,        // Expands to AttributePair { base: 15, current: 15 }
+//!     intellect: 10,
+//!     // ...
+//! ),
+//! hp_override: Some(50),  // Expands to AttributePair16 { base: 50, current: 50 }
+//! ```
+//!
+//! **Full format (for pre-buffed characters):**
+//! ```ron
+//! base_stats: (
+//!     might: (base: 15, current: 18),  // Character starts with buffed Might
+//!     intellect: 10,
+//!     // ...
+//! ),
+//! hp_override: Some((base: 50, current: 65)),  // Pre-buffed HP
+//! ```
+//!
+//! **Legacy format (deprecated, still supported):**
+//! ```ron
+//! hp_base: Some(50),
+//! hp_current: Some(65),  // Converts to hp_override: Some((base: 50, current: 65))
+//! ```
 
 use crate::domain::character::{
     Alignment, AttributePair, AttributePair16, Character, Condition, Equipment, Inventory,
@@ -3450,5 +3481,389 @@ mod tests {
         assert_eq!(character.sp.base, 0);
         // Non-caster should have spell level 0
         assert_eq!(character.spell_level.base, 0);
+    }
+
+    // ===== Phase 2: Campaign Data Migration Tests =====
+    //
+    // These tests verify that existing campaign data files load correctly
+    // with the AttributePair migration (Phase 1 backward compatibility).
+
+    #[test]
+    fn test_phase2_tutorial_campaign_loads() {
+        // Verify tutorial campaign characters.ron loads with new AttributePair format
+        let result = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron");
+
+        assert!(
+            result.is_ok(),
+            "Tutorial campaign characters.ron should load successfully: {:?}",
+            result.err()
+        );
+
+        let db = result.unwrap();
+
+        // Tutorial campaign has 9 character definitions
+        assert_eq!(
+            db.len(),
+            9,
+            "Tutorial campaign should have 9 character definitions"
+        );
+
+        // Verify specific characters exist
+        assert!(
+            db.get_character("tutorial_human_knight").is_some(),
+            "Should find Kira (tutorial_human_knight)"
+        );
+        assert!(
+            db.get_character("tutorial_elf_sorcerer").is_some(),
+            "Should find Sirius (tutorial_elf_sorcerer)"
+        );
+        assert!(
+            db.get_character("tutorial_human_cleric").is_some(),
+            "Should find Mira (tutorial_human_cleric)"
+        );
+    }
+
+    #[test]
+    fn test_phase2_tutorial_campaign_hp_override() {
+        // Verify that tutorial campaign hp_base fields convert to hp_override correctly
+        let db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+            .expect("Failed to load tutorial campaign");
+
+        let kira = db
+            .get_character("tutorial_human_knight")
+            .expect("Should find Kira");
+
+        // Tutorial campaign uses hp_base: Some(10)
+        // Should convert to hp_override: Some(AttributePair16 { base: 10, current: 10 })
+        assert!(
+            kira.hp_override.is_some(),
+            "Kira should have hp_override from hp_base"
+        );
+        assert_eq!(
+            kira.hp_override.unwrap().base,
+            10,
+            "Kira's hp_override base should be 10"
+        );
+        assert_eq!(
+            kira.hp_override.unwrap().current,
+            10,
+            "Kira's hp_override current should equal base (not pre-buffed)"
+        );
+    }
+
+    #[test]
+    fn test_phase2_tutorial_campaign_stats_format() {
+        // Verify that tutorial campaign base_stats (simple format) deserialize correctly
+        let db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+            .expect("Failed to load tutorial campaign");
+
+        let sirius = db
+            .get_character("tutorial_elf_sorcerer")
+            .expect("Should find Sirius");
+
+        // Tutorial campaign uses simple format: might: 8
+        // Should deserialize to Stats with AttributePair { base: 8, current: 8 }
+        assert_eq!(
+            sirius.base_stats.might.base, 8,
+            "Sirius might base should be 8"
+        );
+        assert_eq!(
+            sirius.base_stats.might.current, 8,
+            "Sirius might current should equal base"
+        );
+        assert_eq!(
+            sirius.base_stats.intellect.base, 16,
+            "Sirius intellect base should be 16"
+        );
+        assert_eq!(
+            sirius.base_stats.intellect.current, 16,
+            "Sirius intellect current should equal base"
+        );
+    }
+
+    #[test]
+    fn test_phase2_core_campaign_loads() {
+        // Verify core data/characters.ron loads with new AttributePair format
+        let result = CharacterDatabase::load_from_file("data/characters.ron");
+
+        assert!(
+            result.is_ok(),
+            "Core characters.ron should load successfully: {:?}",
+            result.err()
+        );
+
+        let db = result.unwrap();
+
+        // Core campaign has 6 pre-made character definitions
+        assert_eq!(
+            db.len(),
+            6,
+            "Core campaign should have 6 character definitions"
+        );
+
+        // Verify specific characters exist
+        assert!(
+            db.get_character("pregen_human_knight").is_some(),
+            "Should find Sir Aldric (pregen_human_knight)"
+        );
+        assert!(
+            db.get_character("pregen_gnome_sorcerer").is_some(),
+            "Should find Lyria Starweaver (pregen_gnome_sorcerer)"
+        );
+    }
+
+    #[test]
+    fn test_phase2_core_campaign_stats_format() {
+        // Verify that core campaign base_stats (simple format) deserialize correctly
+        let db = CharacterDatabase::load_from_file("data/characters.ron")
+            .expect("Failed to load core campaign");
+
+        let aldric = db
+            .get_character("pregen_human_knight")
+            .expect("Should find Sir Aldric");
+
+        // Core campaign uses simple format: might: 16
+        // Should deserialize to Stats with AttributePair { base: 16, current: 16 }
+        assert_eq!(
+            aldric.base_stats.might.base, 16,
+            "Sir Aldric might base should be 16"
+        );
+        assert_eq!(
+            aldric.base_stats.might.current, 16,
+            "Sir Aldric might current should equal base"
+        );
+        assert_eq!(
+            aldric.base_stats.endurance.base, 15,
+            "Sir Aldric endurance base should be 15"
+        );
+    }
+
+    #[test]
+    fn test_phase2_campaign_instantiation() {
+        // Verify that campaign characters can be instantiated successfully
+        let char_db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+            .expect("Failed to load tutorial campaign");
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let kira_def = char_db
+            .get_character("tutorial_human_knight")
+            .expect("Should find Kira");
+
+        let kira = kira_def
+            .instantiate(&races, &classes, &items)
+            .expect("Should instantiate Kira successfully");
+
+        // Verify instantiation worked correctly
+        assert_eq!(kira.name, "Kira");
+        assert_eq!(kira.race_id, "human");
+        assert_eq!(kira.class_id, "knight");
+
+        // Verify stats were applied correctly (base_stats + race modifiers)
+        assert!(
+            kira.stats.might.base >= 15,
+            "Kira's might should be at least base 15 (may have race bonus)"
+        );
+
+        // Verify HP override was used
+        // hp_override: Some(10) should be used instead of calculated HP
+        assert_eq!(
+            kira.hp.base, 10,
+            "Kira's HP should use hp_override value of 10"
+        );
+        assert_eq!(
+            kira.hp.current, 10,
+            "Kira's current HP should equal base HP"
+        );
+    }
+
+    #[test]
+    fn test_phase2_all_tutorial_characters_instantiate() {
+        // Verify ALL tutorial campaign characters can be instantiated
+        let char_db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+            .expect("Failed to load tutorial campaign");
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let mut success_count = 0;
+
+        for char_def in char_db.all_characters() {
+            match char_def.instantiate(&races, &classes, &items) {
+                Ok(character) => {
+                    success_count += 1;
+                    // Verify basic invariants
+                    assert_eq!(character.name, char_def.name);
+                    assert_eq!(character.race_id, char_def.race_id);
+                    assert_eq!(character.class_id, char_def.class_id);
+                }
+                Err(e) => {
+                    panic!("Failed to instantiate character '{}': {:?}", char_def.id, e);
+                }
+            }
+        }
+
+        assert_eq!(
+            success_count, 9,
+            "All 9 tutorial characters should instantiate successfully"
+        );
+    }
+
+    #[test]
+    fn test_phase2_all_core_characters_instantiate() {
+        // Verify ALL core campaign characters can be instantiated
+        let char_db = CharacterDatabase::load_from_file("data/characters.ron")
+            .expect("Failed to load core campaign");
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let mut success_count = 0;
+
+        for char_def in char_db.all_characters() {
+            match char_def.instantiate(&races, &classes, &items) {
+                Ok(character) => {
+                    success_count += 1;
+                    // Verify basic invariants
+                    assert_eq!(character.name, char_def.name);
+                    assert_eq!(character.race_id, char_def.race_id);
+                    assert_eq!(character.class_id, char_def.class_id);
+                }
+                Err(e) => {
+                    panic!("Failed to instantiate character '{}': {:?}", char_def.id, e);
+                }
+            }
+        }
+
+        assert_eq!(
+            success_count, 6,
+            "All 6 core characters should instantiate successfully"
+        );
+    }
+
+    #[test]
+    fn test_phase2_stats_roundtrip_preserves_format() {
+        // Verify that Stats can roundtrip through RON serialization
+        // Both simple and full formats should work
+
+        // Test simple format
+        let simple_ron = r#"(
+            might: 15,
+            intellect: 10,
+            personality: 12,
+            endurance: 14,
+            speed: 11,
+            accuracy: 13,
+            luck: 10,
+        )"#;
+
+        let stats: Stats = ron::from_str(simple_ron).expect("Should parse simple format");
+        assert_eq!(stats.might.base, 15);
+        assert_eq!(stats.might.current, 15);
+
+        // Test full format
+        let full_ron = r#"(
+            might: (base: 15, current: 18),
+            intellect: 10,
+            personality: 12,
+            endurance: 14,
+            speed: 11,
+            accuracy: 13,
+            luck: 10,
+        )"#;
+
+        let stats_buffed: Stats = ron::from_str(full_ron).expect("Should parse full format");
+        assert_eq!(stats_buffed.might.base, 15);
+        assert_eq!(stats_buffed.might.current, 18);
+        assert_eq!(stats_buffed.intellect.base, 10);
+        assert_eq!(stats_buffed.intellect.current, 10);
+    }
+
+    #[test]
+    fn test_phase2_example_formats_file_loads() {
+        // Verify the example character_definition_formats.ron file loads correctly
+        // This file demonstrates all supported formats for content authors
+        let result =
+            CharacterDatabase::load_from_file("data/examples/character_definition_formats.ron");
+
+        assert!(
+            result.is_ok(),
+            "Example formats file should load successfully: {:?}",
+            result.err()
+        );
+
+        let db = result.unwrap();
+
+        // File contains 5 example characters
+        assert_eq!(
+            db.len(),
+            5,
+            "Example formats file should have 5 character definitions"
+        );
+
+        // Verify simple format example
+        let simple = db
+            .get_character("example_simple_format")
+            .expect("Should find simple format example");
+        assert_eq!(simple.base_stats.might.base, 16);
+        assert_eq!(simple.base_stats.might.current, 16);
+        assert_eq!(simple.hp_override, Some(AttributePair16::new(50)));
+
+        // Verify buffed character example (full format)
+        let buffed = db
+            .get_character("example_buffed_hero")
+            .expect("Should find buffed hero example");
+        assert_eq!(buffed.base_stats.might.base, 14);
+        assert_eq!(buffed.base_stats.might.current, 18); // Pre-buffed
+        assert_eq!(buffed.base_stats.luck.base, 11);
+        assert_eq!(buffed.base_stats.luck.current, 16); // Pre-blessed
+        assert_eq!(
+            buffed.hp_override,
+            Some(AttributePair16 {
+                base: 45,
+                current: 60
+            })
+        );
+
+        // Verify wounded character example
+        let wounded = db
+            .get_character("example_wounded_veteran")
+            .expect("Should find wounded veteran example");
+        assert_eq!(
+            wounded.hp_override,
+            Some(AttributePair16 {
+                base: 50,
+                current: 30
+            })
+        );
+
+        // Verify auto-calculated HP example (no hp_override)
+        let auto_hp = db
+            .get_character("example_auto_hp")
+            .expect("Should find auto HP example");
+        assert!(auto_hp.hp_override.is_none());
+
+        // Verify legacy format example (backward compatibility)
+        let legacy = db
+            .get_character("example_legacy_format")
+            .expect("Should find legacy format example");
+        // Legacy hp_base + hp_current should convert to hp_override
+        assert_eq!(
+            legacy.hp_override,
+            Some(AttributePair16 {
+                base: 40,
+                current: 25
+            })
+        );
     }
 }
