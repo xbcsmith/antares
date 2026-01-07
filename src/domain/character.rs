@@ -190,6 +190,16 @@ impl AttributePair {
     }
 }
 
+impl std::fmt::Display for AttributePair {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.base == self.current {
+            write!(f, "{}", self.base)
+        } else {
+            write!(f, "{}/{}", self.current, self.base)
+        }
+    }
+}
+
 // Deserialization: accept either a simple number or an object with base/current.
 // This maintains backward compatibility for data files that use raw numbers for attributes.
 #[derive(serde::Deserialize)]
@@ -248,6 +258,16 @@ impl AttributePair16 {
     /// Apply a temporary modifier (positive or negative)
     pub fn modify(&mut self, amount: i32) {
         self.current = self.current.saturating_add_signed(amount as i16);
+    }
+}
+
+impl std::fmt::Display for AttributePair16 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.base == self.current {
+            write!(f, "{}", self.base)
+        } else {
+            write!(f, "{}/{}", self.current, self.base)
+        }
     }
 }
 

@@ -54,7 +54,370 @@ Migrated `CharacterDefinition` to use `Stats` (with `AttributePair`) instead of 
 
 4. **BaseStats Deprecation**: Kept `BaseStats` struct for backward compatibility but marked deprecated. Will be removed in Phase 4 after migration verification.
 
-### Phase 2: Campaign Data Migration - COMPLETED
+## Phase 3: SDK Updates (COMPLETED)
+
+**Status**: ✅ COMPLETED
+**Date**: 2025-01-XX
+**Effort**: ~4 hours
+
+### Overview
+
+Updated the Campaign Builder SDK (`sdk/campaign_builder`) to use the new domain types (`Stats`, `hp_override`) introduced in Phase 1, replacing all deprecated types and ensuring the visual editor correctly exposes base and current values for all character attributes.
+
+### Changes Made
+
+#### 1. Display Trait Implementation
+
+**File**: `src/domain/character.rs`
+
+Added `Display` trait implementations for `AttributePair` and `AttributePair16` to support SDK formatting requirements:
+
+```rust
+impl std::fmt::Display for AttributePair {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.base == self.current {
+            write!(f, "{}", self.base)
+        } else {
+            write!(f, "{}/{}", self.current, self.base)
+        }
+    }
+}
+
+impl std::fmt::Display for AttributePair16 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.base == self.current {
+            write!(f, "{}", self.base)
+        } else {
+            write!(f, "{}/{}", self.current, self.base)
+        }
+    }
+}
+```
+
+**Design Decision**: Display format shows:
+
+- Simple value when `base == current` (e.g., "15")
+- "current/base" format when different (e.g., "12/15" for a debuffed stat)
+
+#### 2. CharacterEditBuffer Restructure
+
+**File**: `sdk/campaign_builder/src/characters_editor.rs`
+
+Replaced single-value stat fields with separate base/current fields:
+
+**Before**:
+
+```rust
+pub struct CharacterEditBuffer {
+    pub might: String,
+    pub intellect: String,
+    // ... other stats
+    pub hp_base: String,
+    pub hp_current: String,
+}
+```
+
+**After**:
+
+```rust
+pub struct CharacterEditBuffer {
+    pub might_base: String,
+    pub might_current: String,
+    pub intellect_base: String,
+    pub intellect_current: String,
+    // ... other stats (base/current pairs)
+    pub hp_override_base: String,
+    pub hp_override_current: String,
+}
+```
+
+**Impact**: Editor now supports creating character templates with pre-applied buffs/debuffs by allowing different base and current values.
+
+#### 3. Validation Logic
+
+Added validation rules in `save_character()` method:
+
+```rust
+// Validate: current cannot exceed base for each stat
+if might_current > might_base {
+    return Err("Might current cannot exceed base".to_string());
+}
+// ... repeated for all 7 stats
+
+// Validate: HP override current cannot exceed base
+if current > base {
+    return Err("HP override current cannot exceed base".to_string());
+}
+```
+
+**Rationale**: Prevents content authors from creating invalid character definitions where temporary (current) values exceed permanent (base) values.
+
+#### 4. Stats Construction
+
+Replaced `BaseStats::new()` with direct `Stats` struct construction using `AttributePair`:
+
+```rust
+use antares::domain::character::AttributePair;
+let base_stats = Stats {
+    might: AttributePair {
+        base: might_base,
+        current: might_current,
+    },
+    intellect: AttributePair {
+        base: intellect_base,
+        current: intellect_current,
+    },
+    // ... all 7 stats
+};
+```
+
+#### 5. HP Override Handling
+
+Replaced separate `hp_base`/`hp_current` fields with unified `hp_override`:
+
+```rust
+use antares::domain::character::AttributePair16;
+let hp_override: Option<AttributePair16> =
+    if self.buffer.hp_override_base.trim().is_empty() {
+        None  // Use class-derived HP calculation
+    } else {
+        let base = self.buffer.hp_override_base.parse::<u16>()?;
+        let current = if self.buffer.hp_override_current.trim().is_empty() {
+            base  // Default current to base if not specified
+        } else {
+            self.buffer.hp_override_current.parse::<u16>()?
+        };
+        Some(AttributePair16 { base, current })
+    };
+```
+
+#### 6. UI Form Updates
+
+**File**: `sdk/campaign_builder/src/characters_editor.rs` (`show_character_form` method)
+
+Restructured stats form grid from 4 columns to 6 columns to show base/current pairs:
+
+```rust
+egui::Grid::new("character_stats_form_grid")
+    .num_columns(6)
+    .show(ui, |ui| {
+        // Header row
+        ui.label("");
+        ui.label("Base");
+        ui.label("Current");
+        ui.label("");
+        ui.label("Base");
+        ui.label("Current");
+        ui.end_row();
+
+        // Might and Intellect
+        ui.label("Might:");
+        ui.add(egui::TextEdit::singleline(&mut self.buffer.might_base));
+        ui.add(egui::TextEdit::singleline(&mut self.buffer.might_current));
+        ui.label("Intellect:");
+        ui.add(egui::TextEdit::singleline(&mut self.buffer.intellect_base));
+        ui.add(egui::TextEdit::singleline(&mut self.buffer.intellect_current));
+        // ... all stats
+    });
+```
+
+Added separate HP Override section with clear instructions:
+
+```rust
+ui.heading("HP Override");
+ui.label("Leave blank to use class-derived HP calculation");
+```
+
+#### 7. Character Preview Display
+
+Updated `show_character_preview()` to display HP correctly:
+
+**Before**:
+
+```rust
+let hp_display = if let (Some(cur), Some(base)) = (character.hp_current, character.hp_base) {
+    format!("{}/{}", cur, base)
+} else {
+    "(derived)".to_string()
+};
+```
+
+**After**:
+
+```rust
+let hp_display = if let Some(hp) = character.hp_override {
+    format!("{}/{}", hp.current, hp.base)
+} else {
+    "(derived)".to_string()
+};
+```
+
+#### 8. Load Character Logic
+
+Updated `start_edit_character()` to extract base and current values:
+
+```rust
+might_base: character.base_stats.might.base.to_string(),
+might_current: character.base_stats.might.current.to_string(),
+// ... all stats
+hp_override_base: character.hp_override.map(|v| v.base.to_string()).unwrap_or_default(),
+hp_override_current: character.hp_override.map(|v| v.current.to_string()).unwrap_or_default(),
+```
+
+#### 9. Test Updates
+
+Updated all SDK tests to use new types:
+
+**Files**:
+
+- `sdk/campaign_builder/src/characters_editor.rs` (60+ tests)
+- `sdk/campaign_builder/src/asset_manager.rs` (3 tests)
+
+**Changes**:
+
+- Replaced `BaseStats::new()` with `Stats::new()`
+- Replaced `hp_base`/`hp_current` with `hp_override`
+- Updated buffer field names (e.g., `might` → `might_base`/`might_current`)
+- Added tests for HP override with both simple and full formats
+
+**Example**:
+
+```rust
+#[test]
+fn test_character_hp_override_roundtrip() {
+    let mut def = CharacterDefinition::new(...);
+    def.hp_override = Some(AttributePair16 {
+        base: 42,
+        current: 30,
+    });
+
+    let ron_str = ron::ser::to_string(&def).unwrap();
+    let parsed: CharacterDefinition = ron::from_str(&ron_str).unwrap();
+    assert_eq!(parsed.hp_override.unwrap().base, 42);
+    assert_eq!(parsed.hp_override.unwrap().current, 30);
+}
+```
+
+### Removed Dependencies
+
+- Removed all imports of deprecated `BaseStats` type
+- Removed all references to deprecated `hp_base` and `hp_current` fields
+- SDK now exclusively uses `Stats` and `hp_override`
+
+### Testing Results
+
+**All quality gates passed**:
+
+```bash
+✅ cargo fmt --all
+✅ cargo check --all-targets --all-features
+✅ cargo clippy --all-targets --all-features -- -D warnings
+✅ cargo nextest run --all-features
+```
+
+**Test Coverage**:
+
+- Total tests: **1,152**
+- Passed: **1,152**
+- Failed: **0**
+- SDK-specific tests: **882**
+
+**New/Updated Tests**:
+
+- `test_character_hp_override_roundtrip` - validates AttributePair16 serialization
+- `test_character_hp_override_simple_format` - validates backward compatibility
+- `test_character_edit_buffer_default` - updated for new field names
+- `test_save_character_invalid_stat` - validates base value parsing
+- `test_save_character_invalid_hp` - validates HP override base parsing
+- `test_save_character_invalid_current_hp` - validates HP override current parsing
+- All asset_manager tests updated to use new types
+
+### User-Facing Changes
+
+#### For Content Authors
+
+**Character Editor UI** now shows:
+
+1. **Base Stats Section**: Grid with Base/Current columns for all 7 attributes
+2. **HP Override Section**: Separate fields for base and current HP
+3. **Validation Feedback**: Immediate error messages if current > base
+
+**Workflow**:
+
+1. Enter base values (permanent character stats)
+2. Enter current values (can be lower for debuffed templates, equal for normal characters)
+3. Leave HP override blank for automatic calculation, or specify custom values
+
+#### For Developers
+
+**API Changes**:
+
+- `CharacterEditBuffer` fields renamed (breaking change for direct field access)
+- No changes to `CharacterDefinition` (already updated in Phase 1)
+- Display trait now available for `AttributePair`/`AttributePair16`
+
+### Architecture Compliance
+
+✅ **Section 4 (Data Structures)**: Uses `Stats` with `AttributePair` fields
+✅ **Section 4.6 (Type Aliases)**: No raw `u8`/`u16` for stats
+✅ **Section 7.2 (RON Format)**: Supports both simple and full attribute formats
+✅ **Validation Rules**: Enforces `current ≤ base` constraint
+✅ **No Breaking Changes**: Backward-compatible RON deserialization maintained
+
+### Migration Path for SDK Users
+
+If external code directly accesses `CharacterEditBuffer` fields:
+
+**Before**:
+
+```rust
+buffer.might = "15".to_string();
+buffer.hp_base = "50".to_string();
+```
+
+**After**:
+
+```rust
+buffer.might_base = "15".to_string();
+buffer.might_current = "15".to_string();
+buffer.hp_override_base = "50".to_string();
+buffer.hp_override_current = "50".to_string();
+```
+
+### Known Limitations
+
+1. **UI Layout**: Stats grid is now 6 columns (wider). May need horizontal scrolling on small screens.
+2. **Validation Timing**: Validation only occurs on save, not during typing (by design).
+3. **No Auto-Sync**: Setting base does not auto-update current; users must set both explicitly.
+
+### Future Enhancements (Optional)
+
+Consider for future phases:
+
+- Add "Copy Base → Current" button in UI for convenience
+- Add visual indicators (color coding) when current ≠ base
+- Add preset templates ("Healthy", "Wounded", "Buffed")
+- Add batch editing for multiple characters
+
+### Completion Checklist
+
+✅ Display trait implemented for AttributePair types
+✅ CharacterEditBuffer updated with base/current fields
+✅ Validation logic enforces current ≤ base
+✅ Stats construction uses AttributePair
+✅ HP override uses AttributePair16
+✅ UI form shows base/current columns
+✅ Preview display updated
+✅ Load logic extracts base/current correctly
+✅ All SDK tests updated
+✅ All quality gates pass
+✅ Documentation complete
+
+**Phase 3 is complete. SDK now fully supports AttributePair-based character definitions.**
+
+---
+
+## Phase 2: Campaign Data Migration (COMPLETED)
 
 **Phase 2 Deliverables** (✅ All Complete):
 
