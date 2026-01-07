@@ -501,8 +501,8 @@ pub enum MapEvent {
         /// Event description
         #[serde(default)]
         description: String,
-        /// Inn/town identifier (u8 for town ID)
-        inn_id: u8,
+        /// Innkeeper NPC identifier (must exist in NPC database with is_innkeeper=true)
+        innkeeper_id: crate::domain::world::NpcId,
     },
 }
 
@@ -1330,6 +1330,36 @@ mod tests {
         };
         let (x, h, z) = metadata.mesh_dimensions(TerrainType::Ground, WallType::Normal);
         assert_eq!((x, h, z), (2.0, 5.0, 2.0)); // 1.0*2.0, 2.5*2.0, 1.0*2.0
+    }
+
+    #[test]
+    fn test_map_event_enter_inn_ron_serialization() {
+        // Verify that MapEvent::EnterInn with an innkeeper_id string
+        // round-trips correctly through RON serialization/deserialization.
+        let event = MapEvent::EnterInn {
+            name: "Cozy Inn Entrance".to_string(),
+            description: "A welcoming inn".to_string(),
+            innkeeper_id: "cozy_inn".to_string(),
+        };
+
+        let ron_str = ron::ser::to_string_pretty(&event, Default::default())
+            .expect("Failed to serialize MapEvent::EnterInn to RON");
+
+        let parsed: MapEvent =
+            ron::de::from_str(&ron_str).expect("Failed to deserialize MapEvent::EnterInn from RON");
+
+        match parsed {
+            MapEvent::EnterInn {
+                name,
+                description,
+                innkeeper_id,
+            } => {
+                assert_eq!(name, "Cozy Inn Entrance".to_string());
+                assert_eq!(description, "A welcoming inn".to_string());
+                assert_eq!(innkeeper_id, "cozy_inn".to_string());
+            }
+            _ => panic!("Expected EnterInn event"),
+        }
     }
 
     #[test]

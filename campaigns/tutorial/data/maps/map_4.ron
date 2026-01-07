@@ -7608,12 +7608,20 @@
     ],
     events: {
         (
-            x: 18,
-            y: 10,
+            x: 12,
+            y: 1,
         ): Sign(
-            name: "Wizard\'s Cave Sign",
-            description: "A sign pointing the way to the Wizard\'s Cave.",
-            text: "To the Wizard\'s Cave",
+            name: "Ruins Direction Sign",
+            description: "A sign pointing the way to the Ancient Ruins.",
+            text: "To Ancient Ruins",
+        ),
+        (
+            x: 8,
+            y: 12,
+        ): RecruitableCharacter(
+            name: "Apprentice Zara",
+            description: "An enthusiastic gnome apprentice sitting on a fallen log, studying a spellbook. She looks up hopefully as you approach.",
+            character_id: "apprentice_zara",
         ),
         (
             x: 12,
@@ -7628,6 +7636,17 @@
             map_id: 3,
         ),
         (
+            x: 16,
+            y: 2,
+        ): Treasure(
+            name: "Hidden Supplies",
+            description: "A stash of supplies tucked away among the rocks.",
+            loot: [
+                14,
+                24,
+            ],
+        ),
+        (
             x: 10,
             y: 19,
         ): Teleport(
@@ -7640,22 +7659,36 @@
             map_id: 5,
         ),
         (
-            x: 8,
-            y: 12,
-        ): RecruitableCharacter(
-            name: "Apprentice Zara",
-            description: "An enthusiastic gnome apprentice sitting on a fallen log, studying a spellbook. She looks up hopefully as you approach.",
-            character_id: "apprentice_zara",
-        ),
-        (
-            x: 17,
-            y: 16,
+            x: 3,
+            y: 11,
         ): Encounter(
-            name: "Bandit Patrol",
-            description: "A patrol of bandits looking for easy victims.",
+            name: "Forest Ambush",
+            description: "A hidden ambush by hostile creatures in the forest.",
             monster_group: [
                 6,
-                6,
+                5,
+            ],
+        ),
+        (
+            x: 7,
+            y: 17,
+        ): Trap(
+            name: "Hidden Pit Trap",
+            description: "A concealed pit trap that deals heavy damage when sprung.",
+            damage: 8,
+            effect: None,
+        ),
+        (
+            x: 10,
+            y: 13,
+        ): Treasure(
+            name: "Large Treasure Chest",
+            description: "A large and ornate chest containing valuable loot.",
+            loot: [
+                15,
+                25,
+                33,
+                40,
             ],
         ),
         (
@@ -7678,67 +7711,12 @@
             ],
         ),
         (
-            x: 10,
-            y: 13,
-        ): Treasure(
-            name: "Large Treasure Chest",
-            description: "A large and ornate chest containing valuable loot.",
-            loot: [
-                15,
-                25,
-                33,
-                40,
-            ],
-        ),
-        (
             x: 0,
             y: 10,
         ): Sign(
             name: "Town Exit Sign",
             description: "A sign directing travelers to the town exit.",
             text: "Exit to town.",
-        ),
-        (
-            x: 19,
-            y: 10,
-        ): Teleport(
-            name: "Mountain Portal",
-            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (19,17).",
-            destination: (
-                x: 19,
-                y: 17,
-            ),
-            map_id: 2,
-        ),
-        (
-            x: 5,
-            y: 3,
-        ): Encounter(
-            name: "Bandit Patrol",
-            description: "A small band of foes patrolling this area.",
-            monster_group: [
-                4,
-                4,
-            ],
-        ),
-        (
-            x: 12,
-            y: 1,
-        ): Sign(
-            name: "Ruins Direction Sign",
-            description: "A sign pointing the way to the Ancient Ruins.",
-            text: "To Ancient Ruins",
-        ),
-        (
-            x: 16,
-            y: 2,
-        ): Treasure(
-            name: "Hidden Supplies",
-            description: "A stash of supplies tucked away among the rocks.",
-            loot: [
-                14,
-                24,
-            ],
         ),
         (
             x: 8,
@@ -7753,23 +7731,45 @@
             ],
         ),
         (
-            x: 7,
-            y: 17,
-        ): Trap(
-            name: "Hidden Pit Trap",
-            description: "A concealed pit trap that deals heavy damage when sprung.",
-            damage: 8,
-            effect: None,
+            x: 5,
+            y: 3,
+        ): Encounter(
+            name: "Bandit Patrol",
+            description: "A small band of foes patrolling this area.",
+            monster_group: [
+                4,
+                4,
+            ],
         ),
         (
-            x: 3,
-            y: 11,
+            x: 19,
+            y: 10,
+        ): Teleport(
+            name: "Mountain Portal",
+            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (19,17).",
+            destination: (
+                x: 19,
+                y: 17,
+            ),
+            map_id: 2,
+        ),
+        (
+            x: 18,
+            y: 10,
+        ): Sign(
+            name: "Wizard\'s Cave Sign",
+            description: "A sign pointing the way to the Wizard\'s Cave.",
+            text: "To the Wizard\'s Cave",
+        ),
+        (
+            x: 17,
+            y: 16,
         ): Encounter(
-            name: "Forest Ambush",
-            description: "A hidden ambush by hostile creatures in the forest.",
+            name: "Bandit Patrol",
+            description: "A patrol of bandits looking for easy victims.",
             monster_group: [
                 6,
-                5,
+                6,
             ],
         ),
     },

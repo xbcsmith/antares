@@ -4,6 +4,30 @@
         name: "Arcturus Story",
         root_node: 1,
         nodes: {
+            1: (
+                id: 1,
+                text: "I am the Great Arcturus!",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Tell me more.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
             2: (
                 id: 2,
                 text: "Hello There! Come and sit and talk a while.",
@@ -11,20 +35,11 @@
                 choices: [],
                 conditions: [],
                 actions: [],
-                is_terminal: false,
-            ),
-            1: (
-                id: 1,
-                text: "I am the Great Arcturus!",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: false,
+                is_terminal: true,
             ),
         },
         speaker_name: Some("Arcturus"),
         repeatable: true,
-        associated_quest: Some(10),
+        associated_quest: Some(0),
     ),
 ]

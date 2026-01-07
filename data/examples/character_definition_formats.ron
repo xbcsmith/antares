@@ -1,0 +1,279 @@
+// character_definition_formats.ron - Example RON formats for CharacterDefinition
+//
+// This file demonstrates the different formats supported for base_stats and hp_override
+// in character definitions after the AttributePair migration (Phases 1 & 2).
+//
+// USE THIS FILE AS A REFERENCE when creating new character definitions.
+
+[
+    // ===== EXAMPLE 1: Simple Format (RECOMMENDED) =====
+    // Use this format for most characters.
+    // Simple values expand to AttributePair { base: value, current: value }
+    (
+        id: "example_simple_format",
+        name: "Simple Knight",
+        race_id: "human",
+        class_id: "knight",
+        sex: Male,
+        alignment: Good,
+
+        // Simple format: just provide numbers
+        // These expand automatically to (base: N, current: N)
+        base_stats: (
+            might: 16,        // Expands to AttributePair { base: 16, current: 16 }
+            intellect: 10,
+            personality: 12,
+            endurance: 15,
+            speed: 11,
+            accuracy: 13,
+            luck: 10,
+        ),
+
+        // HP override also supports simple format
+        hp_override: Some(50),  // Expands to AttributePair16 { base: 50, current: 50 }
+
+        portrait_id: "knight_01",
+        starting_gold: 100,
+        starting_gems: 0,
+        starting_food: 10,
+        starting_items: [],
+        starting_equipment: (
+            weapon: Some(4),
+            armor: Some(21),
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "A standard knight with normal starting stats.",
+        is_premade: true,
+        starts_in_party: false,
+    ),
+
+    // ===== EXAMPLE 2: Pre-Buffed Character (Full Format) =====
+    // Use this format when you want a character to START with buffs/debuffs.
+    // This is useful for:
+    //   - Tutorial characters with starting advantages
+    //   - Boss NPCs with pre-applied enhancements
+    //   - Special story characters with temporary buffs
+    (
+        id: "example_buffed_hero",
+        name: "Blessed Champion",
+        race_id: "human",
+        class_id: "paladin",
+        sex: Female,
+        alignment: Good,
+
+        // Full format: specify base and current separately
+        // Use this when current != base
+        base_stats: (
+            might: (base: 14, current: 18),      // Starts with +4 Might buff
+            intellect: 12,                        // Simple format works too (expands to base: 12, current: 12)
+            personality: (base: 15, current: 15), // Explicit full format (same as simple)
+            endurance: 13,
+            speed: 12,
+            accuracy: 12,
+            luck: (base: 11, current: 16),       // Starts with +5 Luck buff (blessed)
+        ),
+
+        // HP can also use full format for pre-buffed/wounded characters
+        hp_override: Some((base: 45, current: 60)),  // Starts with +15 HP buff
+
+        portrait_id: "paladin_01",
+        starting_gold: 50,
+        starting_gems: 5,
+        starting_food: 10,
+        starting_items: [],
+        starting_equipment: (
+            weapon: Some(5),
+            armor: Some(21),
+            shield: Some(30),
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "A paladin blessed by the gods with enhanced strength and fortune. These buffs are temporary and will fade when the blessing expires.",
+        is_premade: true,
+        starts_in_party: false,
+    ),
+
+    // ===== EXAMPLE 3: Wounded/Debuffed Character =====
+    // Use this for characters who start injured or cursed.
+    // NOTE: System clamps current to base if current > base, so this is mainly
+    // useful for HP (current < base indicates wounded state).
+    (
+        id: "example_wounded_veteran",
+        name: "Scarred Veteran",
+        race_id: "dwarf",
+        class_id: "knight",
+        sex: Male,
+        alignment: Neutral,
+
+        base_stats: (
+            might: 15,
+            intellect: 9,
+            personality: 10,
+            endurance: 16,
+            speed: 8,
+            accuracy: 11,
+            luck: 9,
+        ),
+
+        // Character starts wounded (30/50 HP)
+        // This is useful for rescue missions or injured recruitable NPCs
+        hp_override: Some((base: 50, current: 30)),
+
+        portrait_id: "dwarf_veteran_01",
+        starting_gold: 20,
+        starting_gems: 0,
+        starting_food: 5,
+        starting_items: [],
+        starting_equipment: (
+            weapon: Some(6),
+            armor: Some(20),
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "A battle-scarred veteran recovering from recent wounds. Starts at reduced HP.",
+        is_premade: true,
+        starts_in_party: false,
+    ),
+
+    // ===== EXAMPLE 4: No HP Override (Calculated) =====
+    // If you omit hp_override, HP will be calculated automatically based on:
+    //   - Class HP base (from classes.ron)
+    //   - Endurance stat bonus
+    (
+        id: "example_auto_hp",
+        name: "Standard Mage",
+        race_id: "elf",
+        class_id: "sorcerer",
+        sex: Female,
+        alignment: Neutral,
+
+        base_stats: (
+            might: 8,
+            intellect: 17,
+            personality: 12,
+            endurance: 10,
+            speed: 12,
+            accuracy: 10,
+            luck: 14,
+        ),
+
+        // No hp_override specified - HP will be calculated from class + endurance
+        // For sorcerer with 10 endurance, this will be approximately 4 + (10-10) = 4
+
+        portrait_id: "elf_mage_01",
+        starting_gold: 30,
+        starting_gems: 5,
+        starting_food: 10,
+        starting_items: [],
+        starting_equipment: (
+            weapon: Some(2),
+            armor: None,
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "A standard mage with automatically calculated HP based on class and endurance.",
+        is_premade: true,
+        starts_in_party: false,
+    ),
+
+    // ===== EXAMPLE 5: Legacy Format (DEPRECATED but still supported) =====
+    // Old format with separate hp_base and hp_current fields.
+    // This is converted automatically to hp_override during deserialization.
+    // DO NOT USE THIS FORMAT for new characters - use hp_override instead.
+    (
+        id: "example_legacy_format",
+        name: "Old Format Example",
+        race_id: "human",
+        class_id: "cleric",
+        sex: Male,
+        alignment: Good,
+
+        base_stats: (
+            might: 11,
+            intellect: 12,
+            personality: 15,
+            endurance: 13,
+            speed: 10,
+            accuracy: 10,
+            luck: 12,
+        ),
+
+        // Legacy format - automatically converts to:
+        // hp_override: Some(AttributePair16 { base: 40, current: 25 })
+        hp_base: Some(40),
+        hp_current: Some(25),
+
+        portrait_id: "cleric_01",
+        starting_gold: 50,
+        starting_gems: 2,
+        starting_food: 10,
+        starting_items: [],
+        starting_equipment: (
+            weapon: Some(5),
+            armor: Some(20),
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "Example showing deprecated hp_base/hp_current format. Still works but prefer hp_override for new characters.",
+        is_premade: false,
+        starts_in_party: false,
+    ),
+]
+
+// ===== FORMAT SUMMARY =====
+//
+// Simple Format (Recommended):
+//   base_stats: (might: 15, ...)
+//   hp_override: Some(50)
+//
+// Full Format (For pre-buffed/debuffed):
+//   base_stats: (might: (base: 15, current: 18), ...)
+//   hp_override: Some((base: 50, current: 65))
+//
+// Mixed Format (Allowed):
+//   base_stats: (
+//       might: (base: 15, current: 18),  // Buffed
+//       intellect: 10,                    // Normal
+//       personality: 12,                  // Normal
+//       // ...
+//   )
+//
+// Legacy Format (Deprecated):
+//   hp_base: Some(50)
+//   hp_current: Some(30)
+//
+// No HP Override (Auto-calculated):
+//   (omit hp_override field entirely)
+//
+// ===== VALIDATION RULES =====
+//
+// 1. Stats: base must be 0-255 (u8 range)
+// 2. Stats: current must be 0-255 (u8 range)
+// 3. Stats: if current > base during instantiation, system will clamp with warning
+// 4. HP: base must be 0-65535 (u16 range)
+// 5. HP: current must be 0-65535 (u16 range)
+// 6. HP: if current > base during instantiation, system will clamp with warning
+//
+// ===== BEST PRACTICES =====
+//
+// 1. Use simple format for most characters (cleaner, easier to read)
+// 2. Use full format only when you need pre-buffed/debuffed stats
+// 3. Document WHY a character has current != base (story reason, game mechanic)
+// 4. For wounded characters, use hp_override with current < base
+// 5. For blessed/cursed characters, explain the buff/debuff in description
+// 6. Omit hp_override to let the system calculate HP automatically

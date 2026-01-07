@@ -7,15 +7,39 @@
         sex: Female,
         alignment: Good,
         base_stats: (
-            might: 15,
-            intellect: 10,
-            personality: 11,
-            endurance: 14,
-            speed: 12,
-            accuracy: 12,
-            luck: 10,
+            might: (
+                base: 15,
+                current: 15,
+            ),
+            intellect: (
+                base: 10,
+                current: 10,
+            ),
+            personality: (
+                base: 11,
+                current: 11,
+            ),
+            endurance: (
+                base: 14,
+                current: 14,
+            ),
+            speed: (
+                base: 12,
+                current: 12,
+            ),
+            accuracy: (
+                base: 12,
+                current: 12,
+            ),
+            luck: (
+                base: 10,
+                current: 10,
+            ),
         ),
-        hp_base: Some(10),
+        hp_override: Some((
+            base: 10,
+            current: 10,
+        )),
         portrait_id: "character_040",
         starting_gold: 100,
         starting_gems: 0,
@@ -45,15 +69,39 @@
         sex: Male,
         alignment: Neutral,
         base_stats: (
-            might: 8,
-            intellect: 16,
-            personality: 11,
-            endurance: 10,
-            speed: 12,
-            accuracy: 11,
-            luck: 12,
+            might: (
+                base: 8,
+                current: 8,
+            ),
+            intellect: (
+                base: 16,
+                current: 16,
+            ),
+            personality: (
+                base: 11,
+                current: 11,
+            ),
+            endurance: (
+                base: 10,
+                current: 10,
+            ),
+            speed: (
+                base: 12,
+                current: 12,
+            ),
+            accuracy: (
+                base: 11,
+                current: 11,
+            ),
+            luck: (
+                base: 12,
+                current: 12,
+            ),
         ),
-        hp_base: Some(4),
+        hp_override: Some((
+            base: 4,
+            current: 4,
+        )),
         portrait_id: "character_042",
         starting_gold: 50,
         starting_gems: 5,
@@ -84,15 +132,39 @@
         sex: Female,
         alignment: Good,
         base_stats: (
-            might: 11,
-            intellect: 12,
-            personality: 15,
-            endurance: 13,
-            speed: 10,
-            accuracy: 10,
-            luck: 12,
+            might: (
+                base: 11,
+                current: 11,
+            ),
+            intellect: (
+                base: 12,
+                current: 12,
+            ),
+            personality: (
+                base: 15,
+                current: 15,
+            ),
+            endurance: (
+                base: 13,
+                current: 13,
+            ),
+            speed: (
+                base: 10,
+                current: 10,
+            ),
+            accuracy: (
+                base: 10,
+                current: 10,
+            ),
+            luck: (
+                base: 12,
+                current: 12,
+            ),
         ),
-        hp_base: Some(10),
+        hp_override: Some((
+            base: 10,
+            current: 10,
+        )),
         portrait_id: "character_041",
         starting_gold: 75,
         starting_gems: 2,
@@ -123,15 +195,39 @@
         sex: Male,
         alignment: Neutral,
         base_stats: (
-            might: 14,
-            intellect: 9,
-            personality: 10,
-            endurance: 16,
-            speed: 8,
-            accuracy: 11,
-            luck: 9,
+            might: (
+                base: 14,
+                current: 14,
+            ),
+            intellect: (
+                base: 9,
+                current: 9,
+            ),
+            personality: (
+                base: 10,
+                current: 10,
+            ),
+            endurance: (
+                base: 16,
+                current: 16,
+            ),
+            speed: (
+                base: 8,
+                current: 8,
+            ),
+            accuracy: (
+                base: 11,
+                current: 11,
+            ),
+            luck: (
+                base: 9,
+                current: 9,
+            ),
         ),
-        hp_base: Some(12),
+        hp_override: Some((
+            base: 12,
+            current: 12,
+        )),
         portrait_id: "character_060",
         starting_gold: 20,
         starting_gems: 0,
@@ -160,15 +256,39 @@
         sex: Female,
         alignment: Neutral,
         base_stats: (
-            might: 10,
-            intellect: 13,
-            personality: 11,
-            endurance: 10,
-            speed: 15,
-            accuracy: 14,
-            luck: 15,
+            might: (
+                base: 10,
+                current: 10,
+            ),
+            intellect: (
+                base: 13,
+                current: 13,
+            ),
+            personality: (
+                base: 11,
+                current: 11,
+            ),
+            endurance: (
+                base: 10,
+                current: 10,
+            ),
+            speed: (
+                base: 15,
+                current: 15,
+            ),
+            accuracy: (
+                base: 14,
+                current: 14,
+            ),
+            luck: (
+                base: 15,
+                current: 15,
+            ),
         ),
-        hp_base: Some(8),
+        hp_override: Some((
+            base: 8,
+            current: 8,
+        )),
         portrait_id: "character_061",
         starting_gold: 150,
         starting_gems: 1,
@@ -197,15 +317,39 @@
         sex: Female,
         alignment: Good,
         base_stats: (
-            might: 7,
-            intellect: 15,
-            personality: 13,
-            endurance: 9,
-            speed: 11,
-            accuracy: 10,
-            luck: 14,
+            might: (
+                base: 7,
+                current: 7,
+            ),
+            intellect: (
+                base: 15,
+                current: 15,
+            ),
+            personality: (
+                base: 13,
+                current: 13,
+            ),
+            endurance: (
+                base: 9,
+                current: 9,
+            ),
+            speed: (
+                base: 11,
+                current: 11,
+            ),
+            accuracy: (
+                base: 10,
+                current: 10,
+            ),
+            luck: (
+                base: 14,
+                current: 14,
+            ),
         ),
-        hp_base: Some(4),
+        hp_override: Some((
+            base: 4,
+            current: 4,
+        )),
         portrait_id: "character_071",
         starting_gold: 10,
         starting_gems: 2,
@@ -234,15 +378,39 @@
         sex: Male,
         alignment: Neutral,
         base_stats: (
-            might: 14,
-            intellect: 10,
-            personality: 10,
-            endurance: 13,
-            speed: 11,
-            accuracy: 12,
-            luck: 10,
+            might: (
+                base: 14,
+                current: 14,
+            ),
+            intellect: (
+                base: 10,
+                current: 10,
+            ),
+            personality: (
+                base: 10,
+                current: 10,
+            ),
+            endurance: (
+                base: 13,
+                current: 13,
+            ),
+            speed: (
+                base: 11,
+                current: 11,
+            ),
+            accuracy: (
+                base: 12,
+                current: 12,
+            ),
+            luck: (
+                base: 10,
+                current: 10,
+            ),
         ),
-        hp_base: Some(12),
+        hp_override: Some((
+            base: 12,
+            current: 12,
+        )),
         portrait_id: "character_046",
         starting_gold: 50,
         starting_gems: 0,
@@ -269,15 +437,39 @@
         sex: Female,
         alignment: Neutral,
         base_stats: (
-            might: 8,
-            intellect: 15,
-            personality: 11,
-            endurance: 9,
-            speed: 12,
-            accuracy: 11,
-            luck: 12,
+            might: (
+                base: 8,
+                current: 8,
+            ),
+            intellect: (
+                base: 15,
+                current: 15,
+            ),
+            personality: (
+                base: 11,
+                current: 11,
+            ),
+            endurance: (
+                base: 9,
+                current: 9,
+            ),
+            speed: (
+                base: 12,
+                current: 12,
+            ),
+            accuracy: (
+                base: 11,
+                current: 11,
+            ),
+            luck: (
+                base: 12,
+                current: 12,
+            ),
         ),
-        hp_base: Some(4),
+        hp_override: Some((
+            base: 4,
+            current: 4,
+        )),
         portrait_id: "character_075",
         starting_gold: 30,
         starting_gems: 2,
@@ -304,15 +496,39 @@
         sex: Male,
         alignment: Good,
         base_stats: (
-            might: 11,
-            intellect: 10,
-            personality: 14,
-            endurance: 14,
-            speed: 9,
-            accuracy: 10,
-            luck: 11,
+            might: (
+                base: 11,
+                current: 11,
+            ),
+            intellect: (
+                base: 10,
+                current: 10,
+            ),
+            personality: (
+                base: 14,
+                current: 14,
+            ),
+            endurance: (
+                base: 14,
+                current: 14,
+            ),
+            speed: (
+                base: 9,
+                current: 9,
+            ),
+            accuracy: (
+                base: 10,
+                current: 10,
+            ),
+            luck: (
+                base: 11,
+                current: 11,
+            ),
         ),
-        hp_base: Some(10),
+        hp_override: Some((
+            base: 10,
+            current: 10,
+        )),
         portrait_id: "character_076",
         starting_gold: 40,
         starting_gems: 1,

@@ -1920,9 +1920,8 @@ mod tests {
     fn test_scan_characters_references() {
         use antares::domain::character::Alignment;
         use antares::domain::character::Sex;
-        use antares::domain::character_definition::{
-            BaseStats, CharacterDefinition, StartingEquipment,
-        };
+        use antares::domain::character::Stats;
+        use antares::domain::character_definition::{CharacterDefinition, StartingEquipment};
         use std::path::PathBuf;
 
         let mut manager = AssetManager::new(PathBuf::from("/tmp/test_campaign"));
@@ -1947,9 +1946,8 @@ mod tests {
             class_id: "knight".to_string(),
             sex: Sex::Male,
             alignment: Alignment::Good,
-            base_stats: BaseStats::default(),
-            hp_base: Some(10),
-            hp_current: None,
+            base_stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
+            hp_override: None,
             portrait_id: "character_040".to_string(),
             starting_gold: 100,
             starting_gems: 0,
@@ -2027,9 +2025,8 @@ mod tests {
     fn test_scan_portrait_path_matching() {
         use antares::domain::character::Alignment;
         use antares::domain::character::Sex;
-        use antares::domain::character_definition::{
-            BaseStats, CharacterDefinition, StartingEquipment,
-        };
+        use antares::domain::character::Stats;
+        use antares::domain::character_definition::{CharacterDefinition, StartingEquipment};
         use std::path::PathBuf;
 
         let mut manager = AssetManager::new(PathBuf::from("/tmp/test_campaign"));
@@ -2065,9 +2062,8 @@ mod tests {
             class_id: "knight".to_string(),
             sex: Sex::Female,
             alignment: Alignment::Good,
-            base_stats: BaseStats::default(),
-            hp_base: Some(10),
-            hp_current: None,
+            base_stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
+            hp_override: None,
             portrait_id: "character_040".to_string(),
             starting_gold: 100,
             starting_gems: 0,
@@ -2296,9 +2292,8 @@ mod tests {
     fn test_scan_multiple_characters_same_portrait() {
         use antares::domain::character::Alignment;
         use antares::domain::character::Sex;
-        use antares::domain::character_definition::{
-            BaseStats, CharacterDefinition, StartingEquipment,
-        };
+        use antares::domain::character::Stats;
+        use antares::domain::character_definition::{CharacterDefinition, StartingEquipment};
         use std::path::PathBuf;
 
         let mut manager = AssetManager::new(PathBuf::from("/tmp/test_campaign"));
@@ -2323,9 +2318,8 @@ mod tests {
             class_id: "knight".to_string(),
             sex: Sex::Male,
             alignment: Alignment::Neutral,
-            base_stats: BaseStats::default(),
-            hp_base: Some(12),
-            hp_current: None,
+            base_stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
+            hp_override: None,
             portrait_id: "character_046".to_string(),
             starting_gold: 50,
             starting_gems: 0,
@@ -2344,9 +2338,8 @@ mod tests {
             class_id: "knight".to_string(),
             sex: Sex::Male,
             alignment: Alignment::Neutral,
-            base_stats: BaseStats::default(),
-            hp_base: Some(12),
-            hp_current: None,
+            base_stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
+            hp_override: None,
             portrait_id: "character_046".to_string(),
             starting_gold: 50,
             starting_gems: 0,

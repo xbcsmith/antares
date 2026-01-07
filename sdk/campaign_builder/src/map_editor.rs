@@ -1059,7 +1059,7 @@ pub struct EventEditorState {
     // Recruitable Character fields
     pub recruit_character_id: String,
     // Inn fields
-    pub inn_id_input_buffer: String,
+    pub innkeeper_id_input_buffer: String,
 
     // Autocomplete input buffers
     pub trap_effect_input_buffer: String,
@@ -1090,7 +1090,7 @@ impl Default for EventEditorState {
             sign_text: String::new(),
             npc_id: String::new(),
             recruit_character_id: String::new(),
-            inn_id_input_buffer: String::new(),
+            innkeeper_id_input_buffer: String::new(),
             trap_effect_input_buffer: String::new(),
             teleport_map_input_buffer: String::new(),
             npc_id_input_buffer: String::new(),
@@ -1295,15 +1295,14 @@ impl EventEditorState {
                 })
             }
             EventType::EnterInn => {
-                let inn_id = self
-                    .inn_id_input_buffer
-                    .trim()
-                    .parse::<u8>()
-                    .map_err(|_| "Invalid Inn ID")?;
+                let innkeeper_id = self.innkeeper_id_input_buffer.trim().to_string();
+                if innkeeper_id.is_empty() {
+                    return Err("Innkeeper ID cannot be empty".to_string());
+                }
                 Ok(MapEvent::EnterInn {
                     name: self.name.clone(),
                     description: self.description.clone(),
-                    inn_id,
+                    innkeeper_id,
                 })
             }
         }
@@ -1420,12 +1419,12 @@ impl EventEditorState {
             MapEvent::EnterInn {
                 name,
                 description,
-                inn_id,
+                innkeeper_id,
             } => {
                 s.event_type = EventType::EnterInn;
                 s.name = name.clone();
                 s.description = description.clone();
-                s.inn_id_input_buffer = inn_id.to_string();
+                s.innkeeper_id_input_buffer = innkeeper_id.clone();
             }
         }
         s
@@ -2927,8 +2926,10 @@ impl MapsEditorState {
                         } => {
                             ui.label(format!("Recruitable: {} ({})", character_id, name));
                         }
-                        MapEvent::EnterInn { inn_id, name, .. } => {
-                            ui.label(format!("Inn Entry: {} ({})", inn_id, name));
+                        MapEvent::EnterInn {
+                            innkeeper_id, name, ..
+                        } => {
+                            ui.label(format!("Inn Entry: {} ({})", innkeeper_id, name));
                         }
                     }
 
@@ -3347,9 +3348,9 @@ impl MapsEditorState {
                 }
                 EventType::EnterInn => {
                     ui.horizontal(|ui| {
-                        ui.label("Inn ID:");
+                        ui.label("Innkeeper ID:");
                         if ui
-                            .text_edit_singleline(&mut event_editor.inn_id_input_buffer)
+                            .text_edit_singleline(&mut event_editor.innkeeper_id_input_buffer)
                             .changed()
                         {
                             editor.has_changes = true;
@@ -4288,20 +4289,19 @@ mod tests {
             event_type: EventType::EnterInn,
             name: "Cozy Inn Entrance".to_string(),
             description: "A welcoming inn".to_string(),
-            inn_id_input_buffer: "3".to_string(),
+            innkeeper_id_input_buffer: "cozy_inn_mary".to_string(),
             ..Default::default()
         };
-
         let event = editor.to_map_event().unwrap();
         match event {
             MapEvent::EnterInn {
                 name,
                 description,
-                inn_id,
+                innkeeper_id,
             } => {
                 assert_eq!(name, "Cozy Inn Entrance".to_string());
                 assert_eq!(description, "A welcoming inn".to_string());
-                assert_eq!(inn_id, 3u8);
+                assert_eq!(innkeeper_id, "cozy_inn_mary".to_string());
             }
             _ => panic!("Expected EnterInn event"),
         }
@@ -4312,13 +4312,13 @@ mod tests {
         let event = MapEvent::EnterInn {
             name: "Cozy Inn Entrance".to_string(),
             description: "A welcoming inn".to_string(),
-            inn_id: 3u8,
+            innkeeper_id: "cozy_inn_mary".to_string(),
         };
 
         let state = EventEditorState::from_map_event(Position::new(0, 0), &event);
         assert_eq!(state.event_type, EventType::EnterInn);
         assert_eq!(state.name, "Cozy Inn Entrance".to_string());
-        assert_eq!(state.inn_id_input_buffer, "3".to_string());
+        assert_eq!(state.innkeeper_id_input_buffer, "cozy_inn_mary".to_string());
     }
 
     #[test]

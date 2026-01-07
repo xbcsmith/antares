@@ -189,6 +189,8 @@ Define sprite sheet configurations in a registry file with entries for:
 - `terrain` - 8x8 grid, 128x128 pixels (floor tiles)
 - `trees` - 4x4 grid, 128x256 pixels (vegetation)
 - `decorations` - 8x8 grid, 64x64 pixels (small objects)
+- `signs` - 4x2 grid, 64x128 pixels (wooden signs, stone markers, warning signs, info signs)
+- `portals` - 4x2 grid, 128x128 pixels (teleport pads, dimensional gates, stairs up/down)
 
 #### 2.4 Add Sprite Registry Data Structure
 

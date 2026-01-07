@@ -345,7 +345,7 @@ Antares is a **turn-based RPG** inspired by Might and Magic 1. Understanding the
 
 The architecture defines specific type aliases (Section 4.6):
 
-- `ItemId`, `SpellId`, `MonsterId`, `MapId`, `CharacterId`, `TownId`, `EventId`
+- `ItemId`, `SpellId`, `MonsterId`, `MapId`, `CharacterId`, `InnkeeperId`, `EventId`
 
 **ALWAYS** use these instead of raw `u32` or `usize`. This isn't optional.
 
@@ -422,7 +422,6 @@ Architecture defines many constants:
        // Implementation
    }
    ````
-
 
 2. **Write Tests (MANDATORY)**
 

@@ -265,6 +265,20 @@ impl ErrorFormatter {
                 ]
             }
 
+            ValidationError::InvalidStartingInnkeeper {
+                innkeeper_id,
+                reason,
+            } => {
+                vec![
+                    format!("Ensure NPC '{}' exists in data/npcs.ron", innkeeper_id),
+                    format!(
+                        "If NPC exists, set `is_innkeeper: true` on the NPC definition ({})",
+                        reason
+                    ),
+                    "Use 'npc_editor' to edit NPC definitions".to_string(),
+                ]
+            }
+
             ValidationError::DisconnectedMap { map_id } => {
                 vec![
                     format!("Add a connection to map {map_id} from another map"),

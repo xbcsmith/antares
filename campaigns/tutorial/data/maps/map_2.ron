@@ -7608,16 +7608,12 @@
     ],
     events: {
         (
-            x: 2,
-            y: 2,
-        ): Encounter(
-            name: "Kobold Ambush",
-            description: "A group of kobolds jump out to attack!",
-            monster_group: [
-                2,
-                2,
-                2,
-            ],
+            x: 9,
+            y: 7,
+        ): Sign(
+            name: "Cave Entrance Sign",
+            description: "Sign marking the entrance to the Cave of Arcturus.",
+            text: "The Cave of Arcturus!",
         ),
         (
             x: 12,
@@ -7626,14 +7622,6 @@
             name: "Old Gareth",
             description: "A grizzled dwarf warrior resting near the cave wall. He looks experienced but weary, his armor showing signs of many battles.",
             character_id: "old_gareth",
-        ),
-        (
-            x: 9,
-            y: 7,
-        ): Sign(
-            name: "Cave Entrance Sign",
-            description: "Sign marking the entrance to the Cave of Arcturus.",
-            text: "The Cave of Arcturus!",
         ),
         (
             x: 19,
@@ -7646,6 +7634,18 @@
                 y: 10,
             ),
             map_id: 4,
+        ),
+        (
+            x: 2,
+            y: 2,
+        ): Encounter(
+            name: "Kobold Ambush",
+            description: "A group of kobolds jump out to attack!",
+            monster_group: [
+                2,
+                2,
+                2,
+            ],
         ),
     },
     npc_placements: [

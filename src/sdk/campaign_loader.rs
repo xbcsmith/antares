@@ -38,6 +38,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+// Duplicate tests removed — tests are defined in the bottom `mod tests` section of this file.
+
 // ===== Error Types =====
 
 /// Errors that can occur when working with campaigns
@@ -149,12 +151,12 @@ pub struct CampaignConfig {
     /// Starting food units
     pub starting_food: u32,
 
-    /// Default inn where non-party premade characters start (default: 1)
+    /// Default innkeeper where non-party premade characters start (ID string)
     ///
     /// When a new game is started, premade characters that don't have
-    /// `starts_in_party: true` will be placed at this inn location.
-    #[serde(default = "default_starting_inn")]
-    pub starting_inn: u8,
+    /// `starts_in_party: true` will be placed at this innkeeper's inn.
+    #[serde(default = "default_starting_innkeeper")]
+    pub starting_innkeeper: String,
 
     /// Maximum party size (default: 6)
     #[serde(default = "default_max_party_size")]
@@ -185,8 +187,8 @@ pub struct CampaignConfig {
     pub max_level: u8,
 }
 
-fn default_starting_inn() -> u8 {
-    1
+fn default_starting_innkeeper() -> String {
+    "tutorial_innkeeper_town".to_string()
 }
 
 fn default_max_party_size() -> usize {
@@ -424,8 +426,8 @@ pub struct CampaignMetadata {
     pub starting_direction: String,
     pub starting_gold: u32,
     pub starting_food: u32,
-    #[serde(default = "default_starting_inn")]
-    pub starting_inn: u8,
+    #[serde(default = "default_starting_innkeeper")]
+    pub starting_innkeeper: String,
     pub max_party_size: usize,
     pub max_roster_size: usize,
     pub difficulty: Difficulty,
@@ -486,7 +488,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 starting_direction,
                 starting_gold: metadata.starting_gold,
                 starting_food: metadata.starting_food,
-                starting_inn: metadata.starting_inn,
+                starting_innkeeper: metadata.starting_innkeeper.clone(),
                 max_party_size: metadata.max_party_size,
                 max_roster_size: metadata.max_roster_size,
                 difficulty: metadata.difficulty,
@@ -653,6 +655,17 @@ impl CampaignLoader {
                 if stats.map_count == 0 {
                     errors.push("No maps defined - campaign cannot be played".to_string());
                 }
+
+                // Run SDK validator to perform deeper content checks (e.g., starting innkeeper)
+                let validator = crate::sdk::validation::Validator::new(&db);
+                let config_errors = validator.validate_campaign_config(&campaign.config);
+                for ve in config_errors {
+                    if ve.is_error() {
+                        errors.push(ve.to_string());
+                    } else {
+                        warnings.push(ve.to_string());
+                    }
+                }
             }
             Err(e) => {
                 errors.push(format!("Failed to load content: {}", e));
@@ -734,7 +747,7 @@ mod tests {
             starting_direction: Direction::North,
             starting_gold: 100,
             starting_food: 50,
-            starting_inn: default_starting_inn(),
+            starting_innkeeper: default_starting_innkeeper(),
             max_party_size: default_max_party_size(),
             max_roster_size: default_max_roster_size(),
             difficulty: Difficulty::default(),
@@ -800,5 +813,47 @@ mod tests {
         assert!(!report.has_errors());
         assert!(!report.has_warnings());
         assert_eq!(report.issue_count(), 0);
+    }
+
+    #[test]
+    fn test_tutorial_campaign_has_starting_innkeeper() {
+        let loader = CampaignLoader::new("campaigns");
+        let campaign = loader
+            .load_campaign("tutorial")
+            .expect("Failed to load tutorial campaign");
+
+        assert_eq!(
+            campaign.config.starting_innkeeper,
+            "tutorial_innkeeper_town".to_string()
+        );
+    }
+
+    #[test]
+    fn test_validate_tutorial_campaign_is_valid() {
+        let loader = CampaignLoader::new("campaigns");
+        let report = loader
+            .validate_campaign("tutorial")
+            .expect("validate_campaign failed");
+
+        // The tutorial campaign should be fully valid (no errors or warnings).
+        // Previously this test only asserted there were no innkeeper-related errors
+        // because the tutorial lacked a README. A README has been added and the
+        // tutorial campaign should now validate cleanly end-to-end.
+        assert!(
+            report.is_valid,
+            "Expected campaign to be valid; errors: {:?}, warnings: {:?}",
+            report.errors, report.warnings
+        );
+        assert!(
+            !report.has_warnings(),
+            "Expected no warnings, got: {:?}",
+            report.warnings
+        );
+        assert_eq!(
+            report.issue_count(),
+            0,
+            "Expected no issues, got {} issues",
+            report.issue_count()
+        );
     }
 }

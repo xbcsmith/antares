@@ -18,16 +18,17 @@
 //! ```no_run
 //! use campaign_builder::test_utils::{
 //!     scan_source_files,
-//!     find_pattern_matches,
 //!     PatternMatcher,
+//!     collect_combobox_id_salts,
 //! };
 //!
-//! // Scan for ComboBox usage
+//! // Scan for ComboBox usage and collect ID salts
 //! let matcher = PatternMatcher::combobox_id_salt();
 //! let files = scan_source_files("src/");
 //! for file in files {
 //!     let matches = matcher.find_matches(&file.content);
-//!     // Process matches...
+//!     let salts = collect_combobox_id_salts(&file);
+//!     // Process matches and salts...
 //! }
 //! ```
 

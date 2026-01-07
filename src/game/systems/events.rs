@@ -157,7 +157,7 @@ fn handle_events(
             MapEvent::EnterInn {
                 name,
                 description,
-                inn_id,
+                innkeeper_id,
             } => {
                 let msg = format!("{} - {}", name, description);
                 println!("{}", msg);
@@ -168,12 +168,12 @@ fn handle_events(
                 // Transition GameMode to InnManagement
                 use crate::application::{GameMode, InnManagementState};
                 global_state.0.mode = GameMode::InnManagement(InnManagementState {
-                    current_inn_id: *inn_id,
+                    current_inn_id: innkeeper_id.clone(),
                     selected_party_slot: None,
                     selected_roster_slot: None,
                 });
 
-                let inn_msg = format!("Entering inn (ID: {})", inn_id);
+                let inn_msg = format!("Entering inn (ID: {})", innkeeper_id);
                 println!("{}", inn_msg);
                 if let Some(ref mut log) = game_log {
                     log.add(inn_msg);
@@ -507,7 +507,7 @@ mod tests {
             MapEvent::EnterInn {
                 name: "Cozy Inn Entrance".to_string(),
                 description: "A welcoming inn".to_string(),
-                inn_id: 1,
+                innkeeper_id: "cozy_inn".to_string(),
             },
         );
 
@@ -532,7 +532,11 @@ mod tests {
         let global_state = app.world().resource::<GlobalState>();
         match &global_state.0.mode {
             GameMode::InnManagement(state) => {
-                assert_eq!(state.current_inn_id, 1, "Expected inn_id to be 1");
+                assert_eq!(
+                    state.current_inn_id,
+                    "cozy_inn".to_string(),
+                    "Expected innkeeper id to be 'cozy_inn'"
+                );
                 assert_eq!(
                     state.selected_party_slot, None,
                     "Expected no selected party slot initially"
@@ -549,7 +553,9 @@ mod tests {
         let game_log = app.world().resource::<GameLog>();
         let entries = game_log.entries();
         assert!(
-            entries.iter().any(|e| e.contains("Entering inn (ID: 1)")),
+            entries
+                .iter()
+                .any(|e| e.contains("Entering inn (ID: cozy_inn)")),
             "Expected inn entry message in game log. Actual entries: {:?}",
             entries
         );
@@ -573,7 +579,7 @@ mod tests {
             MapEvent::EnterInn {
                 name: "Dragon's Rest Inn".to_string(),
                 description: "An upscale inn".to_string(),
-                inn_id: 5,
+                innkeeper_id: "tutorial_innkeeper_town2".to_string(),
             },
         );
 
@@ -596,7 +602,11 @@ mod tests {
         let global_state = app.world().resource::<GlobalState>();
         match &global_state.0.mode {
             GameMode::InnManagement(state) => {
-                assert_eq!(state.current_inn_id, 5, "Expected inn_id to be 5");
+                assert_eq!(
+                    state.current_inn_id,
+                    "tutorial_innkeeper_town2".to_string(),
+                    "Expected innkeeper id to be 'tutorial_innkeeper_town2'"
+                );
             }
             other_mode => panic!("Expected GameMode::InnManagement, but got {:?}", other_mode),
         }

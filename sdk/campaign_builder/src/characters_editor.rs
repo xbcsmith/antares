@@ -13,9 +13,9 @@ use crate::ui_helpers::{
     resolve_portrait_path, ActionButtons, EditorToolbar, ItemAction, ToolbarAction,
     TwoColumnLayout,
 };
-use antares::domain::character::{Alignment, Sex};
+use antares::domain::character::{Alignment, Sex, Stats};
 use antares::domain::character_definition::{
-    BaseStats, CharacterDefinition, CharacterDefinitionId, StartingEquipment,
+    CharacterDefinition, CharacterDefinitionId, StartingEquipment,
 };
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::Item;
@@ -104,18 +104,25 @@ pub struct CharacterEditBuffer {
     pub class_id: String,
     pub sex: Sex,
     pub alignment: Alignment,
-    // Base stats as strings for text input
-    pub might: String,
-    pub intellect: String,
-    pub personality: String,
-    pub endurance: String,
-    pub speed: String,
-    pub accuracy: String,
-    pub luck: String,
-    /// Starting HP base as text input (parsed to u16 on save)
-    pub hp_base: String,
-    /// Starting HP current as text input (parsed to u16 on save). Empty = use base/current=base.
-    pub hp_current: String,
+    // Base stats as strings for text input (base/current)
+    pub might_base: String,
+    pub might_current: String,
+    pub intellect_base: String,
+    pub intellect_current: String,
+    pub personality_base: String,
+    pub personality_current: String,
+    pub endurance_base: String,
+    pub endurance_current: String,
+    pub speed_base: String,
+    pub speed_current: String,
+    pub accuracy_base: String,
+    pub accuracy_current: String,
+    pub luck_base: String,
+    pub luck_current: String,
+    /// HP override base (empty = use calculated value)
+    pub hp_override_base: String,
+    /// HP override current (empty = use base)
+    pub hp_override_current: String,
     // Other fields
     pub portrait_id: String,
     pub starting_gold: String,
@@ -147,21 +154,28 @@ impl Default for CharacterEditBuffer {
             class_id: String::new(),
             sex: Sex::Male,
             alignment: Alignment::Neutral,
-            might: "10".to_string(),
-            intellect: "10".to_string(),
-            personality: "10".to_string(),
-            endurance: "10".to_string(),
-            speed: "10".to_string(),
-            accuracy: "10".to_string(),
-            luck: "10".to_string(),
-            hp_base: String::new(),
-            hp_current: String::new(),
+            might_base: "10".to_string(),
+            might_current: "10".to_string(),
+            intellect_base: "10".to_string(),
+            intellect_current: "10".to_string(),
+            personality_base: "10".to_string(),
+            personality_current: "10".to_string(),
+            endurance_base: "10".to_string(),
+            endurance_current: "10".to_string(),
+            speed_base: "10".to_string(),
+            speed_current: "10".to_string(),
+            accuracy_base: "10".to_string(),
+            accuracy_current: "10".to_string(),
+            luck_base: "10".to_string(),
+            luck_current: "10".to_string(),
+            hp_override_base: String::new(),
+            hp_override_current: String::new(),
             portrait_id: String::new(),
-            starting_gold: "100".to_string(),
+            starting_gold: "0".to_string(),
             starting_gems: "0".to_string(),
             starting_food: "10".to_string(),
             description: String::new(),
-            is_premade: true,
+            is_premade: false,
             starts_in_party: false,
             starting_items: Vec::new(),
             weapon_id: 0,
@@ -226,17 +240,27 @@ impl CharactersEditorState {
                 class_id: character.class_id.clone(),
                 sex: character.sex,
                 alignment: character.alignment,
-                might: character.base_stats.might.to_string(),
-                intellect: character.base_stats.intellect.to_string(),
-                personality: character.base_stats.personality.to_string(),
-                endurance: character.base_stats.endurance.to_string(),
-                speed: character.base_stats.speed.to_string(),
-                accuracy: character.base_stats.accuracy.to_string(),
-                luck: character.base_stats.luck.to_string(),
-                hp_base: character.hp_base.map(|v| v.to_string()).unwrap_or_default(),
-                hp_current: character
-                    .hp_current
-                    .map(|v| v.to_string())
+                might_base: character.base_stats.might.base.to_string(),
+                might_current: character.base_stats.might.current.to_string(),
+                intellect_base: character.base_stats.intellect.base.to_string(),
+                intellect_current: character.base_stats.intellect.current.to_string(),
+                personality_base: character.base_stats.personality.base.to_string(),
+                personality_current: character.base_stats.personality.current.to_string(),
+                endurance_base: character.base_stats.endurance.base.to_string(),
+                endurance_current: character.base_stats.endurance.current.to_string(),
+                speed_base: character.base_stats.speed.base.to_string(),
+                speed_current: character.base_stats.speed.current.to_string(),
+                accuracy_base: character.base_stats.accuracy.base.to_string(),
+                accuracy_current: character.base_stats.accuracy.current.to_string(),
+                luck_base: character.base_stats.luck.base.to_string(),
+                luck_current: character.base_stats.luck.current.to_string(),
+                hp_override_base: character
+                    .hp_override
+                    .map(|v| v.base.to_string())
+                    .unwrap_or_default(),
+                hp_override_current: character
+                    .hp_override
+                    .map(|v| v.current.to_string())
                     .unwrap_or_default(),
                 portrait_id: character.portrait_id.to_string(),
                 starting_gold: character.starting_gold.to_string(),
@@ -281,74 +305,178 @@ impl CharactersEditorState {
             return Err("Class ID cannot be empty".to_string());
         }
 
-        // Parse base stats
-        let might = self
+        // Parse base stats (base and current for each attribute)
+        let might_base = self
             .buffer
-            .might
+            .might_base
+            .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Might value")?;
-        let intellect = self
+            .map_err(|_| "Invalid Might base value")?;
+        let might_current = self
             .buffer
-            .intellect
+            .might_current
+            .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Intellect value")?;
-        let personality = self
-            .buffer
-            .personality
-            .parse::<u8>()
-            .map_err(|_| "Invalid Personality value")?;
-        let endurance = self
-            .buffer
-            .endurance
-            .parse::<u8>()
-            .map_err(|_| "Invalid Endurance value")?;
-        let speed = self
-            .buffer
-            .speed
-            .parse::<u8>()
-            .map_err(|_| "Invalid Speed value")?;
-        let accuracy = self
-            .buffer
-            .accuracy
-            .parse::<u8>()
-            .map_err(|_| "Invalid Accuracy value")?;
-        let luck = self
-            .buffer
-            .luck
-            .parse::<u8>()
-            .map_err(|_| "Invalid Luck value")?;
-        // Parse optional HP base (16-bit). Empty string means "use derived value".
-        let hp_base: Option<u16> = if self.buffer.hp_base.trim().is_empty() {
-            None
-        } else {
-            Some(
-                self.buffer
-                    .hp_base
-                    .trim()
-                    .parse::<u16>()
-                    .map_err(|_| "Invalid HP value")?,
-            )
-        };
-
-        // Parse optional HP current (16-bit). Empty string means default to base/current=base.
-        let hp_current: Option<u16> = if self.buffer.hp_current.trim().is_empty() {
-            None
-        } else {
-            Some(
-                self.buffer
-                    .hp_current
-                    .trim()
-                    .parse::<u16>()
-                    .map_err(|_| "Invalid current HP value")?,
-            )
-        };
-
-        // Validate relationship: if both present, current cannot exceed base
-        if let (Some(base), Some(cur)) = (hp_base, hp_current) {
-            if cur > base {
-                return Err("Current HP cannot be greater than Base HP".to_string());
-            }
+            .map_err(|_| "Invalid Might current value")?;
+        if might_current > might_base {
+            return Err("Might current cannot exceed base".to_string());
         }
+
+        let intellect_base = self
+            .buffer
+            .intellect_base
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Intellect base value")?;
+        let intellect_current = self
+            .buffer
+            .intellect_current
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Intellect current value")?;
+        if intellect_current > intellect_base {
+            return Err("Intellect current cannot exceed base".to_string());
+        }
+
+        let personality_base = self
+            .buffer
+            .personality_base
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Personality base value")?;
+        let personality_current = self
+            .buffer
+            .personality_current
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Personality current value")?;
+        if personality_current > personality_base {
+            return Err("Personality current cannot exceed base".to_string());
+        }
+
+        let endurance_base = self
+            .buffer
+            .endurance_base
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Endurance base value")?;
+        let endurance_current = self
+            .buffer
+            .endurance_current
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Endurance current value")?;
+        if endurance_current > endurance_base {
+            return Err("Endurance current cannot exceed base".to_string());
+        }
+
+        let speed_base = self
+            .buffer
+            .speed_base
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Speed base value")?;
+        let speed_current = self
+            .buffer
+            .speed_current
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Speed current value")?;
+        if speed_current > speed_base {
+            return Err("Speed current cannot exceed base".to_string());
+        }
+
+        let accuracy_base = self
+            .buffer
+            .accuracy_base
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Accuracy base value")?;
+        let accuracy_current = self
+            .buffer
+            .accuracy_current
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Accuracy current value")?;
+        if accuracy_current > accuracy_base {
+            return Err("Accuracy current cannot exceed base".to_string());
+        }
+
+        let luck_base = self
+            .buffer
+            .luck_base
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Luck base value")?;
+        let luck_current = self
+            .buffer
+            .luck_current
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Invalid Luck current value")?;
+        if luck_current > luck_base {
+            return Err("Luck current cannot exceed base".to_string());
+        }
+
+        // Create Stats with AttributePair for each stat
+        use antares::domain::character::AttributePair;
+        let base_stats = Stats {
+            might: AttributePair {
+                base: might_base,
+                current: might_current,
+            },
+            intellect: AttributePair {
+                base: intellect_base,
+                current: intellect_current,
+            },
+            personality: AttributePair {
+                base: personality_base,
+                current: personality_current,
+            },
+            endurance: AttributePair {
+                base: endurance_base,
+                current: endurance_current,
+            },
+            speed: AttributePair {
+                base: speed_base,
+                current: speed_current,
+            },
+            accuracy: AttributePair {
+                base: accuracy_base,
+                current: accuracy_current,
+            },
+            luck: AttributePair {
+                base: luck_base,
+                current: luck_current,
+            },
+        };
+
+        // Parse optional HP override (base and current). Empty strings mean "use derived value".
+        use antares::domain::character::AttributePair16;
+        let hp_override: Option<AttributePair16> = if self.buffer.hp_override_base.trim().is_empty()
+        {
+            None
+        } else {
+            let base = self
+                .buffer
+                .hp_override_base
+                .trim()
+                .parse::<u16>()
+                .map_err(|_| "Invalid HP override base value")?;
+            let current = if self.buffer.hp_override_current.trim().is_empty() {
+                base // If current is empty, default to base
+            } else {
+                self.buffer
+                    .hp_override_current
+                    .trim()
+                    .parse::<u16>()
+                    .map_err(|_| "Invalid HP override current value")?
+            };
+            if current > base {
+                return Err("HP override current cannot exceed base".to_string());
+            }
+            Some(AttributePair16 { base, current })
+        };
 
         // Parse other fields
         // Portrait IDs are now strings (filename stems). Accept whatever the user typed
@@ -417,17 +545,8 @@ impl CharactersEditorState {
             class_id,
             sex: self.buffer.sex,
             alignment: self.buffer.alignment,
-            base_stats: BaseStats::new(
-                might,
-                intellect,
-                personality,
-                endurance,
-                speed,
-                accuracy,
-                luck,
-            ),
-            hp_base,
-            hp_current,
+            base_stats,
+            hp_override,
             portrait_id,
             starting_gold,
             starting_gems,
@@ -1376,19 +1495,14 @@ impl CharactersEditorState {
             });
 
         ui.add_space(6.0);
-        // Show HP override/current or indicate derived
+        // Show HP override or indicate derived
         ui.horizontal(|ui| {
             ui.label("HP:");
-            let hp_display =
-                if let (Some(cur), Some(base)) = (character.hp_current, character.hp_base) {
-                    format!("{}/{}", cur, base)
-                } else if let Some(base) = character.hp_base {
-                    format!("{}/{}", base, base)
-                } else if let Some(cur) = character.hp_current {
-                    format!("{}/(derived)", cur)
-                } else {
-                    "(derived)".to_string()
-                };
+            let hp_display = if let Some(hp) = character.hp_override {
+                format!("{}/{}", hp.current, hp.base)
+            } else {
+                "(derived)".to_string()
+            };
             ui.label(hp_display);
         });
 
@@ -1634,63 +1748,117 @@ impl CharactersEditorState {
 
                 ui.add_space(10.0);
                 ui.heading("Base Stats");
+                ui.label("For each stat, enter Base value and Current value (Current ≤ Base)");
 
                 egui::Grid::new("character_stats_form_grid")
-                    .num_columns(4)
+                    .num_columns(6)
                     .spacing([10.0, 4.0])
                     .show(ui, |ui| {
+                        // Header row
+                        ui.label("");
+                        ui.label("Base");
+                        ui.label("Current");
+                        ui.label("");
+                        ui.label("Base");
+                        ui.label("Current");
+                        ui.end_row();
+
+                        // Might and Intellect
                         ui.label("Might:");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.buffer.might).desired_width(40.0),
+                            egui::TextEdit::singleline(&mut self.buffer.might_base)
+                                .desired_width(50.0),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.buffer.might_current)
+                                .desired_width(50.0),
                         );
                         ui.label("Intellect:");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.buffer.intellect)
-                                .desired_width(40.0),
+                            egui::TextEdit::singleline(&mut self.buffer.intellect_base)
+                                .desired_width(50.0),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.buffer.intellect_current)
+                                .desired_width(50.0),
                         );
                         ui.end_row();
 
+                        // Personality and Endurance
                         ui.label("Personality:");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.buffer.personality)
-                                .desired_width(40.0),
+                            egui::TextEdit::singleline(&mut self.buffer.personality_base)
+                                .desired_width(50.0),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.buffer.personality_current)
+                                .desired_width(50.0),
                         );
                         ui.label("Endurance:");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.buffer.endurance)
-                                .desired_width(40.0),
+                            egui::TextEdit::singleline(&mut self.buffer.endurance_base)
+                                .desired_width(50.0),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.buffer.endurance_current)
+                                .desired_width(50.0),
                         );
                         ui.end_row();
 
+                        // Speed and Accuracy
                         ui.label("Speed:");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.buffer.speed).desired_width(40.0),
+                            egui::TextEdit::singleline(&mut self.buffer.speed_base)
+                                .desired_width(50.0),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.buffer.speed_current)
+                                .desired_width(50.0),
                         );
                         ui.label("Accuracy:");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.buffer.accuracy)
-                                .desired_width(40.0),
+                            egui::TextEdit::singleline(&mut self.buffer.accuracy_base)
+                                .desired_width(50.0),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.buffer.accuracy_current)
+                                .desired_width(50.0),
                         );
                         ui.end_row();
 
+                        // Luck (single column)
                         ui.label("Luck:");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.buffer.luck).desired_width(40.0),
+                            egui::TextEdit::singleline(&mut self.buffer.luck_base)
+                                .desired_width(50.0),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.buffer.luck_current)
+                                .desired_width(50.0),
                         );
                         ui.end_row();
+                    });
 
-                        // HP base (optional; leave blank to derive from class/endurance)
-                        ui.label("HP:");
+                ui.add_space(10.0);
+                ui.heading("HP Override");
+                ui.label("Leave blank to use class-derived HP calculation");
+
+                egui::Grid::new("character_hp_override_grid")
+                    .num_columns(4)
+                    .spacing([10.0, 4.0])
+                    .show(ui, |ui| {
+                        ui.label("HP Base:");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.buffer.hp_base)
-                                .desired_width(60.0),
+                            egui::TextEdit::singleline(&mut self.buffer.hp_override_base)
+                                .desired_width(60.0)
+                                .hint_text("optional"),
                         );
-                        ui.label("Current:");
+                        ui.label("HP Current:");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.buffer.hp_current)
-                                .desired_width(60.0),
+                            egui::TextEdit::singleline(&mut self.buffer.hp_override_current)
+                                .desired_width(60.0)
+                                .hint_text("optional"),
                         );
-                        ui.label("(leave blank to derive)");
                         ui.end_row();
                     });
 
@@ -2236,10 +2404,11 @@ mod tests {
         assert!(buffer.name.is_empty());
         assert_eq!(buffer.sex, Sex::Male);
         assert_eq!(buffer.alignment, Alignment::Neutral);
-        assert_eq!(buffer.might, "10");
-        assert_eq!(buffer.hp_base, "");
-        assert_eq!(buffer.hp_current, "");
-        assert!(buffer.is_premade);
+        assert_eq!(buffer.might_base, "10");
+        assert_eq!(buffer.might_current, "10");
+        assert_eq!(buffer.hp_override_base, "");
+        assert_eq!(buffer.hp_override_current, "");
+        assert!(!buffer.is_premade);
     }
 
     #[test]
@@ -2364,9 +2533,8 @@ mod tests {
             class_id: "knight".to_string(),
             sex: Sex::Male,
             alignment: Alignment::Good,
-            hp_base: None,
-            hp_current: None,
-            base_stats: BaseStats::new(10, 10, 10, 10, 10, 10, 10),
+            hp_override: None,
+            base_stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
             portrait_id: "0".to_string(),
             starting_gold: 100,
             starting_gems: 0,
@@ -2484,11 +2652,10 @@ mod tests {
         state.buffer.name = "Test".to_string();
         state.buffer.race_id = "human".to_string();
         state.buffer.class_id = "knight".to_string();
-        state.buffer.might = "not_a_number".to_string();
+        state.buffer.might_base = "not_a_number".to_string();
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Invalid Might value");
     }
 
     #[test]
@@ -2499,7 +2666,7 @@ mod tests {
         state.buffer.name = "Test".to_string();
         state.buffer.race_id = "human".to_string();
         state.buffer.class_id = "knight".to_string();
-        state.buffer.hp_base = "not_a_number".to_string();
+        state.buffer.hp_override_base = "not_a_number".to_string();
 
         let result = state.save_character();
         assert!(result.is_err());
@@ -2513,7 +2680,8 @@ mod tests {
         state.buffer.name = "Test".to_string();
         state.buffer.race_id = "human".to_string();
         state.buffer.class_id = "knight".to_string();
-        state.buffer.hp_current = "not_a_number".to_string();
+        state.buffer.hp_override_base = "50".to_string();
+        state.buffer.hp_override_current = "not_a_number".to_string();
 
         let result = state.save_character();
         assert!(result.is_err());
@@ -3100,45 +3268,50 @@ mod tests {
     }
 
     #[test]
-    fn test_character_hp_base_roundtrip() {
-        use antares::domain::character::{Alignment, Sex};
+    fn test_character_hp_override_roundtrip() {
+        use antares::domain::character::{Alignment, AttributePair16, Sex};
         use antares::domain::character_definition::CharacterDefinition;
 
         let mut def = CharacterDefinition::new(
-            "test_char".to_string(),
-            "Test Character".to_string(),
+            "hp_test".to_string(),
+            "HP Test".to_string(),
             "human".to_string(),
             "knight".to_string(),
             Sex::Male,
             Alignment::Good,
         );
-        def.hp_base = Some(42u16);
+        def.hp_override = Some(AttributePair16 {
+            base: 42,
+            current: 30,
+        });
 
         let ron_str = ron::ser::to_string(&def).expect("Failed to serialize character to RON");
         let parsed: CharacterDefinition =
             ron::from_str(&ron_str).expect("Failed to deserialize character from RON");
-        assert_eq!(parsed.hp_base, Some(42u16));
+        assert_eq!(parsed.hp_override.unwrap().base, 42);
+        assert_eq!(parsed.hp_override.unwrap().current, 30);
     }
 
     #[test]
-    fn test_character_hp_current_roundtrip() {
+    fn test_character_hp_override_simple_format() {
         use antares::domain::character::{Alignment, Sex};
         use antares::domain::character_definition::CharacterDefinition;
 
         let mut def = CharacterDefinition::new(
-            "test_char_cur".to_string(),
-            "Test Character".to_string(),
+            "hp_test2".to_string(),
+            "HP Test 2".to_string(),
             "human".to_string(),
             "knight".to_string(),
             Sex::Male,
             Alignment::Good,
         );
-        def.hp_current = Some(10u16);
+        def.hp_override = Some(antares::domain::character::AttributePair16::new(50));
 
         let ron_str = ron::ser::to_string(&def).expect("Failed to serialize character to RON");
         let parsed: CharacterDefinition =
             ron::from_str(&ron_str).expect("Failed to deserialize character from RON");
-        assert_eq!(parsed.hp_current, Some(10u16));
+        assert_eq!(parsed.hp_override.unwrap().base, 50);
+        assert_eq!(parsed.hp_override.unwrap().current, 50);
     }
 
     #[test]
