@@ -15,6 +15,12 @@ type MeshDimensions = (OrderedFloat<f32>, OrderedFloat<f32>, OrderedFloat<f32>);
 /// Type alias for the mesh cache HashMap
 type MeshCache = HashMap<MeshDimensions, Handle<Mesh>>;
 
+// Event marker colors (RGB)
+const SIGN_MARKER_COLOR: Color = Color::srgb(0.59, 0.44, 0.27); // Brown/tan #967046
+const TELEPORT_MARKER_COLOR: Color = Color::srgb(0.53, 0.29, 0.87); // Purple #8749DE
+const EVENT_MARKER_SIZE: f32 = 0.8; // 80% of tile size
+const EVENT_MARKER_Y_OFFSET: f32 = 0.05; // 5cm above ground to prevent z-fighting
+
 /// Plugin that renders the current map using Bevy meshes/materials.
 ///
 /// Note: The visual rendering plugin remains focused on rendering. The map
@@ -792,6 +798,48 @@ fn spawn_map(
             ));
         }
 
+        // Spawn event markers for signs and teleports
+        for (position, event) in map.events.iter() {
+            let marker_color = match event {
+                world::MapEvent::Sign { .. } => SIGN_MARKER_COLOR,
+                world::MapEvent::Teleport { .. } => TELEPORT_MARKER_COLOR,
+                _ => continue, // Only show markers for signs and teleports
+            };
+
+            let marker_name = match event {
+                world::MapEvent::Sign { name, .. } => format!("SignMarker_{}", name),
+                world::MapEvent::Teleport { name, .. } => format!("TeleportMarker_{}", name),
+                _ => continue,
+            };
+
+            // Calculate world position
+            let world_x = position.x as f32;
+            let world_z = position.y as f32;
+
+            let marker_mesh = meshes.add(
+                Plane3d::default()
+                    .mesh()
+                    .size(EVENT_MARKER_SIZE, EVENT_MARKER_SIZE),
+            );
+            let marker_material = materials.add(StandardMaterial {
+                base_color: marker_color,
+                emissive: LinearRgba::from(marker_color) * 0.3, // Slight glow effect
+                unlit: false,
+                ..default()
+            });
+
+            commands.spawn((
+                Mesh3d(marker_mesh),
+                MeshMaterial3d(marker_material),
+                Transform::from_xyz(world_x, EVENT_MARKER_Y_OFFSET, world_z),
+                GlobalTransform::default(),
+                Visibility::default(),
+                MapEntity(map.id),
+                TileCoord(*position),
+                Name::new(marker_name),
+            ));
+        }
+
         debug!(
             "Map spawning complete with {} tiles and {} NPCs",
             map.width * map.height,
@@ -820,5 +868,37 @@ mod tests {
     fn test_should_not_skip_when_last_map_some() {
         let some_map: Option<types::MapId> = Some(1u16);
         assert!(!should_skip_marker_spawn(&some_map, true));
+    }
+
+    #[test]
+    fn test_sign_marker_color() {
+        assert_eq!(SIGN_MARKER_COLOR, Color::srgb(0.59, 0.44, 0.27));
+    }
+
+    #[test]
+    fn test_teleport_marker_color() {
+        assert_eq!(TELEPORT_MARKER_COLOR, Color::srgb(0.53, 0.29, 0.87));
+    }
+
+    #[test]
+    fn test_event_marker_size_valid_range() {
+        // Verify marker size is between 0 and 1 (80% of tile)
+        let size = EVENT_MARKER_SIZE;
+        assert!(
+            size > 0.0 && size < 1.0,
+            "Marker size {} should be between 0 and 1",
+            size
+        );
+    }
+
+    #[test]
+    fn test_event_marker_y_offset_valid_range() {
+        // Verify Y offset is small enough to prevent z-fighting but visible
+        let offset = EVENT_MARKER_Y_OFFSET;
+        assert!(
+            offset > 0.0 && offset < 0.1,
+            "Y offset {} should be between 0 and 0.1",
+            offset
+        );
     }
 }

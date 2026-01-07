@@ -8,6 +8,7 @@ Add sprite-based visual rendering for tiles, enabling map authors to replace def
 
 > [!IMPORTANT]
 > Complete **Phases 1-2** of [tile_visual_metadata_implementation_plan.md](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/docs/explanation/tile_visual_metadata_implementation_plan.md) before beginning this plan. Specifically:
+>
 > - `TileVisualMetadata` struct must exist in `src/domain/world/types.rs`
 > - Rendering system in `src/game/systems/map.rs` must support per-tile visual metadata
 > - Mesh caching infrastructure must be operational
@@ -48,14 +49,14 @@ Add sprite-based visual rendering for tiles, enabling map authors to replace def
 
 **Recommendation: Use PNG sprite sheets with `TextureAtlas`**
 
-| Aspect | PNG Sprites | SVG |
-|--------|-------------|-----|
-| Bevy Support | First-class, highly optimized | Community crates only (`bevy_svg`) |
-| Performance | Pre-rasterized, GPU-ready | Requires tessellation on load |
-| Batching | Automatic sprite batching | Mesh-based, less efficient |
-| Tooling | Standard game dev workflow | Limited editor support |
-| Animation | Frame-based, TextureAtlas indexed | Complex path morphing |
-| Scalability | Fixed resolution (mipmaps help) | Infinite (at runtime cost) |
+| Aspect       | PNG Sprites                       | SVG                                |
+| ------------ | --------------------------------- | ---------------------------------- |
+| Bevy Support | First-class, highly optimized     | Community crates only (`bevy_svg`) |
+| Performance  | Pre-rasterized, GPU-ready         | Requires tessellation on load      |
+| Batching     | Automatic sprite batching         | Mesh-based, less efficient         |
+| Tooling      | Standard game dev workflow        | Limited editor support             |
+| Animation    | Frame-based, TextureAtlas indexed | Complex path morphing              |
+| Scalability  | Fixed resolution (mipmaps help)   | Infinite (at runtime cost)         |
 
 The tile visual metadata system's `scale` field handles size variation.
 Pre-render sprites at 128x128 or 128x256 pixels, use mipmaps for quality
@@ -83,6 +84,7 @@ at different distances.
 Add sprite configuration to the visual metadata struct (after tile_visual_metadata plan):
 
 - Create `SpriteReference` struct with:
+
   - `sheet_path: String` - path to sprite sheet image (relative to campaign or global assets)
   - `sprite_index: u32` - index within texture atlas grid (0-indexed)
   - `animation: Option<SpriteAnimation>` - optional animation configuration
@@ -189,8 +191,46 @@ Define sprite sheet configurations in a registry file with entries for:
 - `terrain` - 8x8 grid, 128x128 pixels (floor tiles)
 - `trees` - 4x4 grid, 128x256 pixels (vegetation)
 - `decorations` - 8x8 grid, 64x64 pixels (small objects)
-- `signs` - 4x2 grid, 64x128 pixels (wooden signs, stone markers, warning signs, info signs)
-- `portals` - 4x2 grid, 128x128 pixels (teleport pads, dimensional gates, stairs up/down)
+- `signs` - 4x2 grid, 32x64 pixels (wooden_sign, stone_marker, warning_sign, info_sign, quest_marker, shop_sign, danger_sign, direction_sign)
+- `portals` - 4x2 grid, 128x128 pixels (teleport_pad, dimensional_gate, stairs_up, stairs_down, portal_blue, portal_red, trap_door, exit_portal)
+
+Example entries for `data/sprite_sheets.ron`:
+
+```ron
+"signs": SpriteSheetConfig(
+    texture_path: "textures/sprites/signs.png",
+    tile_size: (32.0, 32.0),
+    columns: 4,
+    rows: 2,
+    sprites: [
+        (0, "wooden_sign"),
+        (1, "stone_marker"),
+        (2, "warning_sign"),
+        (3, "info_sign"),
+        (4, "quest_marker"),
+        (5, "shop_sign"),
+        (6, "danger_sign"),
+        (7, "direction_sign"),
+    ],
+),
+
+"portals": SpriteSheetConfig(
+    texture_path: "textures/sprites/portals.png",
+    tile_size: (32.0, 32.0),
+    columns: 4,
+    rows: 2,
+    sprites: [
+        (0, "teleport_pad"),
+        (1, "dimensional_gate"),
+        (2, "stairs_up"),
+        (3, "stairs_down"),
+        (4, "portal_blue"),
+        (5, "portal_red"),
+        (6, "trap_door"),
+        (7, "exit_portal"),
+    ],
+),
+```
 
 #### 2.4 Add Sprite Registry Data Structure
 
@@ -223,7 +263,7 @@ Create asset directories (sprite images will be hand-crafted later):
 - `test_sprite_assets_contains()` - `contains()` returns true after loading
 - `test_sprite_sheet_registry_load()` - registry loads from RON successfully
 - `test_sprite_sheet_registry_get()` - `get()` finds sheet by ID
-- `test_sprite_count()` - `sprite_count()` returns columns * rows
+- `test_sprite_count()` - `sprite_count()` returns columns \* rows
 
 #### 2.7 Deliverables
 
@@ -273,6 +313,7 @@ Update `spawn_map()` to:
 3. If false: call existing mesh spawning code
 
 `spawn_sprite_tile()` should:
+
 - Get texture and atlas handles from `SpriteAssets`
 - Create `Sprite3d` bundle with billboard settings (`double_sided: true`)
 - Set `pixels_per_metre: 128.0` (1 world unit = 128 pixels base)
@@ -323,7 +364,103 @@ Create `animate_tile_sprites` system:
 
 ---
 
-### Phase 4: Sprite Asset Creation Guide
+### Phase 3.X: Replace Event Placeholder Markers with Sprites
+
+**Goal:** Replace the colored quad placeholder markers for signs and teleports with sprite-based rendering.
+
+**Current State:** Phase 2 of E-Key interaction system added placeholder colored quads for visual representation:
+
+- Signs: brown/tan colored plane (RGB 0.59, 0.44, 0.27)
+- Teleports: purple colored plane (RGB 0.53, 0.29, 0.87)
+
+**Replacement Tasks:**
+
+**File:** `src/game/systems/map.rs`
+
+The placeholder marker spawning code in `spawn_map()` function should be replaced as follows:
+
+1. **Query sprite registry** for "signs" and "portals" sprite sheets
+2. **For each MapEvent (Sign/Teleport):**
+   - Determine marker type (Sign or Teleport)
+   - Query appropriate sprite sheet from registry
+   - Get event-specific metadata to select sprite index
+   - Spawn `Sprite3d` entity instead of colored quad plane
+3. **Remove colored quad spawning code** (the section spawning SIGN_MARKER_COLOR and TELEPORT_MARKER_COLOR planes)
+4. **Add sprite index selection** based on event metadata:
+   - For Signs: use event name or description to select from 0-7
+   - For Teleports: use destination map/position to select from 0-7
+   - Default to index 0 if metadata insufficient
+
+**Implementation Details:**
+
+Replace this section in `spawn_map()`:
+
+```rust
+// OLD: Spawn event markers for signs and teleports
+for (position, event) in map.events.iter() {
+    let marker_color = match event {
+        world::MapEvent::Sign { .. } => SIGN_MARKER_COLOR,
+        world::MapEvent::Teleport { .. } => TELEPORT_MARKER_COLOR,
+        _ => continue,
+    };
+    // ... colored quad spawning code ...
+}
+```
+
+With sprite-based rendering:
+
+```rust
+// NEW: Spawn sprite markers for signs and teleports
+for (position, event) in map.events.iter() {
+    let (sheet_key, sprite_index) = match event {
+        world::MapEvent::Sign { name, .. } => {
+            let idx = hash_name_to_index(name, 8); // 8 sign sprites
+            ("signs", idx)
+        },
+        world::MapEvent::Teleport { destination, .. } => {
+            let idx = hash_position_to_index(destination, 8); // 8 portal sprites
+            ("portals", idx)
+        },
+        _ => continue,
+    };
+
+    // Get sprite sheet config from registry
+    if let Some(sheet_config) = sprite_registry.get(sheet_key) {
+        // Spawn Sprite3d entity with appropriate texture atlas
+        // Position at tile coordinate with EVENT_MARKER_Y_OFFSET
+    }
+}
+```
+
+**Testing Requirements:**
+
+- `test_sign_sprites_replace_colored_quads()` - verify signs use sprite rendering
+- `test_teleport_sprites_replace_colored_quads()` - verify teleports use sprite rendering
+- `test_sprite_marker_sprite_index_selection()` - verify correct sprite selected based on event
+- `test_sprite_marker_positioning()` - verify sprite position matches colored quad position
+- `test_sprite_registry_lookup()` - verify registry correctly provides sprite sheets
+
+**Deliverables:**
+
+- [ ] Colored quad spawning code removed from `spawn_map()`
+- [ ] Sprite-based marker spawning implemented
+- [ ] Hash functions for sprite index selection created
+- [ ] Sprite registry integration added
+- [ ] All marker sprites render correctly in-game
+- [ ] Tests confirm sprite rendering replaces colored quads
+
+**Success Criteria:**
+
+- ✅ Sign events display sprite from "signs" sheet instead of brown quad
+- ✅ Teleport events display sprite from "portals" sheet instead of purple quad
+- ✅ Sprite selection uses event metadata for visual variety
+- ✅ Sprite positioning and scaling match original placeholder markers
+- ✅ Performance equivalent or better than colored quad rendering
+- ✅ No visual regression from current placeholder system
+
+---
+
+### Phase 4: Sprite Asset Creation Guide (Now Phase 5)
 
 **Goal:** Document sprite creation workflow and provide starter assets.
 
@@ -342,12 +479,12 @@ Create comprehensive guide covering:
 
 Hand-craft sprite sheets with the following specifications:
 
-| File | Grid | Sprite Size | Sheet Size | Content |
-|------|------|-------------|------------|---------|
-| `walls.png` | 4x4 | 128x256 | 512x1024 | Stone, brick, wood, damaged walls |
-| `doors.png` | 4x2 | 128x256 | 512x512 | Wooden/iron doors (open/closed) |
-| `terrain.png` | 8x8 | 128x128 | 1024x1024 | Stone, grass, dirt, water floors |
-| `trees.png` | 4x4 | 128x256 | 512x1024 | Deciduous, conifer, dead, magical |
+| File          | Grid | Sprite Size | Sheet Size | Content                           |
+| ------------- | ---- | ----------- | ---------- | --------------------------------- |
+| `walls.png`   | 4x4  | 128x256     | 512x1024   | Stone, brick, wood, damaged walls |
+| `doors.png`   | 4x2  | 128x256     | 512x512    | Wooden/iron doors (open/closed)   |
+| `terrain.png` | 8x8  | 128x128     | 1024x1024  | Stone, grass, dirt, water floors  |
+| `trees.png`   | 4x4  | 128x256     | 512x1024   | Deciduous, conifer, dead, magical |
 
 #### 4.3 Testing Requirements
 
@@ -375,7 +512,7 @@ Hand-craft sprite sheets with the following specifications:
 
 ---
 
-### Phase 5: Campaign Builder SDK Integration
+### Phase 6: Campaign Builder SDK Integration
 
 **Goal:** Add sprite selection and preview to the Campaign Builder map editor.
 
@@ -518,20 +655,20 @@ Add material overrides for sprite rendering:
 
 ### External Dependencies
 
-| Crate | Version | Purpose |
-|-------|---------|---------|
-| `bevy_sprite3d` | 3.0 | Billboard sprite rendering in 3D world |
-| `bevy` | 0.17 | Core engine (existing) |
+| Crate           | Version | Purpose                                |
+| --------------- | ------- | -------------------------------------- |
+| `bevy_sprite3d` | 3.0     | Billboard sprite rendering in 3D world |
+| `bevy`          | 0.17    | Core engine (existing)                 |
 
 ### Internal Dependencies
 
-| Component | Dependency |
-|-----------|------------|
-| Phase 1 | Tile Visual Metadata Plan (Phases 1-2 complete) |
-| Phase 2 | Phase 1 complete |
-| Phase 3 | Phase 2 complete, bevy_sprite3d added |
-| Phase 4 | Phase 3 complete |
-| Phase 5 | Phase 4 complete |
+| Component | Dependency                                      |
+| --------- | ----------------------------------------------- |
+| Phase 1   | Tile Visual Metadata Plan (Phases 1-2 complete) |
+| Phase 2   | Phase 1 complete                                |
+| Phase 3   | Phase 2 complete, bevy_sprite3d added           |
+| Phase 4   | Phase 3 complete                                |
+| Phase 5   | Phase 4 complete                                |
 
 ## Risks and Mitigations
 
