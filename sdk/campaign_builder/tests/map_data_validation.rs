@@ -182,8 +182,9 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                     MapEvent::EnterInn {
                         name,
                         description,
-                        inn_id: _,
+                        innkeeper_id,
                     } => {
+                        // Basic presence checks
                         assert!(
                             !name.trim().is_empty(),
                             "EnterInn in map {} at {:?} has empty name",
@@ -196,6 +197,70 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                             path.display(),
                             pos
                         );
+
+                        // Validate innkeeper_id: must be non-empty and must reference an NPC
+                        let inn_id = innkeeper_id.trim();
+                        assert!(
+                            !inn_id.is_empty(),
+                            "EnterInn in map {} at {:?} has empty innkeeper_id",
+                            path.display(),
+                            pos
+                        );
+
+                        // Look for an `npcs.ron` in the parent of the maps directory (e.g., campaigns/<campaign>/data/npcs.ron)
+                        let mut found_and_valid = false;
+
+                        if let Some(parent_dir) = dir.parent() {
+                            let npcs_file = parent_dir.join("npcs.ron");
+                            if npcs_file.exists() {
+                                // Parse npcs.ron and verify the referenced NPC exists and is an innkeeper
+                                let npcs_contents =
+                                    fs::read_to_string(&npcs_file).map_err(|e| {
+                                        format!(
+                                            "Failed to read npcs.ron {}: {}",
+                                            npcs_file.display(),
+                                            e
+                                        )
+                                    })?;
+
+                                let npcs: Vec<antares::domain::world::npc::NpcDefinition> =
+                                    ron::de::from_str(&npcs_contents).map_err(
+                                        |e| -> Box<dyn std::error::Error> {
+                                            Box::from(format!(
+                                                "RON parse error in {}: {}",
+                                                npcs_file.display(),
+                                                e
+                                            ))
+                                        },
+                                    )?;
+
+                                if let Some(npc) = npcs.iter().find(|n| n.id == inn_id) {
+                                    assert!(
+                                        npc.is_innkeeper,
+                                        "EnterInn in map {} at {:?} references NPC '{}' which is not an innkeeper (is_innkeeper=false)",
+                                        path.display(),
+                                        pos,
+                                        inn_id
+                                    );
+                                    found_and_valid = true;
+                                } else {
+                                    // Not found in npcs.ron; fall back to checking placements below
+                                    found_and_valid = false;
+                                }
+                            }
+                        }
+
+                        // If an npcs.ron wasn't found or didn't contain the NPC, ensure the NPC is placed on the map
+                        if !found_and_valid {
+                            let placed = map.npc_placements.iter().any(|p| p.npc_id == inn_id);
+                            assert!(
+                                placed,
+                                "EnterInn in map {} at {:?} references NPC '{}' not found in npcs.ron nor placed on map",
+                                path.display(),
+                                pos,
+                                inn_id
+                            );
+                        }
                     }
                 }
             }

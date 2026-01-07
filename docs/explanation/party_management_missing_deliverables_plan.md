@@ -66,7 +66,7 @@ This plan addresses the remaining 3 missing deliverables from the Party Manageme
 Add new event variant to `MapEvent` enum in `src/domain/world/types.rs` after line 495 (after `RecruitableCharacter`):
 
 ```rust
-/// Enter inn for party management
+/// Enter an inn for party management
 EnterInn {
     /// Event name
     #[serde(default)]
@@ -74,8 +74,8 @@ EnterInn {
     /// Event description
     #[serde(default)]
     description: String,
-    /// Inn/town identifier
-    inn_id: u8,
+    /// Innkeeper NPC identifier (NpcId string)
+    innkeeper_id: crate::domain::world::NpcId,
 },
 ```
 
@@ -88,8 +88,8 @@ Add corresponding result variant to `EventResult` enum in `src/domain/world/even
 ```rust
 /// Entered inn for party management
 EnterInn {
-    /// Inn identifier
-    inn_id: u8,
+    /// Innkeeper NPC identifier (NpcId)
+    innkeeper_id: crate::domain::world::NpcId,
 },
 ```
 

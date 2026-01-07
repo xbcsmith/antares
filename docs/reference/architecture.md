@@ -337,7 +337,24 @@ pub struct Party {
 /// Character roster (character pool)
 pub struct Roster {
     pub characters: Vec<Character>,              // Up to 18 characters total
-    pub character_locations: Vec<Option<TownId>>, // Where inactive characters are stored
+    pub character_locations: Vec<CharacterLocation>, // Where each character's location is stored (InParty, AtInn(InnkeeperId), OnMap(MapId))
+}
+
+/// Character location tracking used by roster and party management:
+///
+/// - `InParty` — Character is in the active adventuring party
+/// - `AtInn(InnkeeperId)` — Character is stored at the named innkeeper's inn (InnkeeperId is the NPC id string)
+/// - `OnMap(MapId)` — Character is placed on a specific map for recruitment encounters
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CharacterLocation {
+    /// Character is in the active party
+    InParty,
+
+    /// Character is stored at a specific innkeeper's inn
+    AtInn(InnkeeperId),
+
+    /// Character is available on a specific map (for recruitment encounters)
+    OnMap(MapId),
 }
 
 /// Party-wide active spell effects (separate from character conditions)
@@ -883,7 +900,16 @@ pub type SpellId = u16;      // High byte = school, low byte = spell number
 pub type MonsterId = u8;
 pub type MapId = u16;
 pub type CharacterId = usize;
-pub type TownId = u8;
+/// Innkeeper NPC identifier (references `NpcId` for NPCs that are marked as innkeepers)
+///
+/// Semantics:
+/// - Used for `CharacterLocation::AtInn(InnkeeperId)` to record where roster characters are stored
+/// - Referenced by map events such as `EnterInn { innkeeper_id: NpcId, ... }` to open inn management
+/// - Campaign metadata uses `starting_innkeeper: String` to indicate the default innkeeper for premade non-party characters
+///
+/// Validation:
+/// - Validators should ensure the referenced NPC exists in `npcs.ron` and has `is_innkeeper == true`
+pub type InnkeeperId = String;
 pub type EventId = u16;
 pub type CharacterDefinitionId = String;
 pub type RaceId = String;
@@ -988,32 +1014,6 @@ impl StartingEquipment {
     }
 }
 
-/// Base stats for character definitions (before race/class modifiers)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BaseStats {
-    pub might: u8,
-    pub intellect: u8,
-    pub personality: u8,
-    pub endurance: u8,
-    pub speed: u8,
-    pub accuracy: u8,
-    pub luck: u8,
-}
-
-impl Default for BaseStats {
-    fn default() -> Self {
-        Self {
-            might: 10,
-            intellect: 10,
-            personality: 10,
-            endurance: 10,
-            speed: 10,
-            accuracy: 10,
-            luck: 10,
-        }
-    }
-}
-
 /// Data-driven character template for premade characters and NPCs
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CharacterDefinition {
@@ -1023,9 +1023,20 @@ pub struct CharacterDefinition {
     pub class_id: ClassId,
     pub sex: Sex,
     pub alignment: Alignment,
-    pub base_stats: BaseStats,
+    /// Base statistics with AttributePair support (base and current values)
+    ///
+    /// Supports backward-compatible simple format (numbers) and full format
+    /// with explicit base/current pairs. See `Stats` documentation.
+    pub base_stats: Stats,
+    /// Optional HP override (base and current)
+    ///
+    /// When present, overrides calculated starting HP. Supports both
+    /// simple format (`Some(50)`) and full format with AttributePair16.
     #[serde(default)]
-    pub portrait_id: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hp_override: Option<AttributePair16>,
+    #[serde(default)]
+    pub portrait_id: String,
     #[serde(default)]
     pub starting_gold: u32,
     #[serde(default)]
@@ -1054,9 +1065,9 @@ impl CharacterDefinition {
     ) -> Result<Character, CharacterDefinitionError> {
         // 1. Validate references exist
         // 2. Convert race_id/class_id to enums
-        // 3. Apply race stat modifiers to base_stats
-        // 4. Calculate starting HP (max roll of class HP die + endurance mod)
-        // 5. Calculate starting SP (based on class spell_stat)
+        // 3. Apply race stat modifiers to base_stats (AttributePair base values)
+        // 4. Calculate starting HP from hp_override or class HP die + endurance
+        // 5. Calculate starting SP (based on class spell_stat from stats)
         // 6. Apply race resistances
         // 7. Populate inventory with starting_items
         // 8. Create equipment from starting_equipment
@@ -1112,9 +1123,9 @@ with runtime Character instances:
 
 1. **Validation**: Verify race_id, class_id, and all item IDs exist in databases
 2. **Enum Conversion**: Convert string IDs to Race/Class enums
-3. **Stat Application**: Apply race modifiers to base stats (clamped to 3-25)
-4. **HP Calculation**: Max roll of class HP die + (endurance - 10) / 2, minimum 1
-5. **SP Calculation**: Based on class spell_stat (Intellect or Personality)
+3. **Stat Application**: Apply race modifiers to base_stats AttributePair base values (clamped to 3-25)
+4. **HP Calculation**: Use hp_override if present, else max roll of class HP die + (endurance - 10) / 2, minimum 1
+5. **SP Calculation**: Based on class spell_stat (Intellect or Personality) from stats.base values
 6. **Resistance Setup**: Copy race resistances to character
 7. **Inventory Population**: Add starting_items to inventory
 8. **Equipment Setup**: Map starting_equipment slots to equipment slots
@@ -2418,25 +2429,29 @@ pub fn max_spell_level(character_level: u32, class: Class) -> u8 {
 
 **Inn Mechanics:**
 
-- Each town has an inn
+- Inns are represented by innkeeper NPCs and referenced by string IDs (`InnkeeperId` / `NpcId`), not numeric town IDs
+- Entering an `EnterInn` map event (which references an `innkeeper_id`) prompts the player to sign in and manage the party
 - Party must sign in to save progress
-- Sign in prompt when entering inn
 - Answering "Yes" saves all character data to disk
-- Characters saved with current stats/conditions
+- Characters are saved with current stats/conditions and a location (e.g., `CharacterLocation::AtInn(InnkeeperId)`)
 
 **Save Data:**
 
 - All character statistics
-- Current location (town/inn)
+- Current location (e.g., `CharacterLocation::AtInn(InnkeeperId)` or a map ID)
 - Inventory and equipment
 - Quest progress and flags
 - Party composition
 
 **Loading:**
 
-- Resume from last inn where party signed in
-- Can form different party from roster
-- Each town tracks which characters last visited
+- Resume from the last innkeeper's inn where the party signed in
+- Can form a different party from the roster on load
+- Each inn (identified by its innkeeper ID) tracks which characters last visited and these locations are restored when loading
+
+**Legacy / Migration Notes:**
+
+- Older saves or campaign data that referenced numeric `TownId` values should be migrated to string `InnkeeperId` references (map `inn_id: 1` → `innkeeper_id: "tutorial_innkeeper_town"`). Tooling or migration helpers can be used to map legacy numeric inn references to canonical innkeeper NPC IDs so loads remain consistent with the new `CharacterLocation::AtInn(InnkeeperId)` format.
 
 #### 12.8 Resource Management Commands
 

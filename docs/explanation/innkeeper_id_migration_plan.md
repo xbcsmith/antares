@@ -15,38 +15,44 @@ Migrate the inn location system from arbitrary numeric IDs (`TownId = u8`) to me
 ### Existing Infrastructure
 
 **Type System** (`src/domain/types.rs` lines 39-40):
+
 - `TownId = u8` - numeric identifier currently only used for inn tracking
 - `NpcId = String` - string identifier for NPCs (defined in `src/domain/world/npc.rs` line 48)
 - `MapId = u16` - map identifier (sufficient for location tracking)
 
 **Character Location Tracking** (`src/domain/character.rs` lines 436-445):
+
 ```rust
 pub enum CharacterLocation {
     InParty,
-    AtInn(TownId),      // Uses u8 numeric ID
+    AtInn(InnkeeperId),      // Uses string-based InnkeeperId (NpcId)
     OnMap(MapId),        // Uses MapId for location
 }
 ```
 
 **Map Events** (`src/domain/world/types.rs` lines 495-506):
+
 ```rust
 EnterInn {
     name: String,
     description: String,
-    inn_id: u8,         // Uses u8 numeric ID
+    innkeeper_id: crate::domain::world::NpcId,         // Innkeeper NPC identifier (NpcId string)
 }
 ```
 
 **Campaign Configuration**:
+
 - `src/sdk/campaign_loader.rs` line ~156: `starting_inn: u8`
 - `sdk/campaign_builder/src/lib.rs` line 144: `starting_inn: u8`
 
 **NPC System** (`src/domain/world/npc.rs` lines 79-113):
+
 - `NpcDefinition` has `is_innkeeper: bool` flag
 - NPCs use string IDs (e.g., "tutorial_innkeeper_town")
 - Tutorial campaign has 2 innkeeper NPCs defined (`campaigns/tutorial/data/npcs.ron`)
 
 **Campaign Data**:
+
 - Tutorial campaign: `campaigns/tutorial/` (contains campaign.ron and data/)
 - Test data: `data/` directory (no inn-related content found)
 
@@ -57,7 +63,7 @@ EnterInn {
 3. **Confusing for Authors**: Campaign authors must remember that ID "1" maps to which inn
 4. **Type Mismatch**: `TownId` (u8) vs `NpcId` (String) - incompatible types
 5. **Unused Type**: `TownId` serves no purpose other than inn tracking; `MapId` handles location needs
-6. **Multiple Sources of Truth**: Map events define inn_id separately from NPC definitions
+6. **Multiple Sources of Truth**: Map events define `innkeeper_id` (NpcId string) separately from NPC definitions
 
 ## Implementation Phases
 
@@ -68,6 +74,7 @@ EnterInn {
 **File**: `src/domain/types.rs` (lines 36-40)
 
 **Current**:
+
 ```rust
 /// Town identifier
 pub type TownId = u8;
@@ -87,6 +94,7 @@ pub type InnkeeperId = String;
 **File**: `src/domain/character.rs` (lines 436-445)
 
 **Current**:
+
 ```rust
 pub enum CharacterLocation {
     InParty,
@@ -96,6 +104,7 @@ pub enum CharacterLocation {
 ```
 
 **Changes**:
+
 ```rust
 pub enum CharacterLocation {
     /// Character is in the active party
@@ -116,15 +125,17 @@ pub enum CharacterLocation {
 **File**: `src/domain/world/types.rs` (lines 495-506)
 
 **Current**:
+
 ```rust
 EnterInn {
     name: String,
     description: String,
-    inn_id: u8,
+    innkeeper_id: String,  // Uses NPC ID strings (changed from inn_id: u8)
 },
 ```
 
 **Changes**:
+
 ```rust
 /// Enter an inn for party management
 EnterInn {
@@ -144,11 +155,13 @@ EnterInn {
 **File**: `src/domain/mod.rs` (line 42)
 
 **Current**:
+
 ```rust
 pub use types::{CharacterId, EventId, ItemId, MapId, MonsterId, RaceId, SpellId, TownId};
 ```
 
 **Changes**:
+
 ```rust
 pub use types::{CharacterId, EventId, InnkeeperId, ItemId, MapId, MonsterId, RaceId, SpellId};
 ```
@@ -156,11 +169,13 @@ pub use types::{CharacterId, EventId, InnkeeperId, ItemId, MapId, MonsterId, Rac
 **File**: `src/lib.rs` (line 32)
 
 **Current**:
+
 ```rust
 pub use domain::types::{CharacterId, EventId, ItemId, MapId, MonsterId, SpellId, TownId};
 ```
 
 **Changes**:
+
 ```rust
 pub use domain::types::{CharacterId, EventId, InnkeeperId, ItemId, MapId, MonsterId, SpellId};
 ```
@@ -168,6 +183,7 @@ pub use domain::types::{CharacterId, EventId, InnkeeperId, ItemId, MapId, Monste
 #### 1.5 Remove All TownId Imports
 
 **Files to update**:
+
 - `src/application/mod.rs` (line 21): Remove `TownId` from import
 - `src/application/save_game.rs` (line 391): Remove `TownId` from import
 - `src/domain/character.rs` (line 15): Remove `TownId` from import
@@ -178,6 +194,7 @@ pub use domain::types::{CharacterId, EventId, InnkeeperId, ItemId, MapId, Monste
 #### 1.6 Testing Requirements
 
 **Unit Tests**:
+
 - `test_character_location_atinn_string_id` - Verify AtInn serializes/deserializes as String
 - `test_innkeeper_id_type_alias` - Verify InnkeeperId is String type
 - `test_map_event_enter_inn_string_id` - Verify EnterInn serializes with innkeeper_id
@@ -209,6 +226,7 @@ pub use domain::types::{CharacterId, EventId, InnkeeperId, ItemId, MapId, Monste
 **File**: `src/application/mod.rs` (lines 69-76)
 
 **Current**:
+
 ```rust
 pub struct InnManagementState {
     pub current_inn_id: TownId,
@@ -218,6 +236,7 @@ pub struct InnManagementState {
 ```
 
 **Changes**:
+
 ```rust
 pub struct InnManagementState {
     /// ID of the innkeeper NPC currently being visited
@@ -230,6 +249,7 @@ pub struct InnManagementState {
 ```
 
 **Update Constructor** (lines 88-99):
+
 ```rust
 pub fn new(innkeeper_id: InnkeeperId) -> Self {  // Changed parameter type
     Self {
@@ -241,6 +261,7 @@ pub fn new(innkeeper_id: InnkeeperId) -> Self {  // Changed parameter type
 ```
 
 **Update all usages in tests**:
+
 - Line ~64: `InnManagementState::new(TownId::from(1))` → `InnManagementState::new("tutorial_innkeeper_town".to_string())`
 - Line ~90: Similar updates in doc examples
 
@@ -251,15 +272,17 @@ pub fn new(innkeeper_id: InnkeeperId) -> Self {  // Changed parameter type
 **Method: `dismiss_character`** (lines 661-665):
 
 **Current**:
+
 ```rust
 pub fn dismiss_character(
     &mut self,
     party_index: usize,
-    inn_id: TownId,
+    innkeeper_id: InnkeeperId,
 ) -> Result<Character, PartyManagementError>
 ```
 
 **Changes**:
+
 ```rust
 pub fn dismiss_character(
     &mut self,
@@ -271,6 +294,7 @@ pub fn dismiss_character(
 **Method: `current_inn_id`** (lines 730-737):
 
 **Current**:
+
 ```rust
 pub fn current_inn_id(&self) -> Option<TownId> {
     // TODO: Implementation
@@ -279,6 +303,7 @@ pub fn current_inn_id(&self) -> Option<TownId> {
 ```
 
 **Changes**:
+
 ```rust
 pub fn current_inn_id(&self) -> Option<InnkeeperId> {  // Changed return type
     // TODO: Extract from current map's EnterInn event or game state
@@ -290,6 +315,7 @@ pub fn current_inn_id(&self) -> Option<InnkeeperId> {  // Changed return type
 **Method: `find_nearest_inn`** (lines 764-769):
 
 **Current**:
+
 ```rust
 pub fn find_nearest_inn(&self) -> Option<TownId> {
     self.campaign.as_ref().map(|c| c.config.starting_inn)
@@ -297,6 +323,7 @@ pub fn find_nearest_inn(&self) -> Option<TownId> {
 ```
 
 **Changes**:
+
 ```rust
 pub fn find_nearest_inn(&self) -> Option<InnkeeperId> {  // Changed return type
     // Return campaign's starting_innkeeper
@@ -307,9 +334,10 @@ pub fn find_nearest_inn(&self) -> Option<InnkeeperId> {  // Changed return type
 **Method: `recruit_from_map`** (lines 825-875):
 
 **Update line ~867**:
+
 ```rust
-// Old:
-self.roster.add_character(character, CharacterLocation::AtInn(inn_id))?;
+// Former (legacy numeric form):
+self.roster.add_character(character, CharacterLocation::AtInn("tutorial_innkeeper_town"))?;
 
 // New:
 self.roster.add_character(character, CharacterLocation::AtInn(innkeeper_id))?;
@@ -318,6 +346,7 @@ self.roster.add_character(character, CharacterLocation::AtInn(innkeeper_id))?;
 **Method: `initialize_roster`** (lines ~567-570):
 
 **Update to use String innkeeper ID**:
+
 ```rust
 // Old:
 CharacterLocation::AtInn(starting_inn)
@@ -331,6 +360,7 @@ CharacterLocation::AtInn(starting_innkeeper.clone())
 **File**: `src/domain/party_manager.rs`
 
 **Update import** (line 35):
+
 ```rust
 // Old:
 use crate::domain::types::TownId;
@@ -342,16 +372,18 @@ use crate::domain::types::InnkeeperId;
 **Method: `dismiss_to_inn`** (lines 194-199):
 
 **Current**:
+
 ```rust
 pub fn dismiss_to_inn(
     party: &mut Party,
     roster: &mut Roster,
     party_index: usize,
-    inn_id: TownId,
+    innkeeper_id: InnkeeperId,
 ) -> Result<Character, PartyManagementError>
 ```
 
 **Changes**:
+
 ```rust
 pub fn dismiss_to_inn(
     party: &mut Party,
@@ -362,6 +394,7 @@ pub fn dismiss_to_inn(
 ```
 
 **Update implementation**:
+
 ```rust
 // Update line ~204:
 *roster_location = CharacterLocation::AtInn(innkeeper_id);
@@ -370,6 +403,7 @@ pub fn dismiss_to_inn(
 **Method: `swap_party_member`** (lines ~350-354):
 
 **Update to preserve String innkeeper ID**:
+
 ```rust
 let dismissed_location = match roster_location {
     CharacterLocation::AtInn(innkeeper_id) => CharacterLocation::AtInn(innkeeper_id.clone()),
@@ -385,6 +419,7 @@ let dismissed_location = match roster_location {
 **Method: `characters_at_inn`** (lines 1335-1350):
 
 **Current**:
+
 ```rust
 pub fn characters_at_inn(&self, town_id: TownId) -> Vec<(usize, &Character)> {
     // ...
@@ -394,6 +429,7 @@ pub fn characters_at_inn(&self, town_id: TownId) -> Vec<(usize, &Character)> {
 ```
 
 **Changes**:
+
 ```rust
 pub fn characters_at_inn(&self, innkeeper_id: &str) -> Vec<(usize, &Character)> {
     self.character_locations
@@ -412,6 +448,7 @@ pub fn characters_at_inn(&self, innkeeper_id: &str) -> Vec<(usize, &Character)> 
 ```
 
 **Update doc example**:
+
 ```rust
 // Update example to use string ID:
 let at_inn = roster.characters_at_inn("tutorial_innkeeper_town");
@@ -426,13 +463,15 @@ let at_inn = roster.characters_at_inn("tutorial_innkeeper_town");
 **Function: `trigger_event`** (lines ~214-219):
 
 **Current**:
+
 ```rust
-MapEvent::EnterInn { inn_id, .. } => {
-    EventResult::EnterInn { inn_id }
+MapEvent::EnterInn { innkeeper_id, .. } => {
+    EventResult::EnterInn { innkeeper_id }
 }
 ```
 
 **Changes**:
+
 ```rust
 MapEvent::EnterInn { innkeeper_id, .. } => {
     // Inn entrances are repeatable - don't remove
@@ -445,13 +484,15 @@ MapEvent::EnterInn { innkeeper_id, .. } => {
 **File**: `src/domain/world/events.rs` (around line ~60-64)
 
 **Current**:
+
 ```rust
 EnterInn {
-    inn_id: u8,
+    innkeeper_id: crate::domain::world::NpcId,
 },
 ```
 
 **Changes**:
+
 ```rust
 EnterInn {
     innkeeper_id: String,
@@ -465,6 +506,7 @@ EnterInn {
 **Update handler** (lines ~139-143):
 
 **Current**:
+
 ```rust
 MapEvent::RecruitableCharacter {
     character_id,
@@ -476,17 +518,20 @@ MapEvent::RecruitableCharacter {
 #### 2.7 Update All Tests
 
 **Search for test usages**:
+
 ```bash
 grep -r "TownId::" src/
 grep -r "AtInn(" src/
-grep -r "inn_id:" src/
+grep -r "innkeeper_id:" src/
 ```
 
 **Update all test cases to use String IDs**:
+
 - `AtInn(1)` → `AtInn("tutorial_innkeeper_town".to_string())`
-- `inn_id: 1` → `innkeeper_id: "tutorial_innkeeper_town".to_string()`
+- Use `EnterInn { innkeeper_id: "tutorial_innkeeper_town" }` (new format). Legacy numeric `inn_id: 1` should be migrated to the innkeeper string form.
 
 **Key test files**:
+
 - `src/application/mod.rs` (tests at end of file)
 - `src/application/save_game.rs` (tests)
 - `src/domain/character.rs` (tests)
@@ -496,6 +541,7 @@ grep -r "inn_id:" src/
 #### 2.8 Testing Requirements
 
 **Unit Tests**:
+
 - `test_dismiss_character_with_innkeeper_id` - Verify dismiss uses string ID
 - `test_characters_at_inn_string_id` - Verify filtering by string ID works
 - `test_recruit_from_map_sends_to_innkeeper` - Verify recruit uses string ID
@@ -503,6 +549,7 @@ grep -r "inn_id:" src/
 - `test_inn_management_state_string_id` - Verify state stores string ID
 
 **Integration Tests**:
+
 - `test_inn_management_workflow` - Full workflow with string IDs
 
 #### 2.9 Deliverables
@@ -536,6 +583,7 @@ grep -r "inn_id:" src/
 **Serialization Impact**: `CharacterLocation::AtInn` now serializes as `AtInn(String)` instead of `AtInn(u8)`.
 
 **RON Format Change**:
+
 - **Old**: `AtInn(1)`
 - **New**: `AtInn("tutorial_innkeeper_town")`
 
@@ -548,6 +596,7 @@ grep -r "inn_id:" src/
 **File**: `src/application/save_game.rs` (tests section)
 
 **Example changes**:
+
 ```rust
 // Old:
 let inn1: TownId = 1;
@@ -558,6 +607,7 @@ roster.add_character(char1, CharacterLocation::AtInn("tutorial_innkeeper_town".t
 ```
 
 **Key test functions to update**:
+
 - `test_save_inn_locations` (line ~649)
 - `test_save_full_roster_state` (line ~846)
 - `test_save_load_preserves_character_invariants` (line ~920)
@@ -585,6 +635,7 @@ fn test_character_location_ron_serialization() {
 #### 3.4 Testing Requirements
 
 **Tests**:
+
 - `test_save_load_with_innkeeper_id` - Verify round-trip with string IDs
 - `test_character_location_ron_serialization` - Verify RON format
 - `test_save_game_format` - Document expected RON structure
@@ -611,12 +662,14 @@ fn test_character_location_ron_serialization() {
 **File**: `src/sdk/campaign_loader.rs` (lines ~156-157)
 
 **Current**:
+
 ```rust
 #[serde(default = "default_starting_inn")]
 pub starting_inn: u8,
 ```
 
 **Changes**:
+
 ```rust
 /// Default innkeeper where non-party premade characters start
 #[serde(default = "default_starting_innkeeper")]
@@ -626,6 +679,7 @@ pub starting_innkeeper: String,
 **Update default function**:
 
 **Current**:
+
 ```rust
 fn default_starting_inn() -> u8 {
     1
@@ -633,6 +687,7 @@ fn default_starting_inn() -> u8 {
 ```
 
 **Changes**:
+
 ```rust
 fn default_starting_innkeeper() -> String {
     "tutorial_innkeeper_town".to_string()
@@ -644,12 +699,14 @@ fn default_starting_innkeeper() -> String {
 **File**: `src/sdk/campaign_loader.rs` (lines ~427-428)
 
 **Current**:
+
 ```rust
 #[serde(default = "default_starting_inn")]
 pub starting_inn: u8,
 ```
 
 **Changes**:
+
 ```rust
 #[serde(default = "default_starting_innkeeper")]
 pub starting_innkeeper: String,
@@ -658,6 +715,7 @@ pub starting_innkeeper: String,
 **Update conversion** (`TryFrom<CampaignMetadata> for Campaign` impl):
 
 **Find and update**:
+
 ```rust
 // Old:
 starting_inn: metadata.starting_inn,
@@ -671,18 +729,21 @@ starting_innkeeper: metadata.starting_innkeeper.clone(),
 **File**: `sdk/campaign_builder/src/lib.rs` (line 144)
 
 **Current**:
+
 ```rust
 #[serde(default = "default_starting_inn")]
 starting_inn: u8,
 ```
 
 **Changes**:
+
 ```rust
 #[serde(default = "default_starting_innkeeper")]
 starting_innkeeper: String,
 ```
 
 **Update default function** (add after line 195):
+
 ```rust
 fn default_starting_innkeeper() -> String {
     "tutorial_innkeeper_town".to_string()
@@ -692,11 +753,13 @@ fn default_starting_innkeeper() -> String {
 **Update default implementation** (line 211):
 
 **Current**:
+
 ```rust
 starting_inn: 1,
 ```
 
 **Changes**:
+
 ```rust
 starting_innkeeper: "tutorial_innkeeper_town".to_string(),
 ```
@@ -704,11 +767,13 @@ starting_innkeeper: "tutorial_innkeeper_town".to_string(),
 **Update test** (line 4919):
 
 **Current**:
+
 ```rust
 starting_inn: 1,
 ```
 
 **Changes**:
+
 ```rust
 starting_innkeeper: "tutorial_innkeeper_town".to_string(),
 ```
@@ -718,6 +783,7 @@ starting_innkeeper: "tutorial_innkeeper_town".to_string(),
 **File**: `src/sdk/validation.rs` (lines ~388-407)
 
 **Add to `validate_characters` method**:
+
 ```rust
 // Validate starting_innkeeper exists and is an innkeeper
 if let Some(npc) = self.db.npcs.get_npc(&self.db.campaign.config.starting_innkeeper) {
@@ -739,6 +805,7 @@ if let Some(npc) = self.db.npcs.get_npc(&self.db.campaign.config.starting_innkee
 ```
 
 **Add new error variant** to `ValidationError` enum:
+
 ```rust
 #[error("Invalid starting innkeeper '{innkeeper_id}': {reason}")]
 InvalidStartingInnkeeper {
@@ -750,6 +817,7 @@ InvalidStartingInnkeeper {
 #### 4.5 Testing Requirements
 
 **Tests**:
+
 - `test_campaign_config_starting_innkeeper` - Verify field exists and is String
 - `test_validate_starting_innkeeper_exists` - Verify validation rejects missing NPC
 - `test_validate_starting_innkeeper_is_innkeeper` - Verify validation rejects non-innkeeper
@@ -757,12 +825,12 @@ InvalidStartingInnkeeper {
 
 #### 4.6 Deliverables
 
-- [ ] `CampaignConfig::starting_innkeeper` field added (String type)
-- [ ] `CampaignMetadata::starting_innkeeper` field added (both in antares and SDK)
-- [ ] Default value set to "tutorial_innkeeper_town"
-- [ ] Validation logic added to check innkeeper exists and has `is_innkeeper=true`
-- [ ] `ValidationError::InvalidStartingInnkeeper` variant added
-- [ ] All Phase 4 tests passing
+- [x] `CampaignConfig::starting_innkeeper` field added (String type)
+- [x] `CampaignMetadata::starting_innkeeper` field added (both in antares and SDK)
+- [x] Default value set to "tutorial_innkeeper_town"
+- [x] Validation logic added to check innkeeper exists and has `is_innkeeper=true`
+- [x] `ValidationError::InvalidStartingInnkeeper` variant added
+- [x] All Phase 4 tests passing
 
 #### 4.7 Success Criteria
 
@@ -780,11 +848,13 @@ InvalidStartingInnkeeper {
 **File**: `sdk/campaign_builder/src/campaign_editor.rs` (line 92)
 
 **Current**:
+
 ```rust
 pub starting_inn: u8,
 ```
 
 **Changes**:
+
 ```rust
 pub starting_innkeeper: String,
 ```
@@ -792,11 +862,13 @@ pub starting_innkeeper: String,
 **Update `from_metadata`** (line 129):
 
 **Current**:
+
 ```rust
 starting_inn: m.starting_inn,
 ```
 
 **Changes**:
+
 ```rust
 starting_innkeeper: m.starting_innkeeper.clone(),
 ```
@@ -804,11 +876,13 @@ starting_innkeeper: m.starting_innkeeper.clone(),
 **Update `apply_to`** (line 163):
 
 **Current**:
+
 ```rust
 dest.starting_inn = self.starting_inn;
 ```
 
 **Changes**:
+
 ```rust
 dest.starting_innkeeper = self.starting_innkeeper.clone();
 ```
@@ -818,6 +892,7 @@ dest.starting_innkeeper = self.starting_innkeeper.clone();
 **File**: `sdk/campaign_builder/src/campaign_editor.rs` (lines ~879-889)
 
 **Current** (DragValue for numeric input):
+
 ```rust
 ui.label("Starting Inn:")
     .on_hover_text("Default inn where non-party premade characters start (default: 1)");
@@ -834,6 +909,7 @@ ui.end_row();
 ```
 
 **Changes** (ComboBox for NPC selection):
+
 ```rust
 ui.label("Starting Innkeeper:")
     .on_hover_text("Default innkeeper NPC where non-party premade characters start");
@@ -886,65 +962,74 @@ ui.end_row();
 #### 5.4 Testing Requirements
 
 **Tests**:
+
 - `test_starting_innkeeper_ui_updates_buffer` - Verify UI updates field
 - `test_starting_innkeeper_persists` - Verify value saves to campaign.ron
 - `test_starting_innkeeper_dropdown_filters_innkeepers` - Verify only innkeepers shown
 
 #### 5.5 Deliverables
 
-- [ ] `CampaignMetadataEditBuffer::starting_innkeeper` field updated to String
-- [ ] UI control changed from DragValue to ComboBox/dropdown
-- [ ] UI filters NPCs to only show `is_innkeeper=true`
-- [ ] UI shows innkeeper name and ID for clarity
-- [ ] All Phase 5 tests passing
+- [x] `CampaignMetadataEditBuffer::starting_innkeeper` field updated to String
+- [x] UI control changed from DragValue to ComboBox/dropdown (shows Name (ID) for clarity)
+- [x] UI filters NPCs to only show `is_innkeeper=true` (falls back to manual text input if no innkeepers are loaded)
+- [x] UI shows innkeeper name and ID for clarity
+- [x] All Phase 5 tests passing
+
+**Note**: When no innkeeper NPCs are available in the editor, the UI gracefully falls back to a single-line text input so authors can manually enter an innkeeper ID.
 
 #### 5.6 Success Criteria
 
 - Campaign Builder UI allows selecting innkeeper from NPC list
 - Only NPCs with `is_innkeeper=true` are shown in dropdown
 - Selected innkeeper ID is saved to campaign.ron
-- UI is intuitive and shows helpful information (name + ID)
+- UI is intuitive and shows helpful information (name + ID), and falls back to a manual text input when no innkeeper NPCs are available
+- Phase 5 unit/UI tests pass (editor buffer behavior and round-trip persistence verified)
 
 ---
 
-### Phase 6: Campaign Data Migration
+### Phase 6: Campaign Data Migration — COMPLETED
 
-#### 6.1 Update Tutorial Campaign Configuration
+#### Summary
 
-**File**: `campaigns/tutorial/campaign.ron` (line 13)
+Phase 6 completed: the tutorial campaign data was updated and verified to use string-based innkeeper IDs. The tutorial campaign now explicitly includes a `starting_innkeeper` value, EnterInn events are validated to reference real innkeeper NPCs, and tests were added to enforce these constraints.
 
-**Current**:
-```ron
-starting_inn: 1,
-```
+#### Changes Made
+
+- `campaigns/tutorial/campaign.ron`
+
+  - Added `starting_innkeeper: "tutorial_innkeeper_town"` to make the tutorial campaign's default innkeeper explicit (the SDK default remains available when the field is omitted).
+
+- `campaigns/tutorial/data/maps/*`
+
+  - Verified `EnterInn` events reference `innkeeper_id: "tutorial_innkeeper_town"` (no changes required for the tutorial maps — values were already correct).
+
+- `campaigns/tutorial/data/npcs.ron`
+
+  - Confirmed `tutorial_innkeeper_town` (and `tutorial_innkeeper_town2`) exist and have `is_innkeeper: true`.
+
+- Tests
+  - `sdk/campaign_builder/tests/map_data_validation.rs` — augmented to assert that `EnterInn` events reference either:
+    - an NPC defined in `npcs.ron` with `is_innkeeper = true`, or
+    - an NPC that is placed on the same map (placement-based references are accepted when no `npcs.ron` is present).
+  - `src/sdk/campaign_loader.rs` — added tests to assert:
+    - `CampaignLoader::load_campaign("tutorial")` exposes `starting_innkeeper` (explicit or via default),
+    - `CampaignLoader::validate_campaign("tutorial")` reports the tutorial campaign as valid.
+
+#### Deliverables (Completed)
+
+- [x] `campaigns/tutorial/campaign.ron` updated with `starting_innkeeper: "tutorial_innkeeper_town"`
+- [x] All `EnterInn` events verified to reference valid innkeeper NPC IDs
+- [x] Tutorial NPCs verified to have `is_innkeeper: true`
+- [x] Map and campaign validation/tests updated to enforce correctness
+- [x] Tutorial campaign passes validation (no innkeeper-related errors)
+
+#### Notes / Next Steps
+
+- If backward migration for legacy numeric `starting_inn` values becomes necessary, we can add a small migration helper that maps legacy numeric IDs to canonical innkeeper IDs during campaign load and add corresponding tests.
+- UX improvement: later phases may add searchable selector UI for large NPC lists in the Campaign Builder.
 
 **Changes**:
-```ron
-starting_innkeeper: "tutorial_innkeeper_town",
-```
 
-**Or if field is missing** (relies on default), add it explicitly:
-```ron
-starting_innkeeper: "tutorial_innkeeper_town",
-```
-
-#### 6.2 Update Tutorial Map Events
-
-**File**: `campaigns/tutorial/data/maps/map_1.ron` (lines ~7680-7686)
-
-**Current**:
-```ron
-(
-    x: 5,
-    y: 4,
-): EnterInn(
-    name: "Cozy Inn Entrance",
-    description: "A welcoming inn where you can rest and manage your party.",
-    inn_id: 1,
-),
-```
-
-**Changes**:
 ```ron
 (
     x: 5,
@@ -957,6 +1042,7 @@ starting_innkeeper: "tutorial_innkeeper_town",
 ```
 
 **Search for all EnterInn events**:
+
 ```bash
 grep -r "EnterInn" campaigns/tutorial/data/maps/
 ```
@@ -968,6 +1054,7 @@ grep -r "EnterInn" campaigns/tutorial/data/maps/
 **File**: `campaigns/tutorial/data/npcs.ron` (lines 16-26)
 
 **Verify NPC exists**:
+
 ```ron
 (
     id: "tutorial_innkeeper_town",
@@ -983,10 +1070,12 @@ grep -r "EnterInn" campaigns/tutorial/data/maps/
 ```
 
 **Confirm**:
+
 - `id: "tutorial_innkeeper_town"` matches campaign config
 - `is_innkeeper: true` is set
 
 **Check for other innkeepers** (line ~104-108):
+
 ```ron
 (
     id: "tutorial_innkeeper_hideout",
@@ -1000,6 +1089,7 @@ grep -r "EnterInn" campaigns/tutorial/data/maps/
 #### 6.4 Testing Requirements
 
 **Tests**:
+
 - `test_tutorial_campaign_loads` - Verify campaign loads without errors
 - `test_tutorial_inn_event_valid` - Verify EnterInn event references valid innkeeper
 - `test_tutorial_starting_innkeeper_exists` - Verify starting_innkeeper NPC exists
@@ -1007,6 +1097,7 @@ grep -r "EnterInn" campaigns/tutorial/data/maps/
 - `test_tutorial_party_initialization` - Verify 3 characters in party, others at inn
 
 **Integration Test**:
+
 - `test_tutorial_full_workflow` - Start game, enter inn, recruit/dismiss characters
 
 #### 6.5 Deliverables
@@ -1027,179 +1118,112 @@ grep -r "EnterInn" campaigns/tutorial/data/maps/
 
 ---
 
-### Phase 7: Documentation and Final Validation
+### Phase 7: Documentation and Final Validation - COMPLETED
 
-#### 7.1 Update Campaign Content Format Documentation
+#### 7.1 Campaign Content Format Documentation - COMPLETED
 
 **File**: `docs/reference/campaign_content_format.md`
 
-**Add section**:
-```markdown
-### Inn and Innkeeper System
+**Changes Made**:
 
-Inn locations are referenced by innkeeper NPC IDs (String type), not numeric IDs.
-
-**Campaign Configuration**:
-- `starting_innkeeper: String` - NPC ID of the default innkeeper where non-party characters start
-  - Must reference an NPC with `is_innkeeper: true`
-  - Example: `"tutorial_innkeeper_town"`
-  - Default: `"tutorial_innkeeper_town"`
-
-**Map Events**:
-- `EnterInn { innkeeper_id: String, ... }` - Triggers inn management interface
-  - Must reference an NPC with `is_innkeeper: true`
-  - Example: `innkeeper_id: "tutorial_innkeeper_town"`
-
-**NPC Definition**:
-- `is_innkeeper: bool` - Marks NPC as an innkeeper who can manage party roster
-  - Required for NPCs referenced by `starting_innkeeper` or `EnterInn` events
-
-**Character Location Tracking**:
-- `CharacterLocation::AtInn(InnkeeperId)` - Character is stored at specified innkeeper's inn
-  - Uses string innkeeper NPC ID
-  - Example: `AtInn("tutorial_innkeeper_town")`
-
-**Example**:
-```ron
-// In npcs.ron:
-(
-    id: "cozy_inn_mary",
-    name: "Mary the Innkeeper",
-    description: "A cheerful innkeeper who runs the Cozy Inn.",
-    portrait_id: "innkeeper_mary",
-    is_innkeeper: true,
-    is_merchant: false,
-    ...
-)
-
-// In campaign.ron:
-CampaignMetadata(
-    ...
-    starting_innkeeper: "cozy_inn_mary",
-    ...
-)
-
-// In map.ron events:
-(x: 5, y: 4): EnterInn(
-    name: "Cozy Inn Entrance",
-    description: "A welcoming inn...",
-    innkeeper_id: "cozy_inn_mary",
-),
-```
+- Added the "Inn and Innkeeper System" section that documents the new innkeeper-based model:
+  - `starting_innkeeper: String` — campaign-level default innkeeper NPC ID (must reference `is_innkeeper: true`)
+  - Map event `EnterInn { innkeeper_id: String, ... }` — triggers inn management
+  - NPC field `is_innkeeper: bool` — marks NPCs that can act as innkeepers
+  - `CharacterLocation::AtInn(InnkeeperId)` — characters stored at a named innkeeper
+- Included examples and validation guidance to show how to author campaigns and map events correctly.
 
 **Validation**:
-- Campaign validator checks that `starting_innkeeper` references an existing NPC
-- Campaign validator verifies NPC has `is_innkeeper: true`
-- Map validator checks that all `EnterInn` events reference valid innkeeper NPCs
-```
 
-#### 7.2 Update Architecture Documentation
+- `CampaignValidator` now checks that `starting_innkeeper` is non-empty, resolves to an NPC, and that the NPC has `is_innkeeper=true`.
+- Map validation ensures all `EnterInn` events reference a resolvable innkeeper NPC.
+
+#### 7.2 Architecture Documentation - COMPLETED
 
 **File**: `docs/reference/architecture.md`
 
-**Update Section 4.6 (Type Aliases)**:
+**Changes Made**:
 
-**Remove**:
-```markdown
-- `TownId = u8`: Town identifier
-```
+- Confirmed `InnkeeperId = String` is present in Section 4.6 (supporting types).
+- Removed references to legacy `TownId = u8` from the relevant sections and clarified that `CharacterLocation::AtInn` uses `InnkeeperId`.
+- Updated Map Event documentation to show `EnterInn` uses `innkeeper_id: String`.
 
-**Add**:
-```markdown
-- `InnkeeperId = String`: Innkeeper NPC identifier (references NpcId with is_innkeeper=true)
-```
-
-**Update Section 7.3 (Map Events)**:
-- Document `EnterInn` uses `innkeeper_id: String` instead of `inn_id: u8`
-
-**Update Section 4.3 (Character Location)**:
-- Document `CharacterLocation::AtInn(InnkeeperId)` uses String type
-
-#### 7.3 Update Implementation Documentation
+#### 7.3 Implementation Documentation - COMPLETED
 
 **File**: `docs/explanation/implementations.md`
 
-**Update previous entry** for "Campaign Builder SDK - Starting Inn UI Control":
+**Changes Made**:
 
-**Change title to**: "Campaign Builder SDK - Starting Innkeeper UI Control"
+- Renamed and updated the SDK documentation entry to:
+  - "Campaign Builder SDK - Starting Innkeeper UI Control - COMPLETED"
+  - Documented change from numeric `starting_inn` to string `starting_innkeeper`
+  - Updated UI examples to show a searchable ComboBox for innkeeper selection (dropdown includes an inline filter input allowing live substring matches against NPC name and ID) and a text-input fallback for custom IDs; documented `default_starting_innkeeper()` usage
+  - Added `CampaignMetadataEditorState::visible_innkeepers()` helper to perform case-insensitive filtering of innkeepers by search term and `innkeeper_search` UI state, and added unit tests covering the helper and the search/filter behavior
+- Added a Phase 7 summary describing the documentation, test, and README changes.
 
-**Update content** to reflect String type and NPC dropdown:
-```markdown
-## Campaign Builder SDK - Starting Innkeeper UI Control - COMPLETED
+#### 7.4 CHANGELOG - COMPLETED
 
-### Summary
+**File**: `CHANGELOG.md` (added at repo root)
 
-Added UI control for the `starting_innkeeper` field in the Campaign Builder's Campaign Metadata Editor. This field is a string identifier (NPC ID) that references an innkeeper NPC where non-party premade characters are placed at when a new game begins.
+**Changes Made**:
 
-### Changes Made
+- Added an "Unreleased" section documenting the breaking changes introduced by the migration:
+  - Removal of `TownId = u8`, addition of `InnkeeperId = String`
+  - `AtInn(u8)` → `AtInn(String)` in save/campaign formats
+  - `EnterInn { inn_id: u8 }` → `EnterInn { innkeeper_id: String }`
+  - `starting_inn: u8` → `starting_innkeeper: String`
+- Included migration guidance and rationale.
 
-**Type Change**: Changed from `starting_inn: u8` (numeric) to `starting_innkeeper: String` (NPC ID)
+#### 7.5 Testing & Final Validation - COMPLETED
 
-**UI Change**: Changed from DragValue (numeric input) to ComboBox (NPC dropdown)
+**Actions Taken**:
 
-**Validation**: Added validation to ensure innkeeper NPC exists and has `is_innkeeper: true`
+- Added `campaigns/tutorial/README.md` so the tutorial campaign satisfies `validate_structure()` (README requirement).
+- Updated `src/sdk/campaign_loader.rs::test_validate_tutorial_campaign_is_valid` to assert the tutorial campaign validates end‑to‑end with no errors or warnings.
+- Ensured `docs/reference/campaign_content_format.md`, `docs/reference/architecture.md`, and `docs/explanation/implementations.md` reflect the final design.
+- Created `CHANGELOG.md` and documented breaking changes and migration steps.
 
-...
-```
+**Quality Gates**:
 
-#### 7.4 Update CHANGELOG
+- `cargo fmt --all` → OK
+- `cargo check --all-targets --all-features` → OK
+- `cargo clippy --all-targets --all-features -- -D warnings` → OK
+- `cargo nextest run --all-features` → OK (all tests passed)
 
-**File**: `CHANGELOG.md`
+**Result**:
 
-**Add entry**:
-```markdown
-## [Unreleased]
+- `validate_campaign("tutorial")` now reports `is_valid == true` with zero errors and zero warnings.
+- Documentation and change log updated to help authors and reviewers understand the migration and its implications.
 
-### BREAKING CHANGES
+---
 
-- **Inn System Migration**: Changed from numeric inn IDs to innkeeper NPC IDs
-  - **Type Removal**: `TownId = u8` type removed entirely
-  - **Type Addition**: `InnkeeperId = String` type added
-  - **CharacterLocation**: `AtInn(u8)` → `AtInn(String)`
-  - **MapEvent**: `EnterInn { inn_id: u8 }` → `EnterInn { innkeeper_id: String }`
-  - **CampaignConfig**: `starting_inn: u8` → `starting_innkeeper: String`
-  - **Save Game Format**: Breaking change - old saves will not load
-  - **Campaign Format**: Breaking change - old campaigns must update to use string innkeeper IDs
-  - **Example**: `AtInn(1)` → `AtInn("tutorial_innkeeper_town")`
+### Deliverables — Status
 
-- **Benefits**:
-  - Validation: Innkeeper IDs are validated against NPC database
-  - Better UX: UI shows innkeeper names and portraits
-  - Clearer authoring: Campaign authors select from NPC list, not arbitrary numbers
+- [x] `campaigns/tutorial/campaign.ron` contains `starting_innkeeper: "tutorial_innkeeper_town"`
+- [x] All `EnterInn` events in tutorial maps use `innkeeper_id` (string)
+- [x] Tutorial NPCs verified to have `is_innkeeper: true`
+- [x] `campaigns/tutorial/README.md` added
+- [x] `docs/reference/campaign_content_format.md` updated
+- [x] `docs/reference/architecture.md` updated
+- [x] `docs/explanation/implementations.md` updated
+- [x] `CHANGELOG.md` added with breaking changes and migration guidance
+- [x] Tests updated and passing (unit + integration)
 
-- **Migration**: No migration tool provided - update campaign data manually:
-  - Change `inn_id: 1` to `innkeeper_id: "tutorial_innkeeper_town"` in map events
-  - Change `starting_inn: 1` to `starting_innkeeper: "tutorial_innkeeper_town"` in campaign.ron
-  - Verify all referenced NPCs have `is_innkeeper: true`
-```
+### Success Criteria
 
-#### 7.5 Testing Requirements
-
-**Full Test Suite**:
-```bash
-# Unit tests
-cargo test --lib
-
-# Integration tests
-cargo test --test '*'
-
-# All features
-cargo nextest run --all-features
-
-# Clippy
-cargo clippy --all-targets --all-features -- -D warnings
-
-# Format check
-cargo fmt --all -- --check
-```
+- Campaign validator reports no issues for tutorial campaign
+- All automated quality gates pass
+- Documentation clearly describes the new system and migration steps
 
 **Campaign Validation**:
+
 ```bash
 # Validate tutorial campaign
 cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 ```
 
 **Manual Testing Checklist**:
+
 - [ ] Load tutorial campaign in game
 - [ ] Start new game
 - [ ] Verify starting party has 3 members (Kira, Sage, Mira)
@@ -1225,8 +1249,8 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 - [ ] Campaign content format documentation updated
 - [ ] Architecture documentation updated
 - [ ] Implementation documentation updated
-- [ ] CHANGELOG updated with breaking changes
-- [ ] All tests passing (unit + integration)
+- [x] CHANGELOG updated with breaking changes
+- [x] All tests passing (unit + integration)
 - [ ] Campaign validator passes for tutorial
 - [ ] Manual testing checklist completed
 - [ ] No `TownId` references in codebase
@@ -1251,6 +1275,7 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 ### Unit Test Coverage
 
 **Minimum coverage targets**:
+
 - Type system: 100% (simple type aliases)
 - CharacterLocation: 100% (enum serialization)
 - Application logic: >90% (critical paths)
@@ -1258,6 +1283,7 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 - Save/load: 100% (round-trip tests)
 
 **Key test files**:
+
 - `src/domain/types.rs` - Type alias tests
 - `src/domain/character.rs` - CharacterLocation tests
 - `src/domain/world/types.rs` - MapEvent tests
@@ -1269,23 +1295,27 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 ### Integration Test Scenarios
 
 1. **New Game Initialization**
+
    - Start new game with innkeeper IDs
    - Verify starting party and inn characters
    - Verify character locations use string IDs
 
 2. **Party Management Workflow**
+
    - Recruit character from inn to party
    - Dismiss character from party to inn
    - Swap party members
    - Verify locations update correctly
 
 3. **Save/Load Round-Trip**
+
    - Save game with characters at various locations
    - Load game
    - Verify all character locations preserved
    - Verify string IDs match
 
 4. **Inn Event Trigger**
+
    - Move to inn entrance on map
    - Trigger EnterInn event
    - Verify InnManagement mode activated
@@ -1316,6 +1346,7 @@ See Phase 7.5 above for complete manual testing checklist.
 **Medium Risk**:
 
 1. **Comprehensive Code Changes**: Many files need updates
+
    - **Mitigation**: Phased approach with testing at each phase
    - **Impact**: High number of files to update
    - **Timeline**: 3-5 days of implementation
@@ -1328,6 +1359,7 @@ See Phase 7.5 above for complete manual testing checklist.
 **Low Risk**:
 
 1. **SDK UI Implementation**: Dropdown needs NPC list access
+
    - **Mitigation**: Reuse existing ComboBox patterns
    - **Impact**: Minimal - straightforward UI change
    - **Timeline**: 0.5 days
@@ -1366,31 +1398,38 @@ All required systems already exist. No external APIs or new crates needed.
 **Total Estimated Time**: 4-6 days
 
 **Phase Breakdown**:
+
 - Phase 1: Type System Foundation - 1 day
+
   - Update type aliases, enums, exports
   - Remove all TownId references
   - Update basic unit tests
 
 - Phase 2: Application Logic Updates - 2 days
+
   - Update all application and domain logic
   - Update all test cases to use string IDs
   - Verify compilation and tests
 
 - Phase 3: Save/Load System Updates - 0.5 days
+
   - Update save/load tests
   - Verify RON serialization
 
 - Phase 4: Campaign Configuration Updates - 0.5 days
+
   - Update config structs
   - Add validation
   - Update tests
 
 - Phase 5: SDK UI Updates - 1 day
+
   - Update edit buffer
   - Implement NPC dropdown
   - Update tests
 
 - Phase 6: Campaign Data Migration - 0.5 days
+
   - Update tutorial campaign.ron
   - Update map events
   - Verify NPC data
@@ -1402,6 +1441,7 @@ All required systems already exist. No external APIs or new crates needed.
   - Final verification
 
 **Parallelization Opportunities**:
+
 - Documentation can be written alongside implementation
 - Tests can be written before implementation (TDD approach)
 - Phase 4 and 5 can partially overlap (config + UI)
@@ -1425,6 +1465,7 @@ This migration replaces arbitrary numeric inn IDs with meaningful innkeeper NPC 
 5. **Simpler Implementation**: No migration tool complexity since backwards compatibility not required
 
 **Breaking Changes Justified**:
+
 - Project is early in development
 - Only one campaign exists (tutorial)
 - Benefits far outweigh migration cost
@@ -1434,6 +1475,7 @@ This migration replaces arbitrary numeric inn IDs with meaningful innkeeper NPC 
 Execute all phases as a single feature branch to ensure consistency and avoid partial migration states. Test thoroughly after each phase but merge everything together.
 
 **Next Steps After Plan Approval**:
+
 1. Create feature branch: `feature/innkeeper-id-migration`
 2. Execute Phase 1 (Type System)
 3. Run tests, verify compilation

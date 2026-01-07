@@ -141,8 +141,8 @@ pub struct CampaignMetadata {
     starting_direction: String,
     starting_gold: u32,
     starting_food: u32,
-    #[serde(default = "default_starting_inn")]
-    starting_inn: u8,
+    #[serde(default = "default_starting_innkeeper")]
+    starting_innkeeper: String,
     max_party_size: usize,
     max_roster_size: usize,
     difficulty: Difficulty,
@@ -194,8 +194,8 @@ impl Difficulty {
     }
 }
 
-fn default_starting_inn() -> u8 {
-    1
+fn default_starting_innkeeper() -> String {
+    "tutorial_innkeeper_town".to_string()
 }
 
 impl Default for CampaignMetadata {
@@ -213,7 +213,7 @@ impl Default for CampaignMetadata {
             starting_direction: "North".to_string(),
             starting_gold: 100,
             starting_food: 10,
-            starting_inn: 1,
+            starting_innkeeper: "tutorial_innkeeper_town".to_string(),
             max_party_size: 6,
             max_roster_size: 20,
             difficulty: Difficulty::Normal,
@@ -1789,6 +1789,85 @@ impl CampaignBuilderApp {
             }
         }
 
+        // Run SDK validator for deeper content checks (e.g., starting innkeeper)
+        // Only run if NPCs have been loaded into the editor OR the configured starting
+        // innkeeper differs from the default tutorial innkeeper (i.e., user-specified).
+        if !self.npc_editor_state.npcs.is_empty()
+            || self.campaign.starting_innkeeper != default_starting_innkeeper()
+        {
+            // Build a lightweight ContentDatabase containing relevant content so the SDK Validator can
+            // validate content-dependent configuration such as `starting_innkeeper`.
+            let mut db = antares::sdk::database::ContentDatabase::new();
+
+            // Populate NPC database from the editor state
+            for npc in &self.npc_editor_state.npcs {
+                // Ignore insertion errors from the DB helper (should be infrequent)
+                let _ = db.npcs.add_npc(npc.clone());
+            }
+
+            // Invoke SDK validator for campaign config checks
+            let validator = antares::sdk::validation::Validator::new(&db);
+
+            // Build a minimal CampaignConfig for validation - other fields are defaulted to reasonable values
+            let config = antares::sdk::campaign_loader::CampaignConfig {
+                starting_map: 0,
+                starting_position: antares::domain::types::Position { x: 0, y: 0 },
+                starting_direction: antares::domain::types::Direction::North,
+                starting_gold: self.campaign.starting_gold,
+                starting_food: self.campaign.starting_food,
+                starting_innkeeper: self.campaign.starting_innkeeper.clone(),
+                max_party_size: self.campaign.max_party_size as usize,
+                max_roster_size: self.campaign.max_roster_size as usize,
+                difficulty: antares::sdk::campaign_loader::Difficulty::Normal,
+                permadeath: self.campaign.permadeath,
+                allow_multiclassing: self.campaign.allow_multiclassing,
+                starting_level: self.campaign.starting_level,
+                max_level: self.campaign.max_level,
+            };
+
+            let config_errors = validator.validate_campaign_config(&config);
+            for ve in config_errors {
+                match ve {
+                    antares::sdk::validation::ValidationError::InvalidStartingInnkeeper {
+                        innkeeper_id,
+                        reason,
+                    } => {
+                        // Use a message format that matches existing tests' expectations
+                        let msg =
+                            format!("Starting innkeeper '{}' invalid: {}", innkeeper_id, reason);
+                        self.validation_errors
+                            .push(validation::ValidationResult::error(
+                                validation::ValidationCategory::Configuration,
+                                msg,
+                            ));
+                    }
+                    other => match other.severity() {
+                        antares::sdk::validation::Severity::Error => {
+                            self.validation_errors
+                                .push(validation::ValidationResult::error(
+                                    validation::ValidationCategory::Configuration,
+                                    other.to_string(),
+                                ));
+                        }
+                        antares::sdk::validation::Severity::Warning => {
+                            self.validation_errors
+                                .push(validation::ValidationResult::warning(
+                                    validation::ValidationCategory::Configuration,
+                                    other.to_string(),
+                                ));
+                        }
+                        antares::sdk::validation::Severity::Info => {
+                            self.validation_errors
+                                .push(validation::ValidationResult::info(
+                                    validation::ValidationCategory::Configuration,
+                                    other.to_string(),
+                                ));
+                        }
+                    },
+                }
+            }
+        }
+
         // Update status using ValidationSummary
         let summary = validation::ValidationSummary::from_results(&self.validation_errors);
 
@@ -3257,6 +3336,7 @@ impl CampaignBuilderApp {
             self.campaign_dir.as_ref(),
             &mut self.unsaved_changes,
             &mut self.status_message,
+            self.npc_editor_state.npcs.as_slice(),
         );
 
         // If the campaign metadata editor requested validation, run the shared
@@ -4593,6 +4673,61 @@ mod tests {
     }
 
     #[test]
+    fn test_validation_starting_innkeeper_missing() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+        app.campaign.name = "Test".to_string();
+        app.campaign.starting_map = "test_map".to_string();
+
+        // No NPCs loaded - starting_innkeeper should be flagged as missing
+        app.campaign.starting_innkeeper = "does_not_exist".to_string();
+        app.validate_campaign();
+
+        let has_inn_error = app.validation_errors.iter().any(|e| {
+            e.category == validation::ValidationCategory::Configuration
+                && e.is_error()
+                && e.message.contains("Starting innkeeper")
+        });
+        assert!(has_inn_error);
+    }
+
+    #[test]
+    fn test_validation_starting_innkeeper_not_innkeeper() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+        app.campaign.name = "Test".to_string();
+        app.campaign.starting_map = "test_map".to_string();
+
+        // Add an NPC that exists but is NOT an innkeeper
+        app.npc_editor_state
+            .npcs
+            .push(antares::domain::world::npc::NpcDefinition::new(
+                "npc_not_inn".to_string(),
+                "NPC Not Inn".to_string(),
+                "portrait.png".to_string(),
+            ));
+
+        app.campaign.starting_innkeeper = "npc_not_inn".to_string();
+        app.validate_campaign();
+
+        let has_inn_error = app.validation_errors.iter().any(|e| {
+            e.category == validation::ValidationCategory::Configuration
+                && e.is_error()
+                && e.message.contains("is not marked as is_innkeeper")
+        });
+        assert!(has_inn_error);
+    }
+
+    #[test]
+    fn test_default_starting_innkeeper() {
+        let metadata = CampaignMetadata::default();
+        assert_eq!(
+            metadata.starting_innkeeper,
+            "tutorial_innkeeper_town".to_string()
+        );
+    }
+
+    #[test]
     fn test_metadata_editor_validate_triggers_validation_and_switches_tab() {
         let mut app = CampaignBuilderApp::default();
 
@@ -4921,7 +5056,7 @@ mod tests {
             starting_direction: "North".to_string(),
             starting_gold: 200,
             starting_food: 20,
-            starting_inn: 1,
+            starting_innkeeper: "tutorial_innkeeper_town".to_string(),
             max_party_size: 6,
             max_roster_size: 20,
             difficulty: Difficulty::Hard,

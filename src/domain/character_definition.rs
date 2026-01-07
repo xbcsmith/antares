@@ -20,6 +20,37 @@
 //!
 //! Character definitions are separate from runtime `Character` instances.
 //! Definitions are loaded from RON files; instances are created at runtime.
+//!
+//! # RON Format Migration (AttributePair)
+//!
+//! As of Phase 1 migration, `base_stats` uses `Stats` (with `AttributePair` fields) and
+//! `hp_override` uses `AttributePair16`. Both support backward-compatible deserialization:
+//!
+//! **Simple format (recommended for most cases):**
+//! ```ron
+//! base_stats: (
+//!     might: 15,        // Expands to AttributePair { base: 15, current: 15 }
+//!     intellect: 10,
+//!     // ...
+//! ),
+//! hp_override: Some(50),  // Expands to AttributePair16 { base: 50, current: 50 }
+//! ```
+//!
+//! **Full format (for pre-buffed characters):**
+//! ```ron
+//! base_stats: (
+//!     might: (base: 15, current: 18),  // Character starts with buffed Might
+//!     intellect: 10,
+//!     // ...
+//! ),
+//! hp_override: Some((base: 50, current: 65)),  // Pre-buffed HP
+//! ```
+//!
+//! **Legacy format (deprecated, still supported):**
+//! ```ron
+//! hp_base: Some(50),
+//! hp_current: Some(65),  // Converts to hp_override: Some((base: 50, current: 65))
+//! ```
 
 use crate::domain::character::{
     Alignment, AttributePair, AttributePair16, Character, Condition, Equipment, Inventory,
@@ -267,119 +298,6 @@ impl StartingEquipment {
     }
 }
 
-// ===== Base Stats =====
-
-/// Base statistics for a character definition
-///
-/// Represents the starting stat values before any race or class modifiers.
-/// Values typically range from 3-18 for standard characters.
-///
-/// # Examples
-///
-/// ```
-/// use antares::domain::character_definition::BaseStats;
-///
-/// let stats = BaseStats {
-///     might: 14,
-///     intellect: 10,
-///     personality: 12,
-///     endurance: 13,
-///     speed: 11,
-///     accuracy: 15,
-///     luck: 10,
-/// };
-///
-/// assert_eq!(stats.might, 14);
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BaseStats {
-    /// Physical strength, melee damage
-    pub might: u8,
-    /// Magical power, spell effectiveness
-    pub intellect: u8,
-    /// Charisma, social interactions
-    pub personality: u8,
-    /// Constitution, HP calculation
-    pub endurance: u8,
-    /// Initiative, dodging, turn order
-    pub speed: u8,
-    /// Hit chance, ranged attacks
-    pub accuracy: u8,
-    /// Critical hits, random events, loot
-    pub luck: u8,
-}
-
-impl BaseStats {
-    /// Creates a new BaseStats with the specified values
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::character_definition::BaseStats;
-    ///
-    /// let stats = BaseStats::new(14, 10, 12, 13, 11, 15, 10);
-    /// assert_eq!(stats.might, 14);
-    /// assert_eq!(stats.accuracy, 15);
-    /// ```
-    pub fn new(
-        might: u8,
-        intellect: u8,
-        personality: u8,
-        endurance: u8,
-        speed: u8,
-        accuracy: u8,
-        luck: u8,
-    ) -> Self {
-        Self {
-            might,
-            intellect,
-            personality,
-            endurance,
-            speed,
-            accuracy,
-            luck,
-        }
-    }
-
-    /// Converts BaseStats to the runtime Stats type
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::character_definition::BaseStats;
-    ///
-    /// let base = BaseStats::new(14, 10, 12, 13, 11, 15, 10);
-    /// let stats = base.to_stats();
-    /// assert_eq!(stats.might.base, 14);
-    /// assert_eq!(stats.might.current, 14);
-    /// ```
-    pub fn to_stats(&self) -> Stats {
-        Stats::new(
-            self.might,
-            self.intellect,
-            self.personality,
-            self.endurance,
-            self.speed,
-            self.accuracy,
-            self.luck,
-        )
-    }
-}
-
-impl Default for BaseStats {
-    fn default() -> Self {
-        Self {
-            might: 10,
-            intellect: 10,
-            personality: 10,
-            endurance: 10,
-            speed: 10,
-            accuracy: 10,
-            luck: 10,
-        }
-    }
-}
-
 // ===== Character Definition =====
 
 /// Complete definition of a character template
@@ -391,8 +309,8 @@ impl Default for BaseStats {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::character_definition::{CharacterDefinition, BaseStats, StartingEquipment};
-/// use antares::domain::character::{Sex, Alignment};
+/// use antares::domain::character_definition::{CharacterDefinition, StartingEquipment};
+/// use antares::domain::character::{Sex, Alignment, Stats};
 ///
 /// let knight = CharacterDefinition {
 ///     id: "pregen_human_knight".to_string(),
@@ -401,9 +319,8 @@ impl Default for BaseStats {
 ///     class_id: "knight".to_string(),
 ///     sex: Sex::Male,
 ///     alignment: Alignment::Good,
-///     base_stats: BaseStats::new(16, 8, 10, 14, 12, 14, 10),
-///     hp_base: None,
-///     hp_current: None,
+///     base_stats: Stats::new(16, 8, 10, 14, 12, 14, 10),
+///     hp_override: None,
 ///     portrait_id: "1".to_string(),
 ///     starting_gold: 100,
 ///     starting_gems: 0,
@@ -419,6 +336,7 @@ impl Default for BaseStats {
 /// assert!(knight.is_premade);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "CharacterDefinitionDef")]
 pub struct CharacterDefinition {
     /// Unique identifier (e.g., "pregen_human_knight", "npc_wizard")
     pub id: CharacterDefinitionId,
@@ -438,20 +356,40 @@ pub struct CharacterDefinition {
     /// Starting alignment
     pub alignment: Alignment,
 
-    /// Base statistics before race/class modifiers
-    pub base_stats: BaseStats,
-    /// Base HP value for characters created from this definition (pre-modifiers)
-    /// Optional: when present this value overrides calculated starting HP.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hp_base: Option<u16>,
+    /// Base statistics (supports both simple values and AttributePair format)
+    ///
+    /// Simple format (backward compatible):
+    /// ```ron
+    /// base_stats: (
+    ///     might: 15,
+    ///     intellect: 10,
+    ///     // ...
+    /// )
+    /// ```
+    ///
+    /// Full format (explicit base and current):
+    /// ```ron
+    /// base_stats: (
+    ///     might: (base: 15, current: 15),
+    ///     intellect: (base: 10, current: 12),
+    ///     // ...
+    /// )
+    /// ```
+    pub base_stats: Stats,
 
-    /// Optional current HP value for characters created from this definition.
-    /// When present, this value sets the instantiated character's `hp.current`.
-    /// If larger than the computed or overridden base HP, it will be clamped to `hp.base`.
+    /// Optional HP override (base and current)
+    ///
+    /// When present, overrides the calculated starting HP.
+    /// Supports both simple format (e.g., `Some(50)`) and full format
+    /// (e.g., `Some((base: 50, current: 45))`).
+    ///
+    /// # Backward Compatibility
+    ///
+    /// Old `hp_base` and `hp_current` fields are supported via custom
+    /// deserialization for migration purposes.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hp_current: Option<u16>,
+    pub hp_override: Option<AttributePair16>,
 
     /// Portrait/avatar identifier (filename stem / unique string)
     #[serde(default)]
@@ -499,6 +437,86 @@ fn default_starting_food() -> u8 {
     10
 }
 
+// ===== Backward Compatibility Deserialization =====
+
+/// Temporary deserialization helper for backward compatibility
+///
+/// Supports old RON files with separate `hp_base` and `hp_current` fields.
+#[derive(Deserialize)]
+struct CharacterDefinitionDef {
+    pub id: CharacterDefinitionId,
+    pub name: String,
+    pub race_id: RaceId,
+    pub class_id: ClassId,
+    pub sex: Sex,
+    pub alignment: Alignment,
+    pub base_stats: Stats,
+    #[serde(default)]
+    pub hp_base: Option<u16>,
+    #[serde(default)]
+    pub hp_current: Option<u16>,
+    #[serde(default)]
+    pub hp_override: Option<AttributePair16>,
+    #[serde(default)]
+    pub portrait_id: String,
+    #[serde(default)]
+    pub starting_gold: u32,
+    #[serde(default)]
+    pub starting_gems: u32,
+    #[serde(default = "default_starting_food")]
+    pub starting_food: u8,
+    #[serde(default)]
+    pub starting_items: Vec<ItemId>,
+    #[serde(default)]
+    pub starting_equipment: StartingEquipment,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub is_premade: bool,
+    #[serde(default)]
+    pub starts_in_party: bool,
+}
+
+impl From<CharacterDefinitionDef> for CharacterDefinition {
+    fn from(def: CharacterDefinitionDef) -> Self {
+        // Convert old hp_base/hp_current to hp_override
+        let hp_override = if let Some(override_val) = def.hp_override {
+            // New format takes precedence
+            Some(override_val)
+        } else if let Some(base) = def.hp_base {
+            // Old format: hp_base with optional hp_current
+            let current = def.hp_current.unwrap_or(base);
+            Some(AttributePair16 {
+                base,
+                current: current.min(base),
+            })
+        } else {
+            // Only hp_current specified - use it for both
+            def.hp_current.map(AttributePair16::new)
+        };
+
+        Self {
+            id: def.id,
+            name: def.name,
+            race_id: def.race_id,
+            class_id: def.class_id,
+            sex: def.sex,
+            alignment: def.alignment,
+            base_stats: def.base_stats,
+            hp_override,
+            portrait_id: def.portrait_id,
+            starting_gold: def.starting_gold,
+            starting_gems: def.starting_gems,
+            starting_food: def.starting_food,
+            starting_items: def.starting_items,
+            starting_equipment: def.starting_equipment,
+            description: def.description,
+            is_premade: def.is_premade,
+            starts_in_party: def.starts_in_party,
+        }
+    }
+}
+
 impl CharacterDefinition {
     /// Creates a new CharacterDefinition with required fields and defaults
     ///
@@ -544,9 +562,8 @@ impl CharacterDefinition {
             class_id,
             sex,
             alignment,
-            base_stats: BaseStats::default(),
-            hp_base: None,
-            hp_current: None,
+            base_stats: Stats::new(10, 10, 10, 10, 10, 10, 10),
+            hp_override: None,
             portrait_id: String::new(),
             starting_gold: 0,
             starting_gems: 0,
@@ -693,8 +710,8 @@ impl CharacterDefinition {
     /// # Examples
     ///
     /// ```no_run
-    /// use antares::domain::character_definition::{CharacterDefinition, BaseStats};
-    /// use antares::domain::character::{Sex, Alignment};
+    /// use antares::domain::character_definition::CharacterDefinition;
+    /// use antares::domain::character::{Sex, Alignment, Stats};
     /// use antares::domain::races::RaceDatabase;
     /// use antares::domain::classes::ClassDatabase;
     /// use antares::domain::items::ItemDatabase;
@@ -747,38 +764,28 @@ impl CharacterDefinition {
             }
         }
 
-        // Apply race stat modifiers to base stats
+        // Copy base stats and apply race stat modifiers
         let stats = apply_race_modifiers(&self.base_stats, race_def);
 
         // Calculate starting HP based on class and endurance
-        // Use a definition-level override if the author specified one in the CharacterDefinition.
-        let mut hp = calculate_starting_hp(class_def, stats.endurance.base);
-
-        // If an author-specified base override is present, apply it. Respect an optional explicit
-        // current value (`hp_current`) by clamping it to the effective base. If only `hp_current`
-        // is present, clamp it to the computed base.
-        if let Some(hp_override) = self.hp_base {
-            hp.base = hp_override;
-            if let Some(hp_cur) = self.hp_current {
-                if hp_cur > hp.base {
-                    warn!(
-                        "instantiate: hp_current {} exceeds hp_base {}; clamping for character '{}'",
-                        hp_cur, hp.base, self.id
-                    );
-                }
-                hp.current = hp_cur.min(hp.base);
-            } else {
-                hp.current = hp_override;
-            }
-        } else if let Some(hp_cur) = self.hp_current {
-            if hp_cur > hp.base {
+        // Use hp_override if provided, otherwise use calculated value
+        let hp = if let Some(hp_override) = self.hp_override {
+            // Validate that current doesn't exceed base
+            if hp_override.current > hp_override.base {
                 warn!(
-                    "instantiate: hp_current {} exceeds calculated base {}; clamping for character '{}'",
-                    hp_cur, hp.base, self.id
+                    "instantiate: hp_override.current {} exceeds hp_override.base {}; clamping for character '{}'",
+                    hp_override.current, hp_override.base, self.id
                 );
+                AttributePair16 {
+                    base: hp_override.base,
+                    current: hp_override.base,
+                }
+            } else {
+                hp_override
             }
-            hp.current = hp_cur.min(hp.base);
-        }
+        } else {
+            calculate_starting_hp(class_def, stats.endurance.base)
+        };
 
         // Calculate starting SP based on class and relevant stat
         let sp = calculate_starting_sp(class_def, &stats);
@@ -831,7 +838,7 @@ impl CharacterDefinition {
 
 /// Applies race stat modifiers to base stats
 ///
-/// Creates a Stats struct from BaseStats with race modifiers applied.
+/// Creates a Stats struct with race modifiers applied to the base values.
 /// Modifiers are clamped to valid stat ranges (3-25).
 ///
 /// # Arguments
@@ -841,8 +848,8 @@ impl CharacterDefinition {
 ///
 /// # Returns
 ///
-/// Returns a Stats struct with modifiers applied.
-fn apply_race_modifiers(base_stats: &BaseStats, race_def: &RaceDefinition) -> Stats {
+/// Returns a Stats struct with modifiers applied to base values.
+fn apply_race_modifiers(base_stats: &Stats, race_def: &RaceDefinition) -> Stats {
     let mods = &race_def.stat_modifiers;
 
     // Apply modifiers with clamping to valid range (3-25 for modified stats)
@@ -852,13 +859,13 @@ fn apply_race_modifiers(base_stats: &BaseStats, race_def: &RaceDefinition) -> St
     };
 
     Stats::new(
-        apply_mod(base_stats.might, mods.might),
-        apply_mod(base_stats.intellect, mods.intellect),
-        apply_mod(base_stats.personality, mods.personality),
-        apply_mod(base_stats.endurance, mods.endurance),
-        apply_mod(base_stats.speed, mods.speed),
-        apply_mod(base_stats.accuracy, mods.accuracy),
-        apply_mod(base_stats.luck, mods.luck),
+        apply_mod(base_stats.might.base, mods.might),
+        apply_mod(base_stats.intellect.base, mods.intellect),
+        apply_mod(base_stats.personality.base, mods.personality),
+        apply_mod(base_stats.endurance.base, mods.endurance),
+        apply_mod(base_stats.speed.base, mods.speed),
+        apply_mod(base_stats.accuracy.base, mods.accuracy),
+        apply_mod(base_stats.luck.base, mods.luck),
     )
 }
 
@@ -1535,7 +1542,7 @@ mod tests {
             Sex::Male,
             Alignment::Good,
         );
-        assert!(def.hp_base.is_none());
+        assert!(def.hp_override.is_none());
     }
 
     #[test]
@@ -1548,12 +1555,73 @@ mod tests {
             Sex::Male,
             Alignment::Good,
         );
-        def.hp_base = Some(25u16);
+        def.hp_override = Some(AttributePair16::new(25));
 
         let ron_str = ron::ser::to_string(&def).expect("Failed to serialize character to RON");
         let parsed: CharacterDefinition =
             ron::from_str(&ron_str).expect("Failed to deserialize character from RON");
-        assert_eq!(parsed.hp_base, Some(25u16));
+        assert_eq!(parsed.hp_override, Some(AttributePair16::new(25)));
+    }
+
+    #[test]
+    fn test_character_definition_hp_backward_compatibility() {
+        // Test that old RON format with hp_base is still supported
+        let ron_str = r#"(
+            id: "test_char",
+            name: "Test Character",
+            race_id: "human",
+            class_id: "knight",
+            sex: Male,
+            alignment: Good,
+            base_stats: (
+                might: 15,
+                intellect: 10,
+                personality: 10,
+                endurance: 14,
+                speed: 12,
+                accuracy: 12,
+                luck: 10,
+            ),
+            hp_base: Some(50),
+        )"#;
+
+        let parsed: CharacterDefinition =
+            ron::from_str(ron_str).expect("Failed to parse old format");
+        assert_eq!(parsed.hp_override, Some(AttributePair16::new(50)));
+    }
+
+    #[test]
+    fn test_character_definition_hp_backward_compatibility_with_current() {
+        // Test that old RON format with hp_base and hp_current is supported
+        let ron_str = r#"(
+            id: "test_char",
+            name: "Test Character",
+            race_id: "human",
+            class_id: "knight",
+            sex: Male,
+            alignment: Good,
+            base_stats: (
+                might: 15,
+                intellect: 10,
+                personality: 10,
+                endurance: 14,
+                speed: 12,
+                accuracy: 12,
+                luck: 10,
+            ),
+            hp_base: Some(50),
+            hp_current: Some(25),
+        )"#;
+
+        let parsed: CharacterDefinition =
+            ron::from_str(ron_str).expect("Failed to parse old format");
+        assert_eq!(
+            parsed.hp_override,
+            Some(AttributePair16 {
+                base: 50,
+                current: 25
+            })
+        );
     }
 
     // ===== StartingEquipment Tests =====
@@ -1629,55 +1697,73 @@ mod tests {
         assert_eq!(equipment, deserialized);
     }
 
-    // ===== BaseStats Tests =====
+    // ===== Stats Tests =====
 
     #[test]
-    fn test_base_stats_new() {
-        let stats = BaseStats::new(14, 10, 12, 13, 11, 15, 10);
-        assert_eq!(stats.might, 14);
-        assert_eq!(stats.intellect, 10);
-        assert_eq!(stats.personality, 12);
-        assert_eq!(stats.endurance, 13);
-        assert_eq!(stats.speed, 11);
-        assert_eq!(stats.accuracy, 15);
-        assert_eq!(stats.luck, 10);
-    }
-
-    #[test]
-    fn test_base_stats_default() {
-        let stats = BaseStats::default();
-        assert_eq!(stats.might, 10);
-        assert_eq!(stats.intellect, 10);
-        assert_eq!(stats.personality, 10);
-        assert_eq!(stats.endurance, 10);
-        assert_eq!(stats.speed, 10);
-        assert_eq!(stats.accuracy, 10);
-        assert_eq!(stats.luck, 10);
-    }
-
-    #[test]
-    fn test_base_stats_to_stats() {
-        let base = BaseStats::new(14, 10, 12, 13, 11, 15, 10);
-        let stats = base.to_stats();
-
+    fn test_stats_new() {
+        let stats = Stats::new(14, 10, 12, 13, 11, 15, 10);
         assert_eq!(stats.might.base, 14);
         assert_eq!(stats.might.current, 14);
         assert_eq!(stats.intellect.base, 10);
+        assert_eq!(stats.personality.base, 12);
+        assert_eq!(stats.endurance.base, 13);
+        assert_eq!(stats.speed.base, 11);
         assert_eq!(stats.accuracy.base, 15);
+        assert_eq!(stats.luck.base, 10);
     }
 
     #[test]
-    fn test_base_stats_serialization() {
-        let stats = BaseStats::new(16, 8, 10, 14, 12, 14, 10);
+    fn test_stats_serialization_simple_format() {
+        // Test that simple format (plain numbers) works
+        let ron_str = r#"(
+            might: 15,
+            intellect: 10,
+            personality: 12,
+            endurance: 14,
+            speed: 11,
+            accuracy: 13,
+            luck: 10,
+        )"#;
+
+        let stats: Stats = ron::from_str(ron_str).expect("Failed to deserialize simple format");
+        assert_eq!(stats.might.base, 15);
+        assert_eq!(stats.might.current, 15);
+        assert_eq!(stats.intellect.base, 10);
+        assert_eq!(stats.intellect.current, 10);
+    }
+
+    #[test]
+    fn test_stats_serialization_full_format() {
+        // Test that full format (base and current) works
+        let ron_str = r#"(
+            might: (base: 15, current: 18),
+            intellect: (base: 10, current: 10),
+            personality: (base: 12, current: 12),
+            endurance: (base: 14, current: 14),
+            speed: (base: 11, current: 11),
+            accuracy: (base: 13, current: 13),
+            luck: (base: 10, current: 10),
+        )"#;
+
+        let stats: Stats = ron::from_str(ron_str).expect("Failed to deserialize full format");
+        assert_eq!(stats.might.base, 15);
+        assert_eq!(stats.might.current, 18);
+        assert_eq!(stats.intellect.base, 10);
+        assert_eq!(stats.intellect.current, 10);
+    }
+
+    #[test]
+    fn test_stats_serialization_roundtrip() {
+        let stats = Stats::new(16, 8, 10, 14, 12, 14, 10);
         let serialized = ron::to_string(&stats).unwrap();
-        let deserialized: BaseStats = ron::from_str(&serialized).unwrap();
+        let deserialized: Stats = ron::from_str(&serialized).unwrap();
         assert_eq!(stats, deserialized);
     }
 
     // ===== CharacterDefinition Tests =====
 
     #[test]
-    fn test_instantiate_respects_hp_current_and_hp_base() {
+    fn test_instantiate_respects_hp_override() {
         let races =
             RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
         let classes =
@@ -1693,8 +1779,10 @@ mod tests {
             Sex::Male,
             Alignment::Neutral,
         );
-        def.hp_base = Some(50u16);
-        def.hp_current = Some(25u16);
+        def.hp_override = Some(AttributePair16 {
+            base: 50,
+            current: 25,
+        });
 
         let character = def
             .instantiate(&races, &classes, &items)
@@ -1704,7 +1792,7 @@ mod tests {
     }
 
     #[test]
-    fn test_instantiate_hp_current_clamped_to_base() {
+    fn test_instantiate_hp_override_current_clamped_to_base() {
         let races =
             RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
         let classes =
@@ -1720,18 +1808,20 @@ mod tests {
             Sex::Male,
             Alignment::Neutral,
         );
-        def.hp_base = Some(30u16);
-        def.hp_current = Some(100u16);
+        def.hp_override = Some(AttributePair16 {
+            base: 30,
+            current: 50, // Current exceeds base
+        });
 
         let character = def
             .instantiate(&races, &classes, &items)
             .expect("Instantiation failed");
         assert_eq!(character.hp.base, 30u16);
-        assert_eq!(character.hp.current, 30u16); // clamped to base
+        assert_eq!(character.hp.current, 30u16); // Should be clamped
     }
 
     #[test]
-    fn test_instantiate_hp_current_without_hp_base_clamped_to_calculated_base() {
+    fn test_instantiate_without_hp_override_uses_calculated() {
         let races =
             RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
         let classes =
@@ -1739,7 +1829,7 @@ mod tests {
         let items =
             ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
 
-        let mut def = CharacterDefinition::new(
+        let def = CharacterDefinition::new(
             "test_char3".to_string(),
             "Test Character 3".to_string(),
             "human".to_string(),
@@ -1747,13 +1837,13 @@ mod tests {
             Sex::Male,
             Alignment::Neutral,
         );
-        def.hp_current = Some(1u16);
+        // No hp_override set
 
         let character = def
             .instantiate(&races, &classes, &items)
             .expect("Instantiation failed");
-        assert!(character.hp.base >= 1u16);
-        assert_eq!(character.hp.current, 1u16.min(character.hp.base));
+        assert!(character.hp.base > 0);
+        assert_eq!(character.hp.current, character.hp.base);
     }
 
     fn create_test_knight() -> CharacterDefinition {
@@ -1776,7 +1866,7 @@ mod tests {
             Sex::Male,
             Alignment::Neutral,
         );
-        def.base_stats = BaseStats::new(8, 16, 12, 10, 14, 10, 12);
+        def.base_stats = Stats::new(8, 16, 12, 10, 14, 10, 12);
         def.is_premade = true;
         def
     }
@@ -2087,14 +2177,14 @@ mod tests {
 
         let knight = db.get_character("pregen_knight").unwrap();
         assert_eq!(knight.name, "Sir Galahad");
-        assert_eq!(knight.base_stats.might, 16);
+        assert_eq!(knight.base_stats.might.base, 16);
         assert_eq!(knight.starting_gold, 100);
         assert_eq!(knight.starting_items.len(), 2);
         assert!(knight.starting_equipment.weapon.is_some());
 
         let sorcerer = db.get_character("pregen_sorcerer").unwrap();
         assert_eq!(sorcerer.name, "Merlin");
-        assert_eq!(sorcerer.base_stats.intellect, 16);
+        assert_eq!(sorcerer.base_stats.intellect.base, 16);
     }
 
     #[test]
@@ -2345,16 +2435,16 @@ mod tests {
 
             // Verify starting stats are reasonable (3-18 range)
             assert!(
-                char_def.base_stats.might >= 3 && char_def.base_stats.might <= 18,
+                char_def.base_stats.might.base >= 3 && char_def.base_stats.might.base <= 18,
                 "Character '{}' has out-of-range might: {}",
                 char_def.id,
-                char_def.base_stats.might
+                char_def.base_stats.might.base
             );
             assert!(
-                char_def.base_stats.intellect >= 3 && char_def.base_stats.intellect <= 18,
+                char_def.base_stats.intellect.base >= 3 && char_def.base_stats.intellect.base <= 18,
                 "Character '{}' has out-of-range intellect: {}",
                 char_def.id,
-                char_def.base_stats.intellect
+                char_def.base_stats.intellect.base
             );
 
             // Verify description is not empty for pre-made characters
@@ -2568,7 +2658,7 @@ mod tests {
     fn test_apply_race_modifiers_no_modifiers() {
         use crate::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
 
-        let base_stats = BaseStats::new(10, 10, 10, 10, 10, 10, 10);
+        let base_stats = Stats::new(10, 10, 10, 10, 10, 10, 10);
         let race_def = RaceDefinition {
             id: "human".to_string(),
             name: "Human".to_string(),
@@ -2595,7 +2685,7 @@ mod tests {
     fn test_apply_race_modifiers_with_bonuses() {
         use crate::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
 
-        let base_stats = BaseStats::new(10, 10, 10, 10, 10, 10, 10);
+        let base_stats = Stats::new(10, 10, 10, 10, 10, 10, 10);
         let race_def = RaceDefinition {
             id: "elf".to_string(),
             name: "Elf".to_string(),
@@ -2631,7 +2721,7 @@ mod tests {
         use crate::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
 
         // Test clamping at lower bound
-        let low_stats = BaseStats::new(3, 3, 3, 3, 3, 3, 3);
+        let low_stats = Stats::new(3, 3, 3, 3, 3, 3, 3);
         let race_def = RaceDefinition {
             id: "test".to_string(),
             name: "Test".to_string(),
@@ -2656,7 +2746,7 @@ mod tests {
         assert_eq!(stats.might.base, 3); // Clamped to minimum
 
         // Test clamping at upper bound
-        let high_stats = BaseStats::new(18, 18, 18, 18, 18, 18, 18);
+        let high_stats = Stats::new(18, 18, 18, 18, 18, 18, 18);
         let race_def_bonus = RaceDefinition {
             id: "test".to_string(),
             name: "Test".to_string(),
@@ -2994,9 +3084,8 @@ mod tests {
             class_id: "knight".to_string(),
             sex: Sex::Male,
             alignment: Alignment::Good,
-            base_stats: BaseStats::new(14, 10, 10, 12, 10, 12, 10),
-            hp_base: None,
-            hp_current: None,
+            base_stats: Stats::new(14, 10, 10, 12, 10, 12, 10),
+            hp_override: None,
             portrait_id: "1".to_string(),
             starting_gold: 100,
             starting_gems: 5,
@@ -3177,9 +3266,8 @@ mod tests {
             class_id: "sorcerer".to_string(),
             sex: Sex::Female,
             alignment: Alignment::Neutral,
-            base_stats: BaseStats::new(6, 18, 6, 8, 6, 8, 6),
-            hp_base: None,
-            hp_current: None,
+            base_stats: Stats::new(6, 18, 6, 8, 6, 8, 6),
+            hp_override: None,
             portrait_id: "2".to_string(),
             starting_gold: 50,
             starting_gems: 10,
@@ -3225,9 +3313,8 @@ mod tests {
             class_id: "knight".to_string(),
             sex: Sex::Male,
             alignment: Alignment::Good,
-            base_stats: BaseStats::new(16, 16, 10, 14, 10, 14, 10),
-            hp_base: None,
-            hp_current: None,
+            base_stats: Stats::new(16, 16, 10, 14, 10, 14, 10),
+            hp_override: None,
             portrait_id: "1".to_string(),
             starting_gold: 100,
             starting_gems: 0,
@@ -3248,5 +3335,389 @@ mod tests {
         assert_eq!(character.sp.base, 0);
         // Non-caster should have spell level 0
         assert_eq!(character.spell_level.base, 0);
+    }
+
+    // ===== Phase 2: Campaign Data Migration Tests =====
+    //
+    // These tests verify that existing campaign data files load correctly
+    // with the AttributePair migration (Phase 1 backward compatibility).
+
+    #[test]
+    fn test_phase2_tutorial_campaign_loads() {
+        // Verify tutorial campaign characters.ron loads with new AttributePair format
+        let result = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron");
+
+        assert!(
+            result.is_ok(),
+            "Tutorial campaign characters.ron should load successfully: {:?}",
+            result.err()
+        );
+
+        let db = result.unwrap();
+
+        // Tutorial campaign has 9 character definitions
+        assert_eq!(
+            db.len(),
+            9,
+            "Tutorial campaign should have 9 character definitions"
+        );
+
+        // Verify specific characters exist
+        assert!(
+            db.get_character("tutorial_human_knight").is_some(),
+            "Should find Kira (tutorial_human_knight)"
+        );
+        assert!(
+            db.get_character("tutorial_elf_sorcerer").is_some(),
+            "Should find Sirius (tutorial_elf_sorcerer)"
+        );
+        assert!(
+            db.get_character("tutorial_human_cleric").is_some(),
+            "Should find Mira (tutorial_human_cleric)"
+        );
+    }
+
+    #[test]
+    fn test_phase2_tutorial_campaign_hp_override() {
+        // Verify that tutorial campaign hp_base fields convert to hp_override correctly
+        let db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+            .expect("Failed to load tutorial campaign");
+
+        let kira = db
+            .get_character("tutorial_human_knight")
+            .expect("Should find Kira");
+
+        // Tutorial campaign uses hp_base: Some(10)
+        // Should convert to hp_override: Some(AttributePair16 { base: 10, current: 10 })
+        assert!(
+            kira.hp_override.is_some(),
+            "Kira should have hp_override from hp_base"
+        );
+        assert_eq!(
+            kira.hp_override.unwrap().base,
+            10,
+            "Kira's hp_override base should be 10"
+        );
+        assert_eq!(
+            kira.hp_override.unwrap().current,
+            10,
+            "Kira's hp_override current should equal base (not pre-buffed)"
+        );
+    }
+
+    #[test]
+    fn test_phase2_tutorial_campaign_stats_format() {
+        // Verify that tutorial campaign base_stats (simple format) deserialize correctly
+        let db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+            .expect("Failed to load tutorial campaign");
+
+        let sirius = db
+            .get_character("tutorial_elf_sorcerer")
+            .expect("Should find Sirius");
+
+        // Tutorial campaign uses simple format: might: 8
+        // Should deserialize to Stats with AttributePair { base: 8, current: 8 }
+        assert_eq!(
+            sirius.base_stats.might.base, 8,
+            "Sirius might base should be 8"
+        );
+        assert_eq!(
+            sirius.base_stats.might.current, 8,
+            "Sirius might current should equal base"
+        );
+        assert_eq!(
+            sirius.base_stats.intellect.base, 16,
+            "Sirius intellect base should be 16"
+        );
+        assert_eq!(
+            sirius.base_stats.intellect.current, 16,
+            "Sirius intellect current should equal base"
+        );
+    }
+
+    #[test]
+    fn test_phase2_core_campaign_loads() {
+        // Verify core data/characters.ron loads with new AttributePair format
+        let result = CharacterDatabase::load_from_file("data/characters.ron");
+
+        assert!(
+            result.is_ok(),
+            "Core characters.ron should load successfully: {:?}",
+            result.err()
+        );
+
+        let db = result.unwrap();
+
+        // Core campaign has 6 pre-made character definitions
+        assert_eq!(
+            db.len(),
+            6,
+            "Core campaign should have 6 character definitions"
+        );
+
+        // Verify specific characters exist
+        assert!(
+            db.get_character("pregen_human_knight").is_some(),
+            "Should find Sir Aldric (pregen_human_knight)"
+        );
+        assert!(
+            db.get_character("pregen_gnome_sorcerer").is_some(),
+            "Should find Lyria Starweaver (pregen_gnome_sorcerer)"
+        );
+    }
+
+    #[test]
+    fn test_phase2_core_campaign_stats_format() {
+        // Verify that core campaign base_stats (simple format) deserialize correctly
+        let db = CharacterDatabase::load_from_file("data/characters.ron")
+            .expect("Failed to load core campaign");
+
+        let aldric = db
+            .get_character("pregen_human_knight")
+            .expect("Should find Sir Aldric");
+
+        // Core campaign uses simple format: might: 16
+        // Should deserialize to Stats with AttributePair { base: 16, current: 16 }
+        assert_eq!(
+            aldric.base_stats.might.base, 16,
+            "Sir Aldric might base should be 16"
+        );
+        assert_eq!(
+            aldric.base_stats.might.current, 16,
+            "Sir Aldric might current should equal base"
+        );
+        assert_eq!(
+            aldric.base_stats.endurance.base, 15,
+            "Sir Aldric endurance base should be 15"
+        );
+    }
+
+    #[test]
+    fn test_phase2_campaign_instantiation() {
+        // Verify that campaign characters can be instantiated successfully
+        let char_db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+            .expect("Failed to load tutorial campaign");
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let kira_def = char_db
+            .get_character("tutorial_human_knight")
+            .expect("Should find Kira");
+
+        let kira = kira_def
+            .instantiate(&races, &classes, &items)
+            .expect("Should instantiate Kira successfully");
+
+        // Verify instantiation worked correctly
+        assert_eq!(kira.name, "Kira");
+        assert_eq!(kira.race_id, "human");
+        assert_eq!(kira.class_id, "knight");
+
+        // Verify stats were applied correctly (base_stats + race modifiers)
+        assert!(
+            kira.stats.might.base >= 15,
+            "Kira's might should be at least base 15 (may have race bonus)"
+        );
+
+        // Verify HP override was used
+        // hp_override: Some(10) should be used instead of calculated HP
+        assert_eq!(
+            kira.hp.base, 10,
+            "Kira's HP should use hp_override value of 10"
+        );
+        assert_eq!(
+            kira.hp.current, 10,
+            "Kira's current HP should equal base HP"
+        );
+    }
+
+    #[test]
+    fn test_phase2_all_tutorial_characters_instantiate() {
+        // Verify ALL tutorial campaign characters can be instantiated
+        let char_db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
+            .expect("Failed to load tutorial campaign");
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let mut success_count = 0;
+
+        for char_def in char_db.all_characters() {
+            match char_def.instantiate(&races, &classes, &items) {
+                Ok(character) => {
+                    success_count += 1;
+                    // Verify basic invariants
+                    assert_eq!(character.name, char_def.name);
+                    assert_eq!(character.race_id, char_def.race_id);
+                    assert_eq!(character.class_id, char_def.class_id);
+                }
+                Err(e) => {
+                    panic!("Failed to instantiate character '{}': {:?}", char_def.id, e);
+                }
+            }
+        }
+
+        assert_eq!(
+            success_count, 9,
+            "All 9 tutorial characters should instantiate successfully"
+        );
+    }
+
+    #[test]
+    fn test_phase2_all_core_characters_instantiate() {
+        // Verify ALL core campaign characters can be instantiated
+        let char_db = CharacterDatabase::load_from_file("data/characters.ron")
+            .expect("Failed to load core campaign");
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let mut success_count = 0;
+
+        for char_def in char_db.all_characters() {
+            match char_def.instantiate(&races, &classes, &items) {
+                Ok(character) => {
+                    success_count += 1;
+                    // Verify basic invariants
+                    assert_eq!(character.name, char_def.name);
+                    assert_eq!(character.race_id, char_def.race_id);
+                    assert_eq!(character.class_id, char_def.class_id);
+                }
+                Err(e) => {
+                    panic!("Failed to instantiate character '{}': {:?}", char_def.id, e);
+                }
+            }
+        }
+
+        assert_eq!(
+            success_count, 6,
+            "All 6 core characters should instantiate successfully"
+        );
+    }
+
+    #[test]
+    fn test_phase2_stats_roundtrip_preserves_format() {
+        // Verify that Stats can roundtrip through RON serialization
+        // Both simple and full formats should work
+
+        // Test simple format
+        let simple_ron = r#"(
+            might: 15,
+            intellect: 10,
+            personality: 12,
+            endurance: 14,
+            speed: 11,
+            accuracy: 13,
+            luck: 10,
+        )"#;
+
+        let stats: Stats = ron::from_str(simple_ron).expect("Should parse simple format");
+        assert_eq!(stats.might.base, 15);
+        assert_eq!(stats.might.current, 15);
+
+        // Test full format
+        let full_ron = r#"(
+            might: (base: 15, current: 18),
+            intellect: 10,
+            personality: 12,
+            endurance: 14,
+            speed: 11,
+            accuracy: 13,
+            luck: 10,
+        )"#;
+
+        let stats_buffed: Stats = ron::from_str(full_ron).expect("Should parse full format");
+        assert_eq!(stats_buffed.might.base, 15);
+        assert_eq!(stats_buffed.might.current, 18);
+        assert_eq!(stats_buffed.intellect.base, 10);
+        assert_eq!(stats_buffed.intellect.current, 10);
+    }
+
+    #[test]
+    fn test_phase2_example_formats_file_loads() {
+        // Verify the example character_definition_formats.ron file loads correctly
+        // This file demonstrates all supported formats for content authors
+        let result =
+            CharacterDatabase::load_from_file("data/examples/character_definition_formats.ron");
+
+        assert!(
+            result.is_ok(),
+            "Example formats file should load successfully: {:?}",
+            result.err()
+        );
+
+        let db = result.unwrap();
+
+        // File contains 5 example characters
+        assert_eq!(
+            db.len(),
+            5,
+            "Example formats file should have 5 character definitions"
+        );
+
+        // Verify simple format example
+        let simple = db
+            .get_character("example_simple_format")
+            .expect("Should find simple format example");
+        assert_eq!(simple.base_stats.might.base, 16);
+        assert_eq!(simple.base_stats.might.current, 16);
+        assert_eq!(simple.hp_override, Some(AttributePair16::new(50)));
+
+        // Verify buffed character example (full format)
+        let buffed = db
+            .get_character("example_buffed_hero")
+            .expect("Should find buffed hero example");
+        assert_eq!(buffed.base_stats.might.base, 14);
+        assert_eq!(buffed.base_stats.might.current, 18); // Pre-buffed
+        assert_eq!(buffed.base_stats.luck.base, 11);
+        assert_eq!(buffed.base_stats.luck.current, 16); // Pre-blessed
+        assert_eq!(
+            buffed.hp_override,
+            Some(AttributePair16 {
+                base: 45,
+                current: 60
+            })
+        );
+
+        // Verify wounded character example
+        let wounded = db
+            .get_character("example_wounded_veteran")
+            .expect("Should find wounded veteran example");
+        assert_eq!(
+            wounded.hp_override,
+            Some(AttributePair16 {
+                base: 50,
+                current: 30
+            })
+        );
+
+        // Verify auto-calculated HP example (no hp_override)
+        let auto_hp = db
+            .get_character("example_auto_hp")
+            .expect("Should find auto HP example");
+        assert!(auto_hp.hp_override.is_none());
+
+        // Verify legacy format example (backward compatibility)
+        let legacy = db
+            .get_character("example_legacy_format")
+            .expect("Should find legacy format example");
+        // Legacy hp_base + hp_current should convert to hp_override
+        assert_eq!(
+            legacy.hp_override,
+            Some(AttributePair16 {
+                base: 40,
+                current: 25
+            })
+        );
     }
 }

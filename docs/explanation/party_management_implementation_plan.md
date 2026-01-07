@@ -3,6 +3,7 @@
 ## Overview
 
 This plan implements a comprehensive party management system for Antares, enabling players to:
+
 - Swap party members at Inns (add/remove/replace characters)
 - Define starting party members via `starts_in_party` flag in character definitions
 - Track character locations throughout the game (in party, at specific inns, on maps)
@@ -14,15 +15,17 @@ This plan implements a comprehensive party management system for Antares, enabli
 ### Existing Infrastructure
 
 **Character System (antares/src/domain/character.rs)**
+
 - `Party`: Active adventuring group (0-6 members, `MAX_MEMBERS = 6`)
   - `add_member(&mut self, character: Character)`: Adds character, returns `CharacterError::PartyFull` if at capacity
   - `remove_member(&mut self, index: usize)`: Removes by index, returns `Option<Character>`
   - `is_full()`, `is_empty()`, `size()` helper methods
 - `Roster`: All created characters (up to 18, `MAX_CHARACTERS = 18`)
-  - `add_character(&mut self, character: Character, location: Option<TownId>)`: Adds to roster with location
-  - `character_locations: Vec<Option<TownId>>`: Parallel array tracking where each roster character is stored
+  - `add_character(&mut self, character: Character, location: Option<InnkeeperId>)`: Adds to roster with location (InnkeeperId string)
+  - `character_locations: Vec<Option<InnkeeperId>>`: Parallel array tracking where each roster character is stored (legacy; replaced by `Vec<CharacterLocation>`)
 
 **Game State (antares/src/application/mod.rs)**
+
 - `GameState`: Contains `roster: Roster`, `party: Party`, `mode: GameMode`, `world: World`
 - `initialize_roster(&mut self, content_db: &ContentDatabase)`: Populates roster from premade characters (`is_premade == true`)
   - Currently does NOT populate starting party
@@ -30,21 +33,25 @@ This plan implements a comprehensive party management system for Antares, enabli
   - Adds to roster with `location: None`
 
 **Character Definitions (antares/src/domain/character_definition.rs)**
+
 - `CharacterDefinition`: RON-serializable template for creating runtime `Character` instances
   - `is_premade: bool`: Distinguishes premades from templates
   - No `starts_in_party` field yet
   - `instantiate()` method creates runtime `Character` from definition + databases
 
 **Campaign Data (campaigns/tutorial/data/characters.ron)**
+
 - 3 tutorial premades: `tutorial_human_knight` (Kira), `tutorial_elf_sorcerer` (Sage), `tutorial_human_cleric` (Mira)
 - 3 recruitable NPCs: `npc_old_gareth`, `npc_whisper`, `npc_apprentice_zara` (all `is_premade: false`)
 - 3 templates for character generation
 
 **Map Events (antares/src/game/systems/map.rs)**
+
 - `MapEventType` enum: `Teleport`, `NpcDialogue`, `CombatEncounter`, `TreasureChest`
   - No character recruitment event type yet
 
 **UI Systems (antares/src/game/systems/ui.rs)**
+
 - Basic egui UI showing party members in bottom panel
 - No Inn UI or character management UI yet
 
@@ -64,29 +71,32 @@ This plan implements a comprehensive party management system for Antares, enabli
 #### 1.1 Foundation Work
 
 **Add `CharacterLocation` enum (antares/src/domain/character.rs)**
+
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CharacterLocation {
     /// Character is in the active party
     InParty,
     /// Character is stored at a specific inn/town
-    AtInn(TownId),
+    AtInn(InnkeeperId),
     /// Character is available on a specific map (for encounters)
     OnMap(MapId),
 }
 ```
 
 **Update `Roster` struct**
+
 - Change `character_locations: Vec<Option<TownId>>` → `character_locations: Vec<CharacterLocation>`
 - Add helper methods:
   - `find_character_by_id(&self, id: CharacterId) -> Option<usize>`: Find roster index by character ID
   - `get_character(&self, index: usize) -> Option<&Character>`: Safe indexed access
   - `get_character_mut(&mut self, index: usize) -> Option<&mut Character>`: Mutable access
   - `update_location(&mut self, index: usize, location: CharacterLocation)`: Update location tracking
-  - `characters_at_inn(&self, town_id: TownId) -> Vec<(usize, &Character)>`: Get all characters at specific inn
+  - `characters_at_inn(&self, innkeeper_id: InnkeeperId) -> Vec<(usize, &Character)>`: Get all characters at a specific inn
   - `characters_in_party(&self) -> Vec<(usize, &Character)>`: Get all characters marked `InParty`
 
 **Add `starts_in_party` to `CharacterDefinition` (antares/src/domain/character_definition.rs)**
+
 ```rust
 pub struct CharacterDefinition {
     // ... existing fields ...
@@ -100,41 +110,46 @@ pub struct CharacterDefinition {
 #### 1.2 Add Starting Party Population
 
 **Update `GameState::initialize_roster` (antares/src/application/mod.rs)**
+
 - After adding character to roster, check `def.starts_in_party`
 - If true, attempt `self.party.add_member(character.clone())` (clone before adding to roster)
 - Set roster location to `CharacterLocation::InParty` for party members
-- Set roster location to `CharacterLocation::AtInn(starting_inn_id)` for non-party premades
-  - Add `starting_inn: TownId` to `CampaignConfig` (default to 1)
+- Set roster location to `CharacterLocation::AtInn(starting_innkeeper.clone())` for non-party premades
+- Add `starting_innkeeper: String` to `CampaignConfig` (default: `"tutorial_innkeeper_town"`)
 - Handle party overflow: if party full, log warning and place at starting inn instead
 - Return `RosterInitializationError::PartyOverflow` if more than `Party::MAX_MEMBERS` have `starts_in_party: true`
 
 **Add campaign config field (antares/src/sdk/campaign_loader.rs)**
+
 ```rust
 pub struct CampaignConfig {
     // ... existing fields ...
 
-    /// Default inn where non-party premade characters start (default: 1)
-    #[serde(default = "default_starting_inn")]
-    pub starting_inn: TownId,
+    /// Default innkeeper NPC ID where non-party premade characters start
+    #[serde(default = "default_starting_innkeeper")]
+    pub starting_innkeeper: String,
 }
 
-fn default_starting_inn() -> TownId {
-    1
+fn default_starting_innkeeper() -> String {
+    "tutorial_innkeeper_town".to_string()
 }
 ```
 
 #### 1.3 Integrate Starting Party
 
 **Update tutorial campaign data (campaigns/tutorial/data/characters.ron)**
+
 - Set `starts_in_party: true` for Kira, Sage, Mira (the 3 tutorial premades)
 - Set `starts_in_party: false` (or omit, since default) for NPCs and templates
 
 **Update tutorial campaign config (campaigns/tutorial/campaign.ron)**
+
 - Add `starting_inn: 1` to `CampaignMetadata`
 
 #### 1.4 Testing Requirements
 
 **Unit tests (antares/src/application/mod.rs)**
+
 - `test_initialize_roster_populates_starting_party`: Verify characters with `starts_in_party: true` are added to party
 - `test_initialize_roster_sets_party_locations`: Verify party members have `CharacterLocation::InParty`
 - `test_initialize_roster_sets_inn_locations`: Verify non-party premades have `CharacterLocation::AtInn(starting_inn)`
@@ -142,6 +157,7 @@ fn default_starting_inn() -> TownId {
 - `test_initialize_roster_respects_max_party_size`: Verify party size never exceeds `Party::MAX_MEMBERS`
 
 **Integration test**
+
 - `test_new_game_with_starting_party`: Full new game flow, verify party and roster are correctly populated
 
 #### 1.5 Deliverables
@@ -172,6 +188,7 @@ fn default_starting_inn() -> TownId {
 **Add `PartyManager` (new file: antares/src/domain/party_manager.rs)**
 
 Core operations:
+
 ```rust
 pub struct PartyManager;
 
@@ -188,7 +205,7 @@ impl PartyManager {
         party: &mut Party,
         roster: &mut Roster,
         party_index: usize,
-        inn_id: TownId,
+        innkeeper_id: InnkeeperId,
     ) -> Result<Character, PartyManagementError>;
 
     /// Swaps party member with roster character (atomic operation)
@@ -226,6 +243,7 @@ pub enum PartyManagementError {
 ```
 
 **Implementation details:**
+
 - `recruit_to_party`:
   - Verify party not full
   - Verify character location is `AtInn(_)` or `OnMap(_)` (not already `InParty`)
@@ -234,7 +252,7 @@ pub enum PartyManagementError {
 - `dismiss_to_inn`:
   - Verify party size > 1 (cannot remove last member)
   - Remove from party by index
-  - Update roster location to `AtInn(inn_id)`
+  5. Update roster location to `AtInn(InnkeeperId)` (uses string-based InnkeeperId)
   - Return removed character
 - `swap_party_member`:
   - Atomic operation: remove from party, add to roster at inn, recruit from roster
@@ -245,6 +263,7 @@ pub enum PartyManagementError {
 **Update `GameState` (antares/src/application/mod.rs)**
 
 Add party management methods:
+
 ```rust
 impl GameState {
     /// Recruits character from current location to party
@@ -253,9 +272,10 @@ impl GameState {
     }
 
     /// Dismisses party member to current inn
-    pub fn dismiss_character(&mut self, party_index: usize, inn_id: TownId) -> Result<Character, PartyManagementError> {
-        PartyManager::dismiss_to_inn(&mut self.party, &mut self.roster, party_index, inn_id)
+    pub fn dismiss_character(&mut self, party_index: usize, innkeeper_id: InnkeeperId) -> Result<Character, PartyManagementError> {
+        PartyManager::dismiss_to_inn(&mut self.party, &mut self.roster, party_index, innkeeper_id)
     }
+}
 
     /// Swaps party member with roster character
     pub fn swap_party_member(&mut self, party_index: usize, roster_index: usize) -> Result<(), PartyManagementError> {
@@ -278,6 +298,7 @@ impl GameState {
 Modify `Party::add_member` and `Party::remove_member` to accept `roster: &mut Roster` and update locations automatically (or require caller to update).
 
 **Alternative: Keep Party/Roster independent, require GameState to coordinate**
+
 - Cleaner separation of concerns
 - GameState methods (`recruit_character`, etc.) handle location updates
 - Party and Roster remain simple data structures
@@ -285,6 +306,7 @@ Modify `Party::add_member` and `Party::remove_member` to accept `roster: &mut Ro
 #### 2.4 Testing Requirements
 
 **Unit tests (antares/src/domain/party_manager.rs)**
+
 - `test_recruit_to_party_success`: Add character from inn to party
 - `test_recruit_to_party_when_full`: Verify `PartyFull` error
 - `test_recruit_already_in_party`: Verify `AlreadyInParty` error
@@ -294,6 +316,7 @@ Modify `Party::add_member` and `Party::remove_member` to accept `roster: &mut Ro
 - `test_location_tracking_consistency`: Verify roster locations always match party state
 
 **Integration tests (antares/src/application/mod.rs)**
+
 - `test_game_state_recruit_character`: Full flow through GameState
 - `test_game_state_dismiss_character`: Full flow with location update
 - `test_party_management_maintains_invariants`: Verify roster and party stay synchronized
@@ -322,6 +345,7 @@ Modify `Party::add_member` and `Party::remove_member` to accept `roster: &mut Ro
 #### 3.1 Inn Interaction Mode
 
 **Add new `GameMode` variant (antares/src/application/mod.rs)**
+
 ```rust
 pub enum GameMode {
     Exploration,
@@ -333,20 +357,22 @@ pub enum GameMode {
 
 #[derive(Debug, Clone)]
 pub struct InnManagementState {
-    pub current_inn_id: TownId,
+    /// ID of the innkeeper NPC currently being visited
+    pub current_inn_id: InnkeeperId,
     pub selected_party_slot: Option<usize>,
     pub selected_roster_slot: Option<usize>,
 }
 ```
 
 **Add Inn trigger to map events (antares/src/game/systems/map.rs)**
+
 ```rust
 pub enum MapEventType {
     Teleport { target_map: MapId, target_pos: Position },
     NpcDialogue { npc_id: String },
     CombatEncounter { monster_group_id: u8 },
     TreasureChest { loot_table_id: u8 },
-    EnterInn { inn_id: TownId }, // NEW
+    EnterInn { innkeeper_id: InnkeeperId }, // NEW (uses InnkeeperId string)
 }
 ```
 
@@ -355,6 +381,7 @@ pub enum MapEventType {
 **Create `InnUiPlugin` (new file: antares/src/game/systems/inn_ui.rs)**
 
 UI layout:
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │ Inn: [Inn Name] - Party Management                  │
@@ -379,6 +406,7 @@ UI layout:
 ```
 
 **Core functionality:**
+
 - Display party members (6 slots, empty slots shown)
 - Display roster characters at current inn
 - Click party member → Show "Dismiss to Inn" button
@@ -387,6 +415,7 @@ UI layout:
 - Exit button → Return to `GameMode::Exploration`
 
 **State management:**
+
 - Store `InnManagementState` in Bevy resource
 - Handle UI events via Bevy systems
 - Send commands to `GlobalState` to modify party/roster
@@ -394,6 +423,7 @@ UI layout:
 #### 3.3 Event Handling
 
 **Create Bevy events (antares/src/game/systems/inn_ui.rs)**
+
 ```rust
 #[derive(Event)]
 pub struct InnRecruitCharacter {
@@ -416,6 +446,7 @@ pub struct ExitInn;
 ```
 
 **System to process events**
+
 ```rust
 fn inn_action_system(
     mut recruit_events: EventReader<InnRecruitCharacter>,
@@ -445,16 +476,18 @@ fn inn_action_system(
 **Add Inn map event blueprint (campaigns/tutorial/data/maps/)**
 
 Example RON for tutorial town map:
+
 ```ron
 MapEventBlueprint(
     position: (5, 10),
     name: "Traveler's Rest Inn",
     description: "A cozy inn where adventurers gather",
-    event_type: EnterInn(inn_id: 1),
+    event_type: EnterInn(innkeeper_id: "tutorial_innkeeper_town"),
 )
 ```
 
 **Update event trigger system (antares/src/game/systems/events.rs)**
+
 - Handle `MapEventType::EnterInn`
 - Transition `GameMode` to `InnManagement(InnManagementState { current_inn_id, ... })`
 - Show Inn UI overlay
@@ -462,6 +495,7 @@ MapEventBlueprint(
 #### 3.5 Testing Requirements
 
 **UI tests (manual/screenshot tests)**
+
 - Inn UI displays correctly with party members
 - Inn UI shows available characters at current inn
 - Recruit button works, updates party
@@ -470,6 +504,7 @@ MapEventBlueprint(
 - Exit returns to exploration mode
 
 **Integration tests**
+
 - `test_inn_recruit_updates_game_state`: Verify event → state change
 - `test_inn_ui_reflects_current_inn`: Only characters at current inn shown
 - `test_inn_cannot_dismiss_last_member`: Verify error handling in UI
@@ -500,6 +535,7 @@ MapEventBlueprint(
 #### 4.1 Recruitable Character Encounters
 
 **Add `MapEventType::RecruitableCharacter` (antares/src/game/systems/map.rs)**
+
 ```rust
 pub enum MapEventType {
     // ... existing variants ...
@@ -512,6 +548,7 @@ pub enum MapEventType {
 **Create recruitment dialogue flow**
 
 When player triggers `RecruitableCharacter` event:
+
 1. Show character portrait and description
 2. Present dialogue: "Will you join our party?"
    - Yes, and party has room → Add to party immediately, set location `InParty`
@@ -519,6 +556,7 @@ When player triggers `RecruitableCharacter` event:
    - No → Character remains on map (`OnMap(current_map_id)`)
 
 **Update `ContentDatabase` character handling (antares/src/sdk/database.rs)**
+
 - Track which characters are recruitable NPCs (not premades, not templates)
 - Load NPCs into roster when encountered (lazy loading)
 - Add `recruit_npc(&mut self, character_id: &str) -> Result<Character, DatabaseError>`
@@ -526,6 +564,7 @@ When player triggers `RecruitableCharacter` event:
 #### 4.2 Encounter State Management
 
 **Add encounter tracking to `GameState`**
+
 ```rust
 impl GameState {
     /// Tracks which characters have been encountered on maps
@@ -547,6 +586,7 @@ pub enum RecruitResult {
 ```
 
 **Prevent re-recruiting**
+
 - Once character recruited or sent to inn, mark as encountered
 - Future triggers of same map event show "already recruited" message
 - Save `encountered_characters` in save game
@@ -554,6 +594,7 @@ pub enum RecruitResult {
 #### 4.3 Nearest Inn Calculation
 
 **Add `World::find_nearest_inn` (antares/src/domain/world/types.rs)**
+
 ```rust
 impl World {
     /// Finds nearest inn to current party position
@@ -566,6 +607,7 @@ impl World {
 ```
 
 **Alternative: Campaign-defined fallback inn**
+
 - Use `CampaignConfig::starting_inn` as default
 - Avoids complex pathfinding for MVP
 
@@ -574,6 +616,7 @@ impl World {
 **Update tutorial campaign maps (campaigns/tutorial/data/maps/)**
 
 Add recruitable character events:
+
 ```ron
 MapEventBlueprint(
     position: (15, 8),
@@ -595,6 +638,7 @@ MapEventBlueprint(
 **Create recruitment dialog component (antares/src/game/systems/recruitment_dialog.rs)**
 
 UI flow:
+
 ```
 ┌──────────────────────────────────────────┐
 │ [Character Portrait]                     │
@@ -610,6 +654,7 @@ UI flow:
 ```
 
 **If party full:**
+
 ```
 ┌──────────────────────────────────────────┐
 │ Your party is full!                      │
@@ -624,12 +669,14 @@ UI flow:
 #### 4.6 Testing Requirements
 
 **Unit tests**
+
 - `test_recruit_from_map_adds_to_party`: Party has room → character added
 - `test_recruit_from_map_sends_to_inn`: Party full → character sent to inn
 - `test_recruit_from_map_prevents_duplicates`: Already recruited → error
 - `test_encounter_tracking_persists`: `encountered_characters` saved/loaded
 
 **Integration tests**
+
 - `test_map_encounter_full_flow`: Trigger event → dialog → recruit → verify state
 - `test_recruited_character_appears_at_inn`: Send to inn → verify shows in Inn UI
 
@@ -662,11 +709,13 @@ UI flow:
 **Update save game schema (antares/src/application/save_game.rs)**
 
 Ensure serialization includes:
+
 - `Roster::character_locations` (now `Vec<CharacterLocation>` instead of `Vec<Option<TownId>>`)
 - `GameState::encountered_characters` (new field)
 - All character state (in party vs at inn)
 
 **Migration strategy for existing saves**
+
 - Detect old save format (missing `encountered_characters` field)
 - Default `encountered_characters` to empty set
 - Migrate `character_locations` from `Option<TownId>` to `CharacterLocation`
@@ -676,12 +725,14 @@ Ensure serialization includes:
 #### 5.2 Save/Load Testing
 
 **Unit tests (antares/src/application/save_game.rs)**
+
 - `test_save_party_locations`: Save game → load → verify party member locations preserved
 - `test_save_inn_locations`: Save game → load → verify characters at inns preserved
 - `test_save_encountered_characters`: Save game → load → verify encounter tracking preserved
 - `test_save_migration_from_old_format`: Old save → load → verify migration successful
 
 **Integration tests**
+
 - `test_full_save_load_cycle`: New game → recruit characters → save → load → verify all state
 - `test_party_management_persists`: Swap party → save → load → verify swapped state
 
@@ -709,7 +760,8 @@ Ensure serialization includes:
 **Document `starts_in_party` field (docs/reference/campaign_content_format.md)**
 
 Add documentation for new fields:
-```markdown
+
+````markdown
 ## characters.ron Schema
 
 ### CharacterDefinition Fields
@@ -721,6 +773,7 @@ Add documentation for new fields:
   Use case: Pre-made tutorial characters that should immediately be available.
 
   Example:
+
   ```ron
   (
       id: "tutorial_human_knight",
@@ -728,14 +781,15 @@ Add documentation for new fields:
       // ... other fields ...
       starts_in_party: true, // This character starts in party
   )
-
-```
+  ```
+````
 
 #### 6.2 Campaign Validation
 
 **Add validation to `CampaignLoader` (antares/src/sdk/campaign_loader.rs)**
 
 Validate on campaign load:
+
 ```rust
 impl Campaign {
     /// Validates character definitions for party management constraints
@@ -760,6 +814,7 @@ impl Campaign {
 #### 6.3 Content Authoring Tools
 
 **Add CLI validation command (antares/src/bin/campaign_validator.rs)**
+
 ```bash
 # Validate campaign content
 cargo run --bin campaign_validator -- --campaign campaigns/tutorial
@@ -773,6 +828,7 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 ```
 
 **Validation checks:**
+
 - Starting party count <= 6
 - All `RecruitableCharacter` event IDs exist in `characters.ron`
 - All `EnterInn` event IDs are valid `TownId` values
@@ -798,6 +854,7 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 ### Unit Test Coverage
 
 **Minimum coverage targets:**
+
 - `CharacterLocation` enum: 100%
 - `PartyManager` operations: 100%
 - `Roster` location tracking methods: 100%
@@ -833,10 +890,12 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 ### Backwards Compatibility
 
 **Breaking changes:**
+
 - `Roster::character_locations` type changed: `Vec<Option<TownId>>` → `Vec<CharacterLocation>`
 - `GameState` added field: `encountered_characters: HashSet<String>`
 
 **Migration path:**
+
 1. Version save game format (add `version: u8` field)
 2. Detect version on load
 3. If old version, run migration:
@@ -864,16 +923,19 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 **How should inns be identified in the game world?**
 
 **Option A**: Use `TownId` (current approach)
+
 - Simple, already exists in type system
 - Assumes 1 inn per town
 - What if multiple inns in one town?
 
 **Option B**: Create separate `InnId` type alias
+
 - More specific, allows multiple inns per town
 - Requires additional world building (inn database)
 - More complex but more flexible
 
 **Option C**: Use map-based identification (map ID + position)
+
 - Most flexible, any map tile can be an inn
 - Complex to track, harder to serialize
 - Requires spatial lookup
@@ -885,14 +947,17 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 **What happens to character's starting inventory/gold when recruited from map vs inn?**
 
 **Option A**: Characters recruited from maps use their `CharacterDefinition` starting values
+
 - Consistent with how premades work
 - Characters always have expected starting gear
 
 **Option B**: Characters recruited from map have reduced gear (simulating "adventure ready" vs "fresh recruit")
+
 - More realistic, but requires defining "reduced" gear
 - More complex content authoring
 
 **Option C**: Map encounters can override starting gear via event parameters
+
 - Maximum flexibility
 - Most complex to implement and author
 
@@ -903,14 +968,17 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 **What happens if player encounters a recruitable character, declines, then returns later?**
 
 **Option A**: Character persists on map indefinitely until recruited
+
 - Simple, player can always change mind
 - Character never moves, feels static
 
 **Option B**: Character disappears after N game days if not recruited
+
 - More dynamic, encourages timely decisions
 - Requires time-based event system
 
 **Option C**: Character moves to inn automatically after being declined
+
 - Simplest, character is always available somewhere
 - Less immersive ("why did they go to the inn?")
 
@@ -921,14 +989,17 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 **Should certain story-critical characters be un-dismissible?**
 
 **Option A**: All characters can be dismissed (current plan)
+
 - Maximum player freedom
 - Risk of soft-locking if player dismisses everyone
 
 **Option B**: Flag certain characters as "required" (cannot be dismissed)
+
 - Prevents soft-locks
 - Reduces player freedom
 
 **Option C**: Warn player before dismissing last strong character (UX only)
+
 - Informative but not restrictive
 - Player can still make bad decisions
 
@@ -992,6 +1063,7 @@ cargo run --bin campaign_validator -- --campaign campaigns/tutorial
 ### External Crates
 
 No new dependencies required. Uses existing:
+
 - `bevy` (game engine)
 - `bevy_egui` (UI)
 - `serde` (serialization)
@@ -1000,24 +1072,30 @@ No new dependencies required. Uses existing:
 ### Internal Systems
 
 **Phase 1** depends on:
+
 - Existing `Roster`, `Party`, `Character` structures
 - Existing `ContentDatabase` and `CharacterDefinition`
 
 **Phase 2** depends on:
+
 - Phase 1 (CharacterLocation enum)
 
 **Phase 3** depends on:
+
 - Phase 2 (PartyManager operations)
 - Existing Bevy UI systems
 
 **Phase 4** depends on:
+
 - Phase 3 (Inn system for overflow handling)
 - Existing map event system
 
 **Phase 5** depends on:
+
 - All previous phases (complete feature to persist)
 
 **Phase 6** depends on:
+
 - All previous phases (validation requires complete schema)
 
 ---

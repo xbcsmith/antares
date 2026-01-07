@@ -1038,7 +1038,8 @@ impl QuestEditorState {
     /// use campaign_builder::quest_editor::{QuestEditorState, QuestEditorMode};
     ///
     /// let mut editor = QuestEditorState::new();
-    /// editor.start_new_quest("1".to_string());
+    /// let mut quests = Vec::new();
+    /// editor.start_new_quest(&mut quests, "1".to_string());
     /// assert_eq!(editor.mode, QuestEditorMode::Creating);
     /// ```
     #[allow(clippy::too_many_arguments)]

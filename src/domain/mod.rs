@@ -34,12 +34,12 @@ pub mod world;
 
 // Re-export commonly used types from submodules
 pub use character_definition::{
-    BaseStats, CharacterDatabase, CharacterDefinition, CharacterDefinitionError,
-    CharacterDefinitionId, StartingEquipment,
+    CharacterDatabase, CharacterDefinition, CharacterDefinitionError, CharacterDefinitionId,
+    StartingEquipment,
 };
 pub use dialogue::{DialogueId, NodeId};
 pub use quest::QuestId;
-pub use types::{CharacterId, EventId, ItemId, MapId, MonsterId, RaceId, SpellId, TownId};
+pub use types::{CharacterId, EventId, InnkeeperId, ItemId, MapId, MonsterId, RaceId, SpellId};
 pub use types::{DiceRoll, Direction, GameTime, Position};
 
 // Re-export proficiency types

@@ -85,25 +85,31 @@ The `characters.ron` file defines pre-made characters that can be used in the ca
 #### Required Fields
 
 - **`id`** (String): Unique identifier for this character definition
+
   - Must be unique across all characters in the campaign
   - Convention: use lowercase with underscores, e.g., `"tutorial_human_knight"`
 
 - **`name`** (String): Display name shown in-game
+
   - Example: `"Kira"`, `"Aldric the Brave"`
 
 - **`race_id`** (RaceId/String): Reference to a race defined in `races.ron`
+
   - Must match an existing race ID
   - Example: `"human"`, `"elf"`, `"dwarf"`
 
 - **`class_id`** (ClassId/String): Reference to a class defined in `classes.ron`
+
   - Must match an existing class ID
   - Example: `"knight"`, `"sorcerer"`, `"cleric"`
 
 - **`sex`** (Sex): Character sex
+
   - Values: `Male` or `Female`
   - Used for pronouns and certain game mechanics
 
 - **`alignment`** (Alignment): Starting alignment
+
   - Values: `Good`, `Neutral`, or `Evil`
   - Affects equipment restrictions and quest availability
 
@@ -115,35 +121,42 @@ The `characters.ron` file defines pre-made characters that can be used in the ca
 #### Optional Fields
 
 - **`portrait_id`** (String, optional, default: `""`): Portrait filename stem
+
   - Normalized to lowercase with spaces replaced by underscores
   - Empty string `""` indicates no portrait
   - Example: `"human_knight"` → looks for `portraits/human_knight.png`
 
 - **`starting_gold`** (u32, optional, default: `0`): Initial gold amount
+
   - Gold is shared across the party
   - Example: `100`
 
 - **`starting_items`** (Vec\<ItemId\>, optional, default: `[]`): Items added to inventory
+
   - List of item IDs from `items.ron`
   - Items are placed in character's personal inventory
   - Example: `[1, 2, 5]` (ItemId values)
 
 - **`starting_equipment`** (EquipmentSlots, optional): Pre-equipped items
+
   - All slots must be specified (use `None` for empty slots)
   - Items must also be compatible with character's class
   - Slots: `weapon_hand`, `offhand`, `missile`, `head`, `neck`, `body`, `hands`, `feet`, `finger_left`, `finger_right`
 
 - **`hp_base`** (Option\<u16\>, optional, default: `None`): Base HP override
+
   - If `None`, HP is calculated from class and endurance
   - If set, overrides the calculated base HP
   - Example: `Some(10)`
 
 - **`sp_base`** (Option\<u16\>, optional, default: `None`): Base SP override
+
   - If `None`, SP is calculated from class and intellect
   - If set, overrides the calculated base SP
   - Example: `Some(5)`
 
 - **`is_premade`** (bool, optional, default: `false`): Whether this is a pre-made character
+
   - Pre-made characters appear in character selection/recruitment
   - Non-premade characters are templates for random generation
   - Should be `true` for most campaign characters
@@ -161,6 +174,7 @@ The `starts_in_party` field controls party membership at game start:
 #### Behavior
 
 - **`starts_in_party: true`**: Character is placed directly in the active adventuring party
+
   - Party starts with this character immediately available
   - No recruitment step needed
   - Ideal for tutorial campaigns or story-driven starts
@@ -258,6 +272,71 @@ Common validation errors:
 ✗ Missing class 'invalid_class' referenced in character 'my_character'
 ✗ Missing item ID 999 referenced in character 'my_character' starting items
 ```
+
+---
+
+## Inn and Innkeeper System
+
+Inn locations are referenced by innkeeper NPC IDs (String type), not numeric IDs.
+
+Campaign Configuration:
+
+- `starting_innkeeper: String` - NPC ID of the default innkeeper where non-party characters start
+  - Must reference an NPC with `is_innkeeper: true`
+  - Example: `"tutorial_innkeeper_town"`
+  - Default: `"tutorial_innkeeper_town"`
+
+Map Events:
+
+- `EnterInn { innkeeper_id: String, ... }` - Triggers the inn management interface
+  - Must reference an NPC with `is_innkeeper: true`
+  - Example: `innkeeper_id: "tutorial_innkeeper_town"`
+
+NPC Definition:
+
+- `is_innkeeper: bool` - Marks an NPC as an innkeeper who can manage party roster
+  - Required for NPCs referenced by `starting_innkeeper` or `EnterInn` events
+
+Character Location Tracking:
+
+- `CharacterLocation::AtInn(InnkeeperId)` - Character is stored at specified innkeeper's inn
+  - Uses string innkeeper NPC ID
+  - Example: `AtInn("tutorial_innkeeper_town")`
+
+Example:
+
+```ron
+// In npcs.ron:
+(
+    id: "cozy_inn_mary",
+    name: "Mary the Innkeeper",
+    description: "A cheerful innkeeper who runs the Cozy Inn.",
+    portrait_id: "innkeeper_mary",
+    is_innkeeper: true,
+    is_merchant: false,
+    ...
+)
+
+// In campaign.ron:
+CampaignMetadata(
+    ...
+    starting_innkeeper: "cozy_inn_mary",
+    ...
+)
+
+// In map.ron events:
+(x: 5, y: 4): EnterInn(
+    name: "Cozy Inn Entrance",
+    description: "A welcoming inn...",
+    innkeeper_id: "cozy_inn_mary",
+),
+```
+
+Validation:
+
+- Campaign validator checks that `starting_innkeeper` references an existing NPC
+- Campaign validator verifies the NPC has `is_innkeeper: true`
+- Map validator checks that all `EnterInn` events reference valid innkeeper NPCs
 
 ---
 
