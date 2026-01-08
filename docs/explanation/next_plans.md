@@ -23,7 +23,7 @@ Add New Node does nothing.
 Nodes are not editable. We should be able to edit all the data in a node.
 Unable to create new nodes makes it impossible to create dialog trees.
 
-[dialog editor completion](./dialog_editor_completion_implementation_plan.md)
+✅ COMPLETED - [dialog editor completion](./dialog_editor_completion_implementation_plan.md)
 
 ### Remove Event Triggers
 

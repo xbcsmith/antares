@@ -104,11 +104,11 @@ fn instantiate_character(
     content: &GameContent,
 ) -> Result<Character, String> {
     let db = content.db();
-    
+
     // Load character definition
     let definition = db.characters.get_character(character_id)
         .ok_or_else(|| format!("Character definition '{}' not found", character_id))?;
-    
+
     // Instantiate character from definition
     definition.instantiate(&db.classes, &db.races, &db.items)
         .map_err(|e| format!("Failed to instantiate character '{}': {}", character_id, e))
@@ -178,7 +178,7 @@ Replace TODO in `execute_action()` with full implementation:
 ```rust
 DialogueAction::RecruitToParty { character_id } => {
     info!("Recruiting character '{}' to active party", character_id);
-    
+
     // Check party size limit
     if game_state.party.members.len() >= Party::MAX_MEMBERS {
         warn!("Party is full (max {} members)", Party::MAX_MEMBERS);
@@ -187,18 +187,18 @@ DialogueAction::RecruitToParty { character_id } => {
         }
         return;
     }
-    
+
     // Load and instantiate character
     match instantiate_character(character_id, db) {
         Ok(character) => {
             let name = character.name.clone();
             game_state.party.members.push(character);
-            
+
             info!("Successfully recruited '{}' to party", name);
             if let Some(ref mut log) = game_log {
                 log.add(format!("{} has joined your party!", name));
             }
-            
+
             // TODO Phase 3: Remove MapEvent from current map
             // TODO Phase 4: Trigger HUD refresh
         }
@@ -310,7 +310,7 @@ impl Roster {
             .map(|(_, character)| character)
             .collect()
     }
-    
+
     /// Add character to inn roster
     pub fn add_to_inn(
         &mut self,
@@ -347,7 +347,7 @@ Replace TODO in `execute_action()` with full implementation:
 ```rust
 DialogueAction::RecruitToInn { character_id, innkeeper_id } => {
     info!("Sending character '{}' to inn (keeper: {})", character_id, innkeeper_id);
-    
+
     // Validate innkeeper exists
     let npc_db = &db.npcs;
     if npc_db.get_npc(innkeeper_id).is_none() {
@@ -357,7 +357,7 @@ DialogueAction::RecruitToInn { character_id, innkeeper_id } => {
         }
         return;
     }
-    
+
     // Check roster size limit
     if game_state.roster.characters.len() >= Roster::MAX_CHARACTERS {
         warn!("Roster is full (max {} characters)", Roster::MAX_CHARACTERS);
@@ -366,12 +366,12 @@ DialogueAction::RecruitToInn { character_id, innkeeper_id } => {
         }
         return;
     }
-    
+
     // Load and instantiate character
     match instantiate_character(character_id, db) {
         Ok(character) => {
             let name = character.name.clone();
-            
+
             // Add to roster at inn location
             if let Err(e) = game_state.roster.add_to_inn(character, innkeeper_id.clone()) {
                 warn!("Failed to add character to inn: {}", e);
@@ -380,12 +380,12 @@ DialogueAction::RecruitToInn { character_id, innkeeper_id } => {
                 }
                 return;
             }
-            
+
             info!("Successfully sent '{}' to inn '{}'", name, innkeeper_id);
             if let Some(ref mut log) = game_log {
                 log.add(format!("{} has been sent to the inn!", name));
             }
-            
+
             // TODO Phase 4: Remove MapEvent from current map
         }
         Err(e) => {
@@ -504,7 +504,7 @@ impl Map {
     pub fn remove_event(&mut self, position: Position) -> bool {
         self.events.remove(&position).is_some()
     }
-    
+
     /// Remove a specific event type at position (type-safe removal)
     pub fn remove_recruitable_character(&mut self, position: Position, character_id: &str) -> bool {
         if let Some(MapEvent::RecruitableCharacter { character_id: id, .. }) = self.events.get(&position) {
@@ -538,7 +538,7 @@ Update recruitable character interaction to store position:
 ```rust
 MapEvent::RecruitableCharacter { name, character_id, .. } => {
     info!("Interacting with recruitable character '{}' at {:?}", name, position);
-    
+
     // Store position in dialogue state for later removal
     dialogue_writer.write(StartDialogue {
         dialogue_id: 100,
@@ -668,11 +668,11 @@ impl DialogueContext {
             variables: HashMap::new(),
         }
     }
-    
+
     pub fn set(&mut self, key: impl Into<String>, value: impl Into<String>) {
         self.variables.insert(key.into(), value.into());
     }
-    
+
     pub fn substitute(&self, text: &str) -> String {
         let mut result = text.to_string();
         for (key, value) in &self.variables {
@@ -705,12 +705,12 @@ Create context with character name when triggering recruitment dialogue:
 ```rust
 MapEvent::RecruitableCharacter { name, character_id, .. } => {
     info!("Interacting with recruitable character '{}'", name);
-    
+
     // Create dialogue context with character name
     let mut context = DialogueContext::new();
     context.set("CHARACTER_NAME", name);
     context.set("CHARACTER_ID", character_id);
-    
+
     dialogue_writer.write(StartDialogue {
         dialogue_id: 100,
         interaction_position: Some(position),
@@ -728,7 +728,7 @@ Apply substitution when displaying dialogue text:
 fn handle_start_dialogue(/* ... */) {
     for ev in ev_reader.read() {
         // ... load dialogue tree ...
-        
+
         if let Some(node) = tree.get_node(root) {
             // Apply variable substitution if context provided
             let text = if let Some(ref context) = ev.context {
@@ -736,7 +736,7 @@ fn handle_start_dialogue(/* ... */) {
             } else {
                 node.text.clone()
             };
-            
+
             if let Some(ref mut log) = game_log {
                 let speaker = tree.speaker_name.as_deref().unwrap_or("NPC");
                 log.add(format!("{}: {}", speaker, text));
@@ -875,14 +875,14 @@ fn handle_hud_refresh(
     if refresh_events.read().count() == 0 {
         return;
     }
-    
+
     info!("Refreshing HUD due to party changes");
-    
+
     // Despawn existing HUD
     for entity in existing_hud.iter() {
         commands.entity(entity).despawn_recursive();
     }
-    
+
     // Respawn HUD with updated party
     spawn_hud(commands, global_state, /* ... */);
 }
@@ -912,10 +912,10 @@ fn execute_action(
     mut hud_refresh: Option<MessageWriter<RefreshHud>>,
 ) {
     // ... existing code ...
-    
+
     DialogueAction::RecruitToParty { character_id } => {
         // ... recruitment logic ...
-        
+
         if successful {
             // Trigger HUD refresh to show new party member
             if let Some(ref mut refresh) = hud_refresh {
