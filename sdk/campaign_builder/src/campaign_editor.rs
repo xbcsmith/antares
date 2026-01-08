@@ -109,6 +109,7 @@ pub struct CampaignMetadataEditBuffer {
     pub maps_dir: String,
     pub quests_file: String,
     pub dialogue_file: String,
+    pub npcs_file: String,
     pub conditions_file: String,
 }
 
@@ -144,6 +145,7 @@ impl CampaignMetadataEditBuffer {
             maps_dir: m.maps_dir.clone(),
             quests_file: m.quests_file.clone(),
             dialogue_file: m.dialogue_file.clone(),
+            npcs_file: m.npcs_file.clone(),
             conditions_file: m.conditions_file.clone(),
         }
     }
@@ -178,6 +180,7 @@ impl CampaignMetadataEditBuffer {
         dest.maps_dir = self.maps_dir.clone();
         dest.quests_file = self.quests_file.clone();
         dest.dialogue_file = self.dialogue_file.clone();
+        dest.npcs_file = self.npcs_file.clone();
         dest.conditions_file = self.conditions_file.clone();
     }
 }
@@ -646,7 +649,7 @@ impl CampaignMetadataEditorState {
                         }
 
                         CampaignSection::Files => {
-                            // Files grid: items, spells, monsters, classes, races, characters, maps_dir, quests, dialogue, conditions
+                            // Files grid: items, spells, monsters, classes, races, characters, maps_dir, quests, dialogue, npcs, conditions
                             egui::Grid::new("campaign_files_grid")
                                 .num_columns(2)
                                 .spacing([10.0, 8.0])
@@ -843,6 +846,28 @@ impl CampaignMetadataEditorState {
                                                 .pick_file()
                                             {
                                                 self.buffer.dialogue_file = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label("NPCs File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.npcs_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.npcs_file = p.display().to_string();
                                                 self.has_unsaved_changes = true;
                                                 *unsaved_changes = true;
                                             }

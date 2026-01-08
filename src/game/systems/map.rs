@@ -18,6 +18,7 @@ type MeshCache = HashMap<MeshDimensions, Handle<Mesh>>;
 // Event marker colors (RGB)
 const SIGN_MARKER_COLOR: Color = Color::srgb(0.59, 0.44, 0.27); // Brown/tan #967046
 const TELEPORT_MARKER_COLOR: Color = Color::srgb(0.53, 0.29, 0.87); // Purple #8749DE
+const RECRUITABLE_CHARACTER_MARKER_COLOR: Color = Color::srgb(0.27, 0.67, 0.39); // Green #45AB63
 const EVENT_MARKER_SIZE: f32 = 0.8; // 80% of tile size
 const EVENT_MARKER_Y_OFFSET: f32 = 0.05; // 5cm above ground to prevent z-fighting
 
@@ -798,18 +799,20 @@ fn spawn_map(
             ));
         }
 
-        // Spawn event markers for signs and teleports
+        // Spawn event markers for signs, teleports, and recruitable characters
         for (position, event) in map.events.iter() {
-            let marker_color = match event {
-                world::MapEvent::Sign { .. } => SIGN_MARKER_COLOR,
-                world::MapEvent::Teleport { .. } => TELEPORT_MARKER_COLOR,
-                _ => continue, // Only show markers for signs and teleports
-            };
-
-            let marker_name = match event {
-                world::MapEvent::Sign { name, .. } => format!("SignMarker_{}", name),
-                world::MapEvent::Teleport { name, .. } => format!("TeleportMarker_{}", name),
-                _ => continue,
+            let (marker_color, marker_name) = match event {
+                world::MapEvent::Sign { name, .. } => {
+                    (SIGN_MARKER_COLOR, format!("SignMarker_{}", name))
+                }
+                world::MapEvent::Teleport { name, .. } => {
+                    (TELEPORT_MARKER_COLOR, format!("TeleportMarker_{}", name))
+                }
+                world::MapEvent::RecruitableCharacter { name, .. } => (
+                    RECRUITABLE_CHARACTER_MARKER_COLOR,
+                    format!("RecruitableCharacter_{}", name),
+                ),
+                _ => continue, // Only show markers for signs, teleports, and recruitable characters
             };
 
             // Calculate world position
@@ -878,6 +881,14 @@ mod tests {
     #[test]
     fn test_teleport_marker_color() {
         assert_eq!(TELEPORT_MARKER_COLOR, Color::srgb(0.53, 0.29, 0.87));
+    }
+
+    #[test]
+    fn test_recruitable_character_marker_color() {
+        assert_eq!(
+            RECRUITABLE_CHARACTER_MARKER_COLOR,
+            Color::srgb(0.27, 0.67, 0.39)
+        );
     }
 
     #[test]

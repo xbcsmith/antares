@@ -7,7 +7,7 @@
 On the Metadata Editor, the Files tab is not complete.
 Missing NPC and Conditions file paths from the Metadata --> Files editor.
 
-[metadata files tab completion](./metadata_files_tab_completion_plan.md)
+✅ COMPLETED - [metadata files tab completion](./metadata_files_tab_completion_plan.md)
 
 ### Proficiencies Editor
 
@@ -61,7 +61,7 @@ HUD text for HP is cut off by the bottom of the screen. Increasing the window si
 HUD Portraits are offset and have a large blank area to the right side of the portrait image. If the plan is to display conditions next to the portrait, then this is fine, but if not, the portrait should be centered in the portrait area.
 HUD character names do not need numbers next to them. Order can be determined by position on the HUD.
 
-[game engine fixes](./game_engine_fixes_implementation_plan.md)
+✅ COMPLETED - [game engine fixes](./game_engine_fixes_implementation_plan.md)
 
 ## npc externalization plan
 

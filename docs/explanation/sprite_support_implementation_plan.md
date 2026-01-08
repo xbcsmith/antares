@@ -193,6 +193,7 @@ Define sprite sheet configurations in a registry file with entries for:
 - `decorations` - 8x8 grid, 64x64 pixels (small objects)
 - `signs` - 4x2 grid, 32x64 pixels (wooden_sign, stone_marker, warning_sign, info_sign, quest_marker, shop_sign, danger_sign, direction_sign)
 - `portals` - 4x2 grid, 128x128 pixels (teleport_pad, dimensional_gate, stairs_up, stairs_down, portal_blue, portal_red, trap_door, exit_portal)
+- `recruitable_characters` - 4x2 grid, 32x48 pixels (warrior_recruit, mage_recruit, rogue_recruit, cleric_recruit, ranger_recruit, paladin_recruit, bard_recruit, monk_recruit)
 
 Example entries for `data/sprite_sheets.ron`:
 
@@ -228,6 +229,23 @@ Example entries for `data/sprite_sheets.ron`:
         (5, "portal_red"),
         (6, "trap_door"),
         (7, "exit_portal"),
+    ],
+),
+
+"recruitable_characters": SpriteSheetConfig(
+    texture_path: "textures/sprites/recruitable_characters.png",
+    tile_size: (32.0, 48.0),
+    columns: 4,
+    rows: 2,
+    sprites: [
+        (0, "warrior_recruit"),
+        (1, "mage_recruit"),
+        (2, "rogue_recruit"),
+        (3, "cleric_recruit"),
+        (4, "ranger_recruit"),
+        (5, "paladin_recruit"),
+        (6, "bard_recruit"),
+        (7, "monk_recruit"),
     ],
 ),
 ```

@@ -93,6 +93,9 @@ pub struct DialogueEditorState {
 
     /// Import buffer for RON text
     pub import_buffer: String,
+
+    /// Whether we're currently editing a node (vs adding a new one)
+    pub editing_node: bool,
 }
 
 /// Dialogue editor mode
@@ -320,6 +323,7 @@ impl Default for DialogueEditorState {
             show_preview: false,
             show_import_dialog: false,
             import_buffer: String::new(),
+            editing_node: false,
         }
     }
 }
@@ -345,6 +349,7 @@ impl DialogueEditorState {
                 is_terminal: node.is_terminal,
             };
             self.selected_node = Some(node_id);
+            self.editing_node = true;
             Ok(())
         } else {
             Err("Node not found".to_string())
@@ -375,6 +380,8 @@ impl DialogueEditorState {
 
             self.has_unsaved_changes = true;
             self.selected_node = None;
+            self.editing_node = false;
+            self.node_buffer = NodeEditBuffer::default();
             Ok(())
         } else {
             Err("Node not found".to_string())
@@ -671,16 +678,18 @@ impl DialogueEditorState {
     }
 
     /// Add a new node to current dialogue
-    pub fn add_node(&mut self) -> Result<(), String> {
+    pub fn add_node(&mut self) -> Result<NodeId, String> {
         if self.selected_dialogue.is_none() {
             return Err("No dialogue selected".to_string());
         }
 
+        if self.node_buffer.text.trim().is_empty() {
+            return Err("Node text cannot be empty".to_string());
+        }
+
         let node_id = self
-            .node_buffer
-            .id
-            .parse::<NodeId>()
-            .map_err(|_| "Invalid node ID".to_string())?;
+            .next_available_node_id()
+            .ok_or_else(|| "No dialogue selected".to_string())?;
 
         let mut node = DialogueNode::new(node_id, &self.node_buffer.text);
 
@@ -693,7 +702,7 @@ impl DialogueEditorState {
             self.dialogues[idx].add_node(node);
             self.has_unsaved_changes = true;
             self.node_buffer = NodeEditBuffer::default();
-            Ok(())
+            Ok(node_id)
         } else {
             Err("No dialogue selected".to_string())
         }
@@ -988,6 +997,28 @@ impl DialogueEditorState {
             .max()
             .unwrap_or(0)
             .saturating_add(1)
+    }
+
+    /// Finds the next available node ID for the currently selected dialogue.
+    ///
+    /// Returns the maximum node ID in the selected dialogue plus 1, or 1 if no nodes exist.
+    /// Returns `None` if no dialogue is currently selected.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut editor = DialogueEditorState::new();
+    /// editor.start_new_dialogue();
+    /// assert_eq!(editor.next_available_node_id(), Some(1));
+    /// ```
+    pub fn next_available_node_id(&self) -> Option<NodeId> {
+        if let Some(idx) = self.selected_dialogue {
+            let dialogue = &self.dialogues[idx];
+            let max_id = dialogue.nodes.keys().max().copied().unwrap_or(0);
+            Some(max_id.saturating_add(1))
+        } else {
+            None
+        }
     }
 
     /// Load dialogues from a file path
@@ -1584,43 +1615,53 @@ impl DialogueEditorState {
         dialogue_idx: usize,
         status_message: &mut String,
     ) {
-        // Add node form
-        let mut add_node_clicked = false;
-        ui.horizontal(|ui| {
-            ui.label("Add New Node:");
-            ui.add(
-                egui::TextEdit::singleline(&mut self.node_buffer.id)
-                    .hint_text("Node ID")
-                    .desired_width(80.0),
-            );
-            ui.add(
-                egui::TextEdit::singleline(&mut self.node_buffer.text)
-                    .hint_text("Node text")
-                    .desired_width(250.0),
-            );
-            ui.checkbox(&mut self.node_buffer.is_terminal, "Terminal");
+        // Add node form - only show when not editing a node
+        if !self.editing_node {
+            let dialogue = &self.dialogues[dialogue_idx];
 
-            if ui.button("➕ Add Node").clicked() {
-                add_node_clicked = true;
-            }
-        });
+            ui.group(|ui| {
+                ui.label(format!("➕ Adding node to: \"{}\"", dialogue.name));
 
-        if add_node_clicked {
-            match self.add_node() {
-                Ok(()) => {
-                    *status_message = "Node added".to_string();
+                if let Some(next_id) = self.next_available_node_id() {
+                    ui.label(format!("Next Node ID: {}", next_id));
                 }
-                Err(e) => {
-                    *status_message = format!("Failed to add node: {}", e);
-                }
-            }
+
+                ui.separator();
+
+                ui.label("Node Text:");
+                ui.text_edit_multiline(&mut self.node_buffer.text);
+
+                ui.label("Speaker Override (optional):");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.node_buffer.speaker_override)
+                        .hint_text("Leave empty to use dialogue speaker"),
+                );
+
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.node_buffer.is_terminal, "Terminal Node");
+
+                    if ui.button("✓ Add Node").clicked() {
+                        match self.add_node() {
+                            Ok(node_id) => {
+                                *status_message =
+                                    format!("✓ Node {} created successfully", node_id);
+                            }
+                            Err(e) => {
+                                *status_message = format!("✗ Failed to add node: {}", e);
+                            }
+                        }
+                    }
+                });
+            });
+
+            ui.separator();
         }
-
-        ui.separator();
 
         // Clone dialogue data to avoid borrow conflicts
         let dialogue = self.dialogues[dialogue_idx].clone();
-        let mut select_node: Option<NodeId> = None;
+        let mut select_node_for_choice: Option<NodeId> = None;
+        let mut edit_node_id: Option<NodeId> = None;
+        let mut delete_node_id: Option<NodeId> = None;
 
         // Display nodes
         egui::ScrollArea::vertical()
@@ -1636,6 +1677,39 @@ impl DialogueEditorState {
                             if node.is_terminal {
                                 ui.label("(TERMINAL)");
                             }
+
+                            // Add Edit/Delete buttons for each node
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    // Don't show delete button for root node
+                                    let action = if *node_id == dialogue.root_node {
+                                        ActionButtons::new()
+                                            .with_edit(true)
+                                            .with_delete(false)
+                                            .with_duplicate(false)
+                                            .with_export(false)
+                                            .show(ui)
+                                    } else {
+                                        ActionButtons::new()
+                                            .with_edit(true)
+                                            .with_delete(true)
+                                            .with_duplicate(false)
+                                            .with_export(false)
+                                            .show(ui)
+                                    };
+
+                                    match action {
+                                        ItemAction::Edit => {
+                                            edit_node_id = Some(*node_id);
+                                        }
+                                        ItemAction::Delete => {
+                                            delete_node_id = Some(*node_id);
+                                        }
+                                        _ => {}
+                                    }
+                                },
+                            );
                         });
 
                         ui.label(&node.text);
@@ -1675,19 +1749,114 @@ impl DialogueEditorState {
 
                         // Add choice to this node
                         if ui.button("➕ Add Choice").clicked() {
-                            select_node = Some(*node_id);
+                            select_node_for_choice = Some(*node_id);
                         }
                     });
                 }
             });
 
-        // Process node selection outside scroll area
-        if let Some(node_id) = select_node {
-            self.selected_node = Some(node_id);
+        // Process node actions outside scroll area
+        if let Some(node_id) = edit_node_id {
+            match self.edit_node(dialogue_idx, node_id) {
+                Ok(()) => {
+                    *status_message = format!("Editing Node {}", node_id);
+                }
+                Err(e) => {
+                    *status_message = format!("Failed to edit node: {}", e);
+                }
+            }
         }
 
-        // Choice editor panel
-        self.show_choice_editor_panel(ui, status_message);
+        if let Some(node_id) = delete_node_id {
+            match self.delete_node(dialogue_idx, node_id) {
+                Ok(()) => {
+                    *status_message = format!("Node {} deleted", node_id);
+                }
+                Err(e) => {
+                    *status_message = format!("Failed to delete node: {}", e);
+                }
+            }
+        }
+
+        if let Some(node_id) = select_node_for_choice {
+            self.selected_node = Some(node_id);
+            self.editing_node = false;
+        }
+
+        // Node editor panel - show when editing a node
+        self.show_node_editor_panel(ui, dialogue_idx, status_message);
+
+        // Choice editor panel - only show when not editing a node
+        if !self.editing_node {
+            self.show_choice_editor_panel(ui, status_message);
+        }
+    }
+
+    fn show_node_editor_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        dialogue_idx: usize,
+        status_message: &mut String,
+    ) {
+        let mut save_node_clicked = false;
+        let mut cancel_node_clicked = false;
+
+        if self.editing_node {
+            if let Some(selected_node_id) = self.selected_node {
+                ui.separator();
+                ui.heading(format!("Edit Node {}", selected_node_id));
+
+                ui.horizontal(|ui| {
+                    ui.label("Node Text:");
+                });
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.node_buffer.text)
+                        .desired_width(ui.available_width())
+                        .desired_rows(3),
+                );
+
+                ui.horizontal(|ui| {
+                    ui.label("Speaker Override:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.node_buffer.speaker_override)
+                            .hint_text("Leave empty to use dialogue speaker")
+                            .desired_width(250.0),
+                    );
+                });
+
+                ui.checkbox(&mut self.node_buffer.is_terminal, "Terminal Node");
+
+                ui.horizontal(|ui| {
+                    if ui.button("✓ Save").clicked() {
+                        save_node_clicked = true;
+                    }
+                    if ui.button("✗ Cancel").clicked() {
+                        cancel_node_clicked = true;
+                    }
+                });
+            }
+        }
+
+        // Process node actions outside the panel
+        if save_node_clicked {
+            if let Some(node_id) = self.selected_node {
+                match self.save_node(dialogue_idx, node_id) {
+                    Ok(()) => {
+                        *status_message = format!("Node {} saved", node_id);
+                    }
+                    Err(e) => {
+                        *status_message = format!("Failed to save node: {}", e);
+                    }
+                }
+            }
+        }
+
+        if cancel_node_clicked {
+            self.selected_node = None;
+            self.editing_node = false;
+            self.node_buffer = NodeEditBuffer::default();
+            *status_message = "Node editing cancelled".to_string();
+        }
     }
 
     /// Show the choice editor panel
@@ -2157,5 +2326,167 @@ mod tests {
         assert_eq!(quest_id.unwrap(), 3);
         assert_eq!(unlock_quest_id.unwrap(), 7);
         assert_eq!(item_id.unwrap(), 15);
+    }
+
+    #[test]
+    fn test_next_available_node_id() {
+        let mut editor = DialogueEditorState::new();
+
+        // No dialogue selected - should return None
+        assert_eq!(editor.next_available_node_id(), None);
+
+        // Create a new dialogue
+        editor.start_new_dialogue();
+        editor.dialogue_buffer.id = "1".to_string();
+        editor.dialogue_buffer.name = "Test Dialogue".to_string();
+        editor.dialogue_buffer.speaker_name = "NPC".to_string();
+        editor.save_dialogue().unwrap();
+        editor.selected_dialogue = Some(0);
+
+        // First available node ID should be 1 (no nodes yet)
+        assert_eq!(editor.next_available_node_id(), Some(1));
+
+        // Add a node with ID 1
+        editor.node_buffer.text = "Hello!".to_string();
+        editor.add_node().unwrap();
+
+        // Next available should be 2
+        assert_eq!(editor.next_available_node_id(), Some(2));
+
+        // Add another node
+        editor.node_buffer.text = "Goodbye!".to_string();
+        editor.add_node().unwrap();
+
+        // Next available should be 3
+        assert_eq!(editor.next_available_node_id(), Some(3));
+    }
+
+    #[test]
+    fn test_next_available_node_id_no_dialogue_selected() {
+        let editor = DialogueEditorState::new();
+        assert_eq!(editor.next_available_node_id(), None);
+    }
+
+    #[test]
+    fn test_add_node_with_auto_generated_id() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        dialogue.add_node(DialogueNode::new(1, "Root node"));
+        editor.dialogues.push(dialogue);
+        editor.selected_dialogue = Some(0);
+
+        // Set node text
+        editor.node_buffer.text = "New node text".to_string();
+
+        // Add node - should auto-generate ID as 2
+        let result = editor.add_node();
+        assert!(result.is_ok());
+        let node_id = result.unwrap();
+        assert_eq!(node_id, 2);
+
+        // Verify node was actually added with correct ID
+        let node = editor.dialogues[0].nodes.get(&2);
+        assert!(node.is_some());
+        assert_eq!(node.unwrap().text, "New node text");
+    }
+
+    #[test]
+    fn test_add_node_empty_text_validation() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        dialogue.add_node(DialogueNode::new(1, "Root node"));
+        editor.dialogues.push(dialogue);
+        editor.selected_dialogue = Some(0);
+
+        // Try to add node with empty text
+        editor.node_buffer.text = "".to_string();
+        let result = editor.add_node();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot be empty"));
+
+        // Try with only whitespace
+        editor.node_buffer.text = "   ".to_string();
+        let result = editor.add_node();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot be empty"));
+    }
+
+    #[test]
+    fn test_add_node_with_speaker_override() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        dialogue.add_node(DialogueNode::new(1, "Root node"));
+        editor.dialogues.push(dialogue);
+        editor.selected_dialogue = Some(0);
+
+        // Add node with speaker override
+        editor.node_buffer.text = "Custom speaker text".to_string();
+        editor.node_buffer.speaker_override = "Custom Speaker".to_string();
+
+        let result = editor.add_node();
+        assert!(result.is_ok());
+        let node_id = result.unwrap();
+
+        // Verify node has speaker override set
+        let node = editor.dialogues[0].nodes.get(&node_id);
+        assert!(node.is_some());
+        let node = node.unwrap();
+        assert_eq!(node.text, "Custom speaker text");
+        assert_eq!(node.speaker_override, Some("Custom Speaker".to_string()));
+    }
+
+    #[test]
+    fn test_add_node_terminal_flag() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        dialogue.add_node(DialogueNode::new(1, "Root node"));
+        editor.dialogues.push(dialogue);
+        editor.selected_dialogue = Some(0);
+
+        // Add node marked as terminal
+        editor.node_buffer.text = "Farewell!".to_string();
+        editor.node_buffer.is_terminal = true;
+
+        let result = editor.add_node();
+        assert!(result.is_ok());
+        let node_id = result.unwrap();
+
+        // Verify terminal flag is set
+        let node = editor.dialogues[0].nodes.get(&node_id);
+        assert!(node.is_some());
+        assert!(node.unwrap().is_terminal);
+    }
+
+    #[test]
+    fn test_add_node_clears_buffer_on_success() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+        dialogue.add_node(DialogueNode::new(1, "Root node"));
+        editor.dialogues.push(dialogue);
+        editor.selected_dialogue = Some(0);
+
+        // Fill buffer
+        editor.node_buffer.text = "Some text".to_string();
+        editor.node_buffer.speaker_override = "Speaker".to_string();
+        editor.node_buffer.is_terminal = true;
+
+        // Add node
+        assert!(editor.add_node().is_ok());
+
+        // Verify buffer was cleared
+        assert_eq!(editor.node_buffer.text, "");
+        assert_eq!(editor.node_buffer.speaker_override, "");
+        assert!(!editor.node_buffer.is_terminal);
+    }
+
+    #[test]
+    fn test_add_node_no_dialogue_selected() {
+        let mut editor = DialogueEditorState::new();
+        editor.node_buffer.text = "Some text".to_string();
+
+        // Try to add node without selecting dialogue
+        let result = editor.add_node();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No dialogue selected"));
     }
 }

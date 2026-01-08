@@ -36,6 +36,7 @@
 use crate::domain::types::Position;
 use crate::domain::world::{MapEvent, WallType};
 use crate::game::resources::GlobalState;
+use crate::game::systems::dialogue::StartDialogue;
 use crate::game::systems::events::MapEventTriggered;
 use crate::game::systems::map::DoorOpenedEvent;
 use crate::sdk::game_config::ControlsConfig;
@@ -374,12 +375,14 @@ pub fn parse_key_code(key_str: &str) -> Option<KeyCode> {
 ///
 /// This system processes keyboard input using the configured key mappings,
 /// applies movement cooldown, and updates game state accordingly.
+#[allow(clippy::too_many_arguments)]
 fn handle_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     input_config: Res<InputConfigResource>,
     mut global_state: ResMut<GlobalState>,
     mut door_messages: MessageWriter<DoorOpenedEvent>,
     mut map_event_messages: MessageWriter<MapEventTriggered>,
+    mut dialogue_writer: MessageWriter<StartDialogue>,
     time: Res<Time>,
     mut last_move_time: Local<f32>,
 ) {
@@ -449,7 +452,7 @@ fn handle_input(
             return;
         }
 
-        // Check for sign/teleport (and other events) in any adjacent tile
+        // Check for sign/teleport/recruitable character (and other events) in any adjacent tile
         for position in adjacent_tiles {
             if let Some(event) = map.get_event(position) {
                 match event {
@@ -458,6 +461,17 @@ fn handle_input(
                         map_event_messages.write(MapEventTriggered {
                             event: event.clone(),
                         });
+                        return;
+                    }
+                    MapEvent::RecruitableCharacter {
+                        name, character_id, ..
+                    } => {
+                        info!(
+                            "Interacting with recruitable character '{}' (ID: {}) at {:?}",
+                            name, character_id, position
+                        );
+                        // Use dialogue ID 100 for default recruitment dialogue
+                        dialogue_writer.write(StartDialogue { dialogue_id: 100 });
                         return;
                     }
                     _ => continue,
@@ -895,5 +909,38 @@ mod interaction_tests {
         assert!(npc.is_some());
         assert_eq!(npc.unwrap().npc_id, "test_npc");
         assert_eq!(npc.unwrap().position, npc_pos);
+    }
+
+    /// Test that recruitable character events are properly stored and retrievable.
+    /// Validates that map events for recruitables are correctly managed.
+    #[test]
+    fn test_recruitable_character_event_storage() {
+        // Arrange
+        let mut map =
+            crate::domain::world::Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
+
+        let recruit_pos = Position::new(5, 4);
+        map.add_event(
+            recruit_pos,
+            MapEvent::RecruitableCharacter {
+                name: "TestRecruit".to_string(),
+                description: "A recruitable character".to_string(),
+                character_id: "hero_01".to_string(),
+            },
+        );
+
+        // Act
+        let event = map.get_event(recruit_pos);
+
+        // Assert
+        assert!(event.is_some());
+        assert!(matches!(event, Some(MapEvent::RecruitableCharacter { .. })));
+        if let Some(MapEvent::RecruitableCharacter {
+            character_id, name, ..
+        }) = event
+        {
+            assert_eq!(character_id, "hero_01");
+            assert_eq!(name, "TestRecruit");
+        }
     }
 }
