@@ -34,6 +34,7 @@ pub mod map_editor;
 pub mod monsters_editor;
 pub mod npc_editor;
 pub mod packager;
+pub mod proficiencies_editor;
 pub mod quest_editor;
 pub mod races_editor;
 pub mod spells_editor;
