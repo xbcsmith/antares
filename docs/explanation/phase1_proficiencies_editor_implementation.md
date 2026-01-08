@@ -1,8 +1,8 @@
 # Phase 1: Proficiencies Editor Module Implementation
 
-**Status**: ✅ Complete  
-**Date**: 2025  
-**Component**: SDK Campaign Builder  
+**Status**: ✅ Complete
+**Date**: 2025
+**Component**: SDK Campaign Builder
 
 ## Overview
 
