@@ -13,7 +13,7 @@ Added `proficiencies_file: String` field to `CampaignMetadata` struct:
 ```rust
 pub struct CampaignMetadata {
     // ... existing fields ...
-    
+
     // Data file paths
     proficiencies_file: String,  // NEW: "data/proficiencies.ron"
     // ... other file paths ...
@@ -27,11 +27,11 @@ Added proficiencies data and editor state to main application:
 ```rust
 struct CampaignBuilderApp {
     // ... existing fields ...
-    
+
     // Proficiencies editor state
     proficiencies: Vec<ProficiencyDefinition>,
     proficiencies_editor_state: proficiencies_editor::ProficienciesEditorState,
-    
+
     // ... other fields ...
 }
 ```

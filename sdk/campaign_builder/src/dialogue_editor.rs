@@ -2791,7 +2791,7 @@ mod tests {
         // Create nodes: 1 -> 2, 3 is orphaned
         dialogue.add_node(DialogueNode::new(1, "Root node"));
         let mut node2 = DialogueNode::new(2, "Node 2");
-        let mut node3 = DialogueNode::new(3, "Orphaned node");
+        let node3 = DialogueNode::new(3, "Orphaned node");
         node2.add_choice(DialogueChoice::new("Go to 2", Some(2)));
         dialogue.add_node(node2);
         dialogue.add_node(node3);
@@ -2812,7 +2812,7 @@ mod tests {
         // Create nodes: 1 -> 2 -> 3 (all reachable)
         dialogue.add_node(DialogueNode::new(1, "Root node"));
         let mut node2 = DialogueNode::new(2, "Node 2");
-        let mut node3 = DialogueNode::new(3, "Node 3");
+        let node3 = DialogueNode::new(3, "Node 3");
         node2.add_choice(DialogueChoice::new("Go to 3", Some(3)));
         dialogue.add_node(node2);
         dialogue.add_node(node3);

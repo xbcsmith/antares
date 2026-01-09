@@ -14,7 +14,7 @@ Missing NPC and Conditions file paths from the Metadata --> Files editor.
 Missing a Proficiencies editor tab.
 Add a Proficiencies Editor tab to the Campaign Builder
 
-[proficiencies editor](./proficiencies_editor_implementation_plan.md)
+✅ COMPLETED - [proficiencies editor](./proficiencies_editor_implementation_plan.md)
 
 ### Dialog Editor
 
@@ -46,6 +46,8 @@ Unable to create new nodes makes it impossible to create dialog trees.
 ### Character Definition updates
 
 Full domain change: Change `CharacterDefinition` to store `AttributePair`/`AttributePair16` for stats (or an optional `current_stats` structure), update serialization, instantiation, and tests to support base+current for all stats. This is the most consistent but also the most invasive (more tests, docs, and backward-compatibility considerations).
+
+✅ COMPLETED - [character definition attribute pair](./character_definition_attribute_pair_migration_plan.md)
 
 ### Sprite Support (After Tile Visual Metadata)
 

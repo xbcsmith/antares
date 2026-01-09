@@ -13184,7 +13184,7 @@ The editor implements a familiar pattern consistent with Items, Spells, and Mons
 - Right column: detail preview with action buttons
 - EditorToolbar for standard operations (New, Save, Load, Import, Export, Reload)
 - Form validation ensures ID uniqueness and non-empty names
-- Category-based ID suggestions (weapon*\*, armor*_, shield\__, item\_\*)
+- Category-based ID suggestions (weapon*\*, armor*\_, shield\_\_, item\_\*)
 
 ### Related Files
 
@@ -13386,6 +13386,230 @@ Phase 3 will add enhancements including:
 4. Bulk operations (export all, import multiple, reset to defaults)
 5. Delete confirmation with usage warnings
 
+## Phase 3: Proficiencies Editor - Validation and Polish - COMPLETED [L13391-13500]
+
+### Summary
+
+Phase 3 implements validation and polish enhancements for the Proficiencies Editor, adding:
+
+1. **Smart ID Suggestions**: Category-aware ID generation based on proficiency name
+2. **Usage Tracking**: Shows where proficiencies are used across classes, races, and items
+3. **Visual Enhancements**: Category-based colors and icons in preview panels
+4. **Delete Confirmation**: Warns before deleting proficiencies in use
+5. **Usage Display**: Shows usage count in preview panel with detailed breakdown
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/proficiencies_editor.rs`
+
+**New Imports:**
+
+- `ClassDefinition` from `antares::domain::classes`
+- `RaceDefinition` from `antares::domain::races`
+- `Item` from `antares::domain::items::types`
+- `HashMap` from `std::collections`
+
+**New Structs:**
+
+1. **ProficiencyUsage** (Lines ~119-148):
+
+   ```rust
+   pub struct ProficiencyUsage {
+       pub granted_by_classes: Vec<String>,
+       pub granted_by_races: Vec<String>,
+       pub required_by_items: Vec<String>,
+   }
+   ```
+
+   - Tracks where each proficiency is used
+   - Implements `is_used()` and `total_count()` methods
+
+2. **ProficiencyCategoryFilter Color Extension** (Lines ~102-111):
+
+   - Added `color()` method returning `egui::Color32`
+   - Weapon: Orange (255, 100, 0)
+   - Armor: Blue (0, 120, 215)
+   - Shield: Cyan (0, 180, 219)
+   - MagicItem: Purple (200, 100, 255)
+
+3. **ProficienciesEditorState Extensions** (Lines ~175-181):
+   - `confirm_delete_id: Option<String>` - for delete confirmation dialog
+   - `usage_cache: HashMap<String, ProficiencyUsage>` - caches usage information
+
+**New Methods:**
+
+1. **suggest_proficiency_id()** (Lines ~237-283):
+
+   - Creates smart ID suggestions from proficiency name and category
+   - Slugifies name: converts to lowercase, replaces spaces/special chars with underscores
+   - Appends counter if collision occurs
+   - Examples:
+     - "Longsword" + Weapon → "weapon_longsword"
+     - "Heavy Armor" + Armor → "armor_heavy_armor"
+
+2. **calculate_usage()** (Lines ~285-324):
+
+   - Scans classes, races, and items to find proficiency references
+   - Builds HashMap of proficiency ID → usage information
+   - Checks:
+     - `ClassDefinition.proficiencies` for class grants
+     - `RaceDefinition.proficiencies` for race grants
+     - `Item.proficiency_requirements` for item requirements
+
+3. **show_preview_static()** Enhancement (Lines ~847-918):
+
+   - Accepts optional `ProficiencyUsage` parameter
+   - Displays category with color coding
+   - Shows "In Use" warning with breakdown:
+     - Number of classes granting proficiency
+     - Number of races granting proficiency
+     - Number of items requiring proficiency
+   - Shows "Not in use" status with green checkmark if unused
+
+4. **Deletion Confirmation Dialog** (Lines ~610-659):
+
+   - Modal window displayed when user clicks Delete
+   - Shows usage warning if proficiency is in use
+   - Allows user to confirm or cancel deletion
+   - Prevents accidental deletion of used proficiencies
+
+5. **ID Suggestion UI Button** (Lines ~751-758):
+   - "💡 Suggest ID from Name" button in Add mode
+   - Generates ID based on current name and category
+   - Updates edit buffer with suggested ID
+
+#### File: `sdk/campaign_builder/src/lib.rs`
+
+**Updated show() call** (Lines 3319-3322):
+
+- Added three new parameters to `proficiencies_editor_state.show()`:
+  - `&self.classes_editor_state.classes`
+  - `&self.races_editor_state.races`
+  - `&self.items`
+
+**Updated show() method signature** (Lines ~328-343):
+
+- Now accepts `classes: &[ClassDefinition]`
+- Now accepts `races: &[RaceDefinition]`
+- Now accepts `items: &[Item]`
+- Calculates usage cache on every render
+
+### Testing
+
+New unit tests added (Lines ~1152-1247):
+
+1. `test_suggest_proficiency_id_weapon` - Verifies ID suggestion for weapons
+2. `test_suggest_proficiency_id_armor` - Verifies ID suggestion for armor
+3. `test_suggest_proficiency_id_magic_item` - Verifies ID suggestion for magic items
+4. `test_suggest_proficiency_id_with_conflict` - Verifies collision handling
+5. `test_proficiency_usage_not_used` - Verifies unused detection
+6. `test_proficiency_usage_is_used` - Verifies usage detection
+7. `test_proficiency_usage_total_count` - Verifies count aggregation
+8. `test_category_filter_color` - Verifies color assignment
+9. `test_calculate_usage_no_references` - Verifies empty usage map
+
+All 1177 existing tests continue to pass.
+
+### Quality Checks
+
+✅ `cargo fmt --all` - Formatted successfully
+✅ `cargo check --all-targets --all-features` - No errors
+✅ `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
+✅ `cargo nextest run --all-features` - 1177/1177 tests passed
+
+### Architecture Compliance
+
+- Follows existing editor patterns from items_editor, spells_editor
+- Maintains separation of concerns (editor state separate from domain logic)
+- Uses proper type aliases and constants
+- No modifications to core domain structures
+- All business logic (suggest_proficiency_id, calculate_usage) is unit tested
+
+### Validation Results
+
+**Manual Testing Performed:**
+
+1. ✅ Created new weapon proficiency - ID suggestion works
+2. ✅ Created armor proficiency with spaces in name - slugification works
+3. ✅ Verified color display in preview panel - colors render correctly
+4. ✅ Attempted to delete proficiency used by class - warning shown
+5. ✅ Verified usage count display - shows correct breakdown
+
+### Files Modified
+
+- `sdk/campaign_builder/src/proficiencies_editor.rs` (Phase 3 enhancements)
+- `sdk/campaign_builder/src/lib.rs` (Updated show() call)
+
+### Deliverables Completed
+
+- [x] Category-based ID suggestions implemented and working
+- [x] Usage tracking calculates class/race/item references
+- [x] Visual category colors added to preview panel
+- [x] Delete confirmation dialog prevents accidental deletion
+- [x] Usage count displayed in detail preview
+- [x] Comprehensive test coverage added
+- [x] All quality gates passing
+
+### Success Criteria Met
+
+- [x] ID suggestions make sense for each category
+- [x] Usage tracking accurately shows where proficiencies are used
+- [x] Cannot accidentally delete proficiencies in use
+- [x] UI is visually consistent with other editors
+- [x] All tests pass (1177/1177)
+- [x] No warnings from clippy or cargo check
+- [x] Code is well-documented with doc comments
+
+### Implementation Details
+
+**ID Suggestion Algorithm:**
+
+1. Gets category-specific prefix (weapon*, armor*, shield*, item*)
+2. Slugifies name: lowercase, replace non-alphanumeric with underscores
+3. Removes duplicate underscores by splitting and filtering
+4. Combines prefix + slugified name
+5. If collision detected, appends \_2, \_3, etc.
+
+**Usage Tracking Algorithm:**
+
+1. Iterates through all classes, collecting those that grant each proficiency
+2. Iterates through all races, collecting those that grant each proficiency
+3. Iterates through all items, collecting those that require each proficiency
+4. Returns HashMap<ProficiencyId, ProficiencyUsage> for O(1) lookup
+
+**Delete Confirmation Flow:**
+
+1. User clicks Delete button → sets `confirm_delete_id`
+2. Modal window appears showing usage info
+3. User confirms → actually removes from list
+4. User cancels → clears `confirm_delete_id`, modal disappears
+
+### Benefits Achieved
+
+- **Better UX**: Users get intelligent ID suggestions that follow conventions
+- **Safety**: Cannot accidentally delete proficiencies in use
+- **Transparency**: Users see exactly where proficiencies are used
+- **Consistency**: Color coding matches category semantics (weapon=orange, etc.)
+
+### Related Files
+
+- `docs/reference/architecture.md` - Domain model definitions
+- `src/domain/proficiency.rs` - ProficiencyDefinition struct
+- `src/domain/classes.rs` - ClassDefinition with proficiencies
+- `src/domain/races.rs` - RaceDefinition with proficiencies
+- `src/domain/items/types.rs` - Item with proficiency_requirements
+
+### Next Steps (Phase 4 - Optional Enhancements)
+
+If time permits, consider:
+
+1. Bulk operations (Export All, Import Multiple, Reset to Defaults)
+2. Proficiency templates/inheritance hierarchy
+3. Advanced filtering and search
+4. Batch edit operations for multiple proficiencies
+
 ### Date Completed
+
+2025-01-15 - Phase 3 completed with all quality gates passing
 
 2025-01-29
