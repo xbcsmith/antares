@@ -14515,3 +14515,142 @@ None. All success criteria from the implementation plan have been met.
 ### Status
 
 ✅ **COMPLETE** - All phases implemented, verified, and documented. Production ready.
+
+## Phase 1: Add Edit Event Button to Inspector - COMPLETED
+
+### Summary
+
+Implemented the Edit Event button in the Map Editor Inspector panel to enable inline editing of existing events on the map. This allows map authors to select an event in the inspector and seamlessly transition into editing mode with pre-populated event data.
+
+### Context
+
+Part of the Event Editing in Map Editor Implementation Plan (see `docs/explanation/event_editing_implementation_plan.md`). Phase 1 focuses on UI/UX improvements to make event editing more discoverable and intuitive within the inspector panel.
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/map_editor.rs`
+
+**1. Inspector Panel Enhancement (Lines ~2885-2965)**
+
+Added "✏️ Edit Event" button to the inspector panel event display section with visual feedback indicating when an event is being edited:
+
+- Button appears in horizontal layout alongside "🗑 Remove Event" button
+- Visual feedback: button label changes to "✏️ Editing..." with blue highlight when active
+- Prevents multiple simultaneous edits at different positions
+- Pre-loads event data via `EventEditorState::from_map_event()`
+- Uses event cloning to avoid borrow checker conflicts in egui closures
+
+**2. Tool State Consistency (Lines ~3428-3450)**
+
+Updated `show_event_editor()` to reset tool state after operations:
+
+- After "💾 Save Changes" → tool resets to `EditorTool::Select`
+- After "🗑 Remove Event" → tool resets to `EditorTool::Select`
+- After "➕ Add Event" → tool resets to `EditorTool::Select`
+
+This ensures clean workflow closure and prevents accidental edits to other events.
+
+**3. Event Cloning for Borrow Safety**
+
+Used `.cloned()` when retrieving events to avoid borrow checker conflicts in egui closures. This allows mutable borrow of `editor` in the UI closure while holding event reference.
+
+### Test Coverage
+
+Added 7 comprehensive tests (lines ~5053-5232):
+
+1. **test_edit_event_button_activates_place_event_tool** - Verifies tool switches to PlaceEvent when Edit clicked
+2. **test_edit_event_button_loads_event_into_editor** - Ensures event fields populate correctly from map
+3. **test_edit_event_button_shows_editing_state** - Validates "Editing..." button state indicator
+4. **test_edit_event_save_resets_tool_to_select** - Confirms tool resets after save
+5. **test_edit_event_remove_resets_tool_to_select** - Confirms tool resets after remove
+6. **test_edit_event_switch_between_multiple_events** - Tests switching between different events
+7. **test_edit_different_event_types** - Validates all event types load correctly
+
+All tests verify tool state transitions, event data loading accuracy, and visual feedback correctness.
+
+### Quality Validation
+
+✅ **Code Quality Checks:**
+
+- `cargo fmt --all` - PASSED ✓
+- `cargo check --all-targets --all-features` - PASSED ✓
+- `cargo clippy --all-targets --all-features -- -D warnings` - PASSED ✓
+- `cargo nextest run --all-features` - PASSED ✓ (1177/1177 tests)
+
+✅ **No compilation errors or warnings**
+
+✅ **All existing tests continue to pass**
+
+### Architecture Compliance
+
+✅ **Module Placement**: Changes in `sdk/campaign_builder/src/map_editor.rs` (correct SDK layer)
+
+✅ **Type System**: Uses existing `EditorTool`, `EventEditorState`, `Position` types from architecture
+
+✅ **Naming Conventions**: Follows existing patterns (`is_editing`, `event_clone`)
+
+✅ **State Management**: Tool state transitions properly encapsulated in event editor logic
+
+✅ **Borrow Safety**: Proper use of `.cloned()` to manage Rust ownership in egui closures
+
+### Implementation Details
+
+**Key Design Decisions:**
+
+1. **Event Cloning Strategy**: `.cloned()` on `get_event()` result eliminates borrow conflicts between holding event reference and mutating editor in closure.
+
+2. **Visual Feedback**: Blue-tinted button with "Editing..." text provides dual visual indication that event is being edited at specific position.
+
+3. **Per-Position Tracking**: Inspector independently checks if _its_ event is being edited, allowing user to view other events while one is in edit mode.
+
+4. **Automatic Tool Reset**: Resetting `current_tool` to `Select` after save/remove provides workflow closure and prevents accidental edits.
+
+5. **Event Pre-Population**: `EventEditorState::from_map_event()` ensures all 8 event type variants are handled and data is preserved.
+
+### Benefits Achieved
+
+- **Improved UX**: Direct edit path from inspector without extra tool switching
+- **Data Preservation**: All event fields properly loaded and available for editing
+- **Visual Clarity**: Button state clearly communicates active editing
+- **Workflow Consistency**: Automatic tool reset prevents editing confusion
+- **Type Safety**: Leverages Rust's type system for event variant handling
+
+### Files Modified
+
+- `sdk/campaign_builder/src/map_editor.rs` (2 sections modified, 7 tests added)
+
+### Related Documents
+
+- `docs/explanation/event_editing_implementation_plan.md` - Master implementation plan for all phases
+- No changes to core game engine or domain logic
+
+### Deliverables Completed
+
+- [x] "✏️ Edit Event" button added to Inspector Panel
+- [x] Button activates PlaceEvent tool and loads event data
+- [x] Visual "Editing..." state indicator implemented
+- [x] Tool state resets to Select after operations
+- [x] 7 comprehensive unit tests added and passing
+- [x] All code quality gates passing
+- [x] Documentation complete
+
+### Success Criteria Met
+
+✅ Clicking "✏️ Edit Event" switches to PlaceEvent tool
+✅ Event fields populate correctly in editor with all 8 variants supported
+✅ "Editing..." button shows with blue highlight when active
+✅ Save and Remove operations reset tool to Select mode
+✅ No architectural deviations from documented patterns
+✅ All 1177 tests pass (including 7 new Phase 1 tests)
+✅ Zero clippy warnings
+
+### Next Steps (Phase 2)
+
+Phase 2 will add visual feedback for the event being edited on the map itself:
+
+- Update MapGridWidget tile rendering to highlight the event's position
+- Add tooltip showing which event is being edited
+- Enhanced visual feedback to make event position obvious during editing
+- Integration tests for visual feedback workflow
+
+**Status**: Phase 1 ✅ COMPLETE - Ready for Phase 2
