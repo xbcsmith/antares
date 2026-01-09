@@ -34,6 +34,7 @@ pub mod map_editor;
 pub mod monsters_editor;
 pub mod npc_editor;
 pub mod packager;
+pub mod proficiencies_editor;
 pub mod quest_editor;
 pub mod races_editor;
 pub mod spells_editor;
@@ -60,6 +61,7 @@ use antares::domain::items::types::{
     ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
 };
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+use antares::domain::proficiency::ProficiencyDefinition;
 use antares::domain::quest::{Quest, QuestId};
 use antares::domain::types::{DiceRoll, ItemId, MapId, MonsterId, SpellId};
 use antares::domain::world::Map;
@@ -163,6 +165,8 @@ pub struct CampaignMetadata {
     dialogue_file: String,
     conditions_file: String,
     npcs_file: String,
+    #[serde(default = "default_proficiencies_file")]
+    proficiencies_file: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -196,6 +200,10 @@ impl Difficulty {
 
 fn default_starting_innkeeper() -> String {
     "tutorial_innkeeper_town".to_string()
+}
+
+fn default_proficiencies_file() -> String {
+    "data/proficiencies.ron".to_string()
 }
 
 impl Default for CampaignMetadata {
@@ -233,6 +241,7 @@ impl Default for CampaignMetadata {
             dialogue_file: "data/dialogue.ron".to_string(),
             conditions_file: "data/conditions.ron".to_string(),
             npcs_file: "data/npcs.ron".to_string(),
+            proficiencies_file: "data/proficiencies.ron".to_string(),
         }
     }
 }
@@ -252,6 +261,7 @@ enum EditorTab {
     Characters,
     Dialogues,
     NPCs,
+    Proficiencies,
     Assets,
     Validation,
 }
@@ -279,6 +289,7 @@ impl EditorTab {
             EditorTab::Characters => "Characters",
             EditorTab::Dialogues => "Dialogues",
             EditorTab::NPCs => "NPCs",
+            EditorTab::Proficiencies => "Proficiencies",
             EditorTab::Assets => "Assets",
             EditorTab::Validation => "Validation",
         }
@@ -387,6 +398,7 @@ struct CampaignBuilderApp {
     validation_filter: ValidationFilter,
     validation_focus_asset: Option<PathBuf>,
     show_about_dialog: bool,
+    asset_type_filter: Option<asset_manager::AssetType>,
     show_unsaved_warning: bool,
     pending_action: Option<PendingAction>,
     file_tree: Vec<FileNode>,
@@ -400,6 +412,9 @@ struct CampaignBuilderApp {
 
     spells: Vec<Spell>,
     spells_editor_state: SpellsEditorState,
+
+    proficiencies: Vec<ProficiencyDefinition>,
+    proficiencies_editor_state: proficiencies_editor::ProficienciesEditorState,
 
     monsters: Vec<MonsterDefinition>,
     monsters_editor_state: MonstersEditorState,
@@ -498,6 +513,7 @@ impl Default for CampaignBuilderApp {
             validation_filter: ValidationFilter::All,
             validation_focus_asset: None,
             show_about_dialog: false,
+            asset_type_filter: None,
             show_unsaved_warning: false,
             pending_action: None,
             file_tree: Vec::new(),
@@ -510,6 +526,9 @@ impl Default for CampaignBuilderApp {
 
             spells: Vec::new(),
             spells_editor_state: SpellsEditorState::new(),
+
+            proficiencies: Vec::new(),
+            proficiencies_editor_state: proficiencies_editor::ProficienciesEditorState::new(),
 
             monsters: Vec::new(),
             monsters_editor_state: MonstersEditorState::new(),
@@ -759,6 +778,225 @@ impl CampaignBuilderApp {
             }
         }
         errors
+    }
+
+    /// Validate character IDs for uniqueness and references
+    ///
+    /// Returns validation errors for:
+    /// - Duplicate character IDs
+    /// - Empty character IDs
+    /// - Empty character names (warning)
+    /// - Non-existent class references
+    /// - Non-existent race references
+    fn validate_character_ids(&self) -> Vec<validation::ValidationResult> {
+        let mut results = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for character in &self.characters_editor_state.characters {
+            // Check for duplicate IDs
+            if !seen_ids.insert(character.id.clone()) {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Characters,
+                    format!("Duplicate character ID: '{}'", character.id),
+                ));
+            }
+
+            // Check for empty IDs
+            if character.id.is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Characters,
+                    "Character has empty ID",
+                ));
+            }
+
+            // Check for empty names
+            if character.name.is_empty() {
+                results.push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Characters,
+                    format!("Character '{}' has empty name", character.id),
+                ));
+            }
+
+            // Validate class exists
+            let class_exists = self
+                .classes_editor_state
+                .classes
+                .iter()
+                .any(|c| c.id == character.class_id);
+            if !class_exists && !character.class_id.is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Characters,
+                    format!(
+                        "Character '{}' references non-existent class '{}'",
+                        character.id, character.class_id
+                    ),
+                ));
+            }
+
+            // Validate race exists
+            let race_exists = self
+                .races_editor_state
+                .races
+                .iter()
+                .any(|r| r.id == character.race_id);
+            if !race_exists && !character.race_id.is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Characters,
+                    format!(
+                        "Character '{}' references non-existent race '{}'",
+                        character.id, character.race_id
+                    ),
+                ));
+            }
+        }
+
+        // Add passed message if no characters or all valid
+        if self.characters_editor_state.characters.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Characters,
+                "No characters defined",
+            ));
+        } else if results
+            .iter()
+            .all(|r| r.severity != validation::ValidationSeverity::Error)
+        {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Characters,
+                format!(
+                    "{} character(s) validated",
+                    self.characters_editor_state.characters.len()
+                ),
+            ));
+        }
+
+        results
+    }
+
+    /// Validate proficiency IDs for uniqueness and cross-references
+    ///
+    /// Returns validation errors for:
+    /// - Duplicate proficiency IDs
+    /// - Empty proficiency IDs
+    /// - Empty proficiency names (warning)
+    /// - Proficiencies referenced by classes that don't exist
+    /// - Proficiencies referenced by races that don't exist
+    /// - Proficiencies required by items that don't exist
+    /// - Info messages for unreferenced proficiencies
+    fn validate_proficiency_ids(&self) -> Vec<validation::ValidationResult> {
+        let mut results = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for proficiency in &self.proficiencies {
+            // Check for duplicate IDs
+            if !seen_ids.insert(proficiency.id.clone()) {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Proficiencies,
+                    format!("Duplicate proficiency ID: '{}'", proficiency.id),
+                ));
+            }
+
+            // Check for empty IDs
+            if proficiency.id.is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Proficiencies,
+                    "Proficiency has empty ID",
+                ));
+            }
+
+            // Check for empty names
+            if proficiency.name.is_empty() {
+                results.push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Proficiencies,
+                    format!("Proficiency '{}' has empty name", proficiency.id),
+                ));
+            }
+        }
+
+        // Cross-reference validation: Check for proficiencies referenced by classes
+        let mut referenced_proficiencies = std::collections::HashSet::new();
+        for class in &self.classes_editor_state.classes {
+            for prof_id in &class.proficiencies {
+                referenced_proficiencies.insert(prof_id.clone());
+
+                let prof_exists = self.proficiencies.iter().any(|p| &p.id == prof_id);
+                if !prof_exists {
+                    results.push(validation::ValidationResult::error(
+                        validation::ValidationCategory::Proficiencies,
+                        format!(
+                            "Class '{}' references non-existent proficiency '{}'",
+                            class.id, prof_id
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // Cross-reference validation: Check for proficiencies referenced by races
+        for race in &self.races_editor_state.races {
+            for prof_id in &race.proficiencies {
+                referenced_proficiencies.insert(prof_id.clone());
+
+                let prof_exists = self.proficiencies.iter().any(|p| &p.id == prof_id);
+                if !prof_exists {
+                    results.push(validation::ValidationResult::error(
+                        validation::ValidationCategory::Proficiencies,
+                        format!(
+                            "Race '{}' references non-existent proficiency '{}'",
+                            race.id, prof_id
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // Cross-reference validation: Check for proficiencies required by items
+        for item in &self.items {
+            if let Some(required_prof) = item.required_proficiency() {
+                referenced_proficiencies.insert(required_prof.clone());
+
+                let prof_exists = self.proficiencies.iter().any(|p| &p.id == &required_prof);
+                if !prof_exists {
+                    results.push(validation::ValidationResult::error(
+                        validation::ValidationCategory::Proficiencies,
+                        format!(
+                            "Item '{}' requires non-existent proficiency '{}'",
+                            item.id, required_prof
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // Warning for unreferenced proficiencies
+        for proficiency in &self.proficiencies {
+            if !referenced_proficiencies.contains(&proficiency.id) {
+                results.push(validation::ValidationResult::info(
+                    validation::ValidationCategory::Proficiencies,
+                    format!(
+                        "Proficiency '{}' is not used by any class, race, or item",
+                        proficiency.id
+                    ),
+                ));
+            }
+        }
+
+        // Add passed message if no proficiencies or all valid
+        if self.proficiencies.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Proficiencies,
+                "No proficiencies defined",
+            ));
+        } else if results
+            .iter()
+            .all(|r| r.severity != validation::ValidationSeverity::Error)
+        {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Proficiencies,
+                format!("{} proficiency(ies) validated", self.proficiencies.len()),
+            ));
+        }
+
+        results
     }
 
     /// Generate category status checks (passed or no data info messages)
@@ -1012,6 +1250,39 @@ impl CampaignBuilderApp {
     }
 
     /// Get the next available class ID (string-based, numeric format)
+    /// Discovers map files in the maps directory by scanning for .ron files
+    ///
+    /// This function scans the actual maps directory and returns paths to all .ron files found,
+    /// rather than inferring filenames from map IDs. This allows maps to have any filename.
+    ///
+    /// # Returns
+    ///
+    /// A vector of map file paths relative to the campaign directory.
+    fn discover_map_files(&self) -> Vec<String> {
+        let mut map_files = Vec::new();
+
+        if let Some(ref campaign_dir) = self.campaign_dir {
+            let maps_path = campaign_dir.join(&self.campaign.maps_dir);
+
+            if let Ok(entries) = std::fs::read_dir(&maps_path) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.extension().and_then(|s| s.to_str()) == Some("ron") {
+                        // Store relative path from campaign dir
+                        if let Ok(rel_path) = path.strip_prefix(campaign_dir) {
+                            map_files.push(rel_path.display().to_string());
+                        }
+                    }
+                }
+            }
+
+            // Sort for consistent ordering
+            map_files.sort();
+        }
+
+        map_files
+    }
+
     fn next_available_class_id(&self) -> String {
         let max_id = self
             .classes_editor_state
@@ -1320,6 +1591,138 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load proficiencies from RON file
+    fn load_proficiencies(&mut self) {
+        self.logger
+            .debug(category::FILE_IO, "load_proficiencies() called");
+        let proficiencies_file = self.campaign.proficiencies_file.clone();
+        if let Some(ref dir) = self.campaign_dir {
+            let proficiencies_path = dir.join(&proficiencies_file);
+            self.logger.verbose(
+                category::FILE_IO,
+                &format!(
+                    "Loading proficiencies from: {}",
+                    proficiencies_path.display()
+                ),
+            );
+            if proficiencies_path.exists() {
+                match fs::read_to_string(&proficiencies_path) {
+                    Ok(contents) => {
+                        self.logger.verbose(
+                            category::FILE_IO,
+                            &format!("Read {} bytes from proficiencies file", contents.len()),
+                        );
+                        match ron::from_str::<Vec<ProficiencyDefinition>>(&contents) {
+                            Ok(proficiencies) => {
+                                let count = proficiencies.len();
+                                self.proficiencies = proficiencies;
+
+                                // Mark data file as loaded in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager.mark_data_file_loaded(&proficiencies_file, count);
+                                }
+
+                                self.logger.info(
+                                    category::FILE_IO,
+                                    &format!("Loaded {} proficiencies", self.proficiencies.len()),
+                                );
+                                self.status_message =
+                                    format!("Loaded {} proficiencies", self.proficiencies.len());
+                            }
+                            Err(e) => {
+                                // Mark data file as error in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager
+                                        .mark_data_file_error(&proficiencies_file, &e.to_string());
+                                }
+                                self.logger.error(
+                                    category::FILE_IO,
+                                    &format!("Failed to parse proficiencies: {}", e),
+                                );
+                                self.status_message =
+                                    format!("Failed to parse proficiencies: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(&proficiencies_file, &e.to_string());
+                        }
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!("Failed to read proficiencies file: {}", e),
+                        );
+                        self.status_message = format!("Failed to read proficiencies file: {}", e);
+                    }
+                }
+            } else {
+                self.logger.warn(
+                    category::FILE_IO,
+                    &format!(
+                        "Proficiencies file does not exist: {}",
+                        proficiencies_path.display()
+                    ),
+                );
+            }
+        } else {
+            self.logger.warn(
+                category::FILE_IO,
+                "No campaign directory set when trying to load proficiencies",
+            );
+        }
+    }
+
+    /// Save proficiencies to RON file
+    fn save_proficiencies(&mut self) -> Result<(), String> {
+        self.logger
+            .debug(category::FILE_IO, "save_proficiencies() called");
+        if let Some(ref dir) = self.campaign_dir {
+            let proficiencies_path = dir.join(&self.campaign.proficiencies_file);
+            self.logger.verbose(
+                category::FILE_IO,
+                &format!(
+                    "Saving {} proficiencies to: {}",
+                    self.proficiencies.len(),
+                    proficiencies_path.display()
+                ),
+            );
+
+            // Create proficiencies directory if it doesn't exist
+            if let Some(parent) = proficiencies_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create proficiencies directory: {}", e))?;
+            }
+
+            let ron_config = ron::ser::PrettyConfig::new()
+                .struct_names(false)
+                .enumerate_arrays(false);
+
+            let contents = ron::ser::to_string_pretty(&self.proficiencies, ron_config)
+                .map_err(|e| format!("Failed to serialize proficiencies: {}", e))?;
+
+            fs::write(&proficiencies_path, &contents)
+                .map_err(|e| format!("Failed to write proficiencies file: {}", e))?;
+
+            self.logger.info(
+                category::FILE_IO,
+                &format!(
+                    "Saved {} proficiencies ({} bytes)",
+                    self.proficiencies.len(),
+                    contents.len()
+                ),
+            );
+            self.unsaved_changes = true;
+            Ok(())
+        } else {
+            self.logger.error(
+                category::FILE_IO,
+                "No campaign directory set when trying to save proficiencies",
+            );
+            Err("No campaign directory set".to_string())
+        }
+    }
+
     /// Save dialogues to a file path
     ///
     /// # Arguments
@@ -1388,12 +1791,17 @@ impl CampaignBuilderApp {
                 let npcs: Vec<antares::domain::world::npc::NpcDefinition> =
                     ron::from_str(&contents).map_err(CampaignError::Deserialization)?;
 
+                let count = npcs.len();
                 self.npc_editor_state.npcs = npcs;
                 self.logger.log(
                     LogLevel::Info,
                     category::CAMPAIGN,
-                    &format!("Loaded {} NPCs", self.npc_editor_state.npcs.len()),
+                    &format!("Loaded {} NPCs", count),
                 );
+                // Mark data file as loaded in asset manager
+                if let Some(ref mut manager) = self.asset_manager {
+                    manager.mark_data_file_loaded(&self.campaign.npcs_file, count);
+                }
             } else {
                 self.logger.log(
                     LogLevel::Warn,
@@ -1508,6 +1916,17 @@ impl CampaignBuilderApp {
                                         Ok(map) => {
                                             self.maps.push(map);
                                             loaded_count += 1;
+
+                                            // Mark individual map file as loaded in asset manager
+                                            if let Some(ref mut manager) = self.asset_manager {
+                                                if let Some(relative_path) =
+                                                    path.strip_prefix(dir).ok()
+                                                {
+                                                    if let Some(path_str) = relative_path.to_str() {
+                                                        manager.mark_data_file_loaded(path_str, 1);
+                                                    }
+                                                }
+                                            }
                                         }
                                         Err(e) => {
                                             self.status_message = format!(
@@ -1515,6 +1934,20 @@ impl CampaignBuilderApp {
                                                 path.file_name().unwrap_or_default(),
                                                 e
                                             );
+
+                                            // Mark individual map file as error in asset manager
+                                            if let Some(ref mut manager) = self.asset_manager {
+                                                if let Some(relative_path) =
+                                                    path.strip_prefix(dir).ok()
+                                                {
+                                                    if let Some(path_str) = relative_path.to_str() {
+                                                        manager.mark_data_file_error(
+                                                            path_str,
+                                                            &e.to_string(),
+                                                        );
+                                                    }
+                                                }
+                                            }
                                         }
                                     },
                                     Err(e) => {
@@ -1523,6 +1956,19 @@ impl CampaignBuilderApp {
                                             path.file_name().unwrap_or_default(),
                                             e
                                         );
+
+                                        // Mark individual map file as error in asset manager
+                                        if let Some(ref mut manager) = self.asset_manager {
+                                            if let Some(relative_path) = path.strip_prefix(dir).ok()
+                                            {
+                                                if let Some(path_str) = relative_path.to_str() {
+                                                    manager.mark_data_file_error(
+                                                        path_str,
+                                                        &e.to_string(),
+                                                    );
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1575,13 +2021,20 @@ impl CampaignBuilderApp {
             .debug(category::VALIDATION, "validate_campaign() called");
         self.validation_errors.clear();
 
-        // Validate data IDs for uniqueness
+        // Validate data IDs for uniqueness (in EditorTab order)
         self.validation_errors.extend(self.validate_item_ids());
         self.validation_errors.extend(self.validate_spell_ids());
+        self.validation_errors.extend(self.validate_condition_ids());
         self.validation_errors.extend(self.validate_monster_ids());
         self.validation_errors.extend(self.validate_map_ids());
-        self.validation_errors.extend(self.validate_condition_ids());
+        // Quests validated elsewhere
+        // Classes validated elsewhere
+        // Races validated elsewhere
+        self.validation_errors.extend(self.validate_character_ids());
+        // Dialogues validated elsewhere
         self.validation_errors.extend(self.validate_npc_ids());
+        self.validation_errors
+            .extend(self.validate_proficiency_ids());
 
         // Add category status checks (passed or no data info)
         self.validation_errors
@@ -1936,6 +2389,9 @@ impl CampaignBuilderApp {
         self.spells.clear();
         self.spells_editor_state = SpellsEditorState::new();
 
+        self.proficiencies.clear();
+        self.proficiencies_editor_state = proficiencies_editor::ProficienciesEditorState::new();
+
         self.monsters.clear();
         self.monsters_editor_state = MonstersEditorState::new();
 
@@ -2016,6 +2472,10 @@ impl CampaignBuilderApp {
 
         if let Err(e) = self.save_conditions() {
             save_warnings.push(format!("Conditions: {}", e));
+        }
+
+        if let Err(e) = self.save_proficiencies() {
+            save_warnings.push(format!("Proficiencies: {}", e));
         }
 
         // Save maps individually (they're saved per-map, not as a collection)
@@ -2149,6 +2609,7 @@ impl CampaignBuilderApp {
                         .debug(category::FILE_IO, "Loading data files...");
                     self.load_items();
                     self.load_spells();
+                    self.load_proficiencies();
                     self.load_monsters();
                     self.load_classes_from_campaign();
                     self.load_races_from_campaign();
@@ -2998,6 +3459,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Characters,
                     EditorTab::Dialogues,
                     EditorTab::NPCs,
+                    EditorTab::Proficiencies,
                     EditorTab::Assets,
                     EditorTab::Validation,
                 ];
@@ -3155,6 +3617,18 @@ impl eframe::App for CampaignBuilderApp {
                     self.unsaved_changes = true;
                 }
             }
+            EditorTab::Proficiencies => self.proficiencies_editor_state.show(
+                ui,
+                &mut self.proficiencies,
+                self.campaign_dir.as_ref(),
+                &self.campaign.proficiencies_file,
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+                &mut self.file_load_merge_mode,
+                &self.classes_editor_state.classes,
+                &self.races_editor_state.races,
+                &self.items,
+            ),
             EditorTab::Assets => self.show_assets_editor(ui),
             EditorTab::Validation => self.show_validation_panel(ui),
         });
@@ -3477,14 +3951,23 @@ impl CampaignBuilderApp {
             if path.exists() {
                 match self.characters_editor_state.load_from_file(&path) {
                     Ok(_) => {
-                        self.status_message = format!(
-                            "Loaded {} characters",
-                            self.characters_editor_state.characters.len()
-                        );
+                        let count = self.characters_editor_state.characters.len();
+                        self.status_message = format!("Loaded {} characters", count);
+                        // Mark data file as loaded in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_loaded(&self.campaign.characters_file, count);
+                        }
                     }
                     Err(e) => {
                         self.status_message = format!("Failed to load characters: {}", e);
                         eprintln!("Failed to load characters from {:?}: {}", path, e);
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(
+                                &self.campaign.characters_file,
+                                &e.to_string(),
+                            );
+                        }
                     }
                 }
             } else {
@@ -3830,15 +4313,22 @@ impl CampaignBuilderApp {
                     self.status_message = format!("Failed to scan assets: {}", e);
                 } else {
                     // Initialize data file tracking
+                    // Discover actual map files from the maps directory
+                    let map_file_paths = self.discover_map_files();
+
                     manager.init_data_files(
                         &self.campaign.items_file,
                         &self.campaign.spells_file,
+                        &self.campaign.conditions_file,
                         &self.campaign.monsters_file,
+                        &map_file_paths,
+                        &self.campaign.quests_file,
                         &self.campaign.classes_file,
                         &self.campaign.races_file,
-                        &self.campaign.quests_file,
+                        &self.campaign.characters_file,
                         &self.campaign.dialogue_file,
-                        Some("data/conditions.ron"),
+                        &self.campaign.npcs_file,
+                        &self.campaign.proficiencies_file,
                     );
                     // Scan references on initial load so portraits are properly marked as referenced
                     manager.scan_references(
@@ -3932,14 +4422,35 @@ impl CampaignBuilderApp {
             // Asset type filters with counts
             ui.horizontal_wrapped(|ui| {
                 ui.label("Filter:");
-                let _ = ui.selectable_label(true, "All");
+
+                // "All" button
+                if ui
+                    .selectable_label(
+                        self.asset_type_filter.is_none(),
+                        format!("All ({})", manager.assets().len()),
+                    )
+                    .clicked()
+                {
+                    self.asset_type_filter = None;
+                    self.status_message = "Showing all asset types".to_string();
+                }
+
+                // Individual type filters
                 for asset_type in asset_manager::AssetType::all() {
                     let count = manager.asset_count_by_type(asset_type);
                     if count > 0 {
-                        let _ = ui.selectable_label(
-                            false,
-                            format!("{} {}", asset_type.display_name(), count),
-                        );
+                        let is_selected = self.asset_type_filter == Some(asset_type);
+                        if ui
+                            .selectable_label(
+                                is_selected,
+                                format!("{} ({})", asset_type.display_name(), count),
+                            )
+                            .clicked()
+                        {
+                            self.asset_type_filter = Some(asset_type);
+                            self.status_message =
+                                format!("Filtered by {}", asset_type.display_name());
+                        }
                     }
                 }
             });
@@ -4210,7 +4721,19 @@ impl CampaignBuilderApp {
                 let mut sorted_assets: Vec<_> = manager.assets().iter().collect();
                 sorted_assets.sort_by(|a, b| a.0.cmp(b.0));
 
-                for (path, asset) in sorted_assets {
+                // Apply asset type filter
+                let filtered_assets: Vec<_> = sorted_assets
+                    .iter()
+                    .filter(|(_, asset)| {
+                        match self.asset_type_filter {
+                            None => true, // Show all
+                            Some(filter_type) => asset.asset_type == filter_type,
+                        }
+                    })
+                    .copied()
+                    .collect();
+
+                for (path, asset) in filtered_assets {
                     ui.group(|ui| {
                         ui.vertical(|ui| {
                             // Asset header
@@ -4996,6 +5519,342 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_character_ids_duplicate() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add two characters with the same ID
+        let char1 = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(),
+            name: "Hero".to_string(),
+            class_id: "class_1".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+        let char2 = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(), // Duplicate ID
+            name: "Another Hero".to_string(),
+            class_id: "class_1".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char1);
+        app.characters_editor_state.characters.push(char2);
+
+        let results = app.validate_character_ids();
+        let has_duplicate_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("Duplicate character ID"));
+        assert!(has_duplicate_error);
+    }
+
+    #[test]
+    fn test_validate_character_ids_empty_id() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        let char = characters_editor::CharacterEditBuffer {
+            id: "".to_string(), // Empty ID
+            name: "Hero".to_string(),
+            class_id: "class_1".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char);
+
+        let results = app.validate_character_ids();
+        let has_empty_id_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("empty ID"));
+        assert!(has_empty_id_error);
+    }
+
+    #[test]
+    fn test_validate_character_ids_empty_name_warning() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        let char = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(),
+            name: "".to_string(), // Empty name
+            class_id: "class_1".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char);
+
+        let results = app.validate_character_ids();
+        let has_name_warning = results.iter().any(|r| {
+            r.severity == validation::ValidationSeverity::Warning
+                && r.message.contains("empty name")
+        });
+        assert!(has_name_warning);
+    }
+
+    #[test]
+    fn test_validate_character_ids_invalid_class_reference() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        let char = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(),
+            name: "Hero".to_string(),
+            class_id: "nonexistent_class".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char);
+
+        let results = app.validate_character_ids();
+        let has_class_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("non-existent class"));
+        assert!(has_class_error);
+    }
+
+    #[test]
+    fn test_validate_character_ids_invalid_race_reference() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        let char = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(),
+            name: "Hero".to_string(),
+            class_id: "class_1".to_string(),
+            race_id: "nonexistent_race".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char);
+
+        let results = app.validate_character_ids();
+        let has_race_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("non-existent race"));
+        assert!(has_race_error);
+    }
+
+    #[test]
+    fn test_validate_character_ids_valid() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add a class and race that the character can reference
+        app.classes_editor_state
+            .classes
+            .push(classes_editor::ClassEditBuffer {
+                id: "class_1".to_string(),
+                name: "Knight".to_string(),
+                ..Default::default()
+            });
+
+        app.races_editor_state
+            .races
+            .push(races_editor::RaceEditBuffer {
+                id: "race_1".to_string(),
+                name: "Human".to_string(),
+                ..Default::default()
+            });
+
+        let char = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(),
+            name: "Hero".to_string(),
+            class_id: "class_1".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char);
+
+        let results = app.validate_character_ids();
+        let has_pass = results
+            .iter()
+            .any(|r| r.severity == validation::ValidationSeverity::Passed);
+        assert!(has_pass);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_duplicate() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add two proficiencies with the same ID
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "prof_1".to_string(),
+            name: "Longsword".to_string(),
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "prof_1".to_string(), // Duplicate ID
+            name: "Shortsword".to_string(),
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        let results = app.validate_proficiency_ids();
+        let has_duplicate_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("Duplicate proficiency ID"));
+        assert!(has_duplicate_error);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_empty_id() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "".to_string(), // Empty ID
+            name: "Longsword".to_string(),
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        let results = app.validate_proficiency_ids();
+        let has_empty_id_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("empty ID"));
+        assert!(has_empty_id_error);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_empty_name_warning() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "prof_1".to_string(),
+            name: "".to_string(), // Empty name
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        let results = app.validate_proficiency_ids();
+        let has_name_warning = results.iter().any(|r| {
+            r.severity == validation::ValidationSeverity::Warning
+                && r.message.contains("empty name")
+        });
+        assert!(has_name_warning);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_referenced_by_class() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add a proficiency
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "prof_1".to_string(),
+            name: "Longsword".to_string(),
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        // Add a class that references the proficiency
+        app.classes_editor_state
+            .classes
+            .push(classes_editor::ClassEditBuffer {
+                id: "class_1".to_string(),
+                name: "Knight".to_string(),
+                proficiencies: vec!["prof_1".to_string()],
+                ..Default::default()
+            });
+
+        let results = app.validate_proficiency_ids();
+        let has_pass = results
+            .iter()
+            .any(|r| r.severity == validation::ValidationSeverity::Passed);
+        assert!(has_pass);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_class_references_nonexistent() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add a class that references a non-existent proficiency
+        app.classes_editor_state
+            .classes
+            .push(classes_editor::ClassEditBuffer {
+                id: "class_1".to_string(),
+                name: "Knight".to_string(),
+                proficiencies: vec!["nonexistent_prof".to_string()],
+                ..Default::default()
+            });
+
+        let results = app.validate_proficiency_ids();
+        let has_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("references non-existent proficiency"));
+        assert!(has_error);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_race_references_nonexistent() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add a race that references a non-existent proficiency
+        app.races_editor_state
+            .races
+            .push(races_editor::RaceEditBuffer {
+                id: "race_1".to_string(),
+                name: "Human".to_string(),
+                proficiencies: vec!["nonexistent_prof".to_string()],
+                ..Default::default()
+            });
+
+        let results = app.validate_proficiency_ids();
+        let has_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("references non-existent proficiency"));
+        assert!(has_error);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_item_requires_nonexistent() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add an item that requires a non-existent proficiency
+        let mut item = ItemsEditorState::default_item();
+        item.required_proficiency = Some("nonexistent_prof".to_string());
+        app.items.push(item);
+
+        let results = app.validate_proficiency_ids();
+        let has_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("requires non-existent proficiency"));
+        assert!(has_error);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_unreferenced_info() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add a proficiency that is not referenced by anything
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "unused_prof".to_string(),
+            name: "Unused".to_string(),
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        let results = app.validate_proficiency_ids();
+        let has_info = results.iter().any(|r| {
+            r.severity == validation::ValidationSeverity::Info && r.message.contains("not used")
+        });
+        assert!(has_info);
+    }
+
+    #[test]
     fn test_validation_all_shows_passed_and_errors_only_filters_out_passed() {
         // Ensure 'All' filter shows Passed results by default and 'Errors Only' filters them out.
         let mut app = CampaignBuilderApp::default();
@@ -5075,6 +5934,7 @@ mod tests {
             dialogue_file: "data/dialogue.ron".to_string(),
             conditions_file: "data/conditions.ron".to_string(),
             npcs_file: "data/npcs.ron".to_string(),
+            proficiencies_file: "data/proficiencies.ron".to_string(),
         };
 
         let ron_config = ron::ser::PrettyConfig::new()
@@ -5098,6 +5958,55 @@ mod tests {
         assert_eq!(loaded.name, campaign.name);
         assert_eq!(loaded.difficulty, campaign.difficulty);
         assert_eq!(loaded.permadeath, campaign.permadeath);
+    }
+
+    #[test]
+    fn test_campaign_backwards_compatibility_missing_proficiencies_file() {
+        // Test that old campaign files without proficiencies_file can still load
+        // This ensures campaigns created before Phase 3 still work
+        let old_campaign_ron = r#"CampaignMetadata(
+    id: "legacy_campaign",
+    name: "Legacy Campaign",
+    version: "1.0.0",
+    author: "Test",
+    description: "Test",
+    engine_version: "0.1.0",
+    starting_map: "test_map",
+    starting_position: (5, 5),
+    starting_direction: "North",
+    starting_gold: 100,
+    starting_food: 10,
+    max_party_size: 6,
+    max_roster_size: 20,
+    difficulty: Normal,
+    permadeath: false,
+    allow_multiclassing: false,
+    starting_level: 1,
+    max_level: 20,
+    items_file: "data/items.ron",
+    spells_file: "data/spells.ron",
+    monsters_file: "data/monsters.ron",
+    classes_file: "data/classes.ron",
+    races_file: "data/races.ron",
+    characters_file: "data/characters.ron",
+    maps_dir: "data/maps/",
+    quests_file: "data/quests.ron",
+    dialogue_file: "data/dialogues.ron",
+    conditions_file: "data/conditions.ron",
+    npcs_file: "data/npcs.ron",
+)"#;
+
+        // Deserialize should succeed and use default proficiencies_file
+        let result: Result<CampaignMetadata, _> = ron::from_str(old_campaign_ron);
+        assert!(
+            result.is_ok(),
+            "Failed to deserialize legacy campaign: {:?}",
+            result.err()
+        );
+
+        let campaign = result.unwrap();
+        assert_eq!(campaign.id, "legacy_campaign");
+        assert_eq!(campaign.proficiencies_file, "data/proficiencies.ron");
     }
 
     #[test]

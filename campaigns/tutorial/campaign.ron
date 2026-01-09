@@ -29,4 +29,5 @@ CampaignMetadata(
     dialogue_file: "data/dialogues.ron",
     conditions_file: "data/conditions.ron",
     npcs_file: "data/npcs.ron",
+    proficiencies_file: "data/proficiencies.ron",
 )

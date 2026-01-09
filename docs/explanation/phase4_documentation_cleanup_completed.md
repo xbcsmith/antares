@@ -2,8 +2,8 @@
 
 ## CharacterDefinition AttributePair Migration
 
-**Date**: 2025-01-24  
-**Phase**: 4 of 4  
+**Date**: 2025-01-24
+**Phase**: 4 of 4
 **Status**: ✅ COMPLETE
 
 ---
@@ -26,7 +26,7 @@ With this phase complete, the entire AttributePair migration is now finished acr
 
 - `BaseStats` struct (deprecated since 0.2.0)
 - `BaseStats::new()` constructor
-- `BaseStats::to_stats()` conversion method  
+- `BaseStats::to_stats()` conversion method
 - `BaseStats::default()` implementation
 - 4 deprecated test functions:
   - `test_base_stats_new()`
@@ -95,12 +95,12 @@ pub struct BaseStats {
 pub struct CharacterDefinition {
     /// Base statistics with AttributePair support
     pub base_stats: Stats,
-    
+
     /// Optional HP override (base and current)
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hp_override: Option<AttributePair16>,
-    
+
     #[serde(default)]
     pub portrait_id: String,
     // ...
@@ -252,7 +252,7 @@ $ cargo nextest run --all-features
 ### Maintained ✅
 
 - Old RON files with `hp_base` alone continue to work
-- Old RON files with `hp_base` + `hp_current` continue to work  
+- Old RON files with `hp_base` + `hp_current` continue to work
 - Old RON files with only `hp_current` continue to work
 - Stats support both simple format (numbers) and full format (base/current pairs)
 

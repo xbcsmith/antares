@@ -5708,22 +5708,6 @@
     ],
     events: {
         (
-            x: 10,
-            y: 10,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice describing the Temple of Healing and the services it provides.",
-            text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
-            x: 18,
-            y: 7,
-        ): Sign(
-            name: "Forest Direction Sign",
-            description: "A directional sign pointing to the nearby forest.",
-            text: "To the Forrest",
-        ),
-        (
             x: 19,
             y: 7,
         ): Teleport(
@@ -5744,12 +5728,28 @@
             text: "General Store - Buy and sell items for your adventures.",
         ),
         (
+            x: 10,
+            y: 10,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice describing the Temple of Healing and the services it provides.",
+            text: "Temple of Healing - The priests can restore your health.",
+        ),
+        (
             x: 4,
             y: 4,
         ): Sign(
             name: "Inn Sign",
             description: "A welcoming sign for the Cozy Inn offering rest and lodging.",
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+        ),
+        (
+            x: 18,
+            y: 7,
+        ): Sign(
+            name: "Forest Direction Sign",
+            description: "A directional sign pointing to the nearby forest.",
+            text: "To the Forrest",
         ),
     },
     npc_placements: [

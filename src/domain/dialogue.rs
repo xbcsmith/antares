@@ -414,6 +414,15 @@ pub enum DialogueAction {
 
     /// Grant experience points
     GrantExperience { amount: u32 },
+
+    /// Recruit character to active party
+    RecruitToParty { character_id: String },
+
+    /// Send character to inn
+    RecruitToInn {
+        character_id: String,
+        innkeeper_id: String,
+    },
 }
 
 impl DialogueAction {
@@ -444,6 +453,15 @@ impl DialogueAction {
             }
             DialogueAction::GrantExperience { amount } => {
                 format!("Grant {} experience", amount)
+            }
+            DialogueAction::RecruitToParty { character_id } => {
+                format!("Recruit '{}' to party", character_id)
+            }
+            DialogueAction::RecruitToInn {
+                character_id,
+                innkeeper_id,
+            } => {
+                format!("Send '{}' to inn (keeper: {})", character_id, innkeeper_id)
             }
         }
     }
@@ -620,6 +638,26 @@ mod tests {
 
         let action3 = DialogueAction::GrantExperience { amount: 100 };
         assert!(action3.description().contains("Grant 100 experience"));
+    }
+
+    #[test]
+    fn test_dialogue_action_recruit_to_party_description() {
+        let action = DialogueAction::RecruitToParty {
+            character_id: "hero_01".to_string(),
+        };
+        assert_eq!(action.description(), "Recruit 'hero_01' to party");
+    }
+
+    #[test]
+    fn test_dialogue_action_recruit_to_inn_description() {
+        let action = DialogueAction::RecruitToInn {
+            character_id: "hero_02".to_string(),
+            innkeeper_id: "innkeeper_town_01".to_string(),
+        };
+        assert_eq!(
+            action.description(),
+            "Send 'hero_02' to inn (keeper: innkeeper_town_01)"
+        );
     }
 
     #[test]

@@ -51,7 +51,14 @@ impl Plugin for DialoguePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<StartDialogue>()
             .add_message::<SelectDialogueChoice>()
-            .add_systems(Update, (handle_start_dialogue, handle_select_choice));
+            .add_systems(
+                Update,
+                (
+                    handle_start_dialogue,
+                    handle_select_choice,
+                    handle_recruitment_actions,
+                ),
+            );
     }
 }
 
@@ -431,6 +438,91 @@ fn execute_action(
             if let Some(member) = game_state.party.members.first_mut() {
                 member.experience = member.experience.saturating_add(*amount as u64);
             }
+        }
+        DialogueAction::RecruitToParty { character_id } => {
+            info!("Recruiting character '{}' to active party", character_id);
+            // TODO: Implement party recruitment logic
+            // 1. Load character from character database
+            // 2. Add to global_state.party.members if space available (max 6)
+            // 3. Remove MapEvent::RecruitableCharacter from current map
+            // 4. Refresh HUD
+        }
+        DialogueAction::RecruitToInn {
+            character_id,
+            innkeeper_id,
+        } => {
+            info!(
+                "Sending character '{}' to inn (keeper: {})",
+                character_id, innkeeper_id
+            );
+            // TODO: Implement inn recruitment logic
+            // 1. Load character from character database
+            // 2. Add to innkeeper's roster (stored at inn)
+            // 3. Remove MapEvent::RecruitableCharacter from current map
+        }
+    }
+}
+
+/// System to handle recruitment-specific dialogue actions
+///
+/// This system processes dialogue actions related to character recruitment,
+/// including recruiting to the active party or to an inn. Currently contains
+/// placeholder implementations (TODO) pending integration with party and inn
+/// management systems.
+fn handle_recruitment_actions(global_state: Res<GlobalState>, content: Res<GameContent>) {
+    // Get current dialogue state if active
+    let Some(dialogue_state) = (match &global_state.0.mode {
+        GameMode::Dialogue(state) => Some(state.clone()),
+        _ => None,
+    }) else {
+        return;
+    };
+
+    let db = content.db();
+
+    // Get active dialogue tree
+    let Some(tree_id) = dialogue_state.active_tree_id else {
+        return;
+    };
+
+    let Some(tree) = db.dialogues.get_dialogue(tree_id) else {
+        return;
+    };
+
+    // Get current node
+    let Some(node) = tree.get_node(dialogue_state.current_node_id) else {
+        return;
+    };
+
+    // Process recruitment actions on this node
+    for action in &node.actions {
+        match action {
+            DialogueAction::RecruitToParty { character_id } => {
+                info!(
+                    "Processing RecruitToParty action for character_id: {}",
+                    character_id
+                );
+                // TODO: Actual implementation would:
+                // - Verify party has space (< 6 members)
+                // - Load character definition
+                // - Add to party.members
+                // - Update global state
+            }
+            DialogueAction::RecruitToInn {
+                character_id,
+                innkeeper_id,
+            } => {
+                info!(
+                    "Processing RecruitToInn action for character_id: {}, innkeeper_id: {}",
+                    character_id, innkeeper_id
+                );
+                // TODO: Actual implementation would:
+                // - Load character definition
+                // - Find innkeeper
+                // - Add character to innkeeper's roster
+                // - Update global state
+            }
+            _ => {} // Other actions handled by execute_action
         }
     }
 }

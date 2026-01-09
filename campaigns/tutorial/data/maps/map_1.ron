@@ -7608,49 +7608,12 @@
     ],
     events: {
         (
-            x: 7,
-            y: 15,
-        ): RecruitableCharacter(
-            name: "Whisper",
-            description: "A nimble elf watches from the shadows near the alley.",
-            character_id: "npc_whisper",
-        ),
-        (
-            x: 11,
-            y: 6,
-        ): RecruitableCharacter(
-            name: "Apprentice Zara",
-            description: "A young gnome apprentice studies a spellbook intently.",
-            character_id: "npc_apprentice_zara",
-        ),
-        (
             x: 5,
             y: 4,
         ): EnterInn(
             name: "Cozy Inn Entrance",
             description: "A welcoming inn where you can rest and manage your party.",
             innkeeper_id: "tutorial_innkeeper_town",
-        ),
-        (
-            x: 18,
-            y: 18,
-        ): Teleport(
-            name: "Town Exit Teleport",
-            description: "A teleport pad that transports the party to Dark Forrest (map 4) at (0,10).",
-            destination: (
-                x: 0,
-                y: 10,
-            ),
-            map_id: 4,
-        ),
-        (
-            x: 9,
-            y: 9,
-        ): Trap(
-            name: "Water Trap",
-            description: "A trap in the town square fountain",
-            damage: 10,
-            effect: Some("Poison"),
         ),
         (
             x: 13,
@@ -7677,12 +7640,49 @@
             text: "General Store - Buy and Sell items for your party!",
         ),
         (
+            x: 18,
+            y: 18,
+        ): Teleport(
+            name: "Town Exit Teleport",
+            description: "A teleport pad that transports the party to Dark Forrest (map 4) at (0,10).",
+            destination: (
+                x: 0,
+                y: 10,
+            ),
+            map_id: 4,
+        ),
+        (
+            x: 9,
+            y: 9,
+        ): Trap(
+            name: "Water Trap",
+            description: "A trap in the town square fountain",
+            damage: 10,
+            effect: Some("Poison"),
+        ),
+        (
+            x: 11,
+            y: 6,
+        ): RecruitableCharacter(
+            name: "Apprentice Zara",
+            description: "A young gnome apprentice studies a spellbook intently.",
+            character_id: "npc_apprentice_zara",
+        ),
+        (
             x: 15,
             y: 8,
         ): RecruitableCharacter(
             name: "Old Gareth",
             description: "A grizzled dwarf veteran stands here, repairing armor.",
             character_id: "npc_old_gareth",
+        ),
+        (
+            x: 7,
+            y: 15,
+        ): RecruitableCharacter(
+            name: "Whisper",
+            description: "A nimble elf watches from the shadows near the alley.",
+            character_id: "npc_whisper",
         ),
     },
     npc_placements: [

@@ -444,20 +444,22 @@ impl<'a> Validator<'a> {
     /// ```
     /// use antares::sdk::database::ContentDatabase;
     /// use antares::sdk::validation::Validator;
-    /// use antares::sdk::campaign_loader::CampaignConfig;
+    /// use antares::sdk::campaign_loader::{CampaignConfig, Difficulty};
+    /// use antares::domain::types::{Position, Direction};
+    /// use antares::sdk::validation::ValidationError;
     ///
     /// let db = ContentDatabase::new();
     /// let validator = Validator::new(&db);
     /// let config = CampaignConfig {
     ///     starting_map: 1,
-    ///     starting_position: crate::domain::types::Position::new(0, 0),
-    ///     starting_direction: crate::domain::types::Direction::North,
+    ///     starting_position: Position::new(0, 0),
+    ///     starting_direction: Direction::North,
     ///     starting_gold: 0,
     ///     starting_food: 0,
     ///     starting_innkeeper: "nonexistent_inn".to_string(),
     ///     max_party_size: 6,
     ///     max_roster_size: 20,
-    ///     difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
+    ///     difficulty: Difficulty::Normal,
     ///     permadeath: false,
     ///     allow_multiclassing: false,
     ///     starting_level: 1,
@@ -465,7 +467,7 @@ impl<'a> Validator<'a> {
     /// };
     ///
     /// let errors = validator.validate_campaign_config(&config);
-    /// assert!(errors.iter().any(|e| matches!(e, crate::sdk::validation::ValidationError::InvalidStartingInnkeeper { .. })));
+    /// assert!(errors.iter().any(|e| matches!(e, ValidationError::InvalidStartingInnkeeper { .. })));
     /// ```
     pub fn validate_campaign_config(
         &self,

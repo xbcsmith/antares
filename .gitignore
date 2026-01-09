@@ -26,6 +26,8 @@ notes/
 # Map builder command history
 data/.map_builder_history
 
+prompt.txt
+CHANGELOG.md
 
 *.DS_Store
 *.vscode
