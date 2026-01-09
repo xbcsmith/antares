@@ -374,46 +374,66 @@ impl AssetManager {
     }
 
     /// Initializes data file tracking with the campaign's configured file paths.
+    /// Initializes data file tracking for all campaign data files.
     ///
     /// # Arguments
     ///
     /// * `items_file` - Path to items data file
     /// * `spells_file` - Path to spells data file
+    /// * `conditions_file` - Path to conditions data file
     /// * `monsters_file` - Path to monsters data file
+    /// * `map_file_paths` - List of individual map file paths
+    /// * `quests_file` - Path to quests data file
     /// * `classes_file` - Path to classes data file
     /// * `races_file` - Path to races data file
-    /// * `quests_file` - Path to quests data file
+    /// * `characters_file` - Path to characters data file
     /// * `dialogue_file` - Path to dialogues data file
-    /// * `conditions_file` - Path to conditions data file (optional)
+    /// * `npcs_file` - Path to NPCs data file
+    /// * `proficiencies_file` - Path to proficiencies data file
     #[allow(clippy::too_many_arguments)]
     pub fn init_data_files(
         &mut self,
         items_file: &str,
         spells_file: &str,
+        conditions_file: &str,
         monsters_file: &str,
+        maps_file_list: &[String],
+        quests_file: &str,
         classes_file: &str,
         races_file: &str,
-        quests_file: &str,
+        characters_file: &str,
         dialogue_file: &str,
-        conditions_file: Option<&str>,
+        npcs_file: &str,
+        proficiencies_file: &str,
     ) {
         self.data_files.clear();
+
+        // Add data files in EditorTab order: Items, Spells, Conditions, Monsters, Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies
         self.data_files.push(DataFileInfo::new(items_file, "Items"));
         self.data_files
             .push(DataFileInfo::new(spells_file, "Spells"));
         self.data_files
+            .push(DataFileInfo::new(conditions_file, "Conditions"));
+        self.data_files
             .push(DataFileInfo::new(monsters_file, "Monsters"));
+
+        // Add individual map files
+        for map_file in maps_file_list {
+            self.data_files.push(DataFileInfo::new(map_file, "Map"));
+        }
+
+        self.data_files
+            .push(DataFileInfo::new(quests_file, "Quests"));
         self.data_files
             .push(DataFileInfo::new(classes_file, "Classes"));
         self.data_files.push(DataFileInfo::new(races_file, "Races"));
         self.data_files
-            .push(DataFileInfo::new(quests_file, "Quests"));
+            .push(DataFileInfo::new(characters_file, "Characters"));
         self.data_files
             .push(DataFileInfo::new(dialogue_file, "Dialogues"));
-        if let Some(cond_file) = conditions_file {
-            self.data_files
-                .push(DataFileInfo::new(cond_file, "Conditions"));
-        }
+        self.data_files.push(DataFileInfo::new(npcs_file, "NPCs"));
+        self.data_files
+            .push(DataFileInfo::new(proficiencies_file, "Proficiencies"));
 
         // Check which files exist
         for file_info in &mut self.data_files {
@@ -1280,19 +1300,28 @@ mod tests {
         let _ = std::fs::create_dir_all(&tmp_dir);
 
         let mut manager = AssetManager::new(tmp_dir.clone());
+        let map_files = vec![
+            "data/maps/map_1.ron".to_string(),
+            "data/maps/map_2.ron".to_string(),
+        ];
         manager.init_data_files(
             "data/items.ron",
             "data/spells.ron",
+            "data/conditions.ron",
             "data/monsters.ron",
+            &map_files,
+            "data/quests.ron",
             "data/classes.ron",
             "data/races.ron",
-            "data/quests.ron",
+            "data/characters.ron",
             "data/dialogues.ron",
-            Some("data/conditions.ron"),
+            "data/npcs.ron",
+            "data/proficiencies.ron",
         );
 
         // All files should be marked as missing since they don't exist
-        assert_eq!(manager.data_files().len(), 8);
+        // Expected: Items, Spells, Conditions, Monsters, 2 Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies = 13
+        assert_eq!(manager.data_files().len(), 13);
         for file_info in manager.data_files() {
             assert_eq!(file_info.status, DataFileStatus::Missing);
         }
@@ -1310,12 +1339,16 @@ mod tests {
         manager.init_data_files(
             "data/items.ron",
             "data/spells.ron",
+            "data/conditions.ron",
             "data/monsters.ron",
+            &[],
+            "data/quests.ron",
             "data/classes.ron",
             "data/races.ron",
-            "data/quests.ron",
+            "data/characters.ron",
             "data/dialogues.ron",
-            None,
+            "data/npcs.ron",
+            "data/proficiencies.ron",
         );
 
         manager.mark_data_file_loaded("data/items.ron", 25);
@@ -1341,12 +1374,16 @@ mod tests {
         manager.init_data_files(
             "data/items.ron",
             "data/spells.ron",
+            "data/conditions.ron",
             "data/monsters.ron",
+            &[],
+            "data/quests.ron",
             "data/classes.ron",
             "data/races.ron",
-            "data/quests.ron",
+            "data/characters.ron",
             "data/dialogues.ron",
-            None,
+            "data/npcs.ron",
+            "data/proficiencies.ron",
         );
 
         assert!(!manager.all_data_files_loaded());
@@ -1355,11 +1392,15 @@ mod tests {
         for path in [
             "data/items.ron",
             "data/spells.ron",
+            "data/conditions.ron",
             "data/monsters.ron",
+            "data/quests.ron",
             "data/classes.ron",
             "data/races.ron",
-            "data/quests.ron",
+            "data/characters.ron",
             "data/dialogues.ron",
+            "data/npcs.ron",
+            "data/proficiencies.ron",
         ] {
             manager.mark_data_file_loaded(path, 1);
         }

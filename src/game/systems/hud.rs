@@ -4,13 +4,14 @@
 //! HUD (Heads-Up Display) system for party status visualization
 //!
 //! This module provides a native Bevy UI-based HUD that displays:
-//! - Character names with party position numbers
-//! - HP bars with color-coded health states
-//! - Exact HP values (current/max format)
+//! - Character portraits (scaled to fit card with border)
+//! - HP bars with color-coded health states and overlay text
+//! - HP values (current/max format) as text overlay on HP bar
 //! - Active condition indicators with emoji and color coding
 //!
-//! The HUD uses a horizontal strip layout at the bottom of the screen,
-//! supporting up to 6 party members in individual character cards.
+//! The HUD uses a horizontal strip layout at the bottom of the screen.
+//! Card count is dynamic and matches party size (1-6 members).
+//! Each card displays portrait, HP bar with overlay text, and conditions.
 
 use crate::domain::character::{Condition, PARTY_MAX_SIZE};
 use crate::domain::conditions::ActiveCondition;
@@ -38,10 +39,19 @@ pub const HP_HEALTHY_THRESHOLD: f32 = 0.75;
 pub const HP_CRITICAL_THRESHOLD: f32 = 0.25;
 
 // Layout constants
-pub const HUD_PANEL_HEIGHT: Val = Val::Px(80.0);
+pub const HUD_PANEL_HEIGHT: Val = Val::Px(70.0);
+pub const HUD_BOTTOM_GAP: Val = Val::Px(24.0);
 pub const CHARACTER_CARD_WIDTH: Val = Val::Px(120.0);
-pub const HP_BAR_HEIGHT: Val = Val::Px(16.0);
+pub const HP_BAR_HEIGHT: Val = Val::Px(10.0);
 pub const CARD_PADDING: Val = Val::Px(8.0);
+pub const HP_TEXT_OVERLAY_PADDING_LEFT: Val = Val::Px(4.0);
+pub const PORTRAIT_PERCENT_OF_CARD: f32 = 80.0;
+
+// HP text overlay colors (contrast-aware, based on bar color)
+pub const HP_TEXT_HEALTHY_COLOR: Color = Color::srgba(0.70, 0.92, 0.70, 1.0); // Light green tint (matches healthy bar)
+pub const HP_TEXT_INJURED_COLOR: Color = Color::srgba(0.97, 0.90, 0.60, 1.0); // Light yellow tint (matches injured bar)
+pub const HP_TEXT_CRITICAL_COLOR: Color = Color::srgba(0.96, 0.65, 0.65, 1.0); // Light red tint (matches critical bar)
+pub const HP_TEXT_DEAD_COLOR: Color = Color::srgba(0.75, 0.75, 0.75, 1.0); // Light grey (matches dead bar)
 
 // Condition priority values (higher = more severe)
 pub const PRIORITY_DEAD: u8 = 100;
@@ -102,9 +112,9 @@ pub struct ConditionText {
     pub party_index: usize,
 }
 
-/// Marker component for character name label
+/// Marker component for HP text overlay on the bar
 #[derive(Component)]
-pub struct CharacterNameText {
+pub struct HpTextOverlay {
     pub party_index: usize,
 }
 
@@ -170,7 +180,7 @@ fn setup_hud(mut commands: Commands) {
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(0.0),
+                bottom: HUD_BOTTOM_GAP,
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
                 height: HUD_PANEL_HEIGHT,
@@ -184,7 +194,9 @@ fn setup_hud(mut commands: Commands) {
             HudRoot,
         ))
         .with_children(|parent| {
+            // Only spawn cards for party members that exist
             for party_index in 0..PARTY_MAX_SIZE {
+                // Will be hidden if no character at this index
                 // Spawn character card inline due to Bevy's with_children closure type complexity
                 parent
                     .spawn((
@@ -192,7 +204,7 @@ fn setup_hud(mut commands: Commands) {
                             width: CHARACTER_CARD_WIDTH,
                             flex_direction: FlexDirection::Column,
                             padding: UiRect::all(CARD_PADDING),
-                            row_gap: Val::Px(4.0),
+                            row_gap: Val::Px(0.0),
                             ..default()
                         },
                         BackgroundColor(Color::srgba(0.2, 0.2, 0.2, 0.7)),
@@ -200,16 +212,12 @@ fn setup_hud(mut commands: Commands) {
                         CharacterCard { party_index },
                     ))
                     .with_children(|card| {
-                        // Portrait placeholder (colored rectangle)
-                        //
-                        // Keep the BackgroundColor placeholder (used when no image is
-                        // available), but also attach an ImageNode so we can assign
-                        // a texture handle at runtime when a portrait image exists.
+                        // Portrait (90% of card width, maintains border)
                         card.spawn((
                             Node {
-                                width: Val::Px(PORTRAIT_SIZE),
-                                height: Val::Px(PORTRAIT_SIZE),
-                                margin: UiRect::all(PORTRAIT_MARGIN),
+                                width: Val::Percent(PORTRAIT_PERCENT_OF_CARD),
+                                height: Val::Percent(PORTRAIT_PERCENT_OF_CARD),
+                                margin: UiRect::all(Val::Auto),
                                 ..default()
                             },
                             BackgroundColor(PORTRAIT_PLACEHOLDER_COLOR),
@@ -218,29 +226,19 @@ fn setup_hud(mut commands: Commands) {
                             CharacterPortrait { party_index },
                         ));
 
-                        // Character name text
-                        card.spawn((
-                            Text::new(""),
-                            TextFont {
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                            CharacterNameText { party_index },
-                        ));
-
-                        // HP bar container (background)
+                        // HP bar container (with relative positioning for text overlay)
                         card.spawn((
                             Node {
                                 width: Val::Percent(100.0),
                                 height: HP_BAR_HEIGHT,
+                                position_type: PositionType::Relative,
                                 ..default()
                             },
                             BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 1.0)),
                             HpBarBackground,
                         ))
                         .with_children(|bar| {
-                            // HP bar fill (the colored part that changes width)
+                            // HP bar fill (the colored part)
                             bar.spawn((
                                 Node {
                                     width: Val::Percent(100.0),
@@ -250,20 +248,33 @@ fn setup_hud(mut commands: Commands) {
                                 BackgroundColor(HP_HEALTHY_COLOR),
                                 HpBarFill { party_index },
                             ));
+
+                            // HP text overlay on the bar
+                            //
+                            // NOTE: This needs an explicit width to reliably participate in layout,
+                            // and a z-index so it renders above the bar fill.
+                            bar.spawn((
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: HP_TEXT_OVERLAY_PADDING_LEFT,
+                                    top: Val::Px(0.0),
+                                    width: Val::Percent(100.0),
+                                    height: Val::Percent(100.0),
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },
+                                ZIndex(1),
+                                Text::new(""),
+                                TextFont {
+                                    font_size: 10.0,
+                                    ..default()
+                                },
+                                TextColor(HP_TEXT_HEALTHY_COLOR),
+                                HpTextOverlay { party_index },
+                            ));
                         });
 
-                        // HP text ("45/100 HP")
-                        card.spawn((
-                            Text::new(""),
-                            TextFont {
-                                font_size: 12.0,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                            HpText { party_index },
-                        ));
-
-                        // Condition text ("☠️ Poisoned")
+                        // Condition text
                         card.spawn((
                             Text::new(""),
                             TextFont {
@@ -309,28 +320,40 @@ fn setup_hud(mut commands: Commands) {
 /// Updates HUD elements based on current party state
 ///
 /// This system runs every frame to sync UI with game state.
-/// Updates HP bars, HP text, condition text, and character names.
+/// Updates HP bars, HP overlay text color, condition text, and character card visibility.
 ///
 /// # Arguments
 /// * `global_state` - Game state containing party data
+/// * `card_query` - Query for character card visibility
 /// * `hp_bar_query` - Query for HP bar fill entities
-/// * `hp_text_query` - Query for HP text entities
+/// * `hp_overlay_query` - Query for HP text overlay entities
 /// * `condition_text_query` - Query for condition text entities
-/// * `name_text_query` - Query for character name text entities
 #[allow(clippy::type_complexity)]
 fn update_hud(
     global_state: Res<GlobalState>,
+    mut card_query: Query<(&CharacterCard, &mut Node), Without<HpBarFill>>,
     mut hp_bar_query: Query<(&HpBarFill, &mut Node, &mut BackgroundColor)>,
-    mut hp_text_query: Query<(&HpText, &mut Text), Without<ConditionText>>,
-    mut condition_text_query: Query<(&ConditionText, &mut Text, &mut TextColor), Without<HpText>>,
-    mut name_text_query: Query<
-        (&CharacterNameText, &mut Text),
-        (Without<HpText>, Without<ConditionText>),
+    mut hp_overlay_query: Query<
+        (&HpTextOverlay, &mut Text, &mut TextColor),
+        Without<ConditionText>,
+    >,
+    mut condition_text_query: Query<
+        (&ConditionText, &mut Text, &mut TextColor),
+        Without<HpTextOverlay>,
     >,
 ) {
     let party = &global_state.0.party;
 
-    // Update HP bars
+    // Update card visibility - hide cards that don't have characters
+    for (card, mut node) in card_query.iter_mut() {
+        if party.members.get(card.party_index).is_some() {
+            node.display = Display::Flex;
+        } else {
+            node.display = Display::None;
+        }
+    }
+
+    // Update HP bars and colors
     for (hp_bar, mut node, mut bg_color) in hp_bar_query.iter_mut() {
         if let Some(character) = party.members.get(hp_bar.party_index) {
             // Guard against division by zero and clamp percent to [0.0, 1.0]
@@ -347,10 +370,19 @@ fn update_hud(
         }
     }
 
-    // Update HP text
-    for (hp_text, mut text) in hp_text_query.iter_mut() {
-        if let Some(character) = party.members.get(hp_text.party_index) {
+    // Update HP text overlay with contrast-aware colors
+    for (hp_overlay, mut text, mut text_color) in hp_overlay_query.iter_mut() {
+        if let Some(character) = party.members.get(hp_overlay.party_index) {
             **text = format_hp_display(character.hp.current, character.hp.base);
+
+            // Color text based on HP bar color for contrast
+            let hp_percent = if character.hp.base == 0 {
+                0.0
+            } else {
+                (character.hp.current as f32 / character.hp.base as f32).clamp(0.0, 1.0)
+            };
+
+            *text_color = TextColor(hp_text_overlay_color(hp_percent));
         } else {
             **text = String::new();
         }
@@ -372,15 +404,6 @@ fn update_hud(
 
             **text = display_text;
             *text_color = TextColor(color);
-        } else {
-            **text = String::new();
-        }
-    }
-
-    // Update character names
-    for (name_text, mut text) in name_text_query.iter_mut() {
-        if let Some(character) = party.members.get(name_text.party_index) {
-            **text = format!("{}. {}", name_text.party_index + 1, character.name);
         } else {
             **text = String::new();
         }
@@ -767,14 +790,14 @@ pub fn hp_bar_color(hp_percent: f32) -> Color {
     }
 }
 
-/// Formats HP display as "current/max HP"
+/// Formats HP display as "HP: current/max"
 ///
 /// # Arguments
 /// * `current` - Current HP value
 /// * `max` - Maximum HP value
 ///
 /// # Returns
-/// Formatted string like "45/100 HP"
+/// Formatted string like "HP: 45/100"
 ///
 /// # Examples
 ///
@@ -782,10 +805,44 @@ pub fn hp_bar_color(hp_percent: f32) -> Color {
 /// use antares::game::systems::hud::format_hp_display;
 ///
 /// let display = format_hp_display(45, 100);
-/// assert_eq!(display, "45/100 HP");
+/// assert_eq!(display, "HP: 45/100");
 /// ```
 pub fn format_hp_display(current: u16, max: u16) -> String {
-    format!("{}/{} HP", current, max)
+    format!("HP: {}/{}", current, max)
+}
+
+/// Returns the appropriate text color for HP overlay based on health percentage
+///
+/// Uses contrast-aware colors that are darker/lighter than the bar background:
+/// - Healthy (75%+): Off-white text for green bar
+/// - Injured (25-75%): Dark text for yellow bar
+/// - Critical (0-25%): Off-white text for red bar
+/// - Dead (0%): Light grey text for grey bar
+///
+/// # Arguments
+/// * `hp_percent` - Health percentage (0.0 to 1.0)
+///
+/// # Returns
+/// Color appropriate for the current HP state
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::hp_text_overlay_color;
+///
+/// let healthy_color = hp_text_overlay_color(0.90);
+/// let critical_color = hp_text_overlay_color(0.10);
+/// ```
+pub fn hp_text_overlay_color(hp_percent: f32) -> Color {
+    if hp_percent > HP_HEALTHY_THRESHOLD {
+        HP_TEXT_HEALTHY_COLOR
+    } else if hp_percent > HP_CRITICAL_THRESHOLD {
+        HP_TEXT_INJURED_COLOR
+    } else if hp_percent > 0.0 {
+        HP_TEXT_CRITICAL_COLOR
+    } else {
+        HP_TEXT_DEAD_COLOR
+    }
 }
 
 /// Returns the highest priority condition for display
@@ -1040,10 +1097,91 @@ pub fn get_portrait_color(portrait_key: &str) -> Color {
 // ===== Tests =====
 
 #[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn test_hud_panel_height_reduced() {
+        assert_eq!(HUD_PANEL_HEIGHT, Val::Px(70.0));
+    }
+
+    #[test]
+    fn test_hp_bar_height_thinner() {
+        assert_eq!(HP_BAR_HEIGHT, Val::Px(10.0));
+    }
+
+    #[test]
+    fn test_portrait_percent_of_card() {
+        assert_eq!(PORTRAIT_PERCENT_OF_CARD, 80.0);
+    }
+
+    #[test]
+    fn test_hp_text_overlay_padding() {
+        assert_eq!(HP_TEXT_OVERLAY_PADDING_LEFT, Val::Px(4.0));
+    }
+
+    #[test]
+    fn test_hp_text_overlay_color_healthy() {
+        let color = hp_text_overlay_color(0.90);
+        assert_eq!(color, HP_TEXT_HEALTHY_COLOR);
+    }
+
+    #[test]
+    fn test_hp_text_overlay_color_injured() {
+        let color = hp_text_overlay_color(0.50);
+        assert_eq!(color, HP_TEXT_INJURED_COLOR);
+    }
+
+    #[test]
+    fn test_hp_text_overlay_color_critical() {
+        let color = hp_text_overlay_color(0.10);
+        assert_eq!(color, HP_TEXT_CRITICAL_COLOR);
+    }
+
+    #[test]
+    fn test_hp_text_overlay_color_dead() {
+        let color = hp_text_overlay_color(0.0);
+        assert_eq!(color, HP_TEXT_DEAD_COLOR);
+    }
+
+    #[test]
+    fn test_hp_text_overlay_color_boundary_healthy_threshold() {
+        // At threshold, should use injured color
+        let color = hp_text_overlay_color(HP_HEALTHY_THRESHOLD);
+        assert_eq!(color, HP_TEXT_INJURED_COLOR);
+    }
+
+    #[test]
+    fn test_hp_text_overlay_color_boundary_critical_threshold() {
+        // Just above critical threshold, should use injured color
+        let color = hp_text_overlay_color(HP_CRITICAL_THRESHOLD + 0.01);
+        assert_eq!(color, HP_TEXT_INJURED_COLOR);
+    }
+
+    #[test]
+    fn test_format_hp_display() {
+        let display = format_hp_display(45, 100);
+        assert_eq!(display, "HP: 45/100");
+    }
+
+    #[test]
+    fn test_format_hp_display_full() {
+        let display = format_hp_display(100, 100);
+        assert_eq!(display, "HP: 100/100");
+    }
+
+    #[test]
+    fn test_format_hp_display_zero() {
+        let display = format_hp_display(0, 100);
+        assert_eq!(display, "HP: 0/100");
+    }
+}
+
 mod tests {
     use super::*;
 
     // Helper to compare colors (Bevy Color may have floating point precision differences)
+    #[allow(dead_code)]
     fn colors_approx_equal(a: Color, b: Color) -> bool {
         let a_rgba = a.to_srgba();
         let b_rgba = b.to_srgba();
@@ -1085,19 +1223,19 @@ mod tests {
     #[test]
     fn test_format_hp_display() {
         let display = format_hp_display(45, 100);
-        assert_eq!(display, "45/100 HP");
+        assert_eq!(display, "HP: 45/100");
     }
 
     #[test]
     fn test_format_hp_display_full() {
         let display = format_hp_display(100, 100);
-        assert_eq!(display, "100/100 HP");
+        assert_eq!(display, "HP: 100/100");
     }
 
     #[test]
     fn test_format_hp_display_zero() {
         let display = format_hp_display(0, 100);
-        assert_eq!(display, "0/100 HP");
+        assert_eq!(display, "HP: 0/100");
     }
 
     #[test]
@@ -1234,10 +1372,10 @@ mod tests {
     /// This test:
     /// - Creates a minimal `GameState` with a single party member
     /// - Runs the HUD setup and update systems via a `bevy::prelude::App`
-    /// - Checks that the name and HP text entities for slot 0 are populated
+    /// - Checks that the HP overlay text entities for slot 0 are populated
     #[test]
     fn test_update_hud_populates_texts() {
-        use super::{CharacterNameText, GlobalState, HpText, HudPlugin};
+        use super::{GlobalState, HpTextOverlay, HudPlugin};
         use crate::application::GameState;
         use crate::domain::character::{Alignment, AttributePair16, Character, Sex};
         use bevy::prelude::*;
@@ -1268,44 +1406,25 @@ mod tests {
         app.update(); // Startup
         app.update(); // Update
 
-        // Verify character name text was populated for party slot 0
-        let mut name_found = false;
+        // Verify HP overlay text was populated for party slot 0
+        let mut hp_overlay_found = false;
         {
             let world = app.world_mut();
-            let mut q = world.query::<(&CharacterNameText, &bevy::ui::widget::Text)>();
-            for (name_comp, text) in q.iter(world) {
-                if name_comp.party_index == 0 {
-                    // Name should include 'Test Hero' (may be prefixed with slot number)
-                    assert!(
-                        text.contains("Test Hero") || text.contains("1. Test Hero"),
-                        "Unexpected name text: '{:?}'",
-                        text
-                    );
-                    name_found = true;
-                }
-            }
-        }
-
-        // Verify HP text was populated for party slot 0
-        let mut hp_found = false;
-        {
-            let world = app.world_mut();
-            let mut q = world.query::<(&HpText, &bevy::ui::widget::Text)>();
+            let mut q = world.query::<(&HpTextOverlay, &bevy::ui::widget::Text)>();
             for (hp_comp, text) in q.iter(world) {
                 if hp_comp.party_index == 0 {
-                    // Should display "45/100" (format from format_hp_display)
+                    // Should display "HP: 45/100" (format from format_hp_display)
                     assert!(
-                        text.contains("45/100"),
-                        "Unexpected HP text for slot 0: '{:?}'",
+                        text.contains("HP: 45/100"),
+                        "Unexpected HP overlay text for slot 0: '{:?}'",
                         text
                     );
-                    hp_found = true;
+                    hp_overlay_found = true;
                 }
             }
         }
 
-        assert!(name_found, "Character name text not populated for slot 0");
-        assert!(hp_found, "HP text not populated for slot 0");
+        assert!(hp_overlay_found, "HP overlay text not populated for slot 0");
     }
 
     #[test]

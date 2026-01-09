@@ -7608,24 +7608,6 @@
     ],
     events: {
         (
-            x: 12,
-            y: 10,
-        ): Encounter(
-            name: "Goblin Tribe",
-            description: "Tribe of Goblins",
-            monster_group: [
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-            ],
-        ),
-        (
             x: 13,
             y: 17,
         ): Encounter(
@@ -7651,6 +7633,24 @@
                 11,
                 11,
                 11,
+            ],
+        ),
+        (
+            x: 12,
+            y: 10,
+        ): Encounter(
+            name: "Goblin Tribe",
+            description: "Tribe of Goblins",
+            monster_group: [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
             ],
         ),
         (
