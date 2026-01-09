@@ -23,7 +23,7 @@ Campaign Builder --> Map Editor --> Select Map --> Edit Map. Event editing now f
 
 ### Config Editor Implementation
 
-[config editor implementation](./config_editor_implementation_plan.md)
+✅ COMPLETED - [config editor implementation](./config_editor_implementation_plan.md)
 
 ### Metadata Editor
 
