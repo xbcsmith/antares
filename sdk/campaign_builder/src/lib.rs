@@ -165,6 +165,7 @@ pub struct CampaignMetadata {
     dialogue_file: String,
     conditions_file: String,
     npcs_file: String,
+    #[serde(default = "default_proficiencies_file")]
     proficiencies_file: String,
 }
 
@@ -199,6 +200,10 @@ impl Difficulty {
 
 fn default_starting_innkeeper() -> String {
     "tutorial_innkeeper_town".to_string()
+}
+
+fn default_proficiencies_file() -> String {
+    "data/proficiencies.ron".to_string()
 }
 
 impl Default for CampaignMetadata {
@@ -5264,6 +5269,55 @@ mod tests {
         assert_eq!(loaded.name, campaign.name);
         assert_eq!(loaded.difficulty, campaign.difficulty);
         assert_eq!(loaded.permadeath, campaign.permadeath);
+    }
+
+    #[test]
+    fn test_campaign_backwards_compatibility_missing_proficiencies_file() {
+        // Test that old campaign files without proficiencies_file can still load
+        // This ensures campaigns created before Phase 3 still work
+        let old_campaign_ron = r#"CampaignMetadata(
+    id: "legacy_campaign",
+    name: "Legacy Campaign",
+    version: "1.0.0",
+    author: "Test",
+    description: "Test",
+    engine_version: "0.1.0",
+    starting_map: "test_map",
+    starting_position: (5, 5),
+    starting_direction: "North",
+    starting_gold: 100,
+    starting_food: 10,
+    max_party_size: 6,
+    max_roster_size: 20,
+    difficulty: Normal,
+    permadeath: false,
+    allow_multiclassing: false,
+    starting_level: 1,
+    max_level: 20,
+    items_file: "data/items.ron",
+    spells_file: "data/spells.ron",
+    monsters_file: "data/monsters.ron",
+    classes_file: "data/classes.ron",
+    races_file: "data/races.ron",
+    characters_file: "data/characters.ron",
+    maps_dir: "data/maps/",
+    quests_file: "data/quests.ron",
+    dialogue_file: "data/dialogues.ron",
+    conditions_file: "data/conditions.ron",
+    npcs_file: "data/npcs.ron",
+)"#;
+
+        // Deserialize should succeed and use default proficiencies_file
+        let result: Result<CampaignMetadata, _> = ron::from_str(old_campaign_ron);
+        assert!(
+            result.is_ok(),
+            "Failed to deserialize legacy campaign: {:?}",
+            result.err()
+        );
+
+        let campaign = result.unwrap();
+        assert_eq!(campaign.id, "legacy_campaign");
+        assert_eq!(campaign.proficiencies_file, "data/proficiencies.ron");
     }
 
     #[test]

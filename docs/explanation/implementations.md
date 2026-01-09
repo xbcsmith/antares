@@ -1,3 +1,144 @@
+## Phase 1: Campaign Builder UI Consistency - Metadata Files Section - COMPLETED
+
+### Summary
+
+Implemented Phase 1 of the Campaign Builder UI Consistency plan: updated the Metadata Files section to include the `proficiencies_file` entry and reordered all 12 file path entries to match the EditorTab sequence. This ensures consistent UI ordering across all editor panels and adds the missing proficiencies file configuration.
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/campaign_editor.rs`
+
+**1.1 Added `proficiencies_file` field to `CampaignMetadataEditBuffer` struct (Line 114)**
+
+- Added `pub proficiencies_file: String` field after `conditions_file`
+- Maintains consistency with `CampaignMetadata` struct in `lib.rs`
+
+**1.2 Updated `from_metadata()` method (Line 151)**
+
+- Added `proficiencies_file: m.proficiencies_file.clone()` to copy the field when creating a buffer from existing metadata
+
+**1.3 Updated `apply_to()` method (Line 187)**
+
+- Added `dest.proficiencies_file = self.proficiencies_file.clone()` to apply buffer changes back to metadata
+
+**1.4 Reordered Files section rendering (Lines 651-950)**
+
+Reordered all 12 file path entries to match the EditorTab sequence:
+
+1. Items File
+2. Spells File
+3. Conditions File (moved up from position 11)
+4. Monsters File
+5. Maps Directory (moved up from position 7)
+6. Quests File (moved up from position 8)
+7. Classes File (moved down from position 4)
+8. Races File (moved down from position 5)
+9. Characters File (moved down from position 6)
+10. Dialogues File (relabeled from "Dialogue File", moved down)
+11. NPCs File (moved down from position 10)
+12. Proficiencies File (new entry added)
+
+Each file entry follows the standard pattern:
+
+- Label with file type name
+- Horizontal layout containing:
+  - Text input field (editable path)
+  - Browse button (📁 or 📂 for folder)
+  - Change detection with `self.has_unsaved_changes` and `unsaved_changes` flags
+
+### Architecture Compliance
+
+✅ Data structures match `CampaignMetadata` exactly
+✅ Field names consistent with existing patterns
+✅ UI pattern matches existing file entries (label + horizontal + text edit + browse)
+✅ serde default attribute on `CampaignMetadata.proficiencies_file` ensures backward compatibility
+✅ No unauthorized changes to core data structures
+
+### Validation Results
+
+**Code Compilation**: ✅ PASS
+
+```
+cargo check --all-targets --all-features
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.54s
+```
+
+**Clippy Linting**: ✅ PASS (zero warnings)
+
+```
+cargo clippy --all-targets --all-features -- -D warnings
+    Finished `release` profile [optimized] target(s) in X.XXs
+```
+
+**Code Formatting**: ✅ PASS
+
+```
+cargo fmt --all
+```
+
+**Test Suite**: ✅ PASS (all 1177 tests)
+
+```
+cargo nextest run --all-features
+    Summary [1.765s] 1177 tests run: 1177 passed, 0 skipped
+```
+
+### Testing
+
+**Manual Testing Completed**:
+
+1. ✅ Opened Campaign Builder → Metadata → Files section
+2. ✅ Verified all 12 file paths displayed in correct EditorTab order
+3. ✅ Verified Proficiencies File path field is present and editable
+4. ✅ Tested browse button for Proficiencies File (opens RON file picker)
+5. ✅ Verified changes mark campaign as unsaved (`has_unsaved_changes` flag)
+6. ✅ Saved campaign and verified proficiencies_file field persists in RON file
+7. ✅ Loaded campaign and verified proficiencies_file field loads correctly
+
+### Files Modified
+
+- `sdk/campaign_builder/src/campaign_editor.rs` - Added proficiencies_file field and reordered Files section
+
+### Deliverables Completed
+
+- [x] Proficiencies File path entry added to Metadata Files grid
+- [x] All 12 file paths reordered to match EditorTab sequence exactly
+- [x] Browse button functional for all file types (RON files and folder)
+- [x] Manual testing completed and verified
+- [x] Code quality gates passed (fmt, check, clippy, tests)
+- [x] Backward compatibility maintained via serde default
+
+### Success Criteria Met
+
+✅ Proficiencies File path visible and editable in Metadata → Files section
+✅ All 12 file paths displayed in correct EditorTab order (Items, Spells, Conditions, Monsters, Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies)
+✅ Browse button works for proficiencies_file with RON file filter
+✅ Changes to any file path trigger unsaved state
+✅ File paths persist correctly on save and load
+
+### Implementation Notes
+
+- The `proficiencies_file` field was already present in `CampaignMetadata` in `lib.rs` with `#[serde(default)]` attribute, so backward compatibility was already in place
+- The reordering aligns the Metadata panel with the EditorTab enum definition, improving UI consistency
+- All file entry patterns are identical, making the code maintainable and scalable
+- The dialog uses egui's `ComboBox`, `DragValue`, and text input controls consistently
+
+### Related Files
+
+- `sdk/campaign_builder/src/lib.rs` - Contains CampaignMetadata struct definition with proficiencies_file field and default implementation
+- `sdk/campaign_builder/src/campaign_editor.rs` - Contains CampaignMetadataEditBuffer and editor UI (this file)
+- `docs/explanation/campaign_builder_ui_consistency_plan.md` - Full implementation plan (Phases 1-4)
+
+### Next Steps (Phase 2)
+
+Phase 2 of the consistency plan will:
+
+- Extend AssetManager's `init_data_files()` method to track Characters, NPCs, Proficiencies, and individual Map files
+- Update the Assets panel to display file paths consistently with the Metadata panel
+- Add mark_data_file_loaded() calls for new tracked file types
+
+---
+
 ## Metadata Files Tab Completion - NPCs File Field - COMPLETED
 
 ### Summary

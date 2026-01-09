@@ -111,6 +111,7 @@ pub struct CampaignMetadataEditBuffer {
     pub dialogue_file: String,
     pub npcs_file: String,
     pub conditions_file: String,
+    pub proficiencies_file: String,
 }
 
 impl CampaignMetadataEditBuffer {
@@ -147,6 +148,7 @@ impl CampaignMetadataEditBuffer {
             dialogue_file: m.dialogue_file.clone(),
             npcs_file: m.npcs_file.clone(),
             conditions_file: m.conditions_file.clone(),
+            proficiencies_file: m.proficiencies_file.clone(),
         }
     }
 
@@ -182,6 +184,7 @@ impl CampaignMetadataEditBuffer {
         dest.dialogue_file = self.dialogue_file.clone();
         dest.npcs_file = self.npcs_file.clone();
         dest.conditions_file = self.conditions_file.clone();
+        dest.proficiencies_file = self.proficiencies_file.clone();
     }
 }
 
@@ -649,13 +652,14 @@ impl CampaignMetadataEditorState {
                         }
 
                         CampaignSection::Files => {
-                            // Files grid: items, spells, monsters, classes, races, characters, maps_dir, quests, dialogue, npcs, conditions
+                            // Files grid ordered to match EditorTab sequence:
+                            // Items, Spells, Conditions, Monsters, Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies
                             egui::Grid::new("campaign_files_grid")
                                 .num_columns(2)
                                 .spacing([10.0, 8.0])
                                 .striped(true)
                                 .show(right_ui, |ui| {
-                                    // Helper macro-like inline: label + path + browse
+                                    // Items File
                                     ui.label("Items File:");
                                     ui.horizontal(|ui| {
                                         if ui
@@ -678,6 +682,7 @@ impl CampaignMetadataEditorState {
                                     });
                                     ui.end_row();
 
+                                    // Spells File
                                     ui.label("Spells File:");
                                     ui.horizontal(|ui| {
                                         if ui
@@ -700,6 +705,31 @@ impl CampaignMetadataEditorState {
                                     });
                                     ui.end_row();
 
+                                    // Conditions File
+                                    ui.label("Conditions File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.conditions_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.conditions_file =
+                                                    p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    // Monsters File
                                     ui.label("Monsters File:");
                                     ui.horizontal(|ui| {
                                         if ui
@@ -722,6 +752,51 @@ impl CampaignMetadataEditorState {
                                     });
                                     ui.end_row();
 
+                                    // Maps Directory
+                                    ui.label("Maps Directory:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.maps_dir)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📂").on_hover_text("Browse Folder").clicked()
+                                        {
+                                            if let Some(p) = rfd::FileDialog::new().pick_folder() {
+                                                self.buffer.maps_dir = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    // Quests File
+                                    ui.label("Quests File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.quests_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.quests_file = p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    // Classes File
                                     ui.label("Classes File:");
                                     ui.horizontal(|ui| {
                                         if ui
@@ -744,6 +819,7 @@ impl CampaignMetadataEditorState {
                                     });
                                     ui.end_row();
 
+                                    // Races File
                                     ui.label("Races File:");
                                     ui.horizontal(|ui| {
                                         if ui
@@ -766,6 +842,7 @@ impl CampaignMetadataEditorState {
                                     });
                                     ui.end_row();
 
+                                    // Characters File
                                     ui.label("Characters File:");
                                     ui.horizontal(|ui| {
                                         if ui
@@ -789,49 +866,8 @@ impl CampaignMetadataEditorState {
                                     });
                                     ui.end_row();
 
-                                    ui.label("Maps Directory:");
-                                    ui.horizontal(|ui| {
-                                        if ui
-                                            .text_edit_singleline(&mut self.buffer.maps_dir)
-                                            .changed()
-                                        {
-                                            self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
-                                        }
-                                        if ui.button("📂").on_hover_text("Browse Folder").clicked()
-                                        {
-                                            if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                                                self.buffer.maps_dir = p.display().to_string();
-                                                self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
-                                            }
-                                        }
-                                    });
-                                    ui.end_row();
-
-                                    ui.label("Quests File:");
-                                    ui.horizontal(|ui| {
-                                        if ui
-                                            .text_edit_singleline(&mut self.buffer.quests_file)
-                                            .changed()
-                                        {
-                                            self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
-                                        }
-                                        if ui.button("📁").on_hover_text("Browse").clicked() {
-                                            if let Some(p) = rfd::FileDialog::new()
-                                                .add_filter("RON", &["ron"])
-                                                .pick_file()
-                                            {
-                                                self.buffer.quests_file = p.display().to_string();
-                                                self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
-                                            }
-                                        }
-                                    });
-                                    ui.end_row();
-
-                                    ui.label("Dialogue File:");
+                                    // Dialogues File
+                                    ui.label("Dialogues File:");
                                     ui.horizontal(|ui| {
                                         if ui
                                             .text_edit_singleline(&mut self.buffer.dialogue_file)
@@ -853,6 +889,7 @@ impl CampaignMetadataEditorState {
                                     });
                                     ui.end_row();
 
+                                    // NPCs File
                                     ui.label("NPCs File:");
                                     ui.horizontal(|ui| {
                                         if ui
@@ -875,10 +912,11 @@ impl CampaignMetadataEditorState {
                                     });
                                     ui.end_row();
 
-                                    ui.label("Conditions File:");
+                                    // Proficiencies File
+                                    ui.label("Proficiencies File:");
                                     ui.horizontal(|ui| {
                                         if ui
-                                            .text_edit_singleline(&mut self.buffer.conditions_file)
+                                            .text_edit_singleline(&mut self.buffer.proficiencies_file)
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
@@ -889,7 +927,7 @@ impl CampaignMetadataEditorState {
                                                 .add_filter("RON", &["ron"])
                                                 .pick_file()
                                             {
-                                                self.buffer.conditions_file =
+                                                self.buffer.proficiencies_file =
                                                     p.display().to_string();
                                                 self.has_unsaved_changes = true;
                                                 *unsaved_changes = true;
