@@ -61,6 +61,7 @@ use antares::domain::items::types::{
     ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
 };
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+use antares::domain::proficiency::ProficiencyDefinition;
 use antares::domain::quest::{Quest, QuestId};
 use antares::domain::types::{DiceRoll, ItemId, MapId, MonsterId, SpellId};
 use antares::domain::world::Map;
@@ -164,6 +165,7 @@ pub struct CampaignMetadata {
     dialogue_file: String,
     conditions_file: String,
     npcs_file: String,
+    proficiencies_file: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -234,6 +236,7 @@ impl Default for CampaignMetadata {
             dialogue_file: "data/dialogue.ron".to_string(),
             conditions_file: "data/conditions.ron".to_string(),
             npcs_file: "data/npcs.ron".to_string(),
+            proficiencies_file: "data/proficiencies.ron".to_string(),
         }
     }
 }
@@ -253,6 +256,7 @@ enum EditorTab {
     Characters,
     Dialogues,
     NPCs,
+    Proficiencies,
     Assets,
     Validation,
 }
@@ -280,6 +284,7 @@ impl EditorTab {
             EditorTab::Characters => "Characters",
             EditorTab::Dialogues => "Dialogues",
             EditorTab::NPCs => "NPCs",
+            EditorTab::Proficiencies => "Proficiencies",
             EditorTab::Assets => "Assets",
             EditorTab::Validation => "Validation",
         }
@@ -402,6 +407,9 @@ struct CampaignBuilderApp {
     spells: Vec<Spell>,
     spells_editor_state: SpellsEditorState,
 
+    proficiencies: Vec<ProficiencyDefinition>,
+    proficiencies_editor_state: proficiencies_editor::ProficienciesEditorState,
+
     monsters: Vec<MonsterDefinition>,
     monsters_editor_state: MonstersEditorState,
 
@@ -511,6 +519,9 @@ impl Default for CampaignBuilderApp {
 
             spells: Vec::new(),
             spells_editor_state: SpellsEditorState::new(),
+
+            proficiencies: Vec::new(),
+            proficiencies_editor_state: proficiencies_editor::ProficienciesEditorState::new(),
 
             monsters: Vec::new(),
             monsters_editor_state: MonstersEditorState::new(),
@@ -1321,6 +1332,138 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load proficiencies from RON file
+    fn load_proficiencies(&mut self) {
+        self.logger
+            .debug(category::FILE_IO, "load_proficiencies() called");
+        let proficiencies_file = self.campaign.proficiencies_file.clone();
+        if let Some(ref dir) = self.campaign_dir {
+            let proficiencies_path = dir.join(&proficiencies_file);
+            self.logger.verbose(
+                category::FILE_IO,
+                &format!(
+                    "Loading proficiencies from: {}",
+                    proficiencies_path.display()
+                ),
+            );
+            if proficiencies_path.exists() {
+                match fs::read_to_string(&proficiencies_path) {
+                    Ok(contents) => {
+                        self.logger.verbose(
+                            category::FILE_IO,
+                            &format!("Read {} bytes from proficiencies file", contents.len()),
+                        );
+                        match ron::from_str::<Vec<ProficiencyDefinition>>(&contents) {
+                            Ok(proficiencies) => {
+                                let count = proficiencies.len();
+                                self.proficiencies = proficiencies;
+
+                                // Mark data file as loaded in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager.mark_data_file_loaded(&proficiencies_file, count);
+                                }
+
+                                self.logger.info(
+                                    category::FILE_IO,
+                                    &format!("Loaded {} proficiencies", self.proficiencies.len()),
+                                );
+                                self.status_message =
+                                    format!("Loaded {} proficiencies", self.proficiencies.len());
+                            }
+                            Err(e) => {
+                                // Mark data file as error in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager
+                                        .mark_data_file_error(&proficiencies_file, &e.to_string());
+                                }
+                                self.logger.error(
+                                    category::FILE_IO,
+                                    &format!("Failed to parse proficiencies: {}", e),
+                                );
+                                self.status_message =
+                                    format!("Failed to parse proficiencies: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(&proficiencies_file, &e.to_string());
+                        }
+                        self.logger.error(
+                            category::FILE_IO,
+                            &format!("Failed to read proficiencies file: {}", e),
+                        );
+                        self.status_message = format!("Failed to read proficiencies file: {}", e);
+                    }
+                }
+            } else {
+                self.logger.warn(
+                    category::FILE_IO,
+                    &format!(
+                        "Proficiencies file does not exist: {}",
+                        proficiencies_path.display()
+                    ),
+                );
+            }
+        } else {
+            self.logger.warn(
+                category::FILE_IO,
+                "No campaign directory set when trying to load proficiencies",
+            );
+        }
+    }
+
+    /// Save proficiencies to RON file
+    fn save_proficiencies(&mut self) -> Result<(), String> {
+        self.logger
+            .debug(category::FILE_IO, "save_proficiencies() called");
+        if let Some(ref dir) = self.campaign_dir {
+            let proficiencies_path = dir.join(&self.campaign.proficiencies_file);
+            self.logger.verbose(
+                category::FILE_IO,
+                &format!(
+                    "Saving {} proficiencies to: {}",
+                    self.proficiencies.len(),
+                    proficiencies_path.display()
+                ),
+            );
+
+            // Create proficiencies directory if it doesn't exist
+            if let Some(parent) = proficiencies_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create proficiencies directory: {}", e))?;
+            }
+
+            let ron_config = ron::ser::PrettyConfig::new()
+                .struct_names(false)
+                .enumerate_arrays(false);
+
+            let contents = ron::ser::to_string_pretty(&self.proficiencies, ron_config)
+                .map_err(|e| format!("Failed to serialize proficiencies: {}", e))?;
+
+            fs::write(&proficiencies_path, &contents)
+                .map_err(|e| format!("Failed to write proficiencies file: {}", e))?;
+
+            self.logger.info(
+                category::FILE_IO,
+                &format!(
+                    "Saved {} proficiencies ({} bytes)",
+                    self.proficiencies.len(),
+                    contents.len()
+                ),
+            );
+            self.unsaved_changes = true;
+            Ok(())
+        } else {
+            self.logger.error(
+                category::FILE_IO,
+                "No campaign directory set when trying to save proficiencies",
+            );
+            Err("No campaign directory set".to_string())
+        }
+    }
+
     /// Save dialogues to a file path
     ///
     /// # Arguments
@@ -1937,6 +2080,9 @@ impl CampaignBuilderApp {
         self.spells.clear();
         self.spells_editor_state = SpellsEditorState::new();
 
+        self.proficiencies.clear();
+        self.proficiencies_editor_state = proficiencies_editor::ProficienciesEditorState::new();
+
         self.monsters.clear();
         self.monsters_editor_state = MonstersEditorState::new();
 
@@ -2017,6 +2163,10 @@ impl CampaignBuilderApp {
 
         if let Err(e) = self.save_conditions() {
             save_warnings.push(format!("Conditions: {}", e));
+        }
+
+        if let Err(e) = self.save_proficiencies() {
+            save_warnings.push(format!("Proficiencies: {}", e));
         }
 
         // Save maps individually (they're saved per-map, not as a collection)
@@ -2150,6 +2300,7 @@ impl CampaignBuilderApp {
                         .debug(category::FILE_IO, "Loading data files...");
                     self.load_items();
                     self.load_spells();
+                    self.load_proficiencies();
                     self.load_monsters();
                     self.load_classes_from_campaign();
                     self.load_races_from_campaign();
@@ -2999,6 +3150,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Characters,
                     EditorTab::Dialogues,
                     EditorTab::NPCs,
+                    EditorTab::Proficiencies,
                     EditorTab::Assets,
                     EditorTab::Validation,
                 ];
@@ -3156,6 +3308,15 @@ impl eframe::App for CampaignBuilderApp {
                     self.unsaved_changes = true;
                 }
             }
+            EditorTab::Proficiencies => self.proficiencies_editor_state.show(
+                ui,
+                &mut self.proficiencies,
+                self.campaign_dir.as_ref(),
+                &self.campaign.proficiencies_file,
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+                &mut self.file_load_merge_mode,
+            ),
             EditorTab::Assets => self.show_assets_editor(ui),
             EditorTab::Validation => self.show_validation_panel(ui),
         });
@@ -5076,6 +5237,7 @@ mod tests {
             dialogue_file: "data/dialogue.ron".to_string(),
             conditions_file: "data/conditions.ron".to_string(),
             npcs_file: "data/npcs.ron".to_string(),
+            proficiencies_file: "data/proficiencies.ron".to_string(),
         };
 
         let ron_config = ron::ser::PrettyConfig::new()

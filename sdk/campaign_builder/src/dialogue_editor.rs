@@ -1800,10 +1800,10 @@ impl DialogueEditorState {
     ) {
         // Add node form - only show when not editing a node
         if !self.editing_node {
-            let dialogue = &self.dialogues[dialogue_idx];
+            let dialogue_name = self.dialogues[dialogue_idx].name.clone();
 
             ui.group(|ui| {
-                ui.label(format!("➕ Adding node to: \"{}\"", dialogue.name));
+                ui.label(format!("➕ Adding node to: \"{}\"", dialogue_name));
 
                 if let Some(next_id) = self.next_available_node_id() {
                     ui.label(format!("Next Node ID: {}", next_id));
