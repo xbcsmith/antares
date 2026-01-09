@@ -1537,12 +1537,17 @@ impl CampaignBuilderApp {
                 let npcs: Vec<antares::domain::world::npc::NpcDefinition> =
                     ron::from_str(&contents).map_err(CampaignError::Deserialization)?;
 
+                let count = npcs.len();
                 self.npc_editor_state.npcs = npcs;
                 self.logger.log(
                     LogLevel::Info,
                     category::CAMPAIGN,
-                    &format!("Loaded {} NPCs", self.npc_editor_state.npcs.len()),
+                    &format!("Loaded {} NPCs", count),
                 );
+                // Mark data file as loaded in asset manager
+                if let Some(ref mut manager) = self.asset_manager {
+                    manager.mark_data_file_loaded(&self.campaign.npcs_file, count);
+                }
             } else {
                 self.logger.log(
                     LogLevel::Warn,
@@ -1657,6 +1662,17 @@ impl CampaignBuilderApp {
                                         Ok(map) => {
                                             self.maps.push(map);
                                             loaded_count += 1;
+
+                                            // Mark individual map file as loaded in asset manager
+                                            if let Some(ref mut manager) = self.asset_manager {
+                                                if let Some(relative_path) =
+                                                    path.strip_prefix(dir).ok()
+                                                {
+                                                    if let Some(path_str) = relative_path.to_str() {
+                                                        manager.mark_data_file_loaded(path_str, 1);
+                                                    }
+                                                }
+                                            }
                                         }
                                         Err(e) => {
                                             self.status_message = format!(
@@ -1664,6 +1680,20 @@ impl CampaignBuilderApp {
                                                 path.file_name().unwrap_or_default(),
                                                 e
                                             );
+
+                                            // Mark individual map file as error in asset manager
+                                            if let Some(ref mut manager) = self.asset_manager {
+                                                if let Some(relative_path) =
+                                                    path.strip_prefix(dir).ok()
+                                                {
+                                                    if let Some(path_str) = relative_path.to_str() {
+                                                        manager.mark_data_file_error(
+                                                            path_str,
+                                                            &e.to_string(),
+                                                        );
+                                                    }
+                                                }
+                                            }
                                         }
                                     },
                                     Err(e) => {
@@ -1672,6 +1702,19 @@ impl CampaignBuilderApp {
                                             path.file_name().unwrap_or_default(),
                                             e
                                         );
+
+                                        // Mark individual map file as error in asset manager
+                                        if let Some(ref mut manager) = self.asset_manager {
+                                            if let Some(relative_path) = path.strip_prefix(dir).ok()
+                                            {
+                                                if let Some(path_str) = relative_path.to_str() {
+                                                    manager.mark_data_file_error(
+                                                        path_str,
+                                                        &e.to_string(),
+                                                    );
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3647,14 +3690,23 @@ impl CampaignBuilderApp {
             if path.exists() {
                 match self.characters_editor_state.load_from_file(&path) {
                     Ok(_) => {
-                        self.status_message = format!(
-                            "Loaded {} characters",
-                            self.characters_editor_state.characters.len()
-                        );
+                        let count = self.characters_editor_state.characters.len();
+                        self.status_message = format!("Loaded {} characters", count);
+                        // Mark data file as loaded in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_loaded(&self.campaign.characters_file, count);
+                        }
                     }
                     Err(e) => {
                         self.status_message = format!("Failed to load characters: {}", e);
                         eprintln!("Failed to load characters from {:?}: {}", path, e);
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(
+                                &self.campaign.characters_file,
+                                &e.to_string(),
+                            );
+                        }
                     }
                 }
             } else {
@@ -4000,15 +4052,32 @@ impl CampaignBuilderApp {
                     self.status_message = format!("Failed to scan assets: {}", e);
                 } else {
                     // Initialize data file tracking
+                    // Collect map file paths from loaded maps
+                    let map_file_paths: Vec<String> = self
+                        .maps
+                        .iter()
+                        .map(|m| {
+                            format!(
+                                "{}/{}.ron",
+                                self.campaign.maps_dir.trim_end_matches('/'),
+                                m.id
+                            )
+                        })
+                        .collect();
+
                     manager.init_data_files(
                         &self.campaign.items_file,
                         &self.campaign.spells_file,
+                        &self.campaign.conditions_file,
                         &self.campaign.monsters_file,
+                        &map_file_paths,
+                        &self.campaign.quests_file,
                         &self.campaign.classes_file,
                         &self.campaign.races_file,
-                        &self.campaign.quests_file,
+                        &self.campaign.characters_file,
                         &self.campaign.dialogue_file,
-                        Some("data/conditions.ron"),
+                        &self.campaign.npcs_file,
+                        &self.campaign.proficiencies_file,
                     );
                     // Scan references on initial load so portraits are properly marked as referenced
                     manager.scan_references(

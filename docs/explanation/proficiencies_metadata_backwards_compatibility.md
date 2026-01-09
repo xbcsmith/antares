@@ -9,7 +9,7 @@ After implementing the Proficiencies Editor (Phase 1-3), a critical issue emerge
 ### Error Message
 
 ```
-[15:21:29] [E] FileIO: Failed to load campaign: RON deserialization error: 32:1: 
+[15:21:29] [E] FileIO: Failed to load campaign: RON deserialization error: 32:1:
 Unexpected missing field named `proficiencies_file` in `CampaignMetadata`
 ```
 

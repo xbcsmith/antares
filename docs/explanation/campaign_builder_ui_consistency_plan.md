@@ -15,8 +15,8 @@ Additionally, all file path listings will be reordered to match the EditorTab se
 
 **Editor Tab Order** (defined in `lib.rs` lines 251-267):
 ```
-Metadata → Items → Spells → Conditions → Monsters → Maps → Quests → 
-Classes → Races → Characters → Dialogues → NPCs → Proficiencies → 
+Metadata → Items → Spells → Conditions → Monsters → Maps → Quests →
+Classes → Races → Characters → Dialogues → NPCs → Proficiencies →
 Assets → Validation
 ```
 
@@ -267,7 +267,7 @@ if let Some(ref mut manager) = self.asset_manager {
 2. `test_asset_manager_mark_data_file_loaded` - Update init call
 3. `test_asset_manager_all_data_files_loaded` - Update init call and assertions
 
-**Expected Data File Count**: 
+**Expected Data File Count**:
 - Old: 8 files (Items, Spells, Monsters, Classes, Races, Quests, Dialogues, Conditions)
 - New: 11+ files (add Characters, NPCs, Proficiencies, + individual Maps)
 
@@ -352,7 +352,7 @@ fn validate_character_ids(&self) -> Vec<validation::ValidationResult> {
         if !class_exists {
             results.push(validation::ValidationResult::error(
                 validation::ValidationCategory::Characters,
-                &format!("Character '{}' references non-existent class '{}'", 
+                &format!("Character '{}' references non-existent class '{}'",
                     character.id, character.class_id),
             ));
         }
@@ -363,7 +363,7 @@ fn validate_character_ids(&self) -> Vec<validation::ValidationResult> {
         if !race_exists {
             results.push(validation::ValidationResult::error(
                 validation::ValidationCategory::Characters,
-                &format!("Character '{}' references non-existent race '{}'", 
+                &format!("Character '{}' references non-existent race '{}'",
                     character.id, character.race_id),
             ));
         }
@@ -430,13 +430,13 @@ fn validate_proficiency_ids(&self) -> Vec<validation::ValidationResult> {
     for class in &self.classes_editor_state.classes {
         for prof_id in &class.proficiencies {
             referenced_proficiencies.insert(prof_id);
-            
+
             let prof_exists = self.proficiencies.iter()
                 .any(|p| &p.id == prof_id);
             if !prof_exists {
                 results.push(validation::ValidationResult::error(
                     validation::ValidationCategory::Proficiencies,
-                    &format!("Class '{}' references non-existent proficiency '{}'", 
+                    &format!("Class '{}' references non-existent proficiency '{}'",
                         class.id, prof_id),
                 ));
             }
@@ -447,13 +447,13 @@ fn validate_proficiency_ids(&self) -> Vec<validation::ValidationResult> {
     for race in &self.races_editor_state.races {
         for prof_id in &race.proficiencies {
             referenced_proficiencies.insert(prof_id);
-            
+
             let prof_exists = self.proficiencies.iter()
                 .any(|p| &p.id == prof_id);
             if !prof_exists {
                 results.push(validation::ValidationResult::error(
                     validation::ValidationCategory::Proficiencies,
-                    &format!("Race '{}' references non-existent proficiency '{}'", 
+                    &format!("Race '{}' references non-existent proficiency '{}'",
                         race.id, prof_id),
                 ));
             }
@@ -464,13 +464,13 @@ fn validate_proficiency_ids(&self) -> Vec<validation::ValidationResult> {
     for item in &self.items {
         if let Some(ref required_prof) = item.required_proficiency() {
             referenced_proficiencies.insert(required_prof);
-            
+
             let prof_exists = self.proficiencies.iter()
                 .any(|p| &p.id == required_prof);
             if !prof_exists {
                 results.push(validation::ValidationResult::error(
                     validation::ValidationCategory::Proficiencies,
-                    &format!("Item '{}' requires non-existent proficiency '{}'", 
+                    &format!("Item '{}' requires non-existent proficiency '{}'",
                         item.id, required_prof),
                 ));
             }
@@ -482,7 +482,7 @@ fn validate_proficiency_ids(&self) -> Vec<validation::ValidationResult> {
         if !referenced_proficiencies.contains(&proficiency.id) {
             results.push(validation::ValidationResult::info(
                 validation::ValidationCategory::Proficiencies,
-                &format!("Proficiency '{}' is not used by any class, race, or item", 
+                &format!("Proficiency '{}' is not used by any class, race, or item",
                     proficiency.id),
             ));
         }

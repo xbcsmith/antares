@@ -139,6 +139,262 @@ Phase 2 of the consistency plan will:
 
 ---
 
+## Phase 2: Campaign Builder UI Consistency - Update AssetManager Data File Tracking - COMPLETED
+
+### Summary
+
+Implemented Phase 2 of the Campaign Builder UI Consistency plan: extended the AssetManager to track Characters, NPCs, Proficiencies, and individual Map files alongside existing data files. Updated the method signature, call sites, and load functions to maintain consistent file tracking throughout the campaign builder. All 1177 tests pass with no warnings.
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/asset_manager.rs`
+
+**2.1 Extended `init_data_files()` Method Signature (Lines 376-407)**
+
+Changed from:
+
+```rust
+pub fn init_data_files(
+    &mut self,
+    items_file: &str,
+    spells_file: &str,
+    monsters_file: &str,
+    classes_file: &str,
+    races_file: &str,
+    quests_file: &str,
+    dialogue_file: &str,
+    conditions_file: Option<&str>,
+)
+```
+
+To:
+
+```rust
+#[allow(clippy::too_many_arguments)]
+pub fn init_data_files(
+    &mut self,
+    items_file: &str,
+    spells_file: &str,
+    conditions_file: &str,
+    monsters_file: &str,
+    maps_file_list: &[String],
+    quests_file: &str,
+    classes_file: &str,
+    races_file: &str,
+    characters_file: &str,
+    dialogue_file: &str,
+    npcs_file: &str,
+    proficiencies_file: &str,
+)
+```
+
+Key changes:
+
+- `conditions_file` changed from `Option<&str>` to required `&str`
+- Added `maps_file_list: &[String]` to track individual map files
+- Added `characters_file: &str` to track characters
+- Added `npcs_file: &str` to track NPCs
+- Added `proficiencies_file: &str` to track proficiencies
+- Reordered parameters to match EditorTab sequence
+
+**2.2 Updated `init_data_files()` Body (Lines 407-438)**
+
+Reorganized data file tracking in EditorTab order:
+
+1. Items
+2. Spells
+3. Conditions (now always present, not optional)
+4. Monsters
+5. Maps (iterates through `maps_file_list` and adds each individual map)
+6. Quests
+7. Classes
+8. Races
+9. Characters (NEW)
+10. Dialogues
+11. NPCs (NEW)
+12. Proficiencies (NEW)
+
+Each file is added to `self.data_files` vector and marked as missing if not found on disk.
+
+**2.3 Updated Three Test Functions (Lines 1302-1401)**
+
+- `test_asset_manager_data_file_tracking()` - Updated to use new signature with 2 maps, expects 13 data files (11 fixed + 2 maps)
+- `test_asset_manager_mark_data_file_loaded()` - Updated to use new signature with empty map list
+- `test_asset_manager_all_data_files_loaded()` - Updated to mark all 11 new data files as loaded
+
+#### File: `sdk/campaign_builder/src/lib.rs`
+
+**2.4 Updated Call Site in `show_assets_editor()` (Lines 3995-4024)**
+
+Added map file path collection before calling `init_data_files()`:
+
+```rust
+// Collect map file paths from loaded maps
+let map_file_paths: Vec<String> = self.maps.iter()
+    .map(|m| {
+        let maps_dir = self.campaign.maps_dir.trim_end_matches('/');
+        format!("{}/{}.ron", maps_dir, m.id)
+    })
+    .collect();
+```
+
+Updated method call to use new signature with all 12 parameters in EditorTab order.
+
+**2.5 Updated `load_npcs()` Function (Lines 1537-1549)**
+
+Added `mark_data_file_loaded()` call after successfully loading NPCs:
+
+```rust
+let count = npcs.len();
+self.npc_editor_state.npcs = npcs;
+// ... logging ...
+// Mark data file as loaded in asset manager
+if let Some(ref mut manager) = self.asset_manager {
+    manager.mark_data_file_loaded(&self.campaign.npcs_file, count);
+}
+```
+
+**2.6 Updated `load_characters_from_campaign()` Function (Lines 3652-3671)**
+
+Added `mark_data_file_loaded()` call on success and `mark_data_file_error()` on failure:
+
+```rust
+let count = self.characters_editor_state.characters.len();
+// ... status message ...
+// Mark data file as loaded in asset manager
+if let Some(ref mut manager) = self.asset_manager {
+    manager.mark_data_file_loaded(&self.campaign.characters_file, count);
+}
+```
+
+**2.7 Updated `load_maps()` Function (Lines 1646-1710)**
+
+Added individual map file tracking with `mark_data_file_loaded()` and `mark_data_file_error()` calls:
+
+```rust
+// After successful map parse:
+if let Some(ref mut manager) = self.asset_manager {
+    if let Some(relative_path) = path.strip_prefix(dir).ok() {
+        if let Some(path_str) = relative_path.to_str() {
+            manager.mark_data_file_loaded(path_str, 1);
+        }
+    }
+}
+
+// On parse error:
+if let Some(ref mut manager) = self.asset_manager {
+    if let Some(relative_path) = path.strip_prefix(dir).ok() {
+        if let Some(path_str) = relative_path.to_str() {
+            manager.mark_data_file_error(path_str, &e.to_string());
+        }
+    }
+}
+```
+
+### Architecture Compliance
+
+✅ Extended method signature follows clippy::too_many_arguments pattern
+✅ Data file tracking order matches EditorTab sequence exactly
+✅ Maps handled as individual files (one DataFileInfo per map)
+✅ Conditions file now required (no longer Optional)
+✅ Characters, NPCs, Proficiencies tracked consistently with other files
+✅ No modification to core data structures or public APIs beyond signature extension
+✅ Backward compatibility maintained (all existing functionality preserved)
+
+### Validation Results
+
+**Code Compilation**: ✅ PASS
+
+```
+cargo check --all-targets --all-features
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
+```
+
+**Clippy Linting**: ✅ PASS (zero warnings)
+
+```
+cargo clippy --all-targets --all-features -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+```
+
+**Code Formatting**: ✅ PASS
+
+```
+cargo fmt --all
+Command executed successfully
+```
+
+**Test Suite**: ✅ PASS (all 1177 tests)
+
+```
+cargo nextest run --all-features
+    Summary [1.939s] 1177 tests run: 1177 passed, 0 skipped
+```
+
+### Files Modified
+
+1. `sdk/campaign_builder/src/asset_manager.rs`
+
+   - Extended `init_data_files()` method signature (12 parameters instead of 8)
+   - Updated method body to add Characters, NPCs, Proficiencies data files
+   - Updated method body to iterate through maps and add individual map files
+   - Updated 3 unit tests to use new signature and expected file counts
+
+2. `sdk/campaign_builder/src/lib.rs`
+   - Updated `show_assets_editor()` call site to collect and pass map file paths
+   - Updated `load_npcs()` to call `mark_data_file_loaded()` with NPC count
+   - Updated `load_characters_from_campaign()` to call `mark_data_file_loaded()` with character count and handle errors
+   - Updated `load_maps()` to call `mark_data_file_loaded()` and `mark_data_file_error()` for each map file
+
+### Deliverables Completed
+
+- [x] `init_data_files()` signature extended with 4 new parameters (characters, npcs, proficiencies, map_file_list)
+- [x] Method body updated to track all 12 file types in EditorTab order
+- [x] Individual map files tracked (not just directory)
+- [x] Call site in `show_assets_editor()` updated to pass new parameters
+- [x] `load_characters_from_campaign()` calls `mark_data_file_loaded()`
+- [x] `load_npcs()` calls `mark_data_file_loaded()`
+- [x] `load_maps()` calls `mark_data_file_loaded()` for each map
+- [x] All 3 AssetManager tests updated and passing
+- [x] All quality checks pass (fmt, check, clippy, tests)
+
+### Success Criteria Met
+
+✅ AssetManager tracks Characters, NPCs, Proficiencies, and individual Map files
+✅ Data file tracking order matches EditorTab sequence (Items, Spells, Conditions, Monsters, Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies)
+✅ Maps tracked as individual .ron files (one entry per map)
+✅ All load functions call `mark_data_file_loaded()` to update status
+✅ Test file count assertions updated: expect 11 fixed files + N map files
+✅ No regressions introduced (all 1177 tests passing)
+✅ No clippy warnings or formatting issues
+
+### Implementation Notes
+
+- Map file paths are collected from `self.maps` which contains loaded map objects
+- Each map path is constructed as `{maps_dir}/{map.id}.ron` matching the actual file structure
+- The `conditions_file` field was already present in `CampaignMetadata` and is now required (no longer Optional)
+- Individual map tracking enables per-map error reporting and status in the Assets panel
+- Load functions check `if let Some(ref mut manager) = self.asset_manager` before calling mark methods to handle the case where AssetManager may not be initialized yet
+- Maps are tracked separately from directories, allowing fine-grained asset management
+
+### Related Files
+
+- `sdk/campaign_builder/src/asset_manager.rs` - AssetManager implementation
+- `sdk/campaign_builder/src/lib.rs` - CampaignBuilderApp and load functions
+- `docs/explanation/campaign_builder_ui_consistency_plan.md` - Full implementation plan (Phases 1-4)
+
+### Next Steps (Phase 3)
+
+Phase 3 of the consistency plan will:
+
+- Add `validate_character_ids()` method to validate character references
+- Add `validate_proficiency_ids()` method to validate proficiency usage and uniqueness
+- Update `ValidationCategory` enum to include Characters and Proficiencies
+- Call new validation methods as part of `validate_campaign()`
+- Add comprehensive unit tests for character and proficiency validation
+
+---
+
 ## Metadata Files Tab Completion - NPCs File Field - COMPLETED
 
 ### Summary
