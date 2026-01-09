@@ -58,7 +58,7 @@ Defines a character template (pre-made character or NPC).
     class_id: String,           // Reference to classes.ron
     sex: Sex,                   // Male, Female, Other
     alignment: Alignment,       // Good, Neutral, Evil
-    
+
     // Stats
     base_stats: (
         might: AttributePair,
@@ -72,20 +72,20 @@ Defines a character template (pre-made character or NPC).
 
     // Optional overrides
     hp_override: Option<AttributePair16>, // Overrides calculated HP
-    
+
     // Meta
     portrait_id: String,        // Filename stem (e.g. "knight_01")
     description: String,
-    
+
     // Starting State
     starting_gold: u32,
     starting_gems: u32,
     starting_food: u8,          // Default: 10
-    
+
     starting_items: [           // List of Item IDs (u8)
         1, 5, 10
     ],
-    
+
     starting_equipment: (       // Equipped Item IDs (u8)
         weapon: Some(1),
         armor: Some(10),
@@ -95,7 +95,7 @@ Defines a character template (pre-made character or NPC).
         accessory1: None,
         accessory2: None,
     ),
-    
+
     // Flags
     is_premade: bool,           // If true, appears in "New Game" selection
     starts_in_party: bool,      // If true, auto-added to party
@@ -122,10 +122,10 @@ Defines reusable NPC data (identity, dialogue, quests).
     name: String,               // Display Name
     description: String,
     portrait_id: String,        // Filename stem
-    
+
     dialogue_id: Option<u16>,   // ID of default DialogueTree
     quest_ids: [u16],           // list of Quest IDs involved with
-    
+
     faction: Option<String>,
     is_merchant: bool,
     is_innkeeper: bool,
@@ -149,7 +149,7 @@ Defines the layout and content of a map level.
     width: u32,
     height: u32,
     environment: EnvironmentType, // Outdoor, Indoor, Dungeon, Cave
-    
+
     // Terrain
     tiles: [
         (
@@ -159,7 +159,7 @@ Defines the layout and content of a map level.
         ),
         // ... more tiles
     ],
-    
+
     // Triggered Events (Traps, Teleports, Scripts)
     events: [
         (
@@ -173,7 +173,7 @@ Defines the layout and content of a map level.
             event_type: NpcDialogue("dialogue_id"),
         )
     ],
-    
+
     // NPC Instances
     npc_placements: [
         (
@@ -183,7 +183,7 @@ Defines the layout and content of a map level.
             dialogue_override: None, // Optional DialogueID override
         )
     ],
-    
+
     exits: [],
     starting_position: (x: 0, y: 0),
 )
@@ -250,17 +250,17 @@ ron_content = """
 
 def validate_character_stats(ron_text):
     print("Validating Character Definitions...")
-    
+
     # Regex to find hp_override patterns
     # Matches: hp_override: Some((base: 50, current: 60))
     hp_pattern = re.compile(r'hp_override:\s*Some\s*\(\s*\(\s*base:\s*(\d+),\s*current:\s*(\d+)\s*\)\s*\)')
-    
+
     issues = []
-    
+
     for match in hp_pattern.finditer(ron_text):
         base = int(match.group(1))
         current = int(match.group(2))
-        
+
         if current > base:
             issues.append(f"HP Integrity Check Failed: current ({current}) > base ({base})")
         else:
