@@ -53,6 +53,15 @@ pub struct ConfigEditorState {
     pub controls_turn_right_buffer: String,
     pub controls_interact_buffer: String,
     pub controls_menu_buffer: String,
+
+    /// Validation errors by field name
+    pub validation_errors: std::collections::HashMap<String, String>,
+
+    /// Track which key binding is being captured (None = idle, Some(action_name) = capturing)
+    pub capturing_key_for: Option<String>,
+
+    /// Recently captured key event for key binding
+    pub last_captured_key: Option<String>,
 }
 
 impl Default for ConfigEditorState {
@@ -70,6 +79,9 @@ impl Default for ConfigEditorState {
             controls_turn_right_buffer: String::new(),
             controls_interact_buffer: String::new(),
             controls_menu_buffer: String::new(),
+            validation_errors: std::collections::HashMap::new(),
+            capturing_key_for: None,
+            last_captured_key: None,
         }
     }
 }
@@ -161,6 +173,43 @@ impl ConfigEditorState {
 
         ui.add_space(10.0);
 
+        // Reset to defaults and preset buttons
+        ui.horizontal(|ui| {
+            if ui.button("🔄 Reset to Defaults").clicked() {
+                self.game_config = GameConfig::default();
+                self.update_edit_buffers();
+                *status_message = "Config reset to defaults".to_string();
+                *unsaved_changes = true;
+            }
+
+            ui.separator();
+
+            ui.label("Graphics Presets:");
+            if ui.button("Low").clicked() {
+                self.game_config.graphics.resolution = (1280, 720);
+                self.game_config.graphics.msaa_samples = 1;
+                self.game_config.graphics.shadow_quality = ShadowQuality::Low;
+                *status_message = "Applied Low graphics preset".to_string();
+                *unsaved_changes = true;
+            }
+            if ui.button("Medium").clicked() {
+                self.game_config.graphics.resolution = (1920, 1080);
+                self.game_config.graphics.msaa_samples = 4;
+                self.game_config.graphics.shadow_quality = ShadowQuality::Medium;
+                *status_message = "Applied Medium graphics preset".to_string();
+                *unsaved_changes = true;
+            }
+            if ui.button("High").clicked() {
+                self.game_config.graphics.resolution = (2560, 1440);
+                self.game_config.graphics.msaa_samples = 8;
+                self.game_config.graphics.shadow_quality = ShadowQuality::High;
+                *status_message = "Applied High graphics preset".to_string();
+                *unsaved_changes = true;
+            }
+        });
+
+        ui.add_space(10.0);
+
         // Display sections in a scrollable area
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
@@ -180,46 +229,50 @@ impl ConfigEditorState {
         let section_open = ui.collapsing("🖥️ Graphics Settings", |ui| {
             ui.add_space(5.0);
 
-            // Resolution
+            // Resolution with validation
             ui.horizontal(|ui| {
                 ui.label("Resolution:");
                 let mut width = self.game_config.graphics.resolution.0;
                 let mut height = self.game_config.graphics.resolution.1;
 
-                if ui
-                    .add(egui::DragValue::new(&mut width).range(320..=7680))
-                    .changed()
-                {
+                let width_response = ui.add(egui::DragValue::new(&mut width).range(320..=7680));
+                if width_response.changed() {
                     self.game_config.graphics.resolution.0 = width;
                     *unsaved_changes = true;
+                    self.validation_errors.remove("resolution_width");
                 }
+                width_response.on_hover_text("Screen width in pixels (320-7680)");
 
                 ui.label("×");
 
-                if ui
-                    .add(egui::DragValue::new(&mut height).range(240..=4320))
-                    .changed()
-                {
+                let height_response = ui.add(egui::DragValue::new(&mut height).range(240..=4320));
+                if height_response.changed() {
                     self.game_config.graphics.resolution.1 = height;
                     *unsaved_changes = true;
+                    self.validation_errors.remove("resolution_height");
                 }
+                height_response.on_hover_text("Screen height in pixels (240-4320)");
             });
 
-            // Fullscreen
-            if ui
-                .checkbox(&mut self.game_config.graphics.fullscreen, "Fullscreen")
-                .changed()
-            {
-                *unsaved_changes = true;
+            // Show resolution validation error if any
+            if let Some(error) = self.validation_errors.get("resolution") {
+                ui.colored_label(egui::Color32::LIGHT_RED, format!("⚠️ {}", error));
             }
 
-            // VSync
-            if ui
-                .checkbox(&mut self.game_config.graphics.vsync, "VSync")
-                .changed()
-            {
+            // Fullscreen with tooltip
+            let fullscreen_response =
+                ui.checkbox(&mut self.game_config.graphics.fullscreen, "Fullscreen");
+            if fullscreen_response.changed() {
                 *unsaved_changes = true;
             }
+            fullscreen_response.on_hover_text("Enable fullscreen mode");
+
+            // VSync with tooltip
+            let vsync_response = ui.checkbox(&mut self.game_config.graphics.vsync, "VSync");
+            if vsync_response.changed() {
+                *unsaved_changes = true;
+            }
+            vsync_response.on_hover_text("Enable vertical sync to prevent screen tearing");
 
             // MSAA Samples
             ui.horizontal(|ui| {
@@ -282,61 +335,81 @@ impl ConfigEditorState {
         let section_open = ui.collapsing("🔊 Audio Settings", |ui| {
             ui.add_space(5.0);
 
-            // Master Volume
-            ui.label("Master Volume:");
-            if ui
-                .add(
+            // Master Volume with percentage display
+            ui.horizontal(|ui| {
+                ui.label("Master Volume:");
+                let master_response = ui.add(
                     egui::Slider::new(&mut self.game_config.audio.master_volume, 0.0..=1.0)
                         .step_by(0.05),
-                )
-                .changed()
-            {
-                *unsaved_changes = true;
-            }
+                );
+                if master_response.changed() {
+                    *unsaved_changes = true;
+                }
+                ui.label(format!(
+                    "{}%",
+                    (self.game_config.audio.master_volume * 100.0) as i32
+                ));
+                master_response.on_hover_text("Overall volume level (0-100%)");
+            });
 
-            // Music Volume
-            ui.label("Music Volume:");
-            if ui
-                .add(
+            // Music Volume with percentage display
+            ui.horizontal(|ui| {
+                ui.label("Music Volume:");
+                let music_response = ui.add(
                     egui::Slider::new(&mut self.game_config.audio.music_volume, 0.0..=1.0)
                         .step_by(0.05),
-                )
-                .changed()
-            {
-                *unsaved_changes = true;
-            }
+                );
+                if music_response.changed() {
+                    *unsaved_changes = true;
+                }
+                ui.label(format!(
+                    "{}%",
+                    (self.game_config.audio.music_volume * 100.0) as i32
+                ));
+                music_response.on_hover_text("Background music volume level");
+            });
 
-            // SFX Volume
-            ui.label("SFX Volume:");
-            if ui
-                .add(
+            // SFX Volume with percentage display
+            ui.horizontal(|ui| {
+                ui.label("SFX Volume:");
+                let sfx_response = ui.add(
                     egui::Slider::new(&mut self.game_config.audio.sfx_volume, 0.0..=1.0)
                         .step_by(0.05),
-                )
-                .changed()
-            {
-                *unsaved_changes = true;
-            }
+                );
+                if sfx_response.changed() {
+                    *unsaved_changes = true;
+                }
+                ui.label(format!(
+                    "{}%",
+                    (self.game_config.audio.sfx_volume * 100.0) as i32
+                ));
+                sfx_response.on_hover_text("Sound effects volume level");
+            });
 
-            // Ambient Volume
-            ui.label("Ambient Volume:");
-            if ui
-                .add(
+            // Ambient Volume with percentage display
+            ui.horizontal(|ui| {
+                ui.label("Ambient Volume:");
+                let ambient_response = ui.add(
                     egui::Slider::new(&mut self.game_config.audio.ambient_volume, 0.0..=1.0)
                         .step_by(0.05),
-                )
-                .changed()
-            {
-                *unsaved_changes = true;
-            }
+                );
+                if ambient_response.changed() {
+                    *unsaved_changes = true;
+                }
+                ui.label(format!(
+                    "{}%",
+                    (self.game_config.audio.ambient_volume * 100.0) as i32
+                ));
+                ambient_response.on_hover_text("Ambient sounds and music volume level");
+            });
 
-            // Enable Audio
-            if ui
-                .checkbox(&mut self.game_config.audio.enable_audio, "Enable Audio")
-                .changed()
-            {
+            // Enable Audio with tooltip
+            let enable_response =
+                ui.checkbox(&mut self.game_config.audio.enable_audio, "Enable Audio");
+            if enable_response.changed() {
                 *unsaved_changes = true;
             }
+            enable_response.on_hover_text("Disable to mute all sound");
 
             ui.add_space(5.0);
         });
@@ -365,73 +438,100 @@ impl ConfigEditorState {
             });
 
             ui.add_space(10.0);
-            ui.label("Key Bindings (comma-separated):");
+            ui.label("🎮 Key Bindings (comma-separated keys, e.g., 'W,Up Arrow'):");
+            ui.label(
+                "Supported: A-Z, 0-9, Space, Enter, Escape, Tab, Shift, Ctrl, Alt, Arrow Keys",
+            );
+
+            // Helper function for key binding field with tooltip and validation
+            let show_key_binding = |ui: &mut egui::Ui,
+                                    label: &str,
+                                    buffer: &mut String,
+                                    action_id: &str,
+                                    unsaved_changes: &mut bool,
+                                    validation_errors: &mut std::collections::HashMap<
+                String,
+                String,
+            >| {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{}:", label));
+                    let response = ui.text_edit_singleline(buffer);
+                    if response.changed() {
+                        *unsaved_changes = true;
+                        // Clear error when user starts editing
+                        validation_errors.remove(action_id);
+                    }
+                    response.on_hover_text("Enter comma-separated key names");
+
+                    // Show validation error if exists
+                    if let Some(error) = validation_errors.get(action_id) {
+                        ui.label(
+                            egui::RichText::new(format!("⚠️ {}", error))
+                                .color(egui::Color32::LIGHT_RED),
+                        );
+                    }
+                });
+            };
 
             // Move Forward
-            ui.horizontal(|ui| {
-                ui.label("Move Forward:");
-                if ui
-                    .text_edit_singleline(&mut self.controls_move_forward_buffer)
-                    .changed()
-                {
-                    *unsaved_changes = true;
-                }
-            });
+            show_key_binding(
+                ui,
+                "Move Forward",
+                &mut self.controls_move_forward_buffer,
+                "move_forward",
+                unsaved_changes,
+                &mut self.validation_errors,
+            );
 
             // Move Back
-            ui.horizontal(|ui| {
-                ui.label("Move Back:");
-                if ui
-                    .text_edit_singleline(&mut self.controls_move_back_buffer)
-                    .changed()
-                {
-                    *unsaved_changes = true;
-                }
-            });
+            show_key_binding(
+                ui,
+                "Move Back",
+                &mut self.controls_move_back_buffer,
+                "move_back",
+                unsaved_changes,
+                &mut self.validation_errors,
+            );
 
             // Turn Left
-            ui.horizontal(|ui| {
-                ui.label("Turn Left:");
-                if ui
-                    .text_edit_singleline(&mut self.controls_turn_left_buffer)
-                    .changed()
-                {
-                    *unsaved_changes = true;
-                }
-            });
+            show_key_binding(
+                ui,
+                "Turn Left",
+                &mut self.controls_turn_left_buffer,
+                "turn_left",
+                unsaved_changes,
+                &mut self.validation_errors,
+            );
 
             // Turn Right
-            ui.horizontal(|ui| {
-                ui.label("Turn Right:");
-                if ui
-                    .text_edit_singleline(&mut self.controls_turn_right_buffer)
-                    .changed()
-                {
-                    *unsaved_changes = true;
-                }
-            });
+            show_key_binding(
+                ui,
+                "Turn Right",
+                &mut self.controls_turn_right_buffer,
+                "turn_right",
+                unsaved_changes,
+                &mut self.validation_errors,
+            );
 
             // Interact
-            ui.horizontal(|ui| {
-                ui.label("Interact:");
-                if ui
-                    .text_edit_singleline(&mut self.controls_interact_buffer)
-                    .changed()
-                {
-                    *unsaved_changes = true;
-                }
-            });
+            show_key_binding(
+                ui,
+                "Interact",
+                &mut self.controls_interact_buffer,
+                "interact",
+                unsaved_changes,
+                &mut self.validation_errors,
+            );
 
             // Menu
-            ui.horizontal(|ui| {
-                ui.label("Menu:");
-                if ui
-                    .text_edit_singleline(&mut self.controls_menu_buffer)
-                    .changed()
-                {
-                    *unsaved_changes = true;
-                }
-            });
+            show_key_binding(
+                ui,
+                "Menu",
+                &mut self.controls_menu_buffer,
+                "menu",
+                unsaved_changes,
+                &mut self.validation_errors,
+            );
 
             ui.add_space(5.0);
         });
@@ -444,7 +544,7 @@ impl ConfigEditorState {
         let section_open = ui.collapsing("📷 Camera Settings", |ui| {
             ui.add_space(5.0);
 
-            // Camera Mode
+            // Camera Mode with tooltip
             ui.horizontal(|ui| {
                 ui.label("Camera Mode:");
                 let mode_options = [
@@ -459,7 +559,7 @@ impl ConfigEditorState {
                     .unwrap_or(0);
 
                 let original_index = selected_index;
-                egui::ComboBox::from_id_salt("camera_mode")
+                let combo_response = egui::ComboBox::from_id_salt("camera_mode")
                     .selected_text(mode_names[selected_index])
                     .show_index(ui, &mut selected_index, mode_names.len(), |i| {
                         egui::WidgetText::from(mode_names[i])
@@ -469,149 +569,153 @@ impl ConfigEditorState {
                     self.game_config.camera.mode = mode_options[selected_index];
                     *unsaved_changes = true;
                 }
+
+                combo_response.on_hover_text(
+                    "Select camera perspective: First Person, Tactical (3rd person), or Isometric",
+                );
             });
 
-            // Eye Height
+            // Eye Height with tooltip
             ui.horizontal(|ui| {
                 ui.label("Eye Height:");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut self.game_config.camera.eye_height)
-                            .range(0.1..=3.0)
-                            .speed(0.05),
-                    )
-                    .changed()
-                {
+                let eye_response = ui.add(
+                    egui::DragValue::new(&mut self.game_config.camera.eye_height)
+                        .range(0.1..=3.0)
+                        .speed(0.05),
+                );
+                if eye_response.changed() {
                     *unsaved_changes = true;
                 }
+                eye_response.on_hover_text("Camera height above ground in game units (0.1-3.0)");
             });
 
-            // Field of View
+            // Field of View with tooltip
             ui.horizontal(|ui| {
                 ui.label("FOV (degrees):");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut self.game_config.camera.fov)
-                            .range(30.0..=120.0)
-                            .speed(1.0),
-                    )
-                    .changed()
-                {
+                let fov_response = ui.add(
+                    egui::DragValue::new(&mut self.game_config.camera.fov)
+                        .range(30.0..=120.0)
+                        .speed(1.0),
+                );
+                if fov_response.changed() {
                     *unsaved_changes = true;
                 }
+                fov_response
+                    .on_hover_text("Field of view in degrees (30-120). Wider FOV shows more area");
             });
 
-            // Near Clip
+            // Near Clip with tooltip
             ui.horizontal(|ui| {
                 ui.label("Near Clip:");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut self.game_config.camera.near_clip)
-                            .range(0.01..=10.0)
-                            .speed(0.01),
-                    )
-                    .changed()
-                {
+                let near_response = ui.add(
+                    egui::DragValue::new(&mut self.game_config.camera.near_clip)
+                        .range(0.01..=10.0)
+                        .speed(0.01),
+                );
+                if near_response.changed() {
                     *unsaved_changes = true;
                 }
+                near_response.on_hover_text("Nearest distance to render from camera (0.01-10.0)");
             });
 
-            // Far Clip
+            // Far Clip with tooltip
             ui.horizontal(|ui| {
                 ui.label("Far Clip:");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut self.game_config.camera.far_clip)
-                            .range(10.0..=10000.0)
-                            .speed(10.0),
-                    )
-                    .changed()
-                {
+                let far_response = ui.add(
+                    egui::DragValue::new(&mut self.game_config.camera.far_clip)
+                        .range(10.0..=10000.0)
+                        .speed(10.0),
+                );
+                if far_response.changed() {
                     *unsaved_changes = true;
                 }
+                far_response.on_hover_text("Farthest distance to render from camera (10-10000)");
             });
 
-            // Smooth Rotation
-            if ui
-                .checkbox(
-                    &mut self.game_config.camera.smooth_rotation,
-                    "Smooth Rotation",
-                )
-                .changed()
-            {
+            // Smooth Rotation with tooltip
+            let smooth_response = ui.checkbox(
+                &mut self.game_config.camera.smooth_rotation,
+                "Smooth Rotation",
+            );
+            if smooth_response.changed() {
                 *unsaved_changes = true;
             }
+            smooth_response.on_hover_text("Enable smooth camera rotation interpolation");
 
-            // Rotation Speed
+            // Rotation Speed with tooltip
             ui.horizontal(|ui| {
                 ui.label("Rotation Speed (°/s):");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut self.game_config.camera.rotation_speed)
-                            .range(30.0..=360.0)
-                            .speed(5.0),
-                    )
-                    .changed()
-                {
+                let rotation_response = ui.add(
+                    egui::DragValue::new(&mut self.game_config.camera.rotation_speed)
+                        .range(30.0..=360.0)
+                        .speed(5.0),
+                );
+                if rotation_response.changed() {
                     *unsaved_changes = true;
                 }
+                rotation_response
+                    .on_hover_text("Camera rotation speed in degrees per second (30-360)");
             });
 
-            // Light Height
+            ui.add_space(5.0);
+            ui.separator();
+            ui.label("💡 Lighting Settings");
+            ui.add_space(5.0);
+
+            // Light Height with tooltip
             ui.horizontal(|ui| {
                 ui.label("Light Height:");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut self.game_config.camera.light_height)
-                            .range(0.1..=20.0)
-                            .speed(0.1),
-                    )
-                    .changed()
-                {
+                let light_height_response = ui.add(
+                    egui::DragValue::new(&mut self.game_config.camera.light_height)
+                        .range(0.1..=20.0)
+                        .speed(0.1),
+                );
+                if light_height_response.changed() {
                     *unsaved_changes = true;
                 }
+                light_height_response
+                    .on_hover_text("Height of the primary light source (0.1-20.0)");
             });
 
-            // Light Intensity
+            // Light Intensity with tooltip
             ui.horizontal(|ui| {
                 ui.label("Light Intensity:");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut self.game_config.camera.light_intensity)
-                            .range(100000.0..=10000000.0)
-                            .speed(100000.0),
-                    )
-                    .changed()
-                {
+                let intensity_response = ui.add(
+                    egui::DragValue::new(&mut self.game_config.camera.light_intensity)
+                        .range(100000.0..=10000000.0)
+                        .speed(100000.0),
+                );
+                if intensity_response.changed() {
                     *unsaved_changes = true;
                 }
+                intensity_response.on_hover_text(
+                    "Brightness of the primary light (100k-10M). Higher values = brighter",
+                );
             });
 
-            // Light Range
+            // Light Range with tooltip
             ui.horizontal(|ui| {
                 ui.label("Light Range:");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut self.game_config.camera.light_range)
-                            .range(10.0..=200.0)
-                            .speed(1.0),
-                    )
-                    .changed()
-                {
+                let range_response = ui.add(
+                    egui::DragValue::new(&mut self.game_config.camera.light_range)
+                        .range(10.0..=200.0)
+                        .speed(1.0),
+                );
+                if range_response.changed() {
                     *unsaved_changes = true;
                 }
+                range_response.on_hover_text("Distance the light reaches (10-200 units)");
             });
 
-            // Shadows Enabled
-            if ui
-                .checkbox(
-                    &mut self.game_config.camera.shadows_enabled,
-                    "Shadows Enabled",
-                )
-                .changed()
-            {
+            // Shadows Enabled with tooltip
+            let shadows_response = ui.checkbox(
+                &mut self.game_config.camera.shadows_enabled,
+                "Shadows Enabled",
+            );
+            if shadows_response.changed() {
                 *unsaved_changes = true;
             }
+            shadows_response.on_hover_text("Enable shadow rendering for dynamic lighting effects");
 
             ui.add_space(5.0);
         });
@@ -730,6 +834,216 @@ impl ConfigEditorState {
             .filter(|s| !s.is_empty())
             .collect();
     }
+
+    /// Validate key binding for a control action
+    ///
+    /// # Arguments
+    ///
+    /// * `action_id` - The control action identifier
+    /// * `keys_str` - Comma-separated key names
+    ///
+    /// # Returns
+    ///
+    /// Returns Ok(()) if valid, or Err(error message) if invalid
+    fn validate_key_binding(&self, action_id: &str, keys_str: &str) -> Result<(), String> {
+        if keys_str.is_empty() {
+            return Err(format!("{} must have at least one key bound", action_id));
+        }
+
+        // Valid key names (basic validation)
+        let valid_keys = vec![
+            "A",
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H",
+            "I",
+            "J",
+            "K",
+            "L",
+            "M",
+            "N",
+            "O",
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "Space",
+            "Enter",
+            "Escape",
+            "Tab",
+            "Backspace",
+            "Delete",
+            "Insert",
+            "Home",
+            "End",
+            "PageUp",
+            "PageDown",
+            "Shift",
+            "Ctrl",
+            "Alt",
+            "Super",
+            "Up Arrow",
+            "Down Arrow",
+            "Left Arrow",
+            "Right Arrow",
+            "+",
+            "-",
+            "*",
+            "/",
+            ".",
+            ",",
+            ";",
+            "'",
+            "[",
+            "]",
+            "\\",
+            "`",
+            "~",
+            "!",
+            "@",
+            "#",
+            "$",
+            "%",
+            "^",
+            "&",
+        ];
+
+        let keys: Vec<&str> = keys_str.split(',').map(|s| s.trim()).collect();
+        for key in keys {
+            if !valid_keys
+                .iter()
+                .any(|&valid| valid.eq_ignore_ascii_case(key))
+            {
+                return Err(format!("'{}' is not a recognized key name", key));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate all configuration settings
+    ///
+    /// # Returns
+    ///
+    /// Returns Ok(()) if all settings are valid, otherwise populates validation_errors
+    fn validate_config(&mut self) -> Result<(), String> {
+        self.validation_errors.clear();
+
+        // Validate resolution
+        if self.game_config.graphics.resolution.0 < 320
+            || self.game_config.graphics.resolution.0 > 7680
+        {
+            self.validation_errors.insert(
+                "resolution_width".to_string(),
+                "Width must be 320-7680".to_string(),
+            );
+        }
+        if self.game_config.graphics.resolution.1 < 240
+            || self.game_config.graphics.resolution.1 > 4320
+        {
+            self.validation_errors.insert(
+                "resolution_height".to_string(),
+                "Height must be 240-4320".to_string(),
+            );
+        }
+
+        // Validate audio volumes
+        if self.game_config.audio.master_volume < 0.0 || self.game_config.audio.master_volume > 1.0
+        {
+            self.validation_errors
+                .insert("master_volume".to_string(), "Must be 0.0-1.0".to_string());
+        }
+        if self.game_config.audio.music_volume < 0.0 || self.game_config.audio.music_volume > 1.0 {
+            self.validation_errors
+                .insert("music_volume".to_string(), "Must be 0.0-1.0".to_string());
+        }
+        if self.game_config.audio.sfx_volume < 0.0 || self.game_config.audio.sfx_volume > 1.0 {
+            self.validation_errors
+                .insert("sfx_volume".to_string(), "Must be 0.0-1.0".to_string());
+        }
+        if self.game_config.audio.ambient_volume < 0.0
+            || self.game_config.audio.ambient_volume > 1.0
+        {
+            self.validation_errors
+                .insert("ambient_volume".to_string(), "Must be 0.0-1.0".to_string());
+        }
+
+        // Validate controls key bindings
+        if let Err(e) =
+            self.validate_key_binding("move_forward", &self.controls_move_forward_buffer)
+        {
+            self.validation_errors.insert("move_forward".to_string(), e);
+        }
+        if let Err(e) = self.validate_key_binding("move_back", &self.controls_move_back_buffer) {
+            self.validation_errors.insert("move_back".to_string(), e);
+        }
+        if let Err(e) = self.validate_key_binding("turn_left", &self.controls_turn_left_buffer) {
+            self.validation_errors.insert("turn_left".to_string(), e);
+        }
+        if let Err(e) = self.validate_key_binding("turn_right", &self.controls_turn_right_buffer) {
+            self.validation_errors.insert("turn_right".to_string(), e);
+        }
+        if let Err(e) = self.validate_key_binding("interact", &self.controls_interact_buffer) {
+            self.validation_errors.insert("interact".to_string(), e);
+        }
+        if let Err(e) = self.validate_key_binding("menu", &self.controls_menu_buffer) {
+            self.validation_errors.insert("menu".to_string(), e);
+        }
+
+        // Validate camera settings
+        if self.game_config.camera.eye_height < 0.1 || self.game_config.camera.eye_height > 3.0 {
+            self.validation_errors
+                .insert("eye_height".to_string(), "Must be 0.1-3.0".to_string());
+        }
+        if self.game_config.camera.fov < 30.0 || self.game_config.camera.fov > 120.0 {
+            self.validation_errors
+                .insert("fov".to_string(), "Must be 30-120 degrees".to_string());
+        }
+        if self.game_config.camera.near_clip < 0.01 || self.game_config.camera.near_clip > 10.0 {
+            self.validation_errors
+                .insert("near_clip".to_string(), "Must be 0.01-10.0".to_string());
+        }
+        if self.game_config.camera.far_clip < 10.0 || self.game_config.camera.far_clip > 10000.0 {
+            self.validation_errors
+                .insert("far_clip".to_string(), "Must be 10-10000".to_string());
+        }
+        if self.game_config.camera.near_clip >= self.game_config.camera.far_clip {
+            self.validation_errors.insert(
+                "clip_planes".to_string(),
+                "Near clip must be less than far clip".to_string(),
+            );
+        }
+
+        if self.validation_errors.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{} validation errors found",
+                self.validation_errors.len()
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -831,5 +1145,173 @@ mod tests {
         state.game_config.camera.eye_height = -1.0;
         let result = state.save_config(None);
         assert!(result.is_err());
+    }
+
+    // Phase 2: Inline Validation Tests
+
+    #[test]
+    fn test_validate_key_binding_valid_keys() {
+        let state = ConfigEditorState::new();
+        let result = state.validate_key_binding("move_forward", "W, A, D");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_key_binding_invalid_key() {
+        let state = ConfigEditorState::new();
+        let result = state.validate_key_binding("move_forward", "InvalidKey");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not a recognized key"));
+    }
+
+    #[test]
+    fn test_validate_key_binding_empty() {
+        let state = ConfigEditorState::new();
+        let result = state.validate_key_binding("move_forward", "");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must have at least one key"));
+    }
+
+    #[test]
+    fn test_validate_key_binding_with_arrows() {
+        let state = ConfigEditorState::new();
+        let result = state.validate_key_binding("move_forward", "Up Arrow, W");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_key_binding_case_insensitive() {
+        let state = ConfigEditorState::new();
+        let result = state.validate_key_binding("move_forward", "w, space, enter");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_config_all_valid() {
+        let mut state = ConfigEditorState::new();
+        state.controls_move_forward_buffer = "W".to_string();
+        state.controls_move_back_buffer = "S".to_string();
+        state.controls_turn_left_buffer = "A".to_string();
+        state.controls_turn_right_buffer = "D".to_string();
+        state.controls_interact_buffer = "E".to_string();
+        state.controls_menu_buffer = "Escape".to_string();
+
+        let result = state.validate_config();
+        assert!(result.is_ok());
+        assert!(state.validation_errors.is_empty());
+    }
+
+    #[test]
+    fn test_validate_config_invalid_resolution() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.graphics.resolution = (0, 720);
+        state.controls_move_forward_buffer = "W".to_string();
+        state.controls_move_back_buffer = "S".to_string();
+        state.controls_turn_left_buffer = "A".to_string();
+        state.controls_turn_right_buffer = "D".to_string();
+        state.controls_interact_buffer = "E".to_string();
+        state.controls_menu_buffer = "Escape".to_string();
+
+        let result = state.validate_config();
+        assert!(result.is_err());
+        assert!(state.validation_errors.contains_key("resolution_width"));
+    }
+
+    #[test]
+    fn test_validate_config_invalid_audio_volume() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.audio.master_volume = 1.5;
+        state.controls_move_forward_buffer = "W".to_string();
+        state.controls_move_back_buffer = "S".to_string();
+        state.controls_turn_left_buffer = "A".to_string();
+        state.controls_turn_right_buffer = "D".to_string();
+        state.controls_interact_buffer = "E".to_string();
+        state.controls_menu_buffer = "Escape".to_string();
+
+        let result = state.validate_config();
+        assert!(result.is_err());
+        assert!(state.validation_errors.contains_key("master_volume"));
+    }
+
+    #[test]
+    fn test_validate_config_invalid_key_binding() {
+        let mut state = ConfigEditorState::new();
+        state.controls_move_forward_buffer = "InvalidKey".to_string();
+        state.controls_move_back_buffer = "S".to_string();
+        state.controls_turn_left_buffer = "A".to_string();
+        state.controls_turn_right_buffer = "D".to_string();
+        state.controls_interact_buffer = "E".to_string();
+        state.controls_menu_buffer = "Escape".to_string();
+
+        let result = state.validate_config();
+        assert!(result.is_err());
+        assert!(state.validation_errors.contains_key("move_forward"));
+    }
+
+    #[test]
+    fn test_validate_config_near_far_clip_order() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.camera.near_clip = 10.0;
+        state.game_config.camera.far_clip = 5.0; // far_clip < near_clip
+        state.controls_move_forward_buffer = "W".to_string();
+        state.controls_move_back_buffer = "S".to_string();
+        state.controls_turn_left_buffer = "A".to_string();
+        state.controls_turn_right_buffer = "D".to_string();
+        state.controls_interact_buffer = "E".to_string();
+        state.controls_menu_buffer = "Escape".to_string();
+
+        let result = state.validate_config();
+        assert!(result.is_err());
+        assert!(state.validation_errors.contains_key("clip_planes"));
+    }
+
+    #[test]
+    fn test_reset_to_defaults_clears_changes() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.graphics.resolution = (2560, 1440);
+        state.game_config.audio.master_volume = 0.5;
+
+        // Simulate reset
+        state.game_config = GameConfig::default();
+        state.update_edit_buffers();
+
+        assert_eq!(state.game_config.graphics.resolution, (1280, 720));
+        assert_eq!(state.game_config.audio.master_volume, 0.8);
+    }
+
+    #[test]
+    fn test_graphics_preset_low() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.graphics.resolution = (2560, 1440);
+        state.game_config.graphics.msaa_samples = 16;
+        state.game_config.graphics.shadow_quality = ShadowQuality::Ultra;
+
+        // Apply low preset
+        state.game_config.graphics.resolution = (1280, 720);
+        state.game_config.graphics.msaa_samples = 1;
+        state.game_config.graphics.shadow_quality = ShadowQuality::Low;
+
+        assert_eq!(state.game_config.graphics.resolution, (1280, 720));
+        assert_eq!(state.game_config.graphics.msaa_samples, 1);
+        assert_eq!(
+            state.game_config.graphics.shadow_quality,
+            ShadowQuality::Low
+        );
+    }
+
+    #[test]
+    fn test_graphics_preset_high() {
+        let mut state = ConfigEditorState::new();
+        // Apply high preset
+        state.game_config.graphics.resolution = (2560, 1440);
+        state.game_config.graphics.msaa_samples = 8;
+        state.game_config.graphics.shadow_quality = ShadowQuality::High;
+
+        assert_eq!(state.game_config.graphics.resolution, (2560, 1440));
+        assert_eq!(state.game_config.graphics.msaa_samples, 8);
+        assert_eq!(
+            state.game_config.graphics.shadow_quality,
+            ShadowQuality::High
+        );
     }
 }
