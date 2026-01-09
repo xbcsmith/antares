@@ -1,6 +1,24 @@
 # Next Plans
 
+## Generic
+
+### Campaign Data Documentation
+
+Document the campaign data structure, including all the RON files that make up a campaign, and how they relate to each other.
+
+[campaign data documentation](./campaign_data_documentation_plan.md)
+
 ## SDK
+
+### Map Editor Events
+
+Campaign Builder --> Map Editor --> Select Map --> Edit Map. Need to be able to edit events on the map editor. Events can currently be created and removed, but not edited after creation.
+
+[event editing implementation plan](./event_editing_implementation_plan.md)
+
+### Config Editor Implementation
+
+[config editor implementation](./config_editor_implementation_plan.md)
 
 ### Metadata Editor
 
@@ -29,9 +47,6 @@ Unable to create new nodes makes it impossible to create dialog trees.
 
 ✅ COMPLETED - [remove per tile event triggers implementation](./remove_per_tile_event_triggers_implementation_plan.md)
 
-### Config Editor Implementation
-
-[config editor implementation](./config_editor_implementation_plan.md)
 
 ### Portrait Support Implementation
 
@@ -42,6 +57,46 @@ Unable to create new nodes makes it impossible to create dialog trees.
 ✅ COMPLETED - Need to be able to set starting position for player characters in map editor. (It is done in the campaign.ron)
 
 ## Game Engine
+
+### Procedural Meshes Implementation
+
+[procedural meshes implementation](./procedural_meshes_implementation_plan.md)
+
+### Ingame Dialog System
+
+Need to represent and display dialog trees in the game engine.
+
+bevy_talks is a strong choice because it natively supports RON-based dialogue assets and handles the complex state transitions between dialogue nodes for you.
+
+1. Data-to-Logic Mapping
+While your custom RON format differs slightly from the default bevy_talks schema, the crate is designed to load .talk.ron files directly via its ron_loader module.
+
+    Built-in Loader: You can load your dialogue with a simple handle: let handle: Handle<TalkData> = asset_server.load("dialogue.talk.ron");.
+    Entity-Graph Approach: When you initiate a talk, the plugin spawns the entire dialogue tree as a graph of Bevy Entities. Each dialogue node in your RON becomes an entity with a Talk or CurrentNode component.
+    Events: To advance the dialogue or handle choices, you send events like NextActionRequest or ChooseActionRequest. The plugin then updates the CurrentNode automatically.
+
+2. Implementation of the Floating Text Box
+To achieve a "2.5D retro" floating effect that works with your procedural meshes, follow this technical pattern:
+
+    World-Space Text (Text2d): Use Bevy 0.15's Text2d component instead of UI nodes. This allows the dialogue box to exist at a specific 3D coordinate (e.g., Vec3(0.0, 2.5, 0.0) above your NPC) rather than being stuck to the screen corners.
+    Billboard Component: To ensure the text box is always readable from any angle in your 2.5D world, use a Billboard plugin or a system that forces the text entity to rotate and face the Camera3d.
+    Procedural Background: Since you are already generating meshes, you can spawn a simple Mesh3d (using a Cuboid or Plane) directly behind the text to act as the "bubble" background.
+
+3. Workflow for your specific RON
+Because your RON includes custom fields like associated_quest and actions: [TriggerEvent(...)], you can extend bevy_talks by listening for the specific entity changes it triggers:
+
+    System: Create a system that queries for Changed<CurrentNode>.
+    Logic: When the node changes, read the text from your loaded TalkData asset.
+    Display: Update the Text2d component on your floating box entity.
+    Custom Actions: When the plugin reaches a node with your TriggerEvent, use a Bevy EventWriter to fire off your recruitment or quest logic in Rust.
+
+Recommended Tooling:
+
+    bevy_talks: Best for RON-driven data-to-ECS dialogue graphs.
+    bevy_text_popup: Useful for quick event-based text triggers.
+    bevy_animated_text: Adds the "retro" typewriter effect to your Text2d dialogue.
+
+[dialog system implementation](./dialog_system_implementation_plan.md)
 
 ### Character Definition updates
 

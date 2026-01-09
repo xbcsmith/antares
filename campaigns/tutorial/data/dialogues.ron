@@ -47,6 +47,24 @@
         name: "Default Character Recruitment",
         root_node: 1,
         nodes: {
+            2: (
+                id: 2,
+                text: "Excellent! I\'m ready to join your adventure.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+            3: (
+                id: 3,
+                text: "I\'ll head to the inn right away. See you there!",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
             1: (
                 id: 1,
                 text: "Hello there. My name is {CHARACTER_NAME}. Can I join your party?",
@@ -57,7 +75,9 @@
                         target_node: Some(2),
                         conditions: [],
                         actions: [
-                            TriggerEvent(event_name: "recruit_character_to_party"),
+                            TriggerEvent(
+                                event_name: "recruit_character_to_party",
+                            ),
                         ],
                         ends_dialogue: false,
                     ),
@@ -66,7 +86,9 @@
                         target_node: Some(3),
                         conditions: [],
                         actions: [
-                            TriggerEvent(event_name: "recruit_character_to_inn"),
+                            TriggerEvent(
+                                event_name: "recruit_character_to_inn",
+                            ),
                         ],
                         ends_dialogue: false,
                     ),
@@ -81,24 +103,6 @@
                 conditions: [],
                 actions: [],
                 is_terminal: false,
-            ),
-            2: (
-                id: 2,
-                text: "Excellent! I'm ready to join your adventure.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
-            ),
-            3: (
-                id: 3,
-                text: "I'll head to the inn right away. See you there!",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
             ),
         },
         speaker_name: None,

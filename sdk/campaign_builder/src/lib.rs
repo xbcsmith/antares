@@ -398,6 +398,7 @@ struct CampaignBuilderApp {
     validation_filter: ValidationFilter,
     validation_focus_asset: Option<PathBuf>,
     show_about_dialog: bool,
+    asset_type_filter: Option<asset_manager::AssetType>,
     show_unsaved_warning: bool,
     pending_action: Option<PendingAction>,
     file_tree: Vec<FileNode>,
@@ -512,6 +513,7 @@ impl Default for CampaignBuilderApp {
             validation_filter: ValidationFilter::All,
             validation_focus_asset: None,
             show_about_dialog: false,
+            asset_type_filter: None,
             show_unsaved_warning: false,
             pending_action: None,
             file_tree: Vec::new(),
@@ -949,10 +951,10 @@ impl CampaignBuilderApp {
 
         // Cross-reference validation: Check for proficiencies required by items
         for item in &self.items {
-            if let Some(ref required_prof) = item.required_proficiency {
+            if let Some(required_prof) = item.required_proficiency() {
                 referenced_proficiencies.insert(required_prof.clone());
 
-                let prof_exists = self.proficiencies.iter().any(|p| &p.id == required_prof);
+                let prof_exists = self.proficiencies.iter().any(|p| &p.id == &required_prof);
                 if !prof_exists {
                     results.push(validation::ValidationResult::error(
                         validation::ValidationCategory::Proficiencies,
@@ -1248,6 +1250,39 @@ impl CampaignBuilderApp {
     }
 
     /// Get the next available class ID (string-based, numeric format)
+    /// Discovers map files in the maps directory by scanning for .ron files
+    ///
+    /// This function scans the actual maps directory and returns paths to all .ron files found,
+    /// rather than inferring filenames from map IDs. This allows maps to have any filename.
+    ///
+    /// # Returns
+    ///
+    /// A vector of map file paths relative to the campaign directory.
+    fn discover_map_files(&self) -> Vec<String> {
+        let mut map_files = Vec::new();
+
+        if let Some(ref campaign_dir) = self.campaign_dir {
+            let maps_path = campaign_dir.join(&self.campaign.maps_dir);
+
+            if let Ok(entries) = std::fs::read_dir(&maps_path) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.extension().and_then(|s| s.to_str()) == Some("ron") {
+                        // Store relative path from campaign dir
+                        if let Ok(rel_path) = path.strip_prefix(campaign_dir) {
+                            map_files.push(rel_path.display().to_string());
+                        }
+                    }
+                }
+            }
+
+            // Sort for consistent ordering
+            map_files.sort();
+        }
+
+        map_files
+    }
+
     fn next_available_class_id(&self) -> String {
         let max_id = self
             .classes_editor_state
@@ -4278,18 +4313,8 @@ impl CampaignBuilderApp {
                     self.status_message = format!("Failed to scan assets: {}", e);
                 } else {
                     // Initialize data file tracking
-                    // Collect map file paths from loaded maps
-                    let map_file_paths: Vec<String> = self
-                        .maps
-                        .iter()
-                        .map(|m| {
-                            format!(
-                                "{}/{}.ron",
-                                self.campaign.maps_dir.trim_end_matches('/'),
-                                m.id
-                            )
-                        })
-                        .collect();
+                    // Discover actual map files from the maps directory
+                    let map_file_paths = self.discover_map_files();
 
                     manager.init_data_files(
                         &self.campaign.items_file,
@@ -4397,14 +4422,35 @@ impl CampaignBuilderApp {
             // Asset type filters with counts
             ui.horizontal_wrapped(|ui| {
                 ui.label("Filter:");
-                let _ = ui.selectable_label(true, "All");
+
+                // "All" button
+                if ui
+                    .selectable_label(
+                        self.asset_type_filter.is_none(),
+                        format!("All ({})", manager.assets().len()),
+                    )
+                    .clicked()
+                {
+                    self.asset_type_filter = None;
+                    self.status_message = "Showing all asset types".to_string();
+                }
+
+                // Individual type filters
                 for asset_type in asset_manager::AssetType::all() {
                     let count = manager.asset_count_by_type(asset_type);
                     if count > 0 {
-                        let _ = ui.selectable_label(
-                            false,
-                            format!("{} {}", asset_type.display_name(), count),
-                        );
+                        let is_selected = self.asset_type_filter == Some(asset_type);
+                        if ui
+                            .selectable_label(
+                                is_selected,
+                                format!("{} ({})", asset_type.display_name(), count),
+                            )
+                            .clicked()
+                        {
+                            self.asset_type_filter = Some(asset_type);
+                            self.status_message =
+                                format!("Filtered by {}", asset_type.display_name());
+                        }
                     }
                 }
             });
@@ -4675,7 +4721,19 @@ impl CampaignBuilderApp {
                 let mut sorted_assets: Vec<_> = manager.assets().iter().collect();
                 sorted_assets.sort_by(|a, b| a.0.cmp(b.0));
 
-                for (path, asset) in sorted_assets {
+                // Apply asset type filter
+                let filtered_assets: Vec<_> = sorted_assets
+                    .iter()
+                    .filter(|(_, asset)| {
+                        match self.asset_type_filter {
+                            None => true, // Show all
+                            Some(filter_type) => asset.asset_type == filter_type,
+                        }
+                    })
+                    .copied()
+                    .collect();
+
+                for (path, asset) in filtered_assets {
                     ui.group(|ui| {
                         ui.vertical(|ui| {
                             // Asset header
