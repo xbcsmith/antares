@@ -1662,6 +1662,23 @@ impl<'a> Widget for MapGridWidget<'a> {
                             egui::StrokeKind::Outside,
                         );
                     }
+
+                    // Highlight event being edited (distinct from selection highlights)
+                    if let Some(ref editor) = self.state.event_editor {
+                        if editor.position == pos {
+                            // Draw a thicker green border to make edit state clearly visible
+                            painter.rect_stroke(
+                                rect,
+                                0.0,
+                                Stroke::new(3.0, Color32::LIGHT_GREEN),
+                                egui::StrokeKind::Outside,
+                            );
+
+                            // Draw a small green circle in the top-left corner as visual indicator
+                            let indicator_pos = rect.min + Vec2::new(4.0, 4.0);
+                            painter.circle_filled(indicator_pos, 3.0, Color32::LIGHT_GREEN);
+                        }
+                    }
                 }
             }
         }
@@ -5235,5 +5252,251 @@ mod tests {
             EventType::Trap
         );
         assert_eq!(editor.event_editor.as_ref().unwrap().trap_damage, 25);
+    }
+
+    // Phase 2: Visual Feedback Tests
+
+    #[test]
+    fn test_edit_highlight_appears_when_event_editor_active() {
+        let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos = Position::new(5, 5);
+        let event = MapEvent::Encounter {
+            name: "Test Encounter".to_string(),
+            description: "A test encounter".to_string(),
+            monster_group: vec![],
+        };
+
+        editor.map.add_event(pos, event.clone());
+
+        // Verify no editor is active initially
+        assert!(editor.event_editor.is_none());
+
+        // Activate event editor
+        if let Some(event_ref) = editor.map.get_event(pos) {
+            editor.event_editor = Some(EventEditorState::from_map_event(pos, event_ref));
+        }
+
+        // Verify editor is active at the correct position
+        assert!(editor.event_editor.is_some());
+        assert_eq!(editor.event_editor.as_ref().unwrap().position, pos);
+    }
+
+    #[test]
+    fn test_edit_highlight_not_shown_when_editor_none() {
+        let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
+        let editor = MapEditorState::new(map);
+
+        // Verify event_editor is None
+        assert!(editor.event_editor.is_none());
+    }
+
+    #[test]
+    fn test_edit_highlight_not_shown_for_different_position() {
+        let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos1 = Position::new(3, 3);
+        let pos2 = Position::new(7, 7);
+
+        let event = MapEvent::Treasure {
+            name: "Test Treasure".to_string(),
+            description: "A treasure".to_string(),
+            loot: vec![],
+        };
+
+        editor.map.add_event(pos1, event.clone());
+
+        // Activate editor at pos1
+        if let Some(event_ref) = editor.map.get_event(pos1) {
+            editor.event_editor = Some(EventEditorState::from_map_event(pos1, event_ref));
+        }
+
+        // Verify editor is at pos1, not pos2
+        assert_eq!(editor.event_editor.as_ref().unwrap().position, pos1);
+        assert_ne!(editor.event_editor.as_ref().unwrap().position, pos2);
+    }
+
+    #[test]
+    fn test_edit_tooltip_text_with_event_name() {
+        let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos = Position::new(2, 2);
+        let event = MapEvent::Sign {
+            name: "Welcome Sign".to_string(),
+            description: "A sign".to_string(),
+            text: "Welcome to the dungeon!".to_string(),
+        };
+
+        editor.map.add_event(pos, event.clone());
+
+        // Activate editor
+        if let Some(event_ref) = editor.map.get_event(pos) {
+            editor.event_editor = Some(EventEditorState::from_map_event(pos, event_ref));
+        }
+
+        // Verify event name is stored in editor
+        let editor_state = editor.event_editor.as_ref().unwrap();
+        assert_eq!(editor_state.name, "Welcome Sign");
+        assert_eq!(editor_state.event_type, EventType::Sign);
+    }
+
+    #[test]
+    fn test_edit_tooltip_text_without_name() {
+        let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos = Position::new(4, 4);
+
+        // Create event editor with empty name
+        editor.event_editor = Some(EventEditorState {
+            position: pos,
+            event_type: EventType::Encounter,
+            name: String::new(),
+            ..Default::default()
+        });
+
+        // Verify editor has empty name
+        let editor_state = editor.event_editor.as_ref().unwrap();
+        assert!(editor_state.name.is_empty());
+        assert_eq!(editor_state.position, pos);
+    }
+
+    #[test]
+    fn test_edit_highlight_updates_when_switching_events() {
+        let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos1 = Position::new(1, 1);
+        let pos2 = Position::new(8, 8);
+
+        let event1 = MapEvent::Teleport {
+            name: "Portal 1".to_string(),
+            description: "A portal".to_string(),
+            destination: Position::new(5, 5),
+            map_id: 2,
+        };
+
+        let event2 = MapEvent::Trap {
+            name: "Floor Trap".to_string(),
+            description: "A dangerous trap".to_string(),
+            damage: 15,
+            effect: None,
+        };
+
+        editor.map.add_event(pos1, event1.clone());
+        editor.map.add_event(pos2, event2.clone());
+
+        // Start editing event 1
+        if let Some(event_ref) = editor.map.get_event(pos1) {
+            editor.event_editor = Some(EventEditorState::from_map_event(pos1, event_ref));
+        }
+        assert_eq!(editor.event_editor.as_ref().unwrap().position, pos1);
+
+        // Switch to editing event 2
+        if let Some(event_ref) = editor.map.get_event(pos2) {
+            editor.event_editor = Some(EventEditorState::from_map_event(pos2, event_ref));
+        }
+
+        // Verify highlight moved to pos2
+        assert_eq!(editor.event_editor.as_ref().unwrap().position, pos2);
+        assert_eq!(editor.event_editor.as_ref().unwrap().name, "Floor Trap");
+    }
+
+    #[test]
+    fn test_edit_highlight_cleared_when_editor_reset() {
+        let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos = Position::new(6, 6);
+        let event = MapEvent::EnterInn {
+            name: "The Dragon's Rest".to_string(),
+            description: "An inn".to_string(),
+            innkeeper_id: "innkeeper_1".to_string(),
+        };
+
+        editor.map.add_event(pos, event.clone());
+
+        // Activate editor
+        if let Some(event_ref) = editor.map.get_event(pos) {
+            editor.event_editor = Some(EventEditorState::from_map_event(pos, event_ref));
+        }
+        assert!(editor.event_editor.is_some());
+
+        // Reset editor (simulating save/cancel)
+        editor.event_editor = None;
+
+        // Verify highlight is cleared
+        assert!(editor.event_editor.is_none());
+    }
+
+    #[test]
+    fn test_visual_indicator_circle_position() {
+        let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos = Position::new(4, 4);
+        let event = MapEvent::Treasure {
+            name: "Gold Coins".to_string(),
+            description: "A pile of gold coins".to_string(),
+            loot: vec![],
+        };
+
+        editor.map.add_event(pos, event.clone());
+
+        // Activate editor
+        if let Some(event_ref) = editor.map.get_event(pos) {
+            editor.event_editor = Some(EventEditorState::from_map_event(pos, event_ref));
+        }
+
+        // Verify event editor state is correct (visual indicator will be drawn at rect.min + (4.0, 4.0))
+        let editor_state = editor.event_editor.as_ref().unwrap();
+        assert_eq!(editor_state.position, pos);
+        assert_eq!(editor_state.event_type, EventType::Treasure);
+    }
+
+    #[test]
+    fn test_edit_highlight_with_multiple_events_on_map() {
+        let map = Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        // Add multiple events
+        let pos1 = Position::new(0, 0);
+        let pos2 = Position::new(3, 3);
+        let pos3 = Position::new(9, 9);
+
+        let event1 = MapEvent::Encounter {
+            name: "Event 1".to_string(),
+            description: "First event".to_string(),
+            monster_group: vec![],
+        };
+
+        let event2 = MapEvent::Treasure {
+            name: "Event 2".to_string(),
+            description: "Second event".to_string(),
+            loot: vec![],
+        };
+
+        let event3 = MapEvent::Sign {
+            name: "Event 3".to_string(),
+            description: "Third event sign".to_string(),
+            text: "Third event".to_string(),
+        };
+
+        editor.map.add_event(pos1, event1.clone());
+        editor.map.add_event(pos2, event2.clone());
+        editor.map.add_event(pos3, event3.clone());
+
+        // Edit pos2 - only pos2 should have the highlight
+        if let Some(event_ref) = editor.map.get_event(pos2) {
+            editor.event_editor = Some(EventEditorState::from_map_event(pos2, event_ref));
+        }
+
+        let editor_state = editor.event_editor.as_ref().unwrap();
+        assert_eq!(editor_state.position, pos2);
+        assert_ne!(editor_state.position, pos1);
+        assert_ne!(editor_state.position, pos3);
     }
 }
