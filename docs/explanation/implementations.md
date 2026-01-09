@@ -388,6 +388,277 @@ cargo nextest run --all-features
 Phase 3 of the consistency plan will:
 
 - Add `validate_character_ids()` method to validate character references
+
+## Phase 3: Campaign Builder UI Consistency - Add Validation for Characters and Proficiencies - COMPLETED
+
+### Summary
+
+Implemented Phase 3 of the Campaign Builder UI Consistency plan: added comprehensive validation methods for Character and Proficiency data types, integrated them into the validation pipeline, and created extensive test coverage. Updated the ValidationCategory enum to include Proficiencies. All 1177 tests pass with no warnings or errors.
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/validation.rs`
+
+**3.1 Extended `ValidationCategory` Enum (Lines 25-57)**
+
+Added `Proficiencies` variant to the enum:
+
+```rust
+pub enum ValidationCategory {
+    // ... existing variants ...
+    /// Character definitions
+    Characters,
+    /// Proficiency definitions
+    Proficiencies,
+    /// Asset files (images, sounds, etc.)
+    Assets,
+}
+```
+
+**3.2 Updated `display_name()` Method (Lines 75-93)**
+
+Added display string for Proficiencies:
+
+```rust
+ValidationCategory::Proficiencies => "Proficiencies",
+```
+
+**3.3 Updated `all()` Method (Lines 99-117)**
+
+Added Proficiencies to the vector in EditorTab order:
+
+```rust
+pub fn all() -> Vec<ValidationCategory> {
+    vec![
+        // ... existing entries ...
+        ValidationCategory::Characters,
+        ValidationCategory::Proficiencies,
+        ValidationCategory::Assets,
+    ]
+}
+```
+
+**3.4 Updated `icon()` Method (Lines 120-138)**
+
+Added icon for Proficiencies category:
+
+```rust
+ValidationCategory::Proficiencies => "📚",
+```
+
+#### File: `sdk/campaign_builder/src/lib.rs`
+
+**3.5 Added `validate_character_ids()` Method (Lines 781-853)**
+
+Implemented comprehensive character validation:
+
+- Check for duplicate character IDs
+- Check for empty character IDs (error)
+- Check for empty character names (warning)
+- Validate class references (character.class_id must exist in classes)
+- Validate race references (character.race_id must exist in races)
+- Add passed message if all validations succeed
+- Add info message if no characters are defined
+
+Each validation error/warning includes the category and a descriptive message.
+
+**3.6 Added `validate_proficiency_ids()` Method (Lines 855-975)**
+
+Implemented comprehensive proficiency validation with cross-references:
+
+- Check for duplicate proficiency IDs
+- Check for empty proficiency IDs (error)
+- Check for empty proficiency names (warning)
+- Cross-reference: validate proficiencies referenced by classes (error if missing)
+- Cross-reference: validate proficiencies referenced by races (error if missing)
+- Cross-reference: validate proficiencies required by items (error if missing)
+- Info messages for unreferenced proficiencies (not used by any class, race, or item)
+- Add passed message if all validations succeed
+- Add info message if no proficiencies are defined
+
+**3.7 Updated `validate_campaign()` Method (Lines 1958-1979)**
+
+Integrated new validation methods in EditorTab order:
+
+```rust
+// Validate data IDs for uniqueness (in EditorTab order)
+self.validation_errors.extend(self.validate_item_ids());
+self.validation_errors.extend(self.validate_spell_ids());
+self.validation_errors.extend(self.validate_condition_ids());
+self.validation_errors.extend(self.validate_monster_ids());
+self.validation_errors.extend(self.validate_map_ids());
+// Quests validated elsewhere
+// Classes validated elsewhere
+// Races validated elsewhere
+self.validation_errors.extend(self.validate_character_ids());  // NEW
+// Dialogues validated elsewhere
+self.validation_errors.extend(self.validate_npc_ids());
+self.validation_errors.extend(self.validate_proficiency_ids());  // NEW
+```
+
+**3.8 Added Comprehensive Test Suite (Lines 5439-5766)**
+
+Added 10 new test functions covering all validation scenarios:
+
+1. `test_validate_character_ids_duplicate()` - Detects duplicate character IDs
+2. `test_validate_character_ids_empty_id()` - Detects empty character IDs
+3. `test_validate_character_ids_empty_name_warning()` - Warns on empty names
+4. `test_validate_character_ids_invalid_class_reference()` - Detects invalid class references
+5. `test_validate_character_ids_invalid_race_reference()` - Detects invalid race references
+6. `test_validate_character_ids_valid()` - Passes valid characters with proper references
+7. `test_validate_proficiency_ids_duplicate()` - Detects duplicate proficiency IDs
+8. `test_validate_proficiency_ids_empty_id()` - Detects empty proficiency IDs
+9. `test_validate_proficiency_ids_empty_name_warning()` - Warns on empty names
+10. `test_validate_proficiency_ids_referenced_by_class()` - Validates class references
+11. `test_validate_proficiency_ids_class_references_nonexistent()` - Detects missing proficiencies in classes
+12. `test_validate_proficiency_ids_race_references_nonexistent()` - Detects missing proficiencies in races
+13. `test_validate_proficiency_ids_item_requires_nonexistent()` - Detects missing proficiencies in items
+14. `test_validate_proficiency_ids_unreferenced_info()` - Detects unreferenced proficiencies
+
+### Architecture Compliance
+
+✅ ValidationCategory enum extended with new variant (Proficiencies)
+✅ Display name, icon, and ordering methods updated to include Proficiencies
+✅ Characters already present in ValidationCategory enum (added in Phase 2)
+✅ Validation methods follow existing pattern and conventions
+✅ Methods integrated into validate_campaign() in EditorTab order
+✅ Cross-reference validation checks all relevant data types (classes, races, items)
+✅ Error severity levels appropriate (Error for missing references, Warning for missing names, Info for unused items)
+✅ No modification to core data structures or public APIs
+✅ Comprehensive test coverage with 14 new unit tests
+
+### Validation Results
+
+**Code Compilation**: ✅ PASS
+
+```
+cargo check --all-targets --all-features
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
+```
+
+**Clippy Linting**: ✅ PASS (zero warnings)
+
+```
+cargo clippy --all-targets --all-features -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+```
+
+**Code Formatting**: ✅ PASS
+
+```
+cargo fmt --all
+Command executed successfully
+```
+
+**Test Suite**: ✅ PASS (all 1177 tests)
+
+```
+cargo nextest run --all-features
+    Summary [2.312s] 1177 tests run: 1177 passed, 0 skipped
+```
+
+### Files Modified
+
+1. `sdk/campaign_builder/src/validation.rs`
+
+   - Added `Proficiencies` variant to `ValidationCategory` enum
+   - Updated `display_name()` to return "Proficiencies"
+   - Updated `all()` to include Proficiencies in display order
+   - Updated `icon()` to return "📚" for Proficiencies
+
+2. `sdk/campaign_builder/src/lib.rs`
+
+   - Added `validate_character_ids()` method (73 lines) for character validation
+   - Added `validate_proficiency_ids()` method (121 lines) for proficiency validation with cross-references
+   - Updated `validate_campaign()` to call both new validation methods in EditorTab order
+   - Added 14 comprehensive unit tests covering all validation scenarios
+
+### Deliverables Completed
+
+- [x] `ValidationCategory` enum extended with `Proficiencies` variant
+- [x] `display_name()` method updated for Proficiencies
+- [x] `all()` method updated to include Proficiencies in correct order
+- [x] `icon()` method updated with 📚 icon for Proficiencies
+- [x] `validate_character_ids()` method implemented with full validation logic
+- [x] `validate_proficiency_ids()` method implemented with cross-reference validation
+- [x] `validate_campaign()` updated to call new validators in EditorTab order
+- [x] 14 comprehensive unit tests added and passing
+- [x] All quality checks pass (fmt, check, clippy, tests)
+
+### Success Criteria Met
+
+✅ Duplicate character IDs flagged as errors
+✅ Character class/race references validated against existing definitions
+✅ Empty character IDs and names detected (ID = error, name = warning)
+✅ Duplicate proficiency IDs flagged as errors
+✅ Proficiency cross-references validated (classes, races, items)
+✅ Missing proficiency references detected as errors
+✅ Unreferenced proficiencies flagged as info (not used anywhere)
+✅ All validation errors appear in Validation panel
+✅ Validation methods follow existing code patterns and style
+✅ All 14 new tests pass with various scenarios
+✅ No regressions introduced (all 1177 tests passing)
+✅ ValidationCategory ordering matches EditorTab sequence exactly
+
+### Implementation Details
+
+**Character Validation Logic**:
+
+- Iterates through `self.characters_editor_state.characters`
+- Uses HashSet to track seen IDs and detect duplicates
+- Checks class/race existence by iterating through respective editor states
+- Gracefully handles empty references (doesn't error on empty class_id if character doesn't reference one)
+
+**Proficiency Validation Logic**:
+
+- Iterates through `self.proficiencies` vector
+- Detects duplicates using HashSet pattern
+- Collects all referenced proficiency IDs from:
+  - `self.classes_editor_state.classes[].proficiencies`
+  - `self.races_editor_state.races[].proficiencies`
+  - `self.items[].required_proficiency` (Option field)
+- Cross-references: verifies each referenced proficiency exists
+- Detects unreferenced proficiencies by checking if ID appears in referenced set
+
+**Validation Severity Levels**:
+
+- Error: Duplicate IDs, empty IDs, missing references
+- Warning: Empty names (should be filled but not critical)
+- Info: No data defined, unreferenced proficiencies (informational only)
+- Passed: Category validated successfully with no errors
+
+### Benefits Achieved
+
+- Comprehensive validation prevents invalid character and proficiency definitions
+- Cross-reference validation catches configuration errors early
+- Info messages about unreferenced proficiencies help identify unused definitions
+- Validation errors appear in Validation panel with proper categorization
+- Tests ensure validation logic remains correct through future changes
+
+### Test Coverage
+
+14 new unit tests covering:
+
+- Duplicate detection (characters and proficiencies)
+- Empty ID/name validation
+- Reference validation (class, race, item)
+- Cross-reference validation (missing referenced proficiencies)
+- Info message generation (unreferenced items)
+- Valid data pass-through
+
+### Related Files
+
+- `sdk/campaign_builder/src/validation.rs` - ValidationCategory enum and display methods
+- `sdk/campaign_builder/src/lib.rs` - CampaignBuilderApp and validation methods
+- `docs/explanation/campaign_builder_ui_consistency_plan.md` - Full implementation plan (Phases 1-4)
+
+### Next Steps (Phase 4)
+
+Phase 4 of the consistency plan will:
+
+- Cross-panel verification to ensure EditorTab ordering is consistent across all panels (Metadata, Assets, Validation)
+- Update user-facing documentation/screenshots to show updated validation categories
+- Comprehensive manual testing of validation UI with various error conditions
 - Add `validate_proficiency_ids()` method to validate proficiency usage and uniqueness
 - Update `ValidationCategory` enum to include Characters and Proficiencies
 - Call new validation methods as part of `validate_campaign()`

@@ -51,6 +51,8 @@ pub enum ValidationCategory {
     Races,
     /// Character definitions
     Characters,
+    /// Proficiency definitions
+    Proficiencies,
     /// Asset files (images, sounds, etc.)
     Assets,
 }
@@ -88,6 +90,7 @@ impl ValidationCategory {
             ValidationCategory::Classes => "Classes",
             ValidationCategory::Races => "Races",
             ValidationCategory::Characters => "Characters",
+            ValidationCategory::Proficiencies => "Proficiencies",
             ValidationCategory::Assets => "Assets",
         }
     }
@@ -112,6 +115,7 @@ impl ValidationCategory {
             ValidationCategory::Classes,
             ValidationCategory::Races,
             ValidationCategory::Characters,
+            ValidationCategory::Proficiencies,
             ValidationCategory::Assets,
         ]
     }
@@ -133,6 +137,7 @@ impl ValidationCategory {
             ValidationCategory::Classes => "⚔️",
             ValidationCategory::Races => "👤",
             ValidationCategory::Characters => "🧑",
+            ValidationCategory::Proficiencies => "📚",
             ValidationCategory::Assets => "📦",
         }
     }

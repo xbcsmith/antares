@@ -778,6 +778,225 @@ impl CampaignBuilderApp {
         errors
     }
 
+    /// Validate character IDs for uniqueness and references
+    ///
+    /// Returns validation errors for:
+    /// - Duplicate character IDs
+    /// - Empty character IDs
+    /// - Empty character names (warning)
+    /// - Non-existent class references
+    /// - Non-existent race references
+    fn validate_character_ids(&self) -> Vec<validation::ValidationResult> {
+        let mut results = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for character in &self.characters_editor_state.characters {
+            // Check for duplicate IDs
+            if !seen_ids.insert(character.id.clone()) {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Characters,
+                    format!("Duplicate character ID: '{}'", character.id),
+                ));
+            }
+
+            // Check for empty IDs
+            if character.id.is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Characters,
+                    "Character has empty ID",
+                ));
+            }
+
+            // Check for empty names
+            if character.name.is_empty() {
+                results.push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Characters,
+                    format!("Character '{}' has empty name", character.id),
+                ));
+            }
+
+            // Validate class exists
+            let class_exists = self
+                .classes_editor_state
+                .classes
+                .iter()
+                .any(|c| c.id == character.class_id);
+            if !class_exists && !character.class_id.is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Characters,
+                    format!(
+                        "Character '{}' references non-existent class '{}'",
+                        character.id, character.class_id
+                    ),
+                ));
+            }
+
+            // Validate race exists
+            let race_exists = self
+                .races_editor_state
+                .races
+                .iter()
+                .any(|r| r.id == character.race_id);
+            if !race_exists && !character.race_id.is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Characters,
+                    format!(
+                        "Character '{}' references non-existent race '{}'",
+                        character.id, character.race_id
+                    ),
+                ));
+            }
+        }
+
+        // Add passed message if no characters or all valid
+        if self.characters_editor_state.characters.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Characters,
+                "No characters defined",
+            ));
+        } else if results
+            .iter()
+            .all(|r| r.severity != validation::ValidationSeverity::Error)
+        {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Characters,
+                format!(
+                    "{} character(s) validated",
+                    self.characters_editor_state.characters.len()
+                ),
+            ));
+        }
+
+        results
+    }
+
+    /// Validate proficiency IDs for uniqueness and cross-references
+    ///
+    /// Returns validation errors for:
+    /// - Duplicate proficiency IDs
+    /// - Empty proficiency IDs
+    /// - Empty proficiency names (warning)
+    /// - Proficiencies referenced by classes that don't exist
+    /// - Proficiencies referenced by races that don't exist
+    /// - Proficiencies required by items that don't exist
+    /// - Info messages for unreferenced proficiencies
+    fn validate_proficiency_ids(&self) -> Vec<validation::ValidationResult> {
+        let mut results = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for proficiency in &self.proficiencies {
+            // Check for duplicate IDs
+            if !seen_ids.insert(proficiency.id.clone()) {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Proficiencies,
+                    format!("Duplicate proficiency ID: '{}'", proficiency.id),
+                ));
+            }
+
+            // Check for empty IDs
+            if proficiency.id.is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Proficiencies,
+                    "Proficiency has empty ID",
+                ));
+            }
+
+            // Check for empty names
+            if proficiency.name.is_empty() {
+                results.push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Proficiencies,
+                    format!("Proficiency '{}' has empty name", proficiency.id),
+                ));
+            }
+        }
+
+        // Cross-reference validation: Check for proficiencies referenced by classes
+        let mut referenced_proficiencies = std::collections::HashSet::new();
+        for class in &self.classes_editor_state.classes {
+            for prof_id in &class.proficiencies {
+                referenced_proficiencies.insert(prof_id.clone());
+
+                let prof_exists = self.proficiencies.iter().any(|p| &p.id == prof_id);
+                if !prof_exists {
+                    results.push(validation::ValidationResult::error(
+                        validation::ValidationCategory::Proficiencies,
+                        format!(
+                            "Class '{}' references non-existent proficiency '{}'",
+                            class.id, prof_id
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // Cross-reference validation: Check for proficiencies referenced by races
+        for race in &self.races_editor_state.races {
+            for prof_id in &race.proficiencies {
+                referenced_proficiencies.insert(prof_id.clone());
+
+                let prof_exists = self.proficiencies.iter().any(|p| &p.id == prof_id);
+                if !prof_exists {
+                    results.push(validation::ValidationResult::error(
+                        validation::ValidationCategory::Proficiencies,
+                        format!(
+                            "Race '{}' references non-existent proficiency '{}'",
+                            race.id, prof_id
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // Cross-reference validation: Check for proficiencies required by items
+        for item in &self.items {
+            if let Some(ref required_prof) = item.required_proficiency {
+                referenced_proficiencies.insert(required_prof.clone());
+
+                let prof_exists = self.proficiencies.iter().any(|p| &p.id == required_prof);
+                if !prof_exists {
+                    results.push(validation::ValidationResult::error(
+                        validation::ValidationCategory::Proficiencies,
+                        format!(
+                            "Item '{}' requires non-existent proficiency '{}'",
+                            item.id, required_prof
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // Warning for unreferenced proficiencies
+        for proficiency in &self.proficiencies {
+            if !referenced_proficiencies.contains(&proficiency.id) {
+                results.push(validation::ValidationResult::info(
+                    validation::ValidationCategory::Proficiencies,
+                    format!(
+                        "Proficiency '{}' is not used by any class, race, or item",
+                        proficiency.id
+                    ),
+                ));
+            }
+        }
+
+        // Add passed message if no proficiencies or all valid
+        if self.proficiencies.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Proficiencies,
+                "No proficiencies defined",
+            ));
+        } else if results
+            .iter()
+            .all(|r| r.severity != validation::ValidationSeverity::Error)
+        {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Proficiencies,
+                format!("{} proficiency(ies) validated", self.proficiencies.len()),
+            ));
+        }
+
+        results
+    }
+
     /// Generate category status checks (passed or no data info messages)
     ///
     /// This function checks each data category and adds:
@@ -1767,13 +1986,20 @@ impl CampaignBuilderApp {
             .debug(category::VALIDATION, "validate_campaign() called");
         self.validation_errors.clear();
 
-        // Validate data IDs for uniqueness
+        // Validate data IDs for uniqueness (in EditorTab order)
         self.validation_errors.extend(self.validate_item_ids());
         self.validation_errors.extend(self.validate_spell_ids());
+        self.validation_errors.extend(self.validate_condition_ids());
         self.validation_errors.extend(self.validate_monster_ids());
         self.validation_errors.extend(self.validate_map_ids());
-        self.validation_errors.extend(self.validate_condition_ids());
+        // Quests validated elsewhere
+        // Classes validated elsewhere
+        // Races validated elsewhere
+        self.validation_errors.extend(self.validate_character_ids());
+        // Dialogues validated elsewhere
         self.validation_errors.extend(self.validate_npc_ids());
+        self.validation_errors
+            .extend(self.validate_proficiency_ids());
 
         // Add category status checks (passed or no data info)
         self.validation_errors
@@ -5232,6 +5458,342 @@ mod tests {
             .filter(|e| e.is_error())
             .count();
         assert_eq!(error_count, 0);
+    }
+
+    #[test]
+    fn test_validate_character_ids_duplicate() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add two characters with the same ID
+        let char1 = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(),
+            name: "Hero".to_string(),
+            class_id: "class_1".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+        let char2 = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(), // Duplicate ID
+            name: "Another Hero".to_string(),
+            class_id: "class_1".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char1);
+        app.characters_editor_state.characters.push(char2);
+
+        let results = app.validate_character_ids();
+        let has_duplicate_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("Duplicate character ID"));
+        assert!(has_duplicate_error);
+    }
+
+    #[test]
+    fn test_validate_character_ids_empty_id() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        let char = characters_editor::CharacterEditBuffer {
+            id: "".to_string(), // Empty ID
+            name: "Hero".to_string(),
+            class_id: "class_1".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char);
+
+        let results = app.validate_character_ids();
+        let has_empty_id_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("empty ID"));
+        assert!(has_empty_id_error);
+    }
+
+    #[test]
+    fn test_validate_character_ids_empty_name_warning() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        let char = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(),
+            name: "".to_string(), // Empty name
+            class_id: "class_1".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char);
+
+        let results = app.validate_character_ids();
+        let has_name_warning = results.iter().any(|r| {
+            r.severity == validation::ValidationSeverity::Warning
+                && r.message.contains("empty name")
+        });
+        assert!(has_name_warning);
+    }
+
+    #[test]
+    fn test_validate_character_ids_invalid_class_reference() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        let char = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(),
+            name: "Hero".to_string(),
+            class_id: "nonexistent_class".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char);
+
+        let results = app.validate_character_ids();
+        let has_class_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("non-existent class"));
+        assert!(has_class_error);
+    }
+
+    #[test]
+    fn test_validate_character_ids_invalid_race_reference() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        let char = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(),
+            name: "Hero".to_string(),
+            class_id: "class_1".to_string(),
+            race_id: "nonexistent_race".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char);
+
+        let results = app.validate_character_ids();
+        let has_race_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("non-existent race"));
+        assert!(has_race_error);
+    }
+
+    #[test]
+    fn test_validate_character_ids_valid() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add a class and race that the character can reference
+        app.classes_editor_state
+            .classes
+            .push(classes_editor::ClassEditBuffer {
+                id: "class_1".to_string(),
+                name: "Knight".to_string(),
+                ..Default::default()
+            });
+
+        app.races_editor_state
+            .races
+            .push(races_editor::RaceEditBuffer {
+                id: "race_1".to_string(),
+                name: "Human".to_string(),
+                ..Default::default()
+            });
+
+        let char = characters_editor::CharacterEditBuffer {
+            id: "char_1".to_string(),
+            name: "Hero".to_string(),
+            class_id: "class_1".to_string(),
+            race_id: "race_1".to_string(),
+            ..Default::default()
+        };
+
+        app.characters_editor_state.characters.push(char);
+
+        let results = app.validate_character_ids();
+        let has_pass = results
+            .iter()
+            .any(|r| r.severity == validation::ValidationSeverity::Passed);
+        assert!(has_pass);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_duplicate() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add two proficiencies with the same ID
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "prof_1".to_string(),
+            name: "Longsword".to_string(),
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "prof_1".to_string(), // Duplicate ID
+            name: "Shortsword".to_string(),
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        let results = app.validate_proficiency_ids();
+        let has_duplicate_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("Duplicate proficiency ID"));
+        assert!(has_duplicate_error);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_empty_id() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "".to_string(), // Empty ID
+            name: "Longsword".to_string(),
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        let results = app.validate_proficiency_ids();
+        let has_empty_id_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("empty ID"));
+        assert!(has_empty_id_error);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_empty_name_warning() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "prof_1".to_string(),
+            name: "".to_string(), // Empty name
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        let results = app.validate_proficiency_ids();
+        let has_name_warning = results.iter().any(|r| {
+            r.severity == validation::ValidationSeverity::Warning
+                && r.message.contains("empty name")
+        });
+        assert!(has_name_warning);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_referenced_by_class() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add a proficiency
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "prof_1".to_string(),
+            name: "Longsword".to_string(),
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        // Add a class that references the proficiency
+        app.classes_editor_state
+            .classes
+            .push(classes_editor::ClassEditBuffer {
+                id: "class_1".to_string(),
+                name: "Knight".to_string(),
+                proficiencies: vec!["prof_1".to_string()],
+                ..Default::default()
+            });
+
+        let results = app.validate_proficiency_ids();
+        let has_pass = results
+            .iter()
+            .any(|r| r.severity == validation::ValidationSeverity::Passed);
+        assert!(has_pass);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_class_references_nonexistent() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add a class that references a non-existent proficiency
+        app.classes_editor_state
+            .classes
+            .push(classes_editor::ClassEditBuffer {
+                id: "class_1".to_string(),
+                name: "Knight".to_string(),
+                proficiencies: vec!["nonexistent_prof".to_string()],
+                ..Default::default()
+            });
+
+        let results = app.validate_proficiency_ids();
+        let has_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("references non-existent proficiency"));
+        assert!(has_error);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_race_references_nonexistent() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add a race that references a non-existent proficiency
+        app.races_editor_state
+            .races
+            .push(races_editor::RaceEditBuffer {
+                id: "race_1".to_string(),
+                name: "Human".to_string(),
+                proficiencies: vec!["nonexistent_prof".to_string()],
+                ..Default::default()
+            });
+
+        let results = app.validate_proficiency_ids();
+        let has_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("references non-existent proficiency"));
+        assert!(has_error);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_item_requires_nonexistent() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add an item that requires a non-existent proficiency
+        let mut item = ItemsEditorState::default_item();
+        item.required_proficiency = Some("nonexistent_prof".to_string());
+        app.items.push(item);
+
+        let results = app.validate_proficiency_ids();
+        let has_error = results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("requires non-existent proficiency"));
+        assert!(has_error);
+    }
+
+    #[test]
+    fn test_validate_proficiency_ids_unreferenced_info() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign.id = "test".to_string();
+
+        // Add a proficiency that is not referenced by anything
+        app.proficiencies.push(ProficiencyDefinition {
+            id: "unused_prof".to_string(),
+            name: "Unused".to_string(),
+            category: antares::domain::proficiency::ProficiencyCategory::Weapon,
+            description: String::new(),
+        });
+
+        let results = app.validate_proficiency_ids();
+        let has_info = results.iter().any(|r| {
+            r.severity == validation::ValidationSeverity::Info && r.message.contains("not used")
+        });
+        assert!(has_info);
     }
 
     #[test]
