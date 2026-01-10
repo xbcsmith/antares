@@ -57,6 +57,7 @@ impl Plugin for DialoguePlugin {
             .add_message::<SelectDialogueChoice>()
             .add_message::<AdvanceDialogue>()
             .init_resource::<crate::game::components::dialogue::ActiveDialogueUI>()
+            .init_resource::<crate::game::components::dialogue::ChoiceSelectionState>()
             .add_systems(
                 Update,
                 (
@@ -66,6 +67,9 @@ impl Plugin for DialoguePlugin {
                     handle_recruitment_actions,
                     crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
                     crate::game::systems::dialogue_visuals::update_dialogue_text,
+                    crate::game::systems::dialogue_choices::spawn_choice_ui,
+                    crate::game::systems::dialogue_choices::update_choice_visuals,
+                    crate::game::systems::dialogue_choices::choice_input_system,
                 ),
             )
             .add_systems(
@@ -74,6 +78,7 @@ impl Plugin for DialoguePlugin {
                     crate::game::systems::dialogue_visuals::update_typewriter_text,
                     crate::game::systems::dialogue_visuals::billboard_system,
                     crate::game::systems::dialogue_visuals::cleanup_dialogue_bubble,
+                    crate::game::systems::dialogue_choices::cleanup_choice_ui,
                 ),
             );
     }

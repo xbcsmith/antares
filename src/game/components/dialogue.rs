@@ -55,6 +55,25 @@ pub const DIALOGUE_TEXT_COLOR: Color = Color::srgb(0.95, 0.95, 0.95);
 /// Text color for player choice options (golden)
 pub const DIALOGUE_CHOICE_COLOR: Color = Color::srgb(0.8, 0.8, 0.3);
 
+// Choice UI Constants
+/// Vertical offset of choice container below dialogue bubble (in world units)
+pub const CHOICE_CONTAINER_Y_OFFSET: f32 = -1.5;
+
+/// Height of each choice button (in world units)
+pub const CHOICE_BUTTON_HEIGHT: f32 = 0.4;
+
+/// Vertical spacing between choice buttons (in world units)
+pub const CHOICE_BUTTON_SPACING: f32 = 0.1;
+
+/// Color for selected choice button text
+pub const CHOICE_SELECTED_COLOR: Color = Color::srgb(0.9, 0.8, 0.3);
+
+/// Color for unselected choice button text
+pub const CHOICE_UNSELECTED_COLOR: Color = Color::srgb(0.6, 0.6, 0.6);
+
+/// Background color for choice container
+pub const CHOICE_BACKGROUND_COLOR: Color = Color::srgba(0.05, 0.05, 0.1, 0.95);
+
 // ============================================================================
 // Components
 // ============================================================================
@@ -129,6 +148,31 @@ pub struct TypewriterText {
 pub struct ActiveDialogueUI {
     /// Entity ID of the active dialogue bubble, if any
     pub bubble_entity: Option<Entity>,
+}
+
+/// Marks an entity as a dialogue choice button
+///
+/// Each choice is a selectable option displayed to the player
+/// during branching dialogue.
+#[derive(Component, Debug)]
+pub struct DialogueChoiceButton {
+    /// Index of this choice in the choices list
+    pub choice_index: usize,
+    /// Whether this choice is currently selected
+    pub selected: bool,
+}
+
+/// Marks the container entity holding all choice buttons
+#[derive(Component, Debug)]
+pub struct DialogueChoiceContainer;
+
+/// Resource tracking current choice selection state
+#[derive(Resource, Debug, Default)]
+pub struct ChoiceSelectionState {
+    /// Currently selected choice index (0-based)
+    pub selected_index: usize,
+    /// Total number of available choices
+    pub choice_count: usize,
 }
 
 // ============================================================================
@@ -211,5 +255,30 @@ mod tests {
 
         assert_eq!(bubble.speaker_entity, speaker);
         assert_eq!(bubble.y_offset, DIALOGUE_BUBBLE_Y_OFFSET);
+    }
+
+    #[test]
+    fn test_dialogue_choice_button_creation() {
+        let choice = DialogueChoiceButton {
+            choice_index: 0,
+            selected: true,
+        };
+        assert_eq!(choice.choice_index, 0);
+        assert!(choice.selected);
+    }
+
+    #[test]
+    fn test_choice_selection_state_default() {
+        let state = ChoiceSelectionState::default();
+        assert_eq!(state.selected_index, 0);
+        assert_eq!(state.choice_count, 0);
+    }
+
+    #[test]
+    fn test_choice_ui_constants_valid() {
+        // Constants are compile-time verified through type definitions
+        let _ = CHOICE_CONTAINER_Y_OFFSET;
+        let _ = CHOICE_BUTTON_HEIGHT;
+        let _ = CHOICE_BUTTON_SPACING;
     }
 }
