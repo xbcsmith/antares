@@ -5728,20 +5728,20 @@
             text: "General Store - Buy and sell items for your adventures.",
         ),
         (
-            x: 10,
-            y: 10,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice describing the Temple of Healing and the services it provides.",
-            text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
             x: 4,
             y: 4,
         ): Sign(
             name: "Inn Sign",
             description: "A welcoming sign for the Cozy Inn offering rest and lodging.",
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+        ),
+        (
+            x: 10,
+            y: 10,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice describing the Temple of Healing and the services it provides.",
+            text: "Temple of Healing - The priests can restore your health.",
         ),
         (
             x: 18,

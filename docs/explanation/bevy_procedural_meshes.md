@@ -1,7 +1,7 @@
 Yes, you can generate everything from signs to complex NPCs in Bevy using pure Rust code by leveraging
-mesh primitives and procedural generation. You do not need to load external .gltf or .obj models. 
+mesh primitives and procedural generation. You do not need to load external .gltf or .obj models.
 1. Generating Basic Objects (Trees, NPCs)
-You can build complex objects by combining Bevy's built-in 3D primitive shapes. 
+You can build complex objects by combining Bevy's built-in 3D primitive shapes.
 
     Mesh Primitives: Bevy provides shapes like Cuboid, Sphere, Capsule3d, Cylinder, and Cone.
     Composition: To create a Tree, you can spawn an entity for the trunk using a Cylinder and add a Sphere or Cone as a child entity for the leaves. For an NPC, you might use a Capsule3d for the body and smaller Cuboids or Spheres for limbs and a head.
@@ -18,24 +18,24 @@ You can build complex objects by combining Bevy's built-in 3D primitive shapes.
     Use code with caution.
 
 2. Generating Signs and Text
-For Signs, you can combine a flat Cuboid (the board) and a Cylinder (the post) with world-space text. 
+For Signs, you can combine a flat Cuboid (the board) and a Cylinder (the post) with world-space text.
 
     Text2d: Use the Text2d component to place text directly in the 3D world space rather than on a UI overlay. This text will move and scale with the sign entity.
-    Text3d (Third-Party): If you need actual 3D volumetric text (text with depth), you can use community crates like bevy_rich_text3d or bevy_text_mesh. 
+    Text3d (Third-Party): If you need actual 3D volumetric text (text with depth), you can use community crates like bevy_rich_text3d or bevy_text_mesh.
 
 3. Procedural Mesh Generation
-If primitives are too simple, you can define custom geometry entirely in Rust by specifying vertex positions and indices. 
+If primitives are too simple, you can define custom geometry entirely in Rust by specifying vertex positions and indices.
 
     Custom Meshes: You can use Mesh::new(PrimitiveTopology::TriangleList, ...) and insert attributes like Mesh::ATTRIBUTE_POSITION and Mesh::ATTRIBUTE_NORMAL to create unique, organic shapes like terrain or irregular rocks.
     Helper Crates:
         bevy_procedural_meshes: A mesh builder for creating complex 2D and 3D shapes via code.
-        Lyon: Often used alongside Bevy to tessellate complex 2D shapes into 3D-renderable meshes. 
+        Lyon: Often used alongside Bevy to tessellate complex 2D shapes into 3D-renderable meshes.
 
 4. Coloring and Texturing
-You can generate "textures" via code by creating images at runtime or using pure colors. 
+You can generate "textures" via code by creating images at runtime or using pure colors.
 
     StandardMaterial: Apply colors, metallic properties, or roughness to your generated meshes without needing image files.
-    Procedural Textures: You can generate a Handle<Image> in Rust by filling a Vec<u8> with pixel data (e.g., using noise functions for wood grain or grass patterns) and adding it to Assets<Image>. 
+    Procedural Textures: You can generate a Handle<Image> in Rust by filling a Vec<u8> with pixel data (e.g., using noise functions for wood grain or grass patterns) and adding it to Assets<Image>.
 
     3D Rendering / Generate Custom Mesh - Bevy Engine
     Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD) . with_inserted_attrib...
@@ -43,25 +43,25 @@ You can generate "textures" via code by creating images at runtime or using pure
 
 The objects I want  to create for my fantasy game are trees, teleport portals, NPC, Fountains, Monsters, Treasure Chests
 In Bevy, you can create a diverse fantasy world without external assets by combining
-3D mesh primitives with procedural logic. In Bevy 0.15+, you typically use components like Mesh3d and MeshMaterial3d to render these objects. 
+3D mesh primitives with procedural logic. In Bevy 0.15+, you typically use components like Mesh3d and MeshMaterial3d to render these objects.
 1. Organic & Environmental Objects
 
     Trees: You can build a "blocky" or stylized tree by parenting a Sphere or Cone mesh (leaves) to a Cylinder mesh (trunk). For more realistic results, use crates like bevy_procedural_tree, which generates fractal branch structures directly in Rust.
-    Fountains: Create the base using nested Cylinders or a flattened Torus. For the water effect, use a Particle System (like bevy_hanabi) to spawn tiny blue Spheres or Cuboids that move upward and fall back down via code-based gravity. 
+    Fountains: Create the base using nested Cylinders or a flattened Torus. For the water effect, use a Particle System (like bevy_hanabi) to spawn tiny blue Spheres or Cuboids that move upward and fall back down via code-based gravity.
 
 2. Characters & Creatures
 
     NPCs & Monsters: You can construct a "ragdoll" or "puppet" style character by spawning a central Capsule3d (body) and attaching child entities for limbs (more Capsules or Cuboids).
-    Procedural Animation: Since you aren't using pre-made animations, you can animate these body parts in a Rust system by modifying their Transform (rotation/position) over time using a sine wave for walking or bobbing. 
+    Procedural Animation: Since you aren't using pre-made animations, you can animate these body parts in a Rust system by modifying their Transform (rotation/position) over time using a sine wave for walking or bobbing.
 
 3. Interactive Props & Effects
 
     Teleport Portals: These can be created using a vertical Annulus (ring) or Circle mesh. To make them look magical, apply a custom Shader or use the bevy_basic_portals plugin, which handles the complex math of rendering a different location inside the portal mesh.
-    Treasure Chests: Construct a chest using a large Cuboid for the base and a smaller, slightly offset Cuboid (or a Cylinder cut in half) for the lid. You can animate the lid's Transform.rotation to "open" it when a player interacts. 
+    Treasure Chests: Construct a chest using a large Cuboid for the base and a smaller, slightly offset Cuboid (or a Cylinder cut in half) for the lid. You can animate the lid's Transform.rotation to "open" it when a player interacts.
 
 4. Technical Implementation
 To keep your code clean, define each object as a Bundle or a function:
-Object 
+Object
 	Primary Primitives	Logic Tip
 Tree	Cylinder + Sphere/Cone	Use random scales for leaf clusters to add variety.
 Monster	Capsule3d + Sphere (eyes)	Use LookAt logic to make them track the player.
@@ -127,7 +127,7 @@ fn setup(
         // Position relative to the trunk's *center point* (which is at Y=1.0)
         Transform::from_xyz(0.0, 1.5, 0.0),
     )).id();
-    
+
     // Parent the foliage to the trunk to form a single cohesive tree object
     commands.entity(trunk_entity).add_child(foliage_entity);
 
@@ -175,12 +175,12 @@ Searching
 To make tree branches more complex in Bevy using pure Rust, you should move from simple parenting to a
 recursive branching algorithm. Instead of one cylinder and one sphere, you can use a loop or recursion to spawn smaller and smaller branches that rotate away from each other.
 1. The Recursive Branching Concept
-The most common way to do this in code is a fractal or L-System approach: 
+The most common way to do this in code is a fractal or L-System approach:
 
     Spawn a Trunk: Start with a cylinder at the base.
     Split: At the tip of that cylinder, spawn two or more "child" cylinders.
     Transform: Shrink the child cylinders (e.g., 70% the size of the parent) and rotate them outward (e.g., 30 degrees).
-    Repeat: Treat each new child as a "trunk" and repeat the process for a set number of "generations." 
+    Repeat: Treat each new child as a "trunk" and repeat the process for a set number of "generations."
 
 1. Implementation Strategy
 You can implement this using a recursive function that takes the current "generation" as an argument.
@@ -220,6 +220,6 @@ Use code with caution.
     Randomization: Use a random number generator (rand crate) to slightly vary the rotation angles and branch lengths. This makes the tree look organic rather than perfectly symmetrical.
     Space Colonization: For highly realistic "hero" trees, you can implement the Space Colonization Algorithm, which grows branches toward "attraction points" (simulating light sources).
     External Plugins: If you want to keep it "pure Rust" but save time, you can use crates like bevy_procedural_tree, which handles the complex mesh generation logic while allowing you to control everything via Rust parameters.
-    Leaf Placement: Instead of one big sphere, only spawn foliage (small green spheres or flat planes) at the final "generation" of your recursive function to create a more realistic canopy. 
+    Leaf Placement: Instead of one big sphere, only spawn foliage (small green spheres or flat planes) at the final "generation" of your recursive function to create a more realistic canopy.
 
 These guides describe recursive branching algorithms and procedural generation techniques for creating complex tree branches in Bevy, with options for randomization and leaf placement.
