@@ -401,7 +401,7 @@ match validate_dialogue_tree(&tree, &database) {
 - Check dialogue database loading in campaign initializer
 - Add debug logging to interaction system:
   ```rust
-  println!("NPC at {:?}, Player at {:?}, Distance: {}", 
+  println!("NPC at {:?}, Player at {:?}, Distance: {}",
       npc_pos, player_pos, distance);
   ```
 
