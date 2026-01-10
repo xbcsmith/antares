@@ -27,6 +27,7 @@ pub mod campaign_editor;
 pub mod characters_editor;
 pub mod classes_editor;
 pub mod conditions_editor;
+pub mod config_editor;
 pub mod dialogue_editor;
 pub mod items_editor;
 pub mod logging;
@@ -250,6 +251,7 @@ impl Default for CampaignMetadata {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EditorTab {
     Metadata,
+    Config,
     Items,
     Spells,
     Conditions,
@@ -278,6 +280,7 @@ impl EditorTab {
     fn name(&self) -> &str {
         match self {
             EditorTab::Metadata => "Metadata",
+            EditorTab::Config => "Config",
             EditorTab::Items => "Items",
             EditorTab::Spells => "Spells",
             EditorTab::Conditions => "Conditions",
@@ -406,6 +409,9 @@ struct CampaignBuilderApp {
     // Campaign metadata editor state
     campaign_editor_state: campaign_editor::CampaignMetadataEditorState,
 
+    // Config editor state
+    config_editor_state: config_editor::ConfigEditorState,
+
     // Data editor state
     items: Vec<Item>,
     items_editor_state: ItemsEditorState,
@@ -520,6 +526,9 @@ impl Default for CampaignBuilderApp {
 
             // Campaign metadata editor state
             campaign_editor_state: campaign_editor::CampaignMetadataEditorState::new(),
+
+            // Config editor state
+            config_editor_state: config_editor::ConfigEditorState::new(),
 
             items: Vec::new(),
             items_editor_state: ItemsEditorState::new(),
@@ -3448,6 +3457,7 @@ impl eframe::App for CampaignBuilderApp {
 
                 let tabs = [
                     EditorTab::Metadata,
+                    EditorTab::Config,
                     EditorTab::Items,
                     EditorTab::Spells,
                     EditorTab::Conditions,
@@ -3497,6 +3507,12 @@ impl eframe::App for CampaignBuilderApp {
         // Central panel with editor content
         egui::CentralPanel::default().show(ctx, |ui| match self.active_tab {
             EditorTab::Metadata => self.show_metadata_editor(ui),
+            EditorTab::Config => self.config_editor_state.show(
+                ui,
+                self.campaign_dir.as_ref(),
+                &mut self.unsaved_changes,
+                &mut self.status_message,
+            ),
             EditorTab::Items => self.items_editor_state.show(
                 ui,
                 &mut self.items,

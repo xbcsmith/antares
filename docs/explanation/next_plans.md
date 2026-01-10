@@ -12,13 +12,18 @@ Document the campaign data structure, including all the RON files that make up a
 
 ### Map Editor Events
 
-Campaign Builder --> Map Editor --> Select Map --> Edit Map. Need to be able to edit events on the map editor. Events can currently be created and removed, but not edited after creation.
+✅ COMPLETED - [event editing implementation](./event_editing_implementation_plan.md)
 
-[event editing implementation plan](./event_editing_implementation_plan.md)
+Campaign Builder --> Map Editor --> Select Map --> Edit Map. Event editing now fully supported:
+
+- Create new events using PlaceEvent tool
+- Edit existing events via Inspector Panel "Edit Event" button
+- Remove events via Inspector Panel or event editor
+- Visual feedback shows which event is being edited
 
 ### Config Editor Implementation
 
-[config editor implementation](./config_editor_implementation_plan.md)
+✅ COMPLETED - [config editor implementation](./config_editor_implementation_plan.md)
 
 ### Metadata Editor
 
@@ -47,7 +52,6 @@ Unable to create new nodes makes it impossible to create dialog trees.
 
 ✅ COMPLETED - [remove per tile event triggers implementation](./remove_per_tile_event_triggers_implementation_plan.md)
 
-
 ### Portrait Support Implementation
 
 ✅ COMPLETED - [portrait support implementation](./portrait_support_implementation_plan.md)
@@ -68,27 +72,27 @@ Need to represent and display dialog trees in the game engine.
 
 bevy_talks is a strong choice because it natively supports RON-based dialogue assets and handles the complex state transitions between dialogue nodes for you.
 
-1. Data-to-Logic Mapping
-While your custom RON format differs slightly from the default bevy_talks schema, the crate is designed to load .talk.ron files directly via its ron_loader module.
+1.  Data-to-Logic Mapping
+    While your custom RON format differs slightly from the default bevy_talks schema, the crate is designed to load .talk.ron files directly via its ron_loader module.
 
-    Built-in Loader: You can load your dialogue with a simple handle: let handle: Handle<TalkData> = asset_server.load("dialogue.talk.ron");.
-    Entity-Graph Approach: When you initiate a talk, the plugin spawns the entire dialogue tree as a graph of Bevy Entities. Each dialogue node in your RON becomes an entity with a Talk or CurrentNode component.
-    Events: To advance the dialogue or handle choices, you send events like NextActionRequest or ChooseActionRequest. The plugin then updates the CurrentNode automatically.
+        Built-in Loader: You can load your dialogue with a simple handle: let handle: Handle<TalkData> = asset_server.load("dialogue.talk.ron");.
+        Entity-Graph Approach: When you initiate a talk, the plugin spawns the entire dialogue tree as a graph of Bevy Entities. Each dialogue node in your RON becomes an entity with a Talk or CurrentNode component.
+        Events: To advance the dialogue or handle choices, you send events like NextActionRequest or ChooseActionRequest. The plugin then updates the CurrentNode automatically.
 
-2. Implementation of the Floating Text Box
-To achieve a "2.5D retro" floating effect that works with your procedural meshes, follow this technical pattern:
+2.  Implementation of the Floating Text Box
+    To achieve a "2.5D retro" floating effect that works with your procedural meshes, follow this technical pattern:
 
-    World-Space Text (Text2d): Use Bevy 0.15's Text2d component instead of UI nodes. This allows the dialogue box to exist at a specific 3D coordinate (e.g., Vec3(0.0, 2.5, 0.0) above your NPC) rather than being stuck to the screen corners.
-    Billboard Component: To ensure the text box is always readable from any angle in your 2.5D world, use a Billboard plugin or a system that forces the text entity to rotate and face the Camera3d.
-    Procedural Background: Since you are already generating meshes, you can spawn a simple Mesh3d (using a Cuboid or Plane) directly behind the text to act as the "bubble" background.
+        World-Space Text (Text2d): Use Bevy 0.15's Text2d component instead of UI nodes. This allows the dialogue box to exist at a specific 3D coordinate (e.g., Vec3(0.0, 2.5, 0.0) above your NPC) rather than being stuck to the screen corners.
+        Billboard Component: To ensure the text box is always readable from any angle in your 2.5D world, use a Billboard plugin or a system that forces the text entity to rotate and face the Camera3d.
+        Procedural Background: Since you are already generating meshes, you can spawn a simple Mesh3d (using a Cuboid or Plane) directly behind the text to act as the "bubble" background.
 
-3. Workflow for your specific RON
-Because your RON includes custom fields like associated_quest and actions: [TriggerEvent(...)], you can extend bevy_talks by listening for the specific entity changes it triggers:
+3.  Workflow for your specific RON
+    Because your RON includes custom fields like associated_quest and actions: [TriggerEvent(...)], you can extend bevy_talks by listening for the specific entity changes it triggers:
 
-    System: Create a system that queries for Changed<CurrentNode>.
-    Logic: When the node changes, read the text from your loaded TalkData asset.
-    Display: Update the Text2d component on your floating box entity.
-    Custom Actions: When the plugin reaches a node with your TriggerEvent, use a Bevy EventWriter to fire off your recruitment or quest logic in Rust.
+        System: Create a system that queries for Changed<CurrentNode>.
+        Logic: When the node changes, read the text from your loaded TalkData asset.
+        Display: Update the Text2d component on your floating box entity.
+        Custom Actions: When the plugin reaches a node with your TriggerEvent, use a Bevy EventWriter to fire off your recruitment or quest logic in Rust.
 
 Recommended Tooling:
 

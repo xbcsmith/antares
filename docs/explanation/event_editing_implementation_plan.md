@@ -100,7 +100,7 @@ if let Some(event) = editor.map.get_event(pos) {
         let is_editing = editor.event_editor.as_ref()
             .map(|ed| ed.position == pos)
             .unwrap_or(false);
-        
+
         let edit_button = if is_editing {
             egui::Button::new("✏️ Editing...")
         } else {
@@ -202,7 +202,7 @@ if let Some(ref editor) = self.state.event_editor {
             Stroke::new(3.0, Color32::LIGHT_GREEN),
             egui::StrokeKind::Outside,
         );
-        
+
         // Optional: Draw edit icon in corner
         let icon_rect = Rect::from_min_size(
             rect.min + Vec2::new(rect.width() - 12.0, 2.0),
@@ -275,7 +275,7 @@ fn test_inspector_edit_event_workflow() {
         Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10)
     );
     let pos = Position::new(3, 4);
-    
+
     // Create initial event
     let original_event = MapEvent::Sign {
         name: "Original Sign".to_string(),
@@ -283,32 +283,32 @@ fn test_inspector_edit_event_workflow() {
         text: "Original text".to_string(),
     };
     state.add_event(pos, original_event.clone());
-    
+
     // Simulate Inspector "Edit Event" button click
     state.current_tool = EditorTool::PlaceEvent;
     state.event_editor = Some(EventEditorState::from_map_event(
         pos,
         state.map.get_event(pos).unwrap()
     ));
-    
+
     // Verify editor loaded correctly
     let editor = state.event_editor.as_ref().unwrap();
     assert_eq!(editor.position, pos);
     assert_eq!(editor.event_type, EventType::Sign);
     assert_eq!(editor.name, "Original Sign");
     assert_eq!(editor.sign_text, "Original text");
-    
+
     // Modify event in editor
     let mut editor = state.event_editor.take().unwrap();
     editor.name = "Modified Sign".to_string();
     editor.sign_text = "Modified text".to_string();
-    
+
     // Simulate "Save Changes" button click
     let updated_event = editor.to_map_event().expect("valid event");
     state.map.add_event(pos, updated_event);
     state.has_changes = true;
     state.event_editor = None;
-    
+
     // Verify event was updated
     if let MapEvent::Sign { name, text, .. } = state.map.get_event(pos).unwrap() {
         assert_eq!(name, "Modified Sign");
@@ -316,7 +316,7 @@ fn test_inspector_edit_event_workflow() {
     } else {
         panic!("Expected Sign event");
     }
-    
+
     assert!(state.has_changes);
 }
 ```
@@ -338,7 +338,7 @@ fn test_event_edit_visual_feedback() {
         Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10)
     );
     let pos = Position::new(2, 2);
-    
+
     // Add event
     let event = MapEvent::Sign {
         name: "Test Sign".to_string(),
@@ -346,20 +346,20 @@ fn test_event_edit_visual_feedback() {
         text: "Text".to_string(),
     };
     state.add_event(pos, event.clone());
-    
+
     // Verify no event editor initially
     assert!(state.event_editor.is_none());
-    
+
     // Activate event editor
     state.event_editor = Some(EventEditorState::from_map_event(pos, &event));
-    
+
     // Verify editor is active for this position
     assert!(state.event_editor.is_some());
     assert_eq!(state.event_editor.as_ref().unwrap().position, pos);
-    
+
     // Verify show_event_editor_ui returns true
     assert!(state.show_event_editor_ui());
-    
+
     // Clear editor
     state.event_editor = None;
     assert!(!state.show_event_editor_ui());
@@ -382,10 +382,10 @@ fn test_switch_between_editing_events() {
     let mut state = MapEditorState::new(
         Map::new(1, "Test Map".to_string(), "Description".to_string(), 10, 10)
     );
-    
+
     let pos1 = Position::new(1, 1);
     let pos2 = Position::new(5, 5);
-    
+
     // Add two different events
     let event1 = MapEvent::Sign {
         name: "Sign 1".to_string(),
@@ -398,15 +398,15 @@ fn test_switch_between_editing_events() {
         damage: 10,
         effect: None,
     };
-    
+
     state.add_event(pos1, event1.clone());
     state.add_event(pos2, event2.clone());
-    
+
     // Start editing event 1
     state.event_editor = Some(EventEditorState::from_map_event(pos1, &event1));
     assert_eq!(state.event_editor.as_ref().unwrap().position, pos1);
     assert_eq!(state.event_editor.as_ref().unwrap().event_type, EventType::Sign);
-    
+
     // Switch to editing event 2
     state.event_editor = Some(EventEditorState::from_map_event(pos2, &event2));
     assert_eq!(state.event_editor.as_ref().unwrap().position, pos2);
