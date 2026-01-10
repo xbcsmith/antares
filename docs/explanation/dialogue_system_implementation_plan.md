@@ -3474,7 +3474,6 @@ All standard quality checks passed:
 - Implementation Plan: `docs/explanation/dialogue_system_implementation_plan.md`
 - Architecture Document: `docs/reference/architecture.md` (Section 3.2, 4.x, 7.1)
 - Domain Dialogue Module: `src/domain/dialogue.rs`
-```
 
 ---
 
