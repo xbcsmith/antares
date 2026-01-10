@@ -62,6 +62,12 @@ pub struct ConfigEditorState {
 
     /// Recently captured key event for key binding
     pub last_captured_key: Option<String>,
+
+    /// Track if we need to auto-load config on first display
+    pub needs_initial_load: bool,
+
+    /// Track last campaign directory to detect changes
+    pub last_campaign_dir: Option<PathBuf>,
 }
 
 impl Default for ConfigEditorState {
@@ -82,6 +88,8 @@ impl Default for ConfigEditorState {
             validation_errors: std::collections::HashMap::new(),
             capturing_key_for: None,
             last_captured_key: None,
+            needs_initial_load: true,
+            last_campaign_dir: None,
         }
     }
 }
@@ -130,6 +138,24 @@ impl ConfigEditorState {
         unsaved_changes: &mut bool,
         status_message: &mut String,
     ) {
+        // Auto-load config on first display or when campaign directory changes
+        let campaign_changed = match (campaign_dir, &self.last_campaign_dir) {
+            (Some(new_dir), Some(old_dir)) => new_dir != old_dir,
+            (Some(_), None) => true,
+            (None, Some(_)) => true,
+            (None, None) => false,
+        };
+
+        if (self.needs_initial_load || campaign_changed) && campaign_dir.is_some() {
+            if self.load_config(campaign_dir) {
+                self.needs_initial_load = false;
+                self.last_campaign_dir = campaign_dir.cloned();
+            }
+        }
+
+        // Handle key capture events
+        self.handle_key_capture(ui);
+
         ui.heading("⚙️ Game Configuration");
         ui.add_space(5.0);
 
@@ -438,99 +464,137 @@ impl ConfigEditorState {
             });
 
             ui.add_space(10.0);
-            ui.label("🎮 Key Bindings (comma-separated keys, e.g., 'W,Up Arrow'):");
+            ui.label("🎮 Key Bindings:");
+            ui.label(
+                "Click 'Capture' and press a key, or manually type key names (comma-separated)",
+            );
             ui.label(
                 "Supported: A-Z, 0-9, Space, Enter, Escape, Tab, Shift, Ctrl, Alt, Arrow Keys",
             );
 
-            // Helper function for key binding field with tooltip and validation
-            let show_key_binding = |ui: &mut egui::Ui,
-                                    label: &str,
-                                    buffer: &mut String,
-                                    action_id: &str,
-                                    unsaved_changes: &mut bool,
-                                    validation_errors: &mut std::collections::HashMap<
-                String,
-                String,
-            >| {
-                ui.horizontal(|ui| {
-                    ui.label(format!("{}:", label));
-                    let response = ui.text_edit_singleline(buffer);
-                    if response.changed() {
-                        *unsaved_changes = true;
-                        // Clear error when user starts editing
-                        validation_errors.remove(action_id);
-                    }
-                    response.on_hover_text("Enter comma-separated key names");
+            ui.add_space(5.0);
 
-                    // Show validation error if exists
-                    if let Some(error) = validation_errors.get(action_id) {
-                        ui.label(
-                            egui::RichText::new(format!("⚠️ {}", error))
-                                .color(egui::Color32::LIGHT_RED),
+            // Helper function for key binding field with capture, clear, and validation
+            let show_key_binding_with_capture =
+                |ui: &mut egui::Ui,
+                 label: &str,
+                 buffer: &mut String,
+                 action_id: &str,
+                 unsaved_changes: &mut bool,
+                 validation_errors: &mut std::collections::HashMap<String, String>,
+                 capturing_key_for: &mut Option<String>| {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{}:", label));
+
+                        // Show capture state indicator
+                        let is_capturing = capturing_key_for
+                            .as_ref()
+                            .map(|s| s == action_id)
+                            .unwrap_or(false);
+
+                        if is_capturing {
+                            ui.label(
+                                egui::RichText::new("🎮 Press a key...")
+                                    .color(egui::Color32::LIGHT_BLUE),
+                            );
+                        }
+
+                        // Text field for manual editing
+                        let response = ui.text_edit_singleline(buffer);
+                        if response.changed() {
+                            *unsaved_changes = true;
+                            validation_errors.remove(action_id);
+                        }
+                        response.on_hover_text(
+                            "Enter comma-separated key names, or use Capture button",
                         );
-                    }
-                });
-            };
+
+                        // Capture button
+                        if ui.button("🎮 Capture").clicked() {
+                            *capturing_key_for = Some(action_id.to_string());
+                        }
+
+                        // Clear button
+                        if ui.button("🗑 Clear").clicked() {
+                            buffer.clear();
+                            *unsaved_changes = true;
+                            validation_errors.remove(action_id);
+                        }
+
+                        // Show validation error if exists
+                        if let Some(error) = validation_errors.get(action_id) {
+                            ui.label(
+                                egui::RichText::new(format!("⚠️ {}", error))
+                                    .color(egui::Color32::LIGHT_RED),
+                            );
+                        }
+                    });
+                };
 
             // Move Forward
-            show_key_binding(
+            show_key_binding_with_capture(
                 ui,
                 "Move Forward",
                 &mut self.controls_move_forward_buffer,
                 "move_forward",
                 unsaved_changes,
                 &mut self.validation_errors,
+                &mut self.capturing_key_for,
             );
 
             // Move Back
-            show_key_binding(
+            show_key_binding_with_capture(
                 ui,
                 "Move Back",
                 &mut self.controls_move_back_buffer,
                 "move_back",
                 unsaved_changes,
                 &mut self.validation_errors,
+                &mut self.capturing_key_for,
             );
 
             // Turn Left
-            show_key_binding(
+            show_key_binding_with_capture(
                 ui,
                 "Turn Left",
                 &mut self.controls_turn_left_buffer,
                 "turn_left",
                 unsaved_changes,
                 &mut self.validation_errors,
+                &mut self.capturing_key_for,
             );
 
             // Turn Right
-            show_key_binding(
+            show_key_binding_with_capture(
                 ui,
                 "Turn Right",
                 &mut self.controls_turn_right_buffer,
                 "turn_right",
                 unsaved_changes,
                 &mut self.validation_errors,
+                &mut self.capturing_key_for,
             );
 
             // Interact
-            show_key_binding(
+            show_key_binding_with_capture(
                 ui,
                 "Interact",
                 &mut self.controls_interact_buffer,
                 "interact",
                 unsaved_changes,
                 &mut self.validation_errors,
+                &mut self.capturing_key_for,
             );
 
             // Menu
-            show_key_binding(
+            show_key_binding_with_capture(
                 ui,
                 "Menu",
                 &mut self.controls_menu_buffer,
                 "menu",
                 unsaved_changes,
                 &mut self.validation_errors,
+                &mut self.capturing_key_for,
             );
 
             ui.add_space(5.0);
@@ -786,53 +850,81 @@ impl ConfigEditorState {
     }
 
     /// Update edit buffers from current config values
+    /// Update edit buffers from loaded config
+    ///
+    /// Populates text field buffers with current config values
     fn update_edit_buffers(&mut self) {
-        self.controls_move_forward_buffer = self.game_config.controls.move_forward.join(", ");
-        self.controls_move_back_buffer = self.game_config.controls.move_back.join(", ");
-        self.controls_turn_left_buffer = self.game_config.controls.turn_left.join(", ");
-        self.controls_turn_right_buffer = self.game_config.controls.turn_right.join(", ");
-        self.controls_interact_buffer = self.game_config.controls.interact.join(", ");
-        self.controls_menu_buffer = self.game_config.controls.menu.join(", ");
+        self.controls_move_forward_buffer =
+            format_key_list(&self.game_config.controls.move_forward);
+        self.controls_move_back_buffer = format_key_list(&self.game_config.controls.move_back);
+        self.controls_turn_left_buffer = format_key_list(&self.game_config.controls.turn_left);
+        self.controls_turn_right_buffer = format_key_list(&self.game_config.controls.turn_right);
+        self.controls_interact_buffer = format_key_list(&self.game_config.controls.interact);
+        self.controls_menu_buffer = format_key_list(&self.game_config.controls.menu);
     }
 
     /// Update config from edit buffers
+    ///
+    /// Parses text field buffers back into config vectors
     fn update_config_from_buffers(&mut self) {
-        self.game_config.controls.move_forward = self
-            .controls_move_forward_buffer
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        self.game_config.controls.move_back = self
-            .controls_move_back_buffer
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        self.game_config.controls.turn_left = self
-            .controls_turn_left_buffer
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        self.game_config.controls.turn_right = self
-            .controls_turn_right_buffer
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        self.game_config.controls.interact = self
-            .controls_interact_buffer
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        self.game_config.controls.menu = self
-            .controls_menu_buffer
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
+        self.game_config.controls.move_forward = parse_key_list(&self.controls_move_forward_buffer);
+        self.game_config.controls.move_back = parse_key_list(&self.controls_move_back_buffer);
+        self.game_config.controls.turn_left = parse_key_list(&self.controls_turn_left_buffer);
+        self.game_config.controls.turn_right = parse_key_list(&self.controls_turn_right_buffer);
+        self.game_config.controls.interact = parse_key_list(&self.controls_interact_buffer);
+        self.game_config.controls.menu = parse_key_list(&self.controls_menu_buffer);
+    }
+
+    /// Handle key capture events from egui input
+    ///
+    /// Processes keyboard events when a key binding field is in capture mode.
+    /// Escape cancels capture, other keys are added to the binding.
+    fn handle_key_capture(&mut self, ui: &mut egui::Ui) {
+        if self.capturing_key_for.is_none() {
+            return;
+        }
+
+        ui.input(|i| {
+            for event in &i.events {
+                if let egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers: _,
+                    ..
+                } = event
+                {
+                    // Escape cancels capture without binding
+                    if *key == egui::Key::Escape {
+                        self.capturing_key_for = None;
+                        self.last_captured_key = None;
+                        return;
+                    }
+
+                    // Convert key to string and add to appropriate buffer
+                    let key_name = egui_key_to_string(key);
+                    if let Some(action_id) = &self.capturing_key_for.clone() {
+                        let buffer = match action_id.as_str() {
+                            "move_forward" => &mut self.controls_move_forward_buffer,
+                            "move_back" => &mut self.controls_move_back_buffer,
+                            "turn_left" => &mut self.controls_turn_left_buffer,
+                            "turn_right" => &mut self.controls_turn_right_buffer,
+                            "interact" => &mut self.controls_interact_buffer,
+                            "menu" => &mut self.controls_menu_buffer,
+                            _ => return,
+                        };
+
+                        // Add key to buffer (comma-separated if not empty)
+                        if !buffer.is_empty() {
+                            buffer.push_str(", ");
+                        }
+                        buffer.push_str(&key_name);
+
+                        self.last_captured_key = Some(key_name);
+                        self.capturing_key_for = None;
+                    }
+                }
+            }
+        });
     }
 
     /// Validate key binding for a control action
@@ -1044,6 +1136,125 @@ impl ConfigEditorState {
             ))
         }
     }
+}
+
+/// Convert egui::Key to human-readable string
+///
+/// # Arguments
+///
+/// * `key` - The egui key to convert
+///
+/// # Returns
+///
+/// A human-readable string representation of the key
+///
+/// # Examples
+///
+/// ```ignore
+/// let key_name = egui_key_to_string(&egui::Key::W);
+/// assert_eq!(key_name, "W");
+/// ```
+fn egui_key_to_string(key: &egui::Key) -> String {
+    match key {
+        egui::Key::A => "A".to_string(),
+        egui::Key::B => "B".to_string(),
+        egui::Key::C => "C".to_string(),
+        egui::Key::D => "D".to_string(),
+        egui::Key::E => "E".to_string(),
+        egui::Key::F => "F".to_string(),
+        egui::Key::G => "G".to_string(),
+        egui::Key::H => "H".to_string(),
+        egui::Key::I => "I".to_string(),
+        egui::Key::J => "J".to_string(),
+        egui::Key::K => "K".to_string(),
+        egui::Key::L => "L".to_string(),
+        egui::Key::M => "M".to_string(),
+        egui::Key::N => "N".to_string(),
+        egui::Key::O => "O".to_string(),
+        egui::Key::P => "P".to_string(),
+        egui::Key::Q => "Q".to_string(),
+        egui::Key::R => "R".to_string(),
+        egui::Key::S => "S".to_string(),
+        egui::Key::T => "T".to_string(),
+        egui::Key::U => "U".to_string(),
+        egui::Key::V => "V".to_string(),
+        egui::Key::W => "W".to_string(),
+        egui::Key::X => "X".to_string(),
+        egui::Key::Y => "Y".to_string(),
+        egui::Key::Z => "Z".to_string(),
+        egui::Key::Num0 => "0".to_string(),
+        egui::Key::Num1 => "1".to_string(),
+        egui::Key::Num2 => "2".to_string(),
+        egui::Key::Num3 => "3".to_string(),
+        egui::Key::Num4 => "4".to_string(),
+        egui::Key::Num5 => "5".to_string(),
+        egui::Key::Num6 => "6".to_string(),
+        egui::Key::Num7 => "7".to_string(),
+        egui::Key::Num8 => "8".to_string(),
+        egui::Key::Num9 => "9".to_string(),
+        egui::Key::Space => "Space".to_string(),
+        egui::Key::Enter => "Enter".to_string(),
+        egui::Key::Escape => "Escape".to_string(),
+        egui::Key::Tab => "Tab".to_string(),
+        egui::Key::Backspace => "Backspace".to_string(),
+        egui::Key::Delete => "Delete".to_string(),
+        egui::Key::Insert => "Insert".to_string(),
+        egui::Key::Home => "Home".to_string(),
+        egui::Key::End => "End".to_string(),
+        egui::Key::PageUp => "PageUp".to_string(),
+        egui::Key::PageDown => "PageDown".to_string(),
+        egui::Key::ArrowUp => "Up Arrow".to_string(),
+        egui::Key::ArrowDown => "Down Arrow".to_string(),
+        egui::Key::ArrowLeft => "Left Arrow".to_string(),
+        egui::Key::ArrowRight => "Right Arrow".to_string(),
+        egui::Key::Plus => "+".to_string(),
+        egui::Key::Minus => "-".to_string(),
+        _ => format!("{:?}", key),
+    }
+}
+
+/// Format key list as comma-separated display text
+///
+/// # Arguments
+///
+/// * `keys` - Vector of key name strings
+///
+/// # Returns
+///
+/// Comma-separated string of key names
+///
+/// # Examples
+///
+/// ```ignore
+/// let keys = vec!["W".to_string(), "Up Arrow".to_string()];
+/// let formatted = format_key_list(&keys);
+/// assert_eq!(formatted, "W, Up Arrow");
+/// ```
+fn format_key_list(keys: &[String]) -> String {
+    keys.join(", ")
+}
+
+/// Parse comma-separated key list back to vector
+///
+/// # Arguments
+///
+/// * `text` - Comma-separated key names
+///
+/// # Returns
+///
+/// Vector of trimmed, non-empty key name strings
+///
+/// # Examples
+///
+/// ```ignore
+/// let parsed = parse_key_list("W, Up Arrow, S");
+/// assert_eq!(parsed, vec!["W", "Up Arrow", "S"]);
+/// ```
+fn parse_key_list(text: &str) -> Vec<String> {
+    text.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 #[cfg(test)]
@@ -1313,5 +1524,172 @@ mod tests {
             state.game_config.graphics.shadow_quality,
             ShadowQuality::High
         );
+    }
+
+    // Phase 3: Key Capture and Auto-Population Tests
+
+    #[test]
+    fn test_egui_key_to_string_letters() {
+        assert_eq!(egui_key_to_string(&egui::Key::W), "W");
+        assert_eq!(egui_key_to_string(&egui::Key::A), "A");
+        assert_eq!(egui_key_to_string(&egui::Key::S), "S");
+        assert_eq!(egui_key_to_string(&egui::Key::D), "D");
+    }
+
+    #[test]
+    fn test_egui_key_to_string_numbers() {
+        assert_eq!(egui_key_to_string(&egui::Key::Num0), "0");
+        assert_eq!(egui_key_to_string(&egui::Key::Num1), "1");
+        assert_eq!(egui_key_to_string(&egui::Key::Num9), "9");
+    }
+
+    #[test]
+    fn test_egui_key_to_string_special_keys() {
+        assert_eq!(egui_key_to_string(&egui::Key::Space), "Space");
+        assert_eq!(egui_key_to_string(&egui::Key::Enter), "Enter");
+        assert_eq!(egui_key_to_string(&egui::Key::Escape), "Escape");
+        assert_eq!(egui_key_to_string(&egui::Key::Tab), "Tab");
+        assert_eq!(egui_key_to_string(&egui::Key::Backspace), "Backspace");
+    }
+
+    #[test]
+    fn test_egui_key_to_string_arrows() {
+        assert_eq!(egui_key_to_string(&egui::Key::ArrowUp), "Up Arrow");
+        assert_eq!(egui_key_to_string(&egui::Key::ArrowDown), "Down Arrow");
+        assert_eq!(egui_key_to_string(&egui::Key::ArrowLeft), "Left Arrow");
+        assert_eq!(egui_key_to_string(&egui::Key::ArrowRight), "Right Arrow");
+    }
+
+    #[test]
+    fn test_format_key_list_single_key() {
+        let keys = vec!["W".to_string()];
+        let formatted = format_key_list(&keys);
+        assert_eq!(formatted, "W");
+    }
+
+    #[test]
+    fn test_format_key_list_multiple_keys() {
+        let keys = vec!["W".to_string(), "Up Arrow".to_string(), "Space".to_string()];
+        let formatted = format_key_list(&keys);
+        assert_eq!(formatted, "W, Up Arrow, Space");
+    }
+
+    #[test]
+    fn test_format_key_list_empty() {
+        let keys: Vec<String> = vec![];
+        let formatted = format_key_list(&keys);
+        assert_eq!(formatted, "");
+    }
+
+    #[test]
+    fn test_parse_key_list_single_key() {
+        let parsed = parse_key_list("W");
+        assert_eq!(parsed, vec!["W".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_key_list_multiple_keys() {
+        let parsed = parse_key_list("W, Up Arrow, S");
+        assert_eq!(
+            parsed,
+            vec!["W".to_string(), "Up Arrow".to_string(), "S".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_key_list_with_extra_spaces() {
+        let parsed = parse_key_list("W  ,  Up Arrow  ,  S");
+        assert_eq!(
+            parsed,
+            vec!["W".to_string(), "Up Arrow".to_string(), "S".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_key_list_empty_string() {
+        let parsed = parse_key_list("");
+        assert_eq!(parsed, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_parse_key_list_filters_empty_entries() {
+        let parsed = parse_key_list("W, , S, ");
+        assert_eq!(parsed, vec!["W".to_string(), "S".to_string()]);
+    }
+
+    #[test]
+    fn test_needs_initial_load_default_true() {
+        let state = ConfigEditorState::new();
+        assert!(state.needs_initial_load);
+        assert!(state.last_campaign_dir.is_none());
+    }
+
+    #[test]
+    fn test_capturing_key_for_default_none() {
+        let state = ConfigEditorState::new();
+        assert!(state.capturing_key_for.is_none());
+        assert!(state.last_captured_key.is_none());
+    }
+
+    #[test]
+    fn test_update_edit_buffers_auto_populates() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.controls.move_forward = vec!["W".to_string(), "Up Arrow".to_string()];
+        state.game_config.controls.move_back = vec!["S".to_string()];
+        state.game_config.controls.turn_left = vec!["A".to_string(), "Left Arrow".to_string()];
+
+        state.update_edit_buffers();
+
+        assert_eq!(state.controls_move_forward_buffer, "W, Up Arrow");
+        assert_eq!(state.controls_move_back_buffer, "S");
+        assert_eq!(state.controls_turn_left_buffer, "A, Left Arrow");
+    }
+
+    #[test]
+    fn test_round_trip_buffer_conversion() {
+        let mut state = ConfigEditorState::new();
+        let original_keys = vec!["W".to_string(), "Up Arrow".to_string(), "Space".to_string()];
+
+        state.game_config.controls.move_forward = original_keys.clone();
+        state.update_edit_buffers();
+        state.update_config_from_buffers();
+
+        assert_eq!(state.game_config.controls.move_forward, original_keys);
+    }
+
+    #[test]
+    fn test_manual_text_edit_still_works() {
+        let mut state = ConfigEditorState::new();
+        state.controls_move_forward_buffer = "X, Y, Z".to_string();
+        state.update_config_from_buffers();
+
+        assert_eq!(
+            state.game_config.controls.move_forward,
+            vec!["X".to_string(), "Y".to_string(), "Z".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_multiple_keys_per_action() {
+        let mut state = ConfigEditorState::new();
+        state.controls_move_forward_buffer = "W, Up Arrow, 8".to_string();
+        state.update_config_from_buffers();
+
+        assert_eq!(state.game_config.controls.move_forward.len(), 3);
+        assert!(state
+            .game_config
+            .controls
+            .move_forward
+            .contains(&"W".to_string()));
+        assert!(state
+            .game_config
+            .controls
+            .move_forward
+            .contains(&"Up Arrow".to_string()));
+        assert!(state
+            .game_config
+            .controls
+            .move_forward
+            .contains(&"8".to_string()));
     }
 }

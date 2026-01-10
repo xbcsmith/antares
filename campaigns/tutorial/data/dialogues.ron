@@ -4,6 +4,15 @@
         name: "Arcturus Story",
         root_node: 1,
         nodes: {
+            2: (
+                id: 2,
+                text: "Hello There! Come and sit and talk a while.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
             1: (
                 id: 1,
                 text: "I am the Great Arcturus!",
@@ -28,15 +37,6 @@
                 actions: [],
                 is_terminal: false,
             ),
-            2: (
-                id: 2,
-                text: "Hello There! Come and sit and talk a while.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
-            ),
         },
         speaker_name: Some("Arcturus"),
         repeatable: true,
@@ -47,15 +47,6 @@
         name: "Default Character Recruitment",
         root_node: 1,
         nodes: {
-            2: (
-                id: 2,
-                text: "Excellent! I\'m ready to join your adventure.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
-            ),
             3: (
                 id: 3,
                 text: "I\'ll head to the inn right away. See you there!",
@@ -103,6 +94,15 @@
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+            ),
+            2: (
+                id: 2,
+                text: "Excellent! I\'m ready to join your adventure.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
             ),
         },
         speaker_name: None,
