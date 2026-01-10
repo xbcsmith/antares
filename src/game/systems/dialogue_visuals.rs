@@ -430,6 +430,54 @@ pub fn follow_speaker_system(
     }
 }
 
+/// Monitors speaker entity and ends dialogue if speaker is despawned
+///
+/// This system checks if the active dialogue speaker entity still exists in the world.
+/// If the speaker is despawned during dialogue (e.g., NPC removed or level unloaded),
+/// dialogue is ended gracefully and the game returns to Exploration mode.
+///
+/// # Arguments
+///
+/// * `mut global_state` - Current game state to update
+/// * `query_entities` - Query to verify speaker entity existence
+/// * `mut game_log` - Optional game log for error messages
+///
+/// # Examples
+///
+/// ```no_run
+/// use bevy::prelude::*;
+/// use antares::game::systems::dialogue_visuals::check_speaker_exists;
+/// use antares::game::resources::GlobalState;
+///
+/// # fn example(
+/// #     global_state: Res<GlobalState>,
+/// #     query_entities: Query<Entity>,
+/// # ) {
+/// // System is automatically called each frame
+/// # }
+/// ```
+pub fn check_speaker_exists(
+    mut global_state: ResMut<GlobalState>,
+    query_entities: Query<Entity>,
+    mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
+) {
+    if let GameMode::Dialogue(ref dialogue_state) = global_state.0.mode {
+        if let Some(speaker_entity) = dialogue_state.speaker_entity {
+            // Check if speaker still exists
+            if query_entities.get(speaker_entity).is_err() {
+                info!(
+                    "Speaker entity {:?} despawned during dialogue, ending conversation",
+                    speaker_entity
+                );
+                if let Some(ref mut log) = game_log {
+                    log.add("Speaker left the conversation.".to_string());
+                }
+                global_state.0.return_to_exploration();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -80,6 +80,7 @@ impl Plugin for DialoguePlugin {
                     crate::game::systems::dialogue_visuals::update_typewriter_text,
                     crate::game::systems::dialogue_visuals::billboard_system,
                     crate::game::systems::dialogue_visuals::follow_speaker_system,
+                    crate::game::systems::dialogue_visuals::check_speaker_exists,
                     crate::game::systems::dialogue_visuals::cleanup_dialogue_bubble,
                     crate::game::systems::dialogue_choices::cleanup_choice_ui,
                 ),
@@ -122,43 +123,80 @@ fn handle_start_dialogue(
 ) {
     for ev in ev_reader.read() {
         let db = content.db();
-        if let Some(tree) = db.dialogues.get_dialogue(ev.dialogue_id) {
-            let root = tree.root_node;
-            global_state.0.mode = GameMode::Dialogue(DialogueState::start(ev.dialogue_id, root));
-
-            // Execute any actions attached to the root node and log the text
-            // Execute root node actions and log the text
-            if let Some(node) = tree.get_node(root) {
-                for action in &node.actions {
-                    execute_action(
-                        action,
-                        &mut global_state.0,
-                        db,
-                        quest_system.as_deref_mut(),
-                        game_log.as_deref_mut(),
+        match db.dialogues.get_dialogue(ev.dialogue_id) {
+            Some(tree) => {
+                // Validate dialogue tree integrity
+                if let Err(validation_error) =
+                    crate::game::systems::dialogue_validation::validate_dialogue_tree(tree)
+                {
+                    let error_msg = format!(
+                        "Dialogue {} validation failed: {}",
+                        ev.dialogue_id, validation_error
                     );
-                }
-                if let Some(ref mut log) = game_log {
-                    let speaker = tree.speaker_name.as_deref().unwrap_or("NPC");
-                    log.add(format!("{}: {}", speaker, node.text));
+                    info!("{}", error_msg);
+                    if let Some(ref mut log) = game_log {
+                        log.add(error_msg);
+                    }
+                    return;
                 }
 
-                // Update DialogueState with current node text and choices
-                let choices: Vec<String> = node.choices.iter().map(|c| c.text.clone()).collect();
-                if let GameMode::Dialogue(ref mut state) = global_state.0.mode {
-                    state.update_node(
-                        node.text.clone(),
-                        tree.speaker_name.as_deref().unwrap_or("NPC").to_string(),
-                        choices,
-                        Some(ev.speaker_entity),
-                    );
+                let root = tree.root_node;
+
+                // Validate root node exists (redundant with validation, but kept for safety)
+                if tree.get_node(root).is_none() {
+                    let error_msg =
+                        format!("Dialogue {} has invalid root node {}", ev.dialogue_id, root);
+                    info!("{}", error_msg);
+                    if let Some(ref mut log) = game_log {
+                        log.add(error_msg);
+                    }
+                    return;
+                }
+
+                global_state.0.mode =
+                    GameMode::Dialogue(DialogueState::start(ev.dialogue_id, root));
+
+                // Execute any actions attached to the root node and log the text
+                // Execute root node actions and log the text
+                if let Some(node) = tree.get_node(root) {
+                    for action in &node.actions {
+                        execute_action(
+                            action,
+                            &mut global_state.0,
+                            db,
+                            quest_system.as_deref_mut(),
+                            game_log.as_deref_mut(),
+                        );
+                    }
+                    if let Some(ref mut log) = game_log {
+                        let speaker = tree.speaker_name.as_deref().unwrap_or("NPC");
+                        log.add(format!("{}: {}", speaker, node.text));
+                    }
+
+                    // Update DialogueState with current node text and choices
+                    let choices: Vec<String> =
+                        node.choices.iter().map(|c| c.text.clone()).collect();
+                    if let GameMode::Dialogue(ref mut state) = global_state.0.mode {
+                        state.update_node(
+                            node.text.clone(),
+                            tree.speaker_name.as_deref().unwrap_or("NPC").to_string(),
+                            choices,
+                            Some(ev.speaker_entity),
+                        );
+                    }
                 }
             }
-        } else {
-            println!(
-                "Warning: StartDialogue requested for missing id {}",
-                ev.dialogue_id
-            );
+            None => {
+                let error_msg = format!(
+                    "Error: Dialogue {} not found for speaker {:?}",
+                    ev.dialogue_id, ev.speaker_entity
+                );
+                info!("{}", error_msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(error_msg);
+                }
+                // Do not enter Dialogue mode - stay in current mode
+            }
         }
     }
 }
@@ -197,10 +235,14 @@ fn handle_select_choice(
             if let Some(current_node) = tree.get_node(current_node_id) {
                 // Validate choice index
                 if ev.choice_index >= current_node.choices.len() {
-                    println!(
-                        "Warning: Invalid dialogue choice index {} for node {}",
-                        ev.choice_index, current_node_id
+                    let error_msg = format!(
+                        "Invalid dialogue choice index {} for node {} (dialogue {})",
+                        ev.choice_index, current_node_id, tree_id
                     );
+                    info!("{}", error_msg);
+                    if let Some(ref mut log) = game_log {
+                        log.add(error_msg);
+                    }
                     continue;
                 }
 
@@ -238,9 +280,24 @@ fn handle_select_choice(
 
                     // Non-terminal: clone next node data to avoid overlapping borrows
                     if let Some(target) = choice.target_node {
-                        let new_node_data = tree
-                            .get_node(target)
-                            .map(|n| (n.text.clone(), n.actions.clone()));
+                        // Validate target node exists before advancing
+                        let new_node_data = match tree.get_node(target) {
+                            Some(node) => Some((node.text.clone(), node.actions.clone())),
+                            None => {
+                                let error_msg = format!(
+                                    "Invalid node ID {} in dialogue tree {}",
+                                    target, tree_id
+                                );
+                                info!("{}", error_msg);
+                                if let Some(ref mut log) = game_log {
+                                    log.add(error_msg);
+                                    log.add("Dialogue ended unexpectedly.".to_string());
+                                }
+                                // End dialogue gracefully
+                                global_state.0.return_to_exploration();
+                                continue;
+                            }
+                        };
 
                         // Advance dialogue state by taking ownership of the mode to avoid holding a
                         // mutable reference to `global_state` while performing other mutable borrows.
@@ -290,7 +347,15 @@ fn handle_select_choice(
                 }
             }
         } else {
-            println!("Warning: Active dialogue {} not found in db", tree_id);
+            let error_msg = format!("Active dialogue tree {} not found in database", tree_id);
+            info!("{}", error_msg);
+            if let Some(ref mut log) = game_log {
+                log.add(error_msg);
+            }
+            // If the dialogue tree is missing, we should end dialogue
+            if let GameMode::Dialogue(_) = global_state.0.mode {
+                global_state.0.return_to_exploration();
+            }
         }
     }
 }
