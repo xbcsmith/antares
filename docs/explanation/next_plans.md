@@ -6,7 +6,7 @@
 
 Document the campaign data structure, including all the RON files that make up a campaign, and how they relate to each other.
 
-[campaign data documentation](./campaign_data_documentation_plan.md)
+✅ COMPLETED - [campaign data documentation](./campaign_data_documentation_plan.md)
 
 ## SDK
 
