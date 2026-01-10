@@ -85,24 +85,24 @@ Users should:
    ```rust
    ui.horizontal(|ui| {
        ui.label("Move Forward:");
-       
+
        // Text field - editable, shows current bindings
        let text_response = ui.text_edit_singleline(&mut self.controls_move_forward_buffer);
-       
+
        // Capture button - starts interactive capture
-       if ui.button(if self.capturing_key_for == Some("move_forward") { 
-           "🎮 Press a key..." 
-       } else { 
-           "Capture" 
+       if ui.button(if self.capturing_key_for == Some("move_forward") {
+           "🎮 Press a key..."
+       } else {
+           "Capture"
        }).clicked() {
            self.capturing_key_for = Some("move_forward".to_string());
        }
-       
+
        // Clear button - removes all bindings
        if ui.button("Clear").clicked() {
            self.controls_move_forward_buffer.clear();
        }
-       
+
        // Handle key capture if active
        if self.capturing_key_for == Some("move_forward") {
            if let Some(key_name) = self.handle_key_capture(ui, "move_forward") {
@@ -148,7 +148,7 @@ Users should:
            self.load_config(campaign_dir);
            self.needs_initial_load = false;
        }
-       
+
        // ... rest of show() logic ...
    }
    ```
@@ -185,28 +185,28 @@ fn egui_key_to_string(key: egui::Key) -> Option<String> {
         Key::B => Some("B".to_string()),
         // ... all letters ...
         Key::Z => Some("Z".to_string()),
-        
+
         // Numbers
         Key::Num0 => Some("0".to_string()),
         Key::Num1 => Some("1".to_string()),
         // ... all numbers ...
-        
+
         // Special keys
         Key::Space => Some("Space".to_string()),
         Key::Enter => Some("Enter".to_string()),
         Key::Escape => None, // Special: cancels capture
         Key::Tab => Some("Tab".to_string()),
         Key::Backspace => None, // Special: clears binding
-        
+
         // Arrows
         Key::ArrowUp => Some("Up Arrow".to_string()),
         Key::ArrowDown => Some("Down Arrow".to_string()),
         Key::ArrowLeft => Some("Left Arrow".to_string()),
         Key::ArrowRight => Some("Right Arrow".to_string()),
-        
+
         // Modifiers
         // Note: Modifiers are typically handled separately in egui
-        
+
         _ => None, // Unsupported or special-case key
     }
 }

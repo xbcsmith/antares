@@ -140,7 +140,7 @@ fn handle_key_capture(&mut self, ui: &mut egui::Ui) {
 
                 // Convert egui key to human-readable string
                 let key_name = egui_key_to_string(key);
-                
+
                 // Add to appropriate buffer
                 let buffer = match self.capturing_key_for.as_ref().unwrap().as_str() {
                     "move_forward" => &mut self.controls_move_forward_buffer,
@@ -285,7 +285,7 @@ cargo build --package campaign_builder --lib
 
 **Cause**: Didn't click Save button, or validation error.
 
-**Solution**: 
+**Solution**:
 1. Check for red validation error messages in the UI
 2. Ensure all required key bindings are non-empty
 3. Click **"Save"** button in toolbar
