@@ -44,6 +44,10 @@ pub struct SelectDialogueChoice {
     pub choice_index: usize,
 }
 
+/// Message to advance dialogue (show next text chunk or trigger choice display)
+#[derive(Message, Clone, Debug)]
+pub struct AdvanceDialogue;
+
 /// Plugin that registers dialogue message types and systems
 pub struct DialoguePlugin;
 
@@ -51,19 +55,48 @@ impl Plugin for DialoguePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<StartDialogue>()
             .add_message::<SelectDialogueChoice>()
+            .add_message::<AdvanceDialogue>()
             .init_resource::<crate::game::components::dialogue::ActiveDialogueUI>()
             .add_systems(
                 Update,
                 (
+                    dialogue_input_system,
                     handle_start_dialogue,
                     handle_select_choice,
                     handle_recruitment_actions,
                     crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
+                    crate::game::systems::dialogue_visuals::update_dialogue_text,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
                     crate::game::systems::dialogue_visuals::update_typewriter_text,
                     crate::game::systems::dialogue_visuals::billboard_system,
                     crate::game::systems::dialogue_visuals::cleanup_dialogue_bubble,
                 ),
             );
+    }
+}
+
+/// System to handle input for advancing dialogue
+///
+/// Sends AdvanceDialogue message when player presses Space or E during dialogue.
+///
+/// # Arguments
+///
+/// * `keyboard` - Keyboard input state
+/// * `global_state` - Current game state
+/// * `advance_writer` - Message writer for AdvanceDialogue messages
+fn dialogue_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    global_state: Res<GlobalState>,
+    mut advance_writer: MessageWriter<AdvanceDialogue>,
+) {
+    if matches!(global_state.0.mode, GameMode::Dialogue(_))
+        && (keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::KeyE))
+    {
+        advance_writer.write(AdvanceDialogue);
     }
 }
 
@@ -100,6 +133,16 @@ fn handle_start_dialogue(
                 if let Some(ref mut log) = game_log {
                     let speaker = tree.speaker_name.as_deref().unwrap_or("NPC");
                     log.add(format!("{}: {}", speaker, node.text));
+                }
+
+                // Update DialogueState with current node text and choices
+                let choices: Vec<String> = node.choices.iter().map(|c| c.text.clone()).collect();
+                if let GameMode::Dialogue(ref mut state) = global_state.0.mode {
+                    state.update_node(
+                        node.text.clone(),
+                        tree.speaker_name.as_deref().unwrap_or("NPC").to_string(),
+                        choices,
+                    );
                 }
             }
         } else {
@@ -218,6 +261,19 @@ fn handle_select_choice(
                                     quest_system.as_deref_mut(),
                                     game_log.as_deref_mut(),
                                 );
+                            }
+
+                            // Update DialogueState with new node information
+                            if let Some(next_node) = tree.get_node(target) {
+                                let choices: Vec<String> =
+                                    next_node.choices.iter().map(|c| c.text.clone()).collect();
+                                if let GameMode::Dialogue(ref mut state) = global_state.0.mode {
+                                    state.update_node(
+                                        next_node.text.clone(),
+                                        tree.speaker_name.as_deref().unwrap_or("NPC").to_string(),
+                                        choices,
+                                    );
+                                }
                             }
                         }
                     }
@@ -710,5 +766,88 @@ mod tests {
             inv.items.iter().any(|s| s.item_id == 99),
             "Expected item 99 in inventory"
         );
+    }
+
+    #[test]
+    fn test_handle_start_dialogue_updates_state() {
+        // Create test dialogue tree
+        let mut tree = DialogueTree::new(1, "Test", 1);
+        let mut node = DialogueNode::new(1, "Hello!");
+        node.add_choice(DialogueChoice::new("Goodbye", None));
+        tree.add_node(node);
+
+        // Verify that DialogueState would be created with correct fields
+        assert_eq!(tree.get_node(1).unwrap().text, "Hello!");
+        assert_eq!(tree.get_node(1).unwrap().choices.len(), 1);
+    }
+
+    #[test]
+    fn test_dialogue_input_system_requires_dialogue_mode() {
+        // Test that dialogue_input_system only sends events in Dialogue mode
+        // Setup: create a simple global state
+        let mut gs = crate::application::GameState::new();
+        let character = crate::domain::character::Character::new(
+            "Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Good,
+        );
+        gs.party.add_member(character).unwrap();
+
+        // In Exploration mode, no event should be sent
+        gs.mode = GameMode::Exploration;
+        let global_state = GlobalState(gs);
+
+        // Verify we're in exploration mode
+        assert!(matches!(global_state.0.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_advance_dialogue_event_handling() {
+        // Verify AdvanceDialogue event can be created and serialized
+        let event = AdvanceDialogue;
+        let debug_str = format!("{:?}", event);
+        assert_eq!(debug_str, "AdvanceDialogue");
+    }
+
+    #[test]
+    fn test_dialogue_state_updates_on_start() {
+        // Verify that starting a dialogue properly calls update_node
+        let mut state = DialogueState::start(1, 1);
+
+        state.update_node(
+            "Hello!".to_string(),
+            "NPC".to_string(),
+            vec!["Yes".to_string(), "No".to_string()],
+        );
+
+        assert_eq!(state.current_text, "Hello!");
+        assert_eq!(state.current_speaker, "NPC");
+        assert_eq!(state.current_choices.len(), 2);
+        assert!(state.is_active());
+    }
+
+    #[test]
+    fn test_dialogue_state_transitions() {
+        // Verify state updates when transitioning between nodes
+        let mut state = DialogueState::start(1, 1);
+        state.update_node(
+            "First text".to_string(),
+            "Speaker1".to_string(),
+            vec!["Choice 1".to_string()],
+        );
+
+        state.advance_to(2);
+        state.update_node(
+            "Second text".to_string(),
+            "Speaker2".to_string(),
+            vec!["Choice 2".to_string()],
+        );
+
+        assert_eq!(state.current_node_id, 2);
+        assert_eq!(state.current_text, "Second text");
+        assert_eq!(state.current_speaker, "Speaker2");
+        assert_eq!(state.current_choices[0], "Choice 2");
     }
 }

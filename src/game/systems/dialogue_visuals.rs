@@ -191,6 +191,61 @@ pub fn spawn_dialogue_bubble(
 /// update_typewriter_text(time, query);
 /// # }
 /// ```
+///
+/// Updates dialogue bubble text when node changes
+///
+/// Detects when DialogueState.current_text changes and resets typewriter animation.
+///
+/// # Arguments
+///
+/// * `global_state` - Current game state with DialogueState
+/// * `active_ui` - Resource tracking active dialogue bubble
+/// * `query_bubble` - Query for DialogueBubble components
+/// * `query_text` - Query for Text and TypewriterText components
+///
+/// # Examples
+///
+/// ```no_run
+/// use bevy::prelude::*;
+/// use antares::application::GameMode;
+/// use antares::game::systems::dialogue_visuals::update_dialogue_text;
+/// use antares::game::components::dialogue::ActiveDialogueUI;
+/// use antares::game::resources::GlobalState;
+///
+/// # fn example(
+/// #     global_state: Res<GlobalState>,
+/// #     active_ui: Res<ActiveDialogueUI>,
+/// #     query_bubble: Query<&DialogueBubble>,
+/// #     query_text: Query<(&mut Text, &mut TypewriterText)>,
+/// # ) {
+/// update_dialogue_text(global_state, active_ui, query_bubble, query_text);
+/// # }
+/// ```
+pub fn update_dialogue_text(
+    global_state: Res<GlobalState>,
+    active_ui: Res<ActiveDialogueUI>,
+    query_bubble: Query<&DialogueBubble>,
+    mut query_text: Query<(&mut Text, &mut TypewriterText)>,
+) {
+    if let GameMode::Dialogue(ref dialogue_state) = global_state.0.mode {
+        if let Some(bubble_entity) = active_ui.bubble_entity {
+            if let Ok(bubble) = query_bubble.get(bubble_entity) {
+                if let Ok((mut text, mut typewriter)) = query_text.get_mut(bubble.text_entity) {
+                    // Check if text changed
+                    if typewriter.full_text != dialogue_state.current_text {
+                        // Reset typewriter animation for new text
+                        typewriter.full_text = dialogue_state.current_text.clone();
+                        typewriter.visible_chars = 0;
+                        typewriter.timer = 0.0;
+                        typewriter.finished = false;
+                        text.0 = String::new(); // Clear visible text
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub fn update_typewriter_text(time: Res<Time>, mut query: Query<(&mut Text, &mut TypewriterText)>) {
     for (mut text, mut typewriter) in query.iter_mut() {
         // Skip if animation is already complete
