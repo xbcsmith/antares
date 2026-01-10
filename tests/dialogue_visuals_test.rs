@@ -7,6 +7,7 @@
 //! in isolation and when integrated with the game.
 
 use antares::game::components::dialogue::*;
+use bevy::prelude::Entity;
 
 #[test]
 fn test_typewriter_text_component_creation() {
@@ -205,7 +206,10 @@ fn test_dialogue_state_message_types() {
     // Verify that dialogue components work with message passing
     use antares::game::systems::dialogue::{SelectDialogueChoice, StartDialogue};
 
-    let start_msg = StartDialogue { dialogue_id: 1 };
+    let start_msg = StartDialogue {
+        dialogue_id: 1,
+        speaker_entity: Entity::PLACEHOLDER,
+    };
     assert_eq!(start_msg.dialogue_id, 1);
 
     let choice_msg = SelectDialogueChoice { choice_index: 3 };

@@ -113,7 +113,10 @@ fn handle_events(
                     // Check if NPC has a dialogue tree
                     if let Some(dialogue_id) = npc_def.dialogue_id {
                         // Send StartDialogue message to trigger dialogue system
-                        dialogue_writer.write(StartDialogue { dialogue_id });
+                        dialogue_writer.write(StartDialogue {
+                            dialogue_id,
+                            speaker_entity: Entity::PLACEHOLDER,
+                        });
 
                         let msg = format!("{} wants to talk.", npc_def.name);
                         println!("{}", msg);

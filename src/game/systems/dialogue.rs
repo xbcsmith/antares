@@ -35,6 +35,8 @@ use crate::domain::dialogue::{DialogueAction, DialogueCondition, DialogueId};
 pub struct StartDialogue {
     /// Dialogue tree id to activate
     pub dialogue_id: DialogueId,
+    /// Entity that initiated this dialogue (typically an NPC)
+    pub speaker_entity: Entity,
 }
 
 /// Message to select a dialogue choice by index for the active dialogue.
@@ -77,6 +79,7 @@ impl Plugin for DialoguePlugin {
                 (
                     crate::game::systems::dialogue_visuals::update_typewriter_text,
                     crate::game::systems::dialogue_visuals::billboard_system,
+                    crate::game::systems::dialogue_visuals::follow_speaker_system,
                     crate::game::systems::dialogue_visuals::cleanup_dialogue_bubble,
                     crate::game::systems::dialogue_choices::cleanup_choice_ui,
                 ),
@@ -147,6 +150,7 @@ fn handle_start_dialogue(
                         node.text.clone(),
                         tree.speaker_name.as_deref().unwrap_or("NPC").to_string(),
                         choices,
+                        Some(ev.speaker_entity),
                     );
                 }
             }
@@ -172,10 +176,10 @@ fn handle_select_choice(
 ) {
     for ev in ev_reader.read() {
         // --- Read-only phase: inspect mode and capture identifiers ---
-        let (tree_id, current_node_id) = match &global_state.0.mode {
+        let (tree_id, current_node_id, speaker_entity) = match &global_state.0.mode {
             GameMode::Dialogue(state) => {
                 if let Some(tid) = state.active_tree_id {
-                    (tid, state.current_node_id)
+                    (tid, state.current_node_id, state.speaker_entity)
                 } else {
                     // Dialogue is active but no tree configured; skip
                     continue;
@@ -277,6 +281,7 @@ fn handle_select_choice(
                                         next_node.text.clone(),
                                         tree.speaker_name.as_deref().unwrap_or("NPC").to_string(),
                                         choices,
+                                        speaker_entity,
                                     );
                                 }
                             }
@@ -825,6 +830,7 @@ mod tests {
             "Hello!".to_string(),
             "NPC".to_string(),
             vec!["Yes".to_string(), "No".to_string()],
+            None,
         );
 
         assert_eq!(state.current_text, "Hello!");
@@ -841,6 +847,7 @@ mod tests {
             "First text".to_string(),
             "Speaker1".to_string(),
             vec!["Choice 1".to_string()],
+            None,
         );
 
         state.advance_to(2);
@@ -848,6 +855,7 @@ mod tests {
             "Second text".to_string(),
             "Speaker2".to_string(),
             vec!["Choice 2".to_string()],
+            None,
         );
 
         assert_eq!(state.current_node_id, 2);

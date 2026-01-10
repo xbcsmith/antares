@@ -42,7 +42,7 @@ use crate::domain::dialogue::{DialogueId, NodeId};
 /// * `current_text` - Current node's full text content for visual systems.
 /// * `current_speaker` - Current node's speaker name.
 /// * `current_choices` - Current node's available choices.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Resource, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Resource)]
 pub struct DialogueState {
     /// The active dialogue tree ID (None if no dialogue is active)
     pub active_tree_id: Option<DialogueId>,
@@ -61,6 +61,9 @@ pub struct DialogueState {
 
     /// Current node's available choices
     pub current_choices: Vec<String>,
+
+    /// Speaker entity that initiated this dialogue (typically an NPC)
+    pub speaker_entity: Option<bevy::prelude::Entity>,
 }
 
 impl DialogueState {
@@ -102,6 +105,7 @@ impl DialogueState {
             current_text: String::new(),
             current_speaker: String::new(),
             current_choices: Vec::new(),
+            speaker_entity: None,
         }
     }
 
@@ -137,27 +141,37 @@ impl DialogueState {
     /// * `text` - The new node's text content
     /// * `speaker` - The speaker's name for this node
     /// * `choices` - Available player choices (empty for terminal nodes)
+    /// * `speaker_entity` - Optional entity that initiated this dialogue (typically an NPC)
     ///
     /// # Examples
     ///
     /// ```
     /// use antares::application::dialogue::DialogueState;
+    /// use bevy::prelude::Entity;
     ///
     /// let mut state = DialogueState::new();
     /// state.update_node(
     ///     "Hello, adventurer!".to_string(),
     ///     "Village Elder".to_string(),
     ///     vec!["Greetings".to_string(), "Farewell".to_string()],
+    ///     None,
     /// );
     ///
     /// assert_eq!(state.current_text, "Hello, adventurer!");
     /// assert_eq!(state.current_speaker, "Village Elder");
     /// assert_eq!(state.current_choices.len(), 2);
     /// ```
-    pub fn update_node(&mut self, text: String, speaker: String, choices: Vec<String>) {
+    pub fn update_node(
+        &mut self,
+        text: String,
+        speaker: String,
+        choices: Vec<String>,
+        speaker_entity: Option<bevy::prelude::Entity>,
+    ) {
         self.current_text = text;
         self.current_speaker = speaker;
         self.current_choices = choices;
+        self.speaker_entity = speaker_entity;
     }
 
     /// Ends the current dialogue and clears the active state/history.
@@ -201,6 +215,7 @@ mod tests {
         assert_eq!(s.active_tree_id, None);
         assert_eq!(s.current_node_id, 0);
         assert!(s.dialogue_history.is_empty());
+        assert_eq!(s.speaker_entity, None);
     }
 
     #[test]
@@ -242,6 +257,7 @@ mod tests {
             "Hello, traveler!".to_string(),
             "Village Elder".to_string(),
             vec!["Greetings".to_string(), "Farewell".to_string()],
+            None,
         );
 
         assert_eq!(state.current_text, "Hello, traveler!");
@@ -263,11 +279,12 @@ mod tests {
     fn test_update_node_overwrites_previous() {
         let mut state = DialogueState::default();
 
-        state.update_node("First".to_string(), "Speaker1".to_string(), vec![]);
+        state.update_node("First".to_string(), "Speaker1".to_string(), vec![], None);
         state.update_node(
             "Second".to_string(),
             "Speaker2".to_string(),
             vec!["Choice".to_string()],
+            None,
         );
 
         assert_eq!(state.current_text, "Second");
@@ -282,6 +299,7 @@ mod tests {
             "Some text".to_string(),
             "Speaker".to_string(),
             vec!["Choice".to_string()],
+            None,
         );
 
         state.end();
@@ -289,5 +307,23 @@ mod tests {
         assert_eq!(state.current_text, "");
         assert_eq!(state.current_speaker, "");
         assert!(state.current_choices.is_empty());
+        assert_eq!(state.speaker_entity, None);
+    }
+
+    #[test]
+    fn test_dialogue_state_speaker_entity() {
+        use bevy::prelude::Entity;
+
+        let mut state = DialogueState::default();
+        let test_entity = Entity::from_bits(42);
+
+        state.update_node(
+            "Test".to_string(),
+            "NPC".to_string(),
+            vec![],
+            Some(test_entity),
+        );
+
+        assert_eq!(state.speaker_entity, Some(test_entity));
     }
 }

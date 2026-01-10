@@ -166,6 +166,52 @@ pub struct DialogueChoiceButton {
 #[derive(Component, Debug)]
 pub struct DialogueChoiceContainer;
 
+/// Marks an entity as an NPC that can initiate dialogue
+///
+/// NPCs with this component can be interacted with to start conversations.
+/// The dialogue system uses this component to identify dialogue sources
+/// and track which NPC is speaking during a conversation.
+///
+/// # Fields
+///
+/// * `dialogue_id` - Dialogue tree ID to start when interacting with this NPC
+/// * `npc_name` - NPC's display name for identification
+#[derive(Component, Debug, Clone)]
+pub struct NpcDialogue {
+    /// Dialogue tree ID to start when interacting with this NPC
+    pub dialogue_id: crate::domain::dialogue::DialogueId,
+    /// NPC's display name
+    pub npc_name: String,
+}
+
+impl NpcDialogue {
+    /// Creates a new NPC dialogue component
+    ///
+    /// # Arguments
+    ///
+    /// * `dialogue_id` - The dialogue tree ID this NPC uses
+    /// * `npc_name` - The NPC's display name
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::dialogue::NpcDialogue;
+    ///
+    /// let npc = NpcDialogue::new(1, "Village Elder");
+    /// assert_eq!(npc.dialogue_id, 1);
+    /// assert_eq!(npc.npc_name, "Village Elder");
+    /// ```
+    pub fn new(
+        dialogue_id: crate::domain::dialogue::DialogueId,
+        npc_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            dialogue_id,
+            npc_name: npc_name.into(),
+        }
+    }
+}
+
 /// Resource tracking current choice selection state
 #[derive(Resource, Debug, Default)]
 pub struct ChoiceSelectionState {
@@ -280,5 +326,19 @@ mod tests {
         let _ = CHOICE_CONTAINER_Y_OFFSET;
         let _ = CHOICE_BUTTON_HEIGHT;
         let _ = CHOICE_BUTTON_SPACING;
+    }
+
+    #[test]
+    fn test_npc_dialogue_creation() {
+        let npc = NpcDialogue::new(5, "Merchant");
+        assert_eq!(npc.dialogue_id, 5);
+        assert_eq!(npc.npc_name, "Merchant");
+    }
+
+    #[test]
+    fn test_npc_dialogue_with_different_name() {
+        let npc = NpcDialogue::new(10, "Village Elder");
+        assert_eq!(npc.dialogue_id, 10);
+        assert_eq!(npc.npc_name, "Village Elder");
     }
 }

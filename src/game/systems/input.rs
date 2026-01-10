@@ -471,7 +471,10 @@ fn handle_input(
                             name, character_id, position
                         );
                         // Use dialogue ID 100 for default recruitment dialogue
-                        dialogue_writer.write(StartDialogue { dialogue_id: 100 });
+                        dialogue_writer.write(StartDialogue {
+                            dialogue_id: 100,
+                            speaker_entity: Entity::PLACEHOLDER,
+                        });
                         return;
                     }
                     _ => continue,

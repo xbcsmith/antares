@@ -45,6 +45,7 @@ fn test_dialogue_state_update_node() {
         "Hello, traveler!".to_string(),
         "Village Elder".to_string(),
         vec!["Greetings".to_string(), "Farewell".to_string()],
+        None,
     );
 
     assert_eq!(state.current_text, "Hello, traveler!");
@@ -66,6 +67,7 @@ fn test_dialogue_state_advance_and_update() {
         "First node".to_string(),
         "Speaker A".to_string(),
         vec!["Continue".to_string()],
+        None,
     );
 
     assert_eq!(state.current_text, "First node");
@@ -77,6 +79,7 @@ fn test_dialogue_state_advance_and_update() {
         "Second node".to_string(),
         "Speaker B".to_string(),
         vec!["Choice 1".to_string(), "Choice 2".to_string()],
+        None,
     );
 
     assert_eq!(state.current_node_id, 2);
@@ -96,6 +99,7 @@ fn test_dialogue_state_overwrites_choices() {
         "Text 1".to_string(),
         "Speaker 1".to_string(),
         vec!["Choice 1".to_string(), "Choice 2".to_string()],
+        None,
     );
 
     assert_eq!(state.current_choices.len(), 2);
@@ -105,6 +109,7 @@ fn test_dialogue_state_overwrites_choices() {
         "Text 2".to_string(),
         "Speaker 2".to_string(),
         vec!["Only Choice".to_string()],
+        None,
     );
 
     assert_eq!(state.current_choices.len(), 1);
@@ -121,6 +126,7 @@ fn test_dialogue_state_end_clears_all_state() {
         "Some text".to_string(),
         "Some speaker".to_string(),
         vec!["Choice".to_string()],
+        None,
     );
     state.advance_to(2);
 
@@ -155,6 +161,7 @@ fn test_dialogue_state_terminal_choice() {
         "Do you accept?".to_string(),
         "Elder".to_string(),
         vec!["Accept".to_string()],
+        None,
     );
 
     // Terminal choice - dialogue ends
@@ -177,6 +184,7 @@ fn test_dialogue_state_multiple_node_chain() {
             format!("Node {}", i),
             "Speaker".to_string(),
             vec!["Next".to_string()],
+            None,
         );
     }
 
@@ -194,6 +202,7 @@ fn test_dialogue_state_empty_choices() {
         "This is the end.".to_string(),
         "NPC".to_string(),
         vec![], // No choices - terminal node
+        None,
     );
 
     assert_eq!(state.current_text, "This is the end.");
@@ -214,6 +223,7 @@ fn test_dialogue_state_long_text() {
         long_text.to_string(),
         "Philosopher".to_string(),
         vec!["I understand".to_string()],
+        None,
     );
 
     assert_eq!(state.current_text, long_text);
@@ -230,6 +240,7 @@ fn test_dialogue_state_special_characters_in_names() {
         "Greetings!".to_string(),
         "Sir Lancelot O'Brien".to_string(),
         vec!["Hello".to_string()],
+        None,
     );
 
     assert_eq!(state.current_speaker, "Sir Lancelot O'Brien");

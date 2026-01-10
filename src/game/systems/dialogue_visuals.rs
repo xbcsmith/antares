@@ -80,6 +80,7 @@ pub fn spawn_dialogue_bubble(
     mut active_ui: ResMut<ActiveDialogueUI>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    query_speaker: Query<&Transform, Without<Billboard>>,
 ) {
     // Only spawn if in Dialogue mode and no bubble exists yet
     if let GameMode::Dialogue(dialogue_state) = &global_state.0.mode {
@@ -87,9 +88,21 @@ pub fn spawn_dialogue_bubble(
             return; // Bubble already exists
         }
 
-        // Position at a fixed location for now; in future phases,
-        // this will use speaker entity position
-        let speaker_position = Vec3::new(0.0, 0.0, 0.0);
+        // Get speaker position from dialogue state
+        let speaker_position = if let Some(speaker_entity) = dialogue_state.speaker_entity {
+            if let Ok(speaker_transform) = query_speaker.get(speaker_entity) {
+                speaker_transform.translation
+            } else {
+                warn!(
+                    "Speaker entity {:?} not found, using origin",
+                    speaker_entity
+                );
+                Vec3::ZERO
+            }
+        } else {
+            warn!("No speaker entity in dialogue state, using origin");
+            Vec3::ZERO
+        };
         let bubble_position = speaker_position + Vec3::new(0.0, DIALOGUE_BUBBLE_Y_OFFSET, 0.0);
 
         // Create background quad mesh
@@ -155,7 +168,7 @@ pub fn spawn_dialogue_bubble(
         // Create DialogueBubble marker component and spawn it
         let bubble = commands
             .spawn(DialogueBubble {
-                speaker_entity: Entity::PLACEHOLDER,
+                speaker_entity: dialogue_state.speaker_entity.unwrap_or(Entity::PLACEHOLDER),
                 root_entity,
                 background_entity,
                 text_entity,
@@ -369,6 +382,50 @@ pub fn cleanup_dialogue_bubble(
             }
             // Clear the resource
             active_ui.bubble_entity = None;
+        }
+    }
+}
+
+/// Updates dialogue bubble position to follow speaker
+///
+/// Keeps the dialogue bubble positioned above the NPC even if the NPC moves.
+/// This system runs each frame to sync the bubble's world position with the
+/// speaker entity's position.
+///
+/// # Arguments
+///
+/// * `query_bubbles` - Query for DialogueBubble components
+/// * `query_speaker` - Query for speaker Transform components
+/// * `mut query_bubble_transform` - Query for bubble Transform components to update
+///
+/// # Examples
+///
+/// ```no_run
+/// use bevy::prelude::*;
+/// use antares::game::systems::dialogue_visuals::follow_speaker_system;
+/// use antares::game::components::dialogue::{DialogueBubble, Billboard};
+///
+/// # fn example(
+/// #     query_bubbles: Query<&DialogueBubble>,
+/// #     query_speaker: Query<&Transform, Without<DialogueBubble>>,
+/// #     mut query_bubble_transform: Query<&mut Transform, With<Billboard>>,
+/// # ) {
+/// follow_speaker_system(query_bubbles, query_speaker, query_bubble_transform);
+/// # }
+/// ```
+pub fn follow_speaker_system(
+    query_bubbles: Query<&DialogueBubble>,
+    query_speaker: Query<&Transform, Without<DialogueBubble>>,
+    mut query_bubble_transform: Query<&mut Transform, With<Billboard>>,
+) {
+    for bubble in query_bubbles.iter() {
+        if let Ok(speaker_transform) = query_speaker.get(bubble.speaker_entity) {
+            if let Ok(mut bubble_transform) = query_bubble_transform.get_mut(bubble.root_entity) {
+                // Update position to follow speaker
+                let target_position =
+                    speaker_transform.translation + Vec3::new(0.0, bubble.y_offset, 0.0);
+                bubble_transform.translation = target_position;
+            }
         }
     }
 }
