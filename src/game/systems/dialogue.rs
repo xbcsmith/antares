@@ -51,12 +51,17 @@ impl Plugin for DialoguePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<StartDialogue>()
             .add_message::<SelectDialogueChoice>()
+            .init_resource::<crate::game::components::dialogue::ActiveDialogueUI>()
             .add_systems(
                 Update,
                 (
                     handle_start_dialogue,
                     handle_select_choice,
                     handle_recruitment_actions,
+                    crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
+                    crate::game::systems::dialogue_visuals::update_typewriter_text,
+                    crate::game::systems::dialogue_visuals::billboard_system,
+                    crate::game::systems::dialogue_visuals::cleanup_dialogue_bubble,
                 ),
             );
     }

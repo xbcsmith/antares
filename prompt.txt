@@ -1,1 +1,1 @@
-You are an elite Rust Game Developer. Implement  DO NOT SKIP TASKS or DELIVERABLES. THINK HARD and follow the rules in
+You are an elite Rust Game Developer. Implement Phase 2: Visual System Implementation from  DO NOT SKIP TASKS or DELIVERABLES. THINK HARD and follow the rules in
