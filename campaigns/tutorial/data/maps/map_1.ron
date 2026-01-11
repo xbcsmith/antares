@@ -7631,6 +7631,7 @@
             name: "Apprentice Zara",
             description: "A young gnome apprentice studies a spellbook intently.",
             character_id: "npc_apprentice_zara",
+            dialogue_id: None,
         ),
         (
             x: 5,
@@ -7675,6 +7676,7 @@
             name: "Old Gareth",
             description: "A grizzled dwarf veteran stands here, repairing armor.",
             character_id: "npc_old_gareth",
+            dialogue_id: None,
         ),
         (
             x: 7,
@@ -7683,6 +7685,7 @@
             name: "Whisper",
             description: "A nimble elf watches from the shadows near the alley.",
             character_id: "npc_whisper",
+            dialogue_id: None,
         ),
     },
     npc_placements: [

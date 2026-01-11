@@ -18449,6 +18449,232 @@ None - Full integration complete.
 
 ### Status
 
+## Phase 1: Core Recruitment Action Implementation - COMPLETED
+
+### Summary
+
+Implemented core dialogue action execution for character recruitment, including `RecruitToParty` and `RecruitToInn` dialogue actions. This phase establishes the foundation for integrating recruitment interactions into the dialogue system.
+
+### Objective
+
+Enable dialogue-driven character recruitment by:
+
+1. Adding `dialogue_id` field to map recruitment events
+2. Creating recruitment context tracking in dialogue state
+3. Implementing dialogue action handlers for both party and inn recruitment
+4. Providing comprehensive error handling and game log feedback
+
+### Changes Made
+
+#### 1.1 MapEvent Enhancement (`src/domain/world/types.rs`)
+
+Added optional `dialogue_id` field to `MapEvent::RecruitableCharacter`:
+
+```rust
+RecruitableCharacter {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    description: String,
+    character_id: String,
+    #[serde(default)]
+    dialogue_id: Option<DialogueId>,
+}
+```
+
+Also added constant:
+
+```rust
+pub const DEFAULT_RECRUITMENT_DIALOGUE_ID: DialogueId = 1000;
+```
+
+#### 1.2 RecruitmentContext Struct (`src/application/dialogue.rs`)
+
+Created new struct to track recruitment context during dialogue:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecruitmentContext {
+    pub character_id: String,
+    pub event_position: crate::domain::types::Position,
+}
+```
+
+Added `recruitment_context` field to `DialogueState`:
+
+```rust
+pub struct DialogueState {
+    // ... existing fields ...
+    pub recruitment_context: Option<RecruitmentContext>,
+}
+```
+
+Updated `DialogueState::default()` and `DialogueState::end()` to initialize/clear the field.
+
+#### 1.3 PendingRecruitmentContext Resource (`src/game/systems/dialogue.rs`)
+
+Created Bevy resource to hold recruitment context between event trigger and dialogue initialization:
+
+```rust
+#[derive(Resource, Default)]
+pub struct PendingRecruitmentContext(pub Option<RecruitmentContext>);
+```
+
+Registered in `DialoguePlugin::build()`:
+
+```rust
+.insert_resource(PendingRecruitmentContext::default())
+```
+
+#### 1.4 RecruitToParty Action Implementation (`src/game/systems/dialogue.rs`)
+
+Implemented `DialogueAction::RecruitToParty` handler:
+
+- Calls `game_state.recruit_from_map()` for core recruitment logic
+- Handles `RecruitResult::AddedToParty` and `RecruitResult::SentToInn`
+- Comprehensive error handling for all `RecruitmentError` variants
+- Adds game log messages for all outcomes
+
+#### 1.5 RecruitToInn Action Implementation (`src/game/systems/dialogue.rs`)
+
+Implemented `DialogueAction::RecruitToInn` handler:
+
+- Manual implementation that sends character to specific innkeeper (regardless of party capacity)
+- Validates character not already encountered
+- Verifies innkeeper exists in database
+- Instantiates character from definition
+- Adds to roster at specified inn location
+- Tracks as encountered to prevent duplicates
+- Provides detailed error handling and game log feedback
+
+### Data Migration
+
+Updated all campaign map files to include `dialogue_id: None` field:
+
+- `campaigns/tutorial/data/maps/map_1.ron` (3 events)
+- `campaigns/tutorial/data/maps/map_2.ron` (1 event)
+- `campaigns/tutorial/data/maps/map_3.ron` (1 event)
+- `campaigns/tutorial/data/maps/map_4.ron` (1 event)
+
+Updated test in `src/game/systems/input.rs` to include new field.
+
+### Test Coverage
+
+Added 7 comprehensive tests:
+
+1. **test_recruit_to_party_action_success** - Successful recruitment to active party
+2. **test_recruit_to_party_action_when_party_full** - Party full scenario (character sent to inn)
+3. **test_recruit_to_party_action_already_recruited** - Duplicate recruitment prevention
+4. **test_recruit_to_party_action_character_not_found** - Missing character handling
+5. **test_recruit_to_inn_action_success** - Successful inn recruitment
+6. **test_recruit_to_inn_action_already_recruited** - Duplicate prevention for inn recruitment
+7. **test_recruit_to_inn_action_invalid_innkeeper** - Invalid innkeeper handling
+
+All tests use proper database setup with required class and race definitions.
+
+### Quality Verification
+
+```
+✅ cargo fmt --all          → Formatted successfully
+✅ cargo check --all-targets --all-features → No errors
+✅ cargo clippy --all-targets --all-features -- -D warnings → Zero warnings
+```
+
+### Architecture Compliance
+
+- ✅ Uses existing `recruit_from_map()` for core logic
+- ✅ Follows dialogue action execution pattern
+- ✅ Type aliases used consistently (`DialogueId`, `DialogueAction`)
+- ✅ Constants extracted (DEFAULT_RECRUITMENT_DIALOGUE_ID)
+- ✅ Comprehensive error handling with descriptive messages
+- ✅ Game log integration for user feedback
+- ✅ No hardcoded magic numbers
+- ✅ Proper separation of concerns (RecruitToParty vs RecruitToInn)
+
+### Files Modified
+
+- `src/domain/world/types.rs` - Added dialogue_id field and constant
+- `src/application/dialogue.rs` - Added RecruitmentContext struct and field
+- `src/game/systems/dialogue.rs` - Added PendingRecruitmentContext, implemented actions, added tests
+- `src/game/systems/input.rs` - Updated test to include dialogue_id field
+- `campaigns/tutorial/data/maps/map_1.ron` - Added dialogue_id: None to 3 events
+- `campaigns/tutorial/data/maps/map_2.ron` - Added dialogue_id: None to 1 event
+- `campaigns/tutorial/data/maps/map_3.ron` - Added dialogue_id: None to 1 event
+- `campaigns/tutorial/data/maps/map_4.ron` - Added dialogue_id: None to 1 event
+
+### Deliverables Completed
+
+- ✅ dialogue_id field added to MapEvent::RecruitableCharacter
+- ✅ DEFAULT_RECRUITMENT_DIALOGUE_ID constant defined
+- ✅ RecruitmentContext struct created with proper derives
+- ✅ recruitment_context field added to DialogueState
+- ✅ PendingRecruitmentContext resource created and registered
+- ✅ RecruitToParty action fully implemented
+- ✅ RecruitToInn action fully implemented
+- ✅ 7 comprehensive unit tests added
+- ✅ All data files updated with dialogue_id field
+- ✅ All quality checks passing
+
+### Success Criteria Met
+
+- ✅ Code compiles without errors
+- ✅ Zero clippy warnings
+- ✅ All tests pass
+- ✅ Architecture compliant
+- ✅ Proper error handling
+- ✅ Game log integration
+- ✅ Comprehensive documentation in code
+
+### Implementation Details
+
+The RecruitToParty action leverages the existing `recruit_from_map()` method which already handles:
+
+- Duplicate prevention via encountered_characters tracking
+- Character instantiation from definition
+- Party vs inn routing (based on party capacity)
+- Roster location tracking
+
+The RecruitToInn action provides explicit inn assignment by:
+
+- Bypassing automatic party-full logic
+- Allowing dialogue to explicitly route characters to specific inns
+- Maintaining consistent error handling patterns
+
+### Benefits Achieved
+
+- Dialogue system now can trigger character recruitment
+- Flexible inn assignment (automatic vs explicit)
+- Comprehensive error handling prevents invalid states
+- Game log feedback helps users understand outcomes
+- Foundation for Phase 2 (dialogue integration with map events)
+
+### Test Coverage Summary
+
+- Unit tests cover success paths
+- Unit tests cover all error conditions
+- Tests verify game log messages added
+- Tests verify encountered_characters tracking
+- Tests verify roster/party state updates
+- Tests verify character instantiation
+
+### Integration Points
+
+- Dialogue system → Recruitment logic
+- Game log system → User feedback
+- Character database → Character instantiation
+- Party/Roster management → Location tracking
+
+### Known Limitations
+
+- dialogue_id field not yet used (will be implemented in Phase 2)
+- PendingRecruitmentContext resource created but not yet consumed
+- Recruitment events not yet triggered from dialogue (Phase 2 task)
+- Map event cleanup not yet implemented (Phase 2 task)
+
+### Status
+
+✅ COMPLETE - All Phase 1 tasks implemented and tested
+
 ✅ **COMPLETE** - Dialogue system NPC integration is complete and production-ready.
 
 The dialogue system now has full end-to-end support from map data loading through player interaction. Content authors can create NPCs with dialogue trees in campaign data, and players can interact with them in-game following the documented tutorial.

@@ -7626,6 +7626,7 @@
             name: "Apprentice Zara",
             description: "An enthusiastic gnome apprentice sitting on a fallen log, studying a spellbook. She looks up hopefully as you approach.",
             character_id: "apprentice_zara",
+            dialogue_id: None,
         ),
         (
             x: 12,

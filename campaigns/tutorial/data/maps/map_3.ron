@@ -4933,6 +4933,7 @@
             name: "Whisper",
             description: "An elven scout emerges from the shadows, watching you intently. Her nimble fingers toy with a lockpick as she sizes up your party.",
             character_id: "whisper",
+            dialogue_id: None,
         ),
         (
             x: 3,

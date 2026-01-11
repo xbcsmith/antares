@@ -1791,8 +1791,8 @@ Add comprehensive summary of recruitment implementation:
 ````markdown
 ## Character Recruitment System
 
-**Status**: ✅ Implemented  
-**Date**: 2025-01-XX  
+**Status**: ✅ Implemented
+**Date**: 2025-01-XX
 **Implementation Plan**: `docs/explanation/character_recruitment_implementation_plan.md`
 
 ### Overview
