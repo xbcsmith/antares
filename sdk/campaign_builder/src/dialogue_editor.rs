@@ -1477,50 +1477,48 @@ impl DialogueEditorState {
                 for (idx, dialogue) in &dialogues_snapshot {
                     let is_selected = selected_dialogue_idx == Some(*idx);
 
-                    left_ui.group(|group_ui| {
-                        group_ui.set_min_width(group_ui.available_width());
+                    let response = left_ui.selectable_label(is_selected, &dialogue.name);
+                    if response.clicked() {
+                        new_selection = Some(*idx);
+                    }
 
-                        // Main dialogue name
-                        let label = format!("{} ({})", dialogue.name, dialogue.nodes.len());
-                        if group_ui.selectable_label(is_selected, &label).clicked() {
-                            new_selection = Some(*idx);
+                    // Indented sub-text
+                    left_ui.horizontal(|ui| {
+                        ui.add_space(20.0);
+
+                        if let Some(speaker) = &dialogue.speaker_name {
+                            ui.label(
+                                egui::RichText::new(format!("👤 {}", speaker))
+                                    .small()
+                                    .color(egui::Color32::LIGHT_BLUE),
+                            );
                         }
 
-                        // Show text excerpt from first node if available
-                        if let Some((_, first_node)) = dialogue.nodes.iter().next() {
-                            let excerpt: String = first_node.text.chars().take(60).collect();
-                            let display_text = if first_node.text.len() > 60 {
-                                format!("\"{}...\"", excerpt)
-                            } else {
-                                format!("\"{}\"", excerpt)
-                            };
-                            group_ui.label(egui::RichText::new(display_text).small().weak());
+                        if let Some(quest_id) = dialogue.associated_quest {
+                            ui.label(
+                                egui::RichText::new(format!("📜 Quest #{}", quest_id))
+                                    .small()
+                                    .color(egui::Color32::GOLD),
+                            );
                         }
 
-                        // Show speaker and quest info if available
-                        group_ui.horizontal(|inner_ui| {
-                            if let Some(speaker) = &dialogue.speaker_name {
-                                inner_ui.label(
-                                    egui::RichText::new(format!("👤 {}", speaker))
-                                        .small()
-                                        .color(egui::Color32::LIGHT_BLUE),
-                                );
-                            }
-                            if let Some(quest_id) = dialogue.associated_quest {
-                                inner_ui.label(
-                                    egui::RichText::new(format!("📜 Quest #{}", quest_id))
-                                        .small()
-                                        .color(egui::Color32::GOLD),
-                                );
-                            }
-                            if dialogue.repeatable {
-                                inner_ui.label(
-                                    egui::RichText::new("🔄")
-                                        .small()
-                                        .color(egui::Color32::GREEN),
-                                );
-                            }
-                        });
+                        if dialogue.repeatable {
+                            ui.label(
+                                egui::RichText::new("🔄 Repeatable")
+                                    .small()
+                                    .color(egui::Color32::GREEN),
+                            );
+                        }
+
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "| Nodes: {} | ID: {}",
+                                dialogue.nodes.len(),
+                                dialogue.id
+                            ))
+                            .small()
+                            .weak(),
+                        );
                     });
                     left_ui.add_space(4.0);
                 }
@@ -1958,7 +1956,7 @@ impl DialogueEditorState {
 
         // Phase 3: Display nodes with hierarchy and enhanced navigation
         egui::ScrollArea::vertical()
-            .auto_shrink([false; 2])
+            .auto_shrink([false, true])
             .show(ui, |ui| {
                 // Sort nodes by ID for consistent display
                 let mut sorted_nodes: Vec<_> = dialogue.nodes.iter().collect();
@@ -2905,10 +2903,11 @@ mod tests {
         let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
 
         // Create nodes: 1 -> 2, 3 is orphaned
-        dialogue.add_node(DialogueNode::new(1, "Root node"));
-        let mut node2 = DialogueNode::new(2, "Node 2");
+        let mut node1 = DialogueNode::new(1, "Root node");
+        node1.add_choice(DialogueChoice::new("Go to 2", Some(2)));
+        dialogue.add_node(node1);
+        let node2 = DialogueNode::new(2, "Node 2");
         let node3 = DialogueNode::new(3, "Orphaned node");
-        node2.add_choice(DialogueChoice::new("Go to 2", Some(2)));
         dialogue.add_node(node2);
         dialogue.add_node(node3);
 
@@ -3050,7 +3049,7 @@ mod tests {
         editor.dialogues.push(dialogue);
 
         let preview = editor.get_node_preview(0, 1);
-        assert_eq!(preview.len(), 51); // 50 chars + "…"
+        assert_eq!(preview.len(), 53); // 50 chars + "…" (3 bytes)
         assert!(preview.ends_with('…'));
     }
 

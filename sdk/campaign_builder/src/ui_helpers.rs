@@ -2444,23 +2444,25 @@ pub fn autocomplete_monster_selector(
     ui.horizontal(|ui| {
         ui.label(label);
 
-        // Use the provided persistent buffer directly so typed text persists
-        let original = selected_monster_name.clone();
-
         // Build candidates
         let candidates: Vec<String> = extract_monster_candidates(monsters);
 
+        // Persist the per-widget text buffer in egui Memory so typed text survives frames.
+        let buffer_id = make_autocomplete_id(ui, "monster", id_salt);
+
+        // Read the persistent buffer into a local owned `String` so we don't hold a long-lived borrow.
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || selected_monster_name.clone());
+
         let response = AutocompleteInput::new(id_salt, &candidates)
             .with_placeholder("Start typing monster name...")
-            .show(ui, selected_monster_name);
+            .show(ui, &mut text_buffer);
 
         // Check if user selected something from autocomplete
-        if response.changed()
-            && !selected_monster_name.is_empty()
-            && selected_monster_name != &original
-        {
+        if response.changed() && !text_buffer.is_empty() && text_buffer != *selected_monster_name {
             // Validate the monster exists
-            if monsters.iter().any(|m| m.name == *selected_monster_name) {
+            if monsters.iter().any(|m| m.name == text_buffer) {
+                *selected_monster_name = text_buffer.clone();
                 changed = true;
             }
         }
@@ -2473,8 +2475,12 @@ pub fn autocomplete_monster_selector(
                 .clicked()
         {
             selected_monster_name.clear();
+            remove_autocomplete_buffer(ui.ctx(), buffer_id);
             changed = true;
         }
+
+        // Persist buffer back into egui memory so it survives frames.
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
     changed
