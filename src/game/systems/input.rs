@@ -38,7 +38,7 @@ use crate::domain::world::{MapEvent, WallType};
 use crate::game::resources::GlobalState;
 use crate::game::systems::dialogue::StartDialogue;
 use crate::game::systems::events::MapEventTriggered;
-use crate::game::systems::map::DoorOpenedEvent;
+use crate::game::systems::map::{DoorOpenedEvent, NpcMarker, TileCoord};
 use crate::sdk::game_config::ControlsConfig;
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -385,6 +385,7 @@ fn handle_input(
     mut dialogue_writer: MessageWriter<StartDialogue>,
     time: Res<Time>,
     mut last_move_time: Local<f32>,
+    npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
 ) {
     let current_time = time.elapsed_secs();
     let cooldown = input_config.controls.movement_cooldown;
@@ -470,10 +471,17 @@ fn handle_input(
                             "Interacting with recruitable character '{}' (ID: {}) at {:?}",
                             name, character_id, position
                         );
+                        // Find the NPC entity at this position
+                        let speaker_entity = npc_query
+                            .iter()
+                            .find(|(_, _, tile_coord)| tile_coord.0 == position)
+                            .map(|(entity, _, _)| entity)
+                            .unwrap_or(Entity::PLACEHOLDER);
+
                         // Use dialogue ID 100 for default recruitment dialogue
                         dialogue_writer.write(StartDialogue {
                             dialogue_id: 100,
-                            speaker_entity: Entity::PLACEHOLDER,
+                            speaker_entity,
                         });
                         return;
                     }

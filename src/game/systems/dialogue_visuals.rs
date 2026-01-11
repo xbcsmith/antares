@@ -413,19 +413,28 @@ pub fn cleanup_dialogue_bubble(
 /// follow_speaker_system(query_bubbles, query_speaker, query_bubble_transform);
 /// # }
 /// ```
+#[allow(clippy::type_complexity)]
 pub fn follow_speaker_system(
     query_bubbles: Query<&DialogueBubble>,
-    query_speaker: Query<&Transform, Without<DialogueBubble>>,
-    mut query_bubble_transform: Query<&mut Transform, With<Billboard>>,
+    mut param_set: ParamSet<(
+        Query<&Transform, Without<DialogueBubble>>,
+        Query<&mut Transform, With<Billboard>>,
+    )>,
 ) {
+    // Collect speaker positions first to avoid borrow conflicts
+    let mut updates = Vec::new();
     for bubble in query_bubbles.iter() {
-        if let Ok(speaker_transform) = query_speaker.get(bubble.speaker_entity) {
-            if let Ok(mut bubble_transform) = query_bubble_transform.get_mut(bubble.root_entity) {
-                // Update position to follow speaker
-                let target_position =
-                    speaker_transform.translation + Vec3::new(0.0, bubble.y_offset, 0.0);
-                bubble_transform.translation = target_position;
-            }
+        if let Ok(speaker_transform) = param_set.p0().get(bubble.speaker_entity) {
+            let target_position =
+                speaker_transform.translation + Vec3::new(0.0, bubble.y_offset, 0.0);
+            updates.push((bubble.root_entity, target_position));
+        }
+    }
+
+    // Apply updates to bubble transforms
+    for (entity, position) in updates {
+        if let Ok(mut bubble_transform) = param_set.p1().get_mut(entity) {
+            bubble_transform.translation = position;
         }
     }
 }

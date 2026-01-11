@@ -5,7 +5,7 @@ use crate::application::resources::GameContent;
 use crate::domain::world::MapEvent;
 use crate::game::resources::GlobalState;
 use crate::game::systems::dialogue::StartDialogue;
-use crate::game::systems::map::MapChangeEvent;
+use crate::game::systems::map::{MapChangeEvent, NpcMarker, TileCoord};
 use bevy::prelude::*;
 
 pub struct EventPlugin;
@@ -55,6 +55,7 @@ fn handle_events(
     content: Res<GameContent>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
     mut global_state: ResMut<GlobalState>,
+    npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
 ) {
     for trigger in event_reader.read() {
         match &trigger.event {
@@ -112,10 +113,17 @@ fn handle_events(
                 if let Some(npc_def) = content.db().npcs.get_npc(npc_id) {
                     // Check if NPC has a dialogue tree
                     if let Some(dialogue_id) = npc_def.dialogue_id {
+                        // Find the NPC entity by its ID
+                        let speaker_entity = npc_query
+                            .iter()
+                            .find(|(_, marker, _)| marker.npc_id == *npc_id)
+                            .map(|(entity, _, _)| entity)
+                            .unwrap_or(Entity::PLACEHOLDER);
+
                         // Send StartDialogue message to trigger dialogue system
                         dialogue_writer.write(StartDialogue {
                             dialogue_id,
-                            speaker_entity: Entity::PLACEHOLDER,
+                            speaker_entity,
                         });
 
                         let msg = format!("{} wants to talk.", npc_def.name);
