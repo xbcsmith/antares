@@ -1933,7 +1933,6 @@ events: {
     ),
 }
 ```
-````
 
 ### Future Enhancements
 
@@ -1942,7 +1941,6 @@ events: {
 - Recruitment refusal dialogues based on character compatibility
 - Simple yes/no confirmation UI when dialogue_id is None
 
-````
 
 **Validation**:
 
