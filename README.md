@@ -23,8 +23,19 @@ Antares is a modern implementation of classic grid-based dungeon crawling RPGs, 
 - **Magic System**: Cleric and Sorcerer spell casting with spell points
 - **Equipment System**: Weapons, armor, and items with class restrictions
 - **Quest System**: Track objectives, progress, and rewards
-- **Dialogue System**: Interactive NPC conversations
+- **Dialogue System**: Interactive NPC conversations with visual bubbles and choices
 - **Save/Load**: Campaign progress persistence
+
+### Dialogue System
+
+- **2.5D Visual Dialogues**: Floating text bubbles above NPCs with billboard effect
+- **Typewriter Animation**: Character-by-character text reveal for immersive reading
+- **Interactive Choices**: Arrow key/number navigation with visual feedback on selected option
+- **Branching Conversations**: Complex dialogue trees with conditions and actions
+- **Quest Integration**: Start quests, modify game state through dialogue selections
+- **RON Data Format**: Easy-to-edit dialogue content in Rusty Object Notation
+
+See `docs/tutorials/dialogue_system_usage.md` for complete usage guide and examples.
 
 ### Campaign System
 

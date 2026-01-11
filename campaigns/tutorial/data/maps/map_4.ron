@@ -7608,26 +7608,6 @@
     ],
     events: {
         (
-            x: 2,
-            y: 2,
-        ): Encounter(
-            name: "Kobold Ambush",
-            description: "A group of kobolds jump out to attack!",
-            monster_group: [
-                2,
-                2,
-                2,
-            ],
-        ),
-        (
-            x: 9,
-            y: 7,
-        ): Sign(
-            name: "Cave Entrance Sign",
-            description: "Sign marking the entrance to the Cave of Arcturus.",
-            text: "The Cave of Arcturus!",
-        ),
-        (
             x: 12,
             y: 8,
         ): RecruitableCharacter(
@@ -7646,6 +7626,26 @@
                 y: 10,
             ),
             map_id: 4,
+        ),
+        (
+            x: 2,
+            y: 2,
+        ): Encounter(
+            name: "Kobold Ambush",
+            description: "A group of kobolds jump out to attack!",
+            monster_group: [
+                2,
+                2,
+                2,
+            ],
+        ),
+        (
+            x: 9,
+            y: 7,
+        ): Sign(
+            name: "Cave Entrance Sign",
+            description: "Sign marking the entrance to the Cave of Arcturus.",
+            text: "The Cave of Arcturus!",
         ),
     },
     npc_placements: [

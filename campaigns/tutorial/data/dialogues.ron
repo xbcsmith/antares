@@ -4,15 +4,6 @@
         name: "Arcturus Story",
         root_node: 1,
         nodes: {
-            2: (
-                id: 2,
-                text: "Hello There! Come and sit and talk a while.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
-            ),
             1: (
                 id: 1,
                 text: "I am the Great Arcturus!",
@@ -37,6 +28,15 @@
                 actions: [],
                 is_terminal: false,
             ),
+            2: (
+                id: 2,
+                text: "Hello There! Come and sit and talk a while.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
         },
         speaker_name: Some("Arcturus"),
         repeatable: true,
@@ -47,6 +47,15 @@
         name: "Default Character Recruitment",
         root_node: 1,
         nodes: {
+            2: (
+                id: 2,
+                text: "Excellent! I\'m ready to join your adventure.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
             3: (
                 id: 3,
                 text: "I\'ll head to the inn right away. See you there!",
@@ -95,6 +104,16 @@
                 actions: [],
                 is_terminal: false,
             ),
+        },
+        speaker_name: None,
+        repeatable: false,
+        associated_quest: None,
+    ),
+    (
+        id: 101,
+        name: "Apprentice Zara Recruitment",
+        root_node: 1,
+        nodes: {
             2: (
                 id: 2,
                 text: "Excellent! I\'m ready to join your adventure.",
@@ -104,8 +123,123 @@
                 actions: [],
                 is_terminal: true,
             ),
+            3: (
+                id: 3,
+                text: "I\'ll head to the inn right away. See you there!",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+            1: (
+                id: 1,
+                text: "Hello there. My name is {CHARACTER_NAME}. Can I join your party?",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Yes, join us!",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [
+                            TriggerEvent(
+                                event_name: "recruit_character_to_party",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "Meet me at the Inn.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [
+                            TriggerEvent(
+                                event_name: "recruit_character_to_inn",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "Not at this time.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
         },
-        speaker_name: None,
+        speaker_name: Some("Apprentice Zara"),
+        repeatable: false,
+        associated_quest: None,
+    ),
+    (
+        id: 102,
+        name: "Whisper Recruitment ",
+        root_node: 1,
+        nodes: {
+            2: (
+                id: 2,
+                text: "Excellent! I\'m ready to join your adventure.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+            3: (
+                id: 3,
+                text: "I\'ll head to the inn right away. See you there!",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+            1: (
+                id: 1,
+                text: "Hello there. My name is {CHARACTER_NAME}. Can I join your party?",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Yes, join us!",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [
+                            TriggerEvent(
+                                event_name: "recruit_character_to_party",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "Meet me at the Inn.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [
+                            TriggerEvent(
+                                event_name: "recruit_character_to_inn",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "Not at this time.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
+        },
+        speaker_name: Some("Whisper"),
         repeatable: false,
         associated_quest: None,
     ),

@@ -3,5 +3,6 @@
 
 //! Game logic and Bevy systems
 
+pub mod components;
 pub mod resources;
 pub mod systems;
