@@ -48,6 +48,7 @@ fn check_for_events(
 }
 
 /// System to handle triggered events
+#[allow(clippy::too_many_arguments)]
 fn handle_events(
     mut event_reader: MessageReader<MapEventTriggered>,
     mut map_change_writer: MessageWriter<MapChangeEvent>,
@@ -56,6 +57,9 @@ fn handle_events(
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
     mut global_state: ResMut<GlobalState>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
+    mut pending_recruitment: Option<
+        ResMut<crate::game::systems::dialogue::PendingRecruitmentContext>,
+    >,
 ) {
     for trigger in event_reader.read() {
         match &trigger.event {
@@ -153,17 +157,56 @@ fn handle_events(
                 character_id,
                 name,
                 description,
-                ..
+                dialogue_id,
             } => {
                 let msg = format!("{} - {}", name, description);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
                     log.add(msg);
                 }
-                // Recruitment dialog will be triggered by a separate system
-                // that listens for recruitment events and shows the UI
-                // For now, just log that the character was encountered
-                let _ = character_id; // TODO: Trigger recruitment dialog
+
+                let current_pos = global_state.0.world.party_position;
+
+                // If dialogue is specified, trigger dialogue system
+                if let Some(dlg_id) = dialogue_id {
+                    // Find NPC entity at current position for speaker (optional visual)
+                    let speaker_entity = npc_query
+                        .iter()
+                        .find(|(_, _, coord)| {
+                            coord.0.x == current_pos.x && coord.0.y == current_pos.y
+                        })
+                        .map(|(entity, _, _)| entity)
+                        .unwrap_or(Entity::PLACEHOLDER);
+
+                    // Create recruitment context
+                    let recruitment_context = crate::application::dialogue::RecruitmentContext {
+                        character_id: character_id.clone(),
+                        event_position: current_pos,
+                    };
+
+                    // Store context in PendingRecruitmentContext resource for handle_start_dialogue to consume
+                    if let Some(ref mut pending) = pending_recruitment {
+                        pending.0 = Some(recruitment_context);
+                    }
+
+                    // Send StartDialogue message
+                    dialogue_writer.write(StartDialogue {
+                        dialogue_id: *dlg_id,
+                        speaker_entity,
+                    });
+
+                    info!(
+                        "Starting recruitment dialogue {} for character {}",
+                        dlg_id, character_id
+                    );
+                } else {
+                    // No dialogue specified, simple log message
+                    warn!(
+                        "RecruitableCharacter event for '{}' has no dialogue_id. \
+                         Simple confirmation UI not yet implemented.",
+                        character_id
+                    );
+                }
             }
             MapEvent::EnterInn {
                 name,

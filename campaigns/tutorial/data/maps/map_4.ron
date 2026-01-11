@@ -7614,6 +7614,7 @@
             name: "Old Gareth",
             description: "A grizzled dwarf warrior resting near the cave wall. He looks experienced but weary, his armor showing signs of many battles.",
             character_id: "old_gareth",
+            dialogue_id: None,
         ),
         (
             x: 19,

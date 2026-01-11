@@ -28,6 +28,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::dialogue::{DialogueId, NodeId};
 
+/// Context information for character recruitment dialogues
+///
+/// Stores metadata needed to complete recruitment after dialogue concludes.
+/// This includes the character being recruited and the map event position
+/// for cleanup after successful recruitment.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecruitmentContext {
+    /// ID of the character definition being recruited
+    pub character_id: String,
+
+    /// Position of the recruitment event on the map (for removal after recruitment)
+    pub event_position: crate::domain::types::Position,
+}
+
 /// Tracks the currently active dialogue tree and progress through it.
 ///
 /// This structure is small and serializable so it can be persisted inside the
@@ -64,6 +78,9 @@ pub struct DialogueState {
 
     /// Speaker entity that initiated this dialogue (typically an NPC)
     pub speaker_entity: Option<bevy::prelude::Entity>,
+
+    /// Context for recruitment dialogues (None if not a recruitment interaction)
+    pub recruitment_context: Option<RecruitmentContext>,
 }
 
 impl DialogueState {
@@ -106,6 +123,7 @@ impl DialogueState {
             current_speaker: String::new(),
             current_choices: Vec::new(),
             speaker_entity: None,
+            recruitment_context: None,
         }
     }
 
@@ -195,6 +213,7 @@ impl DialogueState {
         self.current_text.clear();
         self.current_speaker.clear();
         self.current_choices.clear();
+        self.recruitment_context = None;
     }
 
     /// Returns true if a dialogue is currently active.
@@ -216,6 +235,7 @@ mod tests {
         assert_eq!(s.current_node_id, 0);
         assert!(s.dialogue_history.is_empty());
         assert_eq!(s.speaker_entity, None);
+        assert_eq!(s.recruitment_context, None);
     }
 
     #[test]
@@ -308,6 +328,7 @@ mod tests {
         assert_eq!(state.current_speaker, "");
         assert!(state.current_choices.is_empty());
         assert_eq!(state.speaker_entity, None);
+        assert_eq!(state.recruitment_context, None);
     }
 
     #[test]
@@ -325,5 +346,17 @@ mod tests {
         );
 
         assert_eq!(state.speaker_entity, Some(test_entity));
+    }
+
+    #[test]
+    fn test_dialogue_state_recruitment_context_none_by_default() {
+        let state = DialogueState::default();
+        assert_eq!(state.recruitment_context, None);
+    }
+
+    #[test]
+    fn test_dialogue_state_start_recruitment_context_none() {
+        let state = DialogueState::start(1 as DialogueId, 1 as NodeId);
+        assert_eq!(state.recruitment_context, None);
     }
 }

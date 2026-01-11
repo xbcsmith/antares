@@ -582,198 +582,241 @@ impl RacesEditorState {
                 let action_to_perform = Cell::new(None::<(usize, ItemAction)>);
                 let new_selection = Cell::new(None::<usize>);
 
-                TwoColumnLayout::new("races_layout")
-                    .with_left_width(250.0)
-                    .show_split(
-                        ui,
-                        |left_ui| {
-                            // Left panel - race list
-                            egui::ScrollArea::vertical()
-                                .id_salt("races_list_scroll")
-                                .show(left_ui, |ui: &mut egui::Ui| {
-                                    for (idx, race) in &races_snapshot {
-                                        let is_selected = selected_race_idx == Some(*idx);
-                                        let size_str = match race.size {
-                                            SizeCategory::Small => "S",
-                                            SizeCategory::Medium => "M",
-                                            SizeCategory::Large => "L",
+                TwoColumnLayout::new("races_layout").show_split(
+                    ui,
+                    |left_ui| {
+                        // Left panel - race list
+                        egui::ScrollArea::vertical()
+                            .id_salt("races_list_scroll")
+                            .show(left_ui, |ui: &mut egui::Ui| {
+                                for (idx, race) in &races_snapshot {
+                                    let is_selected = selected_race_idx == Some(*idx);
+                                    let size_str = match race.size {
+                                        SizeCategory::Small => "S",
+                                        SizeCategory::Medium => "M",
+                                        SizeCategory::Large => "L",
+                                    };
+
+                                    let response = ui.selectable_label(is_selected, &race.name);
+
+                                    if response.clicked() {
+                                        new_selection.set(Some(*idx));
+                                    }
+
+                                    // Sub-text with badges and metadata
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(20.0);
+
+                                        // Size Badge
+                                        let (size_text, size_color) = match race.size {
+                                            SizeCategory::Small => {
+                                                ("Small", egui::Color32::LIGHT_GRAY)
+                                            }
+                                            SizeCategory::Medium => {
+                                                ("Medium", egui::Color32::LIGHT_BLUE)
+                                            }
+                                            SizeCategory::Large => ("Large", egui::Color32::GOLD),
                                         };
 
-                                        let response = ui.selectable_label(
-                                            is_selected,
-                                            format!("[{}] {} ({})", size_str, race.name, race.id),
+                                        ui.label(
+                                            egui::RichText::new(size_text)
+                                                .small()
+                                                .color(size_color),
                                         );
 
-                                        if response.clicked() {
-                                            new_selection.set(Some(*idx));
+                                        // Stat Modifiers summary
+                                        let stats = &race.stat_modifiers;
+                                        let mut mods = Vec::new();
+                                        if stats.might != 0 {
+                                            mods.push(format!("Mgt:{:+}", stats.might));
+                                        }
+                                        if stats.intellect != 0 {
+                                            mods.push(format!("Int:{:+}", stats.intellect));
+                                        }
+                                        if stats.personality != 0 {
+                                            mods.push(format!("Per:{:+}", stats.personality));
+                                        }
+                                        if stats.endurance != 0 {
+                                            mods.push(format!("End:{:+}", stats.endurance));
+                                        }
+                                        if stats.speed != 0 {
+                                            mods.push(format!("Spd:{:+}", stats.speed));
+                                        }
+                                        if stats.accuracy != 0 {
+                                            mods.push(format!("Acc:{:+}", stats.accuracy));
+                                        }
+                                        if stats.luck != 0 {
+                                            mods.push(format!("Lck:{:+}", stats.luck));
                                         }
 
-                                        // Context menu
-                                        response.context_menu(|ui| {
-                                            if ui.button("Edit").clicked() {
-                                                action_to_perform
-                                                    .set(Some((*idx, ItemAction::Edit)));
-                                                ui.close();
-                                            }
-                                            if ui.button("Delete").clicked() {
-                                                action_to_perform
-                                                    .set(Some((*idx, ItemAction::Delete)));
-                                                ui.close();
-                                            }
-                                            if ui.button("Duplicate").clicked() {
-                                                action_to_perform
-                                                    .set(Some((*idx, ItemAction::Duplicate)));
-                                                ui.close();
-                                            }
-                                        });
-                                    }
-                                });
-                        },
-                        |right_ui| {
-                            // Right panel - race details
-                            if let Some(idx) = selected_race_idx {
-                                if let Some((_, race)) =
-                                    races_snapshot.iter().find(|(i, _)| *i == idx)
-                                {
-                                    egui::ScrollArea::vertical()
-                                        .id_salt("race_details_scroll")
-                                        .show(right_ui, |ui| {
-                                            ui.heading(&race.name);
-                                            ui.separator();
+                                        if !mods.is_empty() {
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "| {}",
+                                                    mods.join(", ")
+                                                ))
+                                                .small()
+                                                .weak(),
+                                            );
+                                        }
 
-                                            let action = ActionButtons::new()
-                                                .with_edit(true)
-                                                .with_delete(true)
-                                                .with_duplicate(true)
-                                                .with_export(true)
-                                                .show(ui);
+                                        ui.label(
+                                            egui::RichText::new(format!("| ID: {}", race.id))
+                                                .small()
+                                                .weak(),
+                                        );
+                                    });
 
-                                            if action != ItemAction::None {
-                                                action_to_perform.set(Some((idx, action)));
-                                            }
-                                            ui.separator();
-                                            ui.label(format!("ID: {}", race.id));
-                                            ui.label(format!("Size: {:?}", race.size));
+                                    ui.add_space(4.0);
 
-                                            if !race.description.is_empty() {
-                                                ui.add_space(5.0);
-                                                ui.label(&race.description);
-                                            }
-
-                                            ui.add_space(10.0);
-                                            ui.heading("Stat Modifiers");
-                                            ui.horizontal(|ui| {
-                                                ui.label(format!(
-                                                    "Might: {:+}",
-                                                    race.stat_modifiers.might
-                                                ));
-                                                ui.label(format!(
-                                                    "Intellect: {:+}",
-                                                    race.stat_modifiers.intellect
-                                                ));
-                                                ui.label(format!(
-                                                    "Personality: {:+}",
-                                                    race.stat_modifiers.personality
-                                                ));
-                                            });
-                                            ui.horizontal(|ui| {
-                                                ui.label(format!(
-                                                    "Endurance: {:+}",
-                                                    race.stat_modifiers.endurance
-                                                ));
-                                                ui.label(format!(
-                                                    "Speed: {:+}",
-                                                    race.stat_modifiers.speed
-                                                ));
-                                                ui.label(format!(
-                                                    "Accuracy: {:+}",
-                                                    race.stat_modifiers.accuracy
-                                                ));
-                                                ui.label(format!(
-                                                    "Luck: {:+}",
-                                                    race.stat_modifiers.luck
-                                                ));
-                                            });
-
-                                            ui.add_space(10.0);
-                                            ui.heading("Resistances");
-                                            ui.horizontal(|ui| {
-                                                ui.label(format!(
-                                                    "Magic: {}%",
-                                                    race.resistances.magic
-                                                ));
-                                                ui.label(format!(
-                                                    "Fire: {}%",
-                                                    race.resistances.fire
-                                                ));
-                                                ui.label(format!(
-                                                    "Cold: {}%",
-                                                    race.resistances.cold
-                                                ));
-                                                ui.label(format!(
-                                                    "Elec: {}%",
-                                                    race.resistances.electricity
-                                                ));
-                                            });
-                                            ui.horizontal(|ui| {
-                                                ui.label(format!(
-                                                    "Acid: {}%",
-                                                    race.resistances.acid
-                                                ));
-                                                ui.label(format!(
-                                                    "Fear: {}%",
-                                                    race.resistances.fear
-                                                ));
-                                                ui.label(format!(
-                                                    "Poison: {}%",
-                                                    race.resistances.poison
-                                                ));
-                                                ui.label(format!(
-                                                    "Psychic: {}%",
-                                                    race.resistances.psychic
-                                                ));
-                                            });
-
-                                            if !race.special_abilities.is_empty() {
-                                                ui.add_space(10.0);
-                                                ui.heading("Special Abilities");
-                                                for ability in &race.special_abilities {
-                                                    ui.label(format!("• {}", ability));
-                                                }
-                                            }
-
-                                            if !race.proficiencies.is_empty() {
-                                                ui.add_space(10.0);
-                                                ui.heading("Proficiencies");
-                                                for prof in &race.proficiencies {
-                                                    ui.label(format!("• {}", prof));
-                                                }
-                                            }
-
-                                            if !race.incompatible_item_tags.is_empty() {
-                                                ui.add_space(10.0);
-                                                ui.heading("Incompatible Item Tags");
-                                                for tag in &race.incompatible_item_tags {
-                                                    ui.label(format!("• {}", tag));
-                                                }
-                                            }
-
-                                            // Action buttons
-                                            ui.add_space(10.0);
-                                        });
-                                } else {
-                                    // Selected race is filtered out by search
-                                    right_ui.centered_and_justified(|ui| {
-                                        ui.label("Selected race not visible in current filter");
+                                    // Context menu
+                                    response.context_menu(|ui| {
+                                        if ui.button("Edit").clicked() {
+                                            action_to_perform.set(Some((*idx, ItemAction::Edit)));
+                                            ui.close();
+                                        }
+                                        if ui.button("Delete").clicked() {
+                                            action_to_perform.set(Some((*idx, ItemAction::Delete)));
+                                            ui.close();
+                                        }
+                                        if ui.button("Duplicate").clicked() {
+                                            action_to_perform
+                                                .set(Some((*idx, ItemAction::Duplicate)));
+                                            ui.close();
+                                        }
                                     });
                                 }
+                            });
+                    },
+                    |right_ui| {
+                        // Right panel - race details
+                        if let Some(idx) = selected_race_idx {
+                            if let Some((_, race)) = races_snapshot.iter().find(|(i, _)| *i == idx)
+                            {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("race_details_scroll")
+                                    .show(right_ui, |ui| {
+                                        ui.heading(&race.name);
+                                        ui.separator();
+
+                                        let action = ActionButtons::new()
+                                            .with_edit(true)
+                                            .with_delete(true)
+                                            .with_duplicate(true)
+                                            .with_export(true)
+                                            .show(ui);
+
+                                        if action != ItemAction::None {
+                                            action_to_perform.set(Some((idx, action)));
+                                        }
+                                        ui.separator();
+                                        ui.label(format!("ID: {}", race.id));
+                                        ui.label(format!("Size: {:?}", race.size));
+
+                                        if !race.description.is_empty() {
+                                            ui.add_space(5.0);
+                                            ui.label(&race.description);
+                                        }
+
+                                        ui.add_space(10.0);
+                                        ui.heading("Stat Modifiers");
+                                        ui.horizontal(|ui| {
+                                            ui.label(format!(
+                                                "Might: {:+}",
+                                                race.stat_modifiers.might
+                                            ));
+                                            ui.label(format!(
+                                                "Intellect: {:+}",
+                                                race.stat_modifiers.intellect
+                                            ));
+                                            ui.label(format!(
+                                                "Personality: {:+}",
+                                                race.stat_modifiers.personality
+                                            ));
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label(format!(
+                                                "Endurance: {:+}",
+                                                race.stat_modifiers.endurance
+                                            ));
+                                            ui.label(format!(
+                                                "Speed: {:+}",
+                                                race.stat_modifiers.speed
+                                            ));
+                                            ui.label(format!(
+                                                "Accuracy: {:+}",
+                                                race.stat_modifiers.accuracy
+                                            ));
+                                            ui.label(format!(
+                                                "Luck: {:+}",
+                                                race.stat_modifiers.luck
+                                            ));
+                                        });
+
+                                        ui.add_space(10.0);
+                                        ui.heading("Resistances");
+                                        ui.horizontal(|ui| {
+                                            ui.label(format!("Magic: {}%", race.resistances.magic));
+                                            ui.label(format!("Fire: {}%", race.resistances.fire));
+                                            ui.label(format!("Cold: {}%", race.resistances.cold));
+                                            ui.label(format!(
+                                                "Elec: {}%",
+                                                race.resistances.electricity
+                                            ));
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label(format!("Acid: {}%", race.resistances.acid));
+                                            ui.label(format!("Fear: {}%", race.resistances.fear));
+                                            ui.label(format!(
+                                                "Poison: {}%",
+                                                race.resistances.poison
+                                            ));
+                                            ui.label(format!(
+                                                "Psychic: {}%",
+                                                race.resistances.psychic
+                                            ));
+                                        });
+
+                                        if !race.special_abilities.is_empty() {
+                                            ui.add_space(10.0);
+                                            ui.heading("Special Abilities");
+                                            for ability in &race.special_abilities {
+                                                ui.label(format!("• {}", ability));
+                                            }
+                                        }
+
+                                        if !race.proficiencies.is_empty() {
+                                            ui.add_space(10.0);
+                                            ui.heading("Proficiencies");
+                                            for prof in &race.proficiencies {
+                                                ui.label(format!("• {}", prof));
+                                            }
+                                        }
+
+                                        if !race.incompatible_item_tags.is_empty() {
+                                            ui.add_space(10.0);
+                                            ui.heading("Incompatible Item Tags");
+                                            for tag in &race.incompatible_item_tags {
+                                                ui.label(format!("• {}", tag));
+                                            }
+                                        }
+
+                                        // Action buttons
+                                        ui.add_space(10.0);
+                                    });
                             } else {
+                                // Selected race is filtered out by search
                                 right_ui.centered_and_justified(|ui| {
-                                    ui.label("Select a race to view details");
+                                    ui.label("Selected race not visible in current filter");
                                 });
                             }
-                        },
-                    );
+                        } else {
+                            right_ui.centered_and_justified(|ui| {
+                                ui.label("Select a race to view details");
+                            });
+                        }
+                    },
+                );
 
                 // Apply selection change
                 if let Some(idx) = new_selection.get() {

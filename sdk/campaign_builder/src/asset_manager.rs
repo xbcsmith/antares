@@ -1661,12 +1661,16 @@ mod tests {
         manager.init_data_files(
             "data/items.ron",
             "data/spells.ron",
+            "data/conditions.ron",
             "data/monsters.ron",
+            &[],
+            "data/quests.ron",
             "data/classes.ron",
             "data/races.ron",
-            "data/quests.ron",
+            "data/characters.ron",
             "data/dialogues.ron",
-            Some("data/conditions.ron"),
+            "data/npcs.ron",
+            "data/proficiencies.ron",
         );
 
         // Insert an Asset whose path matches one of the tracked data files
