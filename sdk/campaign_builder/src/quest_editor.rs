@@ -1781,91 +1781,91 @@ impl QuestEditorState {
         maps: &[Map],
         unsaved_changes: &mut bool,
     ) {
-        ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Quest Stages");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("➕ Add Stage").clicked() {
-                        let _ = self.add_stage(quests);
+        ui.heading("Quest Stages");
+        ui.horizontal(|ui| {
+            if ui.button("➕ Add Stage").clicked() {
+                let _ = self.add_stage(quests);
+                *unsaved_changes = true;
+            }
+        });
+
+        ui.separator();
+
+        if let Some(selected_idx) = self.selected_quest {
+            if selected_idx < quests.len() {
+                // Clone stages to avoid borrowing issues
+                let stages = quests[selected_idx].stages.clone();
+                let mut stage_to_delete: Option<usize> = None;
+                let mut stage_to_edit: Option<usize> = None;
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        for (stage_idx, stage) in stages.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                let header = ui.collapsing(
+                                    format!("Stage {}: {}", stage.stage_number, stage.name),
+                                    |ui| {
+                                        ui.label(&stage.description);
+                                        ui.label(format!(
+                                            "Require all objectives: {}",
+                                            stage.require_all_objectives
+                                        ));
+                                        ui.separator();
+
+                                        // Show objectives with edit/delete controls
+                                        self.show_quest_objectives_editor(
+                                            ui,
+                                            selected_idx,
+                                            stage_idx,
+                                            &stage.objectives,
+                                            quests,
+                                            items,
+                                            monsters,
+                                            maps,
+                                            unsaved_changes,
+                                        );
+                                    },
+                                );
+
+                                // Stage action buttons
+                                if ui.small_button("✏️").on_hover_text("Edit Stage").clicked() {
+                                    stage_to_edit = Some(stage_idx);
+                                }
+                                if ui
+                                    .small_button("🗑️")
+                                    .on_hover_text("Delete Stage")
+                                    .clicked()
+                                {
+                                    stage_to_delete = Some(stage_idx);
+                                }
+                            });
+                        }
+
+                        if stages.is_empty() {
+                            ui.label("No stages defined yet");
+                        }
+                    });
+
+                // Handle stage deletion
+                if let Some(stage_idx) = stage_to_delete {
+                    if self.delete_stage(quests, selected_idx, stage_idx).is_ok() {
                         *unsaved_changes = true;
                     }
-                });
-            });
+                }
 
-            ui.separator();
-
-            if let Some(selected_idx) = self.selected_quest {
-                if selected_idx < quests.len() {
-                    // Clone stages to avoid borrowing issues
-                    let stages = quests[selected_idx].stages.clone();
-                    let mut stage_to_delete: Option<usize> = None;
-                    let mut stage_to_edit: Option<usize> = None;
-
-                    for (stage_idx, stage) in stages.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            let header = ui.collapsing(
-                                format!("Stage {}: {}", stage.stage_number, stage.name),
-                                |ui| {
-                                    ui.label(&stage.description);
-                                    ui.label(format!(
-                                        "Require all objectives: {}",
-                                        stage.require_all_objectives
-                                    ));
-                                    ui.separator();
-
-                                    // Show objectives with edit/delete controls
-                                    self.show_quest_objectives_editor(
-                                        ui,
-                                        selected_idx,
-                                        stage_idx,
-                                        &stage.objectives,
-                                        quests,
-                                        items,
-                                        monsters,
-                                        maps,
-                                        unsaved_changes,
-                                    );
-                                },
-                            );
-
-                            // Stage action buttons
-                            if ui.small_button("✏️").on_hover_text("Edit Stage").clicked() {
-                                stage_to_edit = Some(stage_idx);
-                            }
-                            if ui
-                                .small_button("🗑️")
-                                .on_hover_text("Delete Stage")
-                                .clicked()
-                            {
-                                stage_to_delete = Some(stage_idx);
-                            }
-                        });
+                // Handle stage editing
+                if let Some(stage_idx) = stage_to_edit {
+                    if self.edit_stage(quests, selected_idx, stage_idx).is_ok() {
+                        self.mode = QuestEditorMode::Editing;
                     }
-
-                    // Handle stage deletion
-                    if let Some(stage_idx) = stage_to_delete {
-                        if self.delete_stage(quests, selected_idx, stage_idx).is_ok() {
-                            *unsaved_changes = true;
-                        }
-                    }
-
-                    // Handle stage editing
-                    if let Some(stage_idx) = stage_to_edit {
-                        if self.edit_stage(quests, selected_idx, stage_idx).is_ok() {
-                            self.mode = QuestEditorMode::Editing;
-                        }
-                    }
-
-                    if stages.is_empty() {
-                        ui.label("No stages defined yet");
-                    }
-                } else {
-                    ui.label("No quest selected");
                 }
             } else {
                 ui.label("No quest selected");
             }
-        });
+        } else {
+            ui.label("No quest selected");
+        }
 
         // Stage editor modal
         if let Some(stage_idx) = self.selected_stage {
@@ -1930,77 +1930,77 @@ impl QuestEditorState {
         maps: &[Map],
         unsaved_changes: &mut bool,
     ) {
-        ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui.label(format!("Objectives ({})", objectives.len()));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .small_button("➕")
-                        .on_hover_text("Add Objective")
-                        .clicked()
-                    {
-                        if let Ok(new_idx) = self.add_default_objective(quests, stage_idx) {
-                            *unsaved_changes = true;
-                            // Immediately start editing the new objective
-                            let _ = self.edit_objective(quests, quest_idx, stage_idx, new_idx);
-                        }
-                    }
-                });
-            });
-
-            ui.separator();
-
-            let mut objective_to_delete: Option<usize> = None;
-            let mut objective_to_edit: Option<usize> = None;
-
-            for (obj_idx, objective) in objectives.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(format!("{}.", obj_idx + 1));
-                    ui.label(objective.description());
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .small_button("🗑️")
-                            .on_hover_text("Delete Objective")
-                            .clicked()
-                        {
-                            objective_to_delete = Some(obj_idx);
-                        }
-                        if ui
-                            .small_button("✏️")
-                            .on_hover_text("Edit Objective")
-                            .clicked()
-                        {
-                            objective_to_edit = Some(obj_idx);
-                        }
-                    });
-                });
-            }
-
-            // Handle objective deletion
-            if let Some(obj_idx) = objective_to_delete {
-                if self
-                    .delete_objective(quests, quest_idx, stage_idx, obj_idx)
-                    .is_ok()
-                {
+        ui.label(format!("Objectives ({})", objectives.len()));
+        ui.horizontal(|ui| {
+            if ui
+                .small_button("➕")
+                .on_hover_text("Add Objective")
+                .clicked()
+            {
+                if let Ok(new_idx) = self.add_default_objective(quests, stage_idx) {
                     *unsaved_changes = true;
+                    // Immediately start editing the new objective
+                    let _ = self.edit_objective(quests, quest_idx, stage_idx, new_idx);
                 }
-            }
-
-            // Handle objective editing
-            if let Some(obj_idx) = objective_to_edit {
-                if self
-                    .edit_objective(quests, quest_idx, stage_idx, obj_idx)
-                    .is_ok()
-                {
-                    // Objective editing modal will be shown below
-                }
-            }
-
-            if objectives.is_empty() {
-                ui.label("No objectives defined");
             }
         });
+
+        ui.separator();
+
+        let mut objective_to_delete: Option<usize> = None;
+        let mut objective_to_edit: Option<usize> = None;
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                for (obj_idx, objective) in objectives.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{}.", obj_idx + 1));
+                        ui.label(objective.description());
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .small_button("🗑️")
+                                .on_hover_text("Delete Objective")
+                                .clicked()
+                            {
+                                objective_to_delete = Some(obj_idx);
+                            }
+                            if ui
+                                .small_button("✏️")
+                                .on_hover_text("Edit Objective")
+                                .clicked()
+                            {
+                                objective_to_edit = Some(obj_idx);
+                            }
+                        });
+                    });
+                }
+
+                if objectives.is_empty() {
+                    ui.label("No objectives defined");
+                }
+            });
+
+        // Handle objective deletion
+        if let Some(obj_idx) = objective_to_delete {
+            if self
+                .delete_objective(quests, quest_idx, stage_idx, obj_idx)
+                .is_ok()
+            {
+                *unsaved_changes = true;
+            }
+        }
+
+        // Handle objective editing
+        if let Some(obj_idx) = objective_to_edit {
+            if self
+                .edit_objective(quests, quest_idx, stage_idx, obj_idx)
+                .is_ok()
+            {
+                // Objective editing modal will be shown below
+            }
+        }
 
         // Objective editor modal
         if let Some(obj_idx) = self.selected_objective {
@@ -2275,116 +2275,116 @@ impl QuestEditorState {
         items: &[Item],
         unsaved_changes: &mut bool,
     ) {
-        ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Rewards");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("➕ Add Reward").clicked() {
-                        if let Ok(new_idx) = self.add_default_reward(quests) {
-                            *unsaved_changes = true;
-                            // Immediately start editing the new reward
-                            let _ = self.edit_reward(
-                                quests.as_slice(),
-                                self.selected_quest.unwrap(),
-                                new_idx,
-                            );
-                        }
-                    }
-                });
-            });
-
-            ui.separator();
-
-            if let Some(selected_idx) = self.selected_quest {
-                if selected_idx < quests.len() {
-                    let rewards = quests[selected_idx].rewards.clone();
-                    let mut reward_to_delete: Option<usize> = None;
-                    let mut reward_to_edit: Option<usize> = None;
-
-                    for (reward_idx, reward) in rewards.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            let desc = match reward {
-                                QuestReward::Experience(xp) => {
-                                    format!("{} XP", xp)
-                                }
-                                QuestReward::Gold(gold) => {
-                                    format!("{} Gold", gold)
-                                }
-                                QuestReward::Items(items_list) => {
-                                    let item_strs: Vec<String> = items_list
-                                        .iter()
-                                        .map(|(id, qty)| {
-                                            let name = items
-                                                .iter()
-                                                .find(|i| i.id == *id)
-                                                .map(|i| i.name.clone())
-                                                .unwrap_or_else(|| "Unknown Item".to_string());
-                                            format!("{}x {} ({})", qty, name, id)
-                                        })
-                                        .collect();
-                                    item_strs.join(", ")
-                                }
-                                QuestReward::UnlockQuest(qid) => {
-                                    let name = quests
-                                        .iter()
-                                        .find(|q| q.id == *qid)
-                                        .map(|q| q.name.clone())
-                                        .unwrap_or_else(|| "Unknown Quest".to_string());
-                                    format!("Unlock Quest: {} ({})", name, qid)
-                                }
-                                QuestReward::SetFlag { flag_name, value } => {
-                                    format!("Set Flag '{}' to {}", flag_name, value)
-                                }
-                                QuestReward::Reputation { faction, change } => {
-                                    format!("Reputation: {} ({:+})", faction, change)
-                                }
-                            };
-
-                            ui.label(format!("{}.", reward_idx + 1));
-                            ui.label(desc);
-
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui
-                                        .small_button("🗑️")
-                                        .on_hover_text("Delete Reward")
-                                        .clicked()
-                                    {
-                                        reward_to_delete = Some(reward_idx);
-                                    }
-                                    if ui.small_button("✏️").on_hover_text("Edit Reward").clicked()
-                                    {
-                                        reward_to_edit = Some(reward_idx);
-                                    }
-                                },
-                            );
-                        });
-                    }
-
-                    if let Some(reward_idx) = reward_to_delete {
-                        if self.delete_reward(quests, selected_idx, reward_idx).is_ok() {
-                            *unsaved_changes = true;
-                        }
-                    }
-
-                    if let Some(reward_idx) = reward_to_edit {
-                        if self
-                            .edit_reward(quests.as_slice(), selected_idx, reward_idx)
-                            .is_ok()
-                        {
-                            // Modal will show
-                        }
-                    }
-
-                    if rewards.is_empty() {
-                        ui.label("No rewards defined");
-                    }
+        ui.heading("Rewards");
+        ui.horizontal(|ui| {
+            if ui.button("➕ Add Reward").clicked() {
+                if let Ok(new_idx) = self.add_default_reward(quests) {
+                    *unsaved_changes = true;
+                    // Immediately start editing the new reward
+                    let _ =
+                        self.edit_reward(quests.as_slice(), self.selected_quest.unwrap(), new_idx);
                 }
-            } else {
-                ui.label("No quest selected");
             }
         });
+
+        ui.separator();
+
+        if let Some(selected_idx) = self.selected_quest {
+            if selected_idx < quests.len() {
+                let rewards = quests[selected_idx].rewards.clone();
+                let mut reward_to_delete: Option<usize> = None;
+                let mut reward_to_edit: Option<usize> = None;
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        for (reward_idx, reward) in rewards.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                let desc = match reward {
+                                    QuestReward::Experience(xp) => {
+                                        format!("{} XP", xp)
+                                    }
+                                    QuestReward::Gold(gold) => {
+                                        format!("{} Gold", gold)
+                                    }
+                                    QuestReward::Items(items_list) => {
+                                        let item_strs: Vec<String> = items_list
+                                            .iter()
+                                            .map(|(id, qty)| {
+                                                let name = items
+                                                    .iter()
+                                                    .find(|i| i.id == *id)
+                                                    .map(|i| i.name.clone())
+                                                    .unwrap_or_else(|| "Unknown Item".to_string());
+                                                format!("{}x {} ({})", qty, name, id)
+                                            })
+                                            .collect();
+                                        item_strs.join(", ")
+                                    }
+                                    QuestReward::UnlockQuest(qid) => {
+                                        let name = quests
+                                            .iter()
+                                            .find(|q| q.id == *qid)
+                                            .map(|q| q.name.clone())
+                                            .unwrap_or_else(|| "Unknown Quest".to_string());
+                                        format!("Unlock Quest: {} ({})", name, qid)
+                                    }
+                                    QuestReward::SetFlag { flag_name, value } => {
+                                        format!("Set Flag '{}' to {}", flag_name, value)
+                                    }
+                                    QuestReward::Reputation { faction, change } => {
+                                        format!("Reputation: {} ({:+})", faction, change)
+                                    }
+                                };
+
+                                ui.label(format!("{}.", reward_idx + 1));
+                                ui.label(desc);
+
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui
+                                            .small_button("🗑️")
+                                            .on_hover_text("Delete Reward")
+                                            .clicked()
+                                        {
+                                            reward_to_delete = Some(reward_idx);
+                                        }
+                                        if ui
+                                            .small_button("✏️")
+                                            .on_hover_text("Edit Reward")
+                                            .clicked()
+                                        {
+                                            reward_to_edit = Some(reward_idx);
+                                        }
+                                    },
+                                );
+                            });
+                        }
+
+                        if rewards.is_empty() {
+                            ui.label("No rewards defined");
+                        }
+                    });
+
+                if let Some(reward_idx) = reward_to_delete {
+                    if self.delete_reward(quests, selected_idx, reward_idx).is_ok() {
+                        *unsaved_changes = true;
+                    }
+                }
+
+                if let Some(reward_idx) = reward_to_edit {
+                    if self
+                        .edit_reward(quests.as_slice(), selected_idx, reward_idx)
+                        .is_ok()
+                    {
+                        // Modal will show
+                    }
+                }
+            }
+        } else {
+            ui.label("No quest selected");
+        }
 
         // Reward editor modal
         if let Some(reward_idx) = self.selected_reward {

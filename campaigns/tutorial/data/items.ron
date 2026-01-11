@@ -720,4 +720,31 @@
         icon_path: None,
         tags: [],
     ),
+    (
+        id: 105,
+        name: "Long Bow  +1",
+        item_type: Weapon((
+            damage: (
+                count: 1,
+                sides: 8,
+                bonus: 1,
+            ),
+            bonus: 1,
+            hands_required: 2,
+            classification: MartialRanged,
+        )),
+        base_cost: 25,
+        sell_cost: 12,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 0,
+        is_cursed: false,
+        icon_path: None,
+        tags: [
+            "large_weapon",
+            "two_handed",
+        ],
+    ),
 ]

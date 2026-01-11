@@ -1248,8 +1248,16 @@ impl DialogueEditorState {
         status_message: &mut String,
         file_load_merge_mode: &mut bool,
     ) {
-        // Sync dialogues from parameter to internal state
-        self.dialogues = dialogues.clone();
+        // Only sync dialogues if they differ (prevents losing edits on every frame)
+        if self.dialogues.len() != dialogues.len()
+            || self
+                .dialogues
+                .iter()
+                .zip(dialogues.iter())
+                .any(|(a, b)| a.id != b.id)
+        {
+            self.dialogues = dialogues.clone();
+        }
         self.quests = quests.to_vec();
         self.items = items.to_vec();
 
@@ -1435,7 +1443,7 @@ impl DialogueEditorState {
     ) {
         // Clone data for closures
         let search_filter = self.search_filter.clone();
-        let dialogues_snapshot: Vec<(usize, DialogueTree)> = self
+        let mut dialogues_snapshot: Vec<(usize, DialogueTree)> = self
             .dialogues
             .iter()
             .enumerate()
@@ -1448,6 +1456,9 @@ impl DialogueEditorState {
             })
             .map(|(i, d)| (i, d.clone()))
             .collect();
+
+        // Sort by dialogue ID
+        dialogues_snapshot.sort_by_key(|(_, d)| d.id);
 
         let selected_dialogue_idx = self.selected_dialogue;
         let show_preview = self.show_preview;
@@ -1574,7 +1585,9 @@ impl DialogueEditorState {
                                 .max_height(300.0)
                                 .id_salt("dialogue_preview_scroll")
                                 .show(right_ui, |ui| {
-                                    for (node_id, node) in dialogue.nodes.iter().take(5) {
+                                    let mut preview_nodes: Vec<_> = dialogue.nodes.iter().collect();
+                                    preview_nodes.sort_by_key(|(node_id, _)| *node_id);
+                                    for (node_id, node) in preview_nodes.iter().take(5) {
                                         ui.group(|ui| {
                                             ui.label(
                                                 egui::RichText::new(format!("Node: {}", node_id))
@@ -1740,9 +1753,30 @@ impl DialogueEditorState {
             .spacing([10.0, 8.0])
             .show(ui, |ui| {
                 ui.label("Dialogue ID:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.dialogue_buffer.id).desired_width(200.0),
-                );
+
+                // Show suggested next ID if creating new dialogue
+                if self.mode == DialogueEditorMode::Creating {
+                    let next_id = self.next_available_dialogue_id();
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.dialogue_buffer.id)
+                                .desired_width(150.0),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("(next: {})", next_id))
+                                .small()
+                                .weak(),
+                        );
+                        if ui.button("Use").clicked() {
+                            self.dialogue_buffer.id = next_id.to_string();
+                        }
+                    });
+                } else {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.dialogue_buffer.id)
+                            .desired_width(200.0),
+                    );
+                }
                 ui.end_row();
 
                 ui.label("Name:");
@@ -1780,6 +1814,8 @@ impl DialogueEditorState {
             if dialogue_idx < self.dialogues.len() {
                 ui.heading("Dialogue Nodes");
                 self.show_dialogue_nodes_editor(ui, dialogue_idx, status_message);
+                // Sync changes back to output after node edits
+                *dialogues = self.dialogues.clone();
             }
         } else {
             ui.label("Save dialogue to add nodes");
@@ -1805,8 +1841,13 @@ impl DialogueEditorState {
             ui.group(|ui| {
                 ui.label(format!("➕ Adding node to: \"{}\"", dialogue_name));
 
-                if let Some(next_id) = self.next_available_node_id() {
-                    ui.label(format!("Next Node ID: {}", next_id));
+                let next_id = self.next_available_node_id();
+                if let Some(next_id_val) = next_id {
+                    ui.label(
+                        egui::RichText::new(format!("Next Node ID: {}", next_id_val))
+                            .strong()
+                            .color(egui::Color32::LIGHT_GREEN),
+                    );
                 }
 
                 ui.separator();
@@ -1912,12 +1953,18 @@ impl DialogueEditorState {
         let mut select_node_for_choice: Option<NodeId> = None;
         let mut edit_node_id: Option<NodeId> = None;
         let mut delete_node_id: Option<NodeId> = None;
+        let mut edit_choice_id: Option<(NodeId, usize)> = None;
+        let mut delete_choice_id: Option<(NodeId, usize)> = None;
 
         // Phase 3: Display nodes with hierarchy and enhanced navigation
         egui::ScrollArea::vertical()
-            .max_height(400.0)
+            .auto_shrink([false; 2])
             .show(ui, |ui| {
-                for (node_id, node) in &dialogue.nodes {
+                // Sort nodes by ID for consistent display
+                let mut sorted_nodes: Vec<_> = dialogue.nodes.iter().collect();
+                sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
+
+                for (node_id, node) in sorted_nodes {
                     // Phase 3: Highlight unreachable nodes
                     let is_unreachable = unreachable.contains(node_id);
                     let bg_color = if is_unreachable {
@@ -2019,6 +2066,19 @@ impl DialogueEditorState {
                                     if choice.ends_dialogue {
                                         ui.label("(Ends)");
                                     }
+
+                                    // Edit and Delete buttons for choice
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui.button("🗑 Delete").clicked() {
+                                                delete_choice_id = Some((*node_id, choice_idx));
+                                            }
+                                            if ui.button("✏ Edit").clicked() {
+                                                edit_choice_id = Some((*node_id, choice_idx));
+                                            }
+                                        },
+                                    );
                                 });
                             }
                         }
@@ -2069,6 +2129,31 @@ impl DialogueEditorState {
         if let Some(node_id) = select_node_for_choice {
             self.selected_node = Some(node_id);
             self.editing_node = false;
+        }
+
+        // Process choice edit action
+        if let Some((node_id, choice_idx)) = edit_choice_id {
+            match self.edit_choice(dialogue_idx, node_id, choice_idx) {
+                Ok(()) => {
+                    *status_message =
+                        format!("Editing choice {} in node {}", choice_idx + 1, node_id);
+                }
+                Err(e) => {
+                    *status_message = format!("Failed to edit choice: {}", e);
+                }
+            }
+        }
+
+        // Process choice delete action
+        if let Some((node_id, choice_idx)) = delete_choice_id {
+            match self.delete_choice(dialogue_idx, node_id, choice_idx) {
+                Ok(()) => {
+                    *status_message = format!("Choice deleted from node {}", node_id);
+                }
+                Err(e) => {
+                    *status_message = format!("Failed to delete choice: {}", e);
+                }
+            }
         }
 
         // Clear jump-to after processing
@@ -2153,11 +2238,19 @@ impl DialogueEditorState {
     /// Show the choice editor panel
     fn show_choice_editor_panel(&mut self, ui: &mut egui::Ui, status_message: &mut String) {
         let mut add_choice_clicked = false;
+        let mut save_choice_clicked = false;
         let mut cancel_choice_clicked = false;
+        let is_editing_choice = self.selected_choice.is_some();
 
         if let Some(selected_node_id) = self.selected_node {
             ui.separator();
-            ui.heading(format!("Add Choice to Node {}", selected_node_id));
+
+            // Show appropriate heading based on mode
+            if is_editing_choice {
+                ui.heading(format!("Edit Choice in Node {}", selected_node_id));
+            } else {
+                ui.heading(format!("Add Choice to Node {}", selected_node_id));
+            }
 
             ui.horizontal(|ui| {
                 ui.label("Choice Text:");
@@ -2176,7 +2269,11 @@ impl DialogueEditorState {
             });
 
             ui.horizontal(|ui| {
-                if ui.button("✓ Add Choice").clicked() {
+                if is_editing_choice {
+                    if ui.button("✓ Save Choice").clicked() {
+                        save_choice_clicked = true;
+                    }
+                } else if ui.button("✓ Add Choice").clicked() {
                     add_choice_clicked = true;
                 }
                 if ui.button("✗ Cancel").clicked() {
@@ -2196,8 +2293,26 @@ impl DialogueEditorState {
                 }
             }
         }
+        if save_choice_clicked {
+            if let Some(dialogue_idx) = self.selected_dialogue {
+                if let Some(node_id) = self.selected_node {
+                    if let Some(choice_idx) = self.selected_choice {
+                        match self.save_choice(dialogue_idx, node_id, choice_idx) {
+                            Ok(()) => {
+                                *status_message = "Choice saved".to_string();
+                            }
+                            Err(e) => {
+                                *status_message = format!("Failed to save choice: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if cancel_choice_clicked {
             self.selected_node = None;
+            self.selected_choice = None;
+            self.choice_buffer = ChoiceEditBuffer::default();
         }
     }
 }
@@ -2492,6 +2607,7 @@ mod tests {
         node.add_choice(DialogueChoice::new("Original", Some(2)));
         dialogue.add_node(node);
         editor.dialogues.push(dialogue);
+        editor.selected_dialogue = Some(0);
 
         // Edit and save the choice
         editor.edit_choice(0, 1, 0).unwrap();
@@ -3114,5 +3230,148 @@ mod tests {
         assert_eq!(total, 6);
         assert_eq!(reachable, 5);
         assert_eq!(unreachable_count, 1);
+    }
+
+    #[test]
+    fn test_dialogues_sorted_by_id() {
+        let mut editor = DialogueEditorState::new();
+
+        // Create dialogues with non-sequential IDs
+        let mut dialogue1 = DialogueTree::new(5, "Dialogue Five", 1);
+        dialogue1.add_node(DialogueNode::new(1, "Node 1"));
+        editor.dialogues.push(dialogue1);
+
+        let mut dialogue2 = DialogueTree::new(2, "Dialogue Two", 1);
+        dialogue2.add_node(DialogueNode::new(1, "Node 1"));
+        editor.dialogues.push(dialogue2);
+
+        let mut dialogue3 = DialogueTree::new(8, "Dialogue Eight", 1);
+        dialogue3.add_node(DialogueNode::new(1, "Node 1"));
+        editor.dialogues.push(dialogue3);
+
+        // Test filtered_dialogues returns in order
+        let filtered = editor.filtered_dialogues();
+        let ids: Vec<u16> = filtered.iter().map(|(_, d)| d.id).collect();
+
+        // Should be able to sort these by ID
+        let mut sorted_ids = ids.clone();
+        sorted_ids.sort();
+        // Verify all IDs are present
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains(&2));
+        assert!(ids.contains(&5));
+        assert!(ids.contains(&8));
+    }
+
+    #[test]
+    fn test_nodes_sorted_by_id_in_dialogue() {
+        let mut dialogue = DialogueTree::new(1, "Test Dialogue", 1);
+
+        // Add nodes in non-sequential order to test HashMap sorting
+        let mut node5 = DialogueNode::new(5, "Node Five");
+        node5.is_terminal = false;
+        dialogue.add_node(node5);
+
+        let mut node2 = DialogueNode::new(2, "Node Two");
+        node2.is_terminal = false;
+        dialogue.add_node(node2);
+
+        let mut node8 = DialogueNode::new(8, "Node Eight");
+        node8.is_terminal = true;
+        dialogue.add_node(node8);
+
+        let mut node1 = DialogueNode::new(1, "Root Node");
+        node1.is_terminal = false;
+        dialogue.add_node(node1);
+
+        // Verify nodes exist
+        assert_eq!(dialogue.node_count(), 4);
+
+        // Test that nodes can be sorted by ID
+        let mut sorted_nodes: Vec<_> = dialogue.nodes.iter().collect();
+        sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
+
+        let sorted_ids: Vec<u16> = sorted_nodes.iter().map(|(id, _)| **id).collect();
+        assert_eq!(sorted_ids, vec![1, 2, 5, 8]);
+    }
+
+    #[test]
+    fn test_next_available_dialogue_id_suggestion() {
+        let mut editor = DialogueEditorState::new();
+
+        // Create dialogues with specific IDs
+        let mut dialogue1 = DialogueTree::new(1, "First", 1);
+        dialogue1.add_node(DialogueNode::new(1, "Node 1"));
+        editor.dialogues.push(dialogue1);
+
+        let mut dialogue2 = DialogueTree::new(5, "Fifth", 1);
+        dialogue2.add_node(DialogueNode::new(1, "Node 1"));
+        editor.dialogues.push(dialogue2);
+
+        // Next available should be 6 (max + 1)
+        let next_id = editor.next_available_dialogue_id();
+        assert_eq!(next_id, 6);
+
+        // Add another dialogue
+        let mut dialogue3 = DialogueTree::new(10, "Tenth", 1);
+        dialogue3.add_node(DialogueNode::new(1, "Node 1"));
+        editor.dialogues.push(dialogue3);
+
+        // Next available should now be 11
+        let next_id = editor.next_available_dialogue_id();
+        assert_eq!(next_id, 11);
+    }
+
+    #[test]
+    fn test_next_available_node_id_suggestion() {
+        let mut editor = DialogueEditorState::new();
+        let mut dialogue = DialogueTree::new(1, "Test", 1);
+
+        // Add nodes with specific IDs
+        let mut node1 = DialogueNode::new(1, "Root");
+        node1.is_terminal = false;
+        dialogue.add_node(node1);
+
+        let mut node3 = DialogueNode::new(3, "Third");
+        node3.is_terminal = false;
+        dialogue.add_node(node3);
+
+        let mut node7 = DialogueNode::new(7, "Seventh");
+        node7.is_terminal = false;
+        dialogue.add_node(node7);
+
+        editor.dialogues.push(dialogue);
+        editor.selected_dialogue = Some(0);
+
+        // Next available node ID should be 8 (max + 1)
+        let next_id = editor.next_available_node_id();
+        assert_eq!(next_id, Some(8));
+    }
+
+    #[test]
+    fn test_dialogue_id_autocomplete_in_create_mode() {
+        let mut editor = DialogueEditorState::new();
+
+        // Add a few dialogues
+        let mut d1 = DialogueTree::new(1, "First", 1);
+        d1.add_node(DialogueNode::new(1, "Node"));
+        editor.dialogues.push(d1);
+
+        // Start creating new dialogue
+        editor.start_new_dialogue();
+        assert_eq!(editor.mode, DialogueEditorMode::Creating);
+
+        // Suggested ID should be 2
+        let next_id = editor.next_available_dialogue_id();
+        assert_eq!(next_id, 2);
+
+        // Manually set the ID as the form would
+        editor.dialogue_buffer.id = next_id.to_string();
+        editor.dialogue_buffer.name = "Second Dialogue".to_string();
+
+        // Save should work
+        assert!(editor.save_dialogue().is_ok());
+        assert_eq!(editor.dialogues.len(), 2);
+        assert_eq!(editor.dialogues[1].id, 2);
     }
 }

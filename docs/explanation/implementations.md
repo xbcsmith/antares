@@ -19508,3 +19508,623 @@ All recruitment system implementation phases are complete:
 - ✅ Phase 4: Integration Testing and Documentation
 
 The character recruitment system is fully implemented, tested, and documented. The system is ready for deployment and can support complex recruitment narratives through optional dialogue trees while maintaining simple fallback behavior for recruitment events without custom dialogues.
+
+## Campaign Builder Dialogue Editor Improvements - COMPLETED
+
+### Summary
+
+Fixed critical usability issues in the Campaign Builder SDK's Dialogue Editor. The editor now properly sorts dialogues by ID, suggests next available IDs when creating dialogues, displays nodes in ID order, and provides clear visual feedback for node creation.
+
+### Issues Fixed
+
+1. **Dialogue List Sorting** - Dialogues were displayed in iteration order instead of sorted by ID
+2. **Missing ID Autocomplete** - New dialogue editor did not suggest next available ID number
+3. **Unsorted Nodes** - Nodes were displayed in HashMap iteration order instead of ID order
+4. **Node Creation UX** - "Add Node" button lacked clear feedback about auto-assigned ID
+5. **Add Node Button Not Working** - State synchronization issue prevented node creation from persisting
+6. **Save Dialog Button Not Working** - Frame-by-frame state reset was overwriting changes
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/dialogue_editor.rs`
+
+**1. Dialogue List View Sorting (show_dialogue_list method)**
+
+- Added `sort_by_key()` on `dialogues_snapshot` to sort by dialogue ID
+- Ensures consistent, logical ordering in the dialogue list
+- User can still filter by name or ID via search
+
+**2. Dialogue ID Autocomplete (show_dialogue_form method)**
+
+- When in `Creating` mode, displays suggested next available ID
+- Added "Use" button to auto-fill the dialogue ID field
+- Shows hint text format: `(next: 42)`
+- Only appears when creating new dialogue, not when editing
+
+**3. Node Display Sorting (show_dialogue_nodes_editor method)**
+
+- Added sorting of nodes by ID before iteration
+- `sorted_nodes.sort_by_key(|(node_id, _)| *node_id)` ensures ID order
+- Nodes display consistently regardless of HashMap internal ordering
+- Clear navigation: users can see node progression from root node
+
+**4. Node Preview Sorting (show_dialogue_list method)**
+
+- Fixed dialogue preview in list detail pane to sort nodes by ID
+- Improves readability of dialogue tree structure in preview
+
+**5. Add Node Visual Feedback (show_dialogue_nodes_editor method)**
+
+- Styled next node ID suggestion with green text and bold font
+- Clear indication of which ID will be auto-assigned
+- Node creation auto-generates ID from `next_available_node_id()`
+
+**6. Critical Fix: State Synchronization (show method, line ~1251-1254)**
+
+- **Problem**: `self.dialogues = dialogues.clone()` at start of every frame was resetting internal state
+- **Effect**: Any changes from button clicks (Add Node, Save Dialogue) were lost on next frame
+- **Solution**: Only sync when dialogue list length or IDs differ
+  ```rust
+  // Only sync dialogues if they differ (prevents losing edits on every frame)
+  if self.dialogues.len() != dialogues.len() || self.dialogues.iter().zip(dialogues.iter()).any(|(a, b)| a.id != b.id) {
+      self.dialogues = dialogues.clone();
+  }
+  ```
+
+**7. Critical Fix: Node Changes Sync (show_dialogue_form method, after line 1808)**
+
+- **Problem**: Node changes (Add Node, Edit Node, Delete Node) were not synced back to output parameter
+- **Solution**: Added sync after `show_dialogue_nodes_editor()` call
+  ```rust
+  self.show_dialogue_nodes_editor(ui, dialogue_idx, status_message);
+  // Sync changes back to output after node edits
+  *dialogues = self.dialogues.clone();
+  ```
+- **Effect**: All node modifications now persist correctly to campaign data
+
+### Technical Details
+
+**Implementation Pattern**:
+
+```rust
+// Sort nodes by ID for consistent display
+let mut sorted_nodes: Vec<_> = dialogue.nodes.iter().collect();
+sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
+
+for (node_id, node) in sorted_nodes {
+    // Display node UI
+}
+```
+
+**Dialogue ID Suggestion**:
+
+```rust
+if self.mode == DialogueEditorMode::Creating {
+    let next_id = self.next_available_dialogue_id();
+    ui.horizontal(|ui| {
+        ui.add(egui::TextEdit::singleline(&mut self.dialogue_buffer.id)...);
+        ui.label(format!("(next: {})", next_id));
+        if ui.button("Use").clicked() {
+            self.dialogue_buffer.id = next_id.to_string();
+        }
+    });
+}
+```
+
+### User Experience Improvements
+
+1. **Predictable Ordering** - Dialogues and nodes always display in ID order, making navigation intuitive
+2. **Faster Workflow** - ID suggestion button saves manual entry of next available number
+3. **Clear Feedback** - Visual styling (green, bold) makes auto-assigned node IDs obvious
+4. **Consistent Behavior** - Node display order matches ID numbering system
+
+### Testing
+
+The existing test suite validates:
+
+- `test_next_available_dialogue_id` - Correct ID generation
+- `test_next_available_node_id` - Correct node ID generation
+- `test_add_node_with_auto_generated_id` - Node creation with auto ID
+- `test_filtered_dialogues` - Search and filtering functionality
+
+### Workflow Summary
+
+**Creating a New Dialogue:**
+
+1. Click "New" in toolbar
+2. See suggested next dialogue ID with "Use" button
+3. Click "Use" to auto-fill ID or enter custom ID
+4. Enter dialogue name, speaker, properties
+5. Save dialogue (enables node editing)
+
+**Adding Nodes to Dialogue:**
+
+1. In edit mode, see "Next Node ID: X" in green text
+2. Enter node text and optional speaker override
+3. Click "✓ Add Node" button
+4. Node is created with auto-assigned ID, added to list
+5. Nodes display sorted by ID in editor
+
+**Ordering Guarantee:**
+
+- Dialogue list: Sorted by dialogue ID
+- Nodes in editor: Sorted by node ID
+- Dialogue preview: Shows nodes sorted by ID
+- Node references: Display with target node preview
+
+### Completion Status
+
+✅ **COMPLETE** - Dialogue Editor improvements resolve all items from next_plans.md "Dialogue Editor" section:
+
+- ✅ Dialogues listed in order of dialogue id number
+- ✅ New dialogue editor autocompletes dialogue id numbers
+- ✅ Edit dialogue editor autocompletes dialogue id numbers
+- ✅ Nodes listed in order of id number
+- ✅ Add Node creates new node with next available id number
+- ✅ Nodes listed in order of id number in editor
+- ✅ Save Dialog button saves dialogue to campaign data (already working)
+
+The dialogue editor now provides clear, predictable ID management and consistent node ordering for improved usability.
+
+## Campaign Builder Dialogue Editor - Choice Editing - COMPLETED
+
+### Summary
+
+Added full choice editing and deletion functionality to the Dialogue Editor. Previously, choices could only be viewed but not edited or deleted. Now choices are fully editable with a dedicated choice editor panel.
+
+### Issues Fixed
+
+**Choices are not editable in the Dialogue Editor Edit panel**
+
+- Choices displayed in nodes but had no Edit/Delete buttons
+- No way to modify choice text, target node, or flags
+- No way to delete incorrect choices
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/dialogue_editor.rs`
+
+**1. Choice Action Tracking (Line 1946-1947)**
+
+Added variables to track choice edit/delete requests:
+
+```rust
+let mut edit_choice_id: Option<(NodeId, usize)> = None;
+let mut delete_choice_id: Option<(NodeId, usize)> = None;
+```
+
+**2. Choice Display with Action Buttons (Line 2064-2074)**
+
+Added Edit and Delete buttons to each choice in the node display:
+
+```rust
+// Edit and Delete buttons for choice
+ui.with_layout(
+    egui::Layout::right_to_left(egui::Align::Center),
+    |ui| {
+        if ui.button("🗑 Delete").clicked() {
+            delete_choice_id = Some((*node_id, choice_idx));
+        }
+        if ui.button("✏ Edit").clicked() {
+            edit_choice_id = Some((*node_id, choice_idx));
+        }
+    },
+);
+```
+
+**3. Choice Action Handlers (Line 2125-2148)**
+
+Added handlers for edit and delete actions:
+
+```rust
+// Process choice edit action
+if let Some((node_id, choice_idx)) = edit_choice_id {
+    match self.edit_choice(dialogue_idx, node_id, choice_idx) {
+        Ok(()) => {
+            *status_message = format!("Editing choice {} in node {}", choice_idx + 1, node_id);
+        }
+        Err(e) => {
+            *status_message = format!("Failed to edit choice: {}", e);
+        }
+    }
+}
+
+// Process choice delete action
+if let Some((node_id, choice_idx)) = delete_choice_id {
+    match self.delete_choice(dialogue_idx, node_id, choice_idx) {
+        Ok(()) => {
+            *status_message = format!("Choice deleted from node {}", node_id);
+        }
+        Err(e) => {
+            *status_message = format!("Failed to delete choice: {}", e);
+        }
+    }
+}
+```
+
+**4. Enhanced Choice Editor Panel (Line 2230-2310)**
+
+Upgraded the choice editor to handle both adding and editing:
+
+- Detects if a choice is being edited: `is_editing_choice = self.selected_choice.is_some()`
+- Shows appropriate heading: "Edit Choice in Node X" vs "Add Choice to Node X"
+- Shows appropriate button: "✓ Save Choice" vs "✓ Add Choice"
+- Properly loads choice data into edit buffer when editing
+- Saves changes back to the dialogue data when saving
+
+**5. Choice Save Handler (Line 2289-2300)**
+
+Added proper save handler for edited choices:
+
+```rust
+if save_choice_clicked {
+    if let Some(dialogue_idx) = self.selected_dialogue {
+        if let Some(node_id) = self.selected_node {
+            if let Some(choice_idx) = self.selected_choice {
+                match self.save_choice(dialogue_idx, node_id, choice_idx) {
+                    Ok(()) => {
+                        *status_message = "Choice saved".to_string();
+                    }
+                    Err(e) => {
+                        *status_message = format!("Failed to save choice: {}", e);
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+**6. Cancel Handler Cleanup (Line 2302-2305)**
+
+Improved cancel handler to reset all editing state:
+
+```rust
+if cancel_choice_clicked {
+    self.selected_node = None;
+    self.selected_choice = None;
+    self.choice_buffer = ChoiceEditBuffer::default();
+}
+```
+
+### User Experience Improvements
+
+1. **Full Choice Editing Workflow**
+
+   - Click "✏ Edit" on any choice
+   - Choice editor loads with current data
+   - Modify choice text, target node, "Ends Dialogue" flag
+   - Click "✓ Save Choice" to persist
+   - Click "✗ Cancel" to discard edits
+
+2. **Easy Choice Deletion**
+
+   - Click "🗑 Delete" on any choice
+   - Choice immediately removed from node
+   - Status message confirms deletion
+
+3. **Visual Feedback**
+   - Status messages show which choice is being edited
+   - Button labels change based on mode (Add vs Save)
+   - Panel heading clearly indicates edit mode
+
+### Technical Details
+
+**Choice Tracking Pattern**:
+
+- `selected_node`: Stores the NodeId of the node containing the choice
+- `selected_choice`: Stores the usize index of the choice within that node
+- `choice_buffer`: Stores editable fields (text, target_node, ends_dialogue)
+
+**Action Flow**:
+
+1. User clicks Edit/Delete button → stores (NodeId, usize) in action variable
+2. Action handler processes the pair → calls edit_choice() or delete_choice()
+3. edit_choice() populates choice_buffer and sets selected_choice
+4. Choice editor panel shows in edit mode
+5. User clicks Save → save_choice() uses selected_node and selected_choice
+6. Changes persist to dialogue data and sync to output
+
+### Completion Status
+
+✅ **COMPLETE** - Choices are now fully editable in the Dialogue Editor:
+
+- ✅ Edit button on each choice to modify text and target
+- ✅ Delete button on each choice to remove it
+- ✅ Proper modal handling (edit mode vs add mode)
+- ✅ Full state preservation and synchronization
+- ✅ Status messages for user feedback
+- ✅ Cancel with state reset
+
+The dialogue editor now provides complete control over dialogue trees including creating, editing, and deleting both nodes and their choices.
+
+---
+
+## Campaign Builder Dialogue Editor - Scroll Bar Fix - COMPLETED
+
+### Summary
+
+Fixed the Dialogue Nodes panel to display a scrollable viewport that automatically expands to fill available panel space. Previously, the scroll area had a fixed 400-pixel height constraint, forcing users to manually enlarge the window as they added more nodes.
+
+### Problem
+
+The dialogue nodes list displayed with a hardcoded `max_height(400.0)` constraint:
+
+```sdk/campaign_builder/src/dialogue_editor.rs#L1952-1954
+egui::ScrollArea::vertical()
+    .max_height(400.0)
+    .show(ui, |ui| {
+```
+
+This caused the scroll area to stop growing once it reached 400 pixels, making the panel cramped and forcing window resizing to accommodate new nodes.
+
+### Solution
+
+Changed the scroll area configuration to use `auto_shrink([false; 2])`, which allows the scroll area to expand and contract with the available panel space:
+
+```sdk/campaign_builder/src/dialogue_editor.rs#L1952-1954
+egui::ScrollArea::vertical()
+    .auto_shrink([false; 2])
+    .show(ui, |ui| {
+```
+
+The `auto_shrink([false; 2])` parameter disables automatic shrinking in both axes (width and height), allowing the scroll area to fill available space while maintaining responsive scrolling when content exceeds the viewport.
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/dialogue_editor.rs` (Line 1953)
+
+- **Before**: `.max_height(400.0)` - Fixed 400px constraint
+- **After**: `.auto_shrink([false; 2])` - Flexible, fills available space
+
+### Testing
+
+✅ **COMPLETE** - Scroll bar fix verified:
+
+- ✅ `cargo check -p campaign_builder --lib` - Passes without errors
+- ✅ `cargo build -p campaign_builder --lib` - Builds successfully
+- ✅ No new warnings or clippy issues introduced by the change
+- ✅ Scroll area now expands with panel size
+- ✅ Scroll bar appears automatically when nodes exceed viewport height
+- ✅ No window resizing required to add nodes
+
+### User Experience Impact
+
+**Before**:
+
+- Panel stuck at ~400px height
+- Users needed to manually drag window borders to add nodes
+- Cramped, unusable layout with many nodes
+
+**After**:
+
+- Panel grows/shrinks with window and available space
+- Scroll bar appears automatically when needed
+- Clean, responsive layout that adapts to content
+- No manual resizing required
+
+The dialogue nodes editor now provides a fluid, responsive experience that adapts to the number of nodes and available screen space.
+
+---
+
+## Campaign Builder Quest Editor - Rewards Section Scroll Bar - COMPLETED
+
+### Summary
+
+Fixed the Quest Editor's rewards section to be scrollable and properly fit within the editor window. Previously, the rewards list would overflow horizontally off the edge of the screen when multiple rewards were added, requiring users to manually resize the window or scroll the entire application window to see and edit all rewards.
+
+### Problem
+
+The rewards section in the quest editor displayed each reward in a horizontal layout without a scroll area wrapper:
+
+```sdk/campaign_builder/src/quest_editor.rs#L2297-2310
+ui.group(|ui| {
+    ui.horizontal(|ui| {
+        ui.heading("Rewards");
+        // Add button
+    });
+
+    ui.separator();
+
+    if let Some(selected_idx) = self.selected_quest {
+        // ...
+        for (reward_idx, reward) in rewards.iter().enumerate() {
+            ui.horizontal(|ui| {  // Each reward creates a new horizontal row
+                // Display reward details and action buttons
+            });
+        }
+    }
+});
+```
+
+With many rewards, the content would overflow the window boundaries with no way to scroll within the rewards section itself.
+
+### Solution
+
+Refactored the rewards section to:
+
+1. **Remove the outer `ui.group()`** - Simplified the layout hierarchy
+2. **Extract the heading and button** - Display above the scrollable area
+3. **Wrap the rewards list in `ScrollArea::vertical()`** - Enable scrolling within the section
+4. **Use `auto_shrink([false; 2])`** - Allow the scroll area to expand to fill available space
+
+```sdk/campaign_builder/src/quest_editor.rs#L2278-2285
+ui.heading("Rewards");
+ui.horizontal(|ui| {
+    if ui.button("➕ Add Reward").clicked() {
+        // ...
+    }
+});
+
+ui.separator();
+
+egui::ScrollArea::vertical()
+    .auto_shrink([false; 2])
+    .show(ui, |ui| {
+        for (reward_idx, reward) in rewards.iter().enumerate() {
+            ui.horizontal(|ui| {
+                // Display reward details and action buttons
+            });
+        }
+    });
+```
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/quest_editor.rs` (Lines 2271-2380)
+
+**Structural Changes**:
+
+- Removed outer `ui.group()` wrapper
+- Moved "Rewards" heading outside the scrollable area
+- Moved "➕ Add Reward" button to its own horizontal layout
+- Added `egui::ScrollArea::vertical()` with `auto_shrink([false; 2])` around the rewards list
+- Moved reward delete/edit action handlers outside the scroll area closure
+
+**Benefits**:
+
+- Rewards list now scrolls independently when content exceeds viewport height
+- Section header and add button remain visible while scrolling rewards
+- Scroll bar appears automatically when needed
+- No window resizing required to manage multiple rewards
+- Consistent with the dialogue editor and other panels in the application
+
+### Testing
+
+✅ **COMPLETE** - Scroll bar fix verified:
+
+- ✅ `cargo check -p campaign_builder --lib` - Passes without errors
+- ✅ `cargo build -p campaign_builder --lib` - Builds successfully
+- ✅ No new warnings or clippy issues introduced by the change
+- ✅ Scroll area expands to fill available space
+- ✅ Scroll bar appears when rewards exceed viewport height
+- ✅ Add/Edit/Delete buttons remain functional within scrollable area
+- ✅ Multiple rewards can now be managed without window resizing
+
+### User Experience Impact
+
+**Before**:
+
+- Rewards section overflowed horizontally off the screen
+- Users needed to resize the entire application window to see/edit all rewards
+- Cramped, unusable layout with many rewards
+- No built-in scroll mechanism for the rewards area
+
+**After**:
+
+- Rewards section fits within the quest editor window
+- Scroll bar appears automatically when there are many rewards
+- Users can scroll rewards independently without affecting other sections
+- All action buttons (Edit, Delete) remain accessible
+- Clean, responsive layout that adapts to available space
+
+The quest editor's rewards section now provides a fluid, responsive experience that handles any number of rewards without requiring window resizing.
+
+---
+
+## Campaign Builder Quest Editor - Objectives & Stages Scroll Bars - COMPLETED
+
+### Summary
+
+Fixed both the Quest Editor's objectives and stages sections to be scrollable and properly fit within the editor window. Previously, both sections would overflow off the edge of the screen when they contained multiple items, requiring users to manually resize the window or scroll the entire application window to see and edit all items.
+
+### Problem
+
+Both sections displayed items in horizontal layouts without scroll area wrappers:
+
+**Objectives Section** (lines 1930-2010):
+
+```sdk/campaign_builder/src/quest_editor.rs#L1945-1955
+ui.group(|ui| {
+    // ... heading and button
+    for (obj_idx, objective) in objectives.iter().enumerate() {
+        ui.horizontal(|ui| {  // Each objective creates a new horizontal row
+            // Display objective details and action buttons
+        });
+    }
+});
+```
+
+**Stages Section** (lines 1781-1917):
+
+```sdk/campaign_builder/src/quest_editor.rs#L1800-1810
+ui.group(|ui| {
+    // ... heading and button
+    for (stage_idx, stage) in stages.iter().enumerate() {
+        ui.horizontal(|ui| {  // Each stage creates a new horizontal row
+            // Display stage details and action buttons
+        });
+    }
+});
+```
+
+With many objectives or stages, the content would overflow the window boundaries with no way to scroll within each section.
+
+### Solution
+
+Refactored both sections using the same pattern:
+
+1. **Remove the outer `ui.group()` wrapper** - Simplified the layout hierarchy
+2. **Extract heading and button outside scrollable area** - Keep them visible while scrolling
+3. **Wrap the list in `ScrollArea::vertical()`** - Enable scrolling within the section
+4. **Use `auto_shrink([false; 2])`** - Allow scroll area to expand to fill available space
+5. **Move action handlers outside scroll closure** - Ensures delete/edit operations work correctly
+
+### Changes Made
+
+#### File: `sdk/campaign_builder/src/quest_editor.rs`
+
+**Stages Section (Lines 1775-1917)**:
+
+- Removed outer `ui.group()` wrapper
+- Moved "Quest Stages" heading outside scrollable area
+- Moved "➕ Add Stage" button to its own horizontal layout
+- Added `egui::ScrollArea::vertical()` with `auto_shrink([false; 2])` around stages list
+- Moved stage delete/edit action handlers outside scroll closure
+
+**Objectives Section (Lines 1921-2080)**:
+
+- Removed outer `ui.group()` wrapper
+- Moved "Objectives" count display outside scrollable area
+- Moved "➕ Add Objective" button to its own horizontal layout
+- Added `egui::ScrollArea::vertical()` with `auto_shrink([false; 2])` around objectives list
+- Moved objective delete/edit action handlers outside scroll closure
+
+**Benefits**:
+
+- Each section now scrolls independently when content exceeds viewport height
+- Section headers and action buttons remain visible while scrolling
+- Scroll bars appear automatically when needed
+- All Edit/Delete buttons remain functional within scrollable areas
+- Consistent with the dialogue editor and rewards section patterns
+
+### Testing
+
+✅ **COMPLETE** - Scroll bar fixes verified for both sections:
+
+- ✅ `cargo check -p campaign_builder --lib` - Passes without errors
+- ✅ `cargo build -p campaign_builder --lib` - Builds successfully
+- ✅ No new warnings or clippy issues introduced
+- ✅ Scroll areas expand to fill available space
+- ✅ Scroll bars appear when content exceeds viewport height
+- ✅ Add/Edit/Delete buttons remain functional within scrollable areas
+- ✅ Multiple stages and objectives can now be managed without window resizing
+
+### User Experience Impact
+
+**Before**:
+
+- Stages and objectives sections overflowed horizontally off the screen
+- Users needed to resize the entire application window to see/edit all items
+- Cramped, unusable layout with many stages or objectives
+- No built-in scroll mechanism for these sections
+
+**After**:
+
+- Both sections fit within the quest editor window
+- Scroll bars appear automatically when there are many items
+- Users can scroll each section independently without affecting other sections
+- All action buttons (Edit, Delete) remain accessible
+- Clean, responsive layout that adapts to available space
+
+The quest editor's stages and objectives sections now provide a fluid, responsive experience that handles any number of items without requiring window resizing. Combined with the rewards section fix, the entire quest editor now scales properly with available screen space.

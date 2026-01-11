@@ -7608,30 +7608,13 @@
     ],
     events: {
         (
-            x: 9,
-            y: 9,
-        ): Trap(
-            name: "Water Trap",
-            description: "A trap in the town square fountain",
-            damage: 10,
-            effect: Some("Poison"),
-        ),
-        (
-            x: 5,
-            y: 4,
-        ): EnterInn(
-            name: "Cozy Inn Entrance",
-            description: "A welcoming inn where you can rest and manage your party.",
-            innkeeper_id: "tutorial_innkeeper_town",
-        ),
-        (
-            x: 11,
-            y: 6,
+            x: 15,
+            y: 8,
         ): RecruitableCharacter(
-            name: "Apprentice Zara",
-            description: "A young gnome apprentice studies a spellbook intently.",
-            character_id: "npc_apprentice_zara",
-            dialogue_id: None,
+            name: "Old Gareth",
+            description: "A grizzled dwarf veteran stands here, repairing armor.",
+            character_id: "npc_old_gareth",
+            dialogue_id: Some(100),
         ),
         (
             x: 5,
@@ -7650,12 +7633,47 @@
             text: "Temple of Healing - The priests can restore your health.",
         ),
         (
+            x: 5,
+            y: 4,
+        ): EnterInn(
+            name: "Cozy Inn Entrance",
+            description: "A welcoming inn where you can rest and manage your party.",
+            innkeeper_id: "tutorial_innkeeper_town",
+        ),
+        (
             x: 13,
             y: 18,
         ): Sign(
             name: "Directional Sign",
             description: "A wooden sign pointing toward the Dark Forrest.",
             text: "To the Dark Forrest",
+        ),
+        (
+            x: 9,
+            y: 9,
+        ): Trap(
+            name: "Water Trap",
+            description: "A trap in the town square fountain",
+            damage: 10,
+            effect: Some("Poison"),
+        ),
+        (
+            x: 11,
+            y: 6,
+        ): RecruitableCharacter(
+            name: "Apprentice Zara",
+            description: "A young gnome apprentice studies a spellbook intently.",
+            character_id: "npc_apprentice_zara",
+            dialogue_id: Some(101),
+        ),
+        (
+            x: 7,
+            y: 15,
+        ): RecruitableCharacter(
+            name: "Whisper",
+            description: "A nimble elf watches from the shadows near the alley.",
+            character_id: "npc_whisper",
+            dialogue_id: Some(102),
         ),
         (
             x: 18,
@@ -7668,24 +7686,6 @@
                 y: 10,
             ),
             map_id: 4,
-        ),
-        (
-            x: 15,
-            y: 8,
-        ): RecruitableCharacter(
-            name: "Old Gareth",
-            description: "A grizzled dwarf veteran stands here, repairing armor.",
-            character_id: "npc_old_gareth",
-            dialogue_id: None,
-        ),
-        (
-            x: 7,
-            y: 15,
-        ): RecruitableCharacter(
-            name: "Whisper",
-            description: "A nimble elf watches from the shadows near the alley.",
-            character_id: "npc_whisper",
-            dialogue_id: None,
         ),
     },
     npc_placements: [
