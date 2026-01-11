@@ -127,6 +127,7 @@ fn handle_start_dialogue(
     mut ev_reader: MessageReader<StartDialogue>,
     mut global_state: ResMut<GlobalState>,
     content: Res<GameContent>,
+    mut pending_recruitment: ResMut<PendingRecruitmentContext>,
     mut quest_system: Option<ResMut<crate::application::quests::QuestSystem>>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
 ) {
@@ -162,17 +163,27 @@ fn handle_start_dialogue(
                     return;
                 }
 
-                global_state.0.mode =
-                    GameMode::Dialogue(DialogueState::start(ev.dialogue_id, root));
+                // Extract recruitment context if present
+                let recruitment_context = pending_recruitment.0.take();
+
+                let mut new_state = DialogueState::start(ev.dialogue_id, root);
+                new_state.recruitment_context = recruitment_context;
+
+                global_state.0.mode = GameMode::Dialogue(new_state);
 
                 // Execute any actions attached to the root node and log the text
                 // Execute root node actions and log the text
                 if let Some(node) = tree.get_node(root) {
                     for action in &node.actions {
+                        let dlg_state = match &global_state.0.mode {
+                            GameMode::Dialogue(state) => Some(state.clone()),
+                            _ => None,
+                        };
                         execute_action(
                             action,
                             &mut global_state.0,
                             db,
+                            dlg_state.as_ref(),
                             quest_system.as_deref_mut(),
                             game_log.as_deref_mut(),
                         );
@@ -272,10 +283,15 @@ fn handle_select_choice(
                 {
                     // Execute choice actions first (mutably borrow game state inside execute_action)
                     for action in &choice.actions {
+                        let dlg_state = match &global_state.0.mode {
+                            GameMode::Dialogue(state) => Some(state.clone()),
+                            _ => None,
+                        };
                         execute_action(
                             action,
                             &mut global_state.0,
                             db,
+                            dlg_state.as_ref(),
                             quest_system.as_deref_mut(),
                             game_log.as_deref_mut(),
                         );
@@ -329,10 +345,15 @@ fn handle_select_choice(
                             }
 
                             for action in actions {
+                                let dlg_state = match &global_state.0.mode {
+                                    GameMode::Dialogue(state) => Some(state.clone()),
+                                    _ => None,
+                                };
                                 execute_action(
                                     &action,
                                     &mut global_state.0,
                                     db,
+                                    dlg_state.as_ref(),
                                     quest_system.as_deref_mut(),
                                     game_log.as_deref_mut(),
                                 );
@@ -511,6 +532,7 @@ fn execute_action(
     action: &DialogueAction,
     game_state: &mut crate::application::GameState,
     db: &crate::sdk::database::ContentDatabase,
+    dialogue_state: Option<&crate::application::dialogue::DialogueState>,
     mut quest_system: Option<&mut crate::application::quests::QuestSystem>,
     mut game_log: Option<&mut crate::game::systems::ui::GameLog>,
 ) {
@@ -601,6 +623,31 @@ fn execute_action(
                             log.add(format!("{} joins the party!", character_id));
                         }
                     }
+
+                    // Remove recruitment event from map
+                    if let Some(dlg_state) = dialogue_state {
+                        if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
+                            if let Some(current_map) = game_state.world.get_current_map_mut() {
+                                if let Some(_removed_event) =
+                                    current_map.remove_event(recruitment_ctx.event_position)
+                                {
+                                    info!(
+                                        "Removed recruitment event at {:?}",
+                                        recruitment_ctx.event_position
+                                    );
+                                } else {
+                                    warn!(
+                                        "No event found at recruitment position {:?}",
+                                        recruitment_ctx.event_position
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(crate::application::RecruitResult::Declined) => {
+                    // Not currently used by recruit_from_map
+                    info!("Recruitment declined for '{}'", character_id);
                 }
                 Ok(crate::application::RecruitResult::SentToInn(inn_id)) => {
                     info!("Party full - sent '{}' to inn '{}'", character_id, inn_id);
@@ -614,10 +661,22 @@ fn execute_action(
                             log.add(format!("Party is full! {} sent to inn.", character_id));
                         }
                     }
-                }
-                Ok(crate::application::RecruitResult::Declined) => {
-                    // Not currently used by recruit_from_map
-                    info!("Recruitment declined for '{}'", character_id);
+
+                    // Remove recruitment event from map
+                    if let Some(dlg_state) = dialogue_state {
+                        if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
+                            if let Some(current_map) = game_state.world.get_current_map_mut() {
+                                if let Some(_removed_event) =
+                                    current_map.remove_event(recruitment_ctx.event_position)
+                                {
+                                    info!(
+                                        "Removed recruitment event at {:?}",
+                                        recruitment_ctx.event_position
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
                 Err(crate::application::RecruitmentError::AlreadyEncountered(id)) => {
                     warn!("Cannot recruit '{}': already encountered", id);
@@ -732,6 +791,22 @@ fn execute_action(
             if let Some(ref mut log) = game_log {
                 log.add(format!("{} will wait at the inn.", char_def.name));
             }
+
+            // Remove recruitment event from map
+            if let Some(dlg_state) = dialogue_state {
+                if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
+                    if let Some(current_map) = game_state.world.get_current_map_mut() {
+                        if let Some(_removed_event) =
+                            current_map.remove_event(recruitment_ctx.event_position)
+                        {
+                            info!(
+                                "Removed recruitment event at {:?}",
+                                recruitment_ctx.event_position
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -842,7 +917,7 @@ mod tests {
             // Execute root node actions
             if let Some(node) = tree.get_node(root) {
                 for action in &node.actions {
-                    execute_action(action, &mut gs.0, &db, None, None);
+                    execute_action(action, &mut gs.0, &db, None, None, None);
                 }
             }
         } else {
@@ -962,7 +1037,7 @@ mod tests {
                 if let Some(node) = tree.get_node(root) {
                     if let Some(choice) = node.choices.first() {
                         for action in &choice.actions {
-                            execute_action(action, &mut gs.0, &db, None, None);
+                            execute_action(action, &mut gs.0, &db, None, None, None);
                         }
                     }
                 }
@@ -1109,6 +1184,7 @@ mod tests {
             &db,
             None,
             None,
+            None,
         );
 
         // Assert
@@ -1184,6 +1260,7 @@ mod tests {
             &db,
             None,
             None,
+            None,
         );
 
         // Assert - party still at max, character sent to inn
@@ -1238,6 +1315,7 @@ mod tests {
             &db,
             None,
             None,
+            None,
         );
 
         // Assert - party size unchanged
@@ -1258,6 +1336,7 @@ mod tests {
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
         );
@@ -1301,14 +1380,23 @@ mod tests {
         );
         db.characters.add_character(char_def).unwrap();
 
+        // Add innkeeper to database
+        let innkeeper_def = crate::domain::world::npc::NpcDefinition::new(
+            "innkeeper_1".to_string(),
+            "Innkeeper".to_string(),
+            "innkeeper.png".to_string(),
+        );
+        db.npcs.add_npc(innkeeper_def).unwrap();
+
         // Act
         execute_action(
             &DialogueAction::RecruitToInn {
                 character_id: "test_mage".to_string(),
-                innkeeper_id: "town_inn".to_string(),
+                innkeeper_id: "innkeeper_1".to_string(),
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
         );
@@ -1317,7 +1405,7 @@ mod tests {
         assert_eq!(game_state.roster.characters.len(), 1);
         assert!(matches!(
             game_state.roster.character_locations[0],
-            CharacterLocation::AtInn(ref id) if id == "town_inn"
+            CharacterLocation::AtInn(ref id) if id == "innkeeper_1"
         ));
         assert!(game_state.encountered_characters.contains("test_mage"));
     }
@@ -1356,14 +1444,23 @@ mod tests {
         );
         db.characters.add_character(char_def).unwrap();
 
+        // Add innkeeper to database
+        let innkeeper_def = crate::domain::world::npc::NpcDefinition::new(
+            "innkeeper_1".to_string(),
+            "Innkeeper".to_string(),
+            "innkeeper.png".to_string(),
+        );
+        db.npcs.add_npc(innkeeper_def).unwrap();
+
         // First recruitment
         execute_action(
             &DialogueAction::RecruitToInn {
                 character_id: "test_mage".to_string(),
-                innkeeper_id: "town_inn".to_string(),
+                innkeeper_id: "innkeeper_1".to_string(),
             },
             &mut game_state,
             &db,
+            None,
             None,
             None,
         );
@@ -1372,16 +1469,18 @@ mod tests {
         execute_action(
             &DialogueAction::RecruitToInn {
                 character_id: "test_mage".to_string(),
-                innkeeper_id: "town_inn".to_string(),
+                innkeeper_id: "innkeeper_1".to_string(),
             },
             &mut game_state,
             &db,
             None,
             None,
+            None,
         );
 
-        // Assert - only one character in roster
+        // Assert
         assert_eq!(game_state.roster.characters.len(), 1);
+        assert!(game_state.encountered_characters.contains("test_mage"));
     }
 
     #[test]
@@ -1423,15 +1522,17 @@ mod tests {
         execute_action(
             &DialogueAction::RecruitToInn {
                 character_id: "test_mage".to_string(),
-                innkeeper_id: "nonexistent_inn".to_string(),
+                innkeeper_id: "invalid_innkeeper".to_string(),
             },
             &mut game_state,
             &db,
             None,
             None,
+            None,
         );
 
-        // Assert - no character added
+        // Assert - should fail because innkeeper doesn't exist
         assert_eq!(game_state.roster.characters.len(), 0);
+        assert!(!game_state.encountered_characters.contains("test_mage"));
     }
 }
