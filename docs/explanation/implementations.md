@@ -18903,3 +18903,236 @@ All quality gates passing:
 ✅ **COMPLETE** - Phase 2 implementation is production-ready
 
 All recruitment dialogue integration tasks completed with comprehensive testing and validation. The system is ready for Phase 3 (SDK & Campaign Builder updates).
+
+## Phase 3: SDK and Campaign Builder Updates - dialogue_id Field Support - COMPLETED [L18906-18907]
+
+### Summary
+
+Implemented dialogue_id field support in the map editor and validation system to enable optional dialogue tree assignment for recruitable character events. This phase completes the SDK tooling for the recruitment system.
+
+### Objective
+
+- Add dialogue_id field editing to EventEditorState and map editor UI
+- Implement validation functions for recruitable character event references
+- Ensure SDK campaign builder can create and validate recruitment events with optional dialogues
+
+### Changes Made
+
+#### 3.1 Map Editor EventEditorState Enhancement (`sdk/campaign_builder/src/map_editor.rs`)
+
+**Field Addition (Line ~1060)**
+
+Added `pub recruitable_dialogue_id: String` field to `EventEditorState` struct to store the optional dialogue ID as a string for editing.
+
+**Default Implementation (Line ~1088)**
+
+Updated `impl Default` to initialize `recruitable_dialogue_id: String::new()`.
+
+**to_map_event() Method Enhancement (Lines ~1290-1310)**
+
+Updated `EventType::RecruitableCharacter` case to:
+
+- Parse `recruitable_dialogue_id` string to optional u16
+- Return None if empty string
+- Pass `dialogue_id` field to MapEvent::RecruitableCharacter
+
+```rust
+let dialogue_id = if self.recruitable_dialogue_id.is_empty() {
+    None
+} else {
+    self.recruitable_dialogue_id
+        .parse::<u16>()
+        .ok()
+};
+
+Ok(MapEvent::RecruitableCharacter {
+    name: self.name.clone(),
+    description: self.description.clone(),
+    character_id,
+    dialogue_id,
+})
+```
+
+**from_map_event() Method Enhancement (Lines ~1418-1435)**
+
+Updated pattern match to handle `dialogue_id` field:
+
+- Destructure dialogue_id from MapEvent
+- Convert to string for editing, or empty string if None
+
+```rust
+MapEvent::RecruitableCharacter {
+    name,
+    description,
+    character_id,
+    dialogue_id,
+} => {
+    s.event_type = EventType::RecruitableCharacter;
+    s.name = name.clone();
+    s.description = description.clone();
+    s.recruit_character_id = character_id.clone();
+    s.recruit_character_id_input_buffer = character_id.clone();
+    s.recruitable_dialogue_id = dialogue_id
+        .map(|id| id.to_string())
+        .unwrap_or_default();
+}
+```
+
+**UI Rendering Enhancement (Lines ~3400-3418)**
+
+Added dialogue_id input field to RecruitableCharacter event editor:
+
+```rust
+ui.horizontal(|ui| {
+    ui.label("Dialogue ID (optional):");
+    if ui
+        .text_edit_singleline(
+            &mut event_editor.recruitable_dialogue_id,
+        )
+        .changed()
+    {
+        editor.has_changes = true;
+    }
+});
+
+if !event_editor.recruitable_dialogue_id.is_empty() {
+    ui.label("💡 Leave empty for simple yes/no recruitment");
+}
+```
+
+**Test Updates (Lines ~4322-4387)**
+
+- Updated `test_event_editor_state_to_recruitable` to include dialogue_id assertion
+- Updated `test_event_editor_state_from_recruitable` to verify empty dialogue_id handling
+- Added new `test_event_editor_state_recruitable_with_dialogue` test case
+
+#### 3.2 Validation Functions (`sdk/campaign_builder/src/validation.rs`)
+
+**New Function: validate_recruitable_character_references (Lines ~1023-1098)**
+
+Added comprehensive validation function that:
+
+- Iterates through all maps and their events
+- Identifies RecruitableCharacter events
+- Validates character_id references exist in character ID set
+- Validates dialogue_id (if specified) exists in dialogue ID set
+- Returns ValidationResult errors with file paths and suggestions
+
+```rust
+pub fn validate_recruitable_character_references(
+    maps: &[antares::domain::world::Map],
+    character_ids: &std::collections::HashSet<String>,
+    dialogue_ids: &std::collections::HashSet<u16>,
+) -> Vec<ValidationResult> {
+    // Validates both character and dialogue references
+    // Returns detailed error messages for invalid references
+}
+```
+
+**Test Suite (Lines ~1643-1747)**
+
+Added three comprehensive test cases:
+
+1. **test_validate_recruitable_character_valid_references** - Verifies no errors for valid references
+2. **test_validate_recruitable_character_invalid_character_id** - Verifies error detection for missing character
+3. **test_validate_recruitable_character_invalid_dialogue_id** - Verifies error detection for missing dialogue
+
+### Data Migration
+
+No data migration required - dialogue_id is optional and defaults to None for existing events.
+
+### Quality Verification
+
+```
+✅ cargo fmt --all          : OK
+✅ cargo build              : OK (campaign_builder compiles successfully)
+✅ cargo check              : OK
+✅ All validation tests     : PASSING (3 new tests)
+✅ Map editor tests         : PASSING (3 updated tests)
+```
+
+### Architecture Compliance
+
+- ✅ Follows map_editor.rs editing patterns (similar to other event types)
+- ✅ Validation functions match validation.rs conventions
+- ✅ Type usage consistent (DialogueId = u16)
+- ✅ Optional dialogue_id respects domain model
+- ✅ No circular dependencies
+- ✅ Proper error handling with ValidationResult
+
+### Files Modified
+
+1. `sdk/campaign_builder/src/map_editor.rs` - EventEditorState struct, to/from_map_event methods, UI rendering, tests
+2. `sdk/campaign_builder/src/validation.rs` - validate_recruitable_character_references function and tests
+
+### Deliverables Completed
+
+- ✅ EventEditorState struct updated with recruitable_dialogue_id field
+- ✅ Map editor UI displays dialogue_id input field
+- ✅ to_map_event() handles dialogue_id parsing
+- ✅ from_map_event() loads dialogue_id from events
+- ✅ validate_recruitable_character_references() function implemented
+- ✅ Validation tests covering valid and invalid references
+- ✅ All quality checks passing
+
+### Success Criteria Met
+
+- ✅ SDK can create recruitment events with optional dialogues
+- ✅ SDK can validate recruitment event references
+- ✅ dialogue_id field properly integrated into map editor workflow
+- ✅ No breaking changes to existing functionality
+- ✅ Full test coverage for new functionality
+- ✅ Zero compilation warnings/errors
+
+### Implementation Details
+
+The implementation preserves the optional nature of dialogue_id:
+
+- Empty string or unparseable input → None (simple yes/no recruitment)
+- Valid u16 → Some(id) (custom dialogue tree)
+
+The validation function integrates with existing SDK validation patterns and provides helpful error messages with file paths and suggestions for content authors.
+
+### Benefits Achieved
+
+- Content authors can now create recruitment events with optional custom dialogue trees
+- SDK validates recruitment references before campaign deployment
+- Flexible design supports both simple and complex recruitment flows
+- Comprehensive error messages guide content correction
+
+### Integration Points
+
+- EventType::RecruitableCharacter event creation
+- MapEvent enum (domain layer)
+- Campaign validation workflow
+- Map editor UI system
+
+### Known Limitations
+
+None - this phase completes dialogue_id support in the SDK.
+
+### Testing Strategy
+
+1. Unit tests for validation function behavior
+2. Map editor tests for event serialization/deserialization
+3. Integration testing through campaign builder UI
+
+### Completion Checklist
+
+- ✅ Task 3.1: Update Map Editor for dialogue_id Field
+  - ✅ Add field to EventEditorState
+  - ✅ Update Default impl
+  - ✅ Update to_map_event()
+  - ✅ Update from_map_event()
+  - ✅ Update UI rendering
+  - ✅ Update tests
+- ✅ Task 3.2: Add Character and Dialogue Reference Validation
+  - ✅ Implement validate_recruitable_character_references()
+  - ✅ Add validation tests
+  - ✅ Verify integration with existing validation system
+
+### Status
+
+✅ **COMPLETE** - Phase 3 SDK and Campaign Builder updates are production-ready
+
+All recruitment system tooling is complete. The map editor can now create, edit, and validate recruitment events with optional dialogue trees. The SDK is ready for Phase 4 (Integration Testing & Documentation).
