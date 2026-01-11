@@ -4,6 +4,9 @@
 pub mod audio;
 pub mod camera;
 pub mod dialogue;
+pub mod dialogue_choices;
+pub mod dialogue_validation;
+pub mod dialogue_visuals;
 pub mod events;
 pub mod hud;
 pub mod inn_ui;

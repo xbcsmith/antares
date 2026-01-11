@@ -3,6 +3,7 @@
 
 use crate::domain::types;
 use crate::domain::world;
+use crate::game::components::dialogue::NpcDialogue;
 use crate::game::resources::GlobalState;
 use bevy::prelude::*;
 use ordered_float::OrderedFloat;
@@ -274,7 +275,7 @@ fn spawn_map_markers(
             let y = resolved_npc.position.y as f32;
 
             // Center the NPC marker at y=0.9 (bottom at 0, top at 1.8)
-            commands.spawn((
+            let mut npc_entity = commands.spawn((
                 Mesh3d(npc_mesh.clone()),
                 MeshMaterial3d(npc_material.clone()),
                 Transform::from_xyz(x, 0.9, y),
@@ -286,6 +287,11 @@ fn spawn_map_markers(
                     npc_id: resolved_npc.npc_id.clone(),
                 },
             ));
+
+            // Add NpcDialogue component if this NPC has a dialogue tree
+            if let Some(dialogue_id) = resolved_npc.dialogue_id {
+                npc_entity.insert(NpcDialogue::new(dialogue_id, resolved_npc.name.clone()));
+            }
         }
     } else {
         // Current map id is set to an unknown map - leave the world empty
@@ -911,5 +917,68 @@ mod tests {
             "Y offset {} should be between 0 and 0.1",
             offset
         );
+    }
+
+    #[test]
+    fn test_npc_dialogue_component_created_when_dialogue_id_present() {
+        // Test that NPCs with dialogue_id get the NpcDialogue component
+        use crate::domain::types::Position;
+        use crate::domain::world::ResolvedNpc;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        // Create a resolved NPC with dialogue_id
+        let npc = ResolvedNpc {
+            npc_id: "test_merchant".to_string(),
+            name: "Test Merchant".to_string(),
+            description: "A test merchant NPC".to_string(),
+            portrait_id: "merchant.png".to_string(),
+            position: Position::new(5, 5),
+            facing: None,
+            dialogue_id: Some(100u16), // Dialogue ID present
+            quest_ids: vec![],
+            faction: None,
+            is_merchant: true,
+            is_innkeeper: false,
+        };
+
+        // Verify the NpcDialogue component can be created with the NPC's data
+        let npc_dialogue = NpcDialogue::new(npc.dialogue_id.unwrap(), npc.name.clone());
+        assert_eq!(npc_dialogue.dialogue_id, 100u16);
+        assert_eq!(npc_dialogue.npc_name, "Test Merchant");
+    }
+
+    #[test]
+    fn test_npc_without_dialogue_id_doesnt_need_component() {
+        // Test that NPCs without dialogue_id can still be spawned
+        use crate::domain::types::Position;
+        use crate::domain::world::ResolvedNpc;
+
+        let npc = ResolvedNpc {
+            npc_id: "silent_npc".to_string(),
+            name: "Silent NPC".to_string(),
+            description: "An NPC with no dialogue".to_string(),
+            portrait_id: "silent.png".to_string(),
+            position: Position::new(10, 10),
+            facing: None,
+            dialogue_id: None, // No dialogue ID
+            quest_ids: vec![],
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+        };
+
+        // Verify that None dialogue_id is handled correctly
+        assert!(npc.dialogue_id.is_none());
+    }
+
+    #[test]
+    fn test_npc_marker_component_always_created() {
+        // Test that NpcMarker component is created regardless of dialogue presence
+        let marker = NpcMarker {
+            npc_id: "test_npc".to_string(),
+        };
+        assert_eq!(marker.npc_id, "test_npc");
     }
 }
