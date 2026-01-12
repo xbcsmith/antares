@@ -4855,7 +4855,9 @@ impl CampaignBuilderApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antares::domain::character::{AttributePair, AttributePair16};
+    use antares::domain::character::{Alignment, AttributePair, AttributePair16, Sex};
+    use antares::domain::character_definition::CharacterDefinition;
+    use antares::domain::classes::ClassDefinition;
     use antares::domain::combat::monster::MonsterCondition;
     use antares::domain::quest::QuestStage;
     use antares::domain::races::RaceDefinition;
@@ -5540,20 +5542,22 @@ mod tests {
         app.campaign.id = "test".to_string();
 
         // Add two characters with the same ID
-        let char1 = characters_editor::CharacterEditBuffer {
-            id: "char_1".to_string(),
-            name: "Hero".to_string(),
-            class_id: "class_1".to_string(),
-            race_id: "race_1".to_string(),
-            ..Default::default()
-        };
-        let char2 = characters_editor::CharacterEditBuffer {
-            id: "char_1".to_string(), // Duplicate ID
-            name: "Another Hero".to_string(),
-            class_id: "class_1".to_string(),
-            race_id: "race_1".to_string(),
-            ..Default::default()
-        };
+        let char1 = CharacterDefinition::new(
+            "char_1".to_string(),
+            "Hero".to_string(),
+            "race_1".to_string(),
+            "class_1".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        let char2 = CharacterDefinition::new(
+            "char_1".to_string(), // Duplicate ID
+            "Another Hero".to_string(),
+            "race_1".to_string(),
+            "class_1".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
 
         app.characters_editor_state.characters.push(char1);
         app.characters_editor_state.characters.push(char2);
@@ -5570,13 +5574,14 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
         app.campaign.id = "test".to_string();
 
-        let char = characters_editor::CharacterEditBuffer {
-            id: "".to_string(), // Empty ID
-            name: "Hero".to_string(),
-            class_id: "class_1".to_string(),
-            race_id: "race_1".to_string(),
-            ..Default::default()
-        };
+        let char = CharacterDefinition::new(
+            "".to_string(), // Empty ID
+            "Hero".to_string(),
+            "race_1".to_string(),
+            "class_1".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
 
         app.characters_editor_state.characters.push(char);
 
@@ -5592,13 +5597,14 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
         app.campaign.id = "test".to_string();
 
-        let char = characters_editor::CharacterEditBuffer {
-            id: "char_1".to_string(),
-            name: "".to_string(), // Empty name
-            class_id: "class_1".to_string(),
-            race_id: "race_1".to_string(),
-            ..Default::default()
-        };
+        let char = CharacterDefinition::new(
+            "char_1".to_string(),
+            "".to_string(), // Empty name
+            "race_1".to_string(),
+            "class_1".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
 
         app.characters_editor_state.characters.push(char);
 
@@ -5615,13 +5621,14 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
         app.campaign.id = "test".to_string();
 
-        let char = characters_editor::CharacterEditBuffer {
-            id: "char_1".to_string(),
-            name: "Hero".to_string(),
-            class_id: "nonexistent_class".to_string(),
-            race_id: "race_1".to_string(),
-            ..Default::default()
-        };
+        let char = CharacterDefinition::new(
+            "char_1".to_string(),
+            "Hero".to_string(),
+            "race_1".to_string(),
+            "nonexistent_class".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
 
         app.characters_editor_state.characters.push(char);
 
@@ -5637,13 +5644,14 @@ mod tests {
         let mut app = CampaignBuilderApp::default();
         app.campaign.id = "test".to_string();
 
-        let char = characters_editor::CharacterEditBuffer {
-            id: "char_1".to_string(),
-            name: "Hero".to_string(),
-            class_id: "class_1".to_string(),
-            race_id: "nonexistent_race".to_string(),
-            ..Default::default()
-        };
+        let char = CharacterDefinition::new(
+            "char_1".to_string(),
+            "Hero".to_string(),
+            "nonexistent_race".to_string(),
+            "class_1".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
 
         app.characters_editor_state.characters.push(char);
 
@@ -5660,29 +5668,25 @@ mod tests {
         app.campaign.id = "test".to_string();
 
         // Add a class and race that the character can reference
-        app.classes_editor_state
-            .classes
-            .push(classes_editor::ClassEditBuffer {
-                id: "class_1".to_string(),
-                name: "Knight".to_string(),
-                ..Default::default()
-            });
+        app.classes_editor_state.classes.push(ClassDefinition::new(
+            "class_1".to_string(),
+            "Knight".to_string(),
+        ));
 
-        app.races_editor_state
-            .races
-            .push(races_editor::RaceEditBuffer {
-                id: "race_1".to_string(),
-                name: "Human".to_string(),
-                ..Default::default()
-            });
+        app.races_editor_state.races.push(RaceDefinition::new(
+            "race_1".to_string(),
+            "Human".to_string(),
+            "A balanced race".to_string(),
+        ));
 
-        let char = characters_editor::CharacterEditBuffer {
-            id: "char_1".to_string(),
-            name: "Hero".to_string(),
-            class_id: "class_1".to_string(),
-            race_id: "race_1".to_string(),
-            ..Default::default()
-        };
+        let char = CharacterDefinition::new(
+            "char_1".to_string(),
+            "Hero".to_string(),
+            "race_1".to_string(),
+            "class_1".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
 
         app.characters_editor_state.characters.push(char);
 
@@ -5773,14 +5777,9 @@ mod tests {
         });
 
         // Add a class that references the proficiency
-        app.classes_editor_state
-            .classes
-            .push(classes_editor::ClassEditBuffer {
-                id: "class_1".to_string(),
-                name: "Knight".to_string(),
-                proficiencies: vec!["prof_1".to_string()],
-                ..Default::default()
-            });
+        let mut class = ClassDefinition::new("class_1".to_string(), "Knight".to_string());
+        class.proficiencies = vec!["prof_1".to_string()];
+        app.classes_editor_state.classes.push(class);
 
         let results = app.validate_proficiency_ids();
         let has_pass = results
@@ -5795,14 +5794,9 @@ mod tests {
         app.campaign.id = "test".to_string();
 
         // Add a class that references a non-existent proficiency
-        app.classes_editor_state
-            .classes
-            .push(classes_editor::ClassEditBuffer {
-                id: "class_1".to_string(),
-                name: "Knight".to_string(),
-                proficiencies: vec!["nonexistent_prof".to_string()],
-                ..Default::default()
-            });
+        let mut class = ClassDefinition::new("class_1".to_string(), "Knight".to_string());
+        class.proficiencies = vec!["nonexistent_prof".to_string()];
+        app.classes_editor_state.classes.push(class);
 
         let results = app.validate_proficiency_ids();
         let has_error = results
@@ -5817,14 +5811,10 @@ mod tests {
         app.campaign.id = "test".to_string();
 
         // Add a race that references a non-existent proficiency
-        app.races_editor_state
-            .races
-            .push(races_editor::RaceEditBuffer {
-                id: "race_1".to_string(),
-                name: "Human".to_string(),
-                proficiencies: vec!["nonexistent_prof".to_string()],
-                ..Default::default()
-            });
+        let mut race =
+            RaceDefinition::new("race_1".to_string(), "Human".to_string(), String::new());
+        race.proficiencies = vec!["nonexistent_prof".to_string()];
+        app.races_editor_state.races.push(race);
 
         let results = app.validate_proficiency_ids();
         let has_error = results
@@ -5840,7 +5830,13 @@ mod tests {
 
         // Add an item that requires a non-existent proficiency
         let mut item = ItemsEditorState::default_item();
-        item.required_proficiency = Some("nonexistent_prof".to_string());
+        item.item_type = ItemType::Weapon(WeaponData {
+            damage: DiceRoll::new(1, 6, 0),
+            bonus: 0,
+            hands_required: 1,
+            classification: WeaponClassification::MartialMelee,
+        });
+        // "martial_melee" is not in app.proficiencies by default
         app.items.push(item);
 
         let results = app.validate_proficiency_ids();

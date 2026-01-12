@@ -10,9 +10,37 @@ Document the campaign data structure, including all the RON files that make up a
 
 ## SDK
 
-### Map Editor Events
+### Dialogue Editor
 
-✅ COMPLETED - [event editing implementation](./event_editing_implementation_plan.md)
+Dialogue Editor List should list dialogues in order of dialogue id number.
+
+Campaign Builder --> Dialogue Editor --> New
+
+The new dialogue editor does not autocomplete dialogue id numbers. It should suggest the next available id number when creating a new dialogue.
+
+Campaign Builder --> Dialogue Editor --> Edit
+
+The edit dialogue editor does not autocomplete dialogue id numbers. It should suggest the next available id number when creating a new dialogue. Nodes should be listed in order of id number.
+Add Node does nothing. It should create a new node with the next available id number. Nodes should be listed in order of id number.
+Save Dialog button does nothing. It should save the dialogue to the campaign data.
+
+Dialog Editor Node Editing needs a scroll bar.
+
+✅ COMPLETED
+
+### NPC Editor
+
+Campaign Builder --> Dialogue Editor --> Edit
+
+The edit NPC editor does not save changes to the NPC. It should save the NPC to the campaign data.
+
+### Quest Editor
+
+Campaign Builder --> Quest Editor --> Edit
+
+The rewards section and ojectives section of the editor run off the edge of the window and is not scrollable. It should fit the window and scale as it does and be scrollable so that all rewards can be seen and edited.
+
+### Map Editor Events
 
 Campaign Builder --> Map Editor --> Select Map --> Edit Map. Event editing now fully supported:
 
@@ -20,6 +48,10 @@ Campaign Builder --> Map Editor --> Select Map --> Edit Map. Event editing now f
 - Edit existing events via Inspector Panel "Edit Event" button
 - Remove events via Inspector Panel or event editor
 - Visual feedback shows which event is being edited
+
+✅ COMPLETED - [event editing implementation](./event_editing_implementation_plan.md)
+
+
 
 ### Config Editor Implementation
 

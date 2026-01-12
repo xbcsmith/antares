@@ -7608,6 +7608,46 @@
     ],
     events: {
         (
+            x: 12,
+            y: 1,
+        ): Sign(
+            name: "Ruins Direction Sign",
+            description: "A sign pointing the way to the Ancient Ruins.",
+            text: "To Ancient Ruins",
+        ),
+        (
+            x: 10,
+            y: 19,
+        ): Teleport(
+            name: "Mountain Pass Gate",
+            description: "A gate that transports the party to Mountain Pass (map 5) at (19,6).",
+            destination: (
+                x: 19,
+                y: 6,
+            ),
+            map_id: 5,
+        ),
+        (
+            x: 3,
+            y: 11,
+        ): Encounter(
+            name: "Forest Ambush",
+            description: "A hidden ambush by hostile creatures in the forest.",
+            monster_group: [
+                6,
+                5,
+            ],
+        ),
+        (
+            x: 8,
+            y: 12,
+        ): RecruitableCharacter(
+            name: "Apprentice Zara",
+            description: "An enthusiastic gnome apprentice sitting on a fallen log, studying a spellbook. She looks up hopefully as you approach.",
+            character_id: "apprentice_zara",
+            dialogue_id: None,
+        ),
+        (
             x: 8,
             y: 8,
         ): Treasure(
@@ -7620,12 +7660,23 @@
             ],
         ),
         (
-            x: 8,
-            y: 12,
-        ): RecruitableCharacter(
-            name: "Apprentice Zara",
-            description: "An enthusiastic gnome apprentice sitting on a fallen log, studying a spellbook. She looks up hopefully as you approach.",
-            character_id: "apprentice_zara",
+            x: 17,
+            y: 16,
+        ): Encounter(
+            name: "Bandit Patrol",
+            description: "A patrol of bandits looking for easy victims.",
+            monster_group: [
+                6,
+                6,
+            ],
+        ),
+        (
+            x: 0,
+            y: 10,
+        ): Sign(
+            name: "Town Exit Sign",
+            description: "A sign directing travelers to the town exit.",
+            text: "Exit to town.",
         ),
         (
             x: 12,
@@ -7640,26 +7691,24 @@
             map_id: 3,
         ),
         (
-            x: 3,
-            y: 11,
-        ): Encounter(
-            name: "Forest Ambush",
-            description: "A hidden ambush by hostile creatures in the forest.",
-            monster_group: [
-                6,
-                5,
-            ],
+            x: 10,
+            y: 18,
+        ): Sign(
+            name: "Mountain Pass Sign",
+            description: "A wooden sign indicating the way to the mountain pass.",
+            text: "To the Mountain Pass",
         ),
         (
-            x: 5,
-            y: 3,
-        ): Encounter(
-            name: "Bandit Patrol",
-            description: "A small band of foes patrolling this area.",
-            monster_group: [
-                4,
-                4,
-            ],
+            x: 19,
+            y: 10,
+        ): Teleport(
+            name: "Arcturus Cave Portal",
+            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (19,17).",
+            destination: (
+                x: 19,
+                y: 17,
+            ),
+            map_id: 2,
         ),
         (
             x: 16,
@@ -7682,6 +7731,36 @@
             effect: None,
         ),
         (
+            x: 5,
+            y: 3,
+        ): Encounter(
+            name: "Bandit Patrol",
+            description: "A small band of foes patrolling this area.",
+            monster_group: [
+                4,
+                4,
+            ],
+        ),
+        (
+            x: 14,
+            y: 4,
+        ): Encounter(
+            name: "Hungry Wolves",
+            description: "A pack of wolves that hunts together in this region.",
+            monster_group: [
+                5,
+                4,
+            ],
+        ),
+        (
+            x: 18,
+            y: 10,
+        ): Sign(
+            name: "Wizard\'s Cave Sign",
+            description: "A sign pointing the way to the Wizard\'s Cave.",
+            text: "To the Wizard\'s Cave",
+        ),
+        (
             x: 10,
             y: 13,
         ): Treasure(
@@ -7696,61 +7775,6 @@
         ),
         (
             x: 0,
-            y: 10,
-        ): Sign(
-            name: "Town Exit Sign",
-            description: "A sign directing travelers to the town exit.",
-            text: "Exit to town.",
-        ),
-        (
-            x: 10,
-            y: 18,
-        ): Sign(
-            name: "Mountain Pass Sign",
-            description: "A wooden sign indicating the way to the mountain pass.",
-            text: "To the Mountain Pass",
-        ),
-        (
-            x: 14,
-            y: 4,
-        ): Encounter(
-            name: "Hungry Wolves",
-            description: "A pack of wolves that hunts together in this region.",
-            monster_group: [
-                5,
-                4,
-            ],
-        ),
-        (
-            x: 19,
-            y: 10,
-        ): Teleport(
-            name: "Arcturus Cave Portal",
-            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (19,17).",
-            destination: (
-                x: 19,
-                y: 17,
-            ),
-            map_id: 2,
-        ),
-        (
-            x: 18,
-            y: 10,
-        ): Sign(
-            name: "Wizard\'s Cave Sign",
-            description: "A sign pointing the way to the Wizard\'s Cave.",
-            text: "To the Wizard\'s Cave",
-        ),
-        (
-            x: 12,
-            y: 1,
-        ): Sign(
-            name: "Ruins Direction Sign",
-            description: "A sign pointing the way to the Ancient Ruins.",
-            text: "To Ancient Ruins",
-        ),
-        (
-            x: 0,
             y: 9,
         ): Teleport(
             name: "Starting Town Portal",
@@ -7760,29 +7784,6 @@
                 y: 11,
             ),
             map_id: 1,
-        ),
-        (
-            x: 17,
-            y: 16,
-        ): Encounter(
-            name: "Bandit Patrol",
-            description: "A patrol of bandits looking for easy victims.",
-            monster_group: [
-                6,
-                6,
-            ],
-        ),
-        (
-            x: 10,
-            y: 19,
-        ): Teleport(
-            name: "Mountain Pass Gate",
-            description: "A gate that transports the party to Mountain Pass (map 5) at (19,6).",
-            destination: (
-                x: 19,
-                y: 6,
-            ),
-            map_id: 5,
         ),
     },
     npc_placements: [

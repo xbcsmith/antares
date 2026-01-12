@@ -42,6 +42,10 @@ pub struct ClassesEditorState {
 
     /// Unsaved changes
     pub has_unsaved_changes: bool,
+
+    /// Whether the autocomplete buffers should be reset on next form render
+    #[serde(skip)]
+    pub reset_autocomplete_buffers: bool,
 }
 
 /// Editor mode
@@ -113,6 +117,7 @@ impl Default for ClassesEditorState {
             buffer: ClassEditBuffer::default(),
             search_filter: String::new(),
             has_unsaved_changes: false,
+            reset_autocomplete_buffers: false,
         }
     }
 }
@@ -128,6 +133,7 @@ impl ClassesEditorState {
         self.mode = ClassesEditorMode::Creating;
         self.selected_class = None;
         self.buffer = ClassEditBuffer::default();
+        self.reset_autocomplete_buffers = true;
     }
 
     /// Starts editing an existing class
@@ -155,11 +161,17 @@ impl ClassesEditorState {
                 proficiencies: class.proficiencies.clone(),
                 proficiencies_query: String::new(),
             };
+            self.reset_autocomplete_buffers = true;
         }
     }
 
     /// Saves the current class from the edit buffer
-    pub fn save_class(&mut self) -> Result<(), String> {
+    pub fn save_class(
+        &mut self,
+        campaign_dir: Option<&PathBuf>,
+        classes_file: &str,
+        status_message: &mut String,
+    ) -> Result<(), String> {
         let id = self.buffer.id.trim().to_string();
         if id.is_empty() {
             return Err("ID cannot be empty".to_string());
@@ -186,9 +198,7 @@ impl ClassesEditorState {
             .parse::<i8>()
             .map_err(|_| "Invalid HP Die Modifier")?;
 
-        // Legacy disablement_bit_index removed - now using proficiency system
-
-        // Ensure items are trimmed and filtered; buffer uses typed vectors now, so operate accordingly.
+        // Ensure strings are trimmed and filtered
         let abilities: Vec<String> = self
             .buffer
             .special_abilities
@@ -205,11 +215,8 @@ impl ClassesEditorState {
             .filter(|s| !s.is_empty())
             .collect();
 
-        // Starting weapon and armor are now Option<ItemId> in the buffer
         let starting_weapon_id = self.buffer.starting_weapon_id;
         let starting_armor_id = self.buffer.starting_armor_id;
-
-        // Starting items are typed Vec<ItemId> in the buffer; clone directly
         let starting_items: Vec<ItemId> = self.buffer.starting_items.clone();
 
         let class_def = ClassDefinition {
@@ -229,17 +236,32 @@ impl ClassesEditorState {
 
         if let Some(idx) = self.selected_class {
             self.classes[idx] = class_def;
+            *status_message = format!("Updated class '{}'", id);
         } else {
             // Check for duplicate ID if creating new
             if self.classes.iter().any(|c| c.id == id) {
                 return Err("Class ID already exists".to_string());
             }
+            let new_idx = self.classes.len();
             self.classes.push(class_def);
+            self.selected_class = Some(new_idx);
+            *status_message = format!("Created class '{}'", id);
         }
 
         self.has_unsaved_changes = true;
         self.mode = ClassesEditorMode::List;
-        self.selected_class = None;
+
+        // Try to persist immediately
+        if let Some(dir) = campaign_dir {
+            let path = dir.join(classes_file);
+            if let Err(e) = self.save_to_file(&path) {
+                *status_message = format!("Saved in-memory, but failed to persist: {}", e);
+            } else {
+                self.has_unsaved_changes = false;
+                *status_message = format!("Saved class '{}'", id);
+            }
+        }
+
         Ok(())
     }
 
@@ -501,41 +523,130 @@ impl ClassesEditorState {
 
                                 right_ui.separator();
 
-                                // Class details
-                                egui::Grid::new("class_detail_grid")
-                                    .num_columns(2)
-                                    .spacing([10.0, 5.0])
-                                    .show(right_ui, |ui| {
-                                        ui.label("ID:");
-                                        ui.label(&class.id);
-                                        ui.end_row();
+                                egui::ScrollArea::vertical().show(right_ui, |ui| {
+                                    // Class details
+                                    egui::Grid::new("class_detail_grid")
+                                        .num_columns(2)
+                                        .spacing([10.0, 5.0])
+                                        .show(ui, |ui| {
+                                            ui.label("ID:");
+                                            ui.label(&class.id);
+                                            ui.end_row();
 
-                                        ui.label("HP Die:");
-                                        ui.label(format!(
-                                            "{}d{}{:+}",
-                                            class.hp_die.count,
-                                            class.hp_die.sides,
-                                            class.hp_die.bonus
-                                        ));
-                                        ui.end_row();
+                                            ui.label("HP Die:");
+                                            ui.label(format!(
+                                                "{}d{}{:+}",
+                                                class.hp_die.count,
+                                                class.hp_die.sides,
+                                                class.hp_die.bonus
+                                            ));
+                                            ui.end_row();
 
-                                        ui.label("Spell School:");
-                                        ui.label(
-                                            class
-                                                .spell_school
-                                                .map(|s| format!("{:?}", s))
-                                                .unwrap_or_else(|| "None".to_string()),
-                                        );
-                                        ui.end_row();
+                                            ui.label("Spell School:");
+                                            ui.label(
+                                                class
+                                                    .spell_school
+                                                    .map(|s| format!("{:?}", s))
+                                                    .unwrap_or_else(|| "None".to_string()),
+                                            );
+                                            ui.end_row();
 
-                                        ui.label("Pure Caster:");
-                                        ui.label(if class.is_pure_caster { "Yes" } else { "No" });
-                                        ui.end_row();
+                                            ui.label("Pure Caster:");
+                                            ui.label(if class.is_pure_caster {
+                                                "Yes"
+                                            } else {
+                                                "No"
+                                            });
+                                            ui.end_row();
 
-                                        ui.label("Description:");
-                                        ui.label(&class.description);
-                                        ui.end_row();
-                                    });
+                                            ui.label("Description:");
+                                            ui.label(&class.description);
+                                            ui.end_row();
+                                        });
+
+                                    ui.add_space(10.0);
+                                    ui.heading("Starting Equipment");
+                                    ui.separator();
+
+                                    egui::Grid::new("starting_equip_grid")
+                                        .num_columns(2)
+                                        .spacing([10.0, 5.0])
+                                        .show(ui, |ui| {
+                                            ui.label("Weapon:");
+                                            let weapon_name = class
+                                                .starting_weapon_id
+                                                .and_then(|id| {
+                                                    items
+                                                        .iter()
+                                                        .find(|i| i.id == id)
+                                                        .map(|i| i.name.clone())
+                                                })
+                                                .unwrap_or_else(|| "None".to_string());
+                                            ui.label(weapon_name);
+                                            ui.end_row();
+
+                                            ui.label("Armor:");
+                                            let armor_name = class
+                                                .starting_armor_id
+                                                .and_then(|id| {
+                                                    items
+                                                        .iter()
+                                                        .find(|i| i.id == id)
+                                                        .map(|i| i.name.clone())
+                                                })
+                                                .unwrap_or_else(|| "None".to_string());
+                                            ui.label(armor_name);
+                                            ui.end_row();
+                                        });
+
+                                    if !class.starting_items.is_empty() {
+                                        ui.add_space(5.0);
+                                        ui.label("Starting Items:");
+                                        ui.indent("starting_items_list", |ui| {
+                                            for item_id in &class.starting_items {
+                                                let item_name = items
+                                                    .iter()
+                                                    .find(|i| i.id == *item_id)
+                                                    .map(|i| i.name.clone())
+                                                    .unwrap_or_else(|| {
+                                                        format!("Unknown ({})", item_id)
+                                                    });
+                                                ui.label(format!("• {}", item_name));
+                                            }
+                                        });
+                                    }
+
+                                    ui.add_space(10.0);
+                                    ui.heading("Proficiencies");
+                                    ui.separator();
+                                    if class.proficiencies.is_empty() {
+                                        ui.label("None");
+                                    } else {
+                                        ui.horizontal_wrapped(|ui| {
+                                            for prof in &class.proficiencies {
+                                                ui.add(egui::Label::new(
+                                                    egui::RichText::new(prof)
+                                                        .small()
+                                                        .background_color(egui::Color32::from_rgb(
+                                                            60, 60, 80,
+                                                        ))
+                                                        .color(egui::Color32::WHITE),
+                                                ));
+                                            }
+                                        });
+                                    }
+
+                                    ui.add_space(10.0);
+                                    ui.heading("Special Abilities");
+                                    ui.separator();
+                                    if class.special_abilities.is_empty() {
+                                        ui.label("None");
+                                    } else {
+                                        for ability in &class.special_abilities {
+                                            ui.label(format!("• {}", ability));
+                                        }
+                                    }
+                                });
                             } else {
                                 right_ui.label("Select a class to view details");
                             }
@@ -602,7 +713,14 @@ impl ClassesEditorState {
                 }
             }
             ClassesEditorMode::Creating | ClassesEditorMode::Editing => {
-                self.show_class_form(ui, items, campaign_dir, unsaved_changes);
+                self.show_class_form(
+                    ui,
+                    items,
+                    campaign_dir,
+                    classes_file,
+                    unsaved_changes,
+                    status_message,
+                );
             }
         }
     }
@@ -613,8 +731,29 @@ impl ClassesEditorState {
         ui: &mut egui::Ui,
         items: &[Item],
         campaign_dir: Option<&PathBuf>,
+        classes_file: &str,
         unsaved_changes: &mut bool,
+        status_message: &mut String,
     ) {
+        // If requested, reset persistent autocomplete buffers so the form displays
+        // values from the newly loaded buffer rather than stale typed text.
+        if self.reset_autocomplete_buffers {
+            let ctx = ui.ctx();
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:item:class_starting_weapon".to_string()),
+            );
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:item:class_starting_armor".to_string()),
+            );
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:item-list:class_starting_items".to_string()),
+            );
+            self.reset_autocomplete_buffers = false;
+        }
+
         let is_creating = self.mode == ClassesEditorMode::Creating;
         ui.heading(if is_creating {
             "Create New Class"
@@ -863,8 +1002,10 @@ impl ClassesEditorState {
                     }
 
                     if ui.button("✅ Save").clicked() {
-                        if let Err(e) = self.save_class() {
+                        if let Err(e) = self.save_class(campaign_dir, classes_file, status_message)
+                        {
                             eprintln!("Error saving class: {}", e);
+                            *status_message = format!("Error saving class: {}", e);
                         } else {
                             *unsaved_changes = true;
                         }
@@ -896,7 +1037,9 @@ mod tests {
         state.buffer.proficiencies = vec!["simple_weapon".to_string()];
 
         // Act: save the class via the editor
-        state.save_class().expect("Failed to save class");
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .expect("Failed to save class");
 
         // Assert: find the saved class and verify fields round-trip correctly
         assert!(state.classes.iter().any(|c| c.id == "class_rt"));
@@ -943,7 +1086,7 @@ mod tests {
         state.buffer.id = "knight".to_string();
         state.buffer.name = "Knight".to_string();
 
-        let result = state.save_class();
+        let result = state.save_class(None, "classes.ron", &mut String::new());
         assert!(result.is_ok());
         assert_eq!(state.classes.len(), 1);
         assert_eq!(state.classes[0].id, "knight");
@@ -956,7 +1099,7 @@ mod tests {
         state.buffer.id = "".to_string();
         state.buffer.name = "Knight".to_string();
 
-        let result = state.save_class();
+        let result = state.save_class(None, "classes.ron", &mut String::new());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("ID cannot be empty"));
     }
@@ -968,7 +1111,7 @@ mod tests {
         state.buffer.id = "knight".to_string();
         state.buffer.name = "".to_string();
 
-        let result = state.save_class();
+        let result = state.save_class(None, "classes.ron", &mut String::new());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Name cannot be empty"));
     }
@@ -981,14 +1124,16 @@ mod tests {
         state.start_new_class();
         state.buffer.id = "knight".to_string();
         state.buffer.name = "Knight".to_string();
-        state.save_class().unwrap();
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .unwrap();
 
         // Try to create duplicate
         state.start_new_class();
         state.buffer.id = "knight".to_string();
         state.buffer.name = "Another Knight".to_string();
 
-        let result = state.save_class();
+        let result = state.save_class(None, "classes.ron", &mut String::new());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("already exists"));
     }
@@ -999,7 +1144,9 @@ mod tests {
         state.start_new_class();
         state.buffer.id = "knight".to_string();
         state.buffer.name = "Knight".to_string();
-        state.save_class().unwrap();
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .unwrap();
 
         assert_eq!(state.classes.len(), 1);
         state.delete_class(0);
@@ -1025,12 +1172,16 @@ mod tests {
         state.start_new_class();
         state.buffer.id = "knight".to_string();
         state.buffer.name = "Knight".to_string();
-        state.save_class().unwrap();
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .unwrap();
 
         state.start_new_class();
         state.buffer.id = "paladin".to_string();
         state.buffer.name = "Paladin".to_string();
-        state.save_class().unwrap();
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .unwrap();
 
         // No filter
         assert_eq!(state.filtered_classes().len(), 2);
@@ -1052,12 +1203,16 @@ mod tests {
         state.start_new_class();
         state.buffer.id = "1".to_string();
         state.buffer.name = "Class 1".to_string();
-        state.save_class().unwrap();
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .unwrap();
 
         state.start_new_class();
         state.buffer.id = "3".to_string();
         state.buffer.name = "Class 3".to_string();
-        state.save_class().unwrap();
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .unwrap();
 
         assert_eq!(state.next_available_class_id(), "4");
     }
@@ -1070,7 +1225,9 @@ mod tests {
         state.buffer.id = "knight".to_string();
         state.buffer.name = "Knight".to_string();
         state.buffer.description = "A noble warrior".to_string();
-        state.save_class().unwrap();
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .unwrap();
 
         state.start_edit_class(0);
 
@@ -1089,12 +1246,16 @@ mod tests {
         state.start_new_class();
         state.buffer.id = "knight".to_string();
         state.buffer.name = "Knight".to_string();
-        state.save_class().unwrap();
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .unwrap();
 
         // Edit class
         state.start_edit_class(0);
         state.buffer.name = "Noble Knight".to_string();
-        state.save_class().unwrap();
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .unwrap();
 
         assert_eq!(state.classes.len(), 1);
         assert_eq!(state.classes[0].name, "Noble Knight");
@@ -1127,7 +1288,9 @@ mod tests {
         state.start_new_class();
         state.buffer.id = "test".to_string();
         state.buffer.name = "Test".to_string();
-        state.save_class().unwrap();
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .unwrap();
         assert_eq!(state.mode, ClassesEditorMode::List);
 
         state.start_edit_class(0);

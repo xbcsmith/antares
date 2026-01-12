@@ -1058,6 +1058,7 @@ pub struct EventEditorState {
     pub npc_id: String,
     // Recruitable Character fields
     pub recruit_character_id: String,
+    pub recruitable_dialogue_id: String,
     // Inn fields
     pub innkeeper_id_input_buffer: String,
 
@@ -1090,6 +1091,7 @@ impl Default for EventEditorState {
             sign_text: String::new(),
             npc_id: String::new(),
             recruit_character_id: String::new(),
+            recruitable_dialogue_id: String::new(),
             innkeeper_id_input_buffer: String::new(),
             trap_effect_input_buffer: String::new(),
             teleport_map_input_buffer: String::new(),
@@ -1288,10 +1290,18 @@ impl EventEditorState {
                 if character_id.is_empty() {
                     return Err("Character ID cannot be empty".to_string());
                 }
+
+                let dialogue_id = if self.recruitable_dialogue_id.is_empty() {
+                    None
+                } else {
+                    self.recruitable_dialogue_id.parse::<u16>().ok()
+                };
+
                 Ok(MapEvent::RecruitableCharacter {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     character_id,
+                    dialogue_id,
                 })
             }
             EventType::EnterInn => {
@@ -1409,12 +1419,15 @@ impl EventEditorState {
                 name,
                 description,
                 character_id,
+                dialogue_id,
             } => {
                 s.event_type = EventType::RecruitableCharacter;
                 s.name = name.clone();
                 s.description = description.clone();
                 s.recruit_character_id = character_id.clone();
                 s.recruit_character_id_input_buffer = character_id.clone();
+                s.recruitable_dialogue_id =
+                    dialogue_id.map(|id| id.to_string()).unwrap_or_default();
             }
             MapEvent::EnterInn {
                 name,
@@ -3384,6 +3397,20 @@ impl MapsEditorState {
                             editor.has_changes = true;
                         }
                     });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Dialogue ID (optional):");
+                        if ui
+                            .text_edit_singleline(&mut event_editor.recruitable_dialogue_id)
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    });
+
+                    if !event_editor.recruitable_dialogue_id.is_empty() {
+                        ui.label("💡 Leave empty for simple yes/no recruitment");
+                    }
                 }
                 EventType::EnterInn => {
                     ui.horizontal(|ui| {
@@ -4290,6 +4317,7 @@ mod tests {
             name: "Old Gareth".to_string(),
             description: "A grizzled dwarf".to_string(),
             recruit_character_id_input_buffer: "old_gareth".to_string(),
+            recruitable_dialogue_id: String::new(),
             ..Default::default()
         };
 
@@ -4299,10 +4327,12 @@ mod tests {
                 name,
                 description,
                 character_id,
+                dialogue_id,
             } => {
                 assert_eq!(name, "Old Gareth".to_string());
                 assert_eq!(description, "A grizzled dwarf".to_string());
                 assert_eq!(character_id, "old_gareth".to_string());
+                assert_eq!(dialogue_id, None);
             }
             _ => panic!("Expected RecruitableCharacter event"),
         }
@@ -4314,6 +4344,7 @@ mod tests {
             name: "Whisper".to_string(),
             description: "An elven scout".to_string(),
             character_id: "whisper".to_string(),
+            dialogue_id: None,
         };
 
         let state = EventEditorState::from_map_event(Position::new(0, 0), &event);
@@ -4323,6 +4354,34 @@ mod tests {
             state.recruit_character_id_input_buffer,
             "whisper".to_string()
         );
+        assert_eq!(state.recruitable_dialogue_id, "");
+    }
+
+    #[test]
+    fn test_event_editor_state_recruitable_with_dialogue() {
+        let editor = EventEditorState {
+            event_type: EventType::RecruitableCharacter,
+            name: "Sir Lancelot".to_string(),
+            description: "A knight".to_string(),
+            recruit_character_id_input_buffer: "lancelot".to_string(),
+            recruitable_dialogue_id: "1000".to_string(),
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().unwrap();
+        match event {
+            MapEvent::RecruitableCharacter {
+                name,
+                dialogue_id,
+                character_id,
+                ..
+            } => {
+                assert_eq!(name, "Sir Lancelot");
+                assert_eq!(character_id, "lancelot");
+                assert_eq!(dialogue_id, Some(1000u16));
+            }
+            _ => panic!("Expected RecruitableCharacter with dialogue"),
+        }
     }
 
     #[test]

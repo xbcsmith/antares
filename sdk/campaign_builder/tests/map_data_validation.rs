@@ -162,9 +162,7 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                         );
                     }
                     MapEvent::RecruitableCharacter {
-                        name,
-                        description,
-                        character_id: _,
+                        name, description, ..
                     } => {
                         assert!(
                             !name.trim().is_empty(),

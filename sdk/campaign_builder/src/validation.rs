@@ -1020,6 +1020,86 @@ pub fn validate_npc_quest_references(
     Ok(())
 }
 
+/// Validates recruitable character events in maps
+///
+/// Checks that each RecruitableCharacter event references valid character and dialogue IDs.
+///
+/// # Arguments
+///
+/// * `maps` - All maps in the campaign
+/// * `character_ids` - Set of valid character definition IDs
+/// * `dialogue_ids` - Set of valid dialogue tree IDs
+///
+/// # Returns
+///
+/// Vector of validation results (errors for invalid references)
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::validation::validate_recruitable_character_references;
+/// use std::collections::HashSet;
+///
+/// // Create test data
+/// let char_ids: HashSet<String> = vec!["knight_01".to_string()].into_iter().collect();
+/// let dialogue_ids: HashSet<u16> = vec![1000].into_iter().collect();
+/// let maps = vec![]; // Would contain maps with recruitable events
+///
+/// let results = validate_recruitable_character_references(&maps, &char_ids, &dialogue_ids);
+/// assert!(results.is_empty()); // No errors if all references valid
+/// ```
+pub fn validate_recruitable_character_references(
+    maps: &[antares::domain::world::Map],
+    character_ids: &std::collections::HashSet<String>,
+    dialogue_ids: &std::collections::HashSet<u16>,
+) -> Vec<ValidationResult> {
+    let mut results = Vec::new();
+
+    for map in maps {
+        for (position, event) in &map.events {
+            if let antares::domain::world::MapEvent::RecruitableCharacter {
+                name,
+                character_id,
+                dialogue_id,
+                ..
+            } = event
+            {
+                // Validate character exists
+                if !character_ids.contains(character_id) {
+                    results.push(
+                        ValidationResult::error(
+                            ValidationCategory::Maps,
+                            format!(
+                                "Map {} [{}]: Recruitable character '{}' references invalid character ID '{}'",
+                                map.id, name, name, character_id
+                            ),
+                        )
+                        .with_file_path(format!("maps/map_{}.ron", map.id)),
+                    );
+                }
+
+                // Validate dialogue if specified
+                if let Some(dlg_id) = dialogue_id {
+                    if !dialogue_ids.contains(dlg_id) {
+                        results.push(
+                            ValidationResult::error(
+                                ValidationCategory::Maps,
+                                format!(
+                                    "Map {} [{}]: Recruitable character '{}' references invalid dialogue ID {}",
+                                    map.id, name, name, dlg_id
+                                ),
+                            )
+                            .with_file_path(format!("maps/map_{}.ron", map.id)),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    results
+}
+
 mod tests {
     use super::*;
 
@@ -1559,5 +1639,93 @@ mod tests {
         let result = validate_npc_quest_references(&[99, 100], &available);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown quest ID"));
+    }
+
+    #[test]
+    fn test_validate_recruitable_character_valid_references() {
+        use std::collections::HashSet;
+
+        let char_ids: HashSet<String> = vec!["knight_01".to_string(), "wizard_02".to_string()]
+            .into_iter()
+            .collect();
+        let dialogue_ids: HashSet<u16> = vec![1000, 1001].into_iter().collect();
+
+        let mut map =
+            antares::domain::world::Map::new(1, "Test Map".to_string(), "Test".to_string(), 10, 10);
+
+        let pos = antares::domain::types::Position::new(5, 5);
+        map.add_event(
+            pos,
+            antares::domain::world::MapEvent::RecruitableCharacter {
+                name: "Knight".to_string(),
+                description: "A knight".to_string(),
+                character_id: "knight_01".to_string(),
+                dialogue_id: Some(1000),
+            },
+        );
+
+        let results = validate_recruitable_character_references(&[map], &char_ids, &dialogue_ids);
+        assert!(
+            results.is_empty(),
+            "Valid references should produce no errors"
+        );
+    }
+
+    #[test]
+    fn test_validate_recruitable_character_invalid_character_id() {
+        use std::collections::HashSet;
+
+        let char_ids: HashSet<String> = vec!["knight_01".to_string()].into_iter().collect();
+        let dialogue_ids: HashSet<u16> = vec![1000].into_iter().collect();
+
+        let mut map =
+            antares::domain::world::Map::new(1, "Test Map".to_string(), "Test".to_string(), 10, 10);
+
+        let pos = antares::domain::types::Position::new(5, 5);
+        map.add_event(
+            pos,
+            antares::domain::world::MapEvent::RecruitableCharacter {
+                name: "Unknown".to_string(),
+                description: "Unknown".to_string(),
+                character_id: "nonexistent_char".to_string(),
+                dialogue_id: None,
+            },
+        );
+
+        let results = validate_recruitable_character_references(&[map], &char_ids, &dialogue_ids);
+        assert!(
+            !results.is_empty(),
+            "Invalid character_id should produce error"
+        );
+        assert!(results[0].message.contains("invalid character ID"));
+    }
+
+    #[test]
+    fn test_validate_recruitable_character_invalid_dialogue_id() {
+        use std::collections::HashSet;
+
+        let char_ids: HashSet<String> = vec!["knight_01".to_string()].into_iter().collect();
+        let dialogue_ids: HashSet<u16> = vec![1000].into_iter().collect();
+
+        let mut map =
+            antares::domain::world::Map::new(1, "Test Map".to_string(), "Test".to_string(), 10, 10);
+
+        let pos = antares::domain::types::Position::new(5, 5);
+        map.add_event(
+            pos,
+            antares::domain::world::MapEvent::RecruitableCharacter {
+                name: "Knight".to_string(),
+                description: "A knight".to_string(),
+                character_id: "knight_01".to_string(),
+                dialogue_id: Some(9999), // Invalid
+            },
+        );
+
+        let results = validate_recruitable_character_references(&[map], &char_ids, &dialogue_ids);
+        assert!(
+            !results.is_empty(),
+            "Invalid dialogue_id should produce error"
+        );
+        assert!(results[0].message.contains("invalid dialogue ID"));
     }
 }

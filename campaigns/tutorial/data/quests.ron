@@ -188,7 +188,7 @@
     ),
     (
         id: 3,
-        name: "Kill Monsters",
+        name: "Kill Skeletons for Village Elder",
         description: "Kill Monsters",
         stages: [
             (
@@ -216,10 +216,10 @@
         required_quests: [],
         repeatable: false,
         is_main_quest: false,
-        quest_giver_npc: Some("tutorial_wizard_arcturus_brother"),
-        quest_giver_map: Some(2),
+        quest_giver_npc: Some("1:tutorial_elder_village"),
+        quest_giver_map: Some(1),
         quest_giver_position: Some((
-            x: 3,
+            x: 1,
             y: 16,
         )),
     ),
@@ -299,7 +299,92 @@
         required_quests: [],
         repeatable: false,
         is_main_quest: true,
-        quest_giver_npc: Some("tutorial_elder_village2"),
+        quest_giver_npc: Some("5:tutorial_elder_village2"),
+        quest_giver_map: Some(5),
+        quest_giver_position: Some((
+            x: 10,
+            y: 4,
+        )),
+    ),
+    (
+        id: 6,
+        name: "Lost Ranger\'s Bow",
+        description: "Find and return the Lost Ranger\'s Bow",
+        stages: [
+            (
+                stage_number: 1,
+                name: "Retrieve the Bow",
+                description: "Retrieve the Lost Ranger\'s Bow from the Dragon",
+                objectives: [
+                    ReachLocation(
+                        map_id: 2,
+                        position: (
+                            x: 5,
+                            y: 3,
+                        ),
+                        radius: 1,
+                    ),
+                    DeliverItem(
+                        item_id: 105,
+                        npc_id: "2:tutorial_ranger_lost",
+                        quantity: 1,
+                    ),
+                    KillMonsters(
+                        monster_id: 2,
+                        quantity: 6,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Experience(100),
+            Reputation(
+                faction: "Rangers",
+                change: 10,
+            ),
+        ],
+        min_level: Some(1),
+        max_level: Some(30),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: Some("2:tutorial_ranger_lost"),
+        quest_giver_map: Some(2),
+        quest_giver_position: Some((
+            x: 2,
+            y: 2,
+        )),
+    ),
+    (
+        id: 7,
+        name: "Kill Kobalds for Village Elder",
+        description: "Kill the Kobalds for the Village Elder",
+        stages: [
+            (
+                stage_number: 1,
+                name: "",
+                description: "",
+                objectives: [
+                    KillMonsters(
+                        monster_id: 2,
+                        quantity: 10,
+                    ),
+                    TalkToNpc(
+                        npc_id: "1:tutorial_elder_village",
+                        map_id: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [],
+        min_level: Some(1),
+        max_level: Some(30),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: Some("1:tutorial_elder_village"),
         quest_giver_map: Some(1),
         quest_giver_position: Some((
             x: 1,

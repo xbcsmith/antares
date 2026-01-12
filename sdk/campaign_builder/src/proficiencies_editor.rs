@@ -548,68 +548,64 @@ impl ProficienciesEditorState {
         let mut new_selection = selected;
         let mut action_requested: Option<ItemAction> = None;
 
-        TwoColumnLayout::new("proficiencies_list_layout")
-            .with_left_width(300.0)
-            .show_split(
-                ui,
-                |left_ui| {
-                    // Left column: list
-                    left_ui.label("Proficiencies:");
-                    left_ui.separator();
+        TwoColumnLayout::new("proficiencies_list_layout").show_split(
+            ui,
+            |left_ui| {
+                // Left column: list
+                left_ui.label("Proficiencies:");
+                left_ui.separator();
 
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false; 2])
-                        .show(left_ui, |left_ui| {
-                            for (i, (idx, label, _prof)) in
-                                filtered_proficiencies.iter().enumerate()
-                            {
-                                let is_selected = selected == Some(*idx);
-                                if left_ui.selectable_label(is_selected, label).clicked() {
-                                    new_selection = Some(*idx);
-                                }
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(left_ui, |left_ui| {
+                        for (i, (idx, label, _prof)) in filtered_proficiencies.iter().enumerate() {
+                            let is_selected = selected == Some(*idx);
+                            if left_ui.selectable_label(is_selected, label).clicked() {
+                                new_selection = Some(*idx);
                             }
+                        }
 
-                            if filtered_proficiencies.is_empty() {
-                                left_ui.label("No proficiencies found");
-                            }
-                        });
-                },
-                |right_ui| {
-                    // Right column: preview and actions
-                    if let Some(idx) = selected {
-                        if let Some((_, _label, prof)) =
-                            filtered_proficiencies.iter().find(|(i, _, _)| *i == idx)
-                        {
-                            right_ui.label("Details:");
-                            right_ui.separator();
+                        if filtered_proficiencies.is_empty() {
+                            left_ui.label("No proficiencies found");
+                        }
+                    });
+            },
+            |right_ui| {
+                // Right column: preview and actions
+                if let Some(idx) = selected {
+                    if let Some((_, _label, prof)) =
+                        filtered_proficiencies.iter().find(|(i, _, _)| *i == idx)
+                    {
+                        right_ui.label("Details:");
+                        right_ui.separator();
 
-                            // Get usage information for this proficiency
-                            let usage = self.usage_cache.get(&prof.id);
+                        // Get usage information for this proficiency
+                        let usage = self.usage_cache.get(&prof.id);
 
-                            // Preview static display with usage
-                            Self::show_preview_static(right_ui, prof, usage);
+                        // Preview static display with usage
+                        Self::show_preview_static(right_ui, prof, usage);
 
-                            right_ui.separator();
+                        right_ui.separator();
 
-                            // Action buttons
-                            let action = ActionButtons::new()
-                                .with_edit(true)
-                                .with_delete(true)
-                                .with_duplicate(true)
-                                .with_export(true)
-                                .show(right_ui);
+                        // Action buttons
+                        let action = ActionButtons::new()
+                            .with_edit(true)
+                            .with_delete(true)
+                            .with_duplicate(true)
+                            .with_export(true)
+                            .show(right_ui);
 
-                            if action != ItemAction::None {
-                                action_requested = Some(action);
-                            }
-                        } else {
-                            right_ui.label("Select a proficiency to view details");
+                        if action != ItemAction::None {
+                            action_requested = Some(action);
                         }
                     } else {
                         right_ui.label("Select a proficiency to view details");
                     }
-                },
-            );
+                } else {
+                    right_ui.label("Select a proficiency to view details");
+                }
+            },
+        );
 
         // Apply selection change after closures
         self.selected_proficiency = new_selection;
