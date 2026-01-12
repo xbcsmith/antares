@@ -8,7 +8,7 @@
 //! - Missing root nodes
 //! - Invalid node references in choices
 //! - Orphaned nodes unreachable from root
-//! - Circular references
+//! - Unescapable circular references
 //!
 //! These checks are useful both at load time and for debugging dialogue authoring issues.
 
@@ -24,8 +24,12 @@ pub type ValidationResult = Result<(), String>;
 /// Performs the following checks:
 /// - Root node exists in the tree
 /// - All nodes referenced by choices exist
-/// - No circular references between nodes
+/// - No unescapable circular references between nodes
 /// - All nodes are reachable from root (no orphaned nodes)
+///
+/// A circular reference is allowed if there's at least one reachable path from the
+/// cycle to a terminating node or terminating choice (i.e., a choice with
+/// `ends_dialogue = true` or `target_node = None`, or a node with `is_terminal = true`).
 ///
 /// # Arguments
 ///
@@ -70,7 +74,7 @@ pub fn validate_dialogue_tree(tree: &DialogueTree) -> ValidationResult {
         }
     }
 
-    // Check 3: Detect circular references using cycle detection
+    // Check 3: Detect circular references (only fail on unescapable cycles)
     detect_cycles(tree)?;
 
     // Check 4: Find orphaned nodes (unreachable from root)
@@ -89,51 +93,100 @@ pub fn validate_dialogue_tree(tree: &DialogueTree) -> ValidationResult {
     Ok(())
 }
 
-/// Detects cycles in the dialogue tree using depth-first search
+/// Detects cycles in the dialogue tree using depth-first search.
 ///
-/// Returns an error description if a cycle is found
+/// This will return an error only for cycles that are *unescapable* (i.e. there is
+/// no path from the cycle to a terminating node or terminating choice).
 fn detect_cycles(tree: &DialogueTree) -> ValidationResult {
     let mut visited = HashSet::new();
     let mut rec_stack = HashSet::new();
 
-    for node_id in tree.nodes.keys() {
-        if !visited.contains(node_id) && dfs_has_cycle(tree, *node_id, &mut visited, &mut rec_stack)
-        {
-            return Err(format!(
-                "Circular reference detected in dialogue tree {} starting from node {}",
-                tree.id, node_id
-            ));
+    // Iterate over configured nodes; `.copied()` to avoid dealing with references
+    for node_id in tree.nodes.keys().copied() {
+        if !visited.contains(&node_id) {
+            if let Some(cycle_node) = dfs_find_cycle(tree, node_id, &mut visited, &mut rec_stack) {
+                // If the cycle has no reachable termination, it's an error.
+                if !reachable_to_termination(tree, cycle_node) {
+                    return Err(format!(
+                        "Circular reference detected in dialogue tree {} starting from node {}",
+                        tree.id, cycle_node
+                    ));
+                }
+                // Otherwise, cycle is escapable; continue checking remaining nodes.
+            }
         }
     }
 
     Ok(())
 }
 
-/// DFS helper for cycle detection
-fn dfs_has_cycle(
+/// DFS helper which returns Some(node_id) if it discovers a back edge (a cycle),
+/// where the returned `node_id` is part of the cycle. Returns `None` otherwise.
+///
+/// This helper ensures the recursion stack is cleaned up on unwind.
+fn dfs_find_cycle(
     tree: &DialogueTree,
     node_id: NodeId,
     visited: &mut HashSet<NodeId>,
     rec_stack: &mut HashSet<NodeId>,
-) -> bool {
+) -> Option<NodeId> {
     visited.insert(node_id);
     rec_stack.insert(node_id);
+
+    let mut found: Option<NodeId> = None;
 
     if let Some(node) = tree.get_node(node_id) {
         for choice in &node.choices {
             if let Some(target_id) = choice.target_node {
                 if !visited.contains(&target_id) {
-                    if dfs_has_cycle(tree, target_id, visited, rec_stack) {
-                        return true;
+                    if let Some(t) = dfs_find_cycle(tree, target_id, visited, rec_stack) {
+                        found = Some(t);
+                        break;
                     }
                 } else if rec_stack.contains(&target_id) {
-                    return true; // Back edge found - cycle detected
+                    // Found a back edge to target_id which is in the recursion stack.
+                    found = Some(target_id);
+                    break;
                 }
             }
         }
     }
 
     rec_stack.remove(&node_id);
+    found
+}
+
+/// Returns true if there exists a path from `start` to any terminating node or
+/// terminating choice. Termination is defined as:
+/// - a node with `is_terminal == true`, or
+/// - a choice with `ends_dialogue == true`, or
+/// - a choice with `target_node == None`.
+fn reachable_to_termination(tree: &DialogueTree, start: NodeId) -> bool {
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+
+    visited.insert(start);
+    queue.push_back(start);
+
+    while let Some(node_id) = queue.pop_front() {
+        if let Some(node) = tree.get_node(node_id) {
+            if node.is_terminal {
+                return true;
+            }
+            for choice in &node.choices {
+                if choice.ends_dialogue || choice.target_node.is_none() {
+                    return true;
+                }
+                if let Some(target_id) = choice.target_node {
+                    if !visited.contains(&target_id) {
+                        visited.insert(target_id);
+                        queue.push_back(target_id);
+                    }
+                }
+            }
+        }
+    }
+
     false
 }
 
@@ -224,6 +277,7 @@ mod tests {
 
     #[test]
     fn test_detects_circular_references() {
+        // A simple 3-node cycle with no terminating choice should be invalid
         let mut tree = DialogueTree::new(1, "Test", 1);
 
         let mut node1 = DialogueNode::new(1, "Node 1");
@@ -259,6 +313,100 @@ mod tests {
         let result = validate_dialogue_tree(&tree);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Circular reference"));
+    }
+
+    #[test]
+    fn test_allows_escapable_cycle() {
+        // Node 1 <-> Node 2 cycle exists, but Node 1 has a "Farewell" choice
+        // that terminates the dialogue. This should be allowed.
+        let mut tree = DialogueTree::new(1, "Test", 1);
+
+        let mut node1 = DialogueNode::new(1, "Node 1");
+        node1.choices.push(DialogueChoice {
+            text: "Go to 2".to_string(),
+            target_node: Some(2),
+            conditions: vec![],
+            actions: vec![],
+            ends_dialogue: false,
+        });
+        node1.choices.push(DialogueChoice {
+            text: "Farewell".to_string(),
+            target_node: None,
+            conditions: vec![],
+            actions: vec![],
+            ends_dialogue: true,
+        });
+        tree.add_node(node1);
+
+        let mut node2 = DialogueNode::new(2, "Node 2");
+        node2.choices.push(DialogueChoice {
+            text: "Back to 1".to_string(),
+            target_node: Some(1),
+            conditions: vec![],
+            actions: vec![],
+            ends_dialogue: false,
+        });
+        tree.add_node(node2);
+
+        let result = validate_dialogue_tree(&tree);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_allows_cycle_with_external_exit() {
+        // Cycle 1 -> 2 -> 3 -> 1, but node 3 can go to node 4, which has a
+        // terminating choice. The cycle should be allowed.
+        let mut tree = DialogueTree::new(1, "Test", 1);
+
+        let mut node1 = DialogueNode::new(1, "Node 1");
+        node1.choices.push(DialogueChoice {
+            text: "To 2".to_string(),
+            target_node: Some(2),
+            conditions: vec![],
+            actions: vec![],
+            ends_dialogue: false,
+        });
+        tree.add_node(node1);
+
+        let mut node2 = DialogueNode::new(2, "Node 2");
+        node2.choices.push(DialogueChoice {
+            text: "To 3".to_string(),
+            target_node: Some(3),
+            conditions: vec![],
+            actions: vec![],
+            ends_dialogue: false,
+        });
+        tree.add_node(node2);
+
+        let mut node3 = DialogueNode::new(3, "Node 3");
+        node3.choices.push(DialogueChoice {
+            text: "Back to 1".to_string(),
+            target_node: Some(1),
+            conditions: vec![],
+            actions: vec![],
+            ends_dialogue: false,
+        });
+        node3.choices.push(DialogueChoice {
+            text: "Exit to 4".to_string(),
+            target_node: Some(4),
+            conditions: vec![],
+            actions: vec![],
+            ends_dialogue: false,
+        });
+        tree.add_node(node3);
+
+        let mut node4 = DialogueNode::new(4, "Node 4");
+        node4.choices.push(DialogueChoice {
+            text: "Farewell".to_string(),
+            target_node: None,
+            conditions: vec![],
+            actions: vec![],
+            ends_dialogue: true,
+        });
+        tree.add_node(node4);
+
+        let result = validate_dialogue_tree(&tree);
+        assert!(result.is_ok());
     }
 
     #[test]

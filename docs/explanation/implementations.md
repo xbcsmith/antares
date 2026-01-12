@@ -2757,6 +2757,52 @@ cargo run --bin campaign_validator -- campaigns/tutorial
 - ✅ All quality gates pass
 - ✅ Proper dialogue flow: root → choice → terminal node
 
+## Dialogue validation: Allow escapable cycles - COMPLETED
+
+### Summary
+
+Adjusted dialogue tree validation to allow intentional cycles (players cycling back to the beginning of a dialogue) as long as there exists a reachable terminating path from the cycle.
+
+### Context
+
+A validation failure was reported for the Village Elder dialogue in the tutorial campaign due to the presence of intentional cycles that returned the conversation to the root node. These cycles were legitimate UX: players should be able to explore dialog options multiple times and then exit via the existing "Farewell" choice.
+
+### Changes Made
+
+- Updated `src/game/systems/dialogue_validation.rs`:
+  - `detect_cycles()` now only reports cycles that are unescapable (i.e., there is no path from the cycle to a terminating node or terminating choice).
+  - Replaced `dfs_has_cycle()` with `dfs_find_cycle()` which detects a cycle and returns a representative node in the cycle.
+  - Added `reachable_to_termination()` to check if a node (and the nodes reachable from it) can reach a terminating node/choice.
+- Added unit tests:
+  - `test_allows_escapable_cycle`
+  - `test_allows_cycle_with_external_exit`
+- No change to the authored dialogue data was necessary — existing dialogues that intentionally cycle (like Village Elder) are now valid.
+
+### Testing
+
+- Unit tests added and verified locally:
+  - The new tests pass under the library test suite.
+- Quality gates executed and passing (locally):
+  - `cargo fmt --all` ✅
+  - `cargo check --all-targets --all-features` ✅
+  - `cargo clippy --all-targets --all-features -- -D warnings` ✅
+  - `cargo nextest run --all-features` ✅ (full test suite verified)
+
+### Deliverables
+
+- ✅ Validator accepts escapable cycles
+- ✅ New tests added to prevent regressions
+- ✅ Documentation updated here in `docs/explanation/implementations.md`
+
+### Architecture Compliance
+
+- The change respects domain model constraints and does not modify core data structures.
+- Unit tests cover both failure (unescapable cycles) and success (escapable cycles) cases.
+
+### Notes
+
+This change improves dialogue authoring ergonomics by allowing natural conversational loops while still protecting against dialogues that have no way for the player to finish (unescapable loops).
+
 ### Architecture Compliance
 
 Changes follow dialogue system architecture from `docs/reference/architecture.md`:
