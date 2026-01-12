@@ -4904,16 +4904,24 @@
             effect: None,
         ),
         (
-            x: 6,
+            x: 13,
             y: 2,
         ): Treasure(
-            name: "Buried Stash",
-            description: "A stash hidden in a crevice containing valuable items.",
+            name: "Hidden Cache",
+            description: "A tucked-away cache of items and supplies.",
             loot: [
-                10,
-                20,
-                30,
+                11,
+                21,
             ],
+        ),
+        (
+            x: 7,
+            y: 15,
+        ): RecruitableCharacter(
+            name: "Whisper",
+            description: "An elven scout emerges from the shadows, watching you intently. Her nimble fingers toy with a lockpick as she sizes up your party.",
+            character_id: "whisper",
+            dialogue_id: None,
         ),
         (
             x: 2,
@@ -4927,22 +4935,15 @@
             ],
         ),
         (
-            x: 7,
-            y: 15,
-        ): RecruitableCharacter(
-            name: "Whisper",
-            description: "An elven scout emerges from the shadows, watching you intently. Her nimble fingers toy with a lockpick as she sizes up your party.",
-            character_id: "whisper",
-        ),
-        (
-            x: 3,
+            x: 6,
             y: 2,
-        ): Encounter(
-            name: "Monster Patrol",
-            description: "A small patrol of monsters crossing this area.",
-            monster_group: [
-                1,
-                2,
+        ): Treasure(
+            name: "Buried Stash",
+            description: "A stash hidden in a crevice containing valuable items.",
+            loot: [
+                10,
+                20,
+                30,
             ],
         ),
         (
@@ -4958,14 +4959,22 @@
             ],
         ),
         (
-            x: 13,
+            x: 1,
+            y: 7,
+        ): Sign(
+            name: "Exit Sign",
+            description: "A sign marking the path back to town.",
+            text: "Exit to Town",
+        ),
+        (
+            x: 3,
             y: 2,
-        ): Treasure(
-            name: "Hidden Cache",
-            description: "A tucked-away cache of items and supplies.",
-            loot: [
-                11,
-                21,
+        ): Encounter(
+            name: "Monster Patrol",
+            description: "A small patrol of monsters crossing this area.",
+            monster_group: [
+                1,
+                2,
             ],
         ),
         (
@@ -4979,14 +4988,6 @@
                 22,
                 31,
             ],
-        ),
-        (
-            x: 1,
-            y: 7,
-        ): Sign(
-            name: "Exit Sign",
-            description: "A sign marking the path back to town.",
-            text: "Exit to Town",
         ),
     },
     npc_placements: [],

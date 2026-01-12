@@ -23,12 +23,20 @@
 //!
 use bevy::prelude::*;
 
-use crate::application::dialogue::DialogueState;
+use crate::application::dialogue::{DialogueState, RecruitmentContext};
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
 use crate::game::resources::GlobalState;
 
 use crate::domain::dialogue::{DialogueAction, DialogueCondition, DialogueId};
+
+/// Temporary storage for recruitment context during dialogue initialization
+///
+/// This resource holds recruitment context between the moment a RecruitableCharacter
+/// event is triggered and when the dialogue system initializes DialogueState.
+/// The context is consumed by handle_start_dialogue and cleared after use.
+#[derive(Resource, Default)]
+pub struct PendingRecruitmentContext(pub Option<RecruitmentContext>);
 
 /// Message to request that a dialogue tree begin (e.g., NPC started talking).
 #[derive(Message, Clone, Debug)]
@@ -60,6 +68,7 @@ impl Plugin for DialoguePlugin {
             .add_message::<AdvanceDialogue>()
             .init_resource::<crate::game::components::dialogue::ActiveDialogueUI>()
             .init_resource::<crate::game::components::dialogue::ChoiceSelectionState>()
+            .insert_resource(PendingRecruitmentContext::default())
             .add_systems(
                 Update,
                 (
@@ -118,6 +127,7 @@ fn handle_start_dialogue(
     mut ev_reader: MessageReader<StartDialogue>,
     mut global_state: ResMut<GlobalState>,
     content: Res<GameContent>,
+    mut pending_recruitment: ResMut<PendingRecruitmentContext>,
     mut quest_system: Option<ResMut<crate::application::quests::QuestSystem>>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
 ) {
@@ -153,17 +163,27 @@ fn handle_start_dialogue(
                     return;
                 }
 
-                global_state.0.mode =
-                    GameMode::Dialogue(DialogueState::start(ev.dialogue_id, root));
+                // Extract recruitment context if present
+                let recruitment_context = pending_recruitment.0.take();
+
+                let mut new_state = DialogueState::start(ev.dialogue_id, root);
+                new_state.recruitment_context = recruitment_context;
+
+                global_state.0.mode = GameMode::Dialogue(new_state);
 
                 // Execute any actions attached to the root node and log the text
                 // Execute root node actions and log the text
                 if let Some(node) = tree.get_node(root) {
                     for action in &node.actions {
+                        let dlg_state = match &global_state.0.mode {
+                            GameMode::Dialogue(state) => Some(state.clone()),
+                            _ => None,
+                        };
                         execute_action(
                             action,
                             &mut global_state.0,
                             db,
+                            dlg_state.as_ref(),
                             quest_system.as_deref_mut(),
                             game_log.as_deref_mut(),
                         );
@@ -263,10 +283,15 @@ fn handle_select_choice(
                 {
                     // Execute choice actions first (mutably borrow game state inside execute_action)
                     for action in &choice.actions {
+                        let dlg_state = match &global_state.0.mode {
+                            GameMode::Dialogue(state) => Some(state.clone()),
+                            _ => None,
+                        };
                         execute_action(
                             action,
                             &mut global_state.0,
                             db,
+                            dlg_state.as_ref(),
                             quest_system.as_deref_mut(),
                             game_log.as_deref_mut(),
                         );
@@ -320,10 +345,15 @@ fn handle_select_choice(
                             }
 
                             for action in actions {
+                                let dlg_state = match &global_state.0.mode {
+                                    GameMode::Dialogue(state) => Some(state.clone()),
+                                    _ => None,
+                                };
                                 execute_action(
                                     &action,
                                     &mut global_state.0,
                                     db,
+                                    dlg_state.as_ref(),
                                     quest_system.as_deref_mut(),
                                     game_log.as_deref_mut(),
                                 );
@@ -502,6 +532,7 @@ fn execute_action(
     action: &DialogueAction,
     game_state: &mut crate::application::GameState,
     db: &crate::sdk::database::ContentDatabase,
+    dialogue_state: Option<&crate::application::dialogue::DialogueState>,
     mut quest_system: Option<&mut crate::application::quests::QuestSystem>,
     mut game_log: Option<&mut crate::game::systems::ui::GameLog>,
 ) {
@@ -576,25 +607,206 @@ fn execute_action(
             }
         }
         DialogueAction::RecruitToParty { character_id } => {
-            info!("Recruiting character '{}' to active party", character_id);
-            // TODO: Implement party recruitment logic
-            // 1. Load character from character database
-            // 2. Add to global_state.party.members if space available (max 6)
-            // 3. Remove MapEvent::RecruitableCharacter from current map
-            // 4. Refresh HUD
+            info!(
+                "Executing RecruitToParty action for character '{}'",
+                character_id
+            );
+
+            // Call core recruitment logic
+            match game_state.recruit_from_map(character_id, db) {
+                Ok(crate::application::RecruitResult::AddedToParty) => {
+                    info!("Successfully recruited '{}' to active party", character_id);
+                    if let Some(ref mut log) = game_log {
+                        if let Some(char_def) = db.characters.get_character(character_id) {
+                            log.add(format!("{} joins the party!", char_def.name));
+                        } else {
+                            log.add(format!("{} joins the party!", character_id));
+                        }
+                    }
+
+                    // Remove recruitment event from map
+                    if let Some(dlg_state) = dialogue_state {
+                        if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
+                            if let Some(current_map) = game_state.world.get_current_map_mut() {
+                                if let Some(_removed_event) =
+                                    current_map.remove_event(recruitment_ctx.event_position)
+                                {
+                                    info!(
+                                        "Removed recruitment event at {:?}",
+                                        recruitment_ctx.event_position
+                                    );
+                                } else {
+                                    warn!(
+                                        "No event found at recruitment position {:?}",
+                                        recruitment_ctx.event_position
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(crate::application::RecruitResult::Declined) => {
+                    // Not currently used by recruit_from_map
+                    info!("Recruitment declined for '{}'", character_id);
+                }
+                Ok(crate::application::RecruitResult::SentToInn(inn_id)) => {
+                    info!("Party full - sent '{}' to inn '{}'", character_id, inn_id);
+                    if let Some(ref mut log) = game_log {
+                        if let Some(char_def) = db.characters.get_character(character_id) {
+                            log.add(format!(
+                                "Party is full! {} will wait at the inn.",
+                                char_def.name
+                            ));
+                        } else {
+                            log.add(format!("Party is full! {} sent to inn.", character_id));
+                        }
+                    }
+
+                    // Remove recruitment event from map
+                    if let Some(dlg_state) = dialogue_state {
+                        if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
+                            if let Some(current_map) = game_state.world.get_current_map_mut() {
+                                if let Some(_removed_event) =
+                                    current_map.remove_event(recruitment_ctx.event_position)
+                                {
+                                    info!(
+                                        "Removed recruitment event at {:?}",
+                                        recruitment_ctx.event_position
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(crate::application::RecruitmentError::AlreadyEncountered(id)) => {
+                    warn!("Cannot recruit '{}': already encountered", id);
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("{} has already joined your adventure.", id));
+                    }
+                }
+                Err(crate::application::RecruitmentError::CharacterNotFound(id)) => {
+                    error!("Character definition '{}' not found in database", id);
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("Error: Character '{}' not found.", id));
+                    }
+                }
+                Err(crate::application::RecruitmentError::CharacterDefinition(err)) => {
+                    error!("Character definition error for '{}': {}", character_id, err);
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("Error loading character: {}", err));
+                    }
+                }
+                Err(crate::application::RecruitmentError::CharacterError(err)) => {
+                    error!("Character operation error for '{}': {}", character_id, err);
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("Error: {}", err));
+                    }
+                }
+                Err(crate::application::RecruitmentError::PartyManager(err)) => {
+                    error!("Party management error for '{}': {}", character_id, err);
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("Error: {}", err));
+                    }
+                }
+            }
         }
         DialogueAction::RecruitToInn {
             character_id,
             innkeeper_id,
         } => {
             info!(
-                "Sending character '{}' to inn (keeper: {})",
+                "Executing RecruitToInn action for character '{}' at inn '{}'",
                 character_id, innkeeper_id
             );
-            // TODO: Implement inn recruitment logic
-            // 1. Load character from character database
-            // 2. Add to innkeeper's roster (stored at inn)
-            // 3. Remove MapEvent::RecruitableCharacter from current map
+
+            // NOTE: recruit_from_map() handles inn assignment automatically when party is full,
+            // but this action explicitly sends to a specific innkeeper regardless of party capacity.
+            // We need to manually implement this logic.
+
+            // 1. Verify character not already encountered
+            if game_state.encountered_characters.contains(character_id) {
+                warn!("Cannot recruit '{}': already encountered", character_id);
+                if let Some(ref mut log) = game_log {
+                    log.add(format!("{} has already been recruited.", character_id));
+                }
+                return;
+            }
+
+            // 2. Verify innkeeper exists
+            if db.npcs.get_npc(innkeeper_id).is_none() {
+                error!("Innkeeper '{}' not found in database", innkeeper_id);
+                if let Some(ref mut log) = game_log {
+                    log.add(format!("Error: Innkeeper '{}' not found.", innkeeper_id));
+                }
+                return;
+            }
+
+            // 3. Get character definition
+            let char_def = match db.characters.get_character(character_id) {
+                Some(def) => def,
+                None => {
+                    error!(
+                        "Character definition '{}' not found in database",
+                        character_id
+                    );
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("Error: Character '{}' not found.", character_id));
+                    }
+                    return;
+                }
+            };
+
+            // 4. Instantiate character
+            let character = match char_def.instantiate(&db.races, &db.classes, &db.items) {
+                Ok(c) => c,
+                Err(e) => {
+                    error!("Failed to instantiate character '{}': {}", character_id, e);
+                    if let Some(ref mut log) = game_log {
+                        log.add(format!("Error creating character: {}", e));
+                    }
+                    return;
+                }
+            };
+
+            // 5. Add to roster at specified inn
+            let location = crate::domain::character::CharacterLocation::AtInn(innkeeper_id.clone());
+            if let Err(e) = game_state.roster.add_character(character, location) {
+                error!("Failed to add character to roster: {}", e);
+                if let Some(ref mut log) = game_log {
+                    log.add(format!("Error: {}", e));
+                }
+                return;
+            }
+
+            // 6. Mark as encountered
+            game_state
+                .encountered_characters
+                .insert(character_id.to_string());
+
+            // 7. Log success
+            info!(
+                "Successfully recruited '{}' to inn '{}'",
+                character_id, innkeeper_id
+            );
+            if let Some(ref mut log) = game_log {
+                log.add(format!("{} will wait at the inn.", char_def.name));
+            }
+
+            // Remove recruitment event from map
+            if let Some(dlg_state) = dialogue_state {
+                if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
+                    if let Some(current_map) = game_state.world.get_current_map_mut() {
+                        if let Some(_removed_event) =
+                            current_map.remove_event(recruitment_ctx.event_position)
+                        {
+                            info!(
+                                "Removed recruitment event at {:?}",
+                                recruitment_ctx.event_position
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -705,7 +917,7 @@ mod tests {
             // Execute root node actions
             if let Some(node) = tree.get_node(root) {
                 for action in &node.actions {
-                    execute_action(action, &mut gs.0, &db, None, None);
+                    execute_action(action, &mut gs.0, &db, None, None, None);
                 }
             }
         } else {
@@ -825,7 +1037,7 @@ mod tests {
                 if let Some(node) = tree.get_node(root) {
                     if let Some(choice) = node.choices.first() {
                         for action in &choice.actions {
-                            execute_action(action, &mut gs.0, &db, None, None);
+                            execute_action(action, &mut gs.0, &db, None, None, None);
                         }
                     }
                 }
@@ -927,5 +1139,400 @@ mod tests {
         assert_eq!(state.current_text, "Second text");
         assert_eq!(state.current_speaker, "Speaker2");
         assert_eq!(state.current_choices[0], "Choice 2");
+    }
+
+    #[test]
+    fn test_recruit_to_party_action_success() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+
+        // Arrange
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Add required class and race
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Add test character to database
+        let char_def = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Test Knight".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        db.characters.add_character(char_def).unwrap();
+
+        // Act
+        execute_action(
+            &DialogueAction::RecruitToParty {
+                character_id: "test_knight".to_string(),
+            },
+            &mut game_state,
+            &db,
+            None,
+            None,
+            None,
+        );
+
+        // Assert
+        assert_eq!(game_state.party.size(), 1);
+        assert_eq!(game_state.party.members[0].name, "Test Knight");
+        assert!(game_state.encountered_characters.contains("test_knight"));
+    }
+
+    #[test]
+    fn test_recruit_to_party_action_when_party_full() {
+        use crate::domain::character::{Alignment, CharacterLocation, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+
+        // Arrange
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Add required class and race
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Fill party to capacity (6 members)
+        for i in 0..6 {
+            let char_def = CharacterDefinition::new(
+                format!("party_{}", i),
+                format!("Party Member {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            db.characters.add_character(char_def).unwrap();
+            let character = crate::domain::character::Character::new(
+                format!("Party Member {}", i),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            let _ = game_state.party.add_member(character.clone());
+            let _ = game_state
+                .roster
+                .add_character(character, CharacterLocation::InParty);
+        }
+
+        // Add test character to database
+        let char_def = CharacterDefinition::new(
+            "test_mage".to_string(),
+            "Test Mage".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        db.characters.add_character(char_def).unwrap();
+
+        // Act
+        execute_action(
+            &DialogueAction::RecruitToParty {
+                character_id: "test_mage".to_string(),
+            },
+            &mut game_state,
+            &db,
+            None,
+            None,
+            None,
+        );
+
+        // Assert - party still at max, character sent to inn
+        assert_eq!(game_state.party.size(), 6);
+        assert_eq!(game_state.roster.characters.len(), 7); // 6 in party + 1 at inn
+        assert!(game_state.encountered_characters.contains("test_mage"));
+    }
+
+    #[test]
+    fn test_recruit_to_party_action_already_recruited() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+
+        // Arrange
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Add required class and race
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Add test character to database
+        let char_def = CharacterDefinition::new(
+            "test_knight".to_string(),
+            "Test Knight".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        db.characters.add_character(char_def).unwrap();
+
+        // First recruitment
+        let _ = game_state.recruit_from_map("test_knight", &db);
+
+        // Act - attempt second recruitment
+        execute_action(
+            &DialogueAction::RecruitToParty {
+                character_id: "test_knight".to_string(),
+            },
+            &mut game_state,
+            &db,
+            None,
+            None,
+            None,
+        );
+
+        // Assert - party size unchanged
+        assert_eq!(game_state.party.size(), 1);
+        assert_eq!(game_state.roster.characters.len(), 1);
+    }
+
+    #[test]
+    fn test_recruit_to_party_action_character_not_found() {
+        // Arrange
+        let mut game_state = crate::application::GameState::new();
+        let db = crate::sdk::database::ContentDatabase::new(); // Empty database
+
+        // Act
+        execute_action(
+            &DialogueAction::RecruitToParty {
+                character_id: "nonexistent".to_string(),
+            },
+            &mut game_state,
+            &db,
+            None,
+            None,
+            None,
+        );
+
+        // Assert - no changes to party
+        assert_eq!(game_state.party.size(), 0);
+        assert_eq!(game_state.roster.characters.len(), 0);
+    }
+
+    #[test]
+    fn test_recruit_to_inn_action_success() {
+        use crate::domain::character::{Alignment, CharacterLocation, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+
+        // Arrange
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Add required class and race
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Add test character to database
+        let char_def = CharacterDefinition::new(
+            "test_mage".to_string(),
+            "Test Mage".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        db.characters.add_character(char_def).unwrap();
+
+        // Add innkeeper to database
+        let innkeeper_def = crate::domain::world::npc::NpcDefinition::new(
+            "innkeeper_1".to_string(),
+            "Innkeeper".to_string(),
+            "innkeeper.png".to_string(),
+        );
+        db.npcs.add_npc(innkeeper_def).unwrap();
+
+        // Act
+        execute_action(
+            &DialogueAction::RecruitToInn {
+                character_id: "test_mage".to_string(),
+                innkeeper_id: "innkeeper_1".to_string(),
+            },
+            &mut game_state,
+            &db,
+            None,
+            None,
+            None,
+        );
+
+        // Assert
+        assert_eq!(game_state.roster.characters.len(), 1);
+        assert!(matches!(
+            game_state.roster.character_locations[0],
+            CharacterLocation::AtInn(ref id) if id == "innkeeper_1"
+        ));
+        assert!(game_state.encountered_characters.contains("test_mage"));
+    }
+
+    #[test]
+    fn test_recruit_to_inn_action_already_recruited() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+
+        // Arrange
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Add required class and race
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Add test character to database
+        let char_def = CharacterDefinition::new(
+            "test_mage".to_string(),
+            "Test Mage".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        db.characters.add_character(char_def).unwrap();
+
+        // Add innkeeper to database
+        let innkeeper_def = crate::domain::world::npc::NpcDefinition::new(
+            "innkeeper_1".to_string(),
+            "Innkeeper".to_string(),
+            "innkeeper.png".to_string(),
+        );
+        db.npcs.add_npc(innkeeper_def).unwrap();
+
+        // First recruitment
+        execute_action(
+            &DialogueAction::RecruitToInn {
+                character_id: "test_mage".to_string(),
+                innkeeper_id: "innkeeper_1".to_string(),
+            },
+            &mut game_state,
+            &db,
+            None,
+            None,
+            None,
+        );
+
+        // Act - second recruitment attempt
+        execute_action(
+            &DialogueAction::RecruitToInn {
+                character_id: "test_mage".to_string(),
+                innkeeper_id: "innkeeper_1".to_string(),
+            },
+            &mut game_state,
+            &db,
+            None,
+            None,
+            None,
+        );
+
+        // Assert
+        assert_eq!(game_state.roster.characters.len(), 1);
+        assert!(game_state.encountered_characters.contains("test_mage"));
+    }
+
+    #[test]
+    fn test_recruit_to_inn_action_invalid_innkeeper() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+
+        // Arrange
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Add required class and race
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        // Add test character to database
+        let char_def = CharacterDefinition::new(
+            "test_mage".to_string(),
+            "Test Mage".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        db.characters.add_character(char_def).unwrap();
+        // No innkeeper in database
+
+        // Act
+        execute_action(
+            &DialogueAction::RecruitToInn {
+                character_id: "test_mage".to_string(),
+                innkeeper_id: "invalid_innkeeper".to_string(),
+            },
+            &mut game_state,
+            &db,
+            None,
+            None,
+            None,
+        );
+
+        // Assert - should fail because innkeeper doesn't exist
+        assert_eq!(game_state.roster.characters.len(), 0);
+        assert!(!game_state.encountered_characters.contains("test_mage"));
     }
 }

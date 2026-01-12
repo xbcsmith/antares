@@ -937,6 +937,7 @@ mod interaction_tests {
                 name: "TestRecruit".to_string(),
                 description: "A recruitable character".to_string(),
                 character_id: "hero_01".to_string(),
+                dialogue_id: None,
             },
         );
 

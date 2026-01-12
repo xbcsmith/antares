@@ -1791,8 +1791,8 @@ Add comprehensive summary of recruitment implementation:
 ````markdown
 ## Character Recruitment System
 
-**Status**: ✅ Implemented  
-**Date**: 2025-01-XX  
+**Status**: ✅ Implemented
+**Date**: 2025-01-XX
 **Implementation Plan**: `docs/explanation/character_recruitment_implementation_plan.md`
 
 ### Overview
@@ -1933,7 +1933,6 @@ events: {
     ),
 }
 ```
-````
 
 ### Future Enhancements
 
@@ -1942,7 +1941,6 @@ events: {
 - Recruitment refusal dialogues based on character compatibility
 - Simple yes/no confirmation UI when dialogue_id is None
 
-````
 
 **Validation**:
 

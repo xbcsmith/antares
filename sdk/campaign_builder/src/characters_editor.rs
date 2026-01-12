@@ -1270,88 +1270,86 @@ impl CharactersEditorState {
         let mut action_type = ItemAction::None;
         let mut select_idx: Option<usize> = None;
 
-        TwoColumnLayout::new("characters_list")
-            .with_left_width(350.0)
-            .show_split(
-                ui,
-                |left_ui| {
-                    // Left panel: character list
-                    egui::ScrollArea::vertical()
-                        .id_salt("characters_scroll")
-                        .show(left_ui, |ui| {
-                            if filtered_characters.is_empty() {
-                                ui.label("No characters found. Click 'New' to create one.");
-                            } else {
-                                for (original_idx, character) in &filtered_characters {
-                                    let is_selected = selected_character_idx == Some(*original_idx);
+        TwoColumnLayout::new("characters_list").show_split(
+            ui,
+            |left_ui| {
+                // Left panel: character list
+                egui::ScrollArea::vertical()
+                    .id_salt("characters_scroll")
+                    .show(left_ui, |ui| {
+                        if filtered_characters.is_empty() {
+                            ui.label("No characters found. Click 'New' to create one.");
+                        } else {
+                            for (original_idx, character) in &filtered_characters {
+                                let is_selected = selected_character_idx == Some(*original_idx);
 
-                                    // Character info
-                                    let label = format!(
-                                        "{} ({} {})",
-                                        character.name, character.race_id, character.class_id
-                                    );
-                                    let response = ui.selectable_label(is_selected, label);
+                                // Character info
+                                let label = format!(
+                                    "{} ({} {})",
+                                    character.name, character.race_id, character.class_id
+                                );
+                                let response = ui.selectable_label(is_selected, label);
 
-                                    if response.clicked() {
-                                        select_idx = Some(*original_idx);
-                                    }
-
-                                    // Show character type badge
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(20.0);
-                                        if character.is_premade {
-                                            ui.label(
-                                                egui::RichText::new("⭐ Premade")
-                                                    .small()
-                                                    .color(egui::Color32::GOLD),
-                                            );
-                                        } else {
-                                            ui.label(
-                                                egui::RichText::new("📋 Template")
-                                                    .small()
-                                                    .color(egui::Color32::LIGHT_BLUE),
-                                            );
-                                        }
-                                        ui.label(
-                                            egui::RichText::new(format!(
-                                                "| {} | ID: {}",
-                                                alignment_name(character.alignment),
-                                                character.id
-                                            ))
-                                            .small()
-                                            .weak(),
-                                        );
-                                    });
-                                    ui.add_space(4.0);
+                                if response.clicked() {
+                                    select_idx = Some(*original_idx);
                                 }
-                            }
-                        });
-                },
-                |right_ui| {
-                    // Right panel: preview of selected character
-                    if let Some(idx) = selected_character_idx {
-                        if let Some(character) = self.characters.get(idx).cloned() {
-                            // Action buttons (correct placement - in RIGHT panel)
-                            let action = ActionButtons::new()
-                                .enabled(true)
-                                .with_edit(true)
-                                .with_delete(true)
-                                .with_duplicate(true)
-                                .show(right_ui);
 
-                            if action != ItemAction::None {
-                                action_idx = Some(idx);
-                                action_type = action;
+                                // Show character type badge
+                                ui.horizontal(|ui| {
+                                    ui.add_space(20.0);
+                                    if character.is_premade {
+                                        ui.label(
+                                            egui::RichText::new("⭐ Premade")
+                                                .small()
+                                                .color(egui::Color32::GOLD),
+                                        );
+                                    } else {
+                                        ui.label(
+                                            egui::RichText::new("📋 Template")
+                                                .small()
+                                                .color(egui::Color32::LIGHT_BLUE),
+                                        );
+                                    }
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "| {} | ID: {}",
+                                            alignment_name(character.alignment),
+                                            character.id
+                                        ))
+                                        .small()
+                                        .weak(),
+                                    );
+                                });
+                                ui.add_space(4.0);
                             }
-
-                            right_ui.separator();
-                            self.show_character_preview(right_ui, &character, items, campaign_dir);
                         }
-                    } else {
-                        right_ui.label("Select a character to view details.");
+                    });
+            },
+            |right_ui| {
+                // Right panel: preview of selected character
+                if let Some(idx) = selected_character_idx {
+                    if let Some(character) = self.characters.get(idx).cloned() {
+                        // Action buttons (correct placement - in RIGHT panel)
+                        let action = ActionButtons::new()
+                            .enabled(true)
+                            .with_edit(true)
+                            .with_delete(true)
+                            .with_duplicate(true)
+                            .show(right_ui);
+
+                        if action != ItemAction::None {
+                            action_idx = Some(idx);
+                            action_type = action;
+                        }
+
+                        right_ui.separator();
+                        self.show_character_preview(right_ui, &character, items, campaign_dir);
                     }
-                },
-            );
+                } else {
+                    right_ui.label("Select a character to view details.");
+                }
+            },
+        );
 
         // Handle selection
         if let Some(idx) = select_idx {

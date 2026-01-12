@@ -492,6 +492,9 @@ pub enum MapEvent {
         description: String,
         /// Character definition ID for recruitment
         character_id: String,
+        /// Optional dialogue tree for recruitment interaction
+        #[serde(default)]
+        dialogue_id: Option<crate::domain::dialogue::DialogueId>,
     },
     /// Enter an inn for party management
     EnterInn {
@@ -505,6 +508,10 @@ pub enum MapEvent {
         innkeeper_id: crate::domain::world::NpcId,
     },
 }
+
+/// Default dialogue ID for recruitment events when none specified
+#[allow(dead_code)]
+pub const DEFAULT_RECRUITMENT_DIALOGUE_ID: crate::domain::dialogue::DialogueId = 1000;
 
 // ===== Resolved NPC =====
 
