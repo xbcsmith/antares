@@ -2803,6 +2803,45 @@ A validation failure was reported for the Village Elder dialogue in the tutorial
 
 This change improves dialogue authoring ergonomics by allowing natural conversational loops while still protecting against dialogues that have no way for the player to finish (unescapable loops).
 
+## Tutorial NPC test decoupling - COMPLETED
+
+### Summary
+
+Reverted the earlier edits to the live tutorial NPC data and decoupled unit tests from the changing tutorial campaign. Tests that previously referenced `campaigns/tutorial` now use stable test fixtures under `tests/data/`, so ongoing tutorial content changes no longer break unit tests.
+
+### Context
+
+Tutorial campaign files are actively edited by content authors during development. Tests that reference those files directly are brittle and lead to test churn when tutorial data is intentionally changed. To make tests stable and maintainable, they should use dedicated, human-immutable fixtures (\"@data\" style files) that tests can rely on.
+
+### Changes Made
+
+- Restored the tutorial NPC data to its canonical state (no permanent edits to `campaigns/tutorial/data/npcs.ron` were left in the repository).
+- Added stable test fixtures under `tests/data/`:
+  - `tests/data/tutorial_npcs_fixture.ron`
+  - `tests/data/tutorial_dialogues_fixture.ron`
+- Updated SDK tests to use fixtures rather than the live tutorial files:
+  - `sdk::database::tests::test_load_tutorial_npcs_file` now loads `tests/data/tutorial_npcs_fixture.ron`
+  - `sdk::database::tests::test_tutorial_npcs_reference_valid_dialogues` now loads `tests/data/tutorial_dialogues_fixture.ron`
+
+### Testing
+
+- The modified tests that use fixtures pass:
+  - `sdk::database::tests::test_load_tutorial_npcs_file` — passes with fixture data.
+  - `sdk::database::tests::test_tutorial_npcs_reference_valid_dialogues` — passes with fixture data.
+- Full test run (`cargo nextest run --all-features`) completes successfully in the developer environment after these changes.
+
+### Deliverables
+
+- ✅ Tutorial content files reverted to the canonical campaign data
+- ✅ Stable fixtures added under `tests/data/`
+- ✅ Tests updated to use fixtures (no longer coupled to mutable tutorial content)
+- ✅ Test suite passes
+
+### Notes
+
+- Recommendation: Prefer `tests/data/` or an explicit `@data` fixtures directory for tests that must validate content. Those files are intended to be stable and not edited by content authors, avoiding test breakage as tutorial content evolves.
+- If you want, I can add a short lint/check that ensures tests avoid direct references to `campaigns/tutorial` files where appropriate.
+
 ### Architecture Compliance
 
 Changes follow dialogue system architecture from `docs/reference/architecture.md`:
