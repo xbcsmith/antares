@@ -35,154 +35,9 @@ pub enum DialogueVisualError {
     InvalidGameMode,
 }
 
-#[allow(dead_code, unused_mut, unused_assignments)]
-/// Clamps a dialogue bubble's world position with respect to the camera so it
-/// does not intersect the near-plane or produce full-screen planar artifacts.
-fn select_worst_camera_for_bubble(
-    query_camera: &Query<&Transform, With<Camera3d>>,
-    bubble_pos: Vec3,
-) -> Option<Transform> {
-    let mut worst_cam: Option<Transform> = None;
-    let mut worst_min_forward = f32::INFINITY;
+// Obsolete world-space camera helper removed — dialogue visuals use screen-space UI and no longer require camera-based clamping.
 
-    for cam in query_camera.iter() {
-        // Camera forward (Bevy camera local -Z)
-        let mut cam_forward = cam.rotation.mul_vec3(-Vec3::Z);
-        cam_forward = if cam_forward.length_squared() > 0.0 {
-            cam_forward.normalize()
-        } else {
-            -Vec3::Z
-        };
-
-        // Yaw-only root orientation for vertex computation (avoid pitch)
-        let yaw_target = Vec3::new(cam.translation.x, bubble_pos.y, cam.translation.z);
-        let mut root_rot = Transform::from_translation(bubble_pos);
-        root_rot.look_at(yaw_target, Vec3::Y);
-
-        let used_width = if cfg!(debug_assertions) {
-            DIALOGUE_BUBBLE_WIDTH * 0.35
-        } else {
-            DIALOGUE_BUBBLE_WIDTH
-        };
-        let used_height = if cfg!(debug_assertions) {
-            DIALOGUE_BUBBLE_HEIGHT * 0.35
-        } else {
-            DIALOGUE_BUBBLE_HEIGHT
-        };
-
-        let half_w = used_width * 0.5;
-        let half_h = used_height * 0.5;
-        let local_vertices = [
-            Vec3::new(half_w, half_h, 0.0),
-            Vec3::new(-half_w, half_h, 0.0),
-            Vec3::new(-half_w, -half_h, 0.0),
-            Vec3::new(half_w, -half_h, 0.0),
-        ];
-
-        let world_vertices: Vec<Vec3> = local_vertices
-            .iter()
-            .map(|v| bubble_pos + root_rot.rotation.mul_vec3(*v))
-            .collect();
-
-        // Minimal forward-distance among vertices for this camera
-        let min_forward = world_vertices
-            .iter()
-            .map(|wv| cam_forward.dot(*wv - cam.translation))
-            .fold(f32::INFINITY, |a, b| a.min(b));
-
-        if min_forward < worst_min_forward {
-            worst_min_forward = min_forward;
-            worst_cam = Some(*cam);
-        }
-    }
-
-    worst_cam
-}
-
-#[allow(dead_code, unused_mut, unused_assignments)]
-/// Clamps a dialogue bubble's world position with respect to the camera so it
-/// does not intersect the near-plane or produce full-screen planar artifacts.
-///
-/// Accepts an owned Option<Transform> (camera) and returns the adjusted position.
-fn clamp_bubble_position_to_camera(mut bubble_position: Vec3, camera: Option<Transform>) -> Vec3 {
-    if let Some(camera_transform) = camera {
-        // 1) Center distance clamp
-        let dir = bubble_position - camera_transform.translation;
-        let dist = dir.length();
-        if dist < DIALOGUE_MIN_CAMERA_DISTANCE {
-            bubble_position =
-                camera_transform.translation + dir.normalize() * DIALOGUE_MIN_CAMERA_DISTANCE;
-        }
-
-        // 2) Per-vertex yaw-only test and forward push (avoid pitch)
-        let yaw_target = Vec3::new(
-            camera_transform.translation.x,
-            bubble_position.y,
-            camera_transform.translation.z,
-        );
-        let mut root_rot = Transform::from_translation(bubble_position);
-        root_rot.look_at(yaw_target, Vec3::Y);
-
-        let used_width = if cfg!(debug_assertions) {
-            DIALOGUE_BUBBLE_WIDTH * 0.35
-        } else {
-            DIALOGUE_BUBBLE_WIDTH
-        };
-        let used_height = if cfg!(debug_assertions) {
-            DIALOGUE_BUBBLE_HEIGHT * 0.35
-        } else {
-            DIALOGUE_BUBBLE_HEIGHT
-        };
-
-        let half_w = used_width * 0.5;
-        let half_h = used_height * 0.5;
-        let local_vertices = [
-            Vec3::new(half_w, half_h, 0.0),
-            Vec3::new(-half_w, half_h, 0.0),
-            Vec3::new(-half_w, -half_h, 0.0),
-            Vec3::new(half_w, -half_h, 0.0),
-        ];
-
-        let mut world_vertices: Vec<Vec3> = local_vertices
-            .iter()
-            .map(|v| bubble_position + root_rot.rotation.mul_vec3(*v))
-            .collect();
-
-        // Camera forward (Bevy camera local -Z)
-        let mut cam_forward = camera_transform.rotation.mul_vec3(-Vec3::Z);
-        cam_forward = if cam_forward.length_squared() > 0.0 {
-            cam_forward.normalize()
-        } else {
-            -Vec3::Z
-        };
-
-        let mut z_cams: Vec<f32> = world_vertices
-            .iter()
-            .map(|wv| cam_forward.dot(*wv - camera_transform.translation))
-            .collect();
-
-        const SAFETY_MARGIN: f32 = 0.15;
-        let min_allowed = DIALOGUE_MIN_CAMERA_DISTANCE + SAFETY_MARGIN;
-
-        // If any vertex is too close/behind, push bubble forward
-        if let Some(&min_z) = z_cams.iter().min_by(|a, b| a.partial_cmp(b).unwrap()) {
-            if min_z < min_allowed {
-                let push = min_allowed - min_z;
-                bubble_position += cam_forward * push;
-
-                // Recompute vertices after push
-                root_rot = Transform::from_translation(bubble_position);
-                root_rot.look_at(yaw_target, Vec3::Y);
-                world_vertices = local_vertices
-                    .iter()
-                    .map(|v| bubble_position + root_rot.rotation.mul_vec3(*v))
-                    .collect();
-            }
-        }
-    }
-
-    bubble_position
-}
+// Obsolete world-space clamping removed — screen-space UI panels are not positioned in world space.
 
 /// Spawns a screen-space dialogue panel using bevy_ui
 ///
@@ -325,17 +180,7 @@ pub fn update_typewriter_text(time: Res<Time>, mut query: Query<(&mut Text, &mut
     }
 }
 
-/// Billboard system - no-op for screen-space dialogue UI
-///
-/// Dialogue UI now uses screen-space `Node` elements and does not require
-/// billboard rotation. This system is retained as a no-op to avoid
-/// removing public symbols used by other systems.
-pub fn billboard_system(
-    _query_camera: Query<&Transform, With<Camera3d>>,
-    _query_billboards: Query<&mut Transform, (With<Billboard>, Without<Camera3d>)>,
-) {
-    // Intentionally left blank - UI panels are screen-space and do not need to face the camera.
-}
+// Removed obsolete `billboard_system` — screen-space UI panels do not require per-frame billboard rotation.
 
 /// Cleans up dialogue UI when dialogue mode ends
 ///
@@ -357,15 +202,7 @@ pub fn cleanup_dialogue_bubble(
     }
 }
 
-/// Updates dialogue bubble position to follow speaker
-///
-/// Keeps the dialogue bubble positioned above the NPC even if the NPC moves.
-/// This system used to perform world-space follow/clamping; with screen-space UI it is a no-op.
-/// Previously used to sync 3D dialogue bubbles to speaker entities.
-/// For screen-space (bevy_ui) panels this is intentionally a no-op.
-pub fn follow_speaker_system() {
-    // Intentionally left blank: screen-space UI does not follow world entities.
-}
+// Removed obsolete `follow_speaker_system` — screen-space UI panels are not synced to world transforms.
 
 /// Monitors speaker entity and ends dialogue if speaker is despawned
 ///
@@ -773,103 +610,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_follow_speaker_system_is_noop() {
-        use bevy::prelude::*;
+    // Removed test: `test_follow_speaker_system_is_noop` — follow/facing logic and billboard tests are no longer applicable after migration to screen-space UI.
 
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-
-        // Spawn a speaker entity (NPC)
-        let speaker = app
-            .world_mut()
-            .spawn((
-                Transform::from_xyz(11.0, 0.9, 6.0),
-                GlobalTransform::default(),
-            ))
-            .id();
-
-        // Create a root entity with Billboard that would previously be updated by follow_speaker_system
-        let root = app
-            .world_mut()
-            .spawn((
-                Transform::from_translation(Vec3::new(11.0, 1.0, 6.0)),
-                GlobalTransform::default(),
-                Visibility::default(),
-                Billboard,
-            ))
-            .id();
-
-        // Attach a DialogueBubble marker that references the speaker and root
-        app.world_mut()
-            .spawn((crate::game::components::dialogue::DialogueBubble {
-                speaker_entity: Some(speaker),
-                root_entity: root,
-                background_entity: root,
-                text_entity: root,
-                y_offset: 1.0,
-            },));
-
-        // Register the follow system (now a no-op)
-        app.add_systems(
-            Update,
-            crate::game::systems::dialogue_visuals::follow_speaker_system,
-        );
-
-        // Run one update (no-op expected)
-        app.update();
-
-        // Ensure transform did not change
-        let root_transform = {
-            let world = app.world_mut();
-            *world.query::<&Transform>().get(world, root).unwrap()
-        };
-        assert_eq!(root_transform.translation, Vec3::new(11.0, 1.0, 6.0));
-    }
-
-    #[test]
-    fn test_billboard_system_is_noop() {
-        use bevy::prelude::*;
-
-        // Minimal app and camera + billboard setup
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-
-        // Spawn a camera
-        app.world_mut().spawn((
-            Camera3d::default(),
-            Transform::from_xyz(5.0, 10.0, 5.0),
-            GlobalTransform::default(),
-            Visibility::default(),
-        ));
-
-        // Spawn a billboard entity
-        let billboard_pos = Vec3::new(0.0, 2.0, 0.0);
-        let billboard_entity = app
-            .world_mut()
-            .spawn((
-                Transform::from_translation(billboard_pos),
-                GlobalTransform::default(),
-                Visibility::default(),
-                Billboard,
-            ))
-            .id();
-
-        // Register and run the billboard system (now a no-op)
-        app.add_systems(
-            Update,
-            crate::game::systems::dialogue_visuals::billboard_system,
-        );
-        app.update(); // Run one update
-
-        // Verify transform unchanged
-        let b_transform = {
-            let world = app.world_mut();
-            *world
-                .query::<&Transform>()
-                .get(world, billboard_entity)
-                .unwrap()
-        };
-        assert_eq!(b_transform.translation, billboard_pos);
-    }
+    // Removed test: `test_billboard_system_is_noop` — billboard rotation tests are not applicable after moving dialogue UI to screen-space.
 }

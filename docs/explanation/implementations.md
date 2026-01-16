@@ -1,5 +1,60 @@
 ## Phase 1: Core ConfigEditor Implementation - COMPLETED
 
+## Dialogue Bevy UI Refactor - COMPLETED
+
+### Summary
+
+Refactored the dialogue UI from world-space 3D meshes and billboards to a screen-space Bevy UI (`bevy_ui`) panel. Phase 3 (Cleanup & Polish) removed the remaining 3D-specific helpers, constants, and billboard usage, updated systems and tests, and documented the final resolution: dialogue rendering is now a bottom-centered screen-space panel with a typewriter effect and a vertical choice list, eliminating near-plane clipping and alpha/depth artifact classes.
+
+### Changes Made
+
+- Removed obsolete world-space helper functions (`select_worst_camera_for_bubble`, `clamp_bubble_position_to_camera`) and related diagnostic resources.
+- Removed 3D-specific constants from `src/game/components/dialogue.rs`:
+  - `DIALOGUE_BUBBLE_Y_OFFSET`
+  - `DIALOGUE_MIN_CAMERA_DISTANCE`
+  - `DIALOGUE_FALLBACK_ENTITY_HEIGHT`
+  - `CHOICE_CONTAINER_Y_OFFSET`
+- Removed dialogue-specific `Billboard` usage and updated `DialogueBubble` to reference only screen-space UI entities.
+- Rewrote `spawn_dialogue_bubble` to spawn a `Node` hierarchy (panel root, speaker name, content with `TypewriterText`, `DialogueChoiceList`).
+- Removed billboard and follow-speaker systems (no longer applicable) and deleted/tests that assumed no-op behavior.
+- Updated choice UI to be screen-space (Phase 2) and retained logic-only input/selection systems.
+- Updated tests to reflect screen-space UI:
+  - Added/updated tests verifying panel structure, speaker name rendering, and typewriter behavior
+  - Removed tests that assumed world-space entities or `Billboard` existence
+- Updated documentation to record the resolution and rationale.
+
+### Files Modified (representative)
+
+- `src/game/components/dialogue.rs` — removed 3D constants & `Billboard`, updated `DialogueBubble` and component tests.
+- `src/game/components.rs` — updated public re-exports to remove obsolete items.
+- `src/game/systems/dialogue_visuals.rs` — removed world-space helpers, removed billboard/follow systems, simplified spawn/cleanup systems, updated tests.
+- `src/game/systems/dialogue_choices.rs` — previously refactored to screen-space (Phase 2); choice visuals now children of `DialoguePanelRoot`.
+- `tests/dialogue_visuals_test.rs`, `tests/dialogue_choice_test.rs` — updated tests to validate screen-space UI and removed 3D assumptions.
+- `docs/explanation/dialogue_bubble_debug_summary.md` — added final section documenting migration and verification.
+
+### Validation
+
+- Format: `cargo fmt --all` — OK
+- Compile: `cargo check --all-targets --all-features` — OK
+- Lint: `cargo clippy --all-targets --all-features -- -D warnings` — OK
+- Tests: `cargo nextest run --all-features` — All tests passed
+
+### Manual Verification (how to validate in-game)
+
+1. Start the game (`cargo run --release`) and load the tutorial campaign.
+2. Move the party to tile (11,6) where Apprentice Zara is placed, and press E to interact.
+3. Expected:
+   - A readable dialogue panel appears at the bottom-center of the screen.
+   - Text animates via the typewriter effect.
+   - Choices appear beneath the content; arrow keys navigate choices; Enter/Space confirms.
+   - No 3D rendering artifacts (no dark boxes or near-plane tearing).
+
+### Notes & Next Steps
+
+- Consider adding optional speaker portraits (use existing `PortraitAssets`) or configurable panel positioning (top/side).
+- Consider a small appear/disappear animation (fade) for polish in a follow-up.
+- The documentation and tests now reflect the screen-space UI design and should make future regressions easier to detect.
+
 ### Summary
 
 Implemented Phase 1 of the Config Editor plan: added a visual configuration editor for `config.ron` files in the Campaign Builder SDK. The editor provides a four-section UI layout for Graphics, Audio, Controls, and Camera configuration, integrated seamlessly with existing editor patterns and toolbar infrastructure.

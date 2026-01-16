@@ -260,4 +260,37 @@ Update (2026-01-14) — latest debugging iteration
     - The per-vertex debug line showing vertex world positions and camera front distances.
     - A screenshot or short screen recording if the artifact reappears.
 
-If you'd like me to continue, I can implement the material A/B sweep next (fast and likely to isolate the root cause), or I can jump to a screen-space overlay implementation if you prefer the more robust UI approach. Tell me which option you prefer and I'll run the experiment and update this document with the results.
+Update (2026-01-16) — Final resolution: Migration to screen-space UI
+
+Summary:
+
+- Decision: We migrated dialogue visuals from 3D world-space meshes and billboards to screen-space Bevy UI panels (`bevy_ui` Node hierarchy).
+- Key changes:
+  - Replaced the world-space `Mesh3d` + `StandardMaterial` dialogue bubbles with a screen-space `Node` panel created by `spawn_dialogue_bubble`.
+  - Replaced 3D choice buttons with a screen-space `Node` choice list created by `spawn_choice_ui`.
+  - Removed obsolete 3D helper functions (`select_worst_camera_for_bubble`, `clamp_bubble_position_to_camera`), 3D-specific constants (`DIALOGUE_BUBBLE_Y_OFFSET`, `DIALOGUE_MIN_CAMERA_DISTANCE`, `DIALOGUE_FALLBACK_ENTITY_HEIGHT`, `CHOICE_CONTAINER_Y_OFFSET`), and dialogue-specific `Billboard` usage.
+  - Removed billboard/follow-speaker systems from dialogue workflows and cleaned up related tests.
+  - Updated tests to validate the screen-space UI node hierarchy, speaker name rendering, and typewriter animation.
+  - Updated documentation to reflect the migration and rationale (this document).
+- Why this fixed the issue:
+  - Screen-space UI panels do not participate in the 3D render pass, so depth buffer interactions and alpha blending ordering problems (which were producing near-plane full-screen artifacts) no longer occur. This eliminates the large dark boxes and tearing artifacts seen with the previous world-space approach.
+- Verification performed:
+  - Automated checks ran successfully locally:
+    - `cargo fmt --all` — OK
+    - `cargo check --all-targets --all-features` — OK
+    - `cargo clippy --all-targets --all-features -- -D warnings` — OK
+    - `cargo nextest run --all-features` — All tests passed
+  - Manual verification steps:
+    1. Start the game and load the tutorial campaign.
+    2. Move to the NPC at tile (11,6) and press E to interact.
+    3. Confirm the dialogue panel appears bottom-center, text animates (typewriter), choices appear beneath, arrow keys navigate choices, and Enter/Space confirm.
+    4. Confirm there are no 3D near-plane artifacts or screen-covering boxes during dialogue.
+- Remaining open questions (deferred):
+  - Should the panel include a speaker portrait? (We can reuse existing `PortraitAssets`.)
+  - Should panel position be configurable (top/side vs bottom-center)?
+  - Should the panel have appear/disappear animations (fade in/out)?
+- Next steps (optional):
+  - Prepare a concise PR summary and changelog for review.
+  - If desired, follow up to add a speaker portrait or configurable position/animation.
+
+This document has been updated to reflect the final resolution. If you'd like, I can open a PR with the code changes and a short description of the rationale and verification steps.
