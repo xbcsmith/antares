@@ -21,25 +21,24 @@ use crate::game::systems::dialogue::SelectDialogueChoice;
 
 /// Spawns dialogue choice UI when choices become available
 ///
-/// Creates a vertical list of choice buttons positioned below the dialogue bubble.
-/// Each choice is a selectable button with text showing the choice text.
+/// This system attaches screen-space choice entries as children of the
+/// `DialogueChoiceList` node created by the dialogue panel. It uses a column
+/// layout and creates a lightweight `Node` per choice that contains the
+/// `Text`, `TextFont`, `TextColor`, `BackgroundColor` and `DialogueChoiceButton`
+/// marker components.
 ///
-/// The system only spawns choices when:
+/// Conditions for spawn:
 /// - Game is in Dialogue mode
 /// - Choices are available in the current dialogue state
-/// - No choice container already exists
-///
-/// # Arguments
-///
-/// * `commands` - Bevy commands for entity spawning
-/// * `global_state` - Current game state (must be in Dialogue mode)
-/// * `active_ui` - Resource tracking active dialogue UI
-/// * `mut choice_state` - Resource tracking choice selection
+/// - No choices have been spawned (tracked via `ChoiceSelectionState`)
+/// - A `DialogueChoiceList` container exists (created by the dialogue panel)
 pub fn spawn_choice_ui(
     mut commands: Commands,
     global_state: Res<GlobalState>,
     active_ui: Res<ActiveDialogueUI>,
     mut choice_state: ResMut<ChoiceSelectionState>,
+    // Query to find the screen-space choice list container
+    choice_list_query: Query<Entity, With<DialogueChoiceList>>,
 ) {
     if let GameMode::Dialogue(ref dialogue_state) = global_state.0.mode {
         // Only spawn choices when they are available
@@ -47,50 +46,65 @@ pub fn spawn_choice_ui(
             return;
         }
 
-        // Check if there's already a choice container to prevent re-spawning
+        // Prevent re-spawning if choices are already present
         if choice_state.choice_count > 0 {
-            return; // Already spawned
+            return;
         }
 
-        // Check that dialogue bubble exists
+        // Ensure dialogue panel exists
         if active_ui.bubble_entity.is_none() {
             return;
         }
 
-        // Spawn choice container
-        let container = commands
-            .spawn((
-                Transform::from_xyz(0.0, CHOICE_CONTAINER_Y_OFFSET, 0.0),
-                Visibility::default(),
-                GlobalTransform::default(),
-                DialogueChoiceContainer,
-                Billboard,
-            ))
-            .id();
+        // Find the existing choice list container node (created by the panel)
+        let container = match choice_list_query.iter().next() {
+            Some(e) => e,
+            None => {
+                // No container to attach choices to; nothing to do
+                return;
+            }
+        };
 
-        // Spawn individual choice buttons
         let choice_count = dialogue_state.current_choices.len();
+
+        // Spawn UI nodes for each choice
         for (index, choice_text) in dialogue_state.current_choices.iter().enumerate() {
-            let y_offset = -(index as f32) * (CHOICE_BUTTON_HEIGHT + CHOICE_BUTTON_SPACING);
             let selected = index == 0; // First choice selected by default
 
-            let choice_color = if selected {
+            let text_color = if selected {
                 CHOICE_SELECTED_COLOR
             } else {
                 CHOICE_UNSELECTED_COLOR
             };
 
-            let choice_button = commands
+            // Selected background intentionally slightly different so tests can detect it.
+            // Using a literal here avoids needing to change components for Phase 2.
+            let selected_bg = Color::srgba(0.12, 0.12, 0.15, 1.0);
+
+            let bg_color = if selected {
+                selected_bg
+            } else {
+                CHOICE_BACKGROUND_COLOR
+            };
+
+            // Each choice is a Node with text and selection marker
+            let choice_entity = commands
                 .spawn((
-                    Text::new(format!("{}. {}", index + 1, choice_text)),
-                    TextFont {
-                        font_size: DIALOGUE_TEXT_SIZE * 0.8,
+                    Node {
+                        margin: UiRect::vertical(Val::Px(4.0)),
+                        padding: UiRect::all(Val::Px(6.0)),
+                        flex_direction: FlexDirection::Row,
                         ..default()
                     },
-                    TextColor(choice_color),
-                    Transform::from_xyz(0.0, y_offset, 0.1),
-                    Visibility::default(),
-                    GlobalTransform::default(),
+                    BackgroundColor(bg_color),
+                    BorderRadius::all(Val::Px(4.0)),
+                    // Display number + text like "1. Choice"
+                    Text::new(format!("{}. {}", index + 1, choice_text)),
+                    TextFont {
+                        font_size: DIALOGUE_CONTENT_FONT_SIZE * 0.9,
+                        ..default()
+                    },
+                    TextColor(text_color),
                     DialogueChoiceButton {
                         choice_index: index,
                         selected,
@@ -98,10 +112,11 @@ pub fn spawn_choice_ui(
                 ))
                 .id();
 
-            commands.entity(container).add_child(choice_button);
+            // Attach to the choice list container
+            commands.entity(container).add_child(choice_entity);
         }
 
-        // Update choice selection state
+        // Initialize selection tracking
         choice_state.selected_index = 0;
         choice_state.choice_count = choice_count;
     }
@@ -118,18 +133,38 @@ pub fn spawn_choice_ui(
 /// * `query` - Query for choice button entities
 pub fn update_choice_visuals(
     choice_state: Res<ChoiceSelectionState>,
-    mut query: Query<(&DialogueChoiceButton, &mut TextColor)>,
+    mut query: Query<(
+        &mut DialogueChoiceButton,
+        &mut TextColor,
+        &mut BackgroundColor,
+    )>,
 ) {
+    // Only update visuals when the selection state actually changes
     if !choice_state.is_changed() {
         return;
     }
 
-    for (button, mut text_color) in query.iter_mut() {
+    // Use a distinct highlight background for selected choice
+    let highlight_bg = Color::srgba(0.12, 0.12, 0.15, 1.0);
+
+    for (mut button, mut text_color, mut bg_color) in query.iter_mut() {
         let selected = button.choice_index == choice_state.selected_index;
+
+        // Reflect logical selection on the component
+        button.selected = selected;
+
+        // Update text color
         text_color.0 = if selected {
             CHOICE_SELECTED_COLOR
         } else {
             CHOICE_UNSELECTED_COLOR
+        };
+
+        // Update background to highlight selection in addition to text color
+        bg_color.0 = if selected {
+            highlight_bg
+        } else {
+            CHOICE_BACKGROUND_COLOR
         };
     }
 }
@@ -226,13 +261,18 @@ pub fn cleanup_choice_ui(
     mut commands: Commands,
     global_state: Res<GlobalState>,
     mut choice_state: ResMut<ChoiceSelectionState>,
-    query: Query<Entity, With<DialogueChoiceContainer>>,
+    // Query the screen-space choice list container(s) and remove their children
+    query: Query<&Children, With<DialogueChoiceList>>,
 ) {
-    // Cleanup if no longer in Dialogue mode
+    // Cleanup when leaving Dialogue mode
     if !matches!(global_state.0.mode, GameMode::Dialogue(_)) {
-        for entity in query.iter() {
-            commands.entity(entity).despawn();
+        for children in query.iter() {
+            for child in children.iter() {
+                // Despawn each child choice node (they do not have nested children)
+                commands.entity(child).despawn();
+            }
         }
+
         choice_state.selected_index = 0;
         choice_state.choice_count = 0;
     }
@@ -253,9 +293,9 @@ mod tests {
     }
 
     #[test]
-    fn test_choice_container_component_marker() {
-        // Verify component is simple marker
-        let _container = DialogueChoiceContainer;
+    fn test_choice_list_component_marker() {
+        // Verify new screen-space marker exists
+        let _list = DialogueChoiceList;
         // Component should compile and be usable - verified by type checking
     }
 
@@ -294,5 +334,236 @@ mod tests {
         assert_eq!(number_to_index(1), 0);
         assert_eq!(number_to_index(5), 4);
         assert_eq!(number_to_index(9), 8);
+    }
+
+    #[test]
+    fn test_spawn_choice_ui_populates_choice_list() {
+        use crate::application::dialogue::DialogueState;
+        use crate::application::GameMode;
+        use crate::domain::types::Position;
+        use crate::game::components::dialogue::{ActiveDialogueUI, DialogueChoiceButton};
+        use crate::game::resources::GlobalState;
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ActiveDialogueUI>();
+        app.init_resource::<ChoiceSelectionState>();
+
+        // Prepare a DialogueState with two choices
+        let mut gs = GlobalState(crate::application::GameState::new());
+        let mut ds = DialogueState::start_simple(
+            "Hello!".to_string(),
+            "Speaker".to_string(),
+            None,
+            Some(Position::new(5, 6)),
+        );
+        ds.update_node(
+            "Hello!".to_string(),
+            "Speaker".to_string(),
+            vec!["Opt A".to_string(), "Opt B".to_string()],
+            None,
+        );
+        gs.0.mode = GameMode::Dialogue(ds);
+        app.insert_resource(gs);
+
+        // Spawn panel then choices
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
+        );
+        app.update();
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_choices::spawn_choice_ui,
+        );
+        app.update();
+
+        let world = app.world_mut();
+        // Verify both choice entities exist
+        let choice_count = world.query::<&DialogueChoiceButton>().iter(world).count();
+        assert_eq!(choice_count, 2);
+
+        // Collect entries for inspection to avoid overlapping world borrows
+        let entries: Vec<_> = world
+            .query::<(&DialogueChoiceButton, &Text, &TextColor, &BackgroundColor)>()
+            .iter(world)
+            .collect();
+
+        // Verify first choice is selected and colors/backgrounds are set
+        let first = entries
+            .iter()
+            .find(|(b, _, _, _)| b.choice_index == 0)
+            .expect("expected first choice");
+        let (button, text, text_color, bg_color) = *first;
+        assert!(button.selected);
+        assert_eq!(text_color.0, CHOICE_SELECTED_COLOR);
+
+        // Ensure selected background is different from the unselected one
+        let unselected_bg = entries
+            .iter()
+            .find(|(b, _, _, _)| b.choice_index != 0)
+            .map(|(_, _, _, bg)| bg.0)
+            .expect("expected unselected");
+        assert_ne!(bg_color.0, unselected_bg);
+
+        // Confirm text content format is "1. <choice>"
+        assert!(text.0.starts_with("1."));
+    }
+
+    #[test]
+    fn test_update_choice_visuals_applies_highlight() {
+        use crate::application::dialogue::DialogueState;
+        use crate::application::GameMode;
+        use crate::domain::types::Position;
+        use crate::game::components::dialogue::{ActiveDialogueUI, DialogueChoiceButton};
+        use crate::game::resources::GlobalState;
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ActiveDialogueUI>();
+        app.init_resource::<ChoiceSelectionState>();
+
+        // Prepare a DialogueState with two choices
+        let mut gs = GlobalState(crate::application::GameState::new());
+        let mut ds = DialogueState::start_simple(
+            "Hello!".to_string(),
+            "Speaker".to_string(),
+            None,
+            Some(Position::new(5, 6)),
+        );
+        ds.update_node(
+            "Hello!".to_string(),
+            "Speaker".to_string(),
+            vec!["Opt A".to_string(), "Opt B".to_string()],
+            None,
+        );
+        gs.0.mode = GameMode::Dialogue(ds);
+        app.insert_resource(gs);
+
+        // Spawn panel and choices
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
+        );
+        app.update();
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_choices::spawn_choice_ui,
+        );
+        app.update();
+
+        // Change selection to the second choice
+        {
+            let mut cs = app.world_mut().resource_mut::<ChoiceSelectionState>();
+            cs.selected_index = 1;
+        }
+
+        // Run visuals update to apply highlight
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_choices::update_choice_visuals,
+        );
+        app.update();
+
+        // Verify second choice shows as selected
+        let world = app.world_mut();
+        let entries: Vec<_> = world
+            .query::<(&DialogueChoiceButton, &TextColor, &BackgroundColor)>()
+            .iter(world)
+            .collect();
+
+        let second = entries
+            .iter()
+            .find(|(b, _, _)| b.choice_index == 1)
+            .expect("expected second choice");
+        let (button, text_color, _bg) = *second;
+        assert!(button.selected);
+        assert_eq!(text_color.0, CHOICE_SELECTED_COLOR);
+
+        // First should now be unselected
+        let first = entries
+            .iter()
+            .find(|(b, _, _)| b.choice_index == 0)
+            .expect("expected first choice");
+        let (_, first_text_color, _) = *first;
+        assert_eq!(first_text_color.0, CHOICE_UNSELECTED_COLOR);
+    }
+
+    #[test]
+    fn test_cleanup_choice_ui_despawns_choice_nodes() {
+        use crate::application::dialogue::DialogueState;
+        use crate::application::GameMode;
+        use crate::domain::types::Position;
+        use crate::game::components::dialogue::{ActiveDialogueUI, DialogueChoiceButton};
+        use crate::game::resources::GlobalState;
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ActiveDialogueUI>();
+        app.init_resource::<ChoiceSelectionState>();
+
+        // Prepare a DialogueState with two choices
+        let mut gs = GlobalState(crate::application::GameState::new());
+        let mut ds = DialogueState::start_simple(
+            "Hello!".to_string(),
+            "Speaker".to_string(),
+            None,
+            Some(Position::new(5, 6)),
+        );
+        ds.update_node(
+            "Hello!".to_string(),
+            "Speaker".to_string(),
+            vec!["Opt A".to_string(), "Opt B".to_string()],
+            None,
+        );
+        gs.0.mode = GameMode::Dialogue(ds);
+        app.insert_resource(gs);
+
+        // Spawn panel and choices
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
+        );
+        app.update();
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_choices::spawn_choice_ui,
+        );
+        app.update();
+
+        // Ensure choices exist before cleanup
+        {
+            let world = app.world_mut();
+            let count = world.query::<&DialogueChoiceButton>().iter(world).count();
+            assert_eq!(count, 2, "expected two choice buttons before cleanup");
+        }
+
+        // Change mode to Exploration which triggers cleanup
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.mode = GameMode::Exploration;
+        }
+
+        // Run cleanup system
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_choices::cleanup_choice_ui,
+        );
+        app.update();
+
+        // Verify choices were despawned
+        {
+            let world = app.world_mut();
+            let count = world.query::<&DialogueChoiceButton>().iter(world).count();
+            assert_eq!(count, 0, "expected no choice buttons after cleanup");
+        }
+
+        // Verify choice state was reset
+        let choice_state = app.world().resource::<ChoiceSelectionState>();
+        assert_eq!(choice_state.choice_count, 0);
+        assert_eq!(choice_state.selected_index, 0);
     }
 }

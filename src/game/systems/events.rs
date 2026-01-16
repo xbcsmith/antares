@@ -231,7 +231,9 @@ fn handle_events(
                     // (which can be near the ground) and keeps visuals consistent.
                     let speaker_entity = npc_query
                         .iter()
-                        .find(|(_, _, coord)| coord.0.x == current_pos.x && coord.0.y == current_pos.y)
+                        .find(|(_, _, coord)| {
+                            coord.0.x == current_pos.x && coord.0.y == current_pos.y
+                        })
                         .map(|(entity, _, _)| entity);
 
                     if speaker_entity.is_none() {
@@ -379,10 +381,10 @@ mod tests {
 
     #[test]
     fn test_recruitable_character_does_not_auto_trigger() {
+        use crate::application::resources::GameContent;
         use crate::domain::types::Position;
         use crate::domain::world::MapEvent;
         use crate::game::resources::GlobalState;
-        use crate::application::resources::GameContent;
         use crate::sdk::database::ContentDatabase;
         use bevy::prelude::*;
 
@@ -642,7 +644,7 @@ mod tests {
         use crate::application::resources::GameContent;
         use crate::domain::dialogue::{DialogueNode, DialogueTree};
         use crate::domain::types::Position;
-        use crate::game::components::dialogue::{ActiveDialogueUI, DIALOGUE_BUBBLE_Y_OFFSET};
+        use crate::game::components::dialogue::ActiveDialogueUI;
         use crate::game::resources::GlobalState;
         use crate::sdk::ContentDatabase;
         use bevy::prelude::*;
@@ -697,9 +699,11 @@ mod tests {
             // This avoids depending on stepping-on behavior for RecruitableCharacter.
             use crate::application::dialogue::DialogueState;
             let mut gs_res = app.world_mut().resource_mut::<GlobalState>();
-            gs_res.0.mode = crate::application::GameMode::Dialogue(
-                DialogueState::start(101, 1, Some(event_pos))
-            );
+            gs_res.0.mode = crate::application::GameMode::Dialogue(DialogueState::start(
+                101,
+                1,
+                Some(event_pos),
+            ));
         }
         // Run one update to let dialogue UI spawn
         app.update();
