@@ -31,6 +31,16 @@ pub type DialogueTextEntity = Entity;
 /// Vertical offset of dialogue bubble above the speaker (in world units)
 pub const DIALOGUE_BUBBLE_Y_OFFSET: f32 = 2.5;
 
+/// Default base height (Y coordinate) to use when placing a dialogue bubble above
+/// a map tile when the speaker entity isn't available. This matches the typical
+/// NPC spawn height used by the map renderer and allows UI to be positioned over
+/// the map tile rather than falling back to the world origin.
+pub const DIALOGUE_FALLBACK_ENTITY_HEIGHT: f32 = 0.9;
+
+/// Minimum distance from the camera to keep dialogue bubbles from intersecting
+/// the camera near-plane and becoming screen-filling artifacts.
+pub const DIALOGUE_MIN_CAMERA_DISTANCE: f32 = 1.5;
+
 /// Width of dialogue bubble in world units
 pub const DIALOGUE_BUBBLE_WIDTH: f32 = 4.0;
 
@@ -74,6 +84,22 @@ pub const CHOICE_UNSELECTED_COLOR: Color = Color::srgb(0.6, 0.6, 0.6);
 /// Background color for choice container
 pub const CHOICE_BACKGROUND_COLOR: Color = Color::srgba(0.05, 0.05, 0.1, 0.95);
 
+// Screen-Space UI Constants (bevy_ui)
+/// Panel width as percentage of screen width
+pub const DIALOGUE_PANEL_WIDTH: Val = Val::Percent(60.0);
+
+/// Distance from bottom of screen
+pub const DIALOGUE_PANEL_BOTTOM: Val = Val::Px(120.0);
+
+/// Internal padding for dialogue panel
+pub const DIALOGUE_PANEL_PADDING: Val = Val::Px(16.0);
+
+/// Font size for speaker name
+pub const DIALOGUE_SPEAKER_FONT_SIZE: f32 = 20.0;
+
+/// Font size for dialogue content text
+pub const DIALOGUE_CONTENT_FONT_SIZE: f32 = 18.0;
+
 // ============================================================================
 // Components
 // ============================================================================
@@ -93,7 +119,7 @@ pub const CHOICE_BACKGROUND_COLOR: Color = Color::srgba(0.05, 0.05, 0.1, 0.95);
 #[derive(Component, Debug, Clone)]
 pub struct DialogueBubble {
     /// Entity that spawned this dialogue (typically NPC)
-    pub speaker_entity: Entity,
+    pub speaker_entity: Option<Entity>,
     /// Root entity of the bubble hierarchy
     pub root_entity: Entity,
     /// Background mesh entity
@@ -165,6 +191,34 @@ pub struct DialogueChoiceButton {
 /// Marks the container entity holding all choice buttons
 #[derive(Component, Debug)]
 pub struct DialogueChoiceContainer;
+
+/// Marks the root UI container for the dialogue panel (screen-space)
+///
+/// This is the top-level `Node` entity for the dialogue UI, positioned
+/// at the bottom-center of the screen using bevy_ui.
+#[derive(Component, Debug)]
+pub struct DialoguePanelRoot;
+
+/// Marks the speaker name text element in the dialogue panel
+///
+/// This component identifies the text entity displaying the speaker's name
+/// (e.g., "Apprentice Zara") in the dialogue UI.
+#[derive(Component, Debug)]
+pub struct DialogueSpeakerText;
+
+/// Marks the dialogue content text element
+///
+/// This component identifies the text entity displaying the actual dialogue
+/// content. It works with `TypewriterText` for animated text reveal.
+#[derive(Component, Debug)]
+pub struct DialogueContentText;
+
+/// Marks the choice button list container
+///
+/// This component identifies the container holding all dialogue choice buttons
+/// in the screen-space UI.
+#[derive(Component, Debug)]
+pub struct DialogueChoiceList;
 
 /// Marks an entity as an NPC that can initiate dialogue
 ///
@@ -292,14 +346,14 @@ mod tests {
         let text = Entity::PLACEHOLDER;
 
         let bubble = DialogueBubble {
-            speaker_entity: speaker,
+            speaker_entity: Some(speaker),
             root_entity: root,
             background_entity: background,
             text_entity: text,
             y_offset: DIALOGUE_BUBBLE_Y_OFFSET,
         };
 
-        assert_eq!(bubble.speaker_entity, speaker);
+        assert_eq!(bubble.speaker_entity, Some(speaker));
         assert_eq!(bubble.y_offset, DIALOGUE_BUBBLE_Y_OFFSET);
     }
 

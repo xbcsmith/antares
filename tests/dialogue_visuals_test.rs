@@ -78,14 +78,14 @@ fn test_dialogue_bubble_entity_references() {
     let text = Entity::PLACEHOLDER;
 
     let bubble = DialogueBubble {
-        speaker_entity: speaker,
+        speaker_entity: Some(speaker),
         root_entity: root,
         background_entity: background,
         text_entity: text,
         y_offset: DIALOGUE_BUBBLE_Y_OFFSET,
     };
 
-    assert_eq!(bubble.speaker_entity, speaker);
+    assert_eq!(bubble.speaker_entity, Some(speaker));
     assert_eq!(bubble.root_entity, root);
     assert_eq!(bubble.background_entity, background);
     assert_eq!(bubble.text_entity, text);
@@ -208,7 +208,8 @@ fn test_dialogue_state_message_types() {
 
     let start_msg = StartDialogue {
         dialogue_id: 1,
-        speaker_entity: Entity::PLACEHOLDER,
+        speaker_entity: Some(Entity::PLACEHOLDER),
+        fallback_position: None,
     };
     assert_eq!(start_msg.dialogue_id, 1);
 
@@ -281,7 +282,7 @@ fn test_dialogue_bubble_has_all_entity_references() {
     use bevy::prelude::Entity;
 
     let bubble = DialogueBubble {
-        speaker_entity: Entity::PLACEHOLDER,
+        speaker_entity: Some(Entity::PLACEHOLDER),
         root_entity: Entity::PLACEHOLDER,
         background_entity: Entity::PLACEHOLDER,
         text_entity: Entity::PLACEHOLDER,

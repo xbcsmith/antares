@@ -7608,62 +7608,23 @@
     ],
     events: {
         (
-            x: 10,
-            y: 19,
-        ): Teleport(
-            name: "Mountain Pass Gate",
-            description: "A gate that transports the party to Mountain Pass (map 5) at (19,6).",
-            destination: (
-                x: 19,
-                y: 6,
-            ),
-            map_id: 5,
+            x: 7,
+            y: 17,
+        ): Trap(
+            name: "Hidden Pit Trap",
+            description: "A concealed pit trap that deals heavy damage when sprung.",
+            damage: 8,
+            effect: None,
         ),
         (
-            x: 0,
-            y: 9,
-        ): Teleport(
-            name: "Starting Town Portal",
-            description: "Portal leading back to the Starting Town",
-            destination: (
-                x: 18,
-                y: 11,
-            ),
-            map_id: 1,
-        ),
-        (
-            x: 12,
-            y: 0,
-        ): Teleport(
-            name: "Ancient Portal",
-            description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (0,7).",
-            destination: (
-                x: 0,
-                y: 7,
-            ),
-            map_id: 3,
-        ),
-        (
-            x: 8,
-            y: 8,
-        ): Treasure(
-            name: "Buried Chest",
-            description: "A chest buried and hidden here containing useful items.",
-            loot: [
-                13,
-                23,
-                32,
-            ],
-        ),
-        (
-            x: 5,
-            y: 3,
+            x: 3,
+            y: 11,
         ): Encounter(
-            name: "Bandit Patrol",
-            description: "A small band of foes patrolling this area.",
+            name: "Forest Ambush",
+            description: "A hidden ambush by hostile creatures in the forest.",
             monster_group: [
-                4,
-                4,
+                6,
+                5,
             ],
         ),
         (
@@ -7678,17 +7639,6 @@
             ],
         ),
         (
-            x: 3,
-            y: 11,
-        ): Encounter(
-            name: "Forest Ambush",
-            description: "A hidden ambush by hostile creatures in the forest.",
-            monster_group: [
-                6,
-                5,
-            ],
-        ),
-        (
             x: 8,
             y: 12,
         ): RecruitableCharacter(
@@ -7696,6 +7646,25 @@
             description: "An enthusiastic gnome apprentice sitting on a fallen log, studying a spellbook. She looks up hopefully as you approach.",
             character_id: "apprentice_zara",
             dialogue_id: None,
+        ),
+        (
+            x: 10,
+            y: 18,
+        ): Sign(
+            name: "Mountain Pass Sign",
+            description: "A wooden sign indicating the way to the mountain pass.",
+            text: "To the Mountain Pass",
+        ),
+        (
+            x: 17,
+            y: 16,
+        ): Encounter(
+            name: "Bandit Patrol",
+            description: "A patrol of bandits looking for easy victims.",
+            monster_group: [
+                6,
+                6,
+            ],
         ),
         (
             x: 16,
@@ -7707,6 +7676,78 @@
                 14,
                 24,
             ],
+        ),
+        (
+            x: 5,
+            y: 3,
+        ): Encounter(
+            name: "Bandit Patrol",
+            description: "A small band of foes patrolling this area.",
+            monster_group: [
+                4,
+                4,
+            ],
+        ),
+        (
+            x: 10,
+            y: 13,
+        ): Treasure(
+            name: "Large Treasure Chest",
+            description: "A large and ornate chest containing valuable loot.",
+            loot: [
+                15,
+                25,
+                33,
+                40,
+            ],
+        ),
+        (
+            x: 8,
+            y: 8,
+        ): Treasure(
+            name: "Buried Chest",
+            description: "A chest buried and hidden here containing useful items.",
+            loot: [
+                13,
+                23,
+                32,
+            ],
+        ),
+        (
+            x: 12,
+            y: 0,
+        ): Teleport(
+            name: "Ancient Portal",
+            description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (0,7).",
+            destination: (
+                x: 0,
+                y: 7,
+            ),
+            map_id: 3,
+        ),
+        (
+            x: 0,
+            y: 9,
+        ): Teleport(
+            name: "Starting Town Portal",
+            description: "Portal leading back to the Starting Town",
+            destination: (
+                x: 18,
+                y: 11,
+            ),
+            map_id: 1,
+        ),
+        (
+            x: 10,
+            y: 19,
+        ): Teleport(
+            name: "Mountain Pass Gate",
+            description: "A gate that transports the party to Mountain Pass (map 5) at (19,6).",
+            destination: (
+                x: 19,
+                y: 6,
+            ),
+            map_id: 5,
         ),
         (
             x: 18,
@@ -7725,6 +7766,14 @@
             text: "Exit to town.",
         ),
         (
+            x: 12,
+            y: 1,
+        ): Sign(
+            name: "Ruins Direction Sign",
+            description: "A sign pointing the way to the Ancient Ruins.",
+            text: "To Ancient Ruins",
+        ),
+        (
             x: 19,
             y: 10,
         ): Teleport(
@@ -7735,55 +7784,6 @@
                 y: 17,
             ),
             map_id: 2,
-        ),
-        (
-            x: 12,
-            y: 1,
-        ): Sign(
-            name: "Ruins Direction Sign",
-            description: "A sign pointing the way to the Ancient Ruins.",
-            text: "To Ancient Ruins",
-        ),
-        (
-            x: 17,
-            y: 16,
-        ): Encounter(
-            name: "Bandit Patrol",
-            description: "A patrol of bandits looking for easy victims.",
-            monster_group: [
-                6,
-                6,
-            ],
-        ),
-        (
-            x: 7,
-            y: 17,
-        ): Trap(
-            name: "Hidden Pit Trap",
-            description: "A concealed pit trap that deals heavy damage when sprung.",
-            damage: 8,
-            effect: None,
-        ),
-        (
-            x: 10,
-            y: 18,
-        ): Sign(
-            name: "Mountain Pass Sign",
-            description: "A wooden sign indicating the way to the mountain pass.",
-            text: "To the Mountain Pass",
-        ),
-        (
-            x: 10,
-            y: 13,
-        ): Treasure(
-            name: "Large Treasure Chest",
-            description: "A large and ornate chest containing valuable loot.",
-            loot: [
-                15,
-                25,
-                33,
-                40,
-            ],
         ),
     },
     npc_placements: [

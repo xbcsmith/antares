@@ -85,10 +85,11 @@ fn test_start_dialogue_event_includes_speaker() {
 
     let event = StartDialogue {
         dialogue_id: 1,
-        speaker_entity: Entity::PLACEHOLDER,
+        speaker_entity: Some(Entity::PLACEHOLDER),
+        fallback_position: None,
     };
     assert_eq!(event.dialogue_id, 1);
-    assert_eq!(event.speaker_entity, Entity::PLACEHOLDER);
+    assert_eq!(event.speaker_entity, Some(Entity::PLACEHOLDER));
 }
 
 #[test]
@@ -97,7 +98,7 @@ fn test_speaker_entity_preservation_on_choice() {
     use antares::application::dialogue::DialogueState;
     use bevy::prelude::Entity;
 
-    let mut state = DialogueState::start(1, 1);
+    let mut state = DialogueState::start(1, 1, None);
     let speaker_entity = Entity::from_bits(99);
 
     state.update_node(
@@ -172,4 +173,22 @@ fn test_dialogue_state_speaker_entity_none_by_default() {
 
     let state = DialogueState::default();
     assert_eq!(state.speaker_entity, None);
+}
+
+#[test]
+fn test_simple_dialogue_initialization() {
+    use antares::application::dialogue::DialogueState;
+    use bevy::prelude::Entity;
+
+    let text = "Hello!".to_string();
+    let speaker = "NPC".to_string();
+    let entity = Some(Entity::from_bits(42));
+
+    let state = DialogueState::start_simple(text.clone(), speaker.clone(), entity, None);
+
+    assert_eq!(state.active_tree_id, None);
+    assert_eq!(state.current_text, text);
+    assert_eq!(state.current_speaker, speaker);
+    assert_eq!(state.current_choices, vec!["Goodbye".to_string()]);
+    assert_eq!(state.speaker_entity, entity);
 }

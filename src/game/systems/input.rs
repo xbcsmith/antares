@@ -449,6 +449,7 @@ fn handle_input(
                     description: String::new(),
                     npc_id: npc.npc_id.clone(),
                 },
+                position: npc.position,
             });
             return;
         }
@@ -461,6 +462,7 @@ fn handle_input(
                         info!("Interacting with event at {:?}", position);
                         map_event_messages.write(MapEventTriggered {
                             event: event.clone(),
+                            position,
                         });
                         return;
                     }
@@ -475,13 +477,13 @@ fn handle_input(
                         let speaker_entity = npc_query
                             .iter()
                             .find(|(_, _, tile_coord)| tile_coord.0 == position)
-                            .map(|(entity, _, _)| entity)
-                            .unwrap_or(Entity::PLACEHOLDER);
+                            .map(|(entity, _, _)| entity);
 
                         // Use dialogue ID 100 for default recruitment dialogue
                         dialogue_writer.write(StartDialogue {
                             dialogue_id: 100,
                             speaker_entity,
+                            fallback_position: Some(position),
                         });
                         return;
                     }
