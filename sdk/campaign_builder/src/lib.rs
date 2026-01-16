@@ -4642,12 +4642,6 @@ impl CampaignBuilderApp {
                                             format!("{:.1} MB", total_size as f64 / (1024.0 * 1024.0))
                                         };
 
-                                        self.status_message = format!(
-                                            "⚠️ About to delete {} files ({}) - Click again to confirm",
-                                            selected_count,
-                                            size_str
-                                        );
-
                                         // Perform deletion
                                         let mut deleted_count = 0;
                                         let mut failed_deletions = Vec::new();

@@ -1549,13 +1549,17 @@ impl ConditionsEditorState {
                         if let Some(del_id) = &self.selected_for_delete {
                             if let Some(pos) = conditions.iter().position(|c| &c.id == del_id) {
                                 conditions.remove(pos);
-                                if self.remove_refs_on_delete {
+
+                                // Combine status messages so we only assign once (avoids unused assignment warning)
+                                let message = if self.remove_refs_on_delete {
                                     let cnt = remove_condition_references_from_spells(spells, del_id);
-                                    *status_message =
-                                        format!("Removed references from {} spell(s).", cnt);
-                                }
+                                    format!("Removed references from {} spell(s). Condition deleted.", cnt)
+                                } else {
+                                    "Condition deleted".to_string()
+                                };
+
                                 *unsaved_changes = true;
-                                *status_message = "Condition deleted".to_string();
+                                *status_message = message;
                                 self.selected_condition_idx = None;
                                 self.save_conditions(
                                     conditions,

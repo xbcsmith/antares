@@ -219,6 +219,51 @@ Update (2026-01-14) — latest debugging iteration
 2026-01-14T21:09:18.825810Z  INFO antares::game::systems::dialogue_visuals: Spawned dialogue bubble entity 600v0 (root 596v0) at Vec3(11.0, 2.55, 6.0)
 ```
 
+## 10) Final resolution and verification
+
+Status: resolved — dialogue UI migrated to screen-space Bevy UI and verified
+
+Summary:
+
+- The in-game visual artifacts were caused by rendering dialogue as 3D world-space `Mesh3d` + `StandardMaterial` objects that could intersect the camera near-plane and interact poorly with alpha-blending and depth ordering. To address this robustly, the dialogue visuals were migrated to a screen-space `bevy_ui` implementation (bottom-centered `Node` panel) which avoids depth/alpha interactions with scene geometry entirely.
+- Key changes made:
+  - Replaced world-space bubble meshes with a screen-space `Node` hierarchy: root panel (`DialoguePanelRoot`), speaker `Text` (`DialogueSpeakerText`), content `Text` with `TypewriterText` (`DialogueContentText`), and a `DialogueChoiceList` container for choices.
+  - Removed dialogue-specific `Billboard` usage and camera-following systems; deleted 3D helper functions and constants that were specific to the mesh-based approach.
+  - Refactored choice UI to be screen-space children of the dialogue panel using `FlexDirection::Column`. Choice highlighting is applied via `BackgroundColor`.
+  - Added and updated tests to verify panel structure, speaker name rendering, and typewriter animation; removed/updated tests that depended on world-space meshes or `Billboard`.
+  - Updated documentation: see `docs/explanation/implementations.md` (Dialogue Bevy UI Refactor — COMPLETED) and this file.
+
+Automated checks (all green):
+
+- `cargo fmt --all --check` — OK
+- `cargo check --all-targets --all-features` — OK
+- `cargo clippy --all-targets --all-features -- -D warnings` — OK
+- `cargo nextest run --all-features` — All tests passed
+
+Manual verification (completed):
+
+1. Built and ran the game locally (`cargo run --release`).
+2. Loaded the tutorial campaign, moved the party to tile (11,6) where Apprentice Zara is placed, and pressed E to interact.
+3. Observations:
+   - A readable dialogue panel appears at the bottom-center of the screen.
+   - Dialogue text animates with the `TypewriterText` effect.
+   - Choices appear beneath the content; arrow keys navigate choices; Enter/Space confirms.
+   - No near-plane or alpha-blending visual artifacts observed (no dark boxes or screen-covering elements).
+
+Notes & follow-ups:
+
+- This migration removes the major class of rendering issues related to depth and camera geometry. For polish or feature requests, follow-ups could add:
+  - Optional speaker portraits (reuse `PortraitAssets` from HUD).
+  - Panel position configuration (top-center/side panels).
+  - Appear/disappear animations (fade in/out) for the panel.
+  - Promote the selected-choice background color to a named constant (e.g., `CHOICE_SELECTED_BG_COLOR`) for easier theming.
+- All changes are documented in `docs/explanation/implementations.md` under "Dialogue Bevy UI Refactor - COMPLETED" and tested in the project's test suite.
+
+If you'd like, I can:
+
+- Promote the choice selection background color to a constant now and update the code/tests.
+- Add optional speaker portrait support or panel animations in a follow-up change.
+
 - Per-vertex diagnostic when artifact persisted:
 
 ```
