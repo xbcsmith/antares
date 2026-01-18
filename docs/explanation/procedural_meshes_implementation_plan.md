@@ -77,7 +77,7 @@ Replace remaining placeholder visuals (simple cuboids and flat planes) with proc
 1. Create new file with SPDX header:
 
    ```
-   // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+   // SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
    // SPDX-License-Identifier: Apache-2.0
    ```
 

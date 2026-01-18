@@ -6,7 +6,7 @@
         portrait_id: "elder_1",
         dialogue_id: Some(3),
         quest_ids: [
-            4,
+            5,
         ],
         faction: Some("Village"),
         is_merchant: false,
@@ -53,7 +53,6 @@
         dialogue_id: Some(1),
         quest_ids: [
             0,
-            1,
         ],
         faction: Some("Wizards"),
         is_merchant: false,
@@ -67,7 +66,7 @@
         dialogue_id: Some(2),
         quest_ids: [
             1,
-            0,
+            3,
         ],
         faction: Some("Village"),
         is_merchant: false,
@@ -89,11 +88,11 @@
     (
         id: "tutorial_elder_village2",
         name: "Village Elder Mountain Pass",
-        description: "The wise elder of the village who offers guidance and local quests.",
+        description: "The elder at the mountain pass who offers guidance and local quests.",
         portrait_id: "npc_014",
         dialogue_id: Some(8),
         quest_ids: [
-            5,
+            4,
         ],
         faction: Some("Village"),
         is_merchant: false,
@@ -102,7 +101,7 @@
     (
         id: "tutorial_innkeeper_town2",
         name: "Innkeeper Mountain Pass",
-        description: "The proprietor of the inn who rents rooms and provides food to travelers.",
+        description: "The proprietor of the inn at the pass, offering rooms and food.",
         portrait_id: "npc_011",
         dialogue_id: Some(9),
         quest_ids: [],
@@ -113,7 +112,7 @@
     (
         id: "tutorial_merchant_town2",
         name: "Merchant Mountain Pass",
-        description: "A traveling merchant offering a selection of goods and supplies.",
+        description: "A traveling merchant at the pass offering supplies.",
         portrait_id: "npc_012",
         dialogue_id: Some(10),
         quest_ids: [],
@@ -124,7 +123,7 @@
     (
         id: "tutorial_priest_town2",
         name: "High Priest Mountain Pass",
-        description: "The head cleric of the temple, who offers healing and spiritual counsel.",
+        description: "The head cleric of the mountain temple who offers counsel and healing.",
         portrait_id: "priest_1",
         dialogue_id: Some(11),
         quest_ids: [],

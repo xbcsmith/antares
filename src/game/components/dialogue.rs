@@ -14,10 +14,7 @@ use bevy::prelude::*;
 /// Used to reference the root entity of a dialogue bubble hierarchy.
 pub type DialogueBubbleEntity = Entity;
 
-/// Type alias for dialogue background entity
-///
-/// Used to reference the background mesh of a dialogue bubble.
-pub type DialogueBackgroundEntity = Entity;
+// Dialogue background entity type removed - UI now uses screen-space Node entities (DialogueBubble.root_entity / text_entity).
 
 /// Type alias for dialogue text entity
 ///
@@ -28,8 +25,7 @@ pub type DialogueTextEntity = Entity;
 // Visual Constants
 // ============================================================================
 
-/// Vertical offset of dialogue bubble above the speaker (in world units)
-pub const DIALOGUE_BUBBLE_Y_OFFSET: f32 = 2.5;
+// 3D world-space positioning constants removed; dialogue visuals now use screen-space `bevy_ui` panels.
 
 /// Width of dialogue bubble in world units
 pub const DIALOGUE_BUBBLE_WIDTH: f32 = 4.0;
@@ -56,8 +52,6 @@ pub const DIALOGUE_TEXT_COLOR: Color = Color::srgb(0.95, 0.95, 0.95);
 pub const DIALOGUE_CHOICE_COLOR: Color = Color::srgb(0.8, 0.8, 0.3);
 
 // Choice UI Constants
-/// Vertical offset of choice container below dialogue bubble (in world units)
-pub const CHOICE_CONTAINER_Y_OFFSET: f32 = -1.5;
 
 /// Height of each choice button (in world units)
 pub const CHOICE_BUTTON_HEIGHT: f32 = 0.4;
@@ -74,45 +68,48 @@ pub const CHOICE_UNSELECTED_COLOR: Color = Color::srgb(0.6, 0.6, 0.6);
 /// Background color for choice container
 pub const CHOICE_BACKGROUND_COLOR: Color = Color::srgba(0.05, 0.05, 0.1, 0.95);
 
+// Screen-Space UI Constants (bevy_ui)
+/// Panel width as percentage of screen width
+pub const DIALOGUE_PANEL_WIDTH: Val = Val::Percent(60.0);
+
+/// Distance from bottom of screen
+pub const DIALOGUE_PANEL_BOTTOM: Val = Val::Px(120.0);
+
+/// Internal padding for dialogue panel
+pub const DIALOGUE_PANEL_PADDING: Val = Val::Px(16.0);
+
+/// Font size for speaker name
+pub const DIALOGUE_SPEAKER_FONT_SIZE: f32 = 20.0;
+
+/// Font size for dialogue content text
+pub const DIALOGUE_CONTENT_FONT_SIZE: f32 = 18.0;
+
 // ============================================================================
 // Components
 // ============================================================================
 
 /// Marks an entity as a dialogue bubble UI element
 ///
-/// Dialogue bubbles are 2.5D UI elements that float above NPCs during conversations.
-/// They contain text content and follow the speaker entity's position.
+/// Dialogue bubbles are screen-space UI panels that appear at the bottom-center
+/// of the screen. They contain the current dialogue text and are tracked by
+/// the `ActiveDialogueUI` resource.
 ///
 /// # Fields
 ///
-/// * `speaker_entity` - The entity that spawned this dialogue (typically an NPC)
-/// * `root_entity` - Root entity of the bubble hierarchy
-/// * `background_entity` - Entity containing the background mesh
-/// * `text_entity` - Entity containing the text component
-/// * `y_offset` - Vertical offset from speaker position
+/// * `speaker_entity` - The entity that initiated this dialogue (optional)
+/// * `root_entity` - Root `Node` entity of the panel hierarchy
+/// * `text_entity` - Entity containing the content `Text` component
 #[derive(Component, Debug, Clone)]
 pub struct DialogueBubble {
-    /// Entity that spawned this dialogue (typically NPC)
-    pub speaker_entity: Entity,
-    /// Root entity of the bubble hierarchy
+    /// Entity that initiated this dialogue (optional)
+    pub speaker_entity: Option<Entity>,
+    /// Root UI node entity for the dialogue panel
     pub root_entity: Entity,
-    /// Background mesh entity
-    pub background_entity: Entity,
-    /// Text entity
+    /// Text entity containing the dialogue content
     pub text_entity: Entity,
-    /// Vertical offset from speaker position
-    pub y_offset: f32,
 }
 
-/// Billboard component - makes entity always face the camera
-///
-/// Used for dialogue bubbles and other 2.5D UI elements that should
-/// remain readable regardless of camera angle.
-///
-/// When attached to an entity, the dialogue system will automatically
-/// rotate it to face the camera each frame, creating a billboard effect.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct Billboard;
+// Billboard component removed - dialogue UI is screen-space and does not require an entity-facing-camera marker.
 
 /// Typewriter text animation state
 ///
@@ -165,6 +162,34 @@ pub struct DialogueChoiceButton {
 /// Marks the container entity holding all choice buttons
 #[derive(Component, Debug)]
 pub struct DialogueChoiceContainer;
+
+/// Marks the root UI container for the dialogue panel (screen-space)
+///
+/// This is the top-level `Node` entity for the dialogue UI, positioned
+/// at the bottom-center of the screen using bevy_ui.
+#[derive(Component, Debug)]
+pub struct DialoguePanelRoot;
+
+/// Marks the speaker name text element in the dialogue panel
+///
+/// This component identifies the text entity displaying the speaker's name
+/// (e.g., "Apprentice Zara") in the dialogue UI.
+#[derive(Component, Debug)]
+pub struct DialogueSpeakerText;
+
+/// Marks the dialogue content text element
+///
+/// This component identifies the text entity displaying the actual dialogue
+/// content. It works with `TypewriterText` for animated text reveal.
+#[derive(Component, Debug)]
+pub struct DialogueContentText;
+
+/// Marks the choice button list container
+///
+/// This component identifies the container holding all dialogue choice buttons
+/// in the screen-space UI.
+#[derive(Component, Debug)]
+pub struct DialogueChoiceList;
 
 /// Marks an entity as an NPC that can initiate dialogue
 ///
@@ -264,11 +289,7 @@ mod tests {
         assert!(ui.bubble_entity.is_none());
     }
 
-    #[test]
-    fn test_billboard_component_creation() {
-        let _billboard = Billboard;
-        // Billboard is a unit struct, just verify it can be created
-    }
+    // Billboard component removed - no unit test required.
 
     #[test]
     fn test_typewriter_complete_text() {
@@ -288,19 +309,17 @@ mod tests {
     fn test_dialogue_bubble_creation() {
         let speaker = Entity::PLACEHOLDER;
         let root = Entity::PLACEHOLDER;
-        let background = Entity::PLACEHOLDER;
         let text = Entity::PLACEHOLDER;
 
         let bubble = DialogueBubble {
-            speaker_entity: speaker,
+            speaker_entity: Some(speaker),
             root_entity: root,
-            background_entity: background,
             text_entity: text,
-            y_offset: DIALOGUE_BUBBLE_Y_OFFSET,
         };
 
-        assert_eq!(bubble.speaker_entity, speaker);
-        assert_eq!(bubble.y_offset, DIALOGUE_BUBBLE_Y_OFFSET);
+        assert_eq!(bubble.speaker_entity, Some(speaker));
+        assert_eq!(bubble.root_entity, root);
+        assert_eq!(bubble.text_entity, text);
     }
 
     #[test]
@@ -323,7 +342,6 @@ mod tests {
     #[test]
     fn test_choice_ui_constants_valid() {
         // Constants are compile-time verified through type definitions
-        let _ = CHOICE_CONTAINER_Y_OFFSET;
         let _ = CHOICE_BUTTON_HEIGHT;
         let _ = CHOICE_BUTTON_SPACING;
     }

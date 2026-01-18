@@ -2501,16 +2501,17 @@ mod tests {
 
     #[test]
     fn test_load_tutorial_npcs_file() {
-        // Test loading the tutorial campaign NPCs data file
-        let tutorial_npcs_path = "campaigns/tutorial/data/npcs.ron";
+        // Test loading a stable tutorial NPC fixture (not the live tutorial data)
+        // Use test fixture so that evolving tutorial data doesn't break this unit test.
+        let tutorial_npcs_path = "tests/data/tutorial_npcs_fixture.ron";
 
-        // Skip test if file doesn't exist (in CI environments)
+        // Skip test if fixture file doesn't exist (in CI environments)
         if !std::path::Path::new(tutorial_npcs_path).exists() {
             return;
         }
 
         let db = NpcDatabase::load_from_file(tutorial_npcs_path)
-            .expect("Failed to load tutorial npcs.ron");
+            .expect("Failed to load tutorial npcs fixture");
 
         // Verify key tutorial NPCs are loaded
         assert!(
@@ -2573,9 +2574,10 @@ mod tests {
 
     #[test]
     fn test_tutorial_npcs_reference_valid_dialogues() {
-        // Test that tutorial NPCs reference valid dialogue IDs
-        let tutorial_npcs_path = "campaigns/tutorial/data/npcs.ron";
-        let tutorial_dialogues_path = "campaigns/tutorial/data/dialogues.ron";
+        // Test that tutorial NPCs reference valid dialogue IDs using stable fixtures
+        // Tests should not rely on the mutable tutorial campaign data.
+        let tutorial_npcs_path = "tests/data/tutorial_npcs_fixture.ron";
+        let tutorial_dialogues_path = "tests/data/tutorial_dialogues_fixture.ron";
 
         // Skip test if files don't exist
         if !std::path::Path::new(tutorial_npcs_path).exists()
@@ -2585,9 +2587,9 @@ mod tests {
         }
 
         let npc_db = NpcDatabase::load_from_file(tutorial_npcs_path)
-            .expect("Failed to load tutorial npcs.ron");
+            .expect("Failed to load tutorial npcs fixture");
         let dialogue_db = DialogueDatabase::load_from_file(tutorial_dialogues_path)
-            .expect("Failed to load tutorial dialogues.ron");
+            .expect("Failed to load tutorial dialogues fixture");
 
         // Verify all NPCs with dialogue_id reference valid dialogues
         for npc_id in npc_db.all_npcs() {

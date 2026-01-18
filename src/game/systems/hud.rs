@@ -190,7 +190,7 @@ fn setup_hud(mut commands: Commands) {
                 column_gap: Val::Px(8.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.1, 0.1, 0.1, 0.85)),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)), // Transparent background
             HudRoot,
         ))
         .with_children(|parent| {

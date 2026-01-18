@@ -5708,14 +5708,6 @@
     ],
     events: {
         (
-            x: 10,
-            y: 10,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice describing the Temple of Healing and the services it provides.",
-            text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
             x: 18,
             y: 7,
         ): Sign(
@@ -5732,12 +5724,12 @@
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
         (
-            x: 15,
-            y: 4,
+            x: 10,
+            y: 10,
         ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store where adventurers can buy and sell goods.",
-            text: "General Store - Buy and sell items for your adventures.",
+            name: "Temple Sign",
+            description: "A notice describing the Temple of Healing and the services it provides.",
+            text: "Temple of Healing - The priests can restore your health.",
         ),
         (
             x: 19,
@@ -5750,6 +5742,14 @@
                 y: 19,
             ),
             map_id: 4,
+        ),
+        (
+            x: 15,
+            y: 4,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store where adventurers can buy and sell goods.",
+            text: "General Store - Buy and sell items for your adventures.",
         ),
     },
     npc_placements: [

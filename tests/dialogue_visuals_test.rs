@@ -74,22 +74,17 @@ fn test_dialogue_bubble_entity_references() {
 
     let speaker = Entity::PLACEHOLDER;
     let root = Entity::PLACEHOLDER;
-    let background = Entity::PLACEHOLDER;
     let text = Entity::PLACEHOLDER;
 
     let bubble = DialogueBubble {
-        speaker_entity: speaker,
+        speaker_entity: Some(speaker),
         root_entity: root,
-        background_entity: background,
         text_entity: text,
-        y_offset: DIALOGUE_BUBBLE_Y_OFFSET,
     };
 
-    assert_eq!(bubble.speaker_entity, speaker);
+    assert_eq!(bubble.speaker_entity, Some(speaker));
     assert_eq!(bubble.root_entity, root);
-    assert_eq!(bubble.background_entity, background);
     assert_eq!(bubble.text_entity, text);
-    assert_eq!(bubble.y_offset, DIALOGUE_BUBBLE_Y_OFFSET);
 }
 
 #[test]
@@ -103,11 +98,7 @@ fn test_typewriter_visible_chars_never_exceeds_text_length() {
     assert_eq!(visible_chars, full_text.len());
 }
 
-#[test]
-fn test_billboard_component_marker() {
-    let _billboard = Billboard;
-    // Billboard is a unit struct and should be usable as a component marker
-}
+// Billboard component removed; no unit test required.
 
 #[test]
 fn test_active_dialogue_ui_can_track_bubble() {
@@ -208,7 +199,8 @@ fn test_dialogue_state_message_types() {
 
     let start_msg = StartDialogue {
         dialogue_id: 1,
-        speaker_entity: Entity::PLACEHOLDER,
+        speaker_entity: Some(Entity::PLACEHOLDER),
+        fallback_position: None,
     };
     assert_eq!(start_msg.dialogue_id, 1);
 
@@ -281,17 +273,14 @@ fn test_dialogue_bubble_has_all_entity_references() {
     use bevy::prelude::Entity;
 
     let bubble = DialogueBubble {
-        speaker_entity: Entity::PLACEHOLDER,
+        speaker_entity: Some(Entity::PLACEHOLDER),
         root_entity: Entity::PLACEHOLDER,
-        background_entity: Entity::PLACEHOLDER,
         text_entity: Entity::PLACEHOLDER,
-        y_offset: 2.5,
     };
 
     // All entity references should be set (even if to placeholder)
     assert_eq!(bubble.root_entity, bubble.root_entity);
     assert_eq!(bubble.text_entity, bubble.text_entity);
-    assert_eq!(bubble.background_entity, bubble.background_entity);
 }
 
 #[test]

@@ -7608,22 +7608,30 @@
     ],
     events: {
         (
-            x: 11,
-            y: 6,
-        ): RecruitableCharacter(
-            name: "Apprentice Zara",
-            description: "A young gnome apprentice studies a spellbook intently.",
-            character_id: "npc_apprentice_zara",
-            dialogue_id: Some(101),
+            x: 9,
+            y: 9,
+        ): Trap(
+            name: "Water Trap",
+            description: "A trap in the town square fountain",
+            damage: 10,
+            effect: Some("Poison"),
         ),
         (
-            x: 7,
-            y: 15,
+            x: 15,
+            y: 8,
         ): RecruitableCharacter(
-            name: "Whisper",
-            description: "A nimble elf watches from the shadows near the alley.",
-            character_id: "npc_whisper",
-            dialogue_id: Some(102),
+            name: "Old Gareth",
+            description: "A grizzled dwarf veteran stands here, repairing armor.",
+            character_id: "npc_old_gareth",
+            dialogue_id: Some(100),
+        ),
+        (
+            x: 5,
+            y: 10,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store\'s wares and services.",
+            text: "General Store - Buy and Sell items for your party!",
         ),
         (
             x: 13,
@@ -7632,15 +7640,6 @@
             name: "Temple Sign",
             description: "A notice outside the temple detailing its services.",
             text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
-            x: 9,
-            y: 9,
-        ): Trap(
-            name: "Water Trap",
-            description: "A trap in the town square fountain",
-            damage: 10,
-            effect: Some("Poison"),
         ),
         (
             x: 18,
@@ -7663,6 +7662,15 @@
             text: "To the Dark Forrest",
         ),
         (
+            x: 7,
+            y: 15,
+        ): RecruitableCharacter(
+            name: "Whisper",
+            description: "A nimble elf watches from the shadows near the alley.",
+            character_id: "npc_whisper",
+            dialogue_id: Some(102),
+        ),
+        (
             x: 5,
             y: 4,
         ): EnterInn(
@@ -7671,21 +7679,13 @@
             innkeeper_id: "tutorial_innkeeper_town",
         ),
         (
-            x: 15,
-            y: 8,
+            x: 11,
+            y: 6,
         ): RecruitableCharacter(
-            name: "Old Gareth",
-            description: "A grizzled dwarf veteran stands here, repairing armor.",
-            character_id: "npc_old_gareth",
-            dialogue_id: Some(100),
-        ),
-        (
-            x: 5,
-            y: 10,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store\'s wares and services.",
-            text: "General Store - Buy and Sell items for your party!",
+            name: "Apprentice Zara",
+            description: "A young gnome apprentice studies a spellbook intently.",
+            character_id: "npc_apprentice_zara",
+            dialogue_id: Some(101),
         ),
     },
     npc_placements: [

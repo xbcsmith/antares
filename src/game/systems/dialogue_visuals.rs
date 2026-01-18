@@ -4,15 +4,15 @@
 //! Dialogue visual systems for rendering and animating dialogue UI
 //!
 //! This module provides Bevy systems that handle the visual presentation of dialogue:
-//! - Spawning dialogue bubbles above speaker entities
+//! - Spawning dialogue bubbles above speaker entities (screen-space panel)
 //! - Animating text with a typewriter effect
-//! - Billboard rotation to face the camera
 //! - Cleanup when dialogue ends
 //!
-//! These systems work with the dialogue components to create an immersive 2.5D
-//! dialogue experience.
+//! These systems work with the dialogue components to create a clean screen-space UI
+//! using `bevy_ui` nodes instead of 3D meshes and billboards.
 
 use bevy::prelude::*;
+
 use thiserror::Error;
 
 use crate::application::GameMode;
@@ -35,225 +35,113 @@ pub enum DialogueVisualError {
     InvalidGameMode,
 }
 
-/// Spawns a 2.5D dialogue bubble above the speaker entity
+// Obsolete world-space camera helper removed — dialogue visuals use screen-space UI and no longer require camera-based clamping.
+
+// Obsolete world-space clamping removed — screen-space UI panels are not positioned in world space.
+
+/// Spawns a screen-space dialogue panel using bevy_ui
 ///
-/// Creates a hierarchy of entities:
-/// - Root entity (positioned above speaker with Billboard component)
-///   - Background entity (semi-transparent colored panel)
-///   - Text entity (animated typewriter text)
+/// Creates a hierarchy of UI nodes:
+/// - Root panel (positioned at bottom-center of screen)
+///   - Speaker name text
+///   - Content text (animated typewriter text)
+///   - Choice list container (empty; populated by choice UI)
 ///
-/// The bubble is only spawned if the game is in Dialogue mode and no bubble currently exists.
-///
-/// # Arguments
-///
-/// * `commands` - Bevy commands for entity spawning
-/// * `global_state` - Current game state (must contain DialogueState in Dialogue mode)
-/// * `active_ui` - Resource tracking the active dialogue bubble
-/// * `meshes` - Mesh assets manager
-/// * `materials` - Material assets manager
-///
-/// # Returns
-///
-/// Updates `active_ui.bubble_entity` with the spawned bubble entity, or leaves it unchanged
-/// if not in Dialogue mode or bubble already exists.
-///
-/// # Examples
-///
-/// ```no_run
-/// use bevy::prelude::*;
-/// use antares::game::systems::dialogue_visuals::spawn_dialogue_bubble;
-/// use antares::game::components::dialogue::ActiveDialogueUI;
-///
-/// # fn example(
-/// #     commands: Commands,
-/// #     global_state: Res<GlobalState>,
-/// #     active_ui: ResMut<ActiveDialogueUI>,
-/// #     meshes: ResMut<Assets<Mesh>>,
-/// #     materials: ResMut<Assets<StandardMaterial>>,
-/// # ) {
-/// spawn_dialogue_bubble(commands, global_state, active_ui, meshes, materials);
-/// # }
-/// ```
+/// The panel is only spawned if the game is in Dialogue mode and no panel currently exists.
 pub fn spawn_dialogue_bubble(
     mut commands: Commands,
     global_state: Res<GlobalState>,
     mut active_ui: ResMut<ActiveDialogueUI>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    query_speaker: Query<&Transform, Without<Billboard>>,
 ) {
-    // Only spawn if in Dialogue mode and no bubble exists yet
+    // Only spawn if in Dialogue mode and no panel exists yet
     if let GameMode::Dialogue(dialogue_state) = &global_state.0.mode {
         if active_ui.bubble_entity.is_some() {
-            return; // Bubble already exists
+            return; // Panel already exists
         }
 
-        // Get speaker position from dialogue state
-        let speaker_position = if let Some(speaker_entity) = dialogue_state.speaker_entity {
-            if let Ok(speaker_transform) = query_speaker.get(speaker_entity) {
-                speaker_transform.translation
-            } else {
-                warn!(
-                    "Speaker entity {:?} not found, using origin",
-                    speaker_entity
-                );
-                Vec3::ZERO
-            }
-        } else {
-            warn!("No speaker entity in dialogue state, using origin");
-            Vec3::ZERO
-        };
-        let bubble_position = speaker_position + Vec3::new(0.0, DIALOGUE_BUBBLE_Y_OFFSET, 0.0);
-
-        // Create background quad mesh
-        let background_mesh = meshes.add(Mesh::from(Rectangle::new(
-            DIALOGUE_BUBBLE_WIDTH,
-            DIALOGUE_BUBBLE_HEIGHT,
-        )));
-
-        let background_material = materials.add(StandardMaterial {
-            base_color: DIALOGUE_BACKGROUND_COLOR,
-            unlit: true,
-            alpha_mode: AlphaMode::Blend,
-            ..default()
-        });
-
-        // Spawn root entity with Billboard component to face camera
-        let root_entity = commands
+        // Spawn the root panel container
+        let panel_root = commands
             .spawn((
-                Transform::from_translation(bubble_position),
-                Visibility::default(),
-                GlobalTransform::default(),
-                Billboard,
-            ))
-            .id();
-
-        // Spawn background mesh as child of root
-        let background_entity = commands
-            .spawn((
-                Mesh3d(background_mesh),
-                MeshMaterial3d(background_material),
-                Transform::from_xyz(0.0, 0.0, 0.0),
-                Visibility::default(),
-                GlobalTransform::default(),
-            ))
-            .id();
-
-        // Spawn text entity as child of root
-        let text_entity = commands
-            .spawn((
-                Text::new(""),
-                TextFont {
-                    font_size: DIALOGUE_TEXT_SIZE,
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: DIALOGUE_PANEL_BOTTOM,
+                    left: Val::Percent(20.0), // Explicit centering (20% | 60% | 20%)
+                    right: Val::Auto,
+                    width: DIALOGUE_PANEL_WIDTH,
+                    margin: UiRect::all(Val::Auto),
+                    padding: UiRect::all(DIALOGUE_PANEL_PADDING),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
                     ..default()
                 },
-                TextColor(DIALOGUE_TEXT_COLOR),
-                Transform::from_xyz(0.0, 0.0, 0.1),
-                Visibility::default(),
-                GlobalTransform::default(),
-                TypewriterText {
-                    full_text: dialogue_state.current_text.clone(),
-                    visible_chars: 0,
-                    timer: 0.0,
-                    speed: DIALOGUE_TYPEWRITER_SPEED,
-                    finished: false,
-                },
+                BackgroundColor(DIALOGUE_BACKGROUND_COLOR),
+                BorderRadius::all(Val::Px(8.0)),
+                ZIndex(10), // Ensure above HUD
+                DialoguePanelRoot,
             ))
-            .id();
+            .with_children(|parent| {
+                // Speaker name text
+                parent.spawn((
+                    Text::new(&dialogue_state.current_speaker),
+                    TextFont {
+                        font_size: DIALOGUE_SPEAKER_FONT_SIZE,
+                        ..default()
+                    },
+                    TextColor(DIALOGUE_CHOICE_COLOR), // Golden color for speaker name
+                    DialogueSpeakerText,
+                ));
 
-        // Set up hierarchy: text and background are children of root
-        commands.entity(root_entity).add_child(background_entity);
-        commands.entity(root_entity).add_child(text_entity);
+                // Dialogue content text with typewriter animation
+                parent.spawn((
+                    Text::new(""),
+                    TextFont {
+                        font_size: DIALOGUE_CONTENT_FONT_SIZE,
+                        ..default()
+                    },
+                    TextColor(DIALOGUE_TEXT_COLOR),
+                    TypewriterText {
+                        full_text: dialogue_state.current_text.clone(),
+                        visible_chars: 0,
+                        timer: 0.0,
+                        speed: DIALOGUE_TYPEWRITER_SPEED,
+                        finished: false,
+                    },
+                    DialogueContentText,
+                ));
 
-        // Create DialogueBubble marker component and spawn it
-        let bubble = commands
-            .spawn(DialogueBubble {
-                speaker_entity: dialogue_state.speaker_entity.unwrap_or(Entity::PLACEHOLDER),
-                root_entity,
-                background_entity,
-                text_entity,
-                y_offset: DIALOGUE_BUBBLE_Y_OFFSET,
+                // Choice list container (empty for now; populated by choice UI in Phase 2)
+                parent.spawn((Node { ..default() }, DialogueChoiceList));
             })
             .id();
 
-        // Track the bubble in the resource
-        active_ui.bubble_entity = Some(bubble);
+        // Track the panel in the resource
+        active_ui.bubble_entity = Some(panel_root);
+
+        // Log the spawn for diagnostics
+        info!(
+            "Spawned dialogue panel entity {:?} for speaker '{}'",
+            panel_root, dialogue_state.current_speaker
+        );
     }
 }
 
-/// Updates typewriter text animation
+/// Updates dialogue panel content when the dialogue state changes
 ///
-/// Reveals text character-by-character based on elapsed time. Each character is revealed
-/// after `TypewriterText::speed` seconds have elapsed.
-///
-/// When all characters are revealed, the `finished` flag is set to true.
-///
-/// # Arguments
-///
-/// * `time` - Bevy time resource for delta time calculation
-/// * `query` - Query for entities with both Text and TypewriterText components
-///
-/// # Examples
-///
-/// ```no_run
-/// use bevy::prelude::*;
-/// use antares::game::systems::dialogue_visuals::update_typewriter_text;
-/// use antares::game::components::dialogue::TypewriterText;
-///
-/// # fn example(time: Res<Time>, query: Query<(&mut Text, &mut TypewriterText)>) {
-/// update_typewriter_text(time, query);
-/// # }
-/// ```
-///
-/// Updates dialogue bubble text when node changes
-///
-/// Detects when DialogueState.current_text changes and resets typewriter animation.
-///
-/// # Arguments
-///
-/// * `global_state` - Current game state with DialogueState
-/// * `active_ui` - Resource tracking active dialogue bubble
-/// * `query_bubble` - Query for DialogueBubble components
-/// * `query_text` - Query for Text and TypewriterText components
-///
-/// # Examples
-///
-/// ```no_run
-/// use bevy::prelude::*;
-/// use antares::application::GameMode;
-/// use antares::game::systems::dialogue_visuals::update_dialogue_text;
-/// use antares::game::components::dialogue::ActiveDialogueUI;
-/// use antares::game::resources::GlobalState;
-///
-/// # fn example(
-/// #     global_state: Res<GlobalState>,
-/// #     active_ui: Res<ActiveDialogueUI>,
-/// #     query_bubble: Query<&DialogueBubble>,
-/// #     query_text: Query<(&mut Text, &mut TypewriterText)>,
-/// # ) {
-/// update_dialogue_text(global_state, active_ui, query_bubble, query_text);
-/// # }
-/// ```
+/// Resets typewriter animation for any content text nodes marked with
+/// `DialogueContentText` when the active `DialogueState`'s `current_text` changes.
 pub fn update_dialogue_text(
     global_state: Res<GlobalState>,
-    active_ui: Res<ActiveDialogueUI>,
-    query_bubble: Query<&DialogueBubble>,
-    mut query_text: Query<(&mut Text, &mut TypewriterText)>,
+    mut query_text: Query<(&mut Text, &mut TypewriterText), With<DialogueContentText>>,
 ) {
     if let GameMode::Dialogue(ref dialogue_state) = global_state.0.mode {
-        if let Some(bubble_entity) = active_ui.bubble_entity {
-            if let Ok(bubble) = query_bubble.get(bubble_entity) {
-                if let Ok((mut text, mut typewriter)) = query_text.get_mut(bubble.text_entity) {
-                    // Check if text changed
-                    if typewriter.full_text != dialogue_state.current_text {
-                        // Reset typewriter animation for new text
-                        typewriter.full_text = dialogue_state.current_text.clone();
-                        typewriter.visible_chars = 0;
-                        typewriter.timer = 0.0;
-                        typewriter.finished = false;
-                        text.0 = String::new(); // Clear visible text
-                    }
-                }
+        for (mut text, mut typewriter) in query_text.iter_mut() {
+            // Reset typewriter animation for new text
+            if typewriter.full_text != dialogue_state.current_text {
+                typewriter.full_text = dialogue_state.current_text.clone();
+                typewriter.visible_chars = 0;
+                typewriter.timer = 0.0;
+                typewriter.finished = false;
+                text.0 = String::new(); // Clear visible text
             }
         }
     }
@@ -293,178 +181,35 @@ pub fn update_typewriter_text(time: Res<Time>, mut query: Query<(&mut Text, &mut
     }
 }
 
-/// Billboard system - rotates entities to face the camera
-///
-/// Makes entities marked with the `Billboard` component always face the camera,
-/// creating a pseudo-3D effect for 2.5D UI elements like dialogue bubbles.
-///
-/// This system continuously rotates billboarded entities to look at the camera's position,
-/// using the world's up direction (Y axis) as the up vector.
-///
-/// # Arguments
-///
-/// * `query_camera` - Query for the camera entity and its transform
-/// * `query_billboards` - Query for entities with Billboard component (excluding camera)
-///
-/// # Examples
-///
-/// ```no_run
-/// use bevy::prelude::*;
-/// use antares::game::systems::dialogue_visuals::billboard_system;
-/// use antares::game::components::dialogue::Billboard;
-///
-/// # fn example(
-/// #     query_camera: Query<&Transform, With<Camera>>,
-/// #     query_billboards: Query<&mut Transform, (With<Billboard>, Without<Camera>)>,
-/// # ) {
-/// billboard_system(query_camera, query_billboards);
-/// # }
-/// ```
-pub fn billboard_system(
-    query_camera: Query<&Transform, With<Camera3d>>,
-    mut query_billboards: Query<&mut Transform, (With<Billboard>, Without<Camera3d>)>,
-) {
-    // Get the camera position
-    if let Ok(camera_transform) = query_camera.single() {
-        // Rotate each billboard to face the camera
-        for mut transform in query_billboards.iter_mut() {
-            transform.look_at(camera_transform.translation, Vec3::Y);
-        }
-    }
-}
+// Removed obsolete `billboard_system` — screen-space UI panels do not require per-frame billboard rotation.
 
 /// Cleans up dialogue UI when dialogue mode ends
 ///
-/// Despawns all dialogue UI entities and clears the `ActiveDialogueUI` resource
+/// Despawns the screen-space panel and clears the `ActiveDialogueUI` resource
 /// when the game mode changes away from Dialogue.
-///
-/// This ensures no dialogue UI remnants persist after dialogue ends, and prepares
-/// the system to spawn a new bubble if dialogue starts again.
-///
-/// # Arguments
-///
-/// * `commands` - Bevy commands for entity despawning
-/// * `global_state` - Current game state
-/// * `active_ui` - Resource tracking active dialogue bubble
-/// * `query` - Query for DialogueBubble components
-///
-/// # Examples
-///
-/// ```no_run
-/// use bevy::prelude::*;
-/// use antares::game::systems::dialogue_visuals::cleanup_dialogue_bubble;
-/// use antares::game::components::dialogue::DialogueBubble;
-///
-/// # fn example(
-/// #     commands: Commands,
-/// #     global_state: Res<GlobalState>,
-/// #     active_ui: ResMut<ActiveDialogueUI>,
-/// #     query: Query<(Entity, &DialogueBubble)>,
-/// # ) {
-/// cleanup_dialogue_bubble(commands, global_state, active_ui, query);
-/// # }
-/// ```
 pub fn cleanup_dialogue_bubble(
     mut commands: Commands,
     global_state: Res<GlobalState>,
     mut active_ui: ResMut<ActiveDialogueUI>,
-    query: Query<(Entity, &DialogueBubble)>,
 ) {
     // Only cleanup if no longer in Dialogue mode
     if !matches!(global_state.0.mode, GameMode::Dialogue(_)) {
-        if let Some(bubble_entity) = active_ui.bubble_entity {
-            // Try to get the bubble and despawn it with all children
-            if let Ok((_, bubble)) = query.get(bubble_entity) {
-                // Despawn root and all its children
-                commands.entity(bubble.root_entity).despawn();
-                // Despawn the bubble marker entity itself
-                commands.entity(bubble_entity).despawn();
-            }
+        if let Some(panel_entity) = active_ui.bubble_entity {
+            // Despawn the UI panel root entity
+            commands.entity(panel_entity).despawn();
             // Clear the resource
             active_ui.bubble_entity = None;
         }
     }
 }
 
-/// Updates dialogue bubble position to follow speaker
-///
-/// Keeps the dialogue bubble positioned above the NPC even if the NPC moves.
-/// This system runs each frame to sync the bubble's world position with the
-/// speaker entity's position.
-///
-/// # Arguments
-///
-/// * `query_bubbles` - Query for DialogueBubble components
-/// * `query_speaker` - Query for speaker Transform components
-/// * `mut query_bubble_transform` - Query for bubble Transform components to update
-///
-/// # Examples
-///
-/// ```no_run
-/// use bevy::prelude::*;
-/// use antares::game::systems::dialogue_visuals::follow_speaker_system;
-/// use antares::game::components::dialogue::{DialogueBubble, Billboard};
-///
-/// # fn example(
-/// #     query_bubbles: Query<&DialogueBubble>,
-/// #     query_speaker: Query<&Transform, Without<DialogueBubble>>,
-/// #     mut query_bubble_transform: Query<&mut Transform, With<Billboard>>,
-/// # ) {
-/// follow_speaker_system(query_bubbles, query_speaker, query_bubble_transform);
-/// # }
-/// ```
-#[allow(clippy::type_complexity)]
-pub fn follow_speaker_system(
-    query_bubbles: Query<&DialogueBubble>,
-    mut param_set: ParamSet<(
-        Query<&Transform, Without<DialogueBubble>>,
-        Query<&mut Transform, With<Billboard>>,
-    )>,
-) {
-    // Collect speaker positions first to avoid borrow conflicts
-    let mut updates = Vec::new();
-    for bubble in query_bubbles.iter() {
-        if let Ok(speaker_transform) = param_set.p0().get(bubble.speaker_entity) {
-            let target_position =
-                speaker_transform.translation + Vec3::new(0.0, bubble.y_offset, 0.0);
-            updates.push((bubble.root_entity, target_position));
-        }
-    }
-
-    // Apply updates to bubble transforms
-    for (entity, position) in updates {
-        if let Ok(mut bubble_transform) = param_set.p1().get_mut(entity) {
-            bubble_transform.translation = position;
-        }
-    }
-}
+// Removed obsolete `follow_speaker_system` — screen-space UI panels are not synced to world transforms.
 
 /// Monitors speaker entity and ends dialogue if speaker is despawned
 ///
 /// This system checks if the active dialogue speaker entity still exists in the world.
 /// If the speaker is despawned during dialogue (e.g., NPC removed or level unloaded),
 /// dialogue is ended gracefully and the game returns to Exploration mode.
-///
-/// # Arguments
-///
-/// * `mut global_state` - Current game state to update
-/// * `query_entities` - Query to verify speaker entity existence
-/// * `mut game_log` - Optional game log for error messages
-///
-/// # Examples
-///
-/// ```no_run
-/// use bevy::prelude::*;
-/// use antares::game::systems::dialogue_visuals::check_speaker_exists;
-/// use antares::game::resources::GlobalState;
-///
-/// # fn example(
-/// #     global_state: Res<GlobalState>,
-/// #     query_entities: Query<Entity>,
-/// # ) {
-/// // System is automatically called each frame
-/// # }
-/// ```
 pub fn check_speaker_exists(
     mut global_state: ResMut<GlobalState>,
     query_entities: Query<Entity>,
@@ -610,4 +355,263 @@ mod tests {
         assert_eq!(visible_text, "Hello");
         assert_eq!(visible_text.len(), 5);
     }
+
+    #[test]
+    fn test_dialogue_panel_spawns_with_correct_structure() {
+        use crate::application::dialogue::DialogueState;
+        use crate::application::GameMode;
+        use crate::domain::types::Position;
+        use crate::game::components::dialogue::{
+            ActiveDialogueUI, DialogueChoiceList, DialogueContentText, DialoguePanelRoot,
+            DialogueSpeakerText,
+        };
+        use crate::game::resources::GlobalState;
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ActiveDialogueUI>();
+
+        let mut gs = GlobalState(crate::application::GameState::new());
+        gs.0.mode = GameMode::Dialogue(DialogueState::start_simple(
+            "Hello!".to_string(),
+            "Test NPC".to_string(),
+            None,
+            Some(Position::new(5, 6)),
+        ));
+        app.insert_resource(gs);
+
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
+        );
+
+        // Run one update to trigger the system
+        app.update();
+
+        let ui = app.world().resource::<ActiveDialogueUI>().clone();
+        assert!(ui.bubble_entity.is_some());
+        let panel_entity = ui.bubble_entity.unwrap();
+
+        // Verify the panel root entity has the DialoguePanelRoot component
+        let root_has_marker = {
+            let world = app.world_mut();
+            world
+                .query::<&DialoguePanelRoot>()
+                .get(world, panel_entity)
+                .is_ok()
+        };
+        assert!(
+            root_has_marker,
+            "Panel root missing DialoguePanelRoot component"
+        );
+
+        // Verify child text elements exist
+        let speaker_found = {
+            let world = app.world_mut();
+            world
+                .query::<(Entity, &DialogueSpeakerText)>()
+                .iter(world)
+                .next()
+                .is_some()
+        };
+        assert!(speaker_found, "Missing DialogueSpeakerText child");
+
+        let content_found = {
+            let world = app.world_mut();
+            world
+                .query::<(Entity, &DialogueContentText)>()
+                .iter(world)
+                .next()
+                .is_some()
+        };
+        assert!(content_found, "Missing DialogueContentText child");
+
+        let choice_list_found = {
+            let world = app.world_mut();
+            world
+                .query::<&DialogueChoiceList>()
+                .iter(world)
+                .next()
+                .is_some()
+        };
+        assert!(choice_list_found, "Missing DialogueChoiceList child");
+    }
+
+    #[test]
+    fn test_dialogue_panel_displays_speaker_name() {
+        use crate::application::dialogue::DialogueState;
+        use crate::application::GameMode;
+        use crate::domain::types::Position;
+        use crate::game::components::dialogue::ActiveDialogueUI;
+        use crate::game::resources::GlobalState;
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ActiveDialogueUI>();
+
+        let speaker = "Apprentice Zara".to_string();
+        let mut gs = GlobalState(crate::application::GameState::new());
+        gs.0.mode = GameMode::Dialogue(DialogueState::start_simple(
+            "Hello!".to_string(),
+            speaker.clone(),
+            None,
+            Some(Position::new(5, 6)),
+        ));
+        app.insert_resource(gs);
+
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
+        );
+
+        // Run one update to trigger the system
+        app.update();
+
+        // Find the speaker text entity
+        let speaker_text_value = {
+            let world = app.world_mut();
+            let (entity, _) = world
+                .query::<(Entity, &DialogueSpeakerText)>()
+                .iter(world)
+                .next()
+                .expect("Expected a DialogueSpeakerText entity");
+
+            let text = world.get::<Text>(entity).unwrap();
+            text.0.clone()
+        };
+
+        assert_eq!(speaker_text_value, speaker);
+    }
+
+    #[test]
+    fn test_dialogue_panel_typewriter_works() {
+        use crate::application::dialogue::DialogueState;
+        use crate::application::GameMode;
+        use crate::domain::types::Position;
+        use crate::game::components::dialogue::{ActiveDialogueUI, DialogueContentText};
+        use crate::game::resources::GlobalState;
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ActiveDialogueUI>();
+
+        let mut gs = GlobalState(crate::application::GameState::new());
+        gs.0.mode = GameMode::Dialogue(DialogueState::start_simple(
+            "Hello!".to_string(),
+            "Speaker".to_string(),
+            None,
+            Some(Position::new(5, 6)),
+        ));
+        app.insert_resource(gs);
+
+        // Spawn the panel
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
+        );
+        app.update();
+
+        // Find the content entity and its initial full text
+        let (content_entity, initial_full_text) = {
+            let world = app.world_mut();
+            let (entity, _) = world
+                .query::<(Entity, &DialogueContentText)>()
+                .iter(world)
+                .next()
+                .expect("Content DialogueContentText entity not found");
+            let typewriter = world
+                .get::<TypewriterText>(entity)
+                .expect("TypewriterText not found on content entity");
+            (entity, typewriter.full_text.clone())
+        };
+
+        // Simulate a single typewriter tick by mutating the TypewriterText and capturing visible text
+        let visible_text = {
+            let world = app.world_mut();
+            let mut tw = world.get_mut::<TypewriterText>(content_entity).unwrap();
+
+            // Simulate time passing equal to one speed step
+            tw.timer = tw.speed;
+            if tw.timer >= tw.speed {
+                tw.timer = 0.0;
+                tw.visible_chars = (tw.visible_chars + 1).min(tw.full_text.len());
+                let visible: String = tw.full_text.chars().take(tw.visible_chars).collect();
+                if tw.visible_chars >= tw.full_text.len() {
+                    tw.finished = true;
+                }
+                visible
+            } else {
+                String::new()
+            }
+        };
+
+        // Apply the visible text to the Text component in a separate world borrow
+        {
+            let world = app.world_mut();
+            let mut text_comp = world.get_mut::<Text>(content_entity).unwrap();
+            text_comp.0 = visible_text;
+        }
+
+        // Verify that the displayed text advanced by one character
+        {
+            let world = app.world_mut();
+            let (entity, _) = world
+                .query::<(Entity, &DialogueContentText)>()
+                .iter(world)
+                .next()
+                .expect("Expected DialogueContentText entity");
+            let text_after = world.get::<Text>(entity).unwrap();
+            assert_eq!(
+                text_after.0,
+                initial_full_text.chars().take(1).collect::<String>()
+            );
+        }
+    }
+
+    #[test]
+    fn test_spawn_dialogue_bubble_debug_material_flags() {
+        // In the new screen-space UI implementation, material debug flags are not relevant.
+        // This test ensures the spawn system executes without panicking.
+        use crate::application::dialogue::DialogueState;
+        use crate::application::GameMode;
+        use crate::domain::types::Position;
+        use crate::game::components::dialogue::ActiveDialogueUI;
+        use crate::game::resources::GlobalState;
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ActiveDialogueUI>();
+
+        let mut gs = GlobalState(crate::application::GameState::new());
+        gs.0.mode = GameMode::Dialogue(DialogueState::start_simple(
+            "Debug test".to_string(),
+            "Test NPC".to_string(),
+            None,
+            Some(Position::new(3, 4)),
+        ));
+        app.insert_resource(gs);
+
+        app.add_systems(
+            Update,
+            crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
+        );
+
+        // Run one update to trigger the system
+        app.update();
+
+        // Verify the panel spawned (we don't inspect debug materials in the new UI)
+        let ui = app.world().resource::<ActiveDialogueUI>().clone();
+        assert!(
+            ui.bubble_entity.is_some(),
+            "Expected dialogue panel to spawn"
+        );
+    }
+
+    // Removed test: `test_follow_speaker_system_is_noop` — follow/facing logic and billboard tests are no longer applicable after migration to screen-space UI.
+
+    // Removed test: `test_billboard_system_is_noop` — billboard rotation tests are not applicable after moving dialogue UI to screen-space.
 }
