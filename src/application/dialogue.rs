@@ -81,6 +81,9 @@ pub struct DialogueState {
 
     /// Context for recruitment dialogues (None if not a recruitment interaction)
     pub recruitment_context: Option<RecruitmentContext>,
+
+    /// Fallback map position for visual placement if speaker_entity is missing
+    pub fallback_position: Option<crate::domain::types::Position>,
 }
 
 impl DialogueState {
@@ -109,12 +112,16 @@ impl DialogueState {
     /// use antares::application::dialogue::DialogueState;
     /// use antares::domain::dialogue::{DialogueId, NodeId};
     ///
-    /// let state = DialogueState::start(5 as DialogueId, 1 as NodeId);
+    /// let state = DialogueState::start(5 as DialogueId, 1 as NodeId, None);
     /// assert_eq!(state.active_tree_id, Some(5));
     /// assert_eq!(state.current_node_id, 1);
     /// assert_eq!(state.dialogue_history, vec![1]);
     /// ```
-    pub fn start(tree_id: DialogueId, root_node: NodeId) -> Self {
+    pub fn start(
+        tree_id: DialogueId,
+        root_node: NodeId,
+        fallback_pos: Option<crate::domain::types::Position>,
+    ) -> Self {
         Self {
             active_tree_id: Some(tree_id),
             current_node_id: root_node,
@@ -124,6 +131,27 @@ impl DialogueState {
             current_choices: Vec::new(),
             speaker_entity: None,
             recruitment_context: None,
+            fallback_position: fallback_pos,
+        }
+    }
+
+    /// Start a simple dialogue without a tree ID.
+    pub fn start_simple(
+        text: String,
+        speaker_name: String,
+        speaker_entity: Option<bevy::prelude::Entity>,
+        fallback_pos: Option<crate::domain::types::Position>,
+    ) -> Self {
+        Self {
+            active_tree_id: None,
+            current_node_id: 0,
+            dialogue_history: Vec::new(),
+            current_text: text,
+            current_speaker: speaker_name,
+            current_choices: vec!["Goodbye".to_string()],
+            speaker_entity,
+            recruitment_context: None,
+            fallback_position: fallback_pos,
         }
     }
 
@@ -240,7 +268,7 @@ mod tests {
 
     #[test]
     fn test_dialogue_state_start_sets_active_tree_and_root_node() {
-        let s = DialogueState::start(7 as DialogueId, 3 as NodeId);
+        let s = DialogueState::start(7 as DialogueId, 3 as NodeId, None);
         assert!(s.is_active());
         assert_eq!(s.active_tree_id, Some(7));
         assert_eq!(s.current_node_id, 3);
@@ -249,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_dialogue_state_advance_to_node_appends_history() {
-        let mut s = DialogueState::start(2 as DialogueId, 10 as NodeId);
+        let mut s = DialogueState::start(2 as DialogueId, 10 as NodeId, None);
         s.advance_to(11 as NodeId);
         s.advance_to(12 as NodeId);
 
@@ -259,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_dialogue_state_end_resets_state() {
-        let mut s = DialogueState::start(99 as DialogueId, 1 as NodeId);
+        let mut s = DialogueState::start(99 as DialogueId, 1 as NodeId, None);
         s.advance_to(2);
         s.end();
 
@@ -314,7 +342,7 @@ mod tests {
 
     #[test]
     fn test_dialogue_state_end_clears_visual_state() {
-        let mut state = DialogueState::start(1 as DialogueId, 1 as NodeId);
+        let mut state = DialogueState::start(1 as DialogueId, 1 as NodeId, None);
         state.update_node(
             "Some text".to_string(),
             "Speaker".to_string(),
@@ -356,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_dialogue_state_start_recruitment_context_none() {
-        let state = DialogueState::start(1 as DialogueId, 1 as NodeId);
+        let state = DialogueState::start(1 as DialogueId, 1 as NodeId, None);
         assert_eq!(state.recruitment_context, None);
     }
 }

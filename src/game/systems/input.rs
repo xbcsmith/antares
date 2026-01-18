@@ -33,10 +33,12 @@
 //! # }
 //! ```
 
+use crate::application::dialogue::RecruitmentContext;
 use crate::domain::types::Position;
 use crate::domain::world::{MapEvent, WallType};
+use crate::game::components::dialogue::NpcDialogue;
 use crate::game::resources::GlobalState;
-use crate::game::systems::dialogue::StartDialogue;
+use crate::game::systems::dialogue::{PendingRecruitmentContext, StartDialogue};
 use crate::game::systems::events::MapEventTriggered;
 use crate::game::systems::map::{DoorOpenedEvent, NpcMarker, TileCoord};
 use crate::sdk::game_config::ControlsConfig;
@@ -383,9 +385,11 @@ fn handle_input(
     mut door_messages: MessageWriter<DoorOpenedEvent>,
     mut map_event_messages: MessageWriter<MapEventTriggered>,
     mut dialogue_writer: MessageWriter<StartDialogue>,
+    mut recruitment_context: ResMut<PendingRecruitmentContext>,
     time: Res<Time>,
     mut last_move_time: Local<f32>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
+    dialogue_query: Query<&NpcDialogue>,
 ) {
     let current_time = time.elapsed_secs();
     let cooldown = input_config.controls.movement_cooldown;
@@ -394,6 +398,9 @@ fn handle_input(
     if current_time - *last_move_time < cooldown {
         return;
     }
+
+    // ALLOW input processing in Dialogue mode to enable "Move to Cancel"
+    // But block Interaction actions (doors, etc.) if in Dialogue.
 
     let game_state = &mut global_state.0;
     let world = &mut game_state.world;
@@ -405,9 +412,11 @@ fn handle_input(
     // behaves consistently with the existing movement model and door behavior,
     // and so headless tests can exercise interaction without depending on
     // Bevy's per-frame input edge detection.
-    if input_config
-        .key_map
-        .is_action_pressed(GameAction::Interact, &keyboard_input)
+    // Only allow Interaction if NOT in Dialogue mode
+    if !matches!(game_state.mode, crate::application::GameMode::Dialogue(_))
+        && input_config
+            .key_map
+            .is_action_pressed(GameAction::Interact, &keyboard_input)
     {
         let party_position = world.party_position;
         let adjacent_tiles = get_adjacent_positions(party_position);
@@ -449,6 +458,7 @@ fn handle_input(
                     description: String::new(),
                     npc_id: npc.npc_id.clone(),
                 },
+                position: npc.position,
             });
             return;
         }
@@ -461,11 +471,15 @@ fn handle_input(
                         info!("Interacting with event at {:?}", position);
                         map_event_messages.write(MapEventTriggered {
                             event: event.clone(),
+                            position,
                         });
                         return;
                     }
                     MapEvent::RecruitableCharacter {
-                        name, character_id, ..
+                        name,
+                        character_id,
+                        dialogue_id,
+                        ..
                     } => {
                         info!(
                             "Interacting with recruitable character '{}' (ID: {}) at {:?}",
@@ -475,13 +489,30 @@ fn handle_input(
                         let speaker_entity = npc_query
                             .iter()
                             .find(|(_, _, tile_coord)| tile_coord.0 == position)
-                            .map(|(entity, _, _)| entity)
-                            .unwrap_or(Entity::PLACEHOLDER);
+                            .map(|(entity, _, _)| entity);
 
-                        // Use dialogue ID 100 for default recruitment dialogue
+                        // Use specific dialogue ID if the NPC has one, otherwise fallback to 100
+                        // Use specific dialogue ID from event if available,
+                        // OR fallback to NPC component,
+                        // OR fallback to default 100
+                        let dialogue_id = dialogue_id
+                            .or_else(|| {
+                                speaker_entity
+                                    .and_then(|entity| dialogue_query.get(entity).ok())
+                                    .map(|npc_dlg| npc_dlg.dialogue_id)
+                            })
+                            .unwrap_or(100);
+
+                        // Set recruitment context so the dialogue system knows who to recruit
+                        recruitment_context.0 = Some(RecruitmentContext {
+                            character_id: character_id.clone(),
+                            event_position: position,
+                        });
+
                         dialogue_writer.write(StartDialogue {
-                            dialogue_id: 100,
+                            dialogue_id,
                             speaker_entity,
+                            fallback_position: Some(position),
                         });
                         return;
                     }
@@ -541,6 +572,14 @@ fn handle_input(
 
     if moved {
         *last_move_time = current_time;
+
+        // If we moved while in Dialogue mode, cancel the dialogue
+        if matches!(game_state.mode, crate::application::GameMode::Dialogue(_)) {
+            info!("Movement detected during dialogue - cancelling dialogue");
+            // Switch back to exploration mode
+            game_state.mode = crate::application::GameMode::Exploration;
+        }
+
         // TODO: Check for events at new position (Phase 4)
     }
 }

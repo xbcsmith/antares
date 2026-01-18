@@ -28,7 +28,7 @@ fn test_dialogue_state_start_initializes_fields() {
     // Verify DialogueState::start properly initializes the state
     use antares::application::dialogue::DialogueState;
 
-    let state = DialogueState::start(42, 1);
+    let state = DialogueState::start(42, 1, None);
     assert!(state.is_active());
     assert_eq!(state.active_tree_id, Some(42));
     assert_eq!(state.current_node_id, 1);
@@ -60,7 +60,7 @@ fn test_dialogue_state_advance_and_update() {
     // Verify advancing nodes and updating state works together
     use antares::application::dialogue::DialogueState;
 
-    let mut state = DialogueState::start(1, 1);
+    let mut state = DialogueState::start(1, 1, None);
 
     // Update node 1
     state.update_node(
@@ -121,7 +121,7 @@ fn test_dialogue_state_end_clears_all_state() {
     // Verify that ending dialogue clears all state
     use antares::application::dialogue::DialogueState;
 
-    let mut state = DialogueState::start(5, 1);
+    let mut state = DialogueState::start(5, 1, None);
     state.update_node(
         "Some text".to_string(),
         "Some speaker".to_string(),
@@ -156,7 +156,7 @@ fn test_dialogue_state_terminal_choice() {
     // Verify state behavior with terminal choice
     use antares::application::dialogue::DialogueState;
 
-    let mut state = DialogueState::start(1, 1);
+    let mut state = DialogueState::start(1, 1, None);
     state.update_node(
         "Do you accept?".to_string(),
         "Elder".to_string(),
@@ -176,7 +176,7 @@ fn test_dialogue_state_multiple_node_chain() {
     // Verify traversing multiple nodes maintains history
     use antares::application::dialogue::DialogueState;
 
-    let mut state = DialogueState::start(1, 10);
+    let mut state = DialogueState::start(1, 10, None);
 
     for i in 11..15 {
         state.advance_to(i);
@@ -251,7 +251,7 @@ fn test_game_mode_dialogue_variant() {
     // Verify GameMode::Dialogue variant can be created and matched
     use antares::application::{dialogue::DialogueState, GameMode};
 
-    let state = DialogueState::start(1, 1);
+    let state = DialogueState::start(1, 1, None);
     let mode = GameMode::Dialogue(state);
 
     match mode {

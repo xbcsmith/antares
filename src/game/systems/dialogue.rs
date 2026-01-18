@@ -44,7 +44,9 @@ pub struct StartDialogue {
     /// Dialogue tree id to activate
     pub dialogue_id: DialogueId,
     /// Entity that initiated this dialogue (typically an NPC)
-    pub speaker_entity: Entity,
+    pub speaker_entity: Option<Entity>,
+    /// Fallback map position for visual placement if speaker_entity is missing
+    pub fallback_position: Option<crate::domain::types::Position>,
 }
 
 /// Message to select a dialogue choice by index for the active dialogue.
@@ -58,12 +60,26 @@ pub struct SelectDialogueChoice {
 #[derive(Message, Clone, Debug)]
 pub struct AdvanceDialogue;
 
+/// Message to start a simple dialogue without a tree ID.
+#[derive(Message, Clone, Debug)]
+pub struct SimpleDialogue {
+    /// Text content to display
+    pub text: String,
+    /// Speaker's name
+    pub speaker_name: String,
+    /// Entity that initiated this dialogue (typically an NPC)
+    pub speaker_entity: Option<Entity>,
+    /// Fallback map position for visual placement if speaker_entity is missing
+    pub fallback_position: Option<crate::domain::types::Position>,
+}
+
 /// Plugin that registers dialogue message types and systems
 pub struct DialoguePlugin;
 
 impl Plugin for DialoguePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<StartDialogue>()
+            .add_message::<SimpleDialogue>()
             .add_message::<SelectDialogueChoice>()
             .add_message::<AdvanceDialogue>()
             .init_resource::<crate::game::components::dialogue::ActiveDialogueUI>()
@@ -74,6 +90,7 @@ impl Plugin for DialoguePlugin {
                 (
                     dialogue_input_system,
                     handle_start_dialogue,
+                    handle_simple_dialogue,
                     handle_select_choice,
                     handle_recruitment_actions,
                     crate::game::systems::dialogue_visuals::spawn_dialogue_bubble,
@@ -87,8 +104,6 @@ impl Plugin for DialoguePlugin {
                 Update,
                 (
                     crate::game::systems::dialogue_visuals::update_typewriter_text,
-                    crate::game::systems::dialogue_visuals::billboard_system,
-                    crate::game::systems::dialogue_visuals::follow_speaker_system,
                     crate::game::systems::dialogue_visuals::check_speaker_exists,
                     crate::game::systems::dialogue_visuals::cleanup_dialogue_bubble,
                     crate::game::systems::dialogue_choices::cleanup_choice_ui,
@@ -166,7 +181,8 @@ fn handle_start_dialogue(
                 // Extract recruitment context if present
                 let recruitment_context = pending_recruitment.0.take();
 
-                let mut new_state = DialogueState::start(ev.dialogue_id, root);
+                let mut new_state =
+                    DialogueState::start(ev.dialogue_id, root, ev.fallback_position);
                 new_state.recruitment_context = recruitment_context;
 
                 global_state.0.mode = GameMode::Dialogue(new_state);
@@ -184,8 +200,8 @@ fn handle_start_dialogue(
                             &mut global_state.0,
                             db,
                             dlg_state.as_ref(),
-                            quest_system.as_deref_mut(),
-                            game_log.as_deref_mut(),
+                            quest_system.as_mut().map(|r| r.as_mut()),
+                            game_log.as_mut().map(|r| r.as_mut()),
                         );
                     }
                     if let Some(ref mut log) = game_log {
@@ -201,7 +217,7 @@ fn handle_start_dialogue(
                             node.text.clone(),
                             tree.speaker_name.as_deref().unwrap_or("NPC").to_string(),
                             choices,
-                            Some(ev.speaker_entity),
+                            ev.speaker_entity,
                         );
                     }
                 }
@@ -221,6 +237,28 @@ fn handle_start_dialogue(
     }
 }
 
+/// System that starts a simple dialogue when a `SimpleDialogue` message is received.
+fn handle_simple_dialogue(
+    mut ev_reader: MessageReader<SimpleDialogue>,
+    mut global_state: ResMut<GlobalState>,
+    mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
+) {
+    for ev in ev_reader.read() {
+        if let Some(ref mut log) = game_log {
+            log.add(format!("{}: {}", ev.speaker_name, ev.text));
+        }
+
+        let state = DialogueState::start_simple(
+            ev.text.clone(),
+            ev.speaker_name.clone(),
+            ev.speaker_entity,
+            ev.fallback_position,
+        );
+
+        global_state.0.mode = GameMode::Dialogue(state);
+    }
+}
+
 /// System that processes a player's choice selection.
 ///
 /// Validates the choice's conditions, executes choice actions (and any resulting
@@ -234,20 +272,26 @@ fn handle_select_choice(
 ) {
     for ev in ev_reader.read() {
         // --- Read-only phase: inspect mode and capture identifiers ---
-        let (tree_id, current_node_id, speaker_entity) = match &global_state.0.mode {
+        let speaker_entity = match &global_state.0.mode {
             GameMode::Dialogue(state) => {
-                if let Some(tid) = state.active_tree_id {
-                    (tid, state.current_node_id, state.speaker_entity)
-                } else {
-                    // Dialogue is active but no tree configured; skip
+                if state.active_tree_id.is_none() {
+                    // Simple dialogue: any choice (like "Goodbye") ends it
+                    global_state.0.return_to_exploration();
                     continue;
                 }
+                (
+                    state.active_tree_id.unwrap(),
+                    state.current_node_id,
+                    state.speaker_entity,
+                )
             }
             _ => {
                 // Not in dialogue mode - ignore the choice
                 continue;
             }
         };
+
+        let (tree_id, current_node_id, speaker_entity) = speaker_entity;
 
         let db = content.db();
         // Obtain the dialogue tree and current node immutably
@@ -292,8 +336,8 @@ fn handle_select_choice(
                             &mut global_state.0,
                             db,
                             dlg_state.as_ref(),
-                            quest_system.as_deref_mut(),
-                            game_log.as_deref_mut(),
+                            quest_system.as_mut().map(|r| r.as_mut()),
+                            game_log.as_mut().map(|r| r.as_mut()),
                         );
                     }
 
@@ -354,8 +398,8 @@ fn handle_select_choice(
                                     &mut global_state.0,
                                     db,
                                     dlg_state.as_ref(),
-                                    quest_system.as_deref_mut(),
-                                    game_log.as_deref_mut(),
+                                    quest_system.as_mut().map(|r| r.as_mut()),
+                                    game_log.as_mut().map(|r| r.as_mut()),
                                 );
                             }
 
@@ -912,7 +956,7 @@ mod tests {
         let mut gs = world.resource_mut::<GlobalState>();
         if let Some(tree) = db.dialogues.get_dialogue(1) {
             let root = tree.root_node;
-            gs.0.mode = GameMode::Dialogue(DialogueState::start(1, root));
+            gs.0.mode = GameMode::Dialogue(DialogueState::start(1, root, None));
 
             // Execute root node actions
             if let Some(node) = tree.get_node(root) {
@@ -964,7 +1008,7 @@ mod tests {
 
             if let Some(tree) = db.dialogues.get_dialogue(2) {
                 let root = tree.root_node;
-                gs.0.mode = GameMode::Dialogue(DialogueState::start(2, root));
+                gs.0.mode = GameMode::Dialogue(DialogueState::start(2, root, None));
             } else {
                 panic!("Dialogue not found in test DB");
             }
@@ -1033,7 +1077,7 @@ mod tests {
 
             if let Some(tree) = db.dialogues.get_dialogue(3) {
                 let root = tree.root_node;
-                gs.0.mode = GameMode::Dialogue(DialogueState::start(3, root));
+                gs.0.mode = GameMode::Dialogue(DialogueState::start(3, root, None));
                 if let Some(node) = tree.get_node(root) {
                     if let Some(choice) = node.choices.first() {
                         for action in &choice.actions {
@@ -1101,7 +1145,7 @@ mod tests {
     #[test]
     fn test_dialogue_state_updates_on_start() {
         // Verify that starting a dialogue properly calls update_node
-        let mut state = DialogueState::start(1, 1);
+        let mut state = DialogueState::start(1, 1, None);
 
         state.update_node(
             "Hello!".to_string(),
@@ -1119,7 +1163,7 @@ mod tests {
     #[test]
     fn test_dialogue_state_transitions() {
         // Verify state updates when transitioning between nodes
-        let mut state = DialogueState::start(1, 1);
+        let mut state = DialogueState::start(1, 1, None);
         state.update_node(
             "First text".to_string(),
             "Speaker1".to_string(),

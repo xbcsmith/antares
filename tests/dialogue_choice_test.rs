@@ -60,7 +60,6 @@ fn test_choice_button_component() {
 #[test]
 fn test_choice_ui_constants() {
     // Constants are compile-time verified through definitions
-    let _ = CHOICE_CONTAINER_Y_OFFSET;
     let _ = CHOICE_BUTTON_HEIGHT;
     let _ = CHOICE_BUTTON_SPACING;
 }

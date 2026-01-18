@@ -1,5 +1,60 @@
 ## Phase 1: Core ConfigEditor Implementation - COMPLETED
 
+## Dialogue Bevy UI Refactor - COMPLETED
+
+### Summary
+
+Refactored the dialogue UI from world-space 3D meshes and billboards to a screen-space Bevy UI (`bevy_ui`) panel. Phase 3 (Cleanup & Polish) removed the remaining 3D-specific helpers, constants, and billboard usage, updated systems and tests, and documented the final resolution: dialogue rendering is now a bottom-centered screen-space panel with a typewriter effect and a vertical choice list, eliminating near-plane clipping and alpha/depth artifact classes.
+
+### Changes Made
+
+- Removed obsolete world-space helper functions (`select_worst_camera_for_bubble`, `clamp_bubble_position_to_camera`) and related diagnostic resources.
+- Removed 3D-specific constants from `src/game/components/dialogue.rs`:
+  - `DIALOGUE_BUBBLE_Y_OFFSET`
+  - `DIALOGUE_MIN_CAMERA_DISTANCE`
+  - `DIALOGUE_FALLBACK_ENTITY_HEIGHT`
+  - `CHOICE_CONTAINER_Y_OFFSET`
+- Removed dialogue-specific `Billboard` usage and updated `DialogueBubble` to reference only screen-space UI entities.
+- Rewrote `spawn_dialogue_bubble` to spawn a `Node` hierarchy (panel root, speaker name, content with `TypewriterText`, `DialogueChoiceList`).
+- Removed billboard and follow-speaker systems (no longer applicable) and deleted/tests that assumed no-op behavior.
+- Updated choice UI to be screen-space (Phase 2) and retained logic-only input/selection systems.
+- Updated tests to reflect screen-space UI:
+  - Added/updated tests verifying panel structure, speaker name rendering, and typewriter behavior
+  - Removed tests that assumed world-space entities or `Billboard` existence
+- Updated documentation to record the resolution and rationale.
+
+### Files Modified (representative)
+
+- `src/game/components/dialogue.rs` — removed 3D constants & `Billboard`, updated `DialogueBubble` and component tests.
+- `src/game/components.rs` — updated public re-exports to remove obsolete items.
+- `src/game/systems/dialogue_visuals.rs` — removed world-space helpers, removed billboard/follow systems, simplified spawn/cleanup systems, updated tests.
+- `src/game/systems/dialogue_choices.rs` — previously refactored to screen-space (Phase 2); choice visuals now children of `DialoguePanelRoot`.
+- `tests/dialogue_visuals_test.rs`, `tests/dialogue_choice_test.rs` — updated tests to validate screen-space UI and removed 3D assumptions.
+- `docs/explanation/dialogue_bubble_debug_summary.md` — added final section documenting migration and verification.
+
+### Validation
+
+- Format: `cargo fmt --all` — OK
+- Compile: `cargo check --all-targets --all-features` — OK
+- Lint: `cargo clippy --all-targets --all-features -- -D warnings` — OK
+- Tests: `cargo nextest run --all-features` — All tests passed
+
+### Manual Verification (how to validate in-game)
+
+1. Start the game (`cargo run --release`) and load the tutorial campaign.
+2. Move the party to tile (11,6) where Apprentice Zara is placed, and press E to interact.
+3. Expected:
+   - A readable dialogue panel appears at the bottom-center of the screen.
+   - Text animates via the typewriter effect.
+   - Choices appear beneath the content; arrow keys navigate choices; Enter/Space confirms.
+   - No 3D rendering artifacts (no dark boxes or near-plane tearing).
+
+### Notes & Next Steps
+
+- Consider adding optional speaker portraits (use existing `PortraitAssets`) or configurable panel positioning (top/side).
+- Consider a small appear/disappear animation (fade) for polish in a follow-up.
+- The documentation and tests now reflect the screen-space UI design and should make future regressions easier to detect.
+
 ### Summary
 
 Implemented Phase 1 of the Config Editor plan: added a visual configuration editor for `config.ron` files in the Campaign Builder SDK. The editor provides a four-section UI layout for Graphics, Audio, Controls, and Camera configuration, integrated seamlessly with existing editor patterns and toolbar infrastructure.
@@ -2756,6 +2811,91 @@ cargo run --bin campaign_validator -- campaigns/tutorial
 - ✅ Campaign validator passes with no errors
 - ✅ All quality gates pass
 - ✅ Proper dialogue flow: root → choice → terminal node
+
+## Dialogue validation: Allow escapable cycles - COMPLETED
+
+### Summary
+
+Adjusted dialogue tree validation to allow intentional cycles (players cycling back to the beginning of a dialogue) as long as there exists a reachable terminating path from the cycle.
+
+### Context
+
+A validation failure was reported for the Village Elder dialogue in the tutorial campaign due to the presence of intentional cycles that returned the conversation to the root node. These cycles were legitimate UX: players should be able to explore dialog options multiple times and then exit via the existing "Farewell" choice.
+
+### Changes Made
+
+- Updated `src/game/systems/dialogue_validation.rs`:
+  - `detect_cycles()` now only reports cycles that are unescapable (i.e., there is no path from the cycle to a terminating node or terminating choice).
+  - Replaced `dfs_has_cycle()` with `dfs_find_cycle()` which detects a cycle and returns a representative node in the cycle.
+  - Added `reachable_to_termination()` to check if a node (and the nodes reachable from it) can reach a terminating node/choice.
+- Added unit tests:
+  - `test_allows_escapable_cycle`
+  - `test_allows_cycle_with_external_exit`
+- No change to the authored dialogue data was necessary — existing dialogues that intentionally cycle (like Village Elder) are now valid.
+
+### Testing
+
+- Unit tests added and verified locally:
+  - The new tests pass under the library test suite.
+- Quality gates executed and passing (locally):
+  - `cargo fmt --all` ✅
+  - `cargo check --all-targets --all-features` ✅
+  - `cargo clippy --all-targets --all-features -- -D warnings` ✅
+  - `cargo nextest run --all-features` ✅ (full test suite verified)
+
+### Deliverables
+
+- ✅ Validator accepts escapable cycles
+- ✅ New tests added to prevent regressions
+- ✅ Documentation updated here in `docs/explanation/implementations.md`
+
+### Architecture Compliance
+
+- The change respects domain model constraints and does not modify core data structures.
+- Unit tests cover both failure (unescapable cycles) and success (escapable cycles) cases.
+
+### Notes
+
+This change improves dialogue authoring ergonomics by allowing natural conversational loops while still protecting against dialogues that have no way for the player to finish (unescapable loops).
+
+## Tutorial NPC test decoupling - COMPLETED
+
+### Summary
+
+Reverted the earlier edits to the live tutorial NPC data and decoupled unit tests from the changing tutorial campaign. Tests that previously referenced `campaigns/tutorial` now use stable test fixtures under `tests/data/`, so ongoing tutorial content changes no longer break unit tests.
+
+### Context
+
+Tutorial campaign files are actively edited by content authors during development. Tests that reference those files directly are brittle and lead to test churn when tutorial data is intentionally changed. To make tests stable and maintainable, they should use dedicated, human-immutable fixtures (\"@data\" style files) that tests can rely on.
+
+### Changes Made
+
+- Restored the tutorial NPC data to its canonical state (no permanent edits to `campaigns/tutorial/data/npcs.ron` were left in the repository).
+- Added stable test fixtures under `tests/data/`:
+  - `tests/data/tutorial_npcs_fixture.ron`
+  - `tests/data/tutorial_dialogues_fixture.ron`
+- Updated SDK tests to use fixtures rather than the live tutorial files:
+  - `sdk::database::tests::test_load_tutorial_npcs_file` now loads `tests/data/tutorial_npcs_fixture.ron`
+  - `sdk::database::tests::test_tutorial_npcs_reference_valid_dialogues` now loads `tests/data/tutorial_dialogues_fixture.ron`
+
+### Testing
+
+- The modified tests that use fixtures pass:
+  - `sdk::database::tests::test_load_tutorial_npcs_file` — passes with fixture data.
+  - `sdk::database::tests::test_tutorial_npcs_reference_valid_dialogues` — passes with fixture data.
+- Full test run (`cargo nextest run --all-features`) completes successfully in the developer environment after these changes.
+
+### Deliverables
+
+- ✅ Tutorial content files reverted to the canonical campaign data
+- ✅ Stable fixtures added under `tests/data/`
+- ✅ Tests updated to use fixtures (no longer coupled to mutable tutorial content)
+- ✅ Test suite passes
+
+### Notes
+
+- Recommendation: Prefer `tests/data/` or an explicit `@data` fixtures directory for tests that must validate content. Those files are intended to be stable and not edited by content authors, avoiding test breakage as tutorial content evolves.
+- If you want, I can add a short lint/check that ensures tests avoid direct references to `campaigns/tutorial` files where appropriate.
 
 ### Architecture Compliance
 
