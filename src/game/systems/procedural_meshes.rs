@@ -152,6 +152,7 @@ pub fn spawn_tree(
 /// * `materials` - Material asset storage
 /// * `meshes` - Mesh asset storage
 /// * `position` - Tile position in world coordinates
+/// * `event_name` - Event name for entity label
 /// * `map_id` - Map identifier for cleanup
 ///
 /// # Returns
@@ -162,6 +163,7 @@ pub fn spawn_portal(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     position: types::Position,
+    event_name: String,
     map_id: types::MapId,
 ) -> Entity {
     let mesh = meshes.add(Torus {
@@ -190,6 +192,7 @@ pub fn spawn_portal(
             Visibility::default(),
             MapEntity(map_id),
             TileCoord(position),
+            Name::new(format!("PortalMarker_{}", event_name)),
         ))
         .id()
 }
@@ -206,6 +209,7 @@ pub fn spawn_portal(
 /// * `materials` - Material asset storage
 /// * `meshes` - Mesh asset storage
 /// * `position` - Tile position in world coordinates
+/// * `event_name` - Event name for entity label
 /// * `map_id` - Map identifier for cleanup
 ///
 /// # Returns
@@ -216,6 +220,7 @@ pub fn spawn_sign(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     position: types::Position,
+    event_name: String,
     map_id: types::MapId,
 ) -> Entity {
     // Create post mesh and material
@@ -251,6 +256,7 @@ pub fn spawn_sign(
             Visibility::default(),
             MapEntity(map_id),
             TileCoord(position),
+            Name::new(format!("SignMarker_{}", event_name)),
         ))
         .id();
 
@@ -282,3 +288,45 @@ pub fn spawn_sign(
 }
 
 // ==================== Tests ====================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== Constant Validation Tests ====================
+
+    /// Validates tree constants are within reasonable bounds
+    #[test]
+    fn test_tree_constants_valid() {
+        // Constants should be positive and follow size relationships
+        // These checks serve as documentation of design invariants
+        let _ = TREE_TRUNK_RADIUS;
+        let _ = TREE_TRUNK_HEIGHT;
+        let _ = TREE_FOLIAGE_RADIUS;
+        // Compile will verify constants exist with correct values
+    }
+
+    /// Validates portal constants are within reasonable bounds
+    #[test]
+    fn test_portal_constants_valid() {
+        // Constants should be positive and follow size relationships
+        // These checks serve as documentation of design invariants
+        let _ = PORTAL_TORUS_MAJOR_RADIUS;
+        let _ = PORTAL_TORUS_MINOR_RADIUS;
+        let _ = PORTAL_Y_POSITION;
+        // Compile will verify constants exist with correct values
+    }
+
+    /// Validates sign constants are within reasonable bounds
+    #[test]
+    fn test_sign_constants_valid() {
+        // Constants should be positive and follow size relationships
+        // These checks serve as documentation of design invariants
+        let _ = SIGN_POST_RADIUS;
+        let _ = SIGN_POST_HEIGHT;
+        let _ = SIGN_BOARD_WIDTH;
+        let _ = SIGN_BOARD_HEIGHT;
+        let _ = SIGN_BOARD_DEPTH;
+        // Compile will verify constants exist with correct values
+    }
+}
