@@ -5,6 +5,7 @@ use crate::domain::types;
 use crate::domain::world;
 use crate::game::components::dialogue::NpcDialogue;
 use crate::game::resources::GlobalState;
+use crate::game::systems::procedural_meshes;
 use bevy::prelude::*;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
@@ -369,7 +370,7 @@ fn spawn_map(
         let door_color = Color::srgb(door_rgb.0, door_rgb.1, door_rgb.2);
         let water_color = Color::srgb(water_rgb.0, water_rgb.1, water_rgb.2);
         let mountain_color = Color::srgb(mountain_rgb.0, mountain_rgb.1, mountain_rgb.2);
-        let forest_color = Color::srgb(forest_rgb.0, forest_rgb.1, forest_rgb.2);
+        let _forest_color = Color::srgb(forest_rgb.0, forest_rgb.1, forest_rgb.2);
         let grass_color = Color::srgb(grass_rgb.0, grass_rgb.1, grass_rgb.2);
 
         let floor_material = materials.add(StandardMaterial {
@@ -464,7 +465,7 @@ fn spawn_map(
                             ));
                         }
                         world::TerrainType::Forest => {
-                            // Render floor first
+                            // Render grass floor first
                             commands.spawn((
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(grass_material.clone()),
@@ -475,50 +476,14 @@ fn spawn_map(
                                 TileCoord(pos),
                             ));
 
-                            // Use per-tile visual metadata for tree dimensions
-                            let (width_x, height, width_z) =
-                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
-                            let mesh = get_or_create_mesh(
+                            // Spawn procedural tree with trunk and foliage
+                            procedural_meshes::spawn_tree(
+                                &mut commands,
+                                &mut materials,
                                 &mut meshes,
-                                &mut mesh_cache,
-                                width_x,
-                                height,
-                                width_z,
+                                pos,
+                                map.id,
                             );
-                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
-
-                            // Apply color tint if specified
-                            let mut base_color = forest_color;
-                            if let Some((r, g, b)) = tile.visual.color_tint {
-                                base_color = Color::srgb(
-                                    forest_rgb.0 * r,
-                                    forest_rgb.1 * g,
-                                    forest_rgb.2 * b,
-                                );
-                            }
-
-                            let material = materials.add(StandardMaterial {
-                                base_color,
-                                perceptual_roughness: 0.9,
-                                ..default()
-                            });
-
-                            // Apply rotation if specified
-                            let rotation = bevy::prelude::Quat::from_rotation_y(
-                                tile.visual.rotation_y_radians(),
-                            );
-                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
-                                .with_rotation(rotation);
-
-                            commands.spawn((
-                                Mesh3d(mesh),
-                                MeshMaterial3d(material),
-                                transform,
-                                GlobalTransform::default(),
-                                Visibility::default(),
-                                MapEntity(map.id),
-                                TileCoord(pos),
-                            ));
                         }
                         world::TerrainType::Grass => {
                             // Grass floor

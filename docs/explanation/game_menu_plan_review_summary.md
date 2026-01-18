@@ -19,7 +19,7 @@ The game menu implementation plan has been completely rewritten to meet AI-Optim
 
 ### Structural Improvements
 
-**Before**: 
+**Before**:
 - Vague "Proposed Changes" sections
 - No current state analysis
 - Missing architectural decisions
@@ -55,7 +55,7 @@ The game menu implementation plan has been completely rewritten to meet AI-Optim
 
 #### ✅ Machine-Verifiable Validation
 - **Before**: "Verify Menu opens"
-- **After**: 
+- **After**:
   ```bash
   cargo nextest run menu_toggle --all-features  # Expected: 7/7 tests pass
   ```
@@ -328,7 +328,7 @@ If any clarifications needed:
 The game menu implementation plan has been transformed from a high-level outline into a production-ready, AI-optimized implementation guide. The plan is:
 
 - ✅ **Complete**: All features, edge cases, and requirements specified
-- ✅ **Unambiguous**: Every instruction has exact file paths and line numbers  
+- ✅ **Unambiguous**: Every instruction has exact file paths and line numbers
 - ✅ **Testable**: 34 automated tests with verifiable success criteria
 - ✅ **Documented**: Full documentation requirements included
 - ✅ **Standards-Compliant**: Meets all PLAN.md and AGENTS.md requirements

@@ -12,6 +12,7 @@ pub mod hud;
 pub mod inn_ui;
 pub mod input;
 pub mod map;
+pub mod procedural_meshes;
 pub mod quest;
 pub mod recruitment_dialog;
 pub mod ui;
