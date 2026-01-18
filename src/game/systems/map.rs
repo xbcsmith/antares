@@ -104,9 +104,28 @@ impl Plugin for MapRenderingPlugin {
     fn build(&self, app: &mut App) {
         // Keep the visual spawn on startup (original behavior), and add the
         // map manager plugin so dynamic changes are handled at runtime.
-        app.add_systems(Startup, spawn_map)
+        app.add_systems(Startup, spawn_map_system)
             .add_plugins(MapManagerPlugin);
     }
+}
+
+/// System wrapper that creates a cache and calls spawn_map
+fn spawn_map_system(
+    commands: Commands,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
+    global_state: Res<GlobalState>,
+    content: Res<crate::application::resources::GameContent>,
+    mut cache: Local<super::procedural_meshes::ProceduralMeshCache>,
+) {
+    spawn_map(
+        commands,
+        meshes,
+        materials,
+        global_state,
+        content,
+        &mut cache,
+    );
 }
 
 /// System that handles door opened messages by refreshing map visuals
@@ -133,7 +152,15 @@ fn handle_door_opened(
     }
 
     // Respawn the map with updated door states
-    spawn_map(commands, meshes, materials, global_state, content);
+    let mut procedural_cache = super::procedural_meshes::ProceduralMeshCache::default();
+    spawn_map(
+        commands,
+        meshes,
+        materials,
+        global_state,
+        content,
+        &mut procedural_cache,
+    );
 }
 
 /// Converts a domain MapEvent into a lightweight MapEventType (if supported)
@@ -333,6 +360,7 @@ fn spawn_map(
     mut materials: ResMut<Assets<StandardMaterial>>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
+    procedural_cache: &mut super::procedural_meshes::ProceduralMeshCache,
 ) {
     debug!("spawn_map system called");
     let game_state = &global_state.0;
@@ -476,6 +504,7 @@ fn spawn_map(
                                 &mut meshes,
                                 pos,
                                 map.id,
+                                procedural_cache,
                             );
                         }
                         world::TerrainType::Grass => {
@@ -775,6 +804,7 @@ fn spawn_map(
                         *position,
                         name.clone(),
                         map.id,
+                        procedural_cache,
                     );
                 }
                 world::MapEvent::Teleport { name, .. } => {
@@ -785,6 +815,7 @@ fn spawn_map(
                         *position,
                         name.clone(),
                         map.id,
+                        procedural_cache,
                     );
                 }
                 // RecruitableCharacter rendering handled by sprite system
