@@ -94,11 +94,29 @@ Unable to create new nodes makes it impossible to create dialog trees.
 
 ## Game Engine
 
+
+### Warnings
+
+2026-01-17T21:23:14.969390Z  WARN bevy_ecs::error::handler: Encountered an error in command `<bevy_ecs::system::commands::entity_command::despawn::{{closure}} as bevy_ecs::error::command_handling::CommandWithEntity<core::result::Result<(), bevy_ecs::world::error::EntityMutableFetchError>>>::with_entity::{{closure}}`: The entity with ID 600v217 does not exist (enable `track_location` feature for more details)
+
+    If you were attempting to apply a command to this entity,
+    and want to handle this error gracefully, consider using `EntityCommands::queue_handled` or `queue_silenced`.
+
+
+✅ COMPLETED -
+
 ### Procedural Meshes Implementation
 
 [procedural meshes implementation](./procedural_meshes_implementation_plan.md)
 
+### InnKeeper Party management
+
+InnKeeper Party management is broken. It triggers automatically before the player enters the inn. It should be triggered by a dialog node. There is no mouse support and no keyboard support so there is no way to navigate the party management window. ESC does not work to close the window. Basically the game is stuck at the InnKeeper Party management window. Characters that were recruited and in the party already still appear in the recruitable list. The recruit screen should only show characters that are not already in the party. Characters that are in the party should appear in the party list with an option to remove them from the party. Removing a character from the party should return them to the recruitable list. ESC should close the party management window and return to the game.
+
+
 ### Character Recruitment Events
+
+We finished the @dialogue_bevy_ui_refactor_plan.md and now we have working chat windows. Several issues still exist. For example the character Whisper is using the default character recruitment dialogue (id 100) instead of her dialogue (id 102).  Same goes for Zara.  WHen asked to join the party choices do not clear the bubble so when we move the bubble stays with the dialogue. Whisper does not join the party. When we talk to the NPC after talking to Whisper the choices do not clear. The NPC Choices are appened to the bubble. InnKeeper Party management
 
 Character recruitment events are not implemented in the game engine. When a dialog node triggers a recruitment event, nothing happens. We need to implement character recruitment events in the game engine so that when a dialog node triggers a recruitment event, the specified character is added to the player's party. The event needs to be able to have a dialog attached to it that plays when the character is recruited. Then the character should either jopin the party and appear in the party HUD or travel to the inn removing the event from the map in-game. If there is no dialog the character should use the default recruitment dialog.
 
@@ -124,13 +142,14 @@ RecruitableCharacter(
             dialog_id: 100,
         ),
 
-[character recruitment implementation](./character_recruitment_implementation_plan.md)
+
+✅ COMPLETED - [character recruitment implementation](./character_recruitment_implementation_plan.md)
 
 ### Save Game Implementation
 
 A configurable Keyboard Key (default ESC) should bring up the game menu. Currently it does nothing. We need to implement the game menu. It should include options like new game, save game, load game, delete game, quit, etc. We should also add a Configuration menu option that allows the user to change settings like volume, graphics quality, key bindings, etc and store it in the Save Game RON File. This config would override the default Campaign Config RON file settings once set. Keeping a list of recent saves that the use can pick from to load would also be a feature.
 
-✅ COMPLETED - [game menu implementation](./game_menu_implementation_plan.md)
+[game menu implementation](./game_menu_implementation_plan.md)
 
 ### Teleport to Map
 

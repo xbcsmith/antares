@@ -7608,12 +7608,38 @@
     ],
     events: {
         (
-            x: 13,
-            y: 18,
+            x: 9,
+            y: 9,
+        ): Trap(
+            name: "Water Trap",
+            description: "A trap in the town square fountain",
+            damage: 10,
+            effect: Some("Poison"),
+        ),
+        (
+            x: 15,
+            y: 8,
+        ): RecruitableCharacter(
+            name: "Old Gareth",
+            description: "A grizzled dwarf veteran stands here, repairing armor.",
+            character_id: "npc_old_gareth",
+            dialogue_id: Some(100),
+        ),
+        (
+            x: 5,
+            y: 10,
         ): Sign(
-            name: "Directional Sign",
-            description: "A wooden sign pointing toward the Dark Forrest.",
-            text: "To the Dark Forrest",
+            name: "General Store Sign",
+            description: "A sign advertising the general store\'s wares and services.",
+            text: "General Store - Buy and Sell items for your party!",
+        ),
+        (
+            x: 13,
+            y: 3,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice outside the temple detailing its services.",
+            text: "Temple of Healing - The priests can restore your health.",
         ),
         (
             x: 18,
@@ -7626,6 +7652,14 @@
                 y: 10,
             ),
             map_id: 4,
+        ),
+        (
+            x: 13,
+            y: 18,
+        ): Sign(
+            name: "Directional Sign",
+            description: "A wooden sign pointing toward the Dark Forrest.",
+            text: "To the Dark Forrest",
         ),
         (
             x: 7,
@@ -7645,22 +7679,6 @@
             innkeeper_id: "tutorial_innkeeper_town",
         ),
         (
-            x: 5,
-            y: 10,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store\'s wares and services.",
-            text: "General Store - Buy and Sell items for your party!",
-        ),
-        (
-            x: 13,
-            y: 3,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice outside the temple detailing its services.",
-            text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
             x: 11,
             y: 6,
         ): RecruitableCharacter(
@@ -7668,24 +7686,6 @@
             description: "A young gnome apprentice studies a spellbook intently.",
             character_id: "npc_apprentice_zara",
             dialogue_id: Some(101),
-        ),
-        (
-            x: 9,
-            y: 9,
-        ): Trap(
-            name: "Water Trap",
-            description: "A trap in the town square fountain",
-            damage: 10,
-            effect: Some("Poison"),
-        ),
-        (
-            x: 15,
-            y: 8,
-        ): RecruitableCharacter(
-            name: "Old Gareth",
-            description: "A grizzled dwarf veteran stands here, repairing armor.",
-            character_id: "npc_old_gareth",
-            dialogue_id: Some(100),
         ),
     },
     npc_placements: [

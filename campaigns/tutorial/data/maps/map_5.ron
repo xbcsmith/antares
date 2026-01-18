@@ -5708,18 +5708,6 @@
     ],
     events: {
         (
-            x: 19,
-            y: 7,
-        ): Teleport(
-            name: "Portal to Dark Forrest",
-            description: "A portal that transports the party to Dark Forrest (map 4) at (10,19).",
-            destination: (
-                x: 10,
-                y: 19,
-            ),
-            map_id: 4,
-        ),
-        (
             x: 18,
             y: 7,
         ): Sign(
@@ -5742,6 +5730,18 @@
             name: "Temple Sign",
             description: "A notice describing the Temple of Healing and the services it provides.",
             text: "Temple of Healing - The priests can restore your health.",
+        ),
+        (
+            x: 19,
+            y: 7,
+        ): Teleport(
+            name: "Portal to Dark Forrest",
+            description: "A portal that transports the party to Dark Forrest (map 4) at (10,19).",
+            destination: (
+                x: 10,
+                y: 19,
+            ),
+            map_id: 4,
         ),
         (
             x: 15,

@@ -65,10 +65,10 @@ pub fn spawn_dialogue_bubble(
                 Node {
                     position_type: PositionType::Absolute,
                     bottom: DIALOGUE_PANEL_BOTTOM,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
+                    left: Val::Percent(20.0), // Explicit centering (20% | 60% | 20%)
+                    right: Val::Auto,
                     width: DIALOGUE_PANEL_WIDTH,
-                    margin: UiRect::horizontal(Val::Auto), // Center horizontally
+                    margin: UiRect::all(Val::Auto),
                     padding: UiRect::all(DIALOGUE_PANEL_PADDING),
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(8.0),
@@ -76,6 +76,7 @@ pub fn spawn_dialogue_bubble(
                 },
                 BackgroundColor(DIALOGUE_BACKGROUND_COLOR),
                 BorderRadius::all(Val::Px(8.0)),
+                ZIndex(10), // Ensure above HUD
                 DialoguePanelRoot,
             ))
             .with_children(|parent| {

@@ -39,6 +39,8 @@ pub fn spawn_choice_ui(
     mut choice_state: ResMut<ChoiceSelectionState>,
     // Query to find the screen-space choice list container
     choice_list_query: Query<Entity, With<DialogueChoiceList>>,
+    // Query to find children for cleanup
+    children_query: Query<&Children>,
 ) {
     if let GameMode::Dialogue(ref dialogue_state) = global_state.0.mode {
         // Only spawn choices when they are available
@@ -46,8 +48,9 @@ pub fn spawn_choice_ui(
             return;
         }
 
-        // Prevent re-spawning if choices are already present
-        if choice_state.choice_count > 0 {
+        // Prevent re-spawning if logic hasn't changed.
+        // We only respawn if the global state (dialogue node) changed OR if we have no choices displayed yet.
+        if !global_state.is_changed() && choice_state.choice_count > 0 {
             return;
         }
 
@@ -64,6 +67,13 @@ pub fn spawn_choice_ui(
                 return;
             }
         };
+
+        // Clear any existing children to ensure we don't append to old choices
+        if let Ok(children) = children_query.get(container) {
+            for child in children.iter() {
+                commands.entity(child).despawn();
+            }
+        }
 
         let choice_count = dialogue_state.current_choices.len();
 
@@ -139,11 +149,6 @@ pub fn update_choice_visuals(
         &mut BackgroundColor,
     )>,
 ) {
-    // Only update visuals when the selection state actually changes
-    if !choice_state.is_changed() {
-        return;
-    }
-
     // Use a distinct highlight background for selected choice
     let highlight_bg = Color::srgba(0.12, 0.12, 0.15, 1.0);
 
@@ -184,7 +189,7 @@ pub fn update_choice_visuals(
 /// * `mut ev_select` - Message writer for SelectDialogueChoice messages
 pub fn choice_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
-    global_state: Res<GlobalState>,
+    mut global_state: ResMut<GlobalState>,
     mut choice_state: ResMut<ChoiceSelectionState>,
     mut ev_select: MessageWriter<SelectDialogueChoice>,
 ) {
@@ -192,8 +197,25 @@ pub fn choice_input_system(
         return;
     }
 
+    // Handle Escape to close dialogue.
+    // Also handle Space/Enter if there are no choices (terminal node).
+    let is_terminal = choice_state.choice_count == 0;
+
+    if keyboard.just_pressed(KeyCode::Escape)
+        || (is_terminal
+            && (keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space)))
+    {
+        // Exit dialogue mode
+        global_state.0.mode = GameMode::Exploration;
+
+        // Reset choice state
+        choice_state.selected_index = 0;
+        choice_state.choice_count = 0;
+        return;
+    }
+
     if choice_state.choice_count == 0 {
-        return; // No choices available
+        return; // No choices available, and not closing
     }
 
     // Navigate up
@@ -216,7 +238,7 @@ pub fn choice_input_system(
         }
     }
 
-    // Direct number selection (1-9)
+    // Direct number selection (1-9) triggers immediately
     for (key, index) in [
         (KeyCode::Digit1, 0),
         (KeyCode::Digit2, 1),
@@ -229,7 +251,13 @@ pub fn choice_input_system(
         (KeyCode::Digit9, 8),
     ] {
         if keyboard.just_pressed(key) && index < choice_state.choice_count {
-            choice_state.selected_index = index;
+            // Select and confirm immediately
+            ev_select.write(SelectDialogueChoice {
+                choice_index: index,
+            });
+            choice_state.selected_index = 0;
+            choice_state.choice_count = 0;
+            return;
         }
     }
 
@@ -258,20 +286,14 @@ pub fn choice_input_system(
 /// * `mut choice_state` - Choice selection state to reset
 /// * `query` - Query for choice container entities
 pub fn cleanup_choice_ui(
-    mut commands: Commands,
     global_state: Res<GlobalState>,
     mut choice_state: ResMut<ChoiceSelectionState>,
-    // Query the screen-space choice list container(s) and remove their children
-    query: Query<&Children, With<DialogueChoiceList>>,
 ) {
     // Cleanup when leaving Dialogue mode
     if !matches!(global_state.0.mode, GameMode::Dialogue(_)) {
-        for children in query.iter() {
-            for child in children.iter() {
-                // Despawn each child choice node (they do not have nested children)
-                commands.entity(child).despawn();
-            }
-        }
+        // Note: We do NOT need to despawn choice entities here because they are children
+        // of the dialogue panel, which is despawned by cleanup_dialogue_bubble.
+        // We only need to reset the selection state.
 
         choice_state.selected_index = 0;
         choice_state.choice_count = 0;
@@ -550,7 +572,10 @@ mod tests {
         // Run cleanup system
         app.add_systems(
             Update,
-            crate::game::systems::dialogue_choices::cleanup_choice_ui,
+            (
+                crate::game::systems::dialogue_choices::cleanup_choice_ui,
+                crate::game::systems::dialogue_visuals::cleanup_dialogue_bubble,
+            ),
         );
         app.update();
 
