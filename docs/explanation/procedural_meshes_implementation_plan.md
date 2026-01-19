@@ -1,5 +1,9 @@
 # Procedural Meshes Implementation Plan
 
+> **STATUS: PHASES 1-5 COMPLETED** (2025-01-XX)
+>
+> **Phase 5 Update**: Portal design changed from torus ring to rectangular vertical frame. Sign interaction changed from auto-trigger to E key interaction with dialogue box (matching NPC interaction pattern). Sign board repositioned to eye height (1.5m).
+>
 > **UPDATE (2025-01-XX)**: This plan has been modified to align with the sprite-based character rendering approach. All "Actor" entity rendering (NPCs, Monsters, Recruitables) has been moved to the Sprite Support implementation plan. This plan now focuses exclusively on **Environmental Objects** (Trees) and **Static Interactive Props** (Signs, Portals).
 >
 > **Key Changes**:
@@ -7,6 +11,7 @@
 > - **Phase 2 (NPC Procedural Representation)**: REMOVED - NPCs now use sprite billboards
 > - **Phase 3 (Event Markers)**: MODIFIED - Removed recruitable character markers (now sprites)
 > - **Phase 4 (Performance)**: MODIFIED - Removed NPC and recruitable mesh cache entries
+> - **Phase 5 (Portal Redesign & Sign Interaction)**: COMPLETED - Portals now rectangular frames, signs require E key
 >
 > **Rationale**: Establishes "2.5D" aesthetic where the game world is 3D (procedural geometry) and characters are 2D (billboard sprites) using native Bevy PBR rendering.
 

@@ -4,7 +4,7 @@
 //! Procedural mesh generation for environmental objects and static event markers
 //!
 //! This module provides pure Rust functions to spawn composite 3D meshes using
-//! Bevy primitives (Cylinder, Sphere, Torus, Cuboid). No external assets required.
+//! Bevy primitives (Cylinder, Sphere, Cuboid). No external assets required.
 //!
 //! Character rendering (NPCs, Monsters, Recruitables) uses the sprite system.
 
@@ -42,8 +42,10 @@ pub struct ProceduralMeshCache {
     tree_trunk: Option<Handle<Mesh>>,
     /// Cached foliage mesh handle for trees
     tree_foliage: Option<Handle<Mesh>>,
-    /// Cached torus mesh handle for portals
-    portal_torus: Option<Handle<Mesh>>,
+    /// Cached horizontal bar mesh handle for portals (top/bottom)
+    portal_frame_horizontal: Option<Handle<Mesh>>,
+    /// Cached vertical bar mesh handle for portals (left/right)
+    portal_frame_vertical: Option<Handle<Mesh>>,
     /// Cached cylinder mesh handle for sign posts
     sign_post: Option<Handle<Mesh>>,
     /// Cached cuboid mesh handle for sign boards
@@ -56,7 +58,8 @@ impl Default for ProceduralMeshCache {
         Self {
             tree_trunk: None,
             tree_foliage: None,
-            portal_torus: None,
+            portal_frame_horizontal: None,
+            portal_frame_vertical: None,
             sign_post: None,
             sign_board: None,
         }
@@ -72,9 +75,12 @@ const TREE_FOLIAGE_RADIUS: f32 = 0.6;
 const TREE_FOLIAGE_Y_OFFSET: f32 = 2.0;
 
 // Event marker dimensions
-const PORTAL_TORUS_MAJOR_RADIUS: f32 = 0.4;
-const PORTAL_TORUS_MINOR_RADIUS: f32 = 0.05;
-const PORTAL_Y_POSITION: f32 = 0.5;
+// Portal dimensions - rectangular frame standing vertically
+const PORTAL_FRAME_WIDTH: f32 = 0.8; // Width of the portal opening
+const PORTAL_FRAME_HEIGHT: f32 = 1.8; // Height of the portal opening (taller, human-sized)
+const PORTAL_FRAME_THICKNESS: f32 = 0.08; // Thickness of frame bars
+const PORTAL_FRAME_DEPTH: f32 = 0.08; // Depth of frame bars
+const PORTAL_Y_POSITION: f32 = 0.9; // Bottom of frame at ground level (frame center)
 const _PORTAL_ROTATION_SPEED: f32 = 1.0; // radians/sec
 
 const SIGN_POST_RADIUS: f32 = 0.05;
@@ -82,7 +88,7 @@ const SIGN_POST_HEIGHT: f32 = 1.5;
 const SIGN_BOARD_WIDTH: f32 = 0.6;
 const SIGN_BOARD_HEIGHT: f32 = 0.3;
 const SIGN_BOARD_DEPTH: f32 = 0.05;
-const SIGN_BOARD_Y_OFFSET: f32 = 1.3;
+const SIGN_BOARD_Y_OFFSET: f32 = 1.5; // Eye height (approx 5 feet)
 
 // Color constants
 const TREE_TRUNK_COLOR: Color = Color::srgb(0.4, 0.25, 0.15); // Brown
@@ -210,8 +216,12 @@ pub fn spawn_tree(
 }
 
 /// Spawns a procedural portal/teleport mesh
+/// Spawns a procedural portal/teleport mesh (rectangular frame)
 ///
-/// Creates a rotating torus mesh to represent a magical portal.
+/// Creates a glowing purple rectangular frame positioned vertically at ground level.
+/// The frame is composed of four cuboid bars forming a doorway-like portal.
+/// Vertically oriented with rounded corners created by the thickness of the bars.
+///
 /// Reuses cached meshes when available to avoid duplicate allocations.
 ///
 /// # Arguments
@@ -223,10 +233,12 @@ pub fn spawn_tree(
 /// * `event_name` - Event name for entity label
 /// * `map_id` - Map identifier for cleanup
 /// * `cache` - Mutable reference to mesh cache for reuse
+/// * `rotation_y` - Optional rotation in degrees around Y-axis (default: 0.0)
 ///
 /// # Returns
 ///
-/// Entity ID of the portal entity
+/// Entity ID of the parent portal entity
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_portal(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
@@ -235,17 +247,35 @@ pub fn spawn_portal(
     event_name: String,
     map_id: types::MapId,
     cache: &mut ProceduralMeshCache,
+    rotation_y: Option<f32>,
 ) -> Entity {
-    // Get or create portal torus mesh from cache
-    let mesh = cache.portal_torus.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Torus {
-            major_radius: PORTAL_TORUS_MAJOR_RADIUS,
-            minor_radius: PORTAL_TORUS_MINOR_RADIUS,
+    // Get or create horizontal bar mesh from cache (for top/bottom bars)
+    let horizontal_bar_mesh = cache.portal_frame_horizontal.clone().unwrap_or_else(|| {
+        let handle = meshes.add(Cuboid {
+            half_size: Vec3::new(
+                PORTAL_FRAME_WIDTH / 2.0,
+                PORTAL_FRAME_THICKNESS / 2.0,
+                PORTAL_FRAME_DEPTH / 2.0,
+            ),
         });
-        cache.portal_torus = Some(handle.clone());
+        cache.portal_frame_horizontal = Some(handle.clone());
         handle
     });
 
+    // Get or create vertical bar mesh from cache (for left/right bars)
+    let vertical_bar_mesh = cache.portal_frame_vertical.clone().unwrap_or_else(|| {
+        let handle = meshes.add(Cuboid {
+            half_size: Vec3::new(
+                PORTAL_FRAME_THICKNESS / 2.0,
+                PORTAL_FRAME_HEIGHT / 2.0,
+                PORTAL_FRAME_DEPTH / 2.0,
+            ),
+        });
+        cache.portal_frame_vertical = Some(handle.clone());
+        handle
+    });
+
+    // Create material for portal frame (shared by all bars)
     let material = materials.add(StandardMaterial {
         base_color: PORTAL_COLOR,
         perceptual_roughness: 0.3,
@@ -258,18 +288,72 @@ pub fn spawn_portal(
         ..default()
     });
 
-    commands
+    // Spawn parent portal entity with optional rotation
+    let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
+    let transform = Transform::from_xyz(position.x as f32, PORTAL_Y_POSITION, position.y as f32)
+        .with_rotation(Quat::from_rotation_y(rotation_radians));
+
+    let parent = commands
         .spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            Transform::from_xyz(position.x as f32, PORTAL_Y_POSITION, position.y as f32),
+            transform,
             GlobalTransform::default(),
             Visibility::default(),
             MapEntity(map_id),
             TileCoord(position),
             Name::new(format!("PortalMarker_{}", event_name)),
         ))
-        .id()
+        .id();
+
+    // Spawn frame bars as children
+    // Top bar (horizontal)
+    let top = commands
+        .spawn((
+            Mesh3d(horizontal_bar_mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::from_xyz(0.0, PORTAL_FRAME_HEIGHT / 2.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(top);
+
+    // Bottom bar (horizontal)
+    let bottom = commands
+        .spawn((
+            Mesh3d(horizontal_bar_mesh),
+            MeshMaterial3d(material.clone()),
+            Transform::from_xyz(0.0, -PORTAL_FRAME_HEIGHT / 2.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(bottom);
+
+    // Left bar (vertical)
+    let left = commands
+        .spawn((
+            Mesh3d(vertical_bar_mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::from_xyz(-PORTAL_FRAME_WIDTH / 2.0, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(left);
+
+    // Right bar (vertical)
+    let right = commands
+        .spawn((
+            Mesh3d(vertical_bar_mesh),
+            MeshMaterial3d(material),
+            Transform::from_xyz(PORTAL_FRAME_WIDTH / 2.0, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(right);
+
+    parent
 }
 
 /// Spawns a procedural sign mesh with post and board
@@ -291,10 +375,12 @@ pub fn spawn_portal(
 /// * `event_name` - Event name for entity label
 /// * `map_id` - Map identifier for cleanup
 /// * `cache` - Mutable reference to mesh cache for reuse
+/// * `rotation_y` - Optional rotation in degrees around Y-axis (default: 0.0)
 ///
 /// # Returns
 ///
 /// Entity ID of the parent sign entity
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_sign(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
@@ -303,6 +389,7 @@ pub fn spawn_sign(
     event_name: String,
     map_id: types::MapId,
     cache: &mut ProceduralMeshCache,
+    rotation_y: Option<f32>,
 ) -> Entity {
     // Get or create post mesh from cache
     let post_mesh = cache.sign_post.clone().unwrap_or_else(|| {
@@ -337,10 +424,14 @@ pub fn spawn_sign(
         ..default()
     });
 
-    // Spawn parent sign entity
+    // Spawn parent sign entity with optional rotation
+    let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
+    let transform = Transform::from_xyz(position.x as f32, 0.0, position.y as f32)
+        .with_rotation(Quat::from_rotation_y(rotation_radians));
+
     let parent = commands
         .spawn((
-            Transform::from_xyz(position.x as f32, 0.0, position.y as f32),
+            transform,
             GlobalTransform::default(),
             Visibility::default(),
             MapEntity(map_id),
@@ -400,8 +491,10 @@ mod tests {
     fn test_portal_constants_valid() {
         // Constants should be positive and follow size relationships
         // These checks serve as documentation of design invariants
-        let _ = PORTAL_TORUS_MAJOR_RADIUS;
-        let _ = PORTAL_TORUS_MINOR_RADIUS;
+        let _ = PORTAL_FRAME_WIDTH;
+        let _ = PORTAL_FRAME_HEIGHT;
+        let _ = PORTAL_FRAME_THICKNESS;
+        let _ = PORTAL_FRAME_DEPTH;
         let _ = PORTAL_Y_POSITION;
         // Compile will verify constants exist with correct values
     }
@@ -427,7 +520,8 @@ mod tests {
         let cache = ProceduralMeshCache::default();
         assert!(cache.tree_trunk.is_none());
         assert!(cache.tree_foliage.is_none());
-        assert!(cache.portal_torus.is_none());
+        assert!(cache.portal_frame_horizontal.is_none());
+        assert!(cache.portal_frame_vertical.is_none());
         assert!(cache.sign_post.is_none());
         assert!(cache.sign_board.is_none());
     }
@@ -474,15 +568,17 @@ mod tests {
         // Test passes if constants compile with valid values
     }
 
-    /// Tests that portal torus dimensions are suitable for caching
+    /// Tests that portal frame dimensions are suitable for caching
     #[test]
-    fn test_portal_torus_dimensions_consistent() {
-        // Portal torus should have reasonable proportions.
-        // Minor radius should be much smaller for ring appearance.
+    fn test_portal_frame_dimensions_consistent() {
+        // Portal frame should have reasonable proportions.
+        // Frame should be tall enough for player character to walk through.
         // These constants are verified at compile time through their usage in
-        // Torus { major_radius, minor_radius } which requires valid f32 values.
-        let _ = PORTAL_TORUS_MAJOR_RADIUS;
-        let _ = PORTAL_TORUS_MINOR_RADIUS;
+        // Cuboid creation which requires valid f32 values.
+        let _ = PORTAL_FRAME_WIDTH;
+        let _ = PORTAL_FRAME_HEIGHT;
+        let _ = PORTAL_FRAME_THICKNESS;
+        let _ = PORTAL_FRAME_DEPTH;
         // Test passes if constants compile with valid values
     }
 

@@ -4872,38 +4872,6 @@
     ],
     events: {
         (
-            x: 10,
-            y: 12,
-        ): Treasure(
-            name: "Worn Chest",
-            description: "A small chest containing assorted loot and coins.",
-            loot: [
-                12,
-                22,
-                31,
-            ],
-        ),
-        (
-            x: 1,
-            y: 7,
-        ): Sign(
-            name: "Exit Sign",
-            description: "A sign marking the path back to town.",
-            text: "Exit to Town",
-        ),
-        (
-            x: 14,
-            y: 14,
-        ): Encounter(
-            name: "Boss Lair",
-            description: "A concentrated group of powerful monsters guarding a key location.",
-            monster_group: [
-                3,
-                3,
-                3,
-            ],
-        ),
-        (
             x: 0,
             y: 7,
         ): Teleport(
@@ -4924,6 +4892,50 @@
             loot: [
                 11,
                 21,
+            ],
+        ),
+        (
+            x: 1,
+            y: 7,
+        ): Sign(
+            name: "Exit Sign",
+            description: "A sign marking the path back to town.",
+            text: "Exit to Town",
+        ),
+        (
+            x: 6,
+            y: 2,
+        ): Treasure(
+            name: "Buried Stash",
+            description: "A stash hidden in a crevice containing valuable items.",
+            loot: [
+                10,
+                20,
+                30,
+            ],
+        ),
+        (
+            x: 10,
+            y: 12,
+        ): Treasure(
+            name: "Worn Chest",
+            description: "A small chest containing assorted loot and coins.",
+            loot: [
+                12,
+                22,
+                31,
+            ],
+        ),
+        (
+            x: 14,
+            y: 14,
+        ): Encounter(
+            name: "Boss Lair",
+            description: "A concentrated group of powerful monsters guarding a key location.",
+            monster_group: [
+                3,
+                3,
+                3,
             ],
         ),
         (
@@ -4949,18 +4961,6 @@
             ],
         ),
         (
-            x: 6,
-            y: 2,
-        ): Treasure(
-            name: "Buried Stash",
-            description: "A stash hidden in a crevice containing valuable items.",
-            loot: [
-                10,
-                20,
-                30,
-            ],
-        ),
-        (
             x: 2,
             y: 6,
         ): Encounter(
@@ -4979,15 +4979,6 @@
             description: "A hidden spike trap that deals 5 points of damage when triggered.",
             damage: 5,
             effect: None,
-        ),
-        (
-            x: 7,
-            y: 15,
-        ): RecruitableCharacter(
-            name: "Whisper",
-            description: "An elven scout emerges from the shadows, watching you intently. Her nimble fingers toy with a lockpick as she sizes up your party.",
-            character_id: "whisper",
-            dialogue_id: None,
         ),
     },
     npc_placements: [],

@@ -39,10 +39,9 @@ fn check_for_events(
 
         if let Some(map) = game_state.world.get_current_map() {
             if let Some(event) = map.get_event(current_pos) {
-                // Do not auto-trigger recruitable characters when the party steps on
-                // their tile. RecruitableCharacter events must be explicitly
-                // interacted with by the player (press the Interact key) to start
-                // recruitment dialogues and to avoid unexpected auto-triggering.
+                // Do not auto-trigger recruitable characters or signs when the party steps on
+                // their tile. These events must be explicitly interacted with by the player
+                // (press the Interact key) to start dialogues and to avoid unexpected auto-triggering.
                 match event {
                     MapEvent::RecruitableCharacter { .. } => {
                         info!(
@@ -50,8 +49,14 @@ fn check_for_events(
                             current_pos
                         );
                     }
+                    MapEvent::Sign { .. } => {
+                        info!(
+                            "Party at {:?} is on a Sign event; not auto-triggering (requires interact)",
+                            current_pos
+                        );
+                    }
                     _ => {
-                        // Trigger other event types automatically (signs, teleports, encounters, etc.)
+                        // Trigger other event types automatically (teleports, encounters, traps, etc.)
                         event_writer.write(MapEventTriggered {
                             event: event.clone(),
                             position: current_pos,
@@ -113,7 +118,15 @@ fn handle_events(
                     target_pos: *destination,
                 });
             }
-            MapEvent::Sign { text, .. } => {
+            MapEvent::Sign { text, name, .. } => {
+                // Show sign text in a dialogue bubble
+                simple_dialogue_writer.write(SimpleDialogue {
+                    text: text.clone(),
+                    speaker_name: name.clone(),
+                    speaker_entity: None,
+                    fallback_position: Some(trigger.position),
+                });
+
                 let msg = format!("Sign reads: {}", text);
                 println!("{}", msg);
                 if let Some(ref mut log) = game_log {
@@ -349,12 +362,14 @@ mod tests {
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
         let event_pos = Position::new(5, 5);
+        // Use Teleport event instead of Sign (Signs now require E key interaction)
         map.add_event(
             event_pos,
-            MapEvent::Sign {
-                name: "Test".to_string(),
-                description: "Test sign".to_string(),
-                text: "You found it!".to_string(),
+            MapEvent::Teleport {
+                name: "Test Portal".to_string(),
+                description: "Test teleport".to_string(),
+                destination: Position::new(1, 1),
+                map_id: 1,
             },
         );
 
@@ -477,12 +492,14 @@ mod tests {
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
         let event_pos = Position::new(5, 5);
+        // Use Teleport event instead of Sign (Signs now require E key interaction)
         map.add_event(
             event_pos,
-            MapEvent::Sign {
-                name: "Test".to_string(),
-                description: "Test sign".to_string(),
-                text: "You found it!".to_string(),
+            MapEvent::Teleport {
+                name: "Test Portal".to_string(),
+                description: "Test teleport".to_string(),
+                destination: Position::new(1, 1),
+                map_id: 1,
             },
         );
 

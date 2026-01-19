@@ -795,6 +795,11 @@ fn spawn_map(
         // Spawn procedural event markers for signs and portals
         // Note: Recruitables handled by sprite system (see sprite_support_implementation_plan.md)
         for (position, event) in map.events.iter() {
+            // Get tile visual metadata for rotation (if tile exists)
+            let rotation_y = map
+                .get_tile(*position)
+                .and_then(|tile| tile.visual.rotation_y);
+
             match event {
                 world::MapEvent::Sign { name, .. } => {
                     procedural_meshes::spawn_sign(
@@ -805,6 +810,7 @@ fn spawn_map(
                         name.clone(),
                         map.id,
                         procedural_cache,
+                        rotation_y,
                     );
                 }
                 world::MapEvent::Teleport { name, .. } => {
@@ -816,6 +822,7 @@ fn spawn_map(
                         name.clone(),
                         map.id,
                         procedural_cache,
+                        rotation_y,
                     );
                 }
                 // RecruitableCharacter rendering handled by sprite system
