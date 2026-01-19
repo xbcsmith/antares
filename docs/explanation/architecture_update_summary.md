@@ -27,7 +27,7 @@ Successfully updated `docs/reference/architecture.md` to reflect the current sta
 
 #### Major Additions:
 - **domain/**: Complete domain layer with all game logic
-- **application/**: Game state management and campaign loading  
+- **application/**: Game state management and campaign loading
 - **game/**: Bevy ECS components and systems
 - **sdk/**: Complete SDK with editors and validation tools
 - **bin/**: All executable applications
@@ -177,7 +177,7 @@ Comprehensive analysis of:
 
 ### Quality Gates Passed
 ✅ `cargo fmt --all` - No formatting issues
-✅ `cargo check --all-targets --all-features` - Compiles successfully  
+✅ `cargo check --all-targets --all-features` - Compiles successfully
 ✅ `cargo clippy --all-targets --all-features -- -D warnings` - No warnings
 ✅ `cargo nextest run --all-features` - All 1323 tests pass
 
