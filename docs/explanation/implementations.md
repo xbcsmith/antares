@@ -519,6 +519,18 @@ No performance regressions observed; cache improves allocation efficiency.
 
 ### Implementation Notes
 
+#### Teleport interaction-only triggers
+
+**Overview**: Teleport events no longer auto-trigger on step; they require the Interact action.
+
+**Components**: `check_for_events` excludes `MapEvent::Teleport` from step-based triggers, and interaction continues to drive teleports via `handle_input`. Auto-trigger tests now use `MapEvent::Trap` to validate step-based behavior.
+
+**Details**: `MapEvent::Teleport` is treated like `MapEvent::Sign` and `MapEvent::RecruitableCharacter` in the step-based event filter, so stepping onto a teleport does nothing until the player uses Interact.
+
+**Testing**: Updated auto-trigger tests to use trap events. Manual verification: stepping on a teleport tile does not trigger; pressing Interact adjacent to the teleport does.
+
+**Examples**: Standing on a teleport tile does not move the party; pressing Interact near the teleport triggers the map change.
+
 **Cache Lifecycle**:
 
 1. `spawn_map_system` called at Startup
@@ -818,6 +830,24 @@ All three public spawn functions have comprehensive doc comments:
 - Portals render correctly: ✅
 - Signs render correctly: ✅
 - Cache reuse confirmed: ✅
+
+---
+
+## Teleport Map Rendering Refresh - COMPLETED
+
+### Summary
+
+Updated map-change handling so teleporting to another map refreshes full map visuals. This prevents the tile mesh layer from disappearing while NPC markers still render after a teleport.
+
+### Changes Made
+
+- `spawn_map_markers` now triggers a full `spawn_map` call when the current map changes.
+- Marker spawning logic skips despawning when visuals for the current map already exist, preventing accidental removal immediately after a refresh.
+
+### Outcome
+
+- Teleporting from `map_1.ron` to `map_2.ron` now renders tiles correctly alongside NPCs.
+- Map visuals are refreshed without requiring a separate door-open event.
 
 ✅ **Documentation complete and accurate**
 

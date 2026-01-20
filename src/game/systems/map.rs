@@ -3,7 +3,6 @@
 
 use crate::domain::types;
 use crate::domain::world;
-use crate::game::components::dialogue::NpcDialogue;
 use crate::game::resources::GlobalState;
 use crate::game::systems::procedural_meshes;
 use bevy::prelude::*;
@@ -95,7 +94,7 @@ impl Plugin for MapManagerPlugin {
             // spawner observe the changed world state and spawn/despawn accordingly.
             .add_systems(
                 Update,
-                (map_change_handler, spawn_map_markers, handle_door_opened),
+                (map_change_handler, handle_door_opened, spawn_map_markers),
             );
     }
 }
@@ -222,11 +221,11 @@ fn map_change_handler(
 /// it despawns previously spawned map entities.
 fn spawn_map_markers(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
-    query_existing: Query<Entity, With<MapEntity>>,
+    query_existing: Query<(Entity, &MapEntity)>,
     mut last_map: Local<Option<types::MapId>>,
 ) {
     let current = global_state.0.world.current_map;
@@ -236,11 +235,32 @@ fn spawn_map_markers(
         return;
     }
 
+    let mut has_any_entities = false;
+    let mut has_current_entities = false;
+
+    for (_entity, map_entity) in query_existing.iter() {
+        has_any_entities = true;
+        if map_entity.0 == current {
+            has_current_entities = true;
+        }
+    }
+
+    // If visuals for the current map already exist, skip marker refresh to avoid
+    // despawning freshly spawned visuals.
+    if has_current_entities {
+        *last_map = Some(current);
+        debug!(
+            "spawn_map_markers: visuals already spawned for current map {}; skipping marker refresh",
+            current
+        );
+        return;
+    }
+
     // If this is the first time this system runs and there are already map
     // entities present (spawned by `spawn_map` in `Startup`), don't
     // despawn them and don't spawn duplicate markers either. Instead, just
     // record the current map and exit.
-    if should_skip_marker_spawn(&last_map, query_existing.iter().next().is_some()) {
+    if should_skip_marker_spawn(&last_map, has_any_entities) {
         *last_map = Some(current);
         debug!(
             "spawn_map_markers: existing map entities present on first run; leaving visuals intact"
@@ -248,72 +268,22 @@ fn spawn_map_markers(
         return;
     } else {
         // We have a previously recorded map and it changed; despawn old map entities
-        for entity in query_existing.iter() {
+        for (entity, _map_entity) in query_existing.iter() {
             commands.entity(entity).despawn();
         }
     }
 
-    // Spawn markers for the new map (if it exists)
-    if let Some(map) = global_state.0.world.get_current_map() {
-        let map_id = map.id;
-
-        // Spawn a lightweight marker entity for every tile (useful for logic & tests)
-        for y in 0..map.height {
-            for x in 0..map.width {
-                let pos = types::Position::new(x as i32, y as i32);
-                commands.spawn((MapEntity(map_id), TileCoord(pos)));
-            }
-        }
-
-        // Spawn EventTrigger entities for each map event that we support
-        for (pos, event) in map.events.iter() {
-            if let Some(evt_type) = map_event_to_event_type(event) {
-                commands.spawn((
-                    MapEntity(map_id),
-                    EventTrigger {
-                        event_type: evt_type,
-                        position: *pos,
-                    },
-                ));
-            }
-        }
-
-        // Spawn NPC visual markers for the new map (Phase 2: NPC Visual Representation)
-        let resolved_npcs = map.resolve_npcs(&content.0.npcs);
-        let npc_color = Color::srgb(0.0, 1.0, 1.0); // Cyan
-        let npc_material = materials.add(StandardMaterial {
-            base_color: npc_color,
-            perceptual_roughness: 0.5,
-            ..default()
-        });
-
-        // Vertical plane representing NPC (billboard-like)
-        // 1.0 wide, 1.8 tall (human height ~6 feet), 0.1 depth
-        let npc_mesh = meshes.add(Cuboid::new(1.0, 1.8, 0.1));
-
-        for resolved_npc in resolved_npcs.iter() {
-            let x = resolved_npc.position.x as f32;
-            let y = resolved_npc.position.y as f32;
-
-            // Center the NPC marker at y=0.9 (bottom at 0, top at 1.8)
-            let mut npc_entity = commands.spawn((
-                Mesh3d(npc_mesh.clone()),
-                MeshMaterial3d(npc_material.clone()),
-                Transform::from_xyz(x, 0.9, y),
-                GlobalTransform::default(),
-                Visibility::default(),
-                MapEntity(map_id),
-                TileCoord(resolved_npc.position),
-                NpcMarker {
-                    npc_id: resolved_npc.npc_id.clone(),
-                },
-            ));
-
-            // Add NpcDialogue component if this NPC has a dialogue tree
-            if let Some(dialogue_id) = resolved_npc.dialogue_id {
-                npc_entity.insert(NpcDialogue::new(dialogue_id, resolved_npc.name.clone()));
-            }
-        }
+    // Spawn visuals (tiles + markers) for the new map (if it exists)
+    if global_state.0.world.get_current_map().is_some() {
+        let mut procedural_cache = super::procedural_meshes::ProceduralMeshCache::default();
+        spawn_map(
+            commands,
+            meshes,
+            materials,
+            global_state,
+            content,
+            &mut procedural_cache,
+        );
     } else {
         // Current map id is set to an unknown map - leave the world empty
         warn!("Current map {} not present in world", current);

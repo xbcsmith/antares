@@ -127,6 +127,7 @@ Creates a new map with the specified dimensions.
 ```
 
 **Parameters:**
+
 - `id`: Map identifier (MapId)
 - `width`: Map width in tiles (1-255 recommended)
 - `height`: Map height in tiles (1-255 recommended)
@@ -164,6 +165,7 @@ Sets a single tile at the specified coordinates.
 ```
 
 **Parameters:**
+
 - `x`, `y`: Tile coordinates
 - `terrain`: Terrain type (see Terrain Types below)
 - `wall`: Optional wall type (see Wall Types below)
@@ -178,12 +180,38 @@ Fills a rectangular region with the specified tile type.
 ```
 
 **Parameters:**
+
 - `x1`, `y1`: Starting corner coordinates
 - `x2`, `y2`: Ending corner coordinates
 - `terrain`: Terrain type
 - `wall`: Optional wall type
 
 **Note:** The coordinates are automatically sorted, so (10,10) to (5,5) works the same as (5,5) to (10,10).
+
+#### bulk <terrain_csv> <wall> <blocked>
+
+Bulk-updates tiles across the entire map whose current terrain is in the comma-separated list. This command sets the `wall_type` and `blocked` flag on matching tiles without changing their terrain.
+
+```
+> bulk Ground,Grass,Forest None false
+✅ Bulk updated 134 tiles (terrains: Ground,Grass,Forest, wall: None, blocked: false)
+```
+
+**Parameters:**
+
+- `terrain_csv`: Comma-separated list of terrain names (e.g., `Ground,Grass,Forest`). Case-insensitive; surrounding spaces are ignored.
+- `wall`: Wall type to apply to matching tiles (`none`, `normal`, `door`, `torch`)
+- `blocked`: Movement blocking flag (`true` or `false`)
+
+**Notes:**
+
+- The `bulk` command operates over the entire map (not a rectangle). If you want to limit changes to an area, use `fill` or `set` first to narrow the region.
+- Use `show` or `info` after running `bulk` to verify changes visually.
+- Example for your earlier request:
+  ```
+  > bulk Ground,Dirt,Swamp,Forest,Grass None false
+  ```
+  This will set `wall_type` to `None` and `blocked` to `false` for all tiles with those terrains.
 
 ### Events
 
@@ -245,6 +273,7 @@ Adds an NPC at the specified position.
 ```
 
 **Parameters:**
+
 - `id`: NPC identifier (must be unique)
 - `x`, `y`: NPC position
 - `name`: NPC name (no spaces)
@@ -455,6 +484,7 @@ When creating events, you'll need to know valid Monster IDs and Item IDs. Refer 
 - `docs/reference/map_ron_format.md` for ID reference lists
 
 Common Monster IDs:
+
 - 1: Rat
 - 2: Goblin
 - 3: Wolf
@@ -462,6 +492,7 @@ Common Monster IDs:
 - 5: Orc
 
 Common Item IDs:
+
 - 10: Short Sword
 - 11: Long Sword
 - 20: Leather Armor
@@ -493,6 +524,7 @@ You see: `⚠️  Warning: NPC with ID 5 already exists`
 You see: `❌ Error: Failed to parse RON: ...`
 
 **Solution:**
+
 1. Check that the file is valid RON format
 2. Run `validate_map` on the file to identify syntax errors
 3. Ensure file exists at the specified path
@@ -502,6 +534,7 @@ You see: `❌ Error: Failed to parse RON: ...`
 After creating your maps:
 
 1. **Validate** - Run `validate_map` to check for errors:
+
    ```bash
    cargo run --bin validate_map -- data/maps/your_map.ron
    ```

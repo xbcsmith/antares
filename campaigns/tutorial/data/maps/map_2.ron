@@ -215,7 +215,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: Ground,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -234,7 +234,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: Ground,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -482,7 +482,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -539,7 +539,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -596,7 +596,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -653,7 +653,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -710,7 +710,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -786,7 +786,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -843,7 +843,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -900,7 +900,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1014,7 +1014,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1204,7 +1204,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1261,7 +1261,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1318,7 +1318,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1375,7 +1375,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1432,7 +1432,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1489,7 +1489,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1622,7 +1622,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1679,7 +1679,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1926,7 +1926,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2040,7 +2040,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2097,7 +2097,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2154,7 +2154,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2211,7 +2211,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2286,9 +2286,9 @@
             ),
         ),
         (
-            terrain: Forest,
-            wall_type: Normal,
-            blocked: true,
+            terrain: Grass,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -2344,7 +2344,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2629,7 +2629,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2666,9 +2666,9 @@
             ),
         ),
         (
-            terrain: Forest,
-            wall_type: Normal,
-            blocked: true,
+            terrain: Grass,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -2704,8 +2704,8 @@
             ),
         ),
         (
-            terrain: Forest,
-            wall_type: Normal,
+            terrain: Grass,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2990,7 +2990,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3065,8 +3065,8 @@
             ),
         ),
         (
-            terrain: Forest,
-            wall_type: Normal,
+            terrain: Grass,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3484,7 +3484,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4130,7 +4130,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4167,7 +4167,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: Ground,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4206,7 +4206,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4547,7 +4547,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: Ground,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4624,7 +4624,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4909,7 +4909,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4985,7 +4985,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -5151,7 +5151,7 @@
                 color_tint: None,
                 scale: None,
                 y_offset: None,
-                rotation_y: None,
+                rotation_y: Some(90),
             ),
         ),
         (
@@ -5821,7 +5821,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -5878,7 +5878,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -5992,7 +5992,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -6049,7 +6049,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -6125,7 +6125,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -6182,7 +6182,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -6296,8 +6296,8 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
-            blocked: true,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -6353,7 +6353,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -6486,7 +6486,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -6599,7 +6599,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: Ground,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6657,8 +6657,8 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
-            blocked: true,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -6714,7 +6714,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -6904,7 +6904,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -6961,7 +6961,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -7018,7 +7018,7 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -7132,8 +7132,8 @@
         ),
         (
             terrain: Forest,
-            wall_type: Normal,
-            blocked: true,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -7608,40 +7608,6 @@
     ],
     events: {
         (
-            x: 3,
-            y: 11,
-        ): Encounter(
-            name: "Forest Ambush",
-            description: "A hidden ambush by hostile creatures in the forest.",
-            monster_group: [
-                6,
-                5,
-            ],
-        ),
-        (
-            x: 0,
-            y: 9,
-        ): Teleport(
-            name: "Starting Town Portal",
-            description: "Portal leading back to the Starting Town",
-            destination: (
-                x: 18,
-                y: 11,
-            ),
-            map_id: 1,
-        ),
-        (
-            x: 16,
-            y: 2,
-        ): Treasure(
-            name: "Hidden Supplies",
-            description: "A stash of supplies tucked away among the rocks.",
-            loot: [
-                14,
-                24,
-            ],
-        ),
-        (
             x: 7,
             y: 17,
         ): Trap(
@@ -7651,85 +7617,16 @@
             effect: None,
         ),
         (
-            x: 0,
-            y: 10,
-        ): Sign(
-            name: "Town Exit Sign",
-            description: "A sign directing travelers to the town exit.",
-            text: "Exit to town.",
-        ),
-        (
-            x: 19,
-            y: 11,
-        ): Sign(
-            name: "Wizard\'s Cave Sign",
-            description: "A sign pointing the way to the Wizard\'s Cave.",
-            text: "To the Wizard\'s Cave",
-        ),
-        (
-            x: 17,
-            y: 16,
-        ): Encounter(
-            name: "Bandit Patrol",
-            description: "A patrol of bandits looking for easy victims.",
-            monster_group: [
-                6,
-                6,
-            ],
-        ),
-        (
-            x: 19,
-            y: 10,
+            x: 1,
+            y: 6,
         ): Teleport(
-            name: "Arcturus Cave Portal",
-            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (19,17).",
+            name: "Starting Town Portal",
+            description: "Portal leading back to the Starting Town",
             destination: (
-                x: 19,
-                y: 17,
+                x: 18,
+                y: 11,
             ),
-            map_id: 2,
-        ),
-        (
-            x: 5,
-            y: 3,
-        ): Encounter(
-            name: "Bandit Patrol",
-            description: "A small band of foes patrolling this area.",
-            monster_group: [
-                4,
-                4,
-            ],
-        ),
-        (
-            x: 10,
-            y: 19,
-        ): Teleport(
-            name: "Mountain Pass Gate",
-            description: "A gate that transports the party to Mountain Pass (map 5) at (19,6).",
-            destination: (
-                x: 19,
-                y: 6,
-            ),
-            map_id: 5,
-        ),
-        (
-            x: 14,
-            y: 4,
-        ): Encounter(
-            name: "Hungry Wolves",
-            description: "A pack of wolves that hunts together in this region.",
-            monster_group: [
-                5,
-                4,
-            ],
-        ),
-        (
-            x: 11,
-            y: 19,
-        ): Sign(
-            name: "Mountain Pass Sign",
-            description: "A wooden sign indicating the way to the mountain pass.",
-            text: "To the Mountain Pass",
+            map_id: 1,
         ),
         (
             x: 10,
@@ -7745,16 +7642,69 @@
             ],
         ),
         (
-            x: 12,
-            y: 0,
+            x: 7,
+            y: 19,
         ): Teleport(
-            name: "Ancient Portal",
-            description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (0,7).",
+            name: "Mountain Pass Gate",
+            description: "A gate that transports the party to Mountain Pass (map 5) at (18,6).",
             destination: (
-                x: 0,
-                y: 7,
+                x: 18,
+                y: 6,
             ),
-            map_id: 3,
+            map_id: 5,
+        ),
+        (
+            x: 11,
+            y: 0,
+        ): Sign(
+            name: "Ruins Direction Sign",
+            description: "A sign pointing the way to the Ancient Ruins.",
+            text: "To Ancient Ruins",
+        ),
+        (
+            x: 16,
+            y: 2,
+        ): Treasure(
+            name: "Hidden Supplies",
+            description: "A stash of supplies tucked away among the rocks.",
+            loot: [
+                14,
+                24,
+            ],
+        ),
+        (
+            x: 19,
+            y: 10,
+        ): Teleport(
+            name: "Arcturus Cave Portal",
+            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (18,17).",
+            destination: (
+                x: 18,
+                y: 17,
+            ),
+            map_id: 4,
+        ),
+        (
+            x: 3,
+            y: 11,
+        ): Encounter(
+            name: "Forest Ambush",
+            description: "A hidden ambush by hostile creatures in the forest.",
+            monster_group: [
+                6,
+                5,
+            ],
+        ),
+        (
+            x: 14,
+            y: 4,
+        ): Encounter(
+            name: "Hungry Wolves",
+            description: "A pack of wolves that hunts together in this region.",
+            monster_group: [
+                5,
+                4,
+            ],
         ),
         (
             x: 8,
@@ -7769,12 +7719,62 @@
             ],
         ),
         (
-            x: 11,
-            y: 0,
+            x: 19,
+            y: 11,
         ): Sign(
-            name: "Ruins Direction Sign",
-            description: "A sign pointing the way to the Ancient Ruins.",
-            text: "To Ancient Ruins",
+            name: "Wizard\'s Cave Sign",
+            description: "A sign pointing the way to the Wizard\'s Cave.",
+            text: "To the Wizard\'s Cave",
+        ),
+        (
+            x: 5,
+            y: 3,
+        ): Encounter(
+            name: "Bandit Patrol",
+            description: "A small band of foes patrolling this area.",
+            monster_group: [
+                4,
+                4,
+            ],
+        ),
+        (
+            x: 1,
+            y: 7,
+        ): Sign(
+            name: "Town Exit Sign",
+            description: "A sign directing travelers to the town exit.",
+            text: "Exit to town.",
+        ),
+        (
+            x: 12,
+            y: 0,
+        ): Teleport(
+            name: "Ancient Portal",
+            description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (1,7).",
+            destination: (
+                x: 1,
+                y: 7,
+            ),
+            map_id: 3,
+        ),
+        (
+            x: 17,
+            y: 16,
+        ): Encounter(
+            name: "Bandit Patrol",
+            description: "A patrol of bandits looking for easy victims.",
+            monster_group: [
+                6,
+                6,
+            ],
+        ),
+        (
+            x: 8,
+            y: 19,
+        ): Sign(
+            name: "Mountain Pass Sign",
+            description: "A wooden sign indicating the way to the mountain pass.",
+            text: "To the Mountain Pass",
         ),
     },
     npc_placements: [

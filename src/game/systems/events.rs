@@ -55,8 +55,14 @@ fn check_for_events(
                             current_pos
                         );
                     }
+                    MapEvent::Teleport { .. } => {
+                        info!(
+                            "Party at {:?} is on a Teleport event; not auto-triggering (requires interact)",
+                            current_pos
+                        );
+                    }
                     _ => {
-                        // Trigger other event types automatically (teleports, encounters, traps, etc.)
+                        // Trigger other event types automatically (encounters, traps, etc.)
                         event_writer.write(MapEventTriggered {
                             event: event.clone(),
                             position: current_pos,
@@ -362,14 +368,14 @@ mod tests {
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
         let event_pos = Position::new(5, 5);
-        // Use Teleport event instead of Sign (Signs now require E key interaction)
+        // Use Trap event to verify auto-triggering (teleports now require interact)
         map.add_event(
             event_pos,
-            MapEvent::Teleport {
-                name: "Test Portal".to_string(),
-                description: "Test teleport".to_string(),
-                destination: Position::new(1, 1),
-                map_id: 1,
+            MapEvent::Trap {
+                name: "Test Trap".to_string(),
+                description: "Test trap".to_string(),
+                damage: 5,
+                effect: None,
             },
         );
 
@@ -492,14 +498,14 @@ mod tests {
 
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
         let event_pos = Position::new(5, 5);
-        // Use Teleport event instead of Sign (Signs now require E key interaction)
+        // Use Trap event to verify auto-triggering (teleports now require interact)
         map.add_event(
             event_pos,
-            MapEvent::Teleport {
-                name: "Test Portal".to_string(),
-                description: "Test teleport".to_string(),
-                destination: Position::new(1, 1),
-                map_id: 1,
+            MapEvent::Trap {
+                name: "Test Trap".to_string(),
+                description: "Test trap".to_string(),
+                damage: 5,
+                effect: None,
             },
         );
 
