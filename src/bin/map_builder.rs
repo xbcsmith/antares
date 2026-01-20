@@ -173,6 +173,49 @@ impl MapBuilder {
         }
     }
 
+    /// Bulk updates tiles that match any terrain in a comma-separated list.
+    ///
+    /// Example:
+    ///   bulk Ground,Grass,Forest None false
+    ///
+    /// This updates only tiles whose current `terrain` is in the provided CSV,
+    /// setting their `wall_type` and `blocked` flag to the provided values.
+    fn bulk_set_for_terrains(&mut self, terrains_csv: &str, wall: WallType, blocked: bool) {
+        let Some(ref mut map) = self.map else {
+            println!("❌ Error: No map loaded. Use 'new' or 'load' first.");
+            return;
+        };
+
+        // Parse terrains CSV into TerrainType vector (using parse_terrain for robustness)
+        let terrains: Vec<TerrainType> = terrains_csv
+            .split(',')
+            .map(|s| parse_terrain(s.trim()))
+            .collect();
+
+        let mut count = 0;
+        for y in 0..map.height {
+            for x in 0..map.width {
+                let pos = Position::new(x as i32, y as i32);
+                if let Some(tile) = map.get_tile_mut(pos) {
+                    if terrains.contains(&tile.terrain) {
+                        tile.wall_type = wall;
+                        tile.blocked = blocked;
+                        count += 1;
+                    }
+                }
+            }
+        }
+
+        println!(
+            "✅ Bulk updated {} tiles (terrains: {}, wall: {:?}, blocked: {})",
+            count, terrains_csv, wall, blocked
+        );
+
+        if self.auto_show {
+            self.show_map();
+        }
+    }
+
     /// Adds an event at the specified position
     fn add_event(&mut self, x: i32, y: i32, event: MapEvent) {
         let Some(ref mut map) = self.map else {
@@ -414,6 +457,28 @@ impl MapBuilder {
 
                 self.fill_tiles(x1, y1, x2, y2, terrain, wall);
             }
+
+            "bulk" => {
+                // Usage: bulk <terrain_csv> <wall> <blocked>
+                // Example: bulk Ground,Grass,Forest None false
+                if parts.len() != 4 {
+                    println!("Usage: bulk <terrain_csv> <wall> <blocked>");
+                    return true;
+                }
+
+                let terrains_csv = parts[1];
+                let wall = parse_wall(parts[2]);
+                let blocked = match parts[3].to_lowercase().as_str() {
+                    "true" => true,
+                    "false" => false,
+                    _ => {
+                        println!("❌ Error: blocked must be 'true' or 'false'");
+                        return true;
+                    }
+                };
+
+                self.bulk_set_for_terrains(terrains_csv, wall, blocked);
+            }
             "event" => {
                 if parts.len() < 5 {
                     println!("Usage: event <x> <y> <type> <data>");
@@ -566,6 +631,7 @@ fn parse_wall(s: &str) -> WallType {
 /// Prints help information
 fn print_help() {
     println!("\n╔═══ Map Builder Commands ═══╗");
+    println!("bulk <terrains_csv> <wall> <blocked> - Update tiles whose terrain is in comma-separated list, set wall type and blocked flag (e.g. bulk Ground,Grass None false)");
     println!("\n📋 Map Creation:");
     println!("  new <id> <width> <height>     Create new map (id must be a number)");
     println!("  load <path>                    Load existing map RON file");
@@ -718,5 +784,44 @@ mod tests {
             let tile = map.get_tile(Position::new(x, 0)).unwrap();
             assert_eq!(tile.wall_type, WallType::Normal);
         }
+    }
+
+    #[test]
+    fn test_bulk_set_for_terrains() {
+        let mut builder = MapBuilder::new();
+        builder.create_map(1, 5, 5);
+
+        // Prepare tiles: (1,1) Forest Normal (and blocked true), (2,2) Ground Normal (blocked true)
+        builder.set_tile(1, 1, TerrainType::Forest, WallType::Normal);
+        if let Some(ref mut map) = builder.map {
+            map.get_tile_mut(Position::new(1, 1)).unwrap().blocked = true;
+        }
+
+        builder.set_tile(2, 2, TerrainType::Ground, WallType::Normal);
+        if let Some(ref mut map) = builder.map {
+            map.get_tile_mut(Position::new(2, 2)).unwrap().blocked = true;
+        }
+
+        // A tile that should remain unchanged: Stone
+        builder.set_tile(3, 3, TerrainType::Stone, WallType::Normal);
+        if let Some(ref mut map) = builder.map {
+            map.get_tile_mut(Position::new(3, 3)).unwrap().blocked = true;
+        }
+
+        // Run bulk change for Ground and Forest -> set wall None, blocked false
+        builder.bulk_set_for_terrains("Ground,Forest", WallType::None, false);
+
+        let map = builder.map.as_ref().unwrap();
+        let t11 = map.get_tile(Position::new(1, 1)).unwrap();
+        assert_eq!(t11.wall_type, WallType::None);
+        assert!(!t11.blocked);
+
+        let t22 = map.get_tile(Position::new(2, 2)).unwrap();
+        assert_eq!(t22.wall_type, WallType::None);
+        assert!(!t22.blocked);
+
+        let t33 = map.get_tile(Position::new(3, 3)).unwrap();
+        assert_eq!(t33.wall_type, WallType::Normal);
+        assert!(t33.blocked);
     }
 }

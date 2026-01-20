@@ -5708,12 +5708,12 @@
     ],
     events: {
         (
-            x: 18,
-            y: 7,
+            x: 10,
+            y: 10,
         ): Sign(
-            name: "Forest Direction Sign",
-            description: "A directional sign pointing to the nearby forest.",
-            text: "To the Forrest",
+            name: "Temple Sign",
+            description: "A notice describing the Temple of Healing and the services it provides.",
+            text: "Temple of Healing - The priests can restore your health.",
         ),
         (
             x: 4,
@@ -5724,12 +5724,32 @@
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
         ),
         (
-            x: 10,
-            y: 10,
+            x: 18,
+            y: 8,
         ): Sign(
-            name: "Temple Sign",
-            description: "A notice describing the Temple of Healing and the services it provides.",
-            text: "Temple of Healing - The priests can restore your health.",
+            name: "Forest Direction Sign",
+            description: "A directional sign pointing to the nearby forest.",
+            text: "To the Forrest",
+        ),
+        (
+            x: 15,
+            y: 4,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store where adventurers can buy and sell goods.",
+            text: "General Store - Buy and sell items for your adventures.",
+        ),
+        (
+            x: 0,
+            y: 7,
+        ): Teleport(
+            name: "Harrow Downs Portal",
+            description: "The portal to the Harrow Downs",
+            destination: (
+                x: 0,
+                y: 18,
+            ),
+            map_id: 6,
         ),
         (
             x: 19,
@@ -5742,14 +5762,6 @@
                 y: 19,
             ),
             map_id: 4,
-        ),
-        (
-            x: 15,
-            y: 4,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store where adventurers can buy and sell goods.",
-            text: "General Store - Buy and sell items for your adventures.",
         ),
     },
     npc_placements: [

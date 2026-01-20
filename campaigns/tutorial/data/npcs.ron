@@ -89,7 +89,7 @@
     (
         id: "tutorial_elder_village2",
         name: "Village Elder Mountain Pass",
-        description: "The wise elder of the village who offers guidance and local quests.",
+        description: "The wise elder of the village who offers guidance and local quests. And is grumpy.",
         portrait_id: "npc_014",
         dialogue_id: Some(8),
         quest_ids: [

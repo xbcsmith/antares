@@ -329,8 +329,8 @@
             ),
         ),
         (
-            terrain: Ground,
-            wall_type: Normal,
+            terrain: Dirt,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -348,8 +348,8 @@
             ),
         ),
         (
-            terrain: Ground,
-            wall_type: Normal,
+            terrain: Dirt,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -368,7 +368,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -406,7 +406,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -425,7 +425,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -444,7 +444,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -463,7 +463,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -500,8 +500,8 @@
             ),
         ),
         (
-            terrain: Ground,
-            wall_type: Normal,
+            terrain: Dirt,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -520,7 +520,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -558,7 +558,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -577,7 +577,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -633,8 +633,8 @@
             ),
         ),
         (
-            terrain: Ground,
-            wall_type: Normal,
+            terrain: Dirt,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -653,7 +653,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -672,7 +672,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -690,7 +690,7 @@
             ),
         ),
         (
-            terrain: Ground,
+            terrain: Stone,
             wall_type: Door,
             blocked: false,
             is_special: false,
@@ -710,7 +710,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -729,7 +729,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -748,7 +748,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -767,7 +767,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -786,7 +786,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -805,7 +805,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -824,7 +824,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -881,7 +881,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -938,7 +938,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -957,7 +957,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -976,7 +976,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1014,7 +1014,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1033,7 +1033,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1052,7 +1052,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1071,7 +1071,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1090,7 +1090,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1109,7 +1109,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1128,7 +1128,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1166,7 +1166,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1185,7 +1185,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1565,7 +1565,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1584,7 +1584,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1622,7 +1622,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1641,7 +1641,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1679,7 +1679,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1698,7 +1698,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1717,7 +1717,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1736,7 +1736,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1755,7 +1755,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1774,7 +1774,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1793,7 +1793,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1850,7 +1850,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1869,7 +1869,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1888,7 +1888,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1907,7 +1907,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1926,7 +1926,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1945,7 +1945,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -1983,7 +1983,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2002,7 +2002,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2021,7 +2021,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2040,7 +2040,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2059,7 +2059,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2097,7 +2097,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2135,7 +2135,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2154,7 +2154,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2173,7 +2173,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2192,7 +2192,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2211,7 +2211,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2230,7 +2230,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2249,7 +2249,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2287,7 +2287,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2306,7 +2306,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2325,7 +2325,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2344,7 +2344,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2363,7 +2363,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2382,7 +2382,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2401,7 +2401,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2458,7 +2458,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2477,7 +2477,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2496,7 +2496,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2515,7 +2515,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2534,7 +2534,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2553,7 +2553,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2591,7 +2591,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2610,7 +2610,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2629,7 +2629,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2648,7 +2648,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2667,7 +2667,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2686,7 +2686,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2704,8 +2704,8 @@
             ),
         ),
         (
-            terrain: Ground,
-            wall_type: Normal,
+            terrain: Dirt,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2762,7 +2762,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2781,7 +2781,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2800,7 +2800,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2819,7 +2819,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2838,7 +2838,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2857,7 +2857,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2895,7 +2895,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2914,7 +2914,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2933,7 +2933,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2952,7 +2952,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2971,7 +2971,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -2989,8 +2989,8 @@
             ),
         ),
         (
-            terrain: Ground,
-            wall_type: Normal,
+            terrain: Dirt,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3008,8 +3008,8 @@
             ),
         ),
         (
-            terrain: Ground,
-            wall_type: Normal,
+            terrain: Dirt,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3256,7 +3256,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3369,8 +3369,8 @@
             ),
         ),
         (
-            terrain: Ground,
-            wall_type: Normal,
+            terrain: Dirt,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3388,8 +3388,8 @@
             ),
         ),
         (
-            terrain: Ground,
-            wall_type: Normal,
+            terrain: Dirt,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3408,7 +3408,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3427,7 +3427,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3465,7 +3465,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3484,7 +3484,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3503,7 +3503,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3522,7 +3522,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3541,7 +3541,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3560,7 +3560,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3579,7 +3579,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3598,7 +3598,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3617,7 +3617,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3673,8 +3673,8 @@
             ),
         ),
         (
-            terrain: Ground,
-            wall_type: Normal,
+            terrain: Dirt,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3693,7 +3693,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3712,7 +3712,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3731,7 +3731,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3750,7 +3750,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3769,7 +3769,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3788,7 +3788,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3807,7 +3807,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3826,7 +3826,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3845,7 +3845,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3864,7 +3864,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3883,7 +3883,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3902,7 +3902,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3978,7 +3978,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -3997,7 +3997,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4035,7 +4035,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4073,7 +4073,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4092,7 +4092,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4111,7 +4111,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4130,7 +4130,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4149,7 +4149,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4168,7 +4168,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4187,7 +4187,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4206,7 +4206,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4225,7 +4225,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4282,7 +4282,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4301,7 +4301,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4320,7 +4320,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4339,7 +4339,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4358,7 +4358,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4377,7 +4377,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4396,7 +4396,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4415,7 +4415,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4434,7 +4434,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4453,7 +4453,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4472,7 +4472,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4491,7 +4491,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4510,7 +4510,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4529,7 +4529,7 @@
         ),
         (
             terrain: Ground,
-            wall_type: Normal,
+            wall_type: r#None,
             blocked: false,
             is_special: false,
             is_dark: false,
@@ -4872,34 +4872,32 @@
     ],
     events: {
         (
-            x: 10,
-            y: 12,
-        ): Treasure(
-            name: "Worn Chest",
-            description: "A small chest containing assorted loot and coins.",
-            loot: [
-                12,
-                22,
-                31,
-            ],
-        ),
-        (
             x: 1,
-            y: 7,
+            y: 8,
         ): Sign(
             name: "Exit Sign",
             description: "A sign marking the path back to town.",
             text: "Exit to Town",
         ),
         (
-            x: 14,
-            y: 14,
+            x: 13,
+            y: 2,
+        ): Treasure(
+            name: "Hidden Cache",
+            description: "A tucked-away cache of items and supplies.",
+            loot: [
+                11,
+                21,
+            ],
+        ),
+        (
+            x: 5,
+            y: 11,
         ): Encounter(
-            name: "Boss Lair",
-            description: "A concentrated group of powerful monsters guarding a key location.",
+            name: "Local Ambush",
+            description: "Monsters that commonly ambush travelers in this part of the dungeon.",
             monster_group: [
-                3,
-                3,
+                1,
                 3,
             ],
         ),
@@ -4916,37 +4914,13 @@
             map_id: 4,
         ),
         (
-            x: 13,
-            y: 2,
-        ): Treasure(
-            name: "Hidden Cache",
-            description: "A tucked-away cache of items and supplies.",
-            loot: [
-                11,
-                21,
-            ],
-        ),
-        (
-            x: 3,
-            y: 2,
-        ): Encounter(
-            name: "Monster Patrol",
-            description: "A small patrol of monsters crossing this area.",
-            monster_group: [
-                1,
-                2,
-            ],
-        ),
-        (
-            x: 5,
-            y: 11,
-        ): Encounter(
-            name: "Local Ambush",
-            description: "Monsters that commonly ambush travelers in this part of the dungeon.",
-            monster_group: [
-                1,
-                3,
-            ],
+            x: 10,
+            y: 6,
+        ): Trap(
+            name: "Spike Trap",
+            description: "A hidden spike trap that deals 5 points of damage when triggered.",
+            damage: 5,
+            effect: None,
         ),
         (
             x: 6,
@@ -4961,8 +4935,31 @@
             ],
         ),
         (
-            x: 2,
-            y: 6,
+            x: 3,
+            y: 2,
+        ): Encounter(
+            name: "Monster Patrol",
+            description: "A small patrol of monsters crossing this area.",
+            monster_group: [
+                1,
+                2,
+            ],
+        ),
+        (
+            x: 10,
+            y: 12,
+        ): Treasure(
+            name: "Worn Chest",
+            description: "A small chest containing assorted loot and coins.",
+            loot: [
+                12,
+                22,
+                31,
+            ],
+        ),
+        (
+            x: 3,
+            y: 5,
         ): Encounter(
             name: "Monster Ambush",
             description: "A group of monsters lying in wait to ambush unsuspecting travelers.",
@@ -4972,22 +4969,16 @@
             ],
         ),
         (
-            x: 10,
-            y: 6,
-        ): Trap(
-            name: "Spike Trap",
-            description: "A hidden spike trap that deals 5 points of damage when triggered.",
-            damage: 5,
-            effect: None,
-        ),
-        (
-            x: 7,
-            y: 15,
-        ): RecruitableCharacter(
-            name: "Whisper",
-            description: "An elven scout emerges from the shadows, watching you intently. Her nimble fingers toy with a lockpick as she sizes up your party.",
-            character_id: "whisper",
-            dialogue_id: None,
+            x: 14,
+            y: 14,
+        ): Encounter(
+            name: "Boss Lair",
+            description: "A concentrated group of powerful monsters guarding a key location.",
+            monster_group: [
+                3,
+                3,
+                3,
+            ],
         ),
     },
     npc_placements: [],
