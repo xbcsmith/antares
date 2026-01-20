@@ -8,7 +8,7 @@
 //! is in `GameMode::InnManagement` mode.
 
 use crate::application::GameMode;
-use crate::domain::character::CharacterLocation;
+use crate::domain::character::{CharacterLocation, PARTY_MAX_SIZE};
 use crate::game::resources::GlobalState;
 use crate::game::systems::ui::GameLog;
 use bevy::prelude::*;
@@ -23,7 +23,12 @@ impl Plugin for InnUiPlugin {
             .add_message::<InnDismissCharacter>()
             .add_message::<InnSwapCharacters>()
             .add_message::<ExitInn>()
-            .add_systems(Update, (inn_ui_system, inn_action_system).chain());
+            .init_resource::<InnNavigationState>()
+            // Process keyboard input first so actions can be handled in the same frame.
+            .add_systems(
+                Update,
+                (inn_input_system, inn_ui_system, inn_action_system).chain(),
+            );
     }
 }
 
@@ -56,6 +61,17 @@ pub struct InnSwapCharacters {
 #[derive(Message)]
 pub struct ExitInn;
 
+/// Tracks keyboard navigation state for inn party management
+#[derive(Resource, Default)]
+pub struct InnNavigationState {
+    /// Selected party slot (0-5) for keyboard navigation
+    pub selected_party_index: Option<usize>,
+    /// Selected roster index for keyboard navigation (global roster index)
+    pub selected_roster_index: Option<usize>,
+    /// Which section has focus: Party(true) or Roster(false)
+    pub focus_on_party: bool,
+}
+
 // ===== UI System =====
 
 /// Renders the inn management UI when in InnManagement mode
@@ -63,6 +79,7 @@ pub struct ExitInn;
 fn inn_ui_system(
     mut contexts: EguiContexts,
     global_state: Res<GlobalState>,
+    nav_state: Res<InnNavigationState>,
     mut recruit_events: MessageWriter<InnRecruitCharacter>,
     mut dismiss_events: MessageWriter<InnDismissCharacter>,
     mut swap_events: MessageWriter<InnSwapCharacters>,
@@ -98,7 +115,7 @@ fn inn_ui_system(
 
             // Display party members
             for party_idx in 0..6 {
-                let is_selected = selected_party == Some(party_idx);
+                let _is_selected = selected_party == Some(party_idx);
 
                 if party_idx < party_count {
                     let member = &global_state.0.party.members[party_idx];
@@ -106,23 +123,32 @@ fn inn_ui_system(
                     ui.group(|ui| {
                         ui.set_min_width(100.0);
                         ui.vertical(|ui| {
-                            let name_text = if is_selected {
+                            let is_mouse_selected = selected_party == Some(party_idx);
+                            let is_keyboard_focused = nav_state.focus_on_party
+                                && nav_state.selected_party_index == Some(party_idx);
+
+                            let name_text = if is_keyboard_focused {
                                 egui::RichText::new(&member.name)
                                     .strong()
-                                    .color(egui::Color32::YELLOW)
+                                    .color(egui::Color32::from_rgb(150, 220, 120))
+                            // keyboard focus = GREEN
+                            } else if is_mouse_selected {
+                                egui::RichText::new(&member.name)
+                                    .strong()
+                                    .color(egui::Color32::YELLOW) // mouse selection = YELLOW
                             } else {
                                 egui::RichText::new(&member.name)
                             };
 
-                            if ui.selectable_label(is_selected, name_text).clicked() {
-                                // Toggle selection
-                                if is_selected {
-                                    // Deselect by exiting and re-entering (clears selection)
-                                    exit_events.write(ExitInn);
-                                } else {
-                                    // Select this party slot
-                                    exit_events.write(ExitInn); // Clear and re-enter with selection
-                                }
+                            if ui
+                                .selectable_label(
+                                    is_mouse_selected || is_keyboard_focused,
+                                    name_text,
+                                )
+                                .clicked()
+                            {
+                                // Toggle selection (handled via exit/re-enter)
+                                exit_events.write(ExitInn);
                             }
 
                             ui.label(format!("Lvl {}", member.level));
@@ -167,7 +193,7 @@ fn inn_ui_system(
         ui.label("Click a character to recruit or swap");
         ui.add_space(5.0);
 
-        // Find characters at this inn
+        // Find characters at this inn (exclude those currently in party)
         let mut inn_characters = Vec::new();
         for (roster_idx, character) in global_state.0.roster.characters.iter().enumerate() {
             if let Some(CharacterLocation::AtInn(inn_id)) =
@@ -184,20 +210,34 @@ fn inn_ui_system(
         } else {
             ui.horizontal_wrapped(|ui| {
                 for (roster_idx, character) in inn_characters {
-                    let is_selected = selected_roster == Some(roster_idx);
+                    let is_mouse_selected = selected_roster == Some(roster_idx);
+                    let is_keyboard_focused = !nav_state.focus_on_party
+                        && nav_state.selected_roster_index == Some(roster_idx);
 
                     ui.group(|ui| {
                         ui.set_min_width(120.0);
                         ui.vertical(|ui| {
-                            let name_text = if is_selected {
+                            let name_text = if is_keyboard_focused {
                                 egui::RichText::new(&character.name)
                                     .strong()
-                                    .color(egui::Color32::LIGHT_BLUE)
+                                    .color(egui::Color32::from_rgb(150, 220, 120))
+                            // keyboard focus = GREEN
+                            } else if is_mouse_selected {
+                                egui::RichText::new(&character.name)
+                                    .strong()
+                                    .color(egui::Color32::YELLOW) // mouse selection = YELLOW
                             } else {
                                 egui::RichText::new(&character.name)
                             };
 
-                            if ui.selectable_label(is_selected, name_text).clicked() {
+                            // Mark selectable if either mouse or keyboard selected
+                            if ui
+                                .selectable_label(
+                                    is_mouse_selected || is_keyboard_focused,
+                                    name_text,
+                                )
+                                .clicked()
+                            {
                                 // Toggle selection (handled via exit/re-enter)
                                 exit_events.write(ExitInn);
                             }
@@ -213,7 +253,7 @@ fn inn_ui_system(
                             ui.add_space(5.0);
 
                             // Recruit button (disabled if party full)
-                            let party_full = global_state.0.party.members.len() >= 6;
+                            let party_full = global_state.0.party.members.len() >= PARTY_MAX_SIZE;
                             let button = egui::Button::new("Recruit");
 
                             if ui.add_enabled(!party_full, button).clicked() {
@@ -226,8 +266,10 @@ fn inn_ui_system(
                                 ui.label(egui::RichText::new("Party full").small().weak());
                             }
 
-                            // Swap button (enabled if party slot selected)
-                            if let Some(party_idx) = selected_party {
+                            // Swap button (enabled if party slot selected either by mouse or keyboard)
+                            if let Some(party_idx) =
+                                selected_party.or(nav_state.selected_party_index)
+                            {
                                 if ui.button("Swap").clicked() {
                                     swap_events.write(InnSwapCharacters {
                                         party_index: party_idx,
@@ -269,6 +311,26 @@ fn inn_ui_system(
             )
             .weak()
             .small(),
+        );
+        ui.label(
+            egui::RichText::new("• Press ESC or click Exit Inn to return to exploration")
+                .weak()
+                .small()
+                .color(egui::Color32::from_rgb(144, 238, 144)),
+        );
+        ui.label(
+            egui::RichText::new(
+                "• Use TAB to switch focus, Arrow Keys to navigate, Enter/Space to select",
+            )
+            .weak()
+            .small()
+            .color(egui::Color32::LIGHT_BLUE),
+        );
+        ui.label(
+            egui::RichText::new("• Select party member + roster character, press S to swap")
+                .weak()
+                .small()
+                .color(egui::Color32::LIGHT_BLUE),
         );
     });
 }
@@ -351,6 +413,179 @@ fn inn_action_system(
         global_state.0.mode = GameMode::Exploration;
         if let Some(ref mut log) = game_log {
             log.add("Left the inn.".to_string());
+        }
+    }
+}
+
+/// Handles keyboard input for inn party management
+fn inn_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    global_state: Res<GlobalState>,
+    mut nav_state: ResMut<InnNavigationState>,
+    mut recruit_events: MessageWriter<InnRecruitCharacter>,
+    mut dismiss_events: MessageWriter<InnDismissCharacter>,
+    mut swap_events: MessageWriter<InnSwapCharacters>,
+    mut exit_events: MessageWriter<ExitInn>,
+) {
+    // Only process input when in InnManagement mode
+    let inn_state = match &global_state.0.mode {
+        GameMode::InnManagement(state) => state,
+        _ => {
+            *nav_state = InnNavigationState::default();
+            return;
+        }
+    };
+
+    let party_count = global_state.0.party.members.len();
+
+    // Collect roster indices for characters at this inn (exclude InParty)
+    let inn_roster_indices: Vec<usize> = global_state
+        .0
+        .roster
+        .character_locations
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, loc)| {
+            if let CharacterLocation::AtInn(inn_id) = loc {
+                if inn_id == &inn_state.current_inn_id {
+                    Some(idx)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let roster_count = inn_roster_indices.len();
+
+    // ESC key exits inn management
+    if keyboard.just_pressed(KeyCode::Escape) {
+        exit_events.write(ExitInn);
+        *nav_state = InnNavigationState::default();
+        return;
+    }
+
+    // Tab key switches focus between party and roster
+    if keyboard.just_pressed(KeyCode::Tab) {
+        nav_state.focus_on_party = !nav_state.focus_on_party;
+        // Clear selections when switching focus
+        if nav_state.focus_on_party {
+            nav_state.selected_roster_index = None;
+        } else {
+            nav_state.selected_party_index = None;
+        }
+    }
+
+    // Arrow key navigation
+    if nav_state.focus_on_party {
+        if party_count == 0 {
+            return;
+        }
+
+        // Navigate right (next)
+        if keyboard.just_pressed(KeyCode::ArrowRight) {
+            let next = match nav_state.selected_party_index {
+                Some(i) => {
+                    if i + 1 < party_count {
+                        i + 1
+                    } else {
+                        0
+                    }
+                }
+                None => 0,
+            };
+            nav_state.selected_party_index = Some(next);
+        }
+
+        // Navigate left (previous)
+        if keyboard.just_pressed(KeyCode::ArrowLeft) {
+            let prev = match nav_state.selected_party_index {
+                Some(i) => {
+                    if i > 0 {
+                        i - 1
+                    } else {
+                        party_count.saturating_sub(1)
+                    }
+                }
+                None => party_count.saturating_sub(1),
+            };
+            nav_state.selected_party_index = Some(prev);
+        }
+
+        // Enter/Space to dismiss selected party member
+        if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
+            if let Some(party_idx) = nav_state.selected_party_index {
+                if party_idx < party_count {
+                    dismiss_events.write(InnDismissCharacter {
+                        party_index: party_idx,
+                    });
+                }
+            }
+        }
+    } else {
+        // Roster focused navigation
+        if roster_count == 0 {
+            nav_state.selected_roster_index = None;
+        } else {
+            if keyboard.just_pressed(KeyCode::ArrowRight) {
+                let pos = nav_state.selected_roster_index.and_then(|global_idx| {
+                    inn_roster_indices.iter().position(|&x| x == global_idx)
+                });
+                let next_pos = match pos {
+                    Some(p) => {
+                        if p + 1 < roster_count {
+                            p + 1
+                        } else {
+                            0
+                        }
+                    }
+                    None => 0,
+                };
+                nav_state.selected_roster_index = Some(inn_roster_indices[next_pos]);
+            }
+
+            if keyboard.just_pressed(KeyCode::ArrowLeft) {
+                let pos = nav_state.selected_roster_index.and_then(|global_idx| {
+                    inn_roster_indices.iter().position(|&x| x == global_idx)
+                });
+                let prev_pos = match pos {
+                    Some(p) => {
+                        if p > 0 {
+                            p - 1
+                        } else {
+                            roster_count - 1
+                        }
+                    }
+                    None => roster_count - 1,
+                };
+                nav_state.selected_roster_index = Some(inn_roster_indices[prev_pos]);
+            }
+
+            // Enter/Space to recruit selected roster character
+            if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
+                if let Some(roster_idx) = nav_state.selected_roster_index {
+                    if party_count < PARTY_MAX_SIZE {
+                        recruit_events.write(InnRecruitCharacter {
+                            roster_index: roster_idx,
+                        });
+                    }
+                }
+            }
+
+            // S key to swap (if both party and roster characters selected)
+            if keyboard.just_pressed(KeyCode::KeyS) {
+                if let (Some(party_idx), Some(roster_idx)) = (
+                    nav_state.selected_party_index,
+                    nav_state.selected_roster_index,
+                ) {
+                    swap_events.write(InnSwapCharacters {
+                        party_index: party_idx,
+                        roster_index: roster_idx,
+                    });
+                }
+            }
         }
     }
 }
