@@ -814,6 +814,7 @@ fn spawn_map(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::components::dialogue::NpcDialogue;
 
     #[test]
     fn test_should_skip_marker_spawn_first_run_with_entities() {
