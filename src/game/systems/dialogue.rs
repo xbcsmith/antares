@@ -852,6 +852,22 @@ fn execute_action(
                 }
             }
         }
+
+        DialogueAction::OpenInnManagement { innkeeper_id } => {
+            use crate::application::{GameMode, InnManagementState};
+
+            info!("Opening inn party management for inn '{}'", innkeeper_id);
+
+            if let Some(ref mut log) = game_log {
+                log.add("Opening party management...".to_string());
+            }
+
+            game_state.mode = GameMode::InnManagement(InnManagementState {
+                current_inn_id: innkeeper_id.clone(),
+                selected_party_slot: None,
+                selected_roster_slot: None,
+            });
+        }
     }
 }
 
@@ -1578,5 +1594,64 @@ mod tests {
         // Assert - should fail because innkeeper doesn't exist
         assert_eq!(game_state.roster.characters.len(), 0);
         assert!(!game_state.encountered_characters.contains("test_mage"));
+    }
+
+    #[test]
+    fn test_open_inn_management_action_transitions_mode() {
+        // Arrange
+        let mut game_state = crate::application::GameState::new();
+        let db = crate::sdk::database::ContentDatabase::new();
+
+        // Act
+        execute_action(
+            &DialogueAction::OpenInnManagement {
+                innkeeper_id: "cozy_inn".to_string(),
+            },
+            &mut game_state,
+            &db,
+            None,
+            None,
+            None,
+        );
+
+        // Assert - mode is InnManagement and inn id is set
+        match &game_state.mode {
+            crate::application::GameMode::InnManagement(state) => {
+                assert_eq!(state.current_inn_id, "cozy_inn".to_string());
+                assert_eq!(state.selected_party_slot, None);
+                assert_eq!(state.selected_roster_slot, None);
+            }
+            other => panic!("Expected GameMode::InnManagement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_open_inn_management_action_logs_message() {
+        // Arrange
+        let mut game_state = crate::application::GameState::new();
+        let db = crate::sdk::database::ContentDatabase::new();
+        let mut log = crate::game::systems::ui::GameLog::new();
+
+        // Act
+        execute_action(
+            &DialogueAction::OpenInnManagement {
+                innkeeper_id: "cozy_inn".to_string(),
+            },
+            &mut game_state,
+            &db,
+            None,
+            None,
+            Some(&mut log),
+        );
+
+        // Assert - message logged
+        let entries = log.entries();
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.contains("Opening party management")),
+            "Expected opening message in game log. Actual entries: {:?}",
+            entries
+        );
     }
 }

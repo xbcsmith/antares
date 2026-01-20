@@ -300,6 +300,104 @@ Phase 3 will focus on performance optimization and mesh caching. Portal and sign
 
 ---
 
+## Feature: Innkeeper Party Management — PHASE 1: Add DialogueAction for Inn Management - COMPLETED
+
+### Summary
+
+Implemented a dialogue-driven mechanism to open the inn party management UI. Instead of auto-opening the Inn Management UI when the party steps on an `EnterInn` tile, the event now triggers the innkeeper's dialogue. A new dialogue action, `OpenInnManagement { innkeeper_id: String }`, was added so dialogues can explicitly open the party management interface when the player chooses to do so.
+
+This change improves user control and allows innkeepers to politely offer party management via conversation instead of immediately changing game mode.
+
+### Changes Made
+
+#### 1.1 Add `OpenInnManagement` variant (`src/domain/dialogue.rs`)
+
+- Added enum variant:
+  ```rust
+  /// Open the inn party management interface
+  OpenInnManagement { innkeeper_id: String },
+  ```
+- Updated `DialogueAction::description()` to return a human-friendly message:
+  ```
+  Open party management at inn (keeper: {innkeeper_id})
+  ```
+
+#### 1.2 Implement execution of `OpenInnManagement` (`src/game/systems/dialogue.rs`)
+
+- Implemented a new case in `execute_action()`:
+  - Transitions the `GameState` to `GameMode::InnManagement(InnManagementState { current_inn_id, selected_party_slot: None, selected_roster_slot: None })`.
+  - Logs a player-facing message `"Opening party management..."` and an info line for debugging.
+- Added unit tests:
+  - `test_open_inn_management_action_transitions_mode` — verifies the mode transition happens.
+  - `test_open_inn_management_action_logs_message` — verifies a log entry is added.
+  - Domain test `test_dialogue_action_open_inn_management_description` — verifies description string.
+
+#### 1.3 Change `EnterInn` event handling to trigger dialogue (`src/game/systems/events.rs`)
+
+- Removed the direct auto-transition to `InnManagement` in `MapEvent::EnterInn`.
+- New behavior:
+  - Look up NPC by `innkeeper_id` in game content DB.
+  - If the NPC has a `dialogue_id`, send `StartDialogue { dialogue_id, speaker_entity, fallback_position }`.
+  - If the NPC has no `dialogue_id` or is not found, log an error (innkeepers must be configured with dialogue).
+- Updated tests to assert `StartDialogue` messages are emitted:
+  - `test_enter_inn_event_triggers_innkeeper_dialogue`
+  - `test_enter_inn_event_triggers_dialogue_for_different_inn_ids`
+
+#### 1.4 Update tutorial innkeeper dialogues (`campaigns/tutorial/data/dialogues.ron`)
+
+- Appended a "I'd like to manage my party." choice to innkeeper dialogues (IDs 4 and 9).
+- Added a terminal node that executes:
+  ```ron
+  OpenInnManagement(innkeeper_id: "tutorial_innkeeper_town")
+  ```
+  and for the mountain innkeeper:
+  ```ron
+  OpenInnManagement(innkeeper_id: "tutorial_innkeeper_town2")
+  ```
+- This makes the ability to manage the party explicit and data-driven via RON.
+
+#### 1.5 Integration (End-to-end) Test
+
+- Added `test_enter_inn_dialogue_choice_opens_inn_management`:
+  - Verifies stepping onto `EnterInn` triggers the innkeeper dialogue (`StartDialogue`).
+  - Simulates the selection of the "Manage party" choice and verifies the game transitions to `GameMode::InnManagement` with the correct `current_inn_id`.
+
+### Validation & Testing
+
+- All local quality gates were executed and passed after the changes:
+  - `cargo fmt --all` ✅
+  - `cargo check --all-targets --all-features` ✅
+  - `cargo clippy --all-targets --all-features -- -D warnings` ✅
+  - `cargo nextest run --all-features` ✅ (all tests pass)
+- Tests added:
+  - Domain: `test_dialogue_action_open_inn_management_description`
+  - Runtime: `test_open_inn_management_action_transitions_mode`, `test_open_inn_management_action_logs_message`
+  - Event system: `test_enter_inn_event_triggers_innkeeper_dialogue`, `test_enter_inn_event_triggers_dialogue_for_different_inn_ids`
+  - Integration: `test_enter_inn_dialogue_choice_opens_inn_management`
+
+### Deliverables Completed
+
+- [x] `DialogueAction::OpenInnManagement` variant added
+- [x] `execute_action()` handles `OpenInnManagement` and sets `InnManagementState`
+- [x] `EnterInn` event now triggers innkeeper dialogue (no direct management UI auto-open)
+- [x] Tutorial innkeeper dialogues updated with a "Manage party" choice invoking `OpenInnManagement`
+- [x] Unit and integration tests added and passing
+
+### Success Criteria
+
+- Stepping onto an `EnterInn` tile presents the innkeeper dialogue rather than immediately opening party management.
+- Choosing the "Manage party" dialogue option opens Inn Management and `InnManagementState.current_inn_id` is correctly set.
+- No unexpected automatic opening of the party-management UI occurs.
+- All tests and linters pass, and documentation is updated.
+
+### Notes & Rationale
+
+- Aligns with data-driven design: innkeepers now explicitly offer party management through their dialogues.
+- Preserves separation of concerns: dialogue system executes an action to change UI state rather than hard-wiring event handlers to UI transitions.
+- Followed repository conventions: added doc comments, wrote unit + integration tests, and used RON for dialogue data updates.
+
+---
+
 ## Phase 3: Performance Optimization and Polish - COMPLETED
 
 ### Summary
