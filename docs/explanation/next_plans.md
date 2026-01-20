@@ -28,6 +28,10 @@ Dialog Editor Node Editing needs a scroll bar.
 
 ✅ COMPLETED
 
+### Map Editor NPC
+
+NPCs placed on the map are not editable. Selecting an NPC on the map does not bring up the NPC editor. It should bring up the NPC editor with the selected NPC's data loaded.
+
 ### NPC Editor
 
 Campaign Builder --> Dialogue Editor --> Edit
@@ -113,6 +117,7 @@ Unable to create new nodes makes it impossible to create dialog trees.
 
 InnKeeper Party management is broken. It triggers automatically before the player enters the inn. It should be triggered by a dialog node. There is no mouse support and no keyboard support so there is no way to navigate the party management window. ESC does not work to close the window. Basically the game is stuck at the InnKeeper Party management window. Characters that were recruited and in the party already still appear in the recruitable list. The recruit screen should only show characters that are not already in the party. Characters that are in the party should appear in the party list with an option to remove them from the party. Removing a character from the party should return them to the recruitable list. ESC should close the party management window and return to the game.
 
+[innkeeper party management fixes plan.md](/Users/bsmith/go/src/github.com/xbcsmith/antares/docs/explanation/innkeeper_party_management_fixes_plan.md)
 
 ### Character Recruitment Events
 

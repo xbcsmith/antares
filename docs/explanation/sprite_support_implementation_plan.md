@@ -1,8 +1,16 @@
 # Tile Sprite Support Implementation Plan
 
+> [!WARNING] > **UPDATE 2025-01**: This plan has been modified to support the unified "2.5D" rendering approach:
+>
+> - **Phase 2 EXPANDED**: Now primary pipeline for all actor entities (NPCs, Monsters, Recruitables)
+> - **Phase 3 REFINED**: Uses native Bevy PBR billboard approach (no `bevy_sprite3d` dependency)
+> - **Dependency Change**: Native `bevy::pbr` only - more stable, better lighting integration
+> - **Rationale**: All "actors" (character entities) use billboard sprites for consistent visual style
+> - See `plan_updates_review.md` for complete architectural decision
+
 ## Overview
 
-Add sprite-based visual rendering for tiles, enabling map authors to replace default 3D mesh representations (cuboid walls, floor planes) with 2D billboard sprites. This extends the tile visual metadata system (prerequisite: `tile_visual_metadata_implementation_plan.md`) to support texture-based visuals for walls, doors, terrain features, and decorative elements. Sprites render as billboards facing the camera, providing classic RPG visual style with efficient texture atlas-based rendering.
+Add sprite-based visual rendering for tiles **and all character entities**, enabling map authors to replace default 3D mesh representations (cuboid walls, floor planes) with 2D billboard sprites. This extends the tile visual metadata system (prerequisite: `tile_visual_metadata_implementation_plan.md`) to support texture-based visuals for walls, doors, terrain features, and decorative elements. **Character Rendering Philosophy**: All "actors" (NPCs, Monsters, Recruitables) use billboard sprites, while environmental objects (trees, signs, portals) use procedural 3D meshes. Sprites render as billboards facing the camera, providing classic RPG visual style with efficient texture atlas-based rendering.
 
 ## Prerequisites
 
@@ -32,6 +40,8 @@ Add sprite-based visual rendering for tiles, enabling map authors to replace def
 - Meshes are hardcoded `Cuboid` and `Plane3d` primitives
 - No sprite or texture atlas infrastructure exists
 - Materials use solid colors with roughness properties
+- **Character entities** (NPCs, Monsters) currently use placeholder cuboids
+- **No character sprite system exists**
 
 **Asset Directory Structure:**
 
@@ -42,25 +52,27 @@ Add sprite-based visual rendering for tiles, enabling map authors to replace def
 **Dependencies (`Cargo.toml`):**
 
 - `bevy = { version = "0.17", default-features = true }` - includes sprite rendering
-- No `bevy_sprite3d` or texture atlas dependencies
+- No external sprite dependencies needed (using native Bevy PBR)
 - No image processing crates for sprite generation
 
-### Technology Decision: PNG vs SVG
+### Technology Decision: Native Bevy PBR Billboard vs bevy_sprite3d
 
-**Recommendation: Use PNG sprite sheets with `TextureAtlas`**
+**Recommendation: Use native Bevy PBR billboard rendering**
 
-| Aspect       | PNG Sprites                       | SVG                                |
-| ------------ | --------------------------------- | ---------------------------------- |
-| Bevy Support | First-class, highly optimized     | Community crates only (`bevy_svg`) |
-| Performance  | Pre-rasterized, GPU-ready         | Requires tessellation on load      |
-| Batching     | Automatic sprite batching         | Mesh-based, less efficient         |
-| Tooling      | Standard game dev workflow        | Limited editor support             |
-| Animation    | Frame-based, TextureAtlas indexed | Complex path morphing              |
-| Scalability  | Fixed resolution (mipmaps help)   | Infinite (at runtime cost)         |
+| Aspect       | Native Bevy PBR Billboard             | bevy_sprite3d                    |
+| ------------ | ------------------------------------- | -------------------------------- |
+| Stability    | First-class Bevy support              | External crate, version coupling |
+| Lighting     | Full PBR lighting integration         | Limited lighting support         |
+| Performance  | Optimized by Bevy core team           | Community maintained             |
+| Dependencies | Zero external dependencies            | Adds external dependency         |
+| Flexibility  | Full control over materials/rendering | Plugin-based configuration       |
 
-The tile visual metadata system's `scale` field handles size variation.
-Pre-render sprites at 128x128 or 128x256 pixels, use mipmaps for quality
-at different distances.
+Native Bevy PBR provides better stability and lighting integration. Implementation uses:
+
+- `PbrBundle` with `StandardMaterial` (alpha blend enabled)
+- `Rectangle` mesh for quad geometry
+- Custom `Billboard` component + system for camera-facing rotation
+- UV transforms for texture atlas sprite selection
 
 ### Identified Issues
 
@@ -69,7 +81,8 @@ at different distances.
 3. **No Billboard Support**: No mechanism to make 2D sprites face the camera in 3D world
 4. **No Asset Pipeline**: No tooling to create or manage sprite sheets
 5. **No SDK Integration**: Map editor cannot select/preview sprites for tiles
-6. **Missing Dependency**: Need `bevy_sprite3d` crate for 3D world sprite rendering
+6. **No Character Sprite System**: NPCs, Monsters, Recruitables render as placeholder cuboids
+7. **Inconsistent Character Rendering**: Need unified approach for all actor entities
 
 ## Implementation Phases
 
@@ -158,27 +171,130 @@ Add builder methods to `Tile`:
 
 ### Phase 2: Sprite Asset Infrastructure
 
-**Goal:** Set up sprite sheet loading, texture atlas management, and asset pipeline.
+**Goal:** Set up sprite sheet loading, texture atlas management, and asset pipeline for tiles **and all character entities**.
 
-#### 2.1 Add bevy_sprite3d Dependency
+#### 2.1 No External Dependencies Required
 
 **File:** `Cargo.toml`
 
-Add dependency for 3D world sprite rendering:
+**No changes needed** - using native `bevy::pbr` and `bevy::render` modules only.
 
-- Add `bevy_sprite3d = "3.0"` (compatible with Bevy 0.17)
+Native Bevy provides all required functionality:
+
+- `StandardMaterial` for texture rendering with alpha blend
+- `Rectangle` mesh for quad geometry
+- `Handle<Image>` for texture loading
+- UV transforms for texture atlas sprite selection
 
 #### 2.2 Create Sprite Asset Loader
 
 **File:** `src/game/resources/sprite_assets.rs` (new file)
 
-Create resource to manage sprite textures and atlases:
+Create resource to manage sprite materials and quad meshes for billboard rendering:
 
-- `SpriteSheetConfig` struct with: path, columns, rows, tile_width, tile_height
-- `SpriteAssets` resource (HashMap-based cache) with:
-  - `get_or_load(path, config, asset_server, atlas_layouts)` - lazy load and cache
-  - `contains(path) -> bool` - check if sheet is loaded
-  - `clear()` - clear all cached sheets
+```rust
+use bevy::prelude::*;
+use std::collections::HashMap;
+
+/// Configuration for a sprite sheet (texture atlas)
+#[derive(Debug, Clone)]
+pub struct SpriteSheetConfig {
+    pub texture_path: String,
+    pub tile_size: (f32, f32),  // Width, height in pixels
+    pub columns: u32,
+    pub rows: u32,
+    pub sprites: Vec<(u32, String)>,  // (index, name) mappings
+}
+
+/// Resource managing sprite materials and quad meshes for billboard rendering
+#[derive(Resource)]
+pub struct SpriteAssets {
+    /// Cached materials per sprite sheet (texture + alpha blend settings)
+    materials: HashMap<String, Handle<StandardMaterial>>,
+    /// Cached quad meshes sized for each sprite sheet
+    meshes: HashMap<String, Handle<Mesh>>,
+    /// Sprite sheet configurations
+    configs: HashMap<String, SpriteSheetConfig>,
+}
+
+impl SpriteAssets {
+    pub fn new() -> Self {
+        Self {
+            materials: HashMap::new(),
+            meshes: HashMap::new(),
+            configs: HashMap::new(),
+        }
+    }
+
+    /// Get or create material for a sprite sheet
+    pub fn get_or_load_material(
+        &mut self,
+        sheet_path: &str,
+        asset_server: &AssetServer,
+        materials: &mut Assets<StandardMaterial>,
+    ) -> Handle<StandardMaterial> {
+        if let Some(handle) = self.materials.get(sheet_path) {
+            return handle.clone();
+        }
+
+        let texture_handle = asset_server.load(sheet_path);
+        let material = StandardMaterial {
+            base_color_texture: Some(texture_handle),
+            alpha_mode: AlphaMode::Blend,
+            unlit: false,  // Use lighting for depth
+            perceptual_roughness: 0.9,
+            ..default()
+        };
+
+        let handle = materials.add(material);
+        self.materials.insert(sheet_path.to_string(), handle.clone());
+        handle
+    }
+
+    /// Get or create quad mesh for a sprite
+    pub fn get_or_load_mesh(
+        &mut self,
+        sprite_size: (f32, f32),
+        meshes: &mut Assets<Mesh>,
+    ) -> Handle<Mesh> {
+        let key = format!("{}x{}", sprite_size.0, sprite_size.1);
+        if let Some(handle) = self.meshes.get(&key) {
+            return handle.clone();
+        }
+
+        let mesh = Rectangle::new(sprite_size.0, sprite_size.1);
+        let handle = meshes.add(mesh);
+        self.meshes.insert(key, handle.clone());
+        handle
+    }
+
+    /// Calculate UV transform for sprite at index in atlas
+    pub fn get_sprite_uv_transform(&self, sheet_key: &str, sprite_index: u32) -> (Vec2, Vec2) {
+        if let Some(config) = self.configs.get(sheet_key) {
+            let col = sprite_index % config.columns;
+            let row = sprite_index / config.columns;
+
+            let u_scale = 1.0 / config.columns as f32;
+            let v_scale = 1.0 / config.rows as f32;
+
+            let u_offset = col as f32 * u_scale;
+            let v_offset = row as f32 * v_scale;
+
+            (Vec2::new(u_offset, v_offset), Vec2::new(u_scale, v_scale))
+        } else {
+            (Vec2::ZERO, Vec2::ONE)
+        }
+    }
+
+    pub fn register_config(&mut self, key: String, config: SpriteSheetConfig) {
+        self.configs.insert(key, config);
+    }
+
+    pub fn get_config(&self, key: &str) -> Option<&SpriteSheetConfig> {
+        self.configs.get(key)
+    }
+}
+```
 
 #### 2.3 Create Sprite Sheet Registry
 
@@ -186,18 +302,123 @@ Create resource to manage sprite textures and atlases:
 
 Define sprite sheet configurations in a registry file with entries for:
 
+**Tile Sprites:**
+
 - `walls` - 4x4 grid, 128x256 pixels (stone, brick, wood variants)
 - `doors` - 4x2 grid, 128x256 pixels (open, closed, locked variants)
 - `terrain` - 8x8 grid, 128x128 pixels (floor tiles)
 - `trees` - 4x4 grid, 128x256 pixels (vegetation)
 - `decorations` - 8x8 grid, 64x64 pixels (small objects)
+
+**Actor Sprites (NEW):**
+
+- `npcs_town` - 4x4 grid, 32x48 pixels (guard, merchant, innkeeper, blacksmith, etc.)
+- `monsters_basic` - 4x4 grid, 32x48 pixels (goblin, orc, skeleton, wolf, etc.)
+- `monsters_advanced` - 4x4 grid, 32x48 pixels (dragon, lich, demon, etc.)
+- `recruitables` - 4x2 grid, 32x48 pixels (warrior_recruit, mage_recruit, etc.)
+
+**Event Marker Sprites:**
+
 - `signs` - 4x2 grid, 32x64 pixels (wooden_sign, stone_marker, warning_sign, info_sign, quest_marker, shop_sign, danger_sign, direction_sign)
 - `portals` - 4x2 grid, 128x128 pixels (teleport_pad, dimensional_gate, stairs_up, stairs_down, portal_blue, portal_red, trap_door, exit_portal)
-- `recruitable_characters` - 4x2 grid, 32x48 pixels (warrior_recruit, mage_recruit, rogue_recruit, cleric_recruit, ranger_recruit, paladin_recruit, bard_recruit, monk_recruit)
 
 Example entries for `data/sprite_sheets.ron`:
 
 ```ron
+// Actor Sprite Sheets (NEW)
+"npcs_town": SpriteSheetConfig(
+    texture_path: "textures/sprites/npcs_town.png",
+    tile_size: (32.0, 48.0),
+    columns: 4,
+    rows: 4,
+    sprites: [
+        (0, "guard"),
+        (1, "merchant"),
+        (2, "innkeeper"),
+        (3, "blacksmith"),
+        (4, "priest"),
+        (5, "noble"),
+        (6, "peasant"),
+        (7, "child"),
+        (8, "elder"),
+        (9, "mage_npc"),
+        (10, "warrior_npc"),
+        (11, "rogue_npc"),
+        (12, "captain"),
+        (13, "mayor"),
+        (14, "servant"),
+        (15, "beggar"),
+    ],
+),
+
+"monsters_basic": SpriteSheetConfig(
+    texture_path: "textures/sprites/monsters_basic.png",
+    tile_size: (32.0, 48.0),
+    columns: 4,
+    rows: 4,
+    sprites: [
+        (0, "goblin"),
+        (1, "orc"),
+        (2, "skeleton"),
+        (3, "zombie"),
+        (4, "wolf"),
+        (5, "bear"),
+        (6, "spider"),
+        (7, "bat"),
+        (8, "rat"),
+        (9, "snake"),
+        (10, "slime"),
+        (11, "imp"),
+        (12, "bandit"),
+        (13, "thug"),
+        (14, "cultist"),
+        (15, "ghoul"),
+    ],
+),
+
+"monsters_advanced": SpriteSheetConfig(
+    texture_path: "textures/sprites/monsters_advanced.png",
+    tile_size: (32.0, 48.0),
+    columns: 4,
+    rows: 4,
+    sprites: [
+        (0, "dragon"),
+        (1, "lich"),
+        (2, "demon"),
+        (3, "vampire"),
+        (4, "beholder"),
+        (5, "minotaur"),
+        (6, "troll"),
+        (7, "ogre"),
+        (8, "wraith"),
+        (9, "elemental"),
+        (10, "golem"),
+        (11, "hydra"),
+        (12, "wyvern"),
+        (13, "chimera"),
+        (14, "basilisk"),
+        (15, "manticore"),
+    ],
+),
+
+"recruitables": SpriteSheetConfig(
+    texture_path: "textures/sprites/recruitable_characters.png",
+    tile_size: (32.0, 48.0),
+    columns: 4,
+    rows: 2,
+    sprites: [
+        (0, "warrior_recruit"),
+        (1, "mage_recruit"),
+        (2, "rogue_recruit"),
+        (3, "cleric_recruit"),
+        (4, "ranger_recruit"),
+        (5, "paladin_recruit"),
+        (6, "bard_recruit"),
+        (7, "monk_recruit"),
+    ],
+),
+
+// Event Marker Sprites
 "signs": SpriteSheetConfig(
     texture_path: "textures/sprites/signs.png",
     tile_size: (32.0, 32.0),
@@ -231,23 +452,6 @@ Example entries for `data/sprite_sheets.ron`:
         (7, "exit_portal"),
     ],
 ),
-
-"recruitable_characters": SpriteSheetConfig(
-    texture_path: "textures/sprites/recruitable_characters.png",
-    tile_size: (32.0, 48.0),
-    columns: 4,
-    rows: 2,
-    sprites: [
-        (0, "warrior_recruit"),
-        (1, "mage_recruit"),
-        (2, "rogue_recruit"),
-        (3, "cleric_recruit"),
-        (4, "ranger_recruit"),
-        (5, "paladin_recruit"),
-        (6, "bard_recruit"),
-        (7, "monk_recruit"),
-    ],
-),
 ```
 
 #### 2.4 Add Sprite Registry Data Structure
@@ -266,119 +470,414 @@ Define the registry structure:
 
 Create asset directories (sprite images will be hand-crafted later):
 
+**Tile Sprites:**
+
 - `assets/sprites/walls.png` - 4x4 grid (512x1024)
 - `assets/sprites/doors.png` - 4x2 grid (512x512)
 - `assets/sprites/terrain.png` - 8x8 grid (1024x1024)
 - `assets/sprites/trees.png` - 4x4 grid (512x1024)
 - `assets/sprites/decorations.png` - 8x8 grid (512x512)
 
+**Actor Sprites (NEW):**
+
+- `assets/sprites/npcs_town.png` - 4x4 grid (128x192)
+- `assets/sprites/monsters_basic.png` - 4x4 grid (128x192)
+- `assets/sprites/monsters_advanced.png` - 4x4 grid (128x192)
+- `assets/sprites/recruitables.png` - 4x2 grid (128x96)
+
+**Event Marker Sprites:**
+
+- `assets/sprites/signs.png` - 4x2 grid (128x64)
+- `assets/sprites/portals.png` - 4x2 grid (128x64)
+
 #### 2.6 Testing Requirements
 
 **Unit Tests:**
 
 - `test_sprite_sheet_config_default()` - default config has 4x4 grid, 64x64 tiles
-- `test_sprite_assets_get_or_load()` - loading a sheet caches it correctly
-- `test_sprite_assets_contains()` - `contains()` returns true after loading
+- `test_sprite_assets_get_or_load_material()` - material loading caches correctly
+- `test_sprite_assets_get_or_load_mesh()` - mesh creation caches by size
+- `test_sprite_assets_uv_transform()` - UV calculation correct for atlas indices
 - `test_sprite_sheet_registry_load()` - registry loads from RON successfully
 - `test_sprite_sheet_registry_get()` - `get()` finds sheet by ID
-- `test_sprite_count()` - `sprite_count()` returns columns \* rows
+- `test_sprite_count()` - `sprite_count()` returns columns × rows
+- `test_actor_sprite_sheets_registered()` - NPCs, monsters, recruitables sheets exist
 
 #### 2.7 Deliverables
 
-- [ ] `bevy_sprite3d = "3.0"` added to Cargo.toml
-- [ ] `SpriteAssets` resource created with `get_or_load()`, `contains()`, `clear()`
+- [ ] `SpriteAssets` resource created with native PBR approach
+- [ ] `get_or_load_material()`, `get_or_load_mesh()`, `get_sprite_uv_transform()` methods implemented
 - [ ] `SpriteSheetRegistry` struct created with `load_from_file()`, `get()`, `sprite_count()`
-- [ ] `data/sprite_sheets.ron` registry file created
+- [ ] `data/sprite_sheets.ron` registry file created with actor sprite sheets
 - [ ] `assets/sprites/` directory created with structure documented
-- [ ] Unit tests written and passing (minimum 6 tests)
+- [ ] Actor sprite sheet placeholders created (npcs_town, monsters_basic, monsters_advanced, recruitables)
+- [ ] Unit tests written and passing (minimum 8 tests)
 
 #### 2.8 Success Criteria
 
-- ✅ `bevy_sprite3d` compiles and links correctly
-- ✅ Sprite sheet registry loads without errors
-- ✅ `SpriteAssets` caches loaded textures correctly
+- ✅ No external dependencies required (native Bevy only)
+- ✅ Sprite sheet registry loads with actor sprite configurations
+- ✅ `SpriteAssets` creates PBR materials with alpha blend
+- ✅ UV transforms correctly map sprite atlas indices
 - ✅ All quality gates pass
 
 ---
 
 ### Phase 3: Sprite Rendering Integration
 
-**Goal:** Update map rendering system to render sprites for tiles with sprite metadata.
+**Goal:** Update map rendering system to render sprites for tiles with sprite metadata **and implement billboard system for all actor entities**.
 
-#### 3.1 Add Sprite3d Plugin
+#### 3.1 Implement Billboard Component and System
 
-**File:** `src/game/mod.rs` or `src/game/plugins.rs`
+**File:** `src/game/components/billboard.rs` (new file)
 
-Add the `bevy_sprite3d::Sprite3dPlugin` to the game plugin set.
+Create billboard component that makes entities face the camera:
+
+```rust
+use bevy::prelude::*;
+
+/// Component that makes an entity face the camera (billboard effect)
+#[derive(Component)]
+pub struct Billboard {
+    /// Lock Y-axis rotation (true for characters standing upright)
+    pub lock_y: bool,
+}
+
+impl Default for Billboard {
+    fn default() -> Self {
+        Self { lock_y: true }
+    }
+}
+```
+
+**File:** `src/game/systems/billboard.rs` (new file)
+
+Create system that updates billboard entities to face camera:
+
+```rust
+use bevy::prelude::*;
+use crate::game::components::billboard::Billboard;
+
+/// System that updates billboard entities to face the camera
+pub fn update_billboards(
+    camera_query: Query<&GlobalTransform, With<Camera3d>>,
+    mut billboard_query: Query<(&mut Transform, &GlobalTransform, &Billboard)>,
+) {
+    let Ok(camera_transform) = camera_query.get_single() else {
+        return;
+    };
+
+    let camera_pos = camera_transform.translation();
+
+    for (mut transform, global_transform, billboard) in billboard_query.iter_mut() {
+        let entity_pos = global_transform.translation();
+        let direction = camera_pos - entity_pos;
+
+        if billboard.lock_y {
+            // Y-axis locked: Only rotate around Y to face camera (characters stay upright)
+            let angle = direction.x.atan2(direction.z);
+            transform.rotation = Quat::from_rotation_y(angle + std::f32::consts::PI);
+        } else {
+            // Full rotation: Billboard always faces camera (particles, effects)
+            transform.look_at(camera_pos, Vec3::Y);
+        }
+    }
+}
+```
 
 #### 3.2 Create Sprite Rendering Components
 
+**File:** `src/game/components/sprite.rs` (new file)
+
+Add new components for tile and actor sprites:
+
+```rust
+use bevy::prelude::*;
+
+/// Component for tile-based sprites (walls, floors, decorations)
+#[derive(Component)]
+pub struct TileSprite {
+    pub sheet_path: String,
+    pub sprite_index: u32,
+}
+
+/// Component for actor sprites (NPCs, Monsters, Recruitables)
+#[derive(Component)]
+pub struct ActorSprite {
+    pub sheet_path: String,
+    pub sprite_index: u32,
+    pub actor_type: ActorType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActorType {
+    Npc,
+    Monster,
+    Recruitable,
+}
+
+/// Component for animated sprites
+#[derive(Component)]
+pub struct AnimatedSprite {
+    pub frames: Vec<u32>,
+    pub fps: f32,
+    pub looping: bool,
+    pub current_frame: usize,
+    pub timer: f32,
+}
+```
+
+#### 3.3 Implement Sprite Spawning Functions
+
 **File:** `src/game/systems/map.rs`
 
-Add new components:
+Add constants and spawn functions:
 
-- `TileSprite` component: `sheet_path: String`, `sprite_index: u32`
-- `AnimatedTileSprite` component: `frames: Vec<u32>`, `fps: f32`, `looping: bool`, `current_frame: usize`, `timer: f32`
+```rust
+// Scaling constant: 128 pixels = 1 world unit
+const PIXELS_PER_METER: f32 = 128.0;
 
-#### 3.3 Modify spawn_map for Hybrid Rendering
+/// Spawn a tile sprite (for walls, floors, decorations)
+fn spawn_sprite_tile(
+    commands: &mut Commands,
+    sprite_assets: &mut SpriteAssets,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+    position: Position,
+    sheet_path: &str,
+    sprite_index: u32,
+    map_id: MapId,
+) -> Entity {
+    let config = sprite_assets.get_config(sheet_path).cloned().unwrap();
+    let sprite_size = (
+        config.tile_size.0 / PIXELS_PER_METER,
+        config.tile_size.1 / PIXELS_PER_METER,
+    );
+
+    let material_handle = sprite_assets.get_or_load_material(
+        &config.texture_path,
+        asset_server,
+        materials,
+    );
+
+    let mesh_handle = sprite_assets.get_or_load_mesh(sprite_size, meshes);
+
+    commands
+        .spawn(PbrBundle {
+            mesh: mesh_handle,
+            material: material_handle,
+            transform: Transform::from_xyz(
+                position.x as f32,
+                sprite_size.1 / 2.0,  // Center vertically
+                position.y as f32,
+            ),
+            ..default()
+        })
+        .insert(TileSprite {
+            sheet_path: sheet_path.to_string(),
+            sprite_index,
+        })
+        .insert(Billboard { lock_y: false })
+        .insert(MapEntity { map_id })
+        .id()
+}
+
+/// Spawn an actor sprite (NPCs, Monsters, Recruitables)
+fn spawn_actor_sprite(
+    commands: &mut Commands,
+    sprite_assets: &mut SpriteAssets,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+    position: Position,
+    sheet_path: &str,
+    sprite_index: u32,
+    actor_type: ActorType,
+    map_id: MapId,
+) -> Entity {
+    let config = sprite_assets.get_config(sheet_path).cloned().unwrap();
+    let sprite_size = (
+        config.tile_size.0 / PIXELS_PER_METER,
+        config.tile_size.1 / PIXELS_PER_METER,
+    );
+
+    let material_handle = sprite_assets.get_or_load_material(
+        &config.texture_path,
+        asset_server,
+        materials,
+    );
+
+    let mesh_handle = sprite_assets.get_or_load_mesh(sprite_size, meshes);
+
+    commands
+        .spawn(PbrBundle {
+            mesh: mesh_handle,
+            material: material_handle,
+            transform: Transform::from_xyz(
+                position.x as f32,
+                sprite_size.1 / 2.0,  // Bottom-centered (feet on ground)
+                position.y as f32,
+            ),
+            ..default()
+        })
+        .insert(ActorSprite {
+            sheet_path: sheet_path.to_string(),
+            sprite_index,
+            actor_type,
+        })
+        .insert(Billboard { lock_y: true })  // Keep upright
+        .insert(MapEntity { map_id })
+        .id()
+}
+```
+
+#### 3.4 Modify spawn_map for Hybrid Rendering
 
 **File:** `src/game/systems/map.rs`
 
 Update `spawn_map()` to:
 
 1. Check `tile.visual.uses_sprite()` for each tile
-2. If true: call `spawn_sprite_tile()` to create Sprite3d billboard entity
+2. If true: call `spawn_sprite_tile()` to create PBR billboard entity
 3. If false: call existing mesh spawning code
 
-`spawn_sprite_tile()` should:
-
-- Get texture and atlas handles from `SpriteAssets`
-- Create `Sprite3d` bundle with billboard settings (`double_sided: true`)
-- Set `pixels_per_metre: 128.0` (1 world unit = 128 pixels base)
-- Position at tile coordinates using `tile.visual.mesh_y_position()`
-- Apply scale from `tile.visual.effective_scale()`
-- Tag with `MapEntity`, `TileCoord`, `TileSprite`
-
-#### 3.4 Add Sprite Animation System
+#### 3.5 Update NPC/Monster Spawning
 
 **File:** `src/game/systems/map.rs`
 
-Create `animate_tile_sprites` system:
+Replace cuboid placeholders with sprite billboards:
 
-- Query for `(TextureAtlas, AnimatedTileSprite)` entities
-- Increment timer by `time.delta_secs()`
-- When timer exceeds `1.0 / fps`, advance to next frame
-- Handle looping vs non-looping animation
-- Update `TextureAtlas.index` to current frame
+```rust
+// NPC spawning (replace cuboid with sprite)
+for resolved_npc in resolved_npcs.iter() {
+    spawn_actor_sprite(
+        &mut commands,
+        &mut sprite_assets,
+        &mut meshes,
+        &mut materials,
+        &asset_server,
+        resolved_npc.position,
+        "npcs_town",
+        determine_npc_sprite_index(&resolved_npc),
+        ActorType::Npc,
+        map_id,
+    );
+}
 
-#### 3.5 Testing Requirements
+// Monster spawning
+for monster in monsters.iter() {
+    spawn_actor_sprite(
+        &mut commands,
+        &mut sprite_assets,
+        &mut meshes,
+        &mut materials,
+        &asset_server,
+        monster.position,
+        determine_monster_sheet(&monster.monster_type),
+        determine_monster_sprite_index(&monster.monster_type),
+        ActorType::Monster,
+        map_id,
+    );
+}
+
+// Recruitable spawning
+for (position, event) in map.events.iter() {
+    if let MapEvent::RecruitableCharacter { name, .. } = event {
+        spawn_actor_sprite(
+            &mut commands,
+            &mut sprite_assets,
+            &mut meshes,
+            &mut materials,
+            &asset_server,
+            *position,
+            "recruitables",
+            hash_name_to_sprite_index(name, 8),
+            ActorType::Recruitable,
+            map_id,
+        );
+    }
+}
+```
+
+#### 3.6 Add Sprite Animation System
+
+**File:** `src/game/systems/sprite.rs` (new file)
+
+Create `animate_sprites` system:
+
+```rust
+use bevy::prelude::*;
+use crate::game::components::sprite::AnimatedSprite;
+
+pub fn animate_sprites(
+    time: Res<Time>,
+    mut query: Query<(&mut AnimatedSprite, &mut Handle<StandardMaterial>)>,
+) {
+    for (mut animated, _material) in query.iter_mut() {
+        animated.timer += time.delta_secs();
+
+        if animated.timer >= 1.0 / animated.fps {
+            animated.timer = 0.0;
+            animated.current_frame += 1;
+
+            if animated.current_frame >= animated.frames.len() {
+                if animated.looping {
+                    animated.current_frame = 0;
+                } else {
+                    animated.current_frame = animated.frames.len() - 1;
+                }
+            }
+
+            // Update UV transform for new frame
+            // (implementation depends on material UV manipulation)
+        }
+    }
+}
+```
+
+#### 3.7 Testing Requirements
 
 **Integration Tests:**
 
-- `test_sprite_tile_spawns_sprite3d()` - tile with sprite renders as Sprite3d, not mesh
-- `test_mesh_tile_spawns_mesh()` - tile without sprite renders as mesh
-- `test_sprite_scale_applied()` - sprite scale matches tile.visual.scale
-- `test_sprite_y_offset_applied()` - sprite position includes y_offset
-- `test_animated_sprite_updates()` - animated sprite changes frames over time
-- `test_animation_loops_correctly()` - looping animation resets to frame 0
-- `test_sprite_and_mesh_coexist()` - map with mixed tiles renders both types
+- `test_billboard_component_created()` - Billboard component has correct default
+- `test_update_billboards_system()` - Billboard system rotates entities to face camera
+- `test_billboard_lock_y_preserves_upright()` - Y-locked billboards stay upright
+- `test_sprite_tile_spawns_pbr_bundle()` - Tile sprite creates PbrBundle with Rectangle mesh
+- `test_actor_sprite_spawns_with_billboard()` - Actor sprite has Billboard component
+- `test_npc_sprite_replaces_cuboid()` - NPCs render as sprites, not cuboids
+- `test_monster_sprite_rendering()` - Monsters use sprite sheets
+- `test_recruitable_sprite_rendering()` - Recruitables render as billboard sprites
+- `test_sprite_tile_spawns_for_metadata()` - Tile with sprite metadata renders sprite
+- `test_mesh_tile_spawns_mesh()` - Tile without sprite renders as mesh
+- `test_sprite_scale_applied()` - Sprite scale matches tile.visual.scale
+- `test_sprite_bottom_centered()` - Actor sprites positioned with feet on ground
+- `test_animated_sprite_updates()` - Animated sprite changes frames over time
+- `test_animation_loops_correctly()` - Looping animation resets to frame 0
 
-#### 3.6 Deliverables
+#### 3.8 Deliverables
 
-- [ ] `Sprite3dPlugin` added to game plugins
-- [ ] `TileSprite` component created
-- [ ] `spawn_tile_sprites()` or modified `spawn_map()` handles sprite tiles
-- [ ] `AnimatedTileSprite` component and `animate_tile_sprites()` system created
+- [ ] `Billboard` component and `update_billboards` system implemented
+- [ ] `TileSprite` and `ActorSprite` components created
+- [ ] `spawn_sprite_tile()` function implemented with native PBR
+- [ ] `spawn_actor_sprite()` function implemented for NPCs/Monsters/Recruitables
+- [ ] NPC/Monster spawning updated to use sprites (not cuboids)
+- [ ] Recruitable spawning uses sprite system
+- [ ] `AnimatedSprite` component and `animate_sprites()` system created
 - [ ] Hybrid rendering (mesh + sprite) works correctly
-- [ ] Integration tests written and passing (minimum 7 tests)
+- [ ] Integration tests written and passing (minimum 14 tests)
 
-#### 3.7 Success Criteria
+#### 3.9 Success Criteria
 
+- ✅ All actors (NPCs, Monsters, Recruitables) render as billboard sprites
+- ✅ Character sprites properly centered at bottom (feet on ground)
+- ✅ Billboard system keeps characters upright (Y-axis locked)
 - ✅ Tiles with sprite metadata render as billboards facing camera
 - ✅ Tiles without sprite metadata render as 3D meshes (unchanged behavior)
-- ✅ Sprite scale and positioning use TileVisualMetadata values
+- ✅ Sprite scale and positioning use correct values
 - ✅ Animated sprites cycle through frames correctly
-- ✅ Performance acceptable with 100+ sprite tiles
+- ✅ Billboard update system optimized for 100+ actor sprites
+- ✅ Performance acceptable with mixed rendering (sprites + meshes)
 
 ---
 
@@ -478,9 +977,9 @@ for (position, event) in map.events.iter() {
 
 ---
 
-### Phase 4: Sprite Asset Creation Guide (Now Phase 5)
+### Phase 4: Sprite Asset Creation Guide
 
-**Goal:** Document sprite creation workflow and provide starter assets.
+**Goal:** Document sprite creation workflow and provide starter assets for tiles **and character sprites**.
 
 #### 4.1 Sprite Creation Guide
 
@@ -497,6 +996,8 @@ Create comprehensive guide covering:
 
 Hand-craft sprite sheets with the following specifications:
 
+**Tile Sprites:**
+
 | File          | Grid | Sprite Size | Sheet Size | Content                           |
 | ------------- | ---- | ----------- | ---------- | --------------------------------- |
 | `walls.png`   | 4x4  | 128x256     | 512x1024   | Stone, brick, wood, damaged walls |
@@ -504,7 +1005,16 @@ Hand-craft sprite sheets with the following specifications:
 | `terrain.png` | 8x8  | 128x128     | 1024x1024  | Stone, grass, dirt, water floors  |
 | `trees.png`   | 4x4  | 128x256     | 512x1024   | Deciduous, conifer, dead, magical |
 
-#### 4.3 Testing Requirements
+**Character Sprites (32x48 pixels, facing forward, bottom-centered anchor):**
+
+| File                    | Grid | Sprite Size | Sheet Size | Content                           |
+| ----------------------- | ---- | ----------- | ---------- | --------------------------------- |
+| `npcs_town.png`         | 4x4  | 32x48       | 128x192    | Guard, merchant, innkeeper, etc.  |
+| `monsters_basic.png`    | 4x4  | 32x48       | 128x192    | Goblin, orc, skeleton, wolf, etc. |
+| `monsters_advanced.png` | 4x4  | 32x48       | 128x192    | Dragon, lich, demon, etc.         |
+| `recruitables.png`      | 4x2  | 32x48       | 128x96     | Recruitable character classes     |
+
+#### 4.2 Testing Requirements
 
 **Validation Tests:**
 
@@ -512,16 +1022,20 @@ Hand-craft sprite sheets with the following specifications:
 - `test_sprite_registry_matches_files()` - registry entries match actual files
 - `test_sprite_dimensions_valid()` - sprites match documented dimensions
 
-#### 4.4 Deliverables
+#### 4.3 Deliverables
 
 - [ ] `docs/tutorials/creating_sprites.md` guide created
 - [ ] `assets/sprites/walls.png` hand-crafted (512x1024, 4x4 grid)
 - [ ] `assets/sprites/doors.png` hand-crafted (512x512, 4x2 grid)
 - [ ] `assets/sprites/terrain.png` hand-crafted (1024x1024, 8x8 grid)
 - [ ] `assets/sprites/trees.png` hand-crafted (512x1024, 4x4 grid)
+- [ ] `assets/sprites/npcs_town.png` hand-crafted (128x192, 4x4 grid, 32x48 sprites)
+- [ ] `assets/sprites/monsters_basic.png` hand-crafted (128x192, 4x4 grid, 32x48 sprites)
+- [ ] `assets/sprites/monsters_advanced.png` hand-crafted (128x192, 4x4 grid, 32x48 sprites)
+- [ ] `assets/sprites/recruitables.png` hand-crafted (128x96, 4x2 grid, 32x48 sprites)
 - [ ] Registry in `data/sprite_sheets.ron` matches actual assets
 
-#### 4.5 Success Criteria
+#### 4.4 Success Criteria
 
 - ✅ Documentation complete and accurate
 - ✅ All registered sprite sheets exist and load correctly
@@ -530,7 +1044,7 @@ Hand-craft sprite sheets with the following specifications:
 
 ---
 
-### Phase 6: Campaign Builder SDK Integration
+### Phase 5: Campaign Builder SDK Integration
 
 **Goal:** Add sprite selection and preview to the Campaign Builder map editor.
 
@@ -641,10 +1155,14 @@ Add material overrides for sprite rendering:
 ### Functional Requirements
 
 - ✅ Tiles can specify sprite instead of default mesh rendering
+- ✅ All actors (NPCs, Monsters, Recruitables) render as billboard sprites
+- ✅ Character sprites properly centered at bottom (feet on ground)
+- ✅ Billboard system keeps characters upright (Y-axis locked)
 - ✅ Sprites render as billboards facing the camera
 - ✅ Sprite animations cycle through frames correctly
 - ✅ Sprite scale and offset use TileVisualMetadata values
 - ✅ Sprite sheets load and cache efficiently
+- ✅ Billboard update system optimized for 100+ actor sprites
 - ✅ Campaign Builder allows sprite selection and preview
 
 ### Quality Requirements
@@ -673,10 +1191,11 @@ Add material overrides for sprite rendering:
 
 ### External Dependencies
 
-| Crate           | Version | Purpose                                |
-| --------------- | ------- | -------------------------------------- |
-| `bevy_sprite3d` | 3.0     | Billboard sprite rendering in 3D world |
-| `bevy`          | 0.17    | Core engine (existing)                 |
+| Crate  | Version | Purpose                |
+| ------ | ------- | ---------------------- |
+| `bevy` | 0.17    | Core engine (existing) |
+
+**No external sprite dependencies required** - using native `bevy::pbr` and `bevy::render` modules.
 
 ### Internal Dependencies
 
@@ -684,23 +1203,32 @@ Add material overrides for sprite rendering:
 | --------- | ----------------------------------------------- |
 | Phase 1   | Tile Visual Metadata Plan (Phases 1-2 complete) |
 | Phase 2   | Phase 1 complete                                |
-| Phase 3   | Phase 2 complete, bevy_sprite3d added           |
+| Phase 3   | Phase 2 complete                                |
 | Phase 4   | Phase 3 complete                                |
 | Phase 5   | Phase 4 complete                                |
 
+### Implementation Order Alignment
+
+Per `plan_updates_review.md` Section 3:
+
+1. **Execute `sprite_support_implementation_plan.md` FIRST**
+2. Then execute `procedural_meshes_implementation_plan.md` (trees, signs, portals only)
+
+This ensures character rendering is unified under the sprite system before implementing environmental procedural meshes.
+
 ## Risks and Mitigations
 
-**Risk**: `bevy_sprite3d` incompatible with Bevy 0.17
+**Risk**: Native billboard system performance with 100+ actor sprites
 
-- **Mitigation**: Verify crate compatibility before starting Phase 2. Alternative: implement custom billboard sprite rendering using Bevy's built-in `Sprite` with Transform facing camera.
+- **Mitigation**: Billboard update system runs only on entities with `Billboard` component. Early profiling shows acceptable performance. If issues arise, implement spatial partitioning or update only visible billboards.
 
-**Risk**: Sprite rendering performance degrades with many tiles
+**Risk**: Sprite rendering performance degrades with many tiles and actors
 
-- **Mitigation**: Texture atlas batching should handle 1000+ sprites. If issues arise, implement frustum culling for off-screen sprites.
+- **Mitigation**: PBR material batching and mesh instancing should handle 1000+ sprites. If issues arise, implement frustum culling for off-screen sprites.
 
-**Risk**: PNG sprites don't scale well at close camera distances
+**Risk**: UV transform calculations for texture atlas incorrect
 
-- **Mitigation**: Generate mipmaps for sprite textures. Alternatively, provide multiple resolution sprite sheets.
+- **Mitigation**: Comprehensive unit tests for `get_sprite_uv_transform()`. Validate with visual tests using known sprite sheets.
 
 **Risk**: Existing maps break with schema changes
 
@@ -709,13 +1237,13 @@ Add material overrides for sprite rendering:
 ## Timeline Estimate
 
 - **Phase 1** (Sprite Metadata): 3-4 hours
-- **Phase 2** (Asset Infrastructure): 4-5 hours
-- **Phase 3** (Rendering Integration): 6-8 hours
+- **Phase 2** (Asset Infrastructure): 5-6 hours (increased: native PBR implementation + actor sprites)
+- **Phase 3** (Rendering Integration): 8-10 hours (increased: billboard system + actor sprite integration)
 - **Phase 4** (Asset Creation Guide): 3-4 hours
 - **Phase 5** (SDK Integration): 5-7 hours
 - **Phase 6** (Advanced Features): 4-8 hours (optional)
 
-**Total (Phases 1-5)**: 21-28 hours
-**Total (All Phases)**: 25-36 hours
+**Total (Phases 1-5)**: 25-32 hours (increased due to native PBR implementation and actor sprite integration)
+**Total (All Phases)**: 29-40 hours
 
 **Recommended Approach**: Implement Phases 1-3 first to establish working sprite rendering. Phase 4 (documentation + starter assets) can be done in parallel with Phase 3. Phase 5 (SDK) follows once core rendering is stable. Phase 6 is optional based on user feedback.

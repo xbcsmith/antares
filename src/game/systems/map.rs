@@ -3,8 +3,8 @@
 
 use crate::domain::types;
 use crate::domain::world;
-use crate::game::components::dialogue::NpcDialogue;
 use crate::game::resources::GlobalState;
+use crate::game::systems::procedural_meshes;
 use bevy::prelude::*;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
@@ -15,13 +15,6 @@ type MeshDimensions = (OrderedFloat<f32>, OrderedFloat<f32>, OrderedFloat<f32>);
 
 /// Type alias for the mesh cache HashMap
 type MeshCache = HashMap<MeshDimensions, Handle<Mesh>>;
-
-// Event marker colors (RGB)
-const SIGN_MARKER_COLOR: Color = Color::srgb(0.59, 0.44, 0.27); // Brown/tan #967046
-const TELEPORT_MARKER_COLOR: Color = Color::srgb(0.53, 0.29, 0.87); // Purple #8749DE
-const RECRUITABLE_CHARACTER_MARKER_COLOR: Color = Color::srgb(0.27, 0.67, 0.39); // Green #45AB63
-const EVENT_MARKER_SIZE: f32 = 0.8; // 80% of tile size
-const EVENT_MARKER_Y_OFFSET: f32 = 0.05; // 5cm above ground to prevent z-fighting
 
 /// Plugin that renders the current map using Bevy meshes/materials.
 ///
@@ -101,7 +94,7 @@ impl Plugin for MapManagerPlugin {
             // spawner observe the changed world state and spawn/despawn accordingly.
             .add_systems(
                 Update,
-                (map_change_handler, spawn_map_markers, handle_door_opened),
+                (map_change_handler, handle_door_opened, spawn_map_markers),
             );
     }
 }
@@ -110,9 +103,28 @@ impl Plugin for MapRenderingPlugin {
     fn build(&self, app: &mut App) {
         // Keep the visual spawn on startup (original behavior), and add the
         // map manager plugin so dynamic changes are handled at runtime.
-        app.add_systems(Startup, spawn_map)
+        app.add_systems(Startup, spawn_map_system)
             .add_plugins(MapManagerPlugin);
     }
+}
+
+/// System wrapper that creates a cache and calls spawn_map
+fn spawn_map_system(
+    commands: Commands,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
+    global_state: Res<GlobalState>,
+    content: Res<crate::application::resources::GameContent>,
+    mut cache: Local<super::procedural_meshes::ProceduralMeshCache>,
+) {
+    spawn_map(
+        commands,
+        meshes,
+        materials,
+        global_state,
+        content,
+        &mut cache,
+    );
 }
 
 /// System that handles door opened messages by refreshing map visuals
@@ -139,7 +151,15 @@ fn handle_door_opened(
     }
 
     // Respawn the map with updated door states
-    spawn_map(commands, meshes, materials, global_state, content);
+    let mut procedural_cache = super::procedural_meshes::ProceduralMeshCache::default();
+    spawn_map(
+        commands,
+        meshes,
+        materials,
+        global_state,
+        content,
+        &mut procedural_cache,
+    );
 }
 
 /// Converts a domain MapEvent into a lightweight MapEventType (if supported)
@@ -201,11 +221,11 @@ fn map_change_handler(
 /// it despawns previously spawned map entities.
 fn spawn_map_markers(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
-    query_existing: Query<Entity, With<MapEntity>>,
+    query_existing: Query<(Entity, &MapEntity)>,
     mut last_map: Local<Option<types::MapId>>,
 ) {
     let current = global_state.0.world.current_map;
@@ -215,11 +235,32 @@ fn spawn_map_markers(
         return;
     }
 
+    let mut has_any_entities = false;
+    let mut has_current_entities = false;
+
+    for (_entity, map_entity) in query_existing.iter() {
+        has_any_entities = true;
+        if map_entity.0 == current {
+            has_current_entities = true;
+        }
+    }
+
+    // If visuals for the current map already exist, skip marker refresh to avoid
+    // despawning freshly spawned visuals.
+    if has_current_entities {
+        *last_map = Some(current);
+        debug!(
+            "spawn_map_markers: visuals already spawned for current map {}; skipping marker refresh",
+            current
+        );
+        return;
+    }
+
     // If this is the first time this system runs and there are already map
     // entities present (spawned by `spawn_map` in `Startup`), don't
     // despawn them and don't spawn duplicate markers either. Instead, just
     // record the current map and exit.
-    if should_skip_marker_spawn(&last_map, query_existing.iter().next().is_some()) {
+    if should_skip_marker_spawn(&last_map, has_any_entities) {
         *last_map = Some(current);
         debug!(
             "spawn_map_markers: existing map entities present on first run; leaving visuals intact"
@@ -227,72 +268,22 @@ fn spawn_map_markers(
         return;
     } else {
         // We have a previously recorded map and it changed; despawn old map entities
-        for entity in query_existing.iter() {
+        for (entity, _map_entity) in query_existing.iter() {
             commands.entity(entity).despawn();
         }
     }
 
-    // Spawn markers for the new map (if it exists)
-    if let Some(map) = global_state.0.world.get_current_map() {
-        let map_id = map.id;
-
-        // Spawn a lightweight marker entity for every tile (useful for logic & tests)
-        for y in 0..map.height {
-            for x in 0..map.width {
-                let pos = types::Position::new(x as i32, y as i32);
-                commands.spawn((MapEntity(map_id), TileCoord(pos)));
-            }
-        }
-
-        // Spawn EventTrigger entities for each map event that we support
-        for (pos, event) in map.events.iter() {
-            if let Some(evt_type) = map_event_to_event_type(event) {
-                commands.spawn((
-                    MapEntity(map_id),
-                    EventTrigger {
-                        event_type: evt_type,
-                        position: *pos,
-                    },
-                ));
-            }
-        }
-
-        // Spawn NPC visual markers for the new map (Phase 2: NPC Visual Representation)
-        let resolved_npcs = map.resolve_npcs(&content.0.npcs);
-        let npc_color = Color::srgb(0.0, 1.0, 1.0); // Cyan
-        let npc_material = materials.add(StandardMaterial {
-            base_color: npc_color,
-            perceptual_roughness: 0.5,
-            ..default()
-        });
-
-        // Vertical plane representing NPC (billboard-like)
-        // 1.0 wide, 1.8 tall (human height ~6 feet), 0.1 depth
-        let npc_mesh = meshes.add(Cuboid::new(1.0, 1.8, 0.1));
-
-        for resolved_npc in resolved_npcs.iter() {
-            let x = resolved_npc.position.x as f32;
-            let y = resolved_npc.position.y as f32;
-
-            // Center the NPC marker at y=0.9 (bottom at 0, top at 1.8)
-            let mut npc_entity = commands.spawn((
-                Mesh3d(npc_mesh.clone()),
-                MeshMaterial3d(npc_material.clone()),
-                Transform::from_xyz(x, 0.9, y),
-                GlobalTransform::default(),
-                Visibility::default(),
-                MapEntity(map_id),
-                TileCoord(resolved_npc.position),
-                NpcMarker {
-                    npc_id: resolved_npc.npc_id.clone(),
-                },
-            ));
-
-            // Add NpcDialogue component if this NPC has a dialogue tree
-            if let Some(dialogue_id) = resolved_npc.dialogue_id {
-                npc_entity.insert(NpcDialogue::new(dialogue_id, resolved_npc.name.clone()));
-            }
-        }
+    // Spawn visuals (tiles + markers) for the new map (if it exists)
+    if global_state.0.world.get_current_map().is_some() {
+        let mut procedural_cache = super::procedural_meshes::ProceduralMeshCache::default();
+        spawn_map(
+            commands,
+            meshes,
+            materials,
+            global_state,
+            content,
+            &mut procedural_cache,
+        );
     } else {
         // Current map id is set to an unknown map - leave the world empty
         warn!("Current map {} not present in world", current);
@@ -339,6 +330,7 @@ fn spawn_map(
     mut materials: ResMut<Assets<StandardMaterial>>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
+    procedural_cache: &mut super::procedural_meshes::ProceduralMeshCache,
 ) {
     debug!("spawn_map system called");
     let game_state = &global_state.0;
@@ -369,7 +361,7 @@ fn spawn_map(
         let door_color = Color::srgb(door_rgb.0, door_rgb.1, door_rgb.2);
         let water_color = Color::srgb(water_rgb.0, water_rgb.1, water_rgb.2);
         let mountain_color = Color::srgb(mountain_rgb.0, mountain_rgb.1, mountain_rgb.2);
-        let forest_color = Color::srgb(forest_rgb.0, forest_rgb.1, forest_rgb.2);
+        let _forest_color = Color::srgb(forest_rgb.0, forest_rgb.1, forest_rgb.2);
         let grass_color = Color::srgb(grass_rgb.0, grass_rgb.1, grass_rgb.2);
 
         let floor_material = materials.add(StandardMaterial {
@@ -464,7 +456,7 @@ fn spawn_map(
                             ));
                         }
                         world::TerrainType::Forest => {
-                            // Render floor first
+                            // Render grass floor first
                             commands.spawn((
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(grass_material.clone()),
@@ -475,50 +467,15 @@ fn spawn_map(
                                 TileCoord(pos),
                             ));
 
-                            // Use per-tile visual metadata for tree dimensions
-                            let (width_x, height, width_z) =
-                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
-                            let mesh = get_or_create_mesh(
+                            // Spawn procedural tree with trunk and foliage
+                            procedural_meshes::spawn_tree(
+                                &mut commands,
+                                &mut materials,
                                 &mut meshes,
-                                &mut mesh_cache,
-                                width_x,
-                                height,
-                                width_z,
+                                pos,
+                                map.id,
+                                procedural_cache,
                             );
-                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
-
-                            // Apply color tint if specified
-                            let mut base_color = forest_color;
-                            if let Some((r, g, b)) = tile.visual.color_tint {
-                                base_color = Color::srgb(
-                                    forest_rgb.0 * r,
-                                    forest_rgb.1 * g,
-                                    forest_rgb.2 * b,
-                                );
-                            }
-
-                            let material = materials.add(StandardMaterial {
-                                base_color,
-                                perceptual_roughness: 0.9,
-                                ..default()
-                            });
-
-                            // Apply rotation if specified
-                            let rotation = bevy::prelude::Quat::from_rotation_y(
-                                tile.visual.rotation_y_radians(),
-                            );
-                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
-                                .with_rotation(rotation);
-
-                            commands.spawn((
-                                Mesh3d(mesh),
-                                MeshMaterial3d(material),
-                                transform,
-                                GlobalTransform::default(),
-                                Visibility::default(),
-                                MapEntity(map.id),
-                                TileCoord(pos),
-                            ));
                         }
                         world::TerrainType::Grass => {
                             // Grass floor
@@ -805,48 +762,43 @@ fn spawn_map(
             ));
         }
 
-        // Spawn event markers for signs, teleports, and recruitable characters
+        // Spawn procedural event markers for signs and portals
+        // Note: Recruitables handled by sprite system (see sprite_support_implementation_plan.md)
         for (position, event) in map.events.iter() {
-            let (marker_color, marker_name) = match event {
+            // Get tile visual metadata for rotation (if tile exists)
+            let rotation_y = map
+                .get_tile(*position)
+                .and_then(|tile| tile.visual.rotation_y);
+
+            match event {
                 world::MapEvent::Sign { name, .. } => {
-                    (SIGN_MARKER_COLOR, format!("SignMarker_{}", name))
+                    procedural_meshes::spawn_sign(
+                        &mut commands,
+                        &mut materials,
+                        &mut meshes,
+                        *position,
+                        name.clone(),
+                        map.id,
+                        procedural_cache,
+                        rotation_y,
+                    );
                 }
                 world::MapEvent::Teleport { name, .. } => {
-                    (TELEPORT_MARKER_COLOR, format!("TeleportMarker_{}", name))
+                    procedural_meshes::spawn_portal(
+                        &mut commands,
+                        &mut materials,
+                        &mut meshes,
+                        *position,
+                        name.clone(),
+                        map.id,
+                        procedural_cache,
+                        rotation_y,
+                    );
                 }
-                world::MapEvent::RecruitableCharacter { name, .. } => (
-                    RECRUITABLE_CHARACTER_MARKER_COLOR,
-                    format!("RecruitableCharacter_{}", name),
-                ),
-                _ => continue, // Only show markers for signs, teleports, and recruitable characters
-            };
-
-            // Calculate world position
-            let world_x = position.x as f32;
-            let world_z = position.y as f32;
-
-            let marker_mesh = meshes.add(
-                Plane3d::default()
-                    .mesh()
-                    .size(EVENT_MARKER_SIZE, EVENT_MARKER_SIZE),
-            );
-            let marker_material = materials.add(StandardMaterial {
-                base_color: marker_color,
-                emissive: LinearRgba::from(marker_color) * 0.3, // Slight glow effect
-                unlit: false,
-                ..default()
-            });
-
-            commands.spawn((
-                Mesh3d(marker_mesh),
-                MeshMaterial3d(marker_material),
-                Transform::from_xyz(world_x, EVENT_MARKER_Y_OFFSET, world_z),
-                GlobalTransform::default(),
-                Visibility::default(),
-                MapEntity(map.id),
-                TileCoord(*position),
-                Name::new(marker_name),
-            ));
+                // RecruitableCharacter rendering handled by sprite system
+                // Other events (Encounter, Trap, Treasure, NpcDialogue, InnEntry) have no visual markers
+                _ => {}
+            }
         }
 
         debug!(
@@ -862,6 +814,7 @@ fn spawn_map(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::components::dialogue::NpcDialogue;
 
     #[test]
     fn test_should_skip_marker_spawn_first_run_with_entities() {
@@ -877,46 +830,6 @@ mod tests {
     fn test_should_not_skip_when_last_map_some() {
         let some_map: Option<types::MapId> = Some(1u16);
         assert!(!should_skip_marker_spawn(&some_map, true));
-    }
-
-    #[test]
-    fn test_sign_marker_color() {
-        assert_eq!(SIGN_MARKER_COLOR, Color::srgb(0.59, 0.44, 0.27));
-    }
-
-    #[test]
-    fn test_teleport_marker_color() {
-        assert_eq!(TELEPORT_MARKER_COLOR, Color::srgb(0.53, 0.29, 0.87));
-    }
-
-    #[test]
-    fn test_recruitable_character_marker_color() {
-        assert_eq!(
-            RECRUITABLE_CHARACTER_MARKER_COLOR,
-            Color::srgb(0.27, 0.67, 0.39)
-        );
-    }
-
-    #[test]
-    fn test_event_marker_size_valid_range() {
-        // Verify marker size is between 0 and 1 (80% of tile)
-        let size = EVENT_MARKER_SIZE;
-        assert!(
-            size > 0.0 && size < 1.0,
-            "Marker size {} should be between 0 and 1",
-            size
-        );
-    }
-
-    #[test]
-    fn test_event_marker_y_offset_valid_range() {
-        // Verify Y offset is small enough to prevent z-fighting but visible
-        let offset = EVENT_MARKER_Y_OFFSET;
-        assert!(
-            offset > 0.0 && offset < 0.1,
-            "Y offset {} should be between 0 and 0.1",
-            offset
-        );
     }
 
     #[test]
