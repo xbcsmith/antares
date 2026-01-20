@@ -7608,6 +7608,18 @@
     ],
     events: {
         (
+            x: 19,
+            y: 15,
+        ): Teleport(
+            name: "Mountain Pass Portal",
+            description: "Portal to the Mountain Pass",
+            destination: (
+                x: 19,
+                y: 11,
+            ),
+            map_id: 5,
+        ),
+        (
             x: 1,
             y: 3,
         ): Encounter(
@@ -7622,16 +7634,18 @@
             ],
         ),
         (
-            x: 19,
-            y: 15,
-        ): Teleport(
-            name: "Mountain Pass Portal",
-            description: "Portal to the Mountain Pass",
-            destination: (
-                x: 19,
-                y: 11,
-            ),
-            map_id: 5,
+            x: 13,
+            y: 17,
+        ): Encounter(
+            name: "Dragon\'s Lair",
+            description: "The lair of the undead dragon. It guards a hoard of treasure.",
+            monster_group: [
+                30,
+                11,
+                11,
+                11,
+                11,
+            ],
         ),
         (
             x: 12,
@@ -7660,20 +7674,6 @@
             monster_group: [
                 11,
                 11,
-                11,
-                11,
-                11,
-                11,
-            ],
-        ),
-        (
-            x: 13,
-            y: 17,
-        ): Encounter(
-            name: "Dragon\'s Lair",
-            description: "The lair of the undead dragon. It guards a hoard of treasure.",
-            monster_group: [
-                30,
                 11,
                 11,
                 11,

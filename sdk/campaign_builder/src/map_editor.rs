@@ -1935,6 +1935,8 @@ pub struct MapsEditorState {
     pub new_map_name: String,
     /// Global zoom level for map grid (1.0 = 100%)
     pub zoom_level: f32,
+    /// Request to open the NPC editor for a given NPC ID (set when user clicks Edit NPC)
+    pub requested_open_npc: Option<String>,
 }
 
 /// Minimum zoom level (25%)
@@ -1987,6 +1989,7 @@ impl Default for MapsEditorState {
             new_map_height: 20,
             new_map_name: "New Map".to_string(),
             zoom_level: DEFAULT_ZOOM,
+            requested_open_npc: None,
         }
     }
 }
@@ -2652,9 +2655,11 @@ impl MapsEditorState {
                             egui::ScrollArea::vertical()
                                 .id_salt("map_editor_inspector_scroll")
                                 .show(right_ui, |ui| {
-                                    Self::show_inspector_panel(
+                                    if let Some(npc_id) = Self::show_inspector_panel(
                                         ui, editor_ref, maps, monsters, items, conditions, npcs,
-                                    );
+                                    ) {
+                                        self.requested_open_npc = Some(npc_id);
+                                    }
                                 });
                         },
                     );
@@ -2854,6 +2859,9 @@ impl MapsEditorState {
     }
 
     /// Show inspector panel
+    ///
+    /// Returns `Some(npc_id)` when the user requests to open the NPC editor for
+    /// an NPC placed on the currently selected tile.
     fn show_inspector_panel(
         ui: &mut egui::Ui,
         editor: &mut MapEditorState,
@@ -2862,7 +2870,9 @@ impl MapsEditorState {
         items: &[Item],
         conditions: &[antares::domain::conditions::ConditionDefinition],
         npcs: &[NpcDefinition],
-    ) {
+    ) -> Option<String> {
+        let mut requested_open_npc: Option<String> = None;
+
         ui.heading("Inspector");
         ui.separator();
 
@@ -2910,6 +2920,13 @@ impl MapsEditorState {
                         .unwrap_or("Unknown");
                     ui.label(format!("Name: {}", name));
                     ui.label(format!("ID: {}", placement.npc_id));
+
+                    // Allow quick navigation to NPC editor for this NPC
+                    ui.horizontal(|ui| {
+                        if ui.button("✏️ Edit NPC").clicked() {
+                            requested_open_npc = Some(placement.npc_id.clone());
+                        }
+                    });
                 }
 
                 if let Some(event) = editor.map.get_event(pos).cloned() {
@@ -3051,6 +3068,8 @@ impl MapsEditorState {
                 }
             });
         }
+
+        requested_open_npc
     }
 
     /// Helper: extract name and description from any MapEvent variant

@@ -7608,6 +7608,16 @@
     ],
     events: {
         (
+            x: 1,
+            y: 1,
+        ): Treasure(
+            name: "The Foo Stand",
+            description: "The Foo Stand",
+            loot: [
+                103,
+            ],
+        ),
+        (
             x: 9,
             y: 7,
         ): Sign(
@@ -7625,16 +7635,6 @@
                 2,
                 2,
                 2,
-            ],
-        ),
-        (
-            x: 1,
-            y: 1,
-        ): Treasure(
-            name: "The Foo Stand",
-            description: "The Foo Stand",
-            loot: [
-                103,
             ],
         ),
         (
