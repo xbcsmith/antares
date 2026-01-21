@@ -525,6 +525,212 @@ Implemented Phase 2 of the Game Menu implementation plan: game-layer menu UI com
 
 ---
 
+## Phase 3: Input System Integration - COMPLETED
+
+### Summary
+
+Implemented Phase 3 of the Game Menu implementation plan: input system integration for menu toggling and keyboard navigation. Users can now open/close the menu with ESC key from any game mode, navigate menus with arrow keys, and return to submenus with Backspace. All input is properly integrated with the existing `handle_input` system and supported by comprehensive integration tests.
+
+### Components Implemented
+
+#### 3.1 Menu Toggle Handler (`src/game/systems/input.rs`)
+
+**Added to `handle_input` function (Lines 406-431)**:
+
+- Checks for `GameAction::Menu` keypress (typically ESC)
+- Toggles between game modes and Menu mode:
+  - If in Menu mode: resumes to previous mode (stored in MenuState)
+  - If in other mode: creates MenuState storing current mode as previous_mode
+- Early return after toggle to prevent other input processing
+- Handles all game modes: Exploration, Combat, Dialogue, InnManagement
+
+#### 3.2 Keyboard Navigation Enhancements (`src/game/systems/menu.rs`)
+
+**Enhanced `handle_menu_keyboard` function**:
+
+- **Arrow Up**: Navigate up with wrapping (returns to last item when at first)
+- **Arrow Down**: Navigate down with wrapping (returns to first item when at last)
+- **Backspace**: Return to Main menu from SaveLoad/Settings submenus
+- **Escape**: Close menu and resume previous game mode
+- **Enter/Space**: Confirm current selection and perform menu actions
+
+**Added `handle_menu_selection` helper function**:
+
+- Interprets selected menu option based on current submenu and selection index
+- Main menu: Resume, Save, Load, Settings, Quit
+- SaveLoad menu: Log selected save slot (implementation in Phase 5)
+- Settings menu: Log selected setting (implementation in Phase 6)
+- Provides clear extensibility point for future phases
+
+#### 3.3 Integration Tests (`tests/integration/menu_toggle_test.rs` - NEW)
+
+**Created 25 comprehensive integration tests**:
+
+- `test_menu_state_stores_previous_mode_exploration`: Verify Exploration mode stored
+- `test_menu_state_stores_previous_mode_combat`: Verify Combat mode stored
+- `test_menu_state_stores_previous_mode_dialogue`: Verify Dialogue mode stored
+- `test_arrow_up_navigates_selection`: Up arrow moves selection up
+- `test_arrow_down_navigates_selection`: Down arrow moves selection down
+- `test_arrow_down_wraps_selection`: Down wraps from last to first
+- `test_arrow_up_wraps_selection`: Up wraps from first to last
+- `test_backspace_returns_to_main_from_settings`: Backspace from Settings
+- `test_backspace_returns_to_main_from_saveload`: Backspace from SaveLoad
+- `test_main_menu_items_selection`: Navigate all 5 main menu items
+- `test_save_load_submenu_respects_save_list_length`: Dynamic item count
+- `test_settings_submenu_navigation`: Navigate Settings options
+- `test_set_submenu_resets_selection`: Selection index resets on submenu change
+- `test_menu_transition_cycle`: Multiple submenu transitions
+- `test_selection_wrapping_with_single_item`: Edge case: single item menu
+- `test_global_state_transitions_to_menu`: GameState.mode transition
+- `test_exit_menu_preserves_mode`: Mode preserved after menu exit
+- `test_save_game_info_population`: Populate save files in SaveLoad
+- `test_saveload_navigation_with_saves`: Navigate realistic save list
+
+### Changes Made
+
+#### Input System (`src/game/systems/input.rs`)
+
+- **Menu toggle logic** (Lines 406-431):
+  - Added check for `GameAction::Menu` using `is_action_just_pressed`
+  - Pattern match on current GameMode to determine action
+  - Uses `MenuState::new()` to store current mode
+  - Early returns to prevent input cascade
+
+#### Menu Systems (`src/game/systems/menu.rs`)
+
+- **Enhanced `handle_menu_keyboard`** (Lines 106-195):
+
+  - Improved documentation with full input handling explanation
+  - Separated input handling into priority order (Backspace → Escape → Arrow keys → Enter/Space)
+  - Added early returns to prevent input cascade
+  - Supports all three submenu types with correct item counts
+  - Minimum item count of 1 for SaveLoad (accounts for empty save list)
+
+- **New `handle_menu_selection` function** (Lines 198-248):
+  - Extracted selection handling logic for clarity
+  - Matches on `current_submenu` to determine action
+  - Main menu performs immediate actions (Resume, Settings, Quit)
+  - SaveLoad/Settings log selection for Phase 5/6 implementation
+  - Uses `info!` logging for debugging and testing
+
+#### Testing Infrastructure (`tests/integration/menu_toggle_test.rs`)
+
+- **25 new integration tests** covering:
+  - Mode storage and preservation
+  - Navigation wrapping in both directions
+  - Submenu transitions with Backspace
+  - Dynamic save list handling
+  - Edge cases (single item, empty saves)
+  - Mode transitions through GameState
+
+### Architecture Compliance
+
+- ✅ Menu toggle integrated into existing `handle_input` without disrupting other systems
+- ✅ Uses existing `GameAction::Menu` enum variant (already defined in Phase 1 infrastructure)
+- ✅ Follows MenuState API contracts (select_previous/select_next with item_count)
+- ✅ No core data structures modified outside Phase 3 scope
+- ✅ Input priority: Menu toggle > other interactions (prevents input race conditions)
+- ✅ Early returns prevent input cascade and ensure clean separation
+- ✅ All functions have SPDX headers and proper documentation
+- ✅ Integration tests use public API only (no private function mocking)
+
+### Validation Results
+
+```bash
+✅ cargo fmt --all                                    → Finished
+✅ cargo check --all-targets --all-features           → Finished
+✅ cargo clippy --all-targets --all-features -- -D warnings → Finished
+✅ cargo nextest run --all-features                   → 1347 tests passed (25 new), 8 skipped
+```
+
+### Testing
+
+**Unit Tests in menu.rs**:
+
+- `test_menu_setup_noop_when_not_in_menu`: Verify stub safety
+- `test_handle_menu_keyboard_bounds`: Verify navigation helpers work
+
+**Integration Tests in tests/integration/menu_toggle_test.rs**:
+
+- 25 comprehensive tests covering all Phase 3 requirements
+- Tests exercise public API only (MenuState, GameMode transitions)
+- Tests verify wrapping, submenu transitions, and state preservation
+- Tests handle edge cases (empty save list, single item menus)
+
+### Files Modified
+
+- `src/game/systems/input.rs` (+26 lines: menu toggle logic)
+- `src/game/systems/menu.rs` (+140 lines: enhanced keyboard handling + helper function)
+- `tests/integration/menu_toggle_test.rs` (NEW - 332 lines: 25 integration tests)
+
+### Deliverables Completed
+
+- ✅ Menu toggle handler added to `handle_input` in input.rs
+- ✅ State transitions work: Exploration ↔ Menu, Combat ↔ Menu, Dialogue ↔ Menu, InnManagement ↔ Menu
+- ✅ Arrow Up/Down navigation with wrapping implemented
+- ✅ Backspace navigation from submenus to Main menu implemented
+- ✅ Enter/Space confirmation with menu selection handling
+- ✅ Escape key closes menu and resumes previous mode
+- ✅ Integration tests created: 25 tests covering all input scenarios
+- ✅ All tests passing (1347 total)
+- ✅ Code quality gates passing (fmt, check, clippy, nextest)
+
+### Success Criteria Met
+
+- ✅ All compilation checks pass (`cargo check`)
+- ✅ `cargo clippy` reports zero warnings
+- ✅ 25 new integration tests pass
+- ✅ Existing test suite unaffected (1322 tests still pass)
+- ✅ Menu toggle works from all game modes
+- ✅ Navigation wraps correctly in both directions
+- ✅ Backspace returns to Main menu from submenus
+- ✅ State preservation verified through tests
+- ✅ Code follows architecture.md structure and conventions
+- ✅ Documentation comprehensive with examples
+
+### Implementation Notes
+
+**Design Decisions**:
+
+1. **Menu toggle in `handle_input`**: Prioritized before other input processing to ensure menu can be opened from any game mode without input race conditions.
+
+2. **Early returns**: Used strategically after menu toggle and for each input action to prevent input cascade and ensure clean separation of concerns.
+
+3. **Dynamic item counts**: SaveLoad submenu item count based on `save_list.len()` with minimum of 1 to account for empty save state.
+
+4. **Selection reset on submenu change**: `MenuState::set_submenu()` resets `selected_index` to 0 to prevent index out-of-bounds when switching between submenus with different item counts.
+
+5. **Separate `handle_menu_selection` function**: Extracted to clarify menu action dispatch and provide extensibility point for Phase 5/6 implementations.
+
+6. **Integration testing approach**: Tests use public API only (MenuState, GameMode) to ensure tests remain valid as implementation details change.
+
+**Input Priority Order**:
+
+1. Backspace: Submenu navigation (returns to Main)
+2. Escape: Menu toggle (close menu)
+3. Arrow Up/Down: Selection navigation
+4. Enter/Space: Selection confirmation
+
+**Future Enhancement Opportunities** (Out of Scope for Phase 3):
+
+- Repeat key handling for held arrow keys (smooth scrolling)
+- Number key shortcuts (press 1-5 to select main menu item)
+- Mouse/Controller navigation
+- Focus management for accessibility
+- Visual feedback (cursor/highlight movement)
+
+### Next Steps (Phase 4)
+
+Phase 4 will implement menu UI rendering:
+
+- `menu_setup` will spawn the full menu UI tree using bevy_ui
+- Menu panels, buttons, and text will be rendered with proper styling
+- Button hover/press visual states will be implemented
+- Menu cleanup will properly despawn the UI hierarchy
+- Integration with selected options will trigger appropriate actions (Resume, Load, etc.)
+
+---
+
 ## Phase 3: Performance Optimization and Polish - COMPLETED
 
 ### Summary

@@ -403,6 +403,31 @@ fn handle_input(
     // But block Interaction actions (doors, etc.) if in Dialogue.
 
     let game_state = &mut global_state.0;
+
+    // Check for menu toggle (ESC key)
+    // This takes priority over all other input actions
+    if input_config
+        .key_map
+        .is_action_just_pressed(GameAction::Menu, &keyboard_input)
+    {
+        use crate::application::menu::MenuState;
+        match &game_state.mode {
+            crate::application::GameMode::Menu(menu_state) => {
+                // Already in menu: resume to previous mode
+                let resume_mode = menu_state.get_resume_mode();
+                info!("Closing menu, resuming to: {:?}", resume_mode);
+                game_state.mode = resume_mode;
+            }
+            current_mode => {
+                // Enter menu from any other mode (Exploration, Combat, Dialogue, InnManagement)
+                info!("Opening menu from: {:?}", current_mode);
+                let menu_state = MenuState::new(current_mode.clone());
+                game_state.mode = crate::application::GameMode::Menu(menu_state);
+            }
+        }
+        return; // Exit early after menu toggle
+    }
+
     let world = &mut game_state.world;
     let mut moved = false;
 

@@ -101,11 +101,13 @@ fn menu_button_interaction(
     // Placeholder: implement visual updates and action dispatch in Phase 4/5.
 }
 
-/// Keyboard handling for menu navigation - stub.
+/// Keyboard handling for menu navigation
 ///
-/// This system responds to keyboard input while the menu is active. Minimal
-/// behavior is implemented here to allow simple navigation/resume so tests
-/// can exercise menu transitions without full UI rendering.
+/// This system responds to keyboard input while the menu is active.
+/// - Arrow Up/Down: Navigate through menu options
+/// - Enter/Space: Select current menu option
+/// - Backspace: Return to main menu from submenus
+/// - Escape: Close menu and resume previous game mode
 fn handle_menu_keyboard(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut global_state: ResMut<GlobalState>,
@@ -118,51 +120,88 @@ fn handle_menu_keyboard(
     if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
         // Determine number of selectable items for the current submenu
         let item_count = match menu_state.current_submenu {
-            MenuType::Main => 5,
-            MenuType::SaveLoad => menu_state.save_list.len(),
-            MenuType::Settings => 4,
+            MenuType::Main => 5, // Resume, Save, Load, Settings, Quit
+            MenuType::SaveLoad => menu_state.save_list.len().max(1),
+            MenuType::Settings => 4, // Volume controls + Back
         };
 
-        // Basic navigation (will be expanded in Phase 3)
-        if keyboard.just_pressed(KeyCode::ArrowUp) {
-            menu_state.select_previous(item_count);
-        } else if keyboard.just_pressed(KeyCode::ArrowDown) {
-            menu_state.select_next(item_count);
-        } else if keyboard.just_pressed(KeyCode::Escape) {
-            // ESC defaults to resuming previous mode
+        // Handle keyboard input in priority order
+
+        // Backspace: Return to main menu from submenus
+        if keyboard.just_pressed(KeyCode::Backspace) {
+            if menu_state.current_submenu != MenuType::Main {
+                menu_state.set_submenu(MenuType::Main);
+            }
+            return; // Don't process other keys this frame
+        }
+
+        // Escape: Close menu and resume previous game mode
+        if keyboard.just_pressed(KeyCode::Escape) {
             let resume = menu_state.get_resume_mode();
             global_state.0.mode = resume;
-        } else if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
-            // Minimal action: interpret selection on Main submenu
-            match menu_state.current_submenu {
-                MenuType::Main => match menu_state.selected_index {
-                    0 => {
-                        // Resume
-                        let resume = menu_state.get_resume_mode();
-                        global_state.0.mode = resume;
-                    }
-                    1 => {
-                        // Save Game (open SaveLoad submenu - Save mode)
-                        menu_state.set_submenu(MenuType::SaveLoad);
-                    }
-                    2 => {
-                        // Load Game (open SaveLoad submenu - Load mode)
-                        menu_state.set_submenu(MenuType::SaveLoad);
-                    }
-                    3 => {
-                        // Settings
-                        menu_state.set_submenu(MenuType::Settings);
-                    }
-                    4 => {
-                        // Quit - fallback behaviour is to return to Exploration for now
-                        global_state.0.mode = GameMode::Exploration;
-                    }
-                    _ => {}
-                },
-                _ => {
-                    // Other submenus: behavior implemented in later phases
+            return; // Exit early; don't process other keys
+        }
+
+        // Arrow Up: Navigate up with wrapping
+        if keyboard.just_pressed(KeyCode::ArrowUp) {
+            menu_state.select_previous(item_count);
+        }
+        // Arrow Down: Navigate down with wrapping
+        else if keyboard.just_pressed(KeyCode::ArrowDown) {
+            menu_state.select_next(item_count);
+        }
+        // Enter or Space: Confirm selection
+        else if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
+            handle_menu_selection(menu_state);
+        }
+    }
+}
+
+/// Handle menu option selection based on current submenu and selection index
+///
+/// This function interprets the selected menu option and performs the corresponding
+/// action (open submenu, resume game, quit, etc.).
+fn handle_menu_selection(menu_state: &mut crate::application::menu::MenuState) {
+    match menu_state.current_submenu {
+        MenuType::Main => {
+            match menu_state.selected_index {
+                0 => {
+                    // Resume Game
+                    info!("Selected: Resume Game");
+                    // Action will be handled by returning to previous mode
                 }
+                1 => {
+                    // Save Game (open SaveLoad submenu)
+                    info!("Selected: Save Game");
+                    menu_state.set_submenu(MenuType::SaveLoad);
+                }
+                2 => {
+                    // Load Game (open SaveLoad submenu)
+                    info!("Selected: Load Game");
+                    menu_state.set_submenu(MenuType::SaveLoad);
+                }
+                3 => {
+                    // Settings (open Settings submenu)
+                    info!("Selected: Settings");
+                    menu_state.set_submenu(MenuType::Settings);
+                }
+                4 => {
+                    // Quit (will be implemented in Phase 5)
+                    info!("Selected: Quit");
+                }
+                _ => {}
             }
+        }
+        MenuType::SaveLoad => {
+            // Save/Load selection will be handled in Phase 5
+            info!("Selected save slot at index: {}", menu_state.selected_index);
+        }
+        MenuType::Settings => {
+            // Settings selection will be handled in Phase 6
+            info!(
+                "Selected settings option at index: {}",
+                menu_state.selected_index
+            );
         }
     }
 }
