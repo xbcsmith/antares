@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Menu plugin and system implementations for Phase 4-5: Menu UI Rendering and Save/Load Integration
+//! Menu plugin and system implementations for Phase 4-6: Menu UI Rendering, Save/Load, and Settings Integration
 //!
 //! This module implements the complete menu UI system with:
 //! - UI spawning based on current submenu (Main/SaveLoad/Settings)
@@ -9,6 +9,7 @@
 //! - Dynamic button color updates based on selection
 //! - Save/Load menu with scrollable save list
 //! - Save and load game operations
+//! - Settings menu with volume sliders (Phase 6)
 //! - Proper cleanup when exiting menu mode
 
 use bevy::prelude::*;
@@ -38,6 +39,7 @@ impl Plugin for MenuPlugin {
                 menu_button_interaction,
                 update_button_colors,
                 populate_save_list,
+                apply_settings,
                 menu_cleanup,
             ),
         );
@@ -411,7 +413,7 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state
     info!("Spawned save/load menu UI");
 }
 
-/// Spawn the settings menu UI - stub for Phase 6
+/// Spawn the settings menu UI with audio sliders and graphics settings (Phase 6)
 fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
     let font = font.clone();
 
@@ -440,6 +442,8 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::FlexStart,
                         padding: UiRect::all(Val::Px(20.0)),
+                        row_gap: Val::Px(10.0),
+                        overflow: Overflow::scroll_y(),
                         ..default()
                     },
                     BackgroundColor(MENU_BACKGROUND_COLOR),
@@ -447,6 +451,7 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                     SettingsPanel,
                 ))
                 .with_children(|panel| {
+                    // Title
                     panel.spawn((
                         Text::new("SETTINGS"),
                         TextFont {
@@ -457,20 +462,300 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                         TextColor(Color::WHITE),
                     ));
 
+                    // Audio Settings Section
                     panel.spawn(Node {
-                        height: Val::Px(40.0),
+                        height: Val::Px(15.0),
                         ..default()
                     });
 
                     panel.spawn((
-                        Text::new("Coming in Phase 6: Settings controls"),
+                        Text::new("Audio Settings"),
                         TextFont {
                             font: font.clone(),
-                            font_size: BUTTON_FONT_SIZE,
+                            font_size: 20.0,
                             ..default()
                         },
-                        TextColor(BUTTON_TEXT_COLOR),
+                        TextColor(Color::srgb(0.8, 0.8, 0.5)),
                     ));
+
+                    // Master Volume
+                    panel.spawn((
+                        Text::new("Master Volume: 80%"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                    panel.spawn((
+                        Node {
+                            width: Val::Percent(95.0),
+                            height: Val::Px(8.0),
+                            margin: UiRect::vertical(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(SLIDER_TRACK_COLOR),
+                        BorderRadius::all(Val::Px(4.0)),
+                    ));
+                    panel.spawn(SettingSlider::new(VolumeSlider::Master, 0.8));
+
+                    // Music Volume
+                    panel.spawn((
+                        Text::new("Music Volume: 60%"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                    panel.spawn((
+                        Node {
+                            width: Val::Percent(95.0),
+                            height: Val::Px(8.0),
+                            margin: UiRect::vertical(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(SLIDER_TRACK_COLOR),
+                        BorderRadius::all(Val::Px(4.0)),
+                    ));
+                    panel.spawn(SettingSlider::new(VolumeSlider::Music, 0.6));
+
+                    // SFX Volume
+                    panel.spawn((
+                        Text::new("SFX Volume: 100%"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                    panel.spawn((
+                        Node {
+                            width: Val::Percent(95.0),
+                            height: Val::Px(8.0),
+                            margin: UiRect::vertical(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(SLIDER_TRACK_COLOR),
+                        BorderRadius::all(Val::Px(4.0)),
+                    ));
+                    panel.spawn(SettingSlider::new(VolumeSlider::Sfx, 1.0));
+
+                    // Ambient Volume
+                    panel.spawn((
+                        Text::new("Ambient Volume: 50%"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                    panel.spawn((
+                        Node {
+                            width: Val::Percent(95.0),
+                            height: Val::Px(8.0),
+                            margin: UiRect::vertical(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(SLIDER_TRACK_COLOR),
+                        BorderRadius::all(Val::Px(4.0)),
+                    ));
+                    panel.spawn(SettingSlider::new(VolumeSlider::Ambient, 0.5));
+
+                    // Graphics Settings Section
+                    panel.spawn(Node {
+                        height: Val::Px(20.0),
+                        ..default()
+                    });
+
+                    panel.spawn((
+                        Text::new("Graphics Settings"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 20.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.5)),
+                    ));
+
+                    panel.spawn((
+                        Text::new("Resolution: 1920x1080"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+
+                    panel.spawn((
+                        Text::new("Fullscreen: Enabled"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+
+                    panel.spawn((
+                        Text::new("VSync: Enabled"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+
+                    // Controls Section
+                    panel.spawn(Node {
+                        height: Val::Px(20.0),
+                        ..default()
+                    });
+
+                    panel.spawn((
+                        Text::new("Controls"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 20.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.5)),
+                    ));
+
+                    panel.spawn((
+                        Text::new("Move: Arrow Keys or WASD"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+
+                    panel.spawn((
+                        Text::new("Interact: E"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+
+                    panel.spawn((
+                        Text::new("Menu: ESC"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+
+                    panel.spawn((
+                        Text::new("Up/Down: Arrow Up/Down"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    ));
+
+                    // Action buttons
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::SpaceAround,
+                            margin: UiRect::top(Val::Px(20.0)),
+                            ..default()
+                        })
+                        .with_children(|buttons| {
+                            buttons
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Px(BUTTON_WIDTH - 60.0),
+                                        height: Val::Px(BUTTON_HEIGHT),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(BUTTON_NORMAL_COLOR),
+                                    BorderRadius::all(Val::Px(4.0)),
+                                    MenuButton::Confirm,
+                                ))
+                                .with_children(|button_root| {
+                                    button_root.spawn((
+                                        Text::new("Apply"),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: BUTTON_FONT_SIZE,
+                                            ..default()
+                                        },
+                                        TextColor(BUTTON_TEXT_COLOR),
+                                    ));
+                                });
+
+                            buttons
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Px(BUTTON_WIDTH - 60.0),
+                                        height: Val::Px(BUTTON_HEIGHT),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(BUTTON_NORMAL_COLOR),
+                                    BorderRadius::all(Val::Px(4.0)),
+                                    MenuButton::Cancel,
+                                ))
+                                .with_children(|button_root| {
+                                    button_root.spawn((
+                                        Text::new("Reset"),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: BUTTON_FONT_SIZE,
+                                            ..default()
+                                        },
+                                        TextColor(BUTTON_TEXT_COLOR),
+                                    ));
+                                });
+
+                            buttons
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Px(BUTTON_WIDTH - 60.0),
+                                        height: Val::Px(BUTTON_HEIGHT),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(BUTTON_NORMAL_COLOR),
+                                    BorderRadius::all(Val::Px(4.0)),
+                                    MenuButton::Back,
+                                ))
+                                .with_children(|button_root| {
+                                    button_root.spawn((
+                                        Text::new("Back"),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: BUTTON_FONT_SIZE,
+                                            ..default()
+                                        },
+                                        TextColor(BUTTON_TEXT_COLOR),
+                                    ));
+                                });
+                        });
                 });
         });
 
@@ -611,9 +896,16 @@ fn handle_button_press(
             menu_state.set_submenu(MenuType::Main);
         }
         MenuButton::Confirm => {
-            info!("Confirm pressed in save/load menu");
-            if menu_state.current_submenu == MenuType::SaveLoad {
-                save_game_operation(global_state, save_manager);
+            info!("Confirm pressed");
+            match menu_state.current_submenu {
+                MenuType::SaveLoad => {
+                    save_game_operation(global_state, save_manager);
+                }
+                MenuType::Settings => {
+                    // Settings will be applied by apply_settings system
+                    menu_state.set_submenu(MenuType::Main);
+                }
+                _ => {}
             }
         }
         MenuButton::SelectSave(index) => {
@@ -622,7 +914,16 @@ fn handle_button_press(
         }
         MenuButton::Cancel => {
             info!("Cancel pressed");
-            menu_state.set_submenu(MenuType::Main);
+            match menu_state.current_submenu {
+                MenuType::Settings => {
+                    // Reset sliders without applying changes
+                    info!("Settings reset - returning to main menu");
+                    menu_state.set_submenu(MenuType::Main);
+                }
+                _ => {
+                    menu_state.set_submenu(MenuType::Main);
+                }
+            }
         }
     }
 }
@@ -673,6 +974,38 @@ fn load_game_operation(
         }
         Err(e) => {
             error!("Failed to load game: {}", e);
+        }
+    }
+}
+
+/// Apply settings changes from sliders to GameConfig
+fn apply_settings(
+    slider_query: Query<&SettingSlider, Changed<SettingSlider>>,
+    mut global_state: ResMut<GlobalState>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Menu(ref m) if m.current_submenu == MenuType::Settings)
+    {
+        return;
+    }
+
+    for slider in slider_query.iter() {
+        match slider.slider_type {
+            VolumeSlider::Master => {
+                global_state.0.config.audio.master_volume = slider.current_value;
+                info!("Master volume updated to {:.0}%", slider.as_percentage());
+            }
+            VolumeSlider::Music => {
+                global_state.0.config.audio.music_volume = slider.current_value;
+                info!("Music volume updated to {:.0}%", slider.as_percentage());
+            }
+            VolumeSlider::Sfx => {
+                global_state.0.config.audio.sfx_volume = slider.current_value;
+                info!("SFX volume updated to {:.0}%", slider.as_percentage());
+            }
+            VolumeSlider::Ambient => {
+                global_state.0.config.audio.ambient_volume = slider.current_value;
+                info!("Ambient volume updated to {:.0}%", slider.as_percentage());
+            }
         }
     }
 }
@@ -869,5 +1202,176 @@ mod tests {
         assert_eq!(info.filename, "save_20250101_120000");
         assert_eq!(info.character_names.len(), 2);
         assert_eq!(info.location, "Map 1, (5, 10)");
+    }
+
+    // ========================================================================
+    // Phase 6: Settings Menu Integration Tests
+    // ========================================================================
+
+    #[test]
+    fn test_setting_slider_creation_and_defaults() {
+        let slider = SettingSlider::new(VolumeSlider::Master, 0.8);
+        assert_eq!(slider.slider_type, VolumeSlider::Master);
+        assert_eq!(slider.current_value, 0.8);
+        assert_eq!(slider.as_percentage(), 80);
+    }
+
+    #[test]
+    fn test_setting_slider_all_volume_types() {
+        let master = SettingSlider::new(VolumeSlider::Master, 0.8);
+        let music = SettingSlider::new(VolumeSlider::Music, 0.6);
+        let sfx = SettingSlider::new(VolumeSlider::Sfx, 1.0);
+        let ambient = SettingSlider::new(VolumeSlider::Ambient, 0.5);
+
+        assert_eq!(master.as_percentage(), 80);
+        assert_eq!(music.as_percentage(), 60);
+        assert_eq!(sfx.as_percentage(), 100);
+        assert_eq!(ambient.as_percentage(), 50);
+    }
+
+    #[test]
+    fn test_setting_slider_percentage_conversion() {
+        let mut slider = SettingSlider::new(VolumeSlider::Music, 0.5);
+        assert_eq!(slider.as_percentage(), 50);
+
+        slider.set_from_percentage(75);
+        assert_eq!(slider.current_value, 0.75);
+        assert_eq!(slider.as_percentage(), 75);
+
+        slider.set_from_percentage(25);
+        assert_eq!(slider.current_value, 0.25);
+        assert_eq!(slider.as_percentage(), 25);
+    }
+
+    #[test]
+    fn test_setting_slider_increment_decrement() {
+        let mut slider = SettingSlider::new(VolumeSlider::Sfx, 0.5);
+        assert_eq!(slider.as_percentage(), 50);
+
+        slider.increment();
+        assert_eq!(slider.as_percentage(), 55);
+
+        slider.increment();
+        assert_eq!(slider.as_percentage(), 60);
+
+        slider.decrement();
+        assert_eq!(slider.as_percentage(), 55);
+
+        slider.decrement();
+        slider.decrement();
+        assert_eq!(slider.as_percentage(), 45);
+    }
+
+    #[test]
+    fn test_setting_slider_clamping_at_boundaries() {
+        let mut slider = SettingSlider::new(VolumeSlider::Ambient, 0.0);
+
+        // Cannot go below 0
+        slider.decrement();
+        assert_eq!(slider.current_value, 0.0);
+        assert_eq!(slider.as_percentage(), 0);
+
+        // Set to max
+        slider.current_value = 1.0;
+        slider.increment();
+        assert_eq!(slider.current_value, 1.0);
+        assert_eq!(slider.as_percentage(), 100);
+    }
+
+    #[test]
+    fn test_setting_slider_clamping_in_constructor() {
+        let clamped_high = SettingSlider::new(VolumeSlider::Master, 1.5);
+        assert_eq!(clamped_high.current_value, 1.0);
+
+        let clamped_low = SettingSlider::new(VolumeSlider::Music, -0.5);
+        assert_eq!(clamped_low.current_value, 0.0);
+    }
+
+    #[test]
+    fn test_setting_slider_adjust_positive() {
+        let mut slider = SettingSlider::new(VolumeSlider::Master, 0.5);
+        slider.adjust(0.2);
+        assert_eq!(slider.as_percentage(), 70);
+
+        slider.adjust(0.1);
+        assert_eq!(slider.as_percentage(), 80);
+    }
+
+    #[test]
+    fn test_setting_slider_adjust_negative() {
+        let mut slider = SettingSlider::new(VolumeSlider::Music, 0.5);
+        slider.adjust(-0.1);
+        assert_eq!(slider.as_percentage(), 40);
+
+        slider.adjust(-0.2);
+        assert_eq!(slider.as_percentage(), 20);
+    }
+
+    #[test]
+    fn test_setting_slider_adjust_clamping() {
+        let mut slider = SettingSlider::new(VolumeSlider::Sfx, 0.95);
+        slider.adjust(0.1); // Would go to 1.05, should clamp to 1.0
+        assert_eq!(slider.current_value, 1.0);
+        assert_eq!(slider.as_percentage(), 100);
+
+        let mut slider2 = SettingSlider::new(VolumeSlider::Ambient, 0.05);
+        slider2.adjust(-0.1); // Would go to -0.05, should clamp to 0.0
+        assert_eq!(slider2.current_value, 0.0);
+        assert_eq!(slider2.as_percentage(), 0);
+    }
+
+    #[test]
+    fn test_menu_button_confirm_in_settings() {
+        assert!(matches!(MenuButton::Confirm, MenuButton::Confirm));
+    }
+
+    #[test]
+    fn test_menu_button_cancel_in_settings() {
+        assert!(matches!(MenuButton::Cancel, MenuButton::Cancel));
+    }
+
+    #[test]
+    fn test_settings_panel_marker_component() {
+        let panel = SettingsPanel;
+        let _ = format!("{:?}", panel);
+    }
+
+    #[test]
+    fn test_slider_constants_for_ui() {
+        assert_eq!(SLIDER_TRACK_COLOR, Color::srgb(0.2, 0.2, 0.3));
+        assert_eq!(SLIDER_FILL_COLOR, Color::srgb(0.5, 0.7, 1.0));
+    }
+
+    #[test]
+    fn test_audio_config_default_matches_sliders() {
+        use crate::sdk::game_config::AudioConfig;
+        let audio_config = AudioConfig::default();
+        let master_slider = SettingSlider::new(VolumeSlider::Master, audio_config.master_volume);
+        let music_slider = SettingSlider::new(VolumeSlider::Music, audio_config.music_volume);
+        let sfx_slider = SettingSlider::new(VolumeSlider::Sfx, audio_config.sfx_volume);
+        let ambient_slider = SettingSlider::new(VolumeSlider::Ambient, audio_config.ambient_volume);
+
+        assert_eq!(master_slider.as_percentage(), 80);
+        assert_eq!(music_slider.as_percentage(), 60);
+        assert_eq!(sfx_slider.as_percentage(), 100);
+        assert_eq!(ambient_slider.as_percentage(), 50);
+    }
+
+    #[test]
+    fn test_setting_slider_rounding_in_percentage() {
+        let slider = SettingSlider::new(VolumeSlider::Master, 0.555);
+        // 0.555 * 100 = 55.5, rounds to 56
+        assert_eq!(slider.as_percentage(), 56);
+
+        let slider2 = SettingSlider::new(VolumeSlider::Music, 0.544);
+        // 0.544 * 100 = 54.4, rounds to 54
+        assert_eq!(slider2.as_percentage(), 54);
+    }
+
+    #[test]
+    fn test_settings_menu_submenu_type() {
+        assert_eq!(MenuType::Settings, MenuType::Settings);
+        assert_ne!(MenuType::Settings, MenuType::Main);
+        assert_ne!(MenuType::Settings, MenuType::SaveLoad);
     }
 }

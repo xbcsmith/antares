@@ -99,9 +99,86 @@ pub enum VolumeSlider {
     Ambient,
 }
 
+/// Component for tracking slider state and value in settings menu.
+///
+/// Attached to a slider entity to track its current value (0.0-1.0 range)
+/// and associate it with a specific volume slider type.
+///
+/// # Examples
+///
+/// ```
+/// use crate::game::components::menu::{SettingSlider, VolumeSlider};
+///
+/// let slider = SettingSlider::new(VolumeSlider::Master, 0.8);
+/// assert_eq!(slider.current_value, 0.8);
+/// assert_eq!(slider.as_percentage(), 80);
+/// ```
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct SettingSlider {
+    /// Which volume channel this slider controls
+    pub slider_type: VolumeSlider,
+    /// Current slider value (0.0 = 0%, 1.0 = 100%)
+    pub current_value: f32,
+}
+
+impl SettingSlider {
+    /// Create a new setting slider with the given type and initial value.
+    ///
+    /// # Arguments
+    ///
+    /// * `slider_type` - The volume slider type
+    /// * `current_value` - Initial value (clamped to 0.0-1.0)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::game::components::menu::{SettingSlider, VolumeSlider};
+    ///
+    /// let slider = SettingSlider::new(VolumeSlider::Master, 0.8);
+    /// assert_eq!(slider.current_value, 0.8);
+    /// ```
+    pub fn new(slider_type: VolumeSlider, current_value: f32) -> Self {
+        Self {
+            slider_type,
+            current_value: current_value.clamp(0.0, 1.0),
+        }
+    }
+
+    /// Get the slider value as a percentage (0-100).
+    pub fn as_percentage(&self) -> u32 {
+        (self.current_value * 100.0).round() as u32
+    }
+
+    /// Set the value from a percentage (0-100).
+    pub fn set_from_percentage(&mut self, percentage: u32) {
+        self.current_value = (percentage.clamp(0, 100) as f32) / 100.0;
+    }
+
+    /// Increment slider by a small step (5%).
+    pub fn increment(&mut self) {
+        self.current_value = (self.current_value + 0.05).clamp(0.0, 1.0);
+    }
+
+    /// Decrement slider by a small step (5%).
+    pub fn decrement(&mut self) {
+        self.current_value = (self.current_value - 0.05).clamp(0.0, 1.0);
+    }
+
+    /// Adjust slider value by a delta, clamped to valid range.
+    pub fn adjust(&mut self, delta: f32) {
+        self.current_value = (self.current_value + delta).clamp(0.0, 1.0);
+    }
+}
+
 // ============================================================================
 // UI Constants
 // ============================================================================
+
+/// Slider track background color (dark)
+pub const SLIDER_TRACK_COLOR: Color = Color::srgb(0.2, 0.2, 0.3);
+
+/// Slider fill color (active portion)
+pub const SLIDER_FILL_COLOR: Color = Color::srgb(0.5, 0.7, 1.0);
 
 /// Background color for menu panels (semi-transparent dark)
 pub const MENU_BACKGROUND_COLOR: Color = Color::srgba(0.1, 0.1, 0.15, 0.95);
@@ -197,6 +274,8 @@ mod tests {
         assert_eq!(BUTTON_PRESSED_COLOR, Color::srgb(0.15, 0.15, 0.25));
         assert_eq!(BUTTON_TEXT_COLOR, Color::srgb(0.9, 0.9, 0.9));
         assert_eq!(MENU_BACKGROUND_COLOR, Color::srgba(0.1, 0.1, 0.15, 0.95));
+        assert_eq!(SLIDER_TRACK_COLOR, Color::srgb(0.2, 0.2, 0.3));
+        assert_eq!(SLIDER_FILL_COLOR, Color::srgb(0.5, 0.7, 1.0));
     }
 
     #[test]
@@ -217,5 +296,61 @@ mod tests {
         let _ = format!("{:?}", main);
         let _ = format!("{:?}", save);
         let _ = format!("{:?}", settings);
+    }
+
+    #[test]
+    fn test_setting_slider_creation() {
+        let slider = SettingSlider::new(VolumeSlider::Master, 0.8);
+        assert_eq!(slider.slider_type, VolumeSlider::Master);
+        assert_eq!(slider.current_value, 0.8);
+        assert_eq!(slider.as_percentage(), 80);
+    }
+
+    #[test]
+    fn test_setting_slider_percentage_conversion() {
+        let mut slider = SettingSlider::new(VolumeSlider::Music, 0.5);
+        assert_eq!(slider.as_percentage(), 50);
+
+        slider.set_from_percentage(75);
+        assert_eq!(slider.current_value, 0.75);
+        assert_eq!(slider.as_percentage(), 75);
+    }
+
+    #[test]
+    fn test_setting_slider_increment_decrement() {
+        let mut slider = SettingSlider::new(VolumeSlider::Sfx, 0.5);
+
+        slider.increment();
+        assert_eq!(slider.as_percentage(), 55);
+
+        slider.decrement();
+        slider.decrement();
+        assert_eq!(slider.as_percentage(), 45);
+    }
+
+    #[test]
+    fn test_setting_slider_clamping() {
+        let mut slider = SettingSlider::new(VolumeSlider::Ambient, 0.0);
+
+        slider.decrement();
+        assert_eq!(slider.current_value, 0.0);
+
+        slider.current_value = 1.0;
+        slider.increment();
+        assert_eq!(slider.current_value, 1.0);
+
+        // Test clamping in constructor
+        let clamped = SettingSlider::new(VolumeSlider::Master, 1.5);
+        assert_eq!(clamped.current_value, 1.0);
+    }
+
+    #[test]
+    fn test_setting_slider_adjust() {
+        let mut slider = SettingSlider::new(VolumeSlider::Master, 0.5);
+        slider.adjust(0.1);
+        assert_eq!(slider.as_percentage(), 60);
+
+        slider.adjust(-0.2);
+        assert_eq!(slider.as_percentage(), 40);
     }
 }
