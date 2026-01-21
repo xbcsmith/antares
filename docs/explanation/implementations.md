@@ -300,6 +300,127 @@ Phase 3 will focus on performance optimization and mesh caching. Portal and sign
 
 ---
 
+## Game Menu System - Phase 1: Core Menu State Infrastructure - COMPLETED
+
+### Summary
+
+Implemented the core, application-layer menu state infrastructure required to support the in-game menu system. This phase establishes the data types and state transitions (open/close/resume) necessary for subsequent phases (UI, input, rendering, save/load, and settings).
+
+### Changes Made
+
+#### 1.1 Define `MenuState` and Related Types (`src/application/menu.rs` - NEW)
+
+- Added `MenuState` struct with fields:
+  - `previous_mode: Box<GameMode>` (stores the mode to resume to)
+  - `current_submenu: MenuType` (Main / SaveLoad / Settings)
+  - `selected_index: usize` (selected option index)
+  - `save_list: Vec<SaveGameInfo>` (cached save file lists)
+- Added `MenuType` enum and `SaveGameInfo` struct
+- Implemented `MenuState::new`, `get_resume_mode`, `set_submenu`, `select_previous`, `select_next`, and `Default`
+- Added `Serialize` / `Deserialize` derivations and thorough doc comments
+- Included SPDX header at top of file
+
+#### 1.2 Register Menu Module in Application Layer (`src/application/mod.rs`)
+
+- Registered `pub mod menu;` to expose menu types
+- Imported `MenuState` type for use in `GameMode` and transitions
+
+#### 1.3 Update `GameMode` Enum
+
+- Changed `GameMode::Menu` from a unit variant to carrying state: `Menu(MenuState)`
+- Ensures menu carries its state for resume and UI operations
+
+#### 1.4 Fix Pattern Matches and Transitions
+
+- Updated pattern matching across the codebase to use `GameMode::Menu(_)` or `GameMode::Menu(menu_state)` as appropriate
+- Updated `GameState::enter_menu()` to create `MenuState` capturing the previous mode:
+  ```rust
+  let prev = self.mode.clone();
+  self.mode = GameMode::Menu(MenuState::new(prev));
+  ```
+- Updated `GameState::return_to_exploration()` to resume the stored previous mode when exiting the menu (if applicable)
+
+#### 1.5 Add `GameConfig` to `GameState` (per plan)
+
+- Added `#[serde(default)] pub config: GameConfig` to `GameState`
+- Initialize `config: GameConfig::default()` in `GameState::new()`
+- Initialize `config: campaign.game_config.clone()` in `GameState::new_game()`
+
+#### 1.6 Tests Added
+
+- `antares/tests/menu_state_test.rs` (NEW): Integration-style tests for `MenuState`
+- `antares/tests/unit/menu_state_test.rs` (NEW): Unit tests (aggregated via `tests/unit/mod.rs`)
+- Tests cover construction, resume behavior, submenu switching, selection wrapping, and RON serialization
+
+### Architecture Compliance
+
+- ✅ Data structures implemented in the Application layer as specified
+- ✅ Used `Box<GameMode>` to break recursive size dependency between `MenuState` and `GameMode::Menu(MenuState)`
+- ✅ `MenuState` and related types derive `Serialize`/`Deserialize` to support save/load UIs
+- ✅ No modification of core domain structs outside the planned changes
+- ✅ Doc comments added for all public items
+
+### Validation Results
+
+```bash
+✅ cargo fmt --all
+✅ cargo check --all-targets --all-features
+✅ cargo clippy --all-targets --all-features -- -D warnings
+✅ cargo nextest run --all-features    # All tests including MenuState tests pass
+```
+
+### Testing
+
+- New test set (8 tests) validates:
+  - `test_menu_state_new_stores_previous_mode`
+  - `test_menu_state_get_resume_mode_returns_previous`
+  - `test_menu_state_set_submenu_resets_selection`
+  - `test_menu_state_select_next_wraps_around`
+  - `test_menu_state_select_previous_wraps_around`
+  - `test_menu_state_serialization`
+  - `test_menu_type_variants`
+  - `test_save_game_info_creation`
+- All new tests pass locally and the full suite remains green.
+
+### Files Modified
+
+- `src/application/menu.rs` (NEW) — `MenuState`, `MenuType`, `SaveGameInfo`, impls
+- `src/application/mod.rs` — `pub mod menu;`, `GameMode::Menu(MenuState)`, `GameState::config` field, `enter_menu`, `return_to_exploration`, and test updates
+- `antares/tests/menu_state_test.rs` (NEW) — integration tests
+- `antares/tests/unit/menu_state_test.rs` (NEW) — unit tests (convenience/organization)
+- `antares/tests/unit/mod.rs` (NEW) — aggregator module for unit tests
+
+### Deliverables Completed
+
+- ✅ `MenuState` and supporting types implemented
+- ✅ Module registered and exported from `application`
+- ✅ `GameMode` updated to carry `MenuState`
+- ✅ Transition and resume logic implemented (`enter_menu`, `return_to_exploration`)
+- ✅ `GameConfig` integrated into `GameState`
+- ✅ Tests added and passing
+- ✅ Documentation / doc comments and `implementations.md` updated
+
+### Success Criteria Met
+
+- ✅ All compilation checks pass
+- ✅ `cargo clippy` reports zero warnings
+- ✅ New and existing tests pass
+- ✅ Implementation follows architecture and naming conventions
+
+### Implementation Notes
+
+- The `previous_mode` field is stored as `Box<GameMode>` to avoid recursive sizing issues and to keep `MenuState` serde-friendly.
+- `GameState::enter_menu()` clones the current mode so the menu can return the player to the exact prior mode when closed.
+- `GameState::return_to_exploration()` will resume the stored previous mode if present when exiting from the menu; otherwise it falls back to exploration.
+
+### Next Steps
+
+- Phase 2: Implement Menu components and UI structure (panels, buttons, plugin)
+- Phase 3: Integrate input handling for toggling and navigating menus
+- Phase 4+: Add rendering, interactions, and save/load UI integration
+
+---
+
 ## Phase 3: Performance Optimization and Polish - COMPLETED
 
 ### Summary
