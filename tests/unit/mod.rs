@@ -8,4 +8,5 @@
 //! `unit`. Add additional unit tests as separate files in this directory
 //! and expose them here with a `mod` declaration (e.g., `mod my_test;`).
 
+mod menu_components_test;
 mod menu_state_test;

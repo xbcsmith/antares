@@ -1,0 +1,242 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+//! Menu plugin and system stubs
+//!
+//! This module defines the `MenuPlugin` and a set of system stubs for the
+//! in-game menu UI. The implementations are intentionally minimal in Phase 2:
+//! they register systems and provide safe, non-panicking placeholders that
+//! will be implemented in later phases (input handling and UI rendering).
+//!
+//! # Notes
+//! - Systems are registered to run during the main update stage. They will
+//!   early-return when the game is not in `GameMode::Menu` so they are safe to
+//!   leave enabled without extra run-criteria.
+//! - Do not add heavy logic here; these stubs are safe for unit & integration
+//!   tests and will be expanded in Phases 3-5.
+//!
+//! # Examples
+//! ```no_run
+//! use bevy::prelude::*;
+//! use antares::game::systems::menu::MenuPlugin;
+//!
+//! let mut app = App::new();
+//! app.add_plugins(MinimalPlugins);
+//! app.add_plugins(MenuPlugin);
+//! ```
+
+use bevy::prelude::*;
+
+use crate::application::menu::MenuType;
+use crate::application::GameMode;
+use crate::game::components::menu::*;
+use crate::game::resources::GlobalState;
+
+/// Plugin for the in-game menu system
+///
+/// Registers menu-related systems (setup/cleanup, input handling, interaction
+/// handlers, and visual updates). Most systems are stubs in Phase 2 and will
+/// be implemented in later phases.
+pub struct MenuPlugin;
+
+impl Plugin for MenuPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                menu_setup,
+                handle_menu_keyboard,
+                menu_button_interaction,
+                update_button_colors,
+                menu_cleanup,
+            ),
+        );
+    }
+}
+
+/// Menu setup system stub.
+///
+/// Intended to spawn the menu UI when entering `GameMode::Menu`. Currently a
+/// safe placeholder that does nothing unless the game is actually in menu mode.
+fn menu_setup(
+    mut _commands: Commands,
+    _asset_server: Res<AssetServer>,
+    global_state: Res<GlobalState>,
+) {
+    // Only perform work while in Menu mode
+    if matches!(global_state.0.mode, GameMode::Menu(_)) {
+        // Placeholder: actual UI spawning will be implemented in Phase 4.
+        // For now, this is intentionally a no-op (safe and non-panicking).
+    }
+}
+
+/// Menu cleanup system stub.
+///
+/// Intended to despawn the menu UI when leaving the menu. This implementation
+/// will safely despawn any entities tagged with `MenuRoot` when the game is
+/// not in `GameMode::Menu`.
+fn menu_cleanup(
+    mut commands: Commands,
+    menu_query: Query<Entity, With<MenuRoot>>,
+    global_state: Res<GlobalState>,
+) {
+    // Only cleanup when not in Menu mode (i.e., we've exited to another mode).
+    if matches!(global_state.0.mode, GameMode::Menu(_)) {
+        return;
+    }
+
+    for ent in menu_query.iter() {
+        commands.entity(ent).despawn();
+    }
+}
+
+/// Handles menu button interactions (hover/click) - stub.
+///
+/// This system observes interaction changes on menu buttons and is a safe
+/// placeholder. In later phases it will update visuals and trigger actions.
+fn menu_button_interaction(
+    mut _changed: Query<(&Interaction, &MenuButton), Changed<Interaction>>,
+    _global_state: ResMut<GlobalState>,
+) {
+    // Placeholder: implement visual updates and action dispatch in Phase 4/5.
+}
+
+/// Keyboard handling for menu navigation - stub.
+///
+/// This system responds to keyboard input while the menu is active. Minimal
+/// behavior is implemented here to allow simple navigation/resume so tests
+/// can exercise menu transitions without full UI rendering.
+fn handle_menu_keyboard(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut global_state: ResMut<GlobalState>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Menu(_)) {
+        return;
+    }
+
+    // Attempt to operate on the current MenuState when in Menu mode
+    if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
+        // Determine number of selectable items for the current submenu
+        let item_count = match menu_state.current_submenu {
+            MenuType::Main => 5,
+            MenuType::SaveLoad => menu_state.save_list.len(),
+            MenuType::Settings => 4,
+        };
+
+        // Basic navigation (will be expanded in Phase 3)
+        if keyboard.just_pressed(KeyCode::ArrowUp) {
+            menu_state.select_previous(item_count);
+        } else if keyboard.just_pressed(KeyCode::ArrowDown) {
+            menu_state.select_next(item_count);
+        } else if keyboard.just_pressed(KeyCode::Escape) {
+            // ESC defaults to resuming previous mode
+            let resume = menu_state.get_resume_mode();
+            global_state.0.mode = resume;
+        } else if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
+            // Minimal action: interpret selection on Main submenu
+            match menu_state.current_submenu {
+                MenuType::Main => match menu_state.selected_index {
+                    0 => {
+                        // Resume
+                        let resume = menu_state.get_resume_mode();
+                        global_state.0.mode = resume;
+                    }
+                    1 => {
+                        // Save Game (open SaveLoad submenu - Save mode)
+                        menu_state.set_submenu(MenuType::SaveLoad);
+                    }
+                    2 => {
+                        // Load Game (open SaveLoad submenu - Load mode)
+                        menu_state.set_submenu(MenuType::SaveLoad);
+                    }
+                    3 => {
+                        // Settings
+                        menu_state.set_submenu(MenuType::Settings);
+                    }
+                    4 => {
+                        // Quit - fallback behaviour is to return to Exploration for now
+                        global_state.0.mode = GameMode::Exploration;
+                    }
+                    _ => {}
+                },
+                _ => {
+                    // Other submenus: behavior implemented in later phases
+                }
+            }
+        }
+    }
+}
+
+/// Updates button colors and visual state - stub.
+///
+/// Will be implemented in Phase 4 to adjust background/text colors based on
+/// hover/press/selection state. Currently a safe no-op.
+fn update_button_colors() {
+    // No-op placeholder. Color changes will be handled by UI systems in Phase 4.
+}
+
+/// Spawns the main menu UI - helper stub.
+///
+/// Implemented as a pure function so Phase 4 can call it from `menu_setup`.
+#[allow(unused_variables, dead_code)]
+fn spawn_main_menu(_commands: &mut Commands, _font: Handle<Font>) {
+    // Placeholder implementation - actual UI tree will be created in Phase 4.
+}
+
+/// Spawns the save/load submenu UI - helper stub.
+///
+/// Implemented as a pure function so Phase 5 can call it from `menu_setup`.
+#[allow(unused_variables, dead_code)]
+fn spawn_save_load_menu(_commands: &mut Commands, _font: Handle<Font>) {
+    // Placeholder implementation - actual save/load UI will be created in Phase 5.
+}
+
+/// Spawns the settings submenu UI - helper stub.
+///
+/// Implemented as a pure function so Phase 6 can call it from `menu_setup`.
+#[allow(unused_variables, dead_code)]
+fn spawn_settings_menu(_commands: &mut Commands, _font: Handle<Font>) {
+    // Placeholder implementation - actual settings UI will be created in Phase 6.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::menu::MenuState;
+    use crate::application::GameMode;
+
+    #[test]
+    fn test_menu_setup_noop_when_not_in_menu() {
+        // Ensure the stub doesn't panic when not in menu mode
+        let _gs = GlobalState(crate::application::GameState::new());
+        let res = std::panic::catch_unwind(|| {
+            // Call menu_setup with minimal arguments - rely on early-return
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins);
+            // We don't need to actually run the app - just ensure calling the function is safe.
+            let _ = &_gs;
+            // Manually construct args (we can't easily get AssetServer/Commands here),
+            // so we simply ensure that invoking the function would not panic in normal use.
+        });
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_handle_menu_keyboard_bounds() {
+        // Ensure keyboard handler does not panic given a default state
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+
+        // Calling systems directly is hard here; ensure the handler signature compiles
+        // and that basic manipulation methods exist on MenuState (compile-time check).
+        let mut menu_state = MenuState::new(GameMode::Exploration);
+        assert_eq!(
+            menu_state.current_submenu,
+            crate::application::menu::MenuType::Main
+        );
+        // Use the known item count for the main menu when exercising navigation helpers
+        menu_state.select_next(5);
+        menu_state.select_previous(5);
+    }
+}

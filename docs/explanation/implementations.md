@@ -397,7 +397,111 @@ Implemented the core, application-layer menu state infrastructure required to su
 - ✅ `GameMode` updated to carry `MenuState`
 - ✅ Transition and resume logic implemented (`enter_menu`, `return_to_exploration`)
 - ✅ `GameConfig` integrated into `GameState`
-- ✅ Tests added and passing
+  ✅ Tests added and passing
+
+## Phase 2: Menu Components and UI Structure - COMPLETED
+
+### Summary
+
+Implemented Phase 2 of the Game Menu implementation plan: game-layer menu UI components, MenuPlugin scaffolding, system stubs, and unit tests. The work provides the structural building blocks needed for later phases (input integration, full UI rendering, save/load, settings). All new files include SPDX headers and doc comments and are placed according to the architecture.
+
+### Changes Made
+
+- Added new game-layer UI components:
+  - `src/game/components/menu.rs` (NEW): marker components (`MenuRoot`, `MainMenuPanel`, `SaveLoadPanel`, `SettingsPanel`), enums (`MenuButton`, `VolumeSlider`), and UI layout/color constants (`MENU_BACKGROUND_COLOR`, `MENU_WIDTH`, `BUTTON_*`, `TITLE_FONT_SIZE`, etc.).
+  - Doc comments and small unit tests included in the file.
+- Exported menu components:
+  - `src/game/components.rs` updated to `pub mod menu;` and `pub use menu::*;` so components are accessible from `antares::game::components`.
+- Added MenuPlugin and system stubs:
+  - `src/game/systems/menu.rs` (NEW): defines `MenuPlugin` and registers safe system stubs: `menu_setup`, `menu_cleanup`, `menu_button_interaction`, `handle_menu_keyboard`, `update_button_colors`, and helper stubs `spawn_main_menu`, `spawn_save_load_menu`, `spawn_settings_menu`. Systems early-return unless the game is in `GameMode::Menu` so they are non-panicking placeholders for later phases.
+  - Adjusted implementations to use Bevy 0.17 idioms (e.g., `KeyCode::ArrowUp`, `KeyCode::Enter`) and avoid deprecated API calls (`despawn_recursive` → `despawn`).
+- Registered systems module and plugin:
+  - `src/game/systems/mod.rs` updated to `pub mod menu;`.
+  - `src/bin/antares.rs` (`AntaresPlugin::build`) now registers the plugin: `app.add_plugins(antares::game::systems::menu::MenuPlugin);`.
+- Tests:
+  - `antares/tests/unit/menu_components_test.rs` (NEW) — unit tests verifying enum variants, constants, and marker components.
+  - `antares/tests/unit/mod.rs` updated to include `mod menu_components_test;`.
+  - Component-level tests also included in `src/game/components/menu.rs` for compile-time checks.
+- Minor internal fixes and lint adjustments:
+  - Silenced `dead_code` on helper stubs until implemented.
+  - Addressed clippy feedback (removed needless returns, fixed unused imports).
+
+### Architecture Compliance
+
+- ✅ Menu components live in the Game layer (`src/game/components/`) as specified.
+- ✅ Plugin and systems live in `src/game/systems/` and follow the project's module layout.
+- ✅ All new implementation files include SPDX header and rustdoc comments.
+- ✅ Type and naming conventions follow the project's style (e.g., `MenuButton`, `VolumeSlider`, constants).
+- ✅ No core data structures (domain/application) were modified outside the scope of Phase 2.
+- ✅ Tests added as unit tests and integrated into the existing `tests/unit` aggregator.
+
+### Validation Results
+
+```bash
+✅ cargo fmt --all
+✅ cargo check --all-targets --all-features
+✅ cargo clippy --all-targets --all-features -- -D warnings
+✅ cargo nextest run --all-features  # Unit tests for menu components pass
+```
+
+### Testing
+
+- Unit tests added (4 core checks, plus file-local tests):
+  - `test_menu_button_variants` — All `MenuButton` variants compile and behave as expected.
+  - `test_volume_slider_variants` — All `VolumeSlider` variants compile.
+  - `test_menu_constants_defined` — Verifies constants (sizes and colors) match expected values from the plan.
+  - `test_menu_root_component` — Confirms `MenuRoot` and other marker components are usable (spawnable and debug-printable).
+- All newly added tests pass locally and the full test suite remains green.
+
+### Files Modified / Added
+
+- Added: `src/game/components/menu.rs` (NEW) — Components, enums, constants, file-local tests
+- Modified: `src/game/components.rs` — `pub mod menu;` and `pub use menu::*;`
+- Added: `src/game/systems/menu.rs` (NEW) — Plugin + system stubs
+- Modified: `src/game/systems/mod.rs` — `pub mod menu;`
+- Modified: `src/bin/antares.rs` — Plugin registration: `MenuPlugin`
+- Added: `antares/tests/unit/menu_components_test.rs` (NEW)
+- Modified: `antares/tests/unit/mod.rs` — added test module to aggregator
+
+### Deliverables Completed
+
+- [x] `src/game/components/menu.rs` created with marker components and enums
+- [x] UI constants defined (colors, sizes, font sizes)
+- [x] `src/game/components.rs` exports the new module
+- [x] `src/game/systems/menu.rs` created with `MenuPlugin` and safe system stubs
+- [x] `src/game/systems/mod.rs` registers `menu` module
+- [x] `MenuPlugin` registered in the main app (Antares plugin)
+- [x] Unit tests created for components (`antares/tests/unit/menu_components_test.rs`)
+- [x] All tests pass; code compiles and lints cleanly
+
+### Success Criteria Met
+
+- ✅ All new code compiles and passes `cargo check`.
+- ✅ `cargo clippy` reports zero warnings (stubs adjusted to satisfy lints).
+- ✅ Unit tests for menu components pass.
+- ✅ Menu components are exported and can be attached to entities.
+- ✅ `MenuPlugin` is present in the application's plugin registration.
+
+### Implementation Notes
+
+- Systems in `menu.rs` are conservative stubs to avoid runtime panics and to be safely enabled during development and testing. They early-return when `GameMode` is not `Menu`.
+- `handle_menu_keyboard` implements minimal keyboard-based navigation (ArrowUp/ArrowDown/Enter/Escape) to allow simple unit-testable transitions; full keyboard handling with focus and repeat behavior will be implemented in Phase 3.
+- `spawn_*` helper functions are present as `dead_code`-annotated stubs to be fleshed out in Phase 4 (UI rendering).
+- The `MenuState` API (from Phase 1) was used as intended: `select_previous`/`select_next` require an `item_count` argument, and safe default counts are used for the Main/Settings menus until dynamic counts are available.
+- Minor bevy API adaptation: replaced `despawn_recursive` with `despawn` to match the project's Bevy version.
+
+### Next Steps (Phase 3)
+
+- Implement input system integration:
+  - Toggle open/close menu with ESC (or configured key).
+  - Robust keyboard navigation with wrapping and direct-number selection.
+  - Mouse/Controller support and focus management.
+- Phase 4 will implement full UI rendering:
+  - `menu_setup` will spawn the main menu DOM using bevy_ui and attach menu components to nodes.
+  - `menu_cleanup` will despawn the menu node hierarchy.
+  - Button interactions and color updates will be implemented and tested.
+- Phase 5/6: Save/Load and Settings UI implementations using the components and plugin scaffolding added in Phase 2.
+
 - ✅ Documentation / doc comments and `implementations.md` updated
 
 ### Success Criteria Met
