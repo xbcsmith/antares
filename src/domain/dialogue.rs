@@ -423,6 +423,9 @@ pub enum DialogueAction {
         character_id: String,
         innkeeper_id: String,
     },
+
+    /// Open the inn party management interface
+    OpenInnManagement { innkeeper_id: String },
 }
 
 impl DialogueAction {
@@ -462,6 +465,9 @@ impl DialogueAction {
                 innkeeper_id,
             } => {
                 format!("Send '{}' to inn (keeper: {})", character_id, innkeeper_id)
+            }
+            DialogueAction::OpenInnManagement { innkeeper_id } => {
+                format!("Open party management at inn (keeper: {})", innkeeper_id)
             }
         }
     }
@@ -657,6 +663,17 @@ mod tests {
         assert_eq!(
             action.description(),
             "Send 'hero_02' to inn (keeper: innkeeper_town_01)"
+        );
+    }
+
+    #[test]
+    fn test_dialogue_action_open_inn_management_description() {
+        let action = DialogueAction::OpenInnManagement {
+            innkeeper_id: "innkeeper_town_01".to_string(),
+        };
+        assert_eq!(
+            action.description(),
+            "Open party management at inn (keeper: innkeeper_town_01)"
         );
     }
 

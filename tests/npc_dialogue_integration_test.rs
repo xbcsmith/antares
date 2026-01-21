@@ -98,7 +98,7 @@ fn test_speaker_entity_preservation_on_choice() {
     use antares::application::dialogue::DialogueState;
     use bevy::prelude::Entity;
 
-    let mut state = DialogueState::start(1, 1, None);
+    let mut state = DialogueState::start(1, 1, None, None);
     let speaker_entity = Entity::from_bits(99);
 
     state.update_node(

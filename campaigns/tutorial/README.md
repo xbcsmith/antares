@@ -15,6 +15,20 @@ This campaign intentionally uses string-based innkeeper NPC identifiers (NpcId)
 for inn references and map `EnterInn` events (e.g., `innkeeper_id: "tutorial_innkeeper_town"`).
 NPCs that act as innkeepers are defined in `data/npcs.ron` and have `is_innkeeper: true`.
 
+## Innkeeper Requirements
+
+**MANDATORY**: All NPCs with `is_innkeeper: true` MUST have a `dialogue_id` configured.
+
+- Default template: Dialogue ID `999` (use this template for campaigns under construction).
+- Custom dialogues: Must include a party-management option. This can be implemented using either:
+  - `OpenInnManagement { innkeeper_id: "<your_innkeeper_id>" }` action on a terminal node, or
+  - a node that triggers `TriggerEvent(event_name: "open_inn_party_management")` (the dialogue runtime will open the inn management UI using the dialogue's speaker NPC ID).
+- Validation: The SDK validator will report an error if an innkeeper NPC lacks a `dialogue_id`. Use the validator after edits to verify compliance.
+
+### Example Innkeeper Dialogue
+
+See dialogue ID `4` or `9` in `data/dialogues.ron` for reference implementations. The default template (ID `999`) is also provided in this campaign as a starting point.
+
 ## Included Content
 
 - `campaign.ron` — campaign metadata (includes `starting_innkeeper`)
@@ -33,6 +47,7 @@ NPCs that act as innkeepers are defined in `data/npcs.ron` and have `is_innkeepe
   `cargo run --bin campaign_validator -- campaigns/tutorial`
 
 The validator checks:
+
 - Required files and directories exist (including this README)
 - `starting_innkeeper` is non-empty and references an NPC that has `is_innkeeper: true`
 - Map `EnterInn` events reference valid innkeeper NPC IDs
@@ -41,6 +56,7 @@ The validator checks:
 ## Notes for Editors
 
 - If you change innkeeper identifiers, update:
+
   - `campaign.ron` (`starting_innkeeper`)
   - `data/npcs.ron` (ensure the NPC exists and `is_innkeeper: true`)
   - Any `EnterInn` events in `data/maps/` to use the new `innkeeper_id`

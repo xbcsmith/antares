@@ -1140,7 +1140,7 @@ impl NpcEditorState {
         selected_portrait
     }
 
-    fn start_edit_npc(&mut self, idx: usize) {
+    pub(crate) fn start_edit_npc(&mut self, idx: usize) {
         if let Some(npc) = self.npcs.get(idx) {
             self.edit_buffer = NpcEditBuffer {
                 id: npc.id.clone(),

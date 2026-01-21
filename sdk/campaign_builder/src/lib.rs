@@ -601,6 +601,30 @@ impl Default for CampaignBuilderApp {
 }
 
 impl CampaignBuilderApp {
+    /// Handle a request emitted by the Maps editor to open the NPC editor for a
+    /// specific NPC ID.
+    ///
+    /// If the Maps editor set `requested_open_npc`, attempt to find the NPC in
+    /// the loaded NPC definitions and, if found, switch to the NPCs tab and
+    /// start editing that NPC. If the NPC isn't found, set an informative
+    /// `status_message` for the user.
+    fn handle_maps_open_npc_request(&mut self) {
+        if let Some(requested_id) = self.maps_editor_state.requested_open_npc.take() {
+            if let Some(idx) = self
+                .npc_editor_state
+                .npcs
+                .iter()
+                .position(|n| n.id == requested_id)
+            {
+                self.active_tab = EditorTab::NPCs;
+                self.npc_editor_state.start_edit_npc(idx);
+                self.status_message = format!("Opening NPC editor for '{}'", requested_id);
+            } else {
+                self.status_message = format!("NPC '{}' not found", requested_id);
+            }
+        }
+    }
+
     /// Create a default item for the edit buffer
     #[allow(deprecated)]
     fn default_item() -> Item {
@@ -3567,19 +3591,41 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,
             ),
-            EditorTab::Maps => self.maps_editor_state.show(
-                ui,
-                &mut self.maps,
-                &self.monsters,
-                &self.items,
-                &self.conditions,
-                &self.npc_editor_state.npcs,
-                self.campaign_dir.as_ref(),
-                &self.campaign.maps_dir,
-                &self.tool_config.display,
-                &mut self.unsaved_changes,
-                &mut self.status_message,
-            ),
+            EditorTab::Maps => {
+                self.maps_editor_state.show(
+                    ui,
+                    &mut self.maps,
+                    &self.monsters,
+                    &self.items,
+                    &self.conditions,
+                    &self.npc_editor_state.npcs,
+                    self.campaign_dir.as_ref(),
+                    &self.campaign.maps_dir,
+                    &self.tool_config.display,
+                    &mut self.unsaved_changes,
+                    &mut self.status_message,
+                );
+
+                // If the Maps editor requested to open the NPC editor for a placed NPC,
+                // honor that request by switching to the NPCs tab and starting edit mode
+                // on the requested NPC (if it exists in the loaded NPC list).
+                if let Some(requested_id) = self.maps_editor_state.requested_open_npc.take() {
+                    if let Some(idx) = self
+                        .npc_editor_state
+                        .npcs
+                        .iter()
+                        .position(|n| n.id == requested_id)
+                    {
+                        // Switch to NPC editor tab and start editing the selected NPC
+                        self.active_tab = EditorTab::NPCs;
+                        self.npc_editor_state.start_edit_npc(idx);
+                        self.status_message = format!("Opening NPC editor for '{}'", requested_id);
+                    } else {
+                        // NPC not found in loaded NPC definitions
+                        self.status_message = format!("NPC '{}' not found", requested_id);
+                    }
+                }
+            }
             EditorTab::Quests => self.show_quests_editor(ui),
             EditorTab::Classes => self.classes_editor_state.show(
                 ui,
@@ -4855,6 +4901,57 @@ mod tests {
     use antares::domain::combat::monster::MonsterCondition;
     use antares::domain::quest::QuestStage;
     use antares::domain::races::RaceDefinition;
+
+    #[test]
+    fn test_handle_maps_open_npc_request_success() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Add a sample NPC definition and ensure it's in the NPC list
+        let npc = antares::domain::world::npc::NpcDefinition {
+            id: "npc_1".to_string(),
+            name: "Test NPC".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            dialogue_id: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+        };
+        app.npc_editor_state.npcs.push(npc);
+
+        // Simulate the maps editor requesting to open the NPC editor for this NPC
+        app.maps_editor_state.requested_open_npc = Some("npc_1".to_string());
+
+        // Execute the handler
+        app.handle_maps_open_npc_request();
+
+        // Verify the app switched to the NPCs tab and started editing the expected NPC
+        assert_eq!(app.active_tab, EditorTab::NPCs);
+        assert_eq!(
+            app.npc_editor_state.mode,
+            crate::npc_editor::NpcEditorMode::Edit
+        );
+        assert_eq!(app.npc_editor_state.selected_npc, Some(0));
+        assert!(app.status_message.contains("Opening NPC editor"));
+        assert!(app.maps_editor_state.requested_open_npc.is_none());
+    }
+
+    #[test]
+    fn test_handle_maps_open_npc_request_not_found() {
+        let mut app = CampaignBuilderApp::default();
+
+        // Request a non-existent NPC
+        app.maps_editor_state.requested_open_npc = Some("missing_npc".to_string());
+
+        // Execute the handler
+        app.handle_maps_open_npc_request();
+
+        // Should not switch tabs and should clear the request with an informative message
+        assert_eq!(app.active_tab, EditorTab::Metadata);
+        assert!(app.status_message.contains("not found"));
+        assert!(app.maps_editor_state.requested_open_npc.is_none());
+    }
 
     #[test]
     fn test_do_new_campaign_clears_loaded_data() {
