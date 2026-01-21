@@ -1471,4 +1471,51 @@
         repeatable: false,
         associated_quest: Some(3),
     ),
+    (
+        id: 999,
+        name: "Default Innkeeper Greeting",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "Welcome to my establishment! What can I do for you?",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "I need to manage my party.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "Nothing right now. Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
+            2: (
+                id: 2,
+                text: "Certainly! Let me help you organize your party.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    TriggerEvent(
+                        event_name: "open_inn_party_management",
+                    ),
+                ],
+                is_terminal: true,
+            ),
+        },
+        speaker_name: Some("Innkeeper"),
+        repeatable: true,
+        associated_quest: None,
+    ),
 ]

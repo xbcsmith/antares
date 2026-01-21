@@ -392,9 +392,71 @@ This change improves user control and allows innkeepers to politely offer party 
 
 ### Notes & Rationale
 
-- Aligns with data-driven design: innkeepers now explicitly offer party management through their dialogues.
-- Preserves separation of concerns: dialogue system executes an action to change UI state rather than hard-wiring event handlers to UI transitions.
-- Followed repository conventions: added doc comments, wrote unit + integration tests, and used RON for dialogue data updates.
+- Aligns with data-driven design: innkeepers now explicitly offer party management through their dialogues
+- Preserves separation of concerns: dialogue system executes an action to change UI state rather than hard-wiring event handlers to UI transitions
+- Followed repository conventions: added doc comments, wrote unit + integration tests, and used RON for dialogue data updates
+
+### Phase 3: Add Default Innkeeper Dialogue Template - COMPLETED
+
+#### Summary
+
+Implemented a default innkeeper dialogue template (ID 999) and engine/runtime support to open the Inn Party Management UI via a dialogue-triggered event. Additionally, added SDK validation to ensure all innkeepers are configured with dialogues and extended runtime dialogue state to track the speaker NPC ID so TriggerEvent-driven flows work reliably.
+
+#### Changes Made
+
+- Added default dialogue template (ID 999) to `campaigns/tutorial/data/dialogues.ron`:
+  - Root node provides choice "I need to manage my party."
+  - Terminal node triggers `TriggerEvent(event_name: "open_inn_party_management")`
+- SDK validation: added `ValidationError::InnkeeperMissingDialogue` and `Validator::validate_innkeepers()` to enforce that any `NpcDefinition` with `is_innkeeper: true` must have a `dialogue_id` configured (`src/sdk/validation.rs`).
+- Dialogue state: added `speaker_npc_id: Option<String>` to `DialogueState` and extended `DialogueState::start(...)` to accept the speaker NPC ID (`src/application/dialogue.rs`).
+- Start/dialogue bootstrap: `handle_start_dialogue` resolves the optional `speaker_entity` → `NpcMarker` and passes `speaker_npc_id` into the new `DialogueState` so subsequent actions can identify the originating NPC.
+- TriggerEvent handling: `execute_action()` recognizes `TriggerEvent { event_name: "open_inn_party_management" }` and, when the `DialogueState` contains a `speaker_npc_id`, transitions the game into `GameMode::InnManagement` with the correct innkeeper ID (`src/game/systems/dialogue.rs`).
+- Tests:
+  - Unit: `test_trigger_event_opens_inn_management` (TriggerEvent -> InnManagement)
+  - Unit: `test_dialogue_state_tracks_speaker_npc_id` (DialogueState::start stores NPC ID)
+  - Integration: `test_default_dialogue_template_opens_inn_management` (StartDialogue + choice -> InnManagement)
+  - SDK: `test_innkeeper_missing_dialogue_validation` (validator flags innkeepers missing `dialogue_id`)
+- Documentation:
+  - `campaigns/tutorial/README.md` updated with "Innkeeper Requirements"
+  - `docs/explanation/modding_guide.md` updated with "Creating Innkeepers" guidance
+  - This `implementations.md` entry added to summarize Phase 3
+
+#### Validation & Testing
+
+- All local quality gates passed:
+  - `cargo fmt --all`
+  - `cargo check --all-targets --all-features`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - `cargo test` — all tests passed (unit + integration)
+- New tests exercise both the TriggerEvent path (unit) and an end-to-end scenario (integration) that verifies `DialogueState.speaker_npc_id` is used to open the inn management UI.
+
+#### Deliverables Completed
+
+- [x] Default innkeeper dialogue template (ID 999) created
+- [x] SDK validation enforces `dialogue_id` for `is_innkeeper` NPCs
+- [x] `DialogueState.speaker_npc_id` field added and populated when dialogue starts with an NPC speaker
+- [x] `TriggerEvent("open_inn_party_management")` handler implemented and transitions to `InnManagement` mode
+- [x] Tutorial innkeepers verified (IDs 4 & 9 already include party management option)
+- [x] Documentation updated (campaign README + modding guide)
+- [x] Unit & integration tests added and passing
+
+#### Success Criteria
+
+- SDK rejects campaigns that declare an innkeeper without a `dialogue_id`
+- Default template (ID 999) opens party management correctly via the TriggerEvent path
+- `speaker_npc_id` is tracked correctly throughout the dialogue flow
+- Tutorial innkeepers present a party management option to players
+- All tests and linters pass locally
+
+#### Rollback Notes (from plan)
+
+If Phase 3 needs to be reverted, the rollback steps are documented in the implementation plan:
+
+1. Remove dialogue ID 999 from campaigns
+2. Revert `DialogueState.speaker_npc_id` additions and related call-site changes
+3. Disable the SDK validation that enforces `dialogue_id` for innkeepers
+4. Reintroduce the previous auto-open behavior for `EnterInn` if desired
+5. Document the revert in `docs/explanation/implementations.md` and campaign READMEs
 
 ---
 

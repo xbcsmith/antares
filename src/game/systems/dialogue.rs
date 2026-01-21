@@ -145,6 +145,7 @@ fn handle_start_dialogue(
     mut pending_recruitment: ResMut<PendingRecruitmentContext>,
     mut quest_system: Option<ResMut<crate::application::quests::QuestSystem>>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
+    npc_query: Query<&crate::game::systems::map::NpcMarker>,
 ) {
     for ev in ev_reader.read() {
         let db = content.db();
@@ -181,8 +182,17 @@ fn handle_start_dialogue(
                 // Extract recruitment context if present
                 let recruitment_context = pending_recruitment.0.take();
 
-                let mut new_state =
-                    DialogueState::start(ev.dialogue_id, root, ev.fallback_position);
+                // Attempt to resolve NPC ID string from the speaker entity (if present)
+                let speaker_npc_id = ev
+                    .speaker_entity
+                    .and_then(|ent| npc_query.get(ent).ok().map(|m| m.npc_id.clone()));
+
+                let mut new_state = DialogueState::start(
+                    ev.dialogue_id,
+                    root,
+                    ev.fallback_position,
+                    speaker_npc_id,
+                );
                 new_state.recruitment_context = recruitment_context;
 
                 global_state.0.mode = GameMode::Dialogue(new_state);
@@ -643,7 +653,46 @@ fn execute_action(
             println!("ChangeReputation {} by {}", faction, change);
         }
         DialogueAction::TriggerEvent { event_name } => {
-            println!("TriggerEvent '{}'", event_name);
+            // Special-case handling for opening the inn party management UI via
+            // a dialogue-triggered event. This uses the speaker NPC ID stored in
+            // the active `DialogueState` (if available) to determine which inn to
+            // open.
+            if event_name == "open_inn_party_management" {
+                // Prefer dialogue_state (passed-in context) when available.
+                let speaker_inn_id = dialogue_state
+                    .and_then(|d| d.speaker_npc_id.clone())
+                    // Fallback: inspect current game mode if we're still in Dialogue
+                    .or_else(|| {
+                        if let crate::application::GameMode::Dialogue(ref ds) = game_state.mode {
+                            ds.speaker_npc_id.clone()
+                        } else {
+                            None
+                        }
+                    });
+
+                if let Some(inn_id) = speaker_inn_id {
+                    use crate::application::{GameMode, InnManagementState};
+                    info!("Opening inn party management for inn '{}'", inn_id);
+
+                    game_state.mode = GameMode::InnManagement(InnManagementState {
+                        current_inn_id: inn_id.clone(),
+                        selected_party_slot: None,
+                        selected_roster_slot: None,
+                    });
+
+                    if let Some(ref mut log) = game_log {
+                        log.add("Opening party management...".to_string());
+                    }
+                } else {
+                    warn!("TriggerEvent 'open_inn_party_management' called but no speaker_npc_id available in DialogueState");
+                }
+            }
+
+            // Generic event logging (kept for visibility/audit)
+            info!("Dialogue triggered event: {}", event_name);
+            if let Some(ref mut log) = game_log {
+                log.add(format!("Event triggered: {}", event_name));
+            }
         }
         DialogueAction::GrantExperience { amount } => {
             if let Some(member) = game_state.party.members.first_mut() {
@@ -972,7 +1021,7 @@ mod tests {
         let mut gs = world.resource_mut::<GlobalState>();
         if let Some(tree) = db.dialogues.get_dialogue(1) {
             let root = tree.root_node;
-            gs.0.mode = GameMode::Dialogue(DialogueState::start(1, root, None));
+            gs.0.mode = GameMode::Dialogue(DialogueState::start(1, root, None, None));
 
             // Execute root node actions
             if let Some(node) = tree.get_node(root) {
@@ -1024,7 +1073,7 @@ mod tests {
 
             if let Some(tree) = db.dialogues.get_dialogue(2) {
                 let root = tree.root_node;
-                gs.0.mode = GameMode::Dialogue(DialogueState::start(2, root, None));
+                gs.0.mode = GameMode::Dialogue(DialogueState::start(2, root, None, None));
             } else {
                 panic!("Dialogue not found in test DB");
             }
@@ -1093,7 +1142,7 @@ mod tests {
 
             if let Some(tree) = db.dialogues.get_dialogue(3) {
                 let root = tree.root_node;
-                gs.0.mode = GameMode::Dialogue(DialogueState::start(3, root, None));
+                gs.0.mode = GameMode::Dialogue(DialogueState::start(3, root, None, None));
                 if let Some(node) = tree.get_node(root) {
                     if let Some(choice) = node.choices.first() {
                         for action in &choice.actions {
@@ -1161,7 +1210,7 @@ mod tests {
     #[test]
     fn test_dialogue_state_updates_on_start() {
         // Verify that starting a dialogue properly calls update_node
-        let mut state = DialogueState::start(1, 1, None);
+        let mut state = DialogueState::start(1, 1, None, None);
 
         state.update_node(
             "Hello!".to_string(),
@@ -1179,7 +1228,7 @@ mod tests {
     #[test]
     fn test_dialogue_state_transitions() {
         // Verify state updates when transitioning between nodes
-        let mut state = DialogueState::start(1, 1, None);
+        let mut state = DialogueState::start(1, 1, None, None);
         state.update_node(
             "First text".to_string(),
             "Speaker1".to_string(),
@@ -1622,6 +1671,180 @@ mod tests {
                 assert_eq!(state.selected_roster_slot, None);
             }
             other => panic!("Expected GameMode::InnManagement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_trigger_event_opens_inn_management() {
+        // Arrange: create a game state and a content DB containing an innkeeper NPC
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Add a test innkeeper NPC to the DB
+        let npc = crate::domain::world::npc::NpcDefinition::innkeeper(
+            "test_innkeeper",
+            "Test Innkeeper",
+            "portrait",
+        );
+        db.npcs.add_npc(npc).unwrap();
+
+        // Build a DialogueState that references the innkeeper by ID
+        let dlg_state = crate::application::dialogue::DialogueState::start(
+            999 as crate::domain::dialogue::DialogueId,
+            1 as crate::domain::dialogue::NodeId,
+            None,
+            Some("test_innkeeper".to_string()),
+        );
+
+        // Act: execute the trigger event action that should open inn management
+        execute_action(
+            &crate::domain::dialogue::DialogueAction::TriggerEvent {
+                event_name: "open_inn_party_management".to_string(),
+            },
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+        );
+
+        // Assert: we transitioned into InnManagement for the expected innkeeper
+        match &game_state.mode {
+            crate::application::GameMode::InnManagement(state) => {
+                assert_eq!(state.current_inn_id, "test_innkeeper".to_string());
+                assert_eq!(state.selected_party_slot, None);
+                assert_eq!(state.selected_roster_slot, None);
+            }
+            other => panic!("Expected GameMode::InnManagement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_default_dialogue_template_opens_inn_management() {
+        use bevy::prelude::*;
+
+        // Arrange: build an App with the dialogue plugin and a content DB containing
+        // the default dialogue template (ID 999) and an innkeeper NPC referencing it.
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(DialoguePlugin);
+
+        // Build content DB
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Dialogue tree 999 (default template)
+        let mut tree = crate::domain::dialogue::DialogueTree::new(
+            999,
+            "Default Innkeeper Greeting".to_string(),
+            1,
+        );
+
+        let mut root = crate::domain::dialogue::DialogueNode::new(
+            1,
+            "Welcome to my establishment! What can I do for you?",
+        );
+        root.add_choice(crate::domain::dialogue::DialogueChoice::new(
+            "I need to manage my party.",
+            Some(2),
+        ));
+        root.add_choice(crate::domain::dialogue::DialogueChoice::new(
+            "Nothing right now. Farewell.",
+            None,
+        ));
+        tree.add_node(root);
+
+        let mut node2 = crate::domain::dialogue::DialogueNode::new(
+            2,
+            "Certainly! Let me help you organize your party.",
+        );
+        node2.add_action(crate::domain::dialogue::DialogueAction::TriggerEvent {
+            event_name: "open_inn_party_management".to_string(),
+        });
+        node2.is_terminal = true;
+        tree.add_node(node2);
+
+        db.dialogues.add_dialogue(tree);
+
+        // Add an innkeeper NPC and set its dialogue_id to 999
+        let mut npc = crate::domain::world::npc::NpcDefinition::innkeeper(
+            "default_inn",
+            "Default Inn",
+            "portrait",
+        );
+        npc.dialogue_id = Some(999);
+        db.npcs.add_npc(npc).unwrap();
+
+        // Insert resources needed by the dialogue systems
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+        app.insert_resource(crate::game::resources::GlobalState(
+            crate::application::GameState::new(),
+        ));
+        app.init_resource::<crate::game::components::dialogue::ActiveDialogueUI>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.insert_resource(crate::game::systems::ui::GameLog::new());
+
+        // Spawn an entity with NpcMarker so the dialogue system can resolve the
+        // speaker_entity -> npc_id mapping used by TriggerEvent handling.
+        let npc_entity = app
+            .world_mut()
+            .spawn((crate::game::systems::map::NpcMarker {
+                npc_id: "default_inn".to_string(),
+            },))
+            .id();
+
+        // Act: send StartDialogue for the default template with the NPC entity as speaker
+        {
+            let mut start_msgs = app.world_mut().resource_mut::<Messages<StartDialogue>>();
+            start_msgs.write(StartDialogue {
+                dialogue_id: 999,
+                speaker_entity: Some(npc_entity),
+                fallback_position: None,
+            });
+        }
+
+        // Run update to process StartDialogue and initialize DialogueState
+        app.update();
+
+        // Verify we're in Dialogue mode and at the root node
+        {
+            let gs = app
+                .world()
+                .resource::<crate::game::resources::GlobalState>();
+            match &gs.0.mode {
+                crate::application::GameMode::Dialogue(ds) => {
+                    assert_eq!(ds.active_tree_id, Some(999u16));
+                    assert_eq!(ds.current_node_id, 1);
+                }
+                other => panic!(
+                    "Expected Dialogue mode after StartDialogue, got {:?}",
+                    other
+                ),
+            }
+        }
+
+        // Send SelectDialogueChoice message to choose the "I need to manage my party." option
+        {
+            let mut choice_msgs = app
+                .world_mut()
+                .resource_mut::<Messages<SelectDialogueChoice>>();
+            choice_msgs.write(SelectDialogueChoice { choice_index: 0 });
+        }
+
+        // Run update to process the choice and execute node actions (TriggerEvent)
+        app.update();
+
+        // Assert: we transitioned into InnManagement for the expected innkeeper
+        let gs = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        match &gs.0.mode {
+            crate::application::GameMode::InnManagement(state) => {
+                assert_eq!(state.current_inn_id, "default_inn".to_string());
+            }
+            other => panic!(
+                "Expected InnManagement mode after selecting manage option, got {:?}",
+                other
+            ),
         }
     }
 

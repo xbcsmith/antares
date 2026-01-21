@@ -79,6 +79,9 @@ pub struct DialogueState {
     /// Speaker entity that initiated this dialogue (typically an NPC)
     pub speaker_entity: Option<bevy::prelude::Entity>,
 
+    /// NPC ID of the speaker (if the speaker corresponds to an NPC in the content DB)
+    pub speaker_npc_id: Option<String>,
+
     /// Context for recruitment dialogues (None if not a recruitment interaction)
     pub recruitment_context: Option<RecruitmentContext>,
 
@@ -112,7 +115,7 @@ impl DialogueState {
     /// use antares::application::dialogue::DialogueState;
     /// use antares::domain::dialogue::{DialogueId, NodeId};
     ///
-    /// let state = DialogueState::start(5 as DialogueId, 1 as NodeId, None);
+    /// let state = DialogueState::start(5 as DialogueId, 1 as NodeId, None, None);
     /// assert_eq!(state.active_tree_id, Some(5));
     /// assert_eq!(state.current_node_id, 1);
     /// assert_eq!(state.dialogue_history, vec![1]);
@@ -121,6 +124,7 @@ impl DialogueState {
         tree_id: DialogueId,
         root_node: NodeId,
         fallback_pos: Option<crate::domain::types::Position>,
+        speaker_npc_id: Option<String>,
     ) -> Self {
         Self {
             active_tree_id: Some(tree_id),
@@ -130,6 +134,7 @@ impl DialogueState {
             current_speaker: String::new(),
             current_choices: Vec::new(),
             speaker_entity: None,
+            speaker_npc_id,
             recruitment_context: None,
             fallback_position: fallback_pos,
         }
@@ -150,6 +155,7 @@ impl DialogueState {
             current_speaker: speaker_name,
             current_choices: vec!["Goodbye".to_string()],
             speaker_entity,
+            speaker_npc_id: None,
             recruitment_context: None,
             fallback_position: fallback_pos,
         }
@@ -242,6 +248,7 @@ impl DialogueState {
         self.current_speaker.clear();
         self.current_choices.clear();
         self.recruitment_context = None;
+        self.speaker_npc_id = None;
     }
 
     /// Returns true if a dialogue is currently active.
@@ -263,31 +270,34 @@ mod tests {
         assert_eq!(s.current_node_id, 0);
         assert!(s.dialogue_history.is_empty());
         assert_eq!(s.speaker_entity, None);
+        assert_eq!(s.speaker_npc_id, None);
         assert_eq!(s.recruitment_context, None);
     }
 
     #[test]
     fn test_dialogue_state_start_sets_active_tree_and_root_node() {
-        let s = DialogueState::start(7 as DialogueId, 3 as NodeId, None);
+        let s = DialogueState::start(7 as DialogueId, 3 as NodeId, None, None);
         assert!(s.is_active());
         assert_eq!(s.active_tree_id, Some(7));
         assert_eq!(s.current_node_id, 3);
         assert_eq!(s.dialogue_history, vec![3]);
+        assert_eq!(s.speaker_npc_id, None);
     }
 
     #[test]
     fn test_dialogue_state_advance_to_node_appends_history() {
-        let mut s = DialogueState::start(2 as DialogueId, 10 as NodeId, None);
+        let mut s = DialogueState::start(2 as DialogueId, 10 as NodeId, None, None);
         s.advance_to(11 as NodeId);
         s.advance_to(12 as NodeId);
 
         assert_eq!(s.current_node_id, 12);
         assert_eq!(s.dialogue_history, vec![10, 11, 12]);
+        assert_eq!(s.speaker_npc_id, None);
     }
 
     #[test]
     fn test_dialogue_state_end_resets_state() {
-        let mut s = DialogueState::start(99 as DialogueId, 1 as NodeId, None);
+        let mut s = DialogueState::start(99 as DialogueId, 1 as NodeId, None, None);
         s.advance_to(2);
         s.end();
 
@@ -295,6 +305,7 @@ mod tests {
         assert_eq!(s.active_tree_id, None);
         assert_eq!(s.current_node_id, 0);
         assert!(s.dialogue_history.is_empty());
+        assert_eq!(s.speaker_npc_id, None);
     }
 
     #[test]
@@ -342,7 +353,7 @@ mod tests {
 
     #[test]
     fn test_dialogue_state_end_clears_visual_state() {
-        let mut state = DialogueState::start(1 as DialogueId, 1 as NodeId, None);
+        let mut state = DialogueState::start(1 as DialogueId, 1 as NodeId, None, None);
         state.update_node(
             "Some text".to_string(),
             "Speaker".to_string(),
@@ -356,6 +367,7 @@ mod tests {
         assert_eq!(state.current_speaker, "");
         assert!(state.current_choices.is_empty());
         assert_eq!(state.speaker_entity, None);
+        assert_eq!(state.speaker_npc_id, None);
         assert_eq!(state.recruitment_context, None);
     }
 
@@ -384,7 +396,18 @@ mod tests {
 
     #[test]
     fn test_dialogue_state_start_recruitment_context_none() {
-        let state = DialogueState::start(1 as DialogueId, 1 as NodeId, None);
+        let state = DialogueState::start(1 as DialogueId, 1 as NodeId, None, None);
         assert_eq!(state.recruitment_context, None);
+    }
+
+    #[test]
+    fn test_dialogue_state_tracks_speaker_npc_id() {
+        let state = DialogueState::start(
+            42 as DialogueId,
+            1 as NodeId,
+            None,
+            Some("inn_test".to_string()),
+        );
+        assert_eq!(state.speaker_npc_id, Some("inn_test".to_string()));
     }
 }

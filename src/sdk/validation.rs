@@ -145,6 +145,16 @@ pub enum ValidationError {
         /// Human-readable reason describing why the configured innkeeper is invalid.
         reason: String,
     },
+
+    /// Innkeeper definition does not include a dialogue id
+    ///
+    /// All NPCs that act as innkeepers MUST have a `dialogue_id` configured
+    /// so they can present interactive options (such as party management).
+    #[error("Innkeeper '{innkeeper_id}' must have dialogue_id configured")]
+    InnkeeperMissingDialogue {
+        /// The innkeeper ID missing a dialogue_id
+        innkeeper_id: String,
+    },
 }
 
 impl ValidationError {
@@ -170,7 +180,8 @@ impl ValidationError {
             | ValidationError::MissingMonster { .. }
             | ValidationError::MissingSpell { .. }
             | ValidationError::DuplicateId { .. }
-            | ValidationError::InvalidStartingInnkeeper { .. } => Severity::Error,
+            | ValidationError::InvalidStartingInnkeeper { .. }
+            | ValidationError::InnkeeperMissingDialogue { .. } => Severity::Error,
 
             ValidationError::DisconnectedMap { .. } => Severity::Warning,
 
@@ -225,6 +236,8 @@ impl ValidationError {
 pub struct Validator<'a> {
     db: &'a ContentDatabase,
 }
+
+/* test moved to existing tests module (avoids duplicate `mod tests` definitions) */
 
 impl<'a> Validator<'a> {
     /// Creates a new validator for the given content database
@@ -290,6 +303,9 @@ impl<'a> Validator<'a> {
 
         // Check balance issues
         errors.extend(self.check_balance());
+
+        // Validate innkeepers have dialogue configured
+        errors.extend(self.validate_innkeepers());
 
         Ok(errors)
     }
@@ -378,6 +394,28 @@ impl<'a> Validator<'a> {
 
         errors
     }
+
+    /// Validates that all NPCs marked as `is_innkeeper` have a dialogue configured.
+    ///
+    /// This is an error-level validation because innkeeper NPCs are expected to
+    /// present dialogue options (for example, to open the party management UI).
+    fn validate_innkeepers(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+
+        for npc_id in self.db.npcs.all_npcs() {
+            if let Some(npc) = self.db.npcs.get_npc(&npc_id) {
+                if npc.is_innkeeper && npc.dialogue_id.is_none() {
+                    errors.push(ValidationError::InnkeeperMissingDialogue {
+                        innkeeper_id: npc_id.clone(),
+                    });
+                }
+            }
+        }
+
+        errors
+    }
+
+    /* tests moved to top-level scope */
 
     /// Validates character definitions for party management constraints
     ///
@@ -817,7 +855,32 @@ mod tests {
         assert!(!warning.is_error());
         assert!(warning.is_warning());
         assert!(!warning.is_info());
+    }
 
+    #[test]
+    fn test_innkeeper_missing_dialogue_validation() {
+        // Arrange: build a content DB with an innkeeper who has no dialogue_id
+        let mut db = ContentDatabase::new();
+        let npc = crate::domain::world::npc::NpcDefinition::innkeeper(
+            "missing_dialogue",
+            "Missing Dialogue Inn",
+            "portrait",
+        );
+        db.npcs.add_npc(npc).unwrap();
+
+        // Act: validate
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().expect("validation failed");
+
+        // Assert: we found the InnkeeperMissingDialogue error for our NPC
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id == "missing_dialogue"
+        )));
+    }
+
+    #[test]
+    fn test_balance_warning_severity() {
         let info = ValidationError::BalanceWarning {
             severity: Severity::Info,
             message: "test".to_string(),

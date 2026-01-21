@@ -750,6 +750,7 @@ mod tests {
                 101,
                 1,
                 Some(event_pos),
+                None,
             ));
         }
         // Run one update to let dialogue UI spawn

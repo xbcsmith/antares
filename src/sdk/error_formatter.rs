@@ -304,6 +304,16 @@ impl ErrorFormatter {
                 ]
             }
 
+            ValidationError::InnkeeperMissingDialogue { innkeeper_id } => {
+                vec![
+                    format!("Innkeeper '{}' must have a dialogue tree configured (set `dialogue_id` in `data/npcs.ron`)", innkeeper_id),
+                    "Use the default template Dialogue ID 999 (see campaigns/tutorial/data/dialogues.ron) as a starting point"
+                        .to_string(),
+                    "Ensure your innkeeper dialogue offers a party-management option via `OpenInnManagement { innkeeper_id }` or a node that triggers `TriggerEvent(event_name: \"open_inn_party_management\")`"
+                        .to_string(),
+                    "Run the campaign validator to verify changes: `cargo run --bin campaign_validator -- <campaign_path>`".to_string(),
+                ]
+            }
             ValidationError::TooManyStartingPartyMembers { count, max } => {
                 vec![
                     format!("Found {count} characters with starts_in_party=true, but max is {max}"),
