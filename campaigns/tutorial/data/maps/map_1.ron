@@ -7608,23 +7608,6 @@
     ],
     events: {
         (
-            x: 13,
-            y: 18,
-        ): Sign(
-            name: "Directional Sign",
-            description: "A wooden sign pointing toward the Dark Forrest.",
-            text: "To the Dark Forrest",
-        ),
-        (
-            x: 15,
-            y: 7,
-        ): RecruitableCharacter(
-            name: "Old Gareth",
-            description: "A grizzled dwarf veteran stands here, repairing armor.",
-            character_id: "npc_old_gareth",
-            dialogue_id: Some(100),
-        ),
-        (
             x: 7,
             y: 15,
         ): RecruitableCharacter(
@@ -7632,15 +7615,6 @@
             description: "A nimble elf watches from the shadows near the alley.",
             character_id: "npc_whisper",
             dialogue_id: Some(102),
-        ),
-        (
-            x: 9,
-            y: 9,
-        ): Trap(
-            name: "Water Trap",
-            description: "A trap in the town square fountain",
-            damage: 10,
-            effect: Some("Poison"),
         ),
         (
             x: 11,
@@ -7652,12 +7626,13 @@
             dialogue_id: Some(101),
         ),
         (
-            x: 5,
-            y: 10,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store\'s wares and services.",
-            text: "General Store - Buy and Sell items for your party!",
+            x: 15,
+            y: 7,
+        ): RecruitableCharacter(
+            name: "Old Gareth",
+            description: "A grizzled dwarf veteran stands here, repairing armor.",
+            character_id: "npc_old_gareth",
+            dialogue_id: Some(100),
         ),
         (
             x: 18,
@@ -7672,6 +7647,30 @@
             map_id: 2,
         ),
         (
+            x: 5,
+            y: 10,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store\'s wares and services.",
+            text: "General Store - Buy and Sell items for your party!",
+        ),
+        (
+            x: 5,
+            y: 17,
+        ): Sign(
+            name: "Elder",
+            description: "The Village Elder",
+            text: "The Village Elder",
+        ),
+        (
+            x: 13,
+            y: 18,
+        ): Sign(
+            name: "Directional Sign",
+            description: "A wooden sign pointing toward the Dark Forrest.",
+            text: "To the Dark Forrest",
+        ),
+        (
             x: 13,
             y: 3,
         ): Sign(
@@ -7680,12 +7679,21 @@
             text: "Temple of Healing - The priests can restore your health.",
         ),
         (
+            x: 9,
+            y: 9,
+        ): Trap(
+            name: "Water Trap",
+            description: "A trap in the town square fountain",
+            damage: 10,
+            effect: Some("Poison"),
+        ),
+        (
             x: 5,
             y: 4,
-        ): EnterInn(
+        ): Sign(
             name: "Cozy Inn Entrance",
             description: "A welcoming inn where you can rest and manage your party.",
-            innkeeper_id: "tutorial_innkeeper_town",
+            text: "Welcome to the Cozy Inn",
         ),
     },
     npc_placements: [

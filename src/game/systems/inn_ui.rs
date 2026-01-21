@@ -26,13 +26,17 @@ impl Plugin for InnUiPlugin {
             .add_message::<SelectPartyMember>()
             .add_message::<SelectRosterMember>()
             .init_resource::<InnNavigationState>()
-            // Process keyboard input first, then selection, then UI, then actions
+            // Process keyboard input first, then selection (keyboard),
+            // render UI, then selection (mouse), then actions.
+            // Running the selection system twice ensures both keyboard-initiated
+            // and UI-initiated selection events are handled within the same frame.
             .add_systems(
                 Update,
                 (
                     inn_input_system,
-                    inn_selection_system,
+                    inn_selection_system, // handle keyboard-based selection before UI
                     inn_ui_system,
+                    inn_selection_system, // handle selection events produced by UI (mouse clicks)
                     inn_action_system,
                 )
                     .chain(),
@@ -92,6 +96,8 @@ pub struct InnNavigationState {
     pub selected_roster_index: Option<usize>,
     /// Which section has focus: Party(true) or Roster(false)
     pub focus_on_party: bool,
+    /// Whether the Exit button currently has keyboard focus
+    pub focus_on_exit: bool,
 }
 
 // ===== UI System =====
@@ -172,13 +178,16 @@ fn inn_ui_system(
                                 )
                                 .clicked()
                             {
+                                debug!("inn_ui: party label clicked idx={} mouse_selected={} keyboard_focus={}", party_idx, is_mouse_selected, is_keyboard_focused);
                                 // Toggle selection
                                 if is_mouse_selected {
+                                    debug!("inn_ui: deselecting party idx={}", party_idx);
                                     // Deselect if already selected
                                     select_party_events.write(SelectPartyMember {
                                         party_index: usize::MAX, // Special value to clear
                                     });
                                 } else {
+                                    debug!("inn_ui: selecting party idx={}", party_idx);
                                     select_party_events.write(SelectPartyMember {
                                         party_index: party_idx,
                                     });
@@ -195,6 +204,7 @@ fn inn_ui_system(
 
                             // Dismiss button
                             if ui.button("Dismiss").clicked() {
+                                debug!("inn_ui: Dismiss button clicked for party idx={}", party_idx);
                                 dismiss_events.write(InnDismissCharacter {
                                     party_index: party_idx,
                                 });
@@ -272,13 +282,16 @@ fn inn_ui_system(
                                 )
                                 .clicked()
                             {
+                                debug!("inn_ui: roster label clicked idx={} mouse_selected={} keyboard_focus={}", roster_idx, is_mouse_selected, is_keyboard_focused);
                                 // Toggle selection
                                 if is_mouse_selected {
+                                    debug!("inn_ui: deselecting roster idx={}", roster_idx);
                                     // Deselect if already selected
                                     select_roster_events.write(SelectRosterMember {
                                         roster_index: usize::MAX, // Special value to clear
                                     });
                                 } else {
+                                    debug!("inn_ui: selecting roster idx={}", roster_idx);
                                     select_roster_events.write(SelectRosterMember {
                                         roster_index: roster_idx,
                                     });
@@ -300,6 +313,7 @@ fn inn_ui_system(
                             let button = egui::Button::new("Recruit");
 
                             if ui.add_enabled(!party_full, button).clicked() {
+                                debug!("inn_ui: Recruit clicked for roster idx={}", roster_idx);
                                 recruit_events.write(InnRecruitCharacter {
                                     roster_index: roster_idx,
                                 });
@@ -314,6 +328,7 @@ fn inn_ui_system(
                                 selected_party.or(nav_state.selected_party_index)
                             {
                                 if ui.button("Swap").clicked() {
+                                    debug!("inn_ui: Swap clicked (party_idx={}, roster_idx={})", party_idx, roster_idx);
                                     swap_events.write(InnSwapCharacters {
                                         party_index: party_idx,
                                         roster_index: roster_idx,
@@ -332,13 +347,21 @@ fn inn_ui_system(
 
         // Exit button - make it more prominent
         ui.horizontal(|ui| {
+            // Highlight Exit when it has keyboard focus
+            let exit_text = if nav_state.focus_on_exit {
+                egui::RichText::new("Exit Inn")
+                    .strong()
+                    .size(16.0)
+                    .color(egui::Color32::from_rgb(144, 238, 144))
+            } else {
+                egui::RichText::new("Exit Inn").size(16.0)
+            };
+
             if ui
-                .add_sized(
-                    [120.0, 30.0],
-                    egui::Button::new(egui::RichText::new("Exit Inn").size(16.0)),
-                )
+                .add_sized([120.0, 30.0], egui::Button::new(exit_text))
                 .clicked()
             {
+                debug!("inn_ui: exit button clicked by mouse");
                 exit_events.write(ExitInn);
             }
 
@@ -409,15 +432,28 @@ fn inn_selection_system(
 ) {
     // Handle party selection events
     for event in select_party_events.read() {
+        debug!(
+            "inn_selection_system: received SelectPartyMember event -> {}",
+            event.party_index
+        );
         if let GameMode::InnManagement(state) = &mut global_state.0.mode {
             if event.party_index == usize::MAX {
+                debug!("inn_selection_system: clearing party selection");
                 // Clear selection
                 state.selected_party_slot = None;
             } else {
                 // Toggle selection
                 if state.selected_party_slot == Some(event.party_index) {
+                    debug!(
+                        "inn_selection_system: toggling off selection for party idx={}",
+                        event.party_index
+                    );
                     state.selected_party_slot = None;
                 } else {
+                    debug!(
+                        "inn_selection_system: selecting party idx={}",
+                        event.party_index
+                    );
                     state.selected_party_slot = Some(event.party_index);
                 }
             }
@@ -426,15 +462,28 @@ fn inn_selection_system(
 
     // Handle roster selection events
     for event in select_roster_events.read() {
+        debug!(
+            "inn_selection_system: received SelectRosterMember event -> {}",
+            event.roster_index
+        );
         if let GameMode::InnManagement(state) = &mut global_state.0.mode {
             if event.roster_index == usize::MAX {
+                debug!("inn_selection_system: clearing roster selection");
                 // Clear selection
                 state.selected_roster_slot = None;
             } else {
                 // Toggle selection
                 if state.selected_roster_slot == Some(event.roster_index) {
+                    debug!(
+                        "inn_selection_system: toggling off selection for roster idx={}",
+                        event.roster_index
+                    );
                     state.selected_roster_slot = None;
                 } else {
+                    debug!(
+                        "inn_selection_system: selecting roster idx={}",
+                        event.roster_index
+                    );
                     state.selected_roster_slot = Some(event.roster_index);
                 }
             }
@@ -569,20 +618,46 @@ fn inn_input_system(
 
     // ESC key exits inn management
     if keyboard.just_pressed(KeyCode::Escape) {
+        debug!("inn_input_system: Escape pressed -> exiting inn");
         exit_events.write(ExitInn);
         *nav_state = InnNavigationState::default();
         return;
     }
 
-    // Tab key switches focus between party and roster
+    // Tab key cycles focus through Party -> Roster -> Exit -> Party ...
     if keyboard.just_pressed(KeyCode::Tab) {
-        nav_state.focus_on_party = !nav_state.focus_on_party;
-        // Clear selections when switching focus
-        if nav_state.focus_on_party {
+        debug!(
+            "inn_input_system: Tab pressed (focus before) party={} exit={}",
+            nav_state.focus_on_party, nav_state.focus_on_exit
+        );
+        if nav_state.focus_on_exit {
+            // Exit -> Party
+            nav_state.focus_on_exit = false;
+            nav_state.focus_on_party = true;
             nav_state.selected_roster_index = None;
-        } else {
+            debug!("inn_input_system: focus changed -> party=true, exit=false");
+        } else if nav_state.focus_on_party {
+            // Party -> Roster
+            nav_state.focus_on_party = false;
             nav_state.selected_party_index = None;
+            debug!("inn_input_system: focus changed -> roster (party=false, exit=false)");
+            // Now focused on roster by default
+        } else {
+            // Roster -> Exit
+            nav_state.focus_on_exit = true;
+            nav_state.selected_roster_index = None;
+            debug!("inn_input_system: focus changed -> exit=true");
         }
+    }
+
+    // If Exit has focus, Enter/Space should exit the inn
+    if nav_state.focus_on_exit
+        && (keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space))
+    {
+        debug!("inn_input_system: Enter/Space pressed while Exit focused -> exiting inn");
+        exit_events.write(ExitInn);
+        *nav_state = InnNavigationState::default();
+        return;
     }
 
     // Arrow key navigation
@@ -625,6 +700,10 @@ fn inn_input_system(
         if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
             if let Some(party_idx) = nav_state.selected_party_index {
                 if party_idx < party_count {
+                    debug!(
+                        "inn_input_system: Enter/Space pressed -> selecting party idx={}",
+                        party_idx
+                    );
                     // First select, then dismiss if already selected
                     select_party_events.write(SelectPartyMember {
                         party_index: party_idx,
@@ -637,12 +716,18 @@ fn inn_input_system(
         if keyboard.just_pressed(KeyCode::KeyD) {
             if let Some(party_idx) = nav_state.selected_party_index {
                 if party_idx < party_count {
+                    debug!(
+                        "inn_input_system: D pressed -> dismiss party idx={}",
+                        party_idx
+                    );
                     dismiss_events.write(InnDismissCharacter {
                         party_index: party_idx,
                     });
                 }
             }
         }
+    } else if nav_state.focus_on_exit {
+        // Exit is focused: handled above (Enter/Space)
     } else {
         // Roster focused navigation
         if roster_count == 0 {
@@ -685,6 +770,10 @@ fn inn_input_system(
             // Enter/Space to select roster character
             if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
                 if let Some(roster_idx) = nav_state.selected_roster_index {
+                    debug!(
+                        "inn_input_system: Enter/Space pressed -> selecting roster idx={}",
+                        roster_idx
+                    );
                     select_roster_events.write(SelectRosterMember {
                         roster_index: roster_idx,
                     });
@@ -695,6 +784,10 @@ fn inn_input_system(
             if keyboard.just_pressed(KeyCode::KeyR) {
                 if let Some(roster_idx) = nav_state.selected_roster_index {
                     if party_count < PARTY_MAX_SIZE {
+                        debug!(
+                            "inn_input_system: R pressed -> recruit roster idx={}",
+                            roster_idx
+                        );
                         recruit_events.write(InnRecruitCharacter {
                             roster_index: roster_idx,
                         });
@@ -708,6 +801,10 @@ fn inn_input_system(
                     nav_state.selected_party_index,
                     nav_state.selected_roster_index,
                 ) {
+                    debug!(
+                        "inn_input_system: S pressed -> swap party_idx={} roster_idx={}",
+                        party_idx, roster_idx
+                    );
                     swap_events.write(InnSwapCharacters {
                         party_index: party_idx,
                         roster_index: roster_idx,
@@ -926,5 +1023,73 @@ mod tests {
 
         // Just verify plugin builds without errors
         // Plugin registered successfully if we reach here
+    }
+
+    #[test]
+    fn test_tab_cycle_focus_and_exit_activation() {
+        // Arrange: Create app and register only the systems/resources needed to test
+        // the input -> selection -> action flow (avoid any Egui/plugin render
+        // dependencies during the unit test).
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        // Register messages used by inn systems (normally provided by InnUiPlugin)
+        app.add_message::<InnRecruitCharacter>();
+        app.add_message::<InnDismissCharacter>();
+        app.add_message::<InnSwapCharacters>();
+        app.add_message::<ExitInn>();
+        app.add_message::<SelectPartyMember>();
+        app.add_message::<SelectRosterMember>();
+
+        // Initialize navigation state resource and keyboard input resource
+        app.init_resource::<InnNavigationState>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        // Install only the input -> selection -> action systems (no UI/Egui)
+        app.add_systems(
+            Update,
+            (inn_input_system, inn_selection_system, inn_action_system),
+        );
+
+        // Set GameState into InnManagement mode
+        let mut game = GameState::new();
+        game.mode = GameMode::InnManagement(InnManagementState {
+            current_inn_id: "test_inn".to_string(),
+            selected_party_slot: None,
+            selected_roster_slot: None,
+        });
+        app.insert_resource(GlobalState(game));
+
+        // Ensure navigation state starts in roster focus (default)
+        assert!(!app.world().resource::<InnNavigationState>().focus_on_party);
+        assert!(!app.world().resource::<InnNavigationState>().focus_on_exit);
+
+        // Press Tab once -> should move to Exit (roster -> exit)
+        {
+            let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keyboard.press(KeyCode::Tab);
+        }
+        app.update();
+        {
+            let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keyboard.release(KeyCode::Tab);
+        }
+
+        let nav = app.world().resource::<InnNavigationState>();
+        assert!(nav.focus_on_exit, "Tab should move focus to Exit");
+
+        // Press Enter -> should write Exit and cause mode to become Exploration
+        {
+            let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keyboard.press(KeyCode::Enter);
+        }
+        app.update();
+        {
+            let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keyboard.release(KeyCode::Enter);
+        }
+
+        let global = app.world().resource::<GlobalState>();
+        assert_eq!(global.0.mode, GameMode::Exploration);
     }
 }

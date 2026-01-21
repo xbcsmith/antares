@@ -7609,11 +7609,15 @@
     events: {
         (
             x: 1,
-            y: 7,
-        ): Sign(
-            name: "Town Exit Sign",
-            description: "A sign directing travelers to the town exit.",
-            text: "Exit to town.",
+            y: 6,
+        ): Teleport(
+            name: "Starting Town Portal",
+            description: "Portal leading back to the Starting Town",
+            destination: (
+                x: 18,
+                y: 11,
+            ),
+            map_id: 1,
         ),
         (
             x: 11,
@@ -7622,14 +7626,6 @@
             name: "Ruins Direction Sign",
             description: "A sign pointing the way to the Ancient Ruins.",
             text: "To Ancient Ruins",
-        ),
-        (
-            x: 8,
-            y: 19,
-        ): Sign(
-            name: "Mountain Pass Sign",
-            description: "A wooden sign indicating the way to the mountain pass.",
-            text: "To the Mountain Pass",
         ),
         (
             x: 7,
@@ -7644,40 +7640,6 @@
             map_id: 5,
         ),
         (
-            x: 8,
-            y: 8,
-        ): Treasure(
-            name: "Buried Chest",
-            description: "A chest buried and hidden here containing useful items.",
-            loot: [
-                13,
-                23,
-                32,
-            ],
-        ),
-        (
-            x: 5,
-            y: 3,
-        ): Encounter(
-            name: "Bandit Patrol",
-            description: "A small band of foes patrolling this area.",
-            monster_group: [
-                4,
-                4,
-            ],
-        ),
-        (
-            x: 14,
-            y: 4,
-        ): Encounter(
-            name: "Hungry Wolves",
-            description: "A pack of wolves that hunts together in this region.",
-            monster_group: [
-                5,
-                4,
-            ],
-        ),
-        (
             x: 16,
             y: 2,
         ): Treasure(
@@ -7687,18 +7649,6 @@
                 14,
                 24,
             ],
-        ),
-        (
-            x: 12,
-            y: 0,
-        ): Teleport(
-            name: "Ancient Portal",
-            description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (1,7).",
-            destination: (
-                x: 1,
-                y: 7,
-            ),
-            map_id: 3,
         ),
         (
             x: 10,
@@ -7714,16 +7664,15 @@
             ],
         ),
         (
-            x: 1,
-            y: 6,
-        ): Teleport(
-            name: "Starting Town Portal",
-            description: "Portal leading back to the Starting Town",
-            destination: (
-                x: 18,
-                y: 11,
-            ),
-            map_id: 1,
+            x: 3,
+            y: 11,
+        ): Encounter(
+            name: "Forest Ambush",
+            description: "A hidden ambush by hostile creatures in the forest.",
+            monster_group: [
+                6,
+                5,
+            ],
         ),
         (
             x: 7,
@@ -7735,14 +7684,77 @@
             effect: None,
         ),
         (
-            x: 3,
+            x: 8,
+            y: 8,
+        ): Treasure(
+            name: "Buried Chest",
+            description: "A chest buried and hidden here containing useful items.",
+            loot: [
+                13,
+                23,
+                32,
+            ],
+        ),
+        (
+            x: 8,
+            y: 19,
+        ): Sign(
+            name: "Mountain Pass Sign",
+            description: "A wooden sign indicating the way to the mountain pass.",
+            text: "To the Mountain Pass",
+        ),
+        (
+            x: 19,
+            y: 10,
+        ): Teleport(
+            name: "Arcturus Cave Portal",
+            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (18,17).",
+            destination: (
+                x: 18,
+                y: 17,
+            ),
+            map_id: 4,
+        ),
+        (
+            x: 19,
             y: 11,
+        ): Sign(
+            name: "Wizard\'s Cave Sign",
+            description: "A sign pointing the way to the Wizard\'s Cave.",
+            text: "To the Wizard\'s Cave",
+        ),
+        (
+            x: 5,
+            y: 3,
         ): Encounter(
-            name: "Forest Ambush",
-            description: "A hidden ambush by hostile creatures in the forest.",
+            name: "Bandit Patrol",
+            description: "A small band of foes patrolling this area.",
             monster_group: [
-                6,
+                4,
+                4,
+            ],
+        ),
+        (
+            x: 12,
+            y: 0,
+        ): Teleport(
+            name: "Ancient Portal",
+            description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (1,7).",
+            destination: (
+                x: 1,
+                y: 7,
+            ),
+            map_id: 3,
+        ),
+        (
+            x: 14,
+            y: 4,
+        ): Encounter(
+            name: "Hungry Wolves",
+            description: "A pack of wolves that hunts together in this region.",
+            monster_group: [
                 5,
+                4,
             ],
         ),
         (
@@ -7757,24 +7769,12 @@
             ],
         ),
         (
-            x: 19,
-            y: 11,
+            x: 1,
+            y: 7,
         ): Sign(
-            name: "Wizard\'s Cave Sign",
-            description: "A sign pointing the way to the Wizard\'s Cave.",
-            text: "To the Wizard\'s Cave",
-        ),
-        (
-            x: 19,
-            y: 10,
-        ): Teleport(
-            name: "Arcturus Cave Portal",
-            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (18,17).",
-            destination: (
-                x: 18,
-                y: 17,
-            ),
-            map_id: 4,
+            name: "Town Exit Sign",
+            description: "A sign directing travelers to the town exit.",
+            text: "Exit to town.",
         ),
     },
     npc_placements: [

@@ -5708,26 +5708,6 @@
     ],
     events: {
         (
-            x: 10,
-            y: 10,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice describing the Temple of Healing and the services it provides.",
-            text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
-            x: 0,
-            y: 7,
-        ): Teleport(
-            name: "Harrow Downs Portal",
-            description: "The portal to the Harrow Downs",
-            destination: (
-                x: 0,
-                y: 18,
-            ),
-            map_id: 6,
-        ),
-        (
             x: 19,
             y: 7,
         ): Teleport(
@@ -5762,6 +5742,26 @@
             name: "Inn Sign",
             description: "A welcoming sign for the Cozy Inn offering rest and lodging.",
             text: "Welcome to the Cozy Inn! Rest and manage your party here.",
+        ),
+        (
+            x: 10,
+            y: 10,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice describing the Temple of Healing and the services it provides.",
+            text: "Temple of Healing - The priests can restore your health.",
+        ),
+        (
+            x: 0,
+            y: 7,
+        ): Teleport(
+            name: "Harrow Downs Portal",
+            description: "The portal to the Harrow Downs",
+            destination: (
+                x: 0,
+                y: 18,
+            ),
+            map_id: 6,
         ),
     },
     npc_placements: [

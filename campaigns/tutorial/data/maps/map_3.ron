@@ -4872,6 +4872,17 @@
     ],
     events: {
         (
+            x: 3,
+            y: 5,
+        ): Encounter(
+            name: "Monster Ambush",
+            description: "A group of monsters lying in wait to ambush unsuspecting travelers.",
+            monster_group: [
+                2,
+                1,
+            ],
+        ),
+        (
             x: 6,
             y: 2,
         ): Treasure(
@@ -4892,17 +4903,6 @@
             text: "Exit to Town",
         ),
         (
-            x: 3,
-            y: 2,
-        ): Encounter(
-            name: "Monster Patrol",
-            description: "A small patrol of monsters crossing this area.",
-            monster_group: [
-                1,
-                2,
-            ],
-        ),
-        (
             x: 0,
             y: 7,
         ): Teleport(
@@ -4913,17 +4913,6 @@
                 y: 0,
             ),
             map_id: 4,
-        ),
-        (
-            x: 13,
-            y: 2,
-        ): Treasure(
-            name: "Hidden Cache",
-            description: "A tucked-away cache of items and supplies.",
-            loot: [
-                11,
-                21,
-            ],
         ),
         (
             x: 14,
@@ -4939,13 +4928,13 @@
         ),
         (
             x: 3,
-            y: 5,
+            y: 2,
         ): Encounter(
-            name: "Monster Ambush",
-            description: "A group of monsters lying in wait to ambush unsuspecting travelers.",
+            name: "Monster Patrol",
+            description: "A small patrol of monsters crossing this area.",
             monster_group: [
-                2,
                 1,
+                2,
             ],
         ),
         (
@@ -4967,6 +4956,17 @@
             description: "A hidden spike trap that deals 5 points of damage when triggered.",
             damage: 5,
             effect: None,
+        ),
+        (
+            x: 13,
+            y: 2,
+        ): Treasure(
+            name: "Hidden Cache",
+            description: "A tucked-away cache of items and supplies.",
+            loot: [
+                11,
+                21,
+            ],
         ),
         (
             x: 10,

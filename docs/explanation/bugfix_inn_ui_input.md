@@ -1,8 +1,8 @@
 # Bug Fix: Inn UI Mouse and Keyboard Input
 
-**Date**: 2025-01-XX  
-**Severity**: High  
-**Status**: ✅ Fixed  
+**Date**: 2025-01-XX
+**Severity**: High
+**Status**: ✅ Fixed
 **Affected Component**: Inn Party Management UI (`src/game/systems/inn_ui.rs`)
 
 ---
@@ -42,7 +42,7 @@ if ui.selectable_label(is_mouse_selected || is_keyboard_focused, name_text).clic
 }
 ```
 
-**Root Cause**: 
+**Root Cause**:
 - Selection state stored in `InnManagementState.selected_party_slot` and `selected_roster_slot`
 - These fields were never being updated
 - Mouse clicks triggered exit instead of selection update
@@ -124,7 +124,7 @@ fn inn_selection_system(
             }
         }
     }
-    
+
     // Handle roster selection events (similar logic)
 }
 ```
@@ -192,7 +192,7 @@ ui.horizontal(|ui| {
     ).clicked() {
         exit_events.write(ExitInn);
     }
-    
+
     // Show ESC hint prominently
     ui.label(
         egui::RichText::new("(or press ESC)")
@@ -286,16 +286,16 @@ All existing tests continue to pass:
 
 ### Selection Feedback
 
-**Before**: No visual feedback when clicking characters  
-**After**: 
+**Before**: No visual feedback when clicking characters
+**After**:
 - **Yellow highlight**: Mouse-selected character
 - **Green highlight**: Keyboard-focused character
 - Both can be active simultaneously for swap operations
 
 ### Exit Button
 
-**Before**: Small, plain "Exit Inn" button  
-**After**: 
+**Before**: Small, plain "Exit Inn" button
+**After**:
 - Larger button (120x30 pixels)
 - Bigger text (16pt)
 - ESC key hint displayed next to button
@@ -307,7 +307,7 @@ All existing tests continue to pass:
 
 1. **Selection persistence**: Selections are cleared when switching focus with Tab
    - This is intentional to prevent confusion between keyboard/mouse selections
-   
+
 2. **No multi-select**: Can only select one party member and one roster member at a time
    - This matches the game's swap mechanic requirements
 
@@ -340,6 +340,6 @@ All existing tests continue to pass:
 
 ---
 
-**Fixed By**: AI Agent (Elite Rust Game Developer)  
-**Verified By**: Manual testing + automated test suite  
+**Fixed By**: AI Agent (Elite Rust Game Developer)
+**Verified By**: Manual testing + automated test suite
 **Status**: ✅ Complete and deployed
