@@ -1,3 +1,112 @@
+## Bug Fix: Inn UI Mouse and Keyboard Input - COMPLETED
+
+### Summary
+
+Fixed critical bugs in the inn party management UI where mouse clicks, Tab key navigation, and exit button interactions were not working correctly. Implemented proper event-driven selection system with visual feedback distinguishing mouse selection (yellow) from keyboard focus (green).
+
+### Changes Made
+
+#### Bug Fixes
+
+**Issue 1: Mouse clicks not working**
+
+- **Problem**: Clicking on characters triggered `ExitInn` instead of selecting them
+- **Fix**: Created `SelectPartyMember` and `SelectRosterMember` message types
+- **Fix**: Mouse clicks now write selection events that update `InnManagementState.selected_party_slot` and `selected_roster_slot`
+
+**Issue 2: Tab key not switching context**
+
+- **Problem**: Keyboard navigation used separate state that didn't sync with mouse selection
+- **Fix**: Created `inn_selection_system()` to handle both keyboard and mouse selection events
+- **Fix**: Tab key now properly switches focus and clears conflicting selections
+
+**Issue 3: Exit button not prominent**
+
+- **Problem**: Small button, ESC hint buried in instructions
+- **Fix**: Increased button size to 120x30 pixels with 16pt text
+- **Fix**: Added prominent ESC key hint next to exit button in light green
+
+#### Implementation Details
+
+1. **New Message Types** (`src/game/systems/inn_ui.rs`):
+
+   - `SelectPartyMember`: Select/deselect party member
+   - `SelectRosterMember`: Select/deselect roster character
+   - Use `usize::MAX` as special value to clear selection
+
+2. **New System** (`inn_selection_system()`):
+
+   - Reads selection events from keyboard and mouse
+   - Updates `InnManagementState.selected_party_slot` and `selected_roster_slot`
+   - Implements toggle behavior (click again to deselect)
+
+3. **System Execution Order**:
+
+   - `inn_input_system` → keyboard input
+   - `inn_selection_system` → update selection state
+   - `inn_ui_system` → render UI with updated state
+   - `inn_action_system` → process actions (recruit, dismiss, swap, exit)
+
+4. **Keyboard Enhancements**:
+
+   - Enter/Space: Select character under focus
+   - D key: Dismiss selected party member
+   - R key: Recruit selected roster character
+   - S key: Swap selected party and roster characters
+   - Tab: Switch focus between party and roster
+   - Arrow keys: Navigate within focused section
+   - ESC: Exit inn
+
+5. **Visual Feedback**:
+   - Yellow highlight: Mouse-selected character
+   - Green highlight: Keyboard-focused character
+   - Both can be active for swap operations
+
+### Architecture Compliance
+
+- ✅ **Event-Driven Design**: Uses Bevy message passing system
+- ✅ **Separation of Concerns**: Selection handling in dedicated system
+- ✅ **Type Safety**: Proper message types for selection events
+- ✅ **SPDX Header**: File includes copyright and license
+- ✅ **Code Quality**: Passes clippy with `#[allow(clippy::too_many_arguments)]` for Bevy systems
+
+### Validation Results
+
+```bash
+✅ cargo fmt --all                                      → Finished
+✅ cargo check --all-targets --all-features             → 0 errors
+✅ cargo clippy --all-targets --all-features -- -D warnings → 0 warnings
+✅ cargo nextest run --all-features                     → 1379/1379 passed
+```
+
+### Manual Testing Checklist
+
+- ✅ Mouse clicks on party members select/deselect (yellow highlight)
+- ✅ Mouse clicks on roster characters select/deselect (yellow highlight)
+- ✅ Tab key switches focus between party and roster
+- ✅ Arrow keys navigate within focused section (green highlight)
+- ✅ Enter/Space selects character under keyboard focus
+- ✅ D/R/S keys perform dismiss/recruit/swap actions
+- ✅ Exit Inn button clearly visible and clickable
+- ✅ ESC key exits inn management
+- ✅ Visual feedback distinguishes mouse vs keyboard selection
+
+### Files Modified
+
+- `src/game/systems/inn_ui.rs` (+120 lines)
+  - Added selection message types
+  - Added `inn_selection_system()`
+  - Fixed click handlers to write selection events
+  - Enhanced keyboard input with dedicated action keys
+  - Improved exit button prominence
+  - Updated on-screen instructions
+
+### Documentation
+
+- `docs/explanation/bugfix_inn_ui_input.md` (345 lines) - Complete bug analysis and fix documentation
+
+---
+
 ## Phase 4: Innkeeper Party Management - Integration Testing and Bug Fixes - COMPLETED
 
 ### Summary

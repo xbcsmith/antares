@@ -23,11 +23,19 @@ impl Plugin for InnUiPlugin {
             .add_message::<InnDismissCharacter>()
             .add_message::<InnSwapCharacters>()
             .add_message::<ExitInn>()
+            .add_message::<SelectPartyMember>()
+            .add_message::<SelectRosterMember>()
             .init_resource::<InnNavigationState>()
-            // Process keyboard input first so actions can be handled in the same frame.
+            // Process keyboard input first, then selection, then UI, then actions
             .add_systems(
                 Update,
-                (inn_input_system, inn_ui_system, inn_action_system).chain(),
+                (
+                    inn_input_system,
+                    inn_selection_system,
+                    inn_ui_system,
+                    inn_action_system,
+                )
+                    .chain(),
             );
     }
 }
@@ -61,6 +69,20 @@ pub struct InnSwapCharacters {
 #[derive(Message)]
 pub struct ExitInn;
 
+/// Event to select a party member (for mouse or keyboard selection)
+#[derive(Message)]
+pub struct SelectPartyMember {
+    /// Index in the party (0-5), or usize::MAX to clear selection
+    pub party_index: usize,
+}
+
+/// Event to select a roster member (for mouse or keyboard selection)
+#[derive(Message)]
+pub struct SelectRosterMember {
+    /// Index in the full roster, or usize::MAX to clear selection
+    pub roster_index: usize,
+}
+
 /// Tracks keyboard navigation state for inn party management
 #[derive(Resource, Default)]
 pub struct InnNavigationState {
@@ -76,6 +98,7 @@ pub struct InnNavigationState {
 
 /// Renders the inn management UI when in InnManagement mode
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 fn inn_ui_system(
     mut contexts: EguiContexts,
     global_state: Res<GlobalState>,
@@ -84,6 +107,8 @@ fn inn_ui_system(
     mut dismiss_events: MessageWriter<InnDismissCharacter>,
     mut swap_events: MessageWriter<InnSwapCharacters>,
     mut exit_events: MessageWriter<ExitInn>,
+    mut select_party_events: MessageWriter<SelectPartyMember>,
+    mut select_roster_events: MessageWriter<SelectRosterMember>,
 ) {
     // Only render if we're in InnManagement mode
     let inn_state = match &global_state.0.mode {
@@ -147,8 +172,17 @@ fn inn_ui_system(
                                 )
                                 .clicked()
                             {
-                                // Toggle selection (handled via exit/re-enter)
-                                exit_events.write(ExitInn);
+                                // Toggle selection
+                                if is_mouse_selected {
+                                    // Deselect if already selected
+                                    select_party_events.write(SelectPartyMember {
+                                        party_index: usize::MAX, // Special value to clear
+                                    });
+                                } else {
+                                    select_party_events.write(SelectPartyMember {
+                                        party_index: party_idx,
+                                    });
+                                }
                             }
 
                             ui.label(format!("Lvl {}", member.level));
@@ -238,8 +272,17 @@ fn inn_ui_system(
                                 )
                                 .clicked()
                             {
-                                // Toggle selection (handled via exit/re-enter)
-                                exit_events.write(ExitInn);
+                                // Toggle selection
+                                if is_mouse_selected {
+                                    // Deselect if already selected
+                                    select_roster_events.write(SelectRosterMember {
+                                        roster_index: usize::MAX, // Special value to clear
+                                    });
+                                } else {
+                                    select_roster_events.write(SelectRosterMember {
+                                        roster_index: roster_idx,
+                                    });
+                                }
                             }
 
                             ui.label(&character.race_id);
@@ -287,10 +330,25 @@ fn inn_ui_system(
         ui.separator();
         ui.add_space(10.0);
 
-        // Exit button
-        if ui.button("Exit Inn").clicked() {
-            exit_events.write(ExitInn);
-        }
+        // Exit button - make it more prominent
+        ui.horizontal(|ui| {
+            if ui
+                .add_sized(
+                    [120.0, 30.0],
+                    egui::Button::new(egui::RichText::new("Exit Inn").size(16.0)),
+                )
+                .clicked()
+            {
+                exit_events.write(ExitInn);
+            }
+
+            // Show ESC hint
+            ui.label(
+                egui::RichText::new("(or press ESC)")
+                    .weak()
+                    .color(egui::Color32::LIGHT_GREEN),
+            );
+        });
 
         // Instructions
         ui.add_space(10.0);
@@ -320,24 +378,70 @@ fn inn_ui_system(
         );
         ui.label(
             egui::RichText::new(
-                "• Use TAB to switch focus, Arrow Keys to navigate, Enter/Space to select",
+                "• Keyboard: TAB to switch focus, Arrow Keys to navigate, Enter/Space to select",
             )
             .weak()
             .small()
             .color(egui::Color32::LIGHT_BLUE),
         );
         ui.label(
-            egui::RichText::new("• Select party member + roster character, press S to swap")
+            egui::RichText::new("• Keyboard: D to dismiss, R to recruit, S to swap")
                 .weak()
                 .small()
                 .color(egui::Color32::LIGHT_BLUE),
+        );
+        ui.label(
+            egui::RichText::new("• Mouse: Click to select, use buttons to perform actions")
+                .weak()
+                .small()
+                .color(egui::Color32::LIGHT_YELLOW),
         );
     });
 }
 
 // ===== Action System =====
+// ===== Action Handler System =====
 
-/// Processes inn action events and updates game state
+fn inn_selection_system(
+    mut select_party_events: MessageReader<SelectPartyMember>,
+    mut select_roster_events: MessageReader<SelectRosterMember>,
+    mut global_state: ResMut<GlobalState>,
+) {
+    // Handle party selection events
+    for event in select_party_events.read() {
+        if let GameMode::InnManagement(state) = &mut global_state.0.mode {
+            if event.party_index == usize::MAX {
+                // Clear selection
+                state.selected_party_slot = None;
+            } else {
+                // Toggle selection
+                if state.selected_party_slot == Some(event.party_index) {
+                    state.selected_party_slot = None;
+                } else {
+                    state.selected_party_slot = Some(event.party_index);
+                }
+            }
+        }
+    }
+
+    // Handle roster selection events
+    for event in select_roster_events.read() {
+        if let GameMode::InnManagement(state) = &mut global_state.0.mode {
+            if event.roster_index == usize::MAX {
+                // Clear selection
+                state.selected_roster_slot = None;
+            } else {
+                // Toggle selection
+                if state.selected_roster_slot == Some(event.roster_index) {
+                    state.selected_roster_slot = None;
+                } else {
+                    state.selected_roster_slot = Some(event.roster_index);
+                }
+            }
+        }
+    }
+}
+
 fn inn_action_system(
     mut recruit_events: MessageReader<InnRecruitCharacter>,
     mut dismiss_events: MessageReader<InnDismissCharacter>,
@@ -418,6 +522,7 @@ fn inn_action_system(
 }
 
 /// Handles keyboard input for inn party management
+#[allow(clippy::too_many_arguments)]
 fn inn_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     global_state: Res<GlobalState>,
@@ -426,6 +531,8 @@ fn inn_input_system(
     mut dismiss_events: MessageWriter<InnDismissCharacter>,
     mut swap_events: MessageWriter<InnSwapCharacters>,
     mut exit_events: MessageWriter<ExitInn>,
+    mut select_party_events: MessageWriter<SelectPartyMember>,
+    mut select_roster_events: MessageWriter<SelectRosterMember>,
 ) {
     // Only process input when in InnManagement mode
     let inn_state = match &global_state.0.mode {
@@ -514,8 +621,20 @@ fn inn_input_system(
             nav_state.selected_party_index = Some(prev);
         }
 
-        // Enter/Space to dismiss selected party member
+        // Enter/Space to select/dismiss party member
         if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
+            if let Some(party_idx) = nav_state.selected_party_index {
+                if party_idx < party_count {
+                    // First select, then dismiss if already selected
+                    select_party_events.write(SelectPartyMember {
+                        party_index: party_idx,
+                    });
+                }
+            }
+        }
+
+        // D key to dismiss selected party member
+        if keyboard.just_pressed(KeyCode::KeyD) {
             if let Some(party_idx) = nav_state.selected_party_index {
                 if party_idx < party_count {
                     dismiss_events.write(InnDismissCharacter {
@@ -563,8 +682,17 @@ fn inn_input_system(
                 nav_state.selected_roster_index = Some(inn_roster_indices[prev_pos]);
             }
 
-            // Enter/Space to recruit selected roster character
+            // Enter/Space to select roster character
             if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
+                if let Some(roster_idx) = nav_state.selected_roster_index {
+                    select_roster_events.write(SelectRosterMember {
+                        roster_index: roster_idx,
+                    });
+                }
+            }
+
+            // R key to recruit selected roster character
+            if keyboard.just_pressed(KeyCode::KeyR) {
                 if let Some(roster_idx) = nav_state.selected_roster_index {
                     if party_count < PARTY_MAX_SIZE {
                         recruit_events.write(InnRecruitCharacter {
