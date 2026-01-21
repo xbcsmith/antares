@@ -1624,4 +1624,213 @@ mod tests {
         assert!(message.contains("6"));
         assert!(message.contains("starts_in_party"));
     }
+
+    // ========================================================================
+    // Phase 4: Integration Testing - Edge Cases for Innkeeper Validation
+    // ========================================================================
+
+    #[test]
+    fn test_innkeeper_with_dialogue_is_valid() {
+        // Arrange: Innkeeper with dialogue_id should pass validation
+        let mut db = ContentDatabase::new();
+
+        let mut innkeeper = crate::domain::world::npc::NpcDefinition::innkeeper(
+            "good_innkeeper",
+            "Good Innkeeper",
+            "portrait",
+        );
+        innkeeper.dialogue_id = Some(999); // Has dialogue
+        db.npcs.add_npc(innkeeper).unwrap();
+
+        // Act
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().expect("validation failed");
+
+        // Assert: No InnkeeperMissingDialogue error
+        assert!(!errors
+            .iter()
+            .any(|e| matches!(e, ValidationError::InnkeeperMissingDialogue { .. })));
+    }
+
+    #[test]
+    fn test_multiple_innkeepers_missing_dialogue() {
+        // Arrange: Multiple innkeepers without dialogue
+        let mut db = ContentDatabase::new();
+
+        for i in 1..=3 {
+            let npc = crate::domain::world::npc::NpcDefinition::innkeeper(
+                format!("inn_{}", i),
+                format!("Inn {}", i),
+                "portrait",
+            );
+            db.npcs.add_npc(npc).unwrap();
+        }
+
+        // Act
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().expect("validation failed");
+
+        // Assert: Should have 3 errors for missing dialogues
+        let missing_dialogue_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::InnkeeperMissingDialogue { .. }))
+            .collect();
+
+        assert_eq!(missing_dialogue_errors.len(), 3);
+    }
+
+    #[test]
+    fn test_innkeeper_missing_dialogue_error_severity() {
+        // Verify InnkeeperMissingDialogue is Error severity
+        let error = ValidationError::InnkeeperMissingDialogue {
+            innkeeper_id: "test_inn".to_string(),
+        };
+
+        assert_eq!(error.severity(), Severity::Error);
+        assert!(error.is_error());
+        assert!(!error.is_warning());
+        assert!(!error.is_info());
+    }
+
+    #[test]
+    fn test_innkeeper_missing_dialogue_display() {
+        // Verify error message format
+        let error = ValidationError::InnkeeperMissingDialogue {
+            innkeeper_id: "broken_inn".to_string(),
+        };
+
+        let message = error.to_string();
+        assert!(message.contains("broken_inn"));
+        assert!(message.contains("dialogue_id"));
+    }
+
+    #[test]
+    fn test_non_innkeeper_without_dialogue_is_ok() {
+        // Arrange: Regular NPC without dialogue should not trigger innkeeper validation
+        let mut db = ContentDatabase::new();
+
+        let regular_npc = crate::domain::world::npc::NpcDefinition::new(
+            "merchant".to_string(),
+            "Town Merchant".to_string(),
+            "portrait.png".to_string(),
+        );
+        db.npcs.add_npc(regular_npc).unwrap();
+
+        // Act
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().expect("validation failed");
+
+        // Assert: No InnkeeperMissingDialogue error for non-innkeeper
+        assert!(!errors.iter().any(|e| matches!(
+            e,
+            ValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id == "merchant"
+        )));
+    }
+
+    #[test]
+    fn test_innkeeper_edge_case_empty_id() {
+        // Arrange: Innkeeper with empty string ID
+        let mut db = ContentDatabase::new();
+
+        let innkeeper =
+            crate::domain::world::npc::NpcDefinition::innkeeper("", "No ID Inn", "portrait");
+        db.npcs.add_npc(innkeeper).unwrap();
+
+        // Act
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().expect("validation failed");
+
+        // Assert: Should still validate (empty ID is valid string)
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id.is_empty()
+        )));
+    }
+
+    #[test]
+    fn test_innkeeper_edge_case_special_characters_in_id() {
+        // Arrange: Innkeeper with special characters in ID
+        let mut db = ContentDatabase::new();
+
+        let special_ids = vec!["inn-town-1", "inn_underscore", "inn.dot", "Inn:Colon"];
+
+        for id in &special_ids {
+            let innkeeper =
+                crate::domain::world::npc::NpcDefinition::innkeeper(*id, "Special Inn", "portrait");
+            db.npcs.add_npc(innkeeper).unwrap();
+        }
+
+        // Act
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().expect("validation failed");
+
+        // Assert: Each should have validation error
+        for id in special_ids {
+            assert!(errors.iter().any(|e| matches!(
+                e,
+                ValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id == id
+            )));
+        }
+    }
+
+    #[test]
+    fn test_validate_innkeepers_performance_large_database() {
+        // Test performance with many NPCs (mix of innkeepers and regular)
+        let mut db = ContentDatabase::new();
+
+        // Add 50 regular NPCs
+        for i in 0..50 {
+            let npc = crate::domain::world::npc::NpcDefinition::new(
+                format!("npc_{}", i),
+                format!("NPC {}", i),
+                "portrait.png".to_string(),
+            );
+            db.npcs.add_npc(npc).unwrap();
+        }
+
+        // Add 10 innkeepers without dialogue
+        for i in 0..10 {
+            let innkeeper = crate::domain::world::npc::NpcDefinition::innkeeper(
+                format!("innkeeper_{}", i),
+                format!("Innkeeper {}", i),
+                "portrait",
+            );
+            db.npcs.add_npc(innkeeper).unwrap();
+        }
+
+        // Act
+        let validator = Validator::new(&db);
+        let errors = validator.validate_all().expect("validation failed");
+
+        // Assert: Should find exactly 10 innkeeper errors
+        let innkeeper_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, ValidationError::InnkeeperMissingDialogue { .. }))
+            .collect();
+
+        assert_eq!(innkeeper_errors.len(), 10);
+    }
+
+    #[test]
+    fn test_innkeeper_validation_isolated() {
+        // Test validate_innkeepers() method directly
+        let mut db = ContentDatabase::new();
+
+        let innkeeper = crate::domain::world::npc::NpcDefinition::innkeeper(
+            "isolated_test",
+            "Test Inn",
+            "portrait",
+        );
+        db.npcs.add_npc(innkeeper).unwrap();
+
+        let validator = Validator::new(&db);
+        let errors = validator.validate_innkeepers();
+
+        // Assert: Direct call should also catch the error
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(
+            errors[0],
+            ValidationError::InnkeeperMissingDialogue { ref innkeeper_id } if innkeeper_id == "isolated_test"
+        ));
+    }
 }
