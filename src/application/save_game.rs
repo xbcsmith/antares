@@ -26,6 +26,7 @@
 //! ```
 
 use crate::application::GameState;
+use bevy::prelude::Resource;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -214,6 +215,7 @@ impl SaveGame {
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Resource)]
 pub struct SaveGameManager {
     /// Directory where save files are stored
     saves_dir: PathBuf,

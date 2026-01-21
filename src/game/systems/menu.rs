@@ -1,17 +1,21 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Menu plugin and system implementations for Phase 4: Menu UI Rendering
+//! Menu plugin and system implementations for Phase 4-5: Menu UI Rendering and Save/Load Integration
 //!
 //! This module implements the complete menu UI system with:
 //! - UI spawning based on current submenu (Main/SaveLoad/Settings)
 //! - Button interaction handling (hover/click)
 //! - Dynamic button color updates based on selection
+//! - Save/Load menu with scrollable save list
+//! - Save and load game operations
 //! - Proper cleanup when exiting menu mode
 
 use bevy::prelude::*;
+use chrono::Local;
 
-use crate::application::menu::{MenuState, MenuType};
+use crate::application::menu::{MenuState, MenuType, SaveGameInfo};
+use crate::application::save_game::SaveGameManager;
 use crate::application::GameMode;
 use crate::game::components::menu::*;
 use crate::game::resources::GlobalState;
@@ -21,6 +25,11 @@ pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
+        app.insert_resource(
+            SaveGameManager::new("saves")
+                .unwrap_or_else(|e| panic!("Failed to initialize SaveGameManager: {}", e)),
+        );
+
         app.add_systems(
             Update,
             (
@@ -28,6 +37,7 @@ impl Plugin for MenuPlugin {
                 handle_menu_keyboard,
                 menu_button_interaction,
                 update_button_colors,
+                populate_save_list,
                 menu_cleanup,
             ),
         );
@@ -53,7 +63,7 @@ fn menu_setup(
 
     match menu_state.current_submenu {
         MenuType::Main => spawn_main_menu(&mut commands, &font, menu_state),
-        MenuType::SaveLoad => spawn_save_load_menu(&mut commands, &font),
+        MenuType::SaveLoad => spawn_save_load_menu(&mut commands, &font, menu_state),
         MenuType::Settings => spawn_settings_menu(&mut commands, &font),
     }
 }
@@ -161,8 +171,8 @@ fn spawn_main_menu(commands: &mut Commands, font: &Handle<Font>, menu_state: &Me
     info!("Spawned main menu UI");
 }
 
-/// Spawn the save/load menu UI - stub for Phase 5
-fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>) {
+/// Spawn the save/load menu UI with scrollable save list
+fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state: &MenuState) {
     let font = font.clone();
 
     commands
@@ -190,6 +200,7 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>) {
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::FlexStart,
                         padding: UiRect::all(Val::Px(20.0)),
+                        row_gap: Val::Px(10.0),
                         ..default()
                     },
                     BackgroundColor(MENU_BACKGROUND_COLOR),
@@ -197,8 +208,9 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>) {
                     SaveLoadPanel,
                 ))
                 .with_children(|panel| {
+                    // Title
                     panel.spawn((
-                        Text::new("SAVE / LOAD"),
+                        Text::new("SAVE / LOAD GAME"),
                         TextFont {
                             font: font.clone(),
                             font_size: TITLE_FONT_SIZE,
@@ -207,20 +219,192 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>) {
                         TextColor(Color::WHITE),
                     ));
 
-                    panel.spawn(Node {
-                        height: Val::Px(40.0),
-                        ..default()
-                    });
-
-                    panel.spawn((
-                        Text::new("Coming in Phase 5: Save/Load slots"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: BUTTON_FONT_SIZE,
+                    // Save list container (scrollable)
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Px(380.0),
+                            flex_direction: FlexDirection::Column,
+                            overflow: Overflow::scroll_y(),
+                            padding: UiRect::all(Val::Px(5.0)),
+                            margin: UiRect::all(Val::Px(10.0)),
                             ..default()
-                        },
-                        TextColor(BUTTON_TEXT_COLOR),
-                    ));
+                        })
+                        .with_children(|list| {
+                            if menu_state.save_list.is_empty() {
+                                list.spawn((
+                                    Text::new("No save files found"),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 18.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                                ));
+                            } else {
+                                for (index, save_info) in menu_state.save_list.iter().enumerate() {
+                                    let is_selected = menu_state.selected_index == index;
+                                    let bg_color = if is_selected {
+                                        BUTTON_HOVER_COLOR
+                                    } else {
+                                        BUTTON_NORMAL_COLOR
+                                    };
+
+                                    list.spawn((
+                                        Button,
+                                        Node {
+                                            width: Val::Percent(95.0),
+                                            padding: UiRect::all(Val::Px(10.0)),
+                                            margin: UiRect::all(Val::Px(5.0)),
+                                            flex_direction: FlexDirection::Column,
+                                            ..default()
+                                        },
+                                        BackgroundColor(bg_color),
+                                        BorderRadius::all(Val::Px(4.0)),
+                                        MenuButton::SelectSave(index),
+                                    ))
+                                    .with_children(|slot| {
+                                        // Filename
+                                        slot.spawn((
+                                            Text::new(format!("Save: {}", save_info.filename)),
+                                            TextFont {
+                                                font: font.clone(),
+                                                font_size: 16.0,
+                                                ..default()
+                                            },
+                                            TextColor(Color::WHITE),
+                                        ));
+
+                                        // Timestamp
+                                        slot.spawn((
+                                            Text::new(format!("Date: {}", save_info.timestamp)),
+                                            TextFont {
+                                                font: font.clone(),
+                                                font_size: 12.0,
+                                                ..default()
+                                            },
+                                            TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                                        ));
+
+                                        // Party members
+                                        if !save_info.character_names.is_empty() {
+                                            slot.spawn((
+                                                Text::new(format!(
+                                                    "Party: {}",
+                                                    save_info.character_names.join(", ")
+                                                )),
+                                                TextFont {
+                                                    font: font.clone(),
+                                                    font_size: 12.0,
+                                                    ..default()
+                                                },
+                                                TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                                            ));
+                                        }
+
+                                        // Location
+                                        slot.spawn((
+                                            Text::new(format!("Location: {}", save_info.location)),
+                                            TextFont {
+                                                font: font.clone(),
+                                                font_size: 12.0,
+                                                ..default()
+                                            },
+                                            TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                                        ));
+                                    });
+                                }
+                            }
+                        });
+
+                    // Action buttons
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::SpaceAround,
+                            margin: UiRect::top(Val::Px(10.0)),
+                            ..default()
+                        })
+                        .with_children(|buttons| {
+                            buttons
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Px(BUTTON_WIDTH - 40.0),
+                                        height: Val::Px(BUTTON_HEIGHT),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(BUTTON_NORMAL_COLOR),
+                                    BorderRadius::all(Val::Px(4.0)),
+                                    MenuButton::Confirm,
+                                ))
+                                .with_children(|button_root| {
+                                    button_root.spawn((
+                                        Text::new("Save"),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: BUTTON_FONT_SIZE,
+                                            ..default()
+                                        },
+                                        TextColor(BUTTON_TEXT_COLOR),
+                                    ));
+                                });
+
+                            buttons
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Px(BUTTON_WIDTH - 40.0),
+                                        height: Val::Px(BUTTON_HEIGHT),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(BUTTON_NORMAL_COLOR),
+                                    BorderRadius::all(Val::Px(4.0)),
+                                    MenuButton::LoadGame,
+                                ))
+                                .with_children(|button_root| {
+                                    button_root.spawn((
+                                        Text::new("Load"),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: BUTTON_FONT_SIZE,
+                                            ..default()
+                                        },
+                                        TextColor(BUTTON_TEXT_COLOR),
+                                    ));
+                                });
+
+                            buttons
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Px(BUTTON_WIDTH - 40.0),
+                                        height: Val::Px(BUTTON_HEIGHT),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(BUTTON_NORMAL_COLOR),
+                                    BorderRadius::all(Val::Px(4.0)),
+                                    MenuButton::Back,
+                                ))
+                                .with_children(|button_root| {
+                                    button_root.spawn((
+                                        Text::new("Back"),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: BUTTON_FONT_SIZE,
+                                            ..default()
+                                        },
+                                        TextColor(BUTTON_TEXT_COLOR),
+                                    ));
+                                });
+                        });
                 });
         });
 
@@ -293,6 +477,74 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
     info!("Spawned settings menu UI");
 }
 
+/// Populate the save list from the filesystem
+fn populate_save_list(mut global_state: ResMut<GlobalState>, save_manager: Res<SaveGameManager>) {
+    let GameMode::Menu(menu_state) = &mut global_state.0.mode else {
+        return;
+    };
+
+    // Only populate once when entering SaveLoad submenu
+    if menu_state.current_submenu != MenuType::SaveLoad || !menu_state.save_list.is_empty() {
+        return;
+    }
+
+    match save_manager.list_saves() {
+        Ok(save_filenames) => {
+            let mut save_list = Vec::new();
+
+            for filename in save_filenames {
+                // Try to load save metadata
+                match save_manager.load(&filename) {
+                    Ok(game_state) => {
+                        let character_names = game_state
+                            .party
+                            .members
+                            .iter()
+                            .map(|c| c.name.clone())
+                            .collect();
+
+                        let location = format!(
+                            "Map {}, ({}, {})",
+                            game_state.world.current_map,
+                            game_state.world.party_position.x,
+                            game_state.world.party_position.y
+                        );
+
+                        save_list.push(SaveGameInfo {
+                            filename: filename.clone(),
+                            timestamp: String::from("Unknown"),
+                            character_names,
+                            location,
+                            game_version: env!("CARGO_PKG_VERSION").to_string(),
+                        });
+                    }
+                    Err(e) => {
+                        warn!("Failed to load save metadata for {}: {}", filename, e);
+                        // Still add an entry with limited info
+                        save_list.push(SaveGameInfo {
+                            filename: filename.clone(),
+                            timestamp: String::from("Error loading"),
+                            character_names: vec![],
+                            location: String::from("Unknown"),
+                            game_version: env!("CARGO_PKG_VERSION").to_string(),
+                        });
+                    }
+                }
+            }
+
+            menu_state.save_list = save_list;
+            info!(
+                "Populated save list with {} saves",
+                menu_state.save_list.len()
+            );
+        }
+        Err(e) => {
+            error!("Failed to list saves: {}", e);
+            menu_state.save_list = Vec::new();
+        }
+    }
+}
+
 /// Clean up menu UI when exiting Menu mode
 fn menu_cleanup(
     mut commands: Commands,
@@ -313,16 +565,21 @@ fn menu_cleanup(
 fn menu_button_interaction(
     mut interaction_query: Query<(&Interaction, &MenuButton), Changed<Interaction>>,
     mut global_state: ResMut<GlobalState>,
+    save_manager: Res<SaveGameManager>,
 ) {
     for (interaction, button) in interaction_query.iter_mut() {
         if *interaction == Interaction::Pressed {
-            handle_button_press(button, &mut global_state);
+            handle_button_press(button, &mut global_state, &save_manager);
         }
     }
 }
 
 /// Handle button press actions
-fn handle_button_press(button: &MenuButton, global_state: &mut ResMut<GlobalState>) {
+fn handle_button_press(
+    button: &MenuButton,
+    global_state: &mut ResMut<GlobalState>,
+    save_manager: &Res<SaveGameManager>,
+) {
     let GameMode::Menu(menu_state) = &mut global_state.0.mode else {
         return;
     };
@@ -349,7 +606,74 @@ fn handle_button_press(button: &MenuButton, global_state: &mut ResMut<GlobalStat
             info!("Quit pressed - exiting");
             std::process::exit(0);
         }
-        _ => {}
+        MenuButton::Back => {
+            info!("Back pressed");
+            menu_state.set_submenu(MenuType::Main);
+        }
+        MenuButton::Confirm => {
+            info!("Confirm pressed in save/load menu");
+            if menu_state.current_submenu == MenuType::SaveLoad {
+                save_game_operation(global_state, save_manager);
+            }
+        }
+        MenuButton::SelectSave(index) => {
+            info!("Selected save slot: {}", index);
+            menu_state.selected_index = *index;
+        }
+        MenuButton::Cancel => {
+            info!("Cancel pressed");
+            menu_state.set_submenu(MenuType::Main);
+        }
+    }
+}
+
+/// Save the current game state to a file
+fn save_game_operation(
+    global_state: &mut ResMut<GlobalState>,
+    save_manager: &Res<SaveGameManager>,
+) {
+    let GameMode::Menu(_menu_state) = &global_state.0.mode else {
+        return;
+    };
+
+    // Generate filename with timestamp
+    let timestamp = Local::now();
+    let filename = timestamp.format("save_%Y%m%d_%H%M%S").to_string();
+
+    // Attempt to save
+    match save_manager.save(&filename, &global_state.0) {
+        Ok(_) => {
+            info!("Game saved successfully: {}", filename);
+            if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
+                menu_state.save_list.clear(); // Clear to force repopulation on next SaveLoad entry
+                menu_state.set_submenu(MenuType::Main);
+            }
+        }
+        Err(e) => {
+            error!("Failed to save game: {}", e);
+        }
+    }
+}
+
+/// Load a game state from a save file
+fn load_game_operation(
+    global_state: &mut ResMut<GlobalState>,
+    save_manager: &Res<SaveGameManager>,
+    selected_filename: &str,
+) {
+    match save_manager.load(selected_filename) {
+        Ok(loaded_state) => {
+            info!("Game loaded successfully: {}", selected_filename);
+
+            // Replace game state
+            global_state.0 = loaded_state;
+
+            // Return to exploration mode
+            global_state.0.mode = GameMode::Exploration;
+        }
+        Err(e) => {
+            error!("Failed to load game: {}", e);
+        }
     }
 }
 
@@ -396,66 +720,100 @@ fn update_button_colors(
 fn handle_menu_keyboard(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut global_state: ResMut<GlobalState>,
+    save_manager: Res<SaveGameManager>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Menu(_)) {
         return;
     }
 
-    if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
-        let item_count = match menu_state.current_submenu {
-            MenuType::Main => 5,
-            MenuType::SaveLoad => menu_state.save_list.len().max(1),
-            MenuType::Settings => 4,
-        };
+    // Extract values before handling selection to avoid borrow conflicts
+    let (submenu, selected_index, item_count, save_list) = {
+        if let GameMode::Menu(menu_state) = &global_state.0.mode {
+            (
+                menu_state.current_submenu,
+                menu_state.selected_index,
+                match menu_state.current_submenu {
+                    MenuType::Main => 5,
+                    MenuType::SaveLoad => menu_state.save_list.len().max(1),
+                    MenuType::Settings => 4,
+                },
+                menu_state.save_list.clone(),
+            )
+        } else {
+            return;
+        }
+    };
 
-        if keyboard.just_pressed(KeyCode::Backspace) {
+    // Handle keyboard input
+    if keyboard.just_pressed(KeyCode::Backspace) {
+        if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
             if menu_state.current_submenu != MenuType::Main {
                 menu_state.set_submenu(MenuType::Main);
             }
-            return;
         }
+        return;
+    }
 
-        if keyboard.just_pressed(KeyCode::Escape) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
             let resume = menu_state.get_resume_mode();
             global_state.0.mode = resume;
-            return;
         }
-
-        if keyboard.just_pressed(KeyCode::ArrowUp) {
-            menu_state.select_previous(item_count);
-        } else if keyboard.just_pressed(KeyCode::ArrowDown) {
-            menu_state.select_next(item_count);
-        } else if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
-            handle_menu_selection(menu_state);
-        }
+        return;
     }
-}
 
-/// Handle menu selection
-fn handle_menu_selection(menu_state: &mut MenuState) {
-    match menu_state.current_submenu {
-        MenuType::Main => match menu_state.selected_index {
-            0 => info!("Selected: Resume"),
-            1 => {
-                info!("Selected: Save");
-                menu_state.set_submenu(MenuType::SaveLoad);
-            }
-            2 => {
-                info!("Selected: Load");
-                menu_state.set_submenu(MenuType::SaveLoad);
-            }
-            3 => {
-                info!("Selected: Settings");
-                menu_state.set_submenu(MenuType::Settings);
-            }
-            4 => info!("Selected: Quit"),
-            _ => {}
-        },
-        MenuType::SaveLoad => {
-            info!("Selected save slot: {}", menu_state.selected_index);
+    if keyboard.just_pressed(KeyCode::ArrowUp) {
+        if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
+            menu_state.select_previous(item_count);
         }
-        MenuType::Settings => {
-            info!("Selected settings: {}", menu_state.selected_index);
+    } else if keyboard.just_pressed(KeyCode::ArrowDown) {
+        if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
+            menu_state.select_next(item_count);
+        }
+    } else if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
+        // Handle selection based on current menu state
+        match submenu {
+            MenuType::Main => match selected_index {
+                0 => {
+                    info!("Selected: Resume");
+                    if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
+                        let resume = menu_state.get_resume_mode();
+                        global_state.0.mode = resume;
+                    }
+                }
+                1 => {
+                    info!("Selected: Save");
+                    save_game_operation(&mut global_state, &save_manager);
+                }
+                2 => {
+                    info!("Selected: Load");
+                    if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
+                        menu_state.set_submenu(MenuType::SaveLoad);
+                        menu_state.save_list.clear();
+                    }
+                }
+                3 => {
+                    info!("Selected: Settings");
+                    if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
+                        menu_state.set_submenu(MenuType::Settings);
+                    }
+                }
+                4 => {
+                    info!("Selected: Quit");
+                    std::process::exit(0);
+                }
+                _ => {}
+            },
+            MenuType::SaveLoad => {
+                if selected_index < save_list.len() {
+                    let filename = save_list[selected_index].filename.clone();
+                    info!("Selected save slot: {} ({})", selected_index, filename);
+                    load_game_operation(&mut global_state, &save_manager, &filename);
+                }
+            }
+            MenuType::Settings => {
+                info!("Selected settings: {}", selected_index);
+            }
         }
     }
 }
@@ -469,5 +827,47 @@ mod tests {
         assert!(matches!(MenuButton::Resume, MenuButton::Resume));
         assert!(matches!(MenuButton::SaveGame, MenuButton::SaveGame));
         assert!(matches!(MenuButton::Quit, MenuButton::Quit));
+    }
+
+    #[test]
+    fn test_save_slot_button_variant() {
+        assert!(matches!(
+            MenuButton::SelectSave(0),
+            MenuButton::SelectSave(_)
+        ));
+        assert!(matches!(
+            MenuButton::SelectSave(5),
+            MenuButton::SelectSave(5)
+        ));
+    }
+
+    #[test]
+    fn test_back_button_variant() {
+        assert!(matches!(MenuButton::Back, MenuButton::Back));
+    }
+
+    #[test]
+    fn test_confirm_button_variant() {
+        assert!(matches!(MenuButton::Confirm, MenuButton::Confirm));
+    }
+
+    #[test]
+    fn test_cancel_button_variant() {
+        assert!(matches!(MenuButton::Cancel, MenuButton::Cancel));
+    }
+
+    #[test]
+    fn test_save_game_info_creation() {
+        let info = SaveGameInfo {
+            filename: "save_20250101_120000".to_string(),
+            timestamp: "2025-01-01 12:00:00".to_string(),
+            character_names: vec!["Hero".to_string(), "Mage".to_string()],
+            location: "Map 1, (5, 10)".to_string(),
+            game_version: "0.1.0".to_string(),
+        };
+
+        assert_eq!(info.filename, "save_20250101_120000");
+        assert_eq!(info.character_names.len(), 2);
+        assert_eq!(info.location, "Map 1, (5, 10)");
     }
 }
