@@ -339,6 +339,7 @@ mod tests {
                 music: "assets/music".to_string(),
                 sounds: "assets/sounds".to_string(),
                 images: "assets/images".to_string(),
+                fonts: "assets/fonts".to_string(),
             },
             root_path: PathBuf::from("test_campaign"),
             game_config: GameConfig {

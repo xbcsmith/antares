@@ -55,8 +55,6 @@ Campaign Builder --> Map Editor --> Select Map --> Edit Map. Event editing now f
 
 ✅ COMPLETED - [event editing implementation](./event_editing_implementation_plan.md)
 
-
-
 ### Config Editor Implementation
 
 ✅ COMPLETED - [config editor implementation](./config_editor_implementation_plan.md)
@@ -98,14 +96,12 @@ Unable to create new nodes makes it impossible to create dialog trees.
 
 ## Game Engine
 
-
 ### Warnings
 
-2026-01-17T21:23:14.969390Z  WARN bevy_ecs::error::handler: Encountered an error in command `<bevy_ecs::system::commands::entity_command::despawn::{{closure}} as bevy_ecs::error::command_handling::CommandWithEntity<core::result::Result<(), bevy_ecs::world::error::EntityMutableFetchError>>>::with_entity::{{closure}}`: The entity with ID 600v217 does not exist (enable `track_location` feature for more details)
+2026-01-17T21:23:14.969390Z WARN bevy_ecs::error::handler: Encountered an error in command `<bevy_ecs::system::commands::entity_command::despawn::{{closure}} as bevy_ecs::error::command_handling::CommandWithEntity<core::result::Result<(), bevy_ecs::world::error::EntityMutableFetchError>>>::with_entity::{{closure}}`: The entity with ID 600v217 does not exist (enable `track_location` feature for more details)
 
     If you were attempting to apply a command to this entity,
     and want to handle this error gracefully, consider using `EntityCommands::queue_handled` or `queue_silenced`.
-
 
 ✅ COMPLETED -
 
@@ -121,36 +117,38 @@ InnKeeper Party management is broken. It triggers automatically before the playe
 
 ### Character Recruitment Events
 
-We finished the @dialogue_bevy_ui_refactor_plan.md and now we have working chat windows. Several issues still exist. For example the character Whisper is using the default character recruitment dialogue (id 100) instead of her dialogue (id 102).  Same goes for Zara.  WHen asked to join the party choices do not clear the bubble so when we move the bubble stays with the dialogue. Whisper does not join the party. When we talk to the NPC after talking to Whisper the choices do not clear. The NPC Choices are appened to the bubble. InnKeeper Party management
+We finished the @dialogue_bevy_ui_refactor_plan.md and now we have working chat windows. Several issues still exist. For example the character Whisper is using the default character recruitment dialogue (id 100) instead of her dialogue (id 102). Same goes for Zara. WHen asked to join the party choices do not clear the bubble so when we move the bubble stays with the dialogue. Whisper does not join the party. When we talk to the NPC after talking to Whisper the choices do not clear. The NPC Choices are appened to the bubble. InnKeeper Party management
 
 Character recruitment events are not implemented in the game engine. When a dialog node triggers a recruitment event, nothing happens. We need to implement character recruitment events in the game engine so that when a dialog node triggers a recruitment event, the specified character is added to the player's party. The event needs to be able to have a dialog attached to it that plays when the character is recruited. Then the character should either jopin the party and appear in the party HUD or travel to the inn removing the event from the map in-game. If there is no dialog the character should use the default recruitment dialog.
 
 Current Behavior:
 
-2026-01-10T21:48:04.284407Z  INFO antares::game::systems::input: Interacting with recruitable character 'Apprentice Zara' (ID: npc_apprentice_zara) at Position { x: 11, y: 6 }
-2026-01-10T21:48:04.301660Z  INFO antares::game::systems::dialogue_visuals: Speaker entity PLACEHOLDER despawned during dialogue, ending conversation
+2026-01-10T21:48:04.284407Z INFO antares::game::systems::input: Interacting with recruitable character 'Apprentice Zara' (ID: npc_apprentice_zara) at Position { x: 11, y: 6 }
+2026-01-10T21:48:04.301660Z INFO antares::game::systems::dialogue_visuals: Speaker entity PLACEHOLDER despawned during dialogue, ending conversation
 
 Example Recruitable Characters:
 
 RecruitableCharacter(
-            name: "Apprentice Zara",
-            description: "A young gnome apprentice studies a spellbook intently.",
-            character_id: "npc_apprentice_zara",
-            dialog_id: 101,
-        ),
-
+name: "Apprentice Zara",
+description: "A young gnome apprentice studies a spellbook intently.",
+character_id: "npc_apprentice_zara",
+dialog_id: 101,
+),
 
 RecruitableCharacter(
-            name: "Old Gareth",
-            description: "A grizzled dwarf veteran stands here, repairing armor.",
-            character_id: "npc_old_gareth",
-            dialog_id: 100,
-        ),
-
+name: "Old Gareth",
+description: "A grizzled dwarf veteran stands here, repairing armor.",
+character_id: "npc_old_gareth",
+dialog_id: 100,
+),
 
 ✅ COMPLETED - [character recruitment implementation](./character_recruitment_implementation_plan.md)
 
-### Save Game Implementation
+### Custom Fonts
+
+Supporting custom fonts requires updates to the campaign config to allow specify a custom Dialogue Font, a Custom Game Menu font. I would expect it to work like this. Default Dialogue Font --> Custom Font in Campaign. The custom Font path should be ./campaigns/<campaign name>/fonts/<font-name>.ttf and it should be configurable by the Campaign Config RON file. If no custom font is specified in the Campaign Config RON file, the default font should be used.
+
+### Game menu implementation
 
 A configurable Keyboard Key (default ESC) should bring up the game menu. Currently it does nothing. We need to implement the game menu. It should include options like new game, save game, load game, delete game, quit, etc. We should also add a Configuration menu option that allows the user to change settings like volume, graphics quality, key bindings, etc and store it in the Save Game RON File. This config would override the default Campaign Config RON file settings once set. Keeping a list of recent saves that the use can pick from to load would also be a feature.
 
@@ -159,6 +157,8 @@ A configurable Keyboard Key (default ESC) should bring up the game menu. Current
 ### Teleport to Map
 
 The teleport to map event works but the target map is not rendering correctly. The NPC are appearing but the tiles are not rendering. We need to fix the teleport to map event so that when the player is teleported to a new map, the map renders correctly.
+
+✅ COMPLETED
 
 ### Ingame Dialog System
 

@@ -34,6 +34,7 @@ impl Plugin for MenuPlugin {
         app.add_systems(
             Update,
             (
+                submenu_transition_cleanup,
                 menu_setup,
                 handle_menu_keyboard,
                 menu_button_interaction,
@@ -46,34 +47,159 @@ impl Plugin for MenuPlugin {
     }
 }
 
-/// Spawn the menu UI when entering Menu mode
+/// Recursively despawn an entity and all its children
+fn despawn_with_children(
+    commands: &mut Commands,
+    entity: Entity,
+    children_query: &Query<&Children>,
+) {
+    // First despawn all children recursively
+    if let Ok(children) = children_query.get(entity) {
+        for child in children.iter() {
+            despawn_with_children(commands, child, children_query);
+        }
+    }
+    // Then despawn the entity itself
+    commands.entity(entity).despawn();
+}
+
+/// Detect submenu transitions and despawn old menu UI
+fn submenu_transition_cleanup(
+    mut commands: Commands,
+    global_state: Res<GlobalState>,
+    menu_query: Query<Entity, With<MenuRoot>>,
+    children_query: Query<&Children>,
+    mut previous_submenu: bevy::ecs::system::Local<Option<MenuType>>,
+) {
+    // Diagnostic logging: show mode, previous submenu, and how many MenuRoot entities exist
+    let menu_count = menu_query.iter().count();
+    info!(
+        "submenu_transition_cleanup called: mode={:?}, previous_submenu={:?}, menu_count={}",
+        global_state.0.mode, *previous_submenu, menu_count
+    );
+
+    let GameMode::Menu(menu_state) = &global_state.0.mode else {
+        // Not in menu mode - reset tracking
+        info!(
+            "submenu_transition_cleanup: not in Menu mode - clearing previous_submenu (was: {:?})",
+            *previous_submenu
+        );
+        *previous_submenu = None;
+        return;
+    };
+
+    let current_submenu = menu_state.current_submenu;
+
+    info!(
+        "submenu_transition_cleanup: in Menu - current_submenu={:?}, previous_submenu={:?}, menu_count={}",
+        current_submenu, *previous_submenu, menu_count
+    );
+
+    // Check if this is a submenu transition (not first entry into menu)
+    if let Some(prev) = *previous_submenu {
+        if prev != current_submenu {
+            // Submenu changed - log and despawn old UI
+            let entities: Vec<Entity> = menu_query.iter().collect();
+            if entities.is_empty() {
+                info!(
+                    "submenu_transition_cleanup: submenu changed {:?} -> {:?} but no MenuRoot entities found",
+                    prev, current_submenu
+                );
+            } else {
+                info!(
+                    "submenu_transition_cleanup: despawning {} MenuRoot entity(ies) for transition: {:?} -> {:?}",
+                    entities.len(),
+                    prev,
+                    current_submenu
+                );
+                for entity in entities.iter() {
+                    info!(
+                        "submenu_transition_cleanup: despawning entity {:?} for submenu transition {:?} -> {:?}",
+                        entity, prev, current_submenu
+                    );
+                    despawn_with_children(&mut commands, *entity, &children_query);
+                }
+            }
+        }
+    }
+
+    // Update tracked submenu
+    *previous_submenu = Some(current_submenu);
+}
+
 fn menu_setup(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
     global_state: Res<GlobalState>,
-    existing_menu: Query<&MenuRoot>,
+    existing_menu: Query<Entity, With<MenuRoot>>,
+    children_query: Query<&Children>,
 ) {
     let GameMode::Menu(menu_state) = &global_state.0.mode else {
         return;
     };
 
+    let existing_count = existing_menu.iter().count();
+    info!(
+        "menu_setup called: mode={:?}, current_submenu={:?}, existing_menu_count={}",
+        global_state.0.mode, menu_state.current_submenu, existing_count
+    );
+
     if !existing_menu.is_empty() {
+        info!(
+            "menu_setup: found {} existing MenuRoot entity(ies) - logging details",
+            existing_count
+        );
+
+        // Log each MenuRoot entity and how many Children it has so we can diagnose
+        // stray or partially-initialized UI entities that prevent spawning.
+        for entity in existing_menu.iter() {
+            match children_query.get(entity) {
+                Ok(children) => {
+                    info!(
+                        "menu_setup: existing MenuRoot entity {:?} has {} children",
+                        entity,
+                        children.len()
+                    );
+                }
+                Err(_) => {
+                    info!(
+                        "menu_setup: existing MenuRoot entity {:?} has no Children component",
+                        entity
+                    );
+                }
+            }
+        }
+
+        info!(
+            "menu_setup: skipping spawn due to {} existing MenuRoot entity(ies)",
+            existing_count
+        );
         return;
     }
 
-    let font = asset_server.load("fonts/FiraSans-Bold.ttf");
-
     match menu_state.current_submenu {
-        MenuType::Main => spawn_main_menu(&mut commands, &font, menu_state),
-        MenuType::SaveLoad => spawn_save_load_menu(&mut commands, &font, menu_state),
-        MenuType::Settings => spawn_settings_menu(&mut commands, &font),
+        MenuType::Main => {
+            info!(
+                "menu_setup: spawning Main menu (selected_index={})",
+                menu_state.selected_index
+            );
+            spawn_main_menu(&mut commands, menu_state)
+        }
+        MenuType::SaveLoad => {
+            info!(
+                "menu_setup: spawning Save/Load menu (selected_index={})",
+                menu_state.selected_index
+            );
+            spawn_save_load_menu(&mut commands, menu_state)
+        }
+        MenuType::Settings => {
+            info!("menu_setup: spawning Settings menu");
+            spawn_settings_menu(&mut commands, &global_state.0)
+        }
     }
 }
 
 /// Spawn the main menu UI
-fn spawn_main_menu(commands: &mut Commands, font: &Handle<Font>, menu_state: &MenuState) {
-    let font = font.clone();
-
+fn spawn_main_menu(commands: &mut Commands, menu_state: &MenuState) {
     commands
         .spawn((
             Node {
@@ -108,15 +234,22 @@ fn spawn_main_menu(commands: &mut Commands, font: &Handle<Font>, menu_state: &Me
                 ))
                 .with_children(|panel| {
                     // Title
-                    panel.spawn((
-                        Text::new("GAME MENU"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: TITLE_FONT_SIZE,
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
+                        })
+                        .with_children(|title| {
+                            title.spawn((
+                                Text::new("GAME MENU"),
+                                TextFont {
+                                    font_size: TITLE_FONT_SIZE,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
 
                     // Spacing
                     panel.spawn(Node {
@@ -124,13 +257,14 @@ fn spawn_main_menu(commands: &mut Commands, font: &Handle<Font>, menu_state: &Me
                         ..default()
                     });
 
-                    // Buttons: Resume, Save, Load, Settings, Quit
+                    // Buttons: Resume, New Game, Save, Load, Settings, Quit
                     let buttons = [
                         (MenuButton::Resume, "Resume Game", 0),
-                        (MenuButton::SaveGame, "Save Game", 1),
-                        (MenuButton::LoadGame, "Load Game", 2),
-                        (MenuButton::Settings, "Settings", 3),
-                        (MenuButton::Quit, "Quit Game", 4),
+                        (MenuButton::NewGame, "New Game", 1),
+                        (MenuButton::SaveGame, "Save Game", 2),
+                        (MenuButton::LoadGame, "Load Game", 3),
+                        (MenuButton::Settings, "Settings", 4),
+                        (MenuButton::Quit, "Quit Game", 5),
                     ];
 
                     for (btn_type, btn_text, btn_idx) in &buttons {
@@ -156,27 +290,37 @@ fn spawn_main_menu(commands: &mut Commands, font: &Handle<Font>, menu_state: &Me
                                 *btn_type,
                             ))
                             .with_children(|button_root| {
-                                button_root.spawn((
-                                    Text::new(btn_text.to_string()),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: BUTTON_FONT_SIZE,
+                                button_root
+                                    .spawn(Node {
+                                        width: Val::Auto,
+                                        height: Val::Auto,
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
                                         ..default()
-                                    },
-                                    TextColor(BUTTON_TEXT_COLOR),
-                                ));
+                                    })
+                                    .with_children(|text_wrapper| {
+                                        text_wrapper.spawn((
+                                            Text::new(btn_text.to_string()),
+                                            TextFont {
+                                                font_size: BUTTON_FONT_SIZE,
+                                                ..default()
+                                            },
+                                            TextColor(BUTTON_TEXT_COLOR),
+                                        ));
+                                    });
                             });
                     }
                 });
         });
 
-    info!("Spawned main menu UI");
+    info!(
+        "Spawned main menu UI (selected_index: {}, current_submenu: {:?})",
+        menu_state.selected_index, menu_state.current_submenu
+    );
 }
 
 /// Spawn the save/load menu UI with scrollable save list
-fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state: &MenuState) {
-    let font = font.clone();
-
+fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
     commands
         .spawn((
             Node {
@@ -211,15 +355,22 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state
                 ))
                 .with_children(|panel| {
                     // Title
-                    panel.spawn((
-                        Text::new("SAVE / LOAD GAME"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: TITLE_FONT_SIZE,
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
+                        })
+                        .with_children(|title| {
+                            title.spawn((
+                                Text::new("SAVE / LOAD GAME"),
+                                TextFont {
+                                    font_size: TITLE_FONT_SIZE,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
 
                     // Save list container (scrollable)
                     panel
@@ -234,15 +385,21 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state
                         })
                         .with_children(|list| {
                             if menu_state.save_list.is_empty() {
-                                list.spawn((
-                                    Text::new("No save files found"),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 18.0,
-                                        ..default()
-                                    },
-                                    TextColor(Color::srgb(0.7, 0.7, 0.7)),
-                                ));
+                                list.spawn(Node {
+                                    width: Val::Auto,
+                                    height: Val::Auto,
+                                    ..default()
+                                })
+                                .with_children(|text_wrapper| {
+                                    text_wrapper.spawn((
+                                        Text::new("No save files found"),
+                                        TextFont {
+                                            font_size: 18.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                                    ));
+                                });
                             } else {
                                 for (index, save_info) in menu_state.save_list.iter().enumerate() {
                                     let is_selected = menu_state.selected_index == index;
@@ -267,53 +424,92 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state
                                     ))
                                     .with_children(|slot| {
                                         // Filename
-                                        slot.spawn((
-                                            Text::new(format!("Save: {}", save_info.filename)),
-                                            TextFont {
-                                                font: font.clone(),
-                                                font_size: 16.0,
-                                                ..default()
+                                        slot.spawn(Node {
+                                            width: Val::Auto,
+                                            height: Val::Auto,
+                                            ..default()
+                                        })
+                                        .with_children(
+                                            |text_wrapper| {
+                                                text_wrapper.spawn((
+                                                    Text::new(format!(
+                                                        "Save: {}",
+                                                        save_info.filename
+                                                    )),
+                                                    TextFont {
+                                                        font_size: 16.0,
+                                                        ..default()
+                                                    },
+                                                    TextColor(Color::WHITE),
+                                                ));
                                             },
-                                            TextColor(Color::WHITE),
-                                        ));
+                                        );
 
                                         // Timestamp
-                                        slot.spawn((
-                                            Text::new(format!("Date: {}", save_info.timestamp)),
-                                            TextFont {
-                                                font: font.clone(),
-                                                font_size: 12.0,
-                                                ..default()
+                                        slot.spawn(Node {
+                                            width: Val::Auto,
+                                            height: Val::Auto,
+                                            ..default()
+                                        })
+                                        .with_children(
+                                            |text_wrapper| {
+                                                text_wrapper.spawn((
+                                                    Text::new(format!(
+                                                        "Date: {}",
+                                                        save_info.timestamp
+                                                    )),
+                                                    TextFont {
+                                                        font_size: 12.0,
+                                                        ..default()
+                                                    },
+                                                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                                                ));
                                             },
-                                            TextColor(Color::srgb(0.9, 0.9, 0.9)),
-                                        ));
+                                        );
 
                                         // Party members
                                         if !save_info.character_names.is_empty() {
-                                            slot.spawn((
-                                                Text::new(format!(
-                                                    "Party: {}",
-                                                    save_info.character_names.join(", ")
-                                                )),
-                                                TextFont {
-                                                    font: font.clone(),
-                                                    font_size: 12.0,
-                                                    ..default()
-                                                },
-                                                TextColor(Color::srgb(0.9, 0.9, 0.9)),
-                                            ));
+                                            slot.spawn(Node {
+                                                width: Val::Auto,
+                                                height: Val::Auto,
+                                                ..default()
+                                            })
+                                            .with_children(|text_wrapper| {
+                                                text_wrapper.spawn((
+                                                    Text::new(format!(
+                                                        "Party: {}",
+                                                        save_info.character_names.join(", ")
+                                                    )),
+                                                    TextFont {
+                                                        font_size: 12.0,
+                                                        ..default()
+                                                    },
+                                                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                                                ));
+                                            });
                                         }
 
                                         // Location
-                                        slot.spawn((
-                                            Text::new(format!("Location: {}", save_info.location)),
-                                            TextFont {
-                                                font: font.clone(),
-                                                font_size: 12.0,
-                                                ..default()
+                                        slot.spawn(Node {
+                                            width: Val::Auto,
+                                            height: Val::Auto,
+                                            ..default()
+                                        })
+                                        .with_children(
+                                            |text_wrapper| {
+                                                text_wrapper.spawn((
+                                                    Text::new(format!(
+                                                        "Location: {}",
+                                                        save_info.location
+                                                    )),
+                                                    TextFont {
+                                                        font_size: 12.0,
+                                                        ..default()
+                                                    },
+                                                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                                                ));
                                             },
-                                            TextColor(Color::srgb(0.9, 0.9, 0.9)),
-                                        ));
+                                        );
                                     });
                                 }
                             }
@@ -333,7 +529,7 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state
                                 .spawn((
                                     Button,
                                     Node {
-                                        width: Val::Px(BUTTON_WIDTH - 40.0),
+                                        width: Val::Px(BUTTON_WIDTH / 4.0 - 10.0),
                                         height: Val::Px(BUTTON_HEIGHT),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
@@ -347,8 +543,7 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state
                                     button_root.spawn((
                                         Text::new("Save"),
                                         TextFont {
-                                            font: font.clone(),
-                                            font_size: BUTTON_FONT_SIZE,
+                                            font_size: 18.0,
                                             ..default()
                                         },
                                         TextColor(BUTTON_TEXT_COLOR),
@@ -359,7 +554,7 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state
                                 .spawn((
                                     Button,
                                     Node {
-                                        width: Val::Px(BUTTON_WIDTH - 40.0),
+                                        width: Val::Px(BUTTON_WIDTH / 4.0 - 10.0),
                                         height: Val::Px(BUTTON_HEIGHT),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
@@ -373,8 +568,7 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state
                                     button_root.spawn((
                                         Text::new("Load"),
                                         TextFont {
-                                            font: font.clone(),
-                                            font_size: BUTTON_FONT_SIZE,
+                                            font_size: 18.0,
                                             ..default()
                                         },
                                         TextColor(BUTTON_TEXT_COLOR),
@@ -385,7 +579,32 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state
                                 .spawn((
                                     Button,
                                     Node {
-                                        width: Val::Px(BUTTON_WIDTH - 40.0),
+                                        width: Val::Px(BUTTON_WIDTH / 4.0 - 10.0),
+                                        height: Val::Px(BUTTON_HEIGHT),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(BUTTON_NORMAL_COLOR),
+                                    BorderRadius::all(Val::Px(4.0)),
+                                    MenuButton::DeleteGame,
+                                ))
+                                .with_children(|button_root| {
+                                    button_root.spawn((
+                                        Text::new("Delete"),
+                                        TextFont {
+                                            font_size: 18.0,
+                                            ..default()
+                                        },
+                                        TextColor(BUTTON_TEXT_COLOR),
+                                    ));
+                                });
+
+                            buttons
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Px(BUTTON_WIDTH / 4.0 - 10.0),
                                         height: Val::Px(BUTTON_HEIGHT),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
@@ -399,8 +618,7 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state
                                     button_root.spawn((
                                         Text::new("Back"),
                                         TextFont {
-                                            font: font.clone(),
-                                            font_size: BUTTON_FONT_SIZE,
+                                            font_size: 18.0,
                                             ..default()
                                         },
                                         TextColor(BUTTON_TEXT_COLOR),
@@ -410,13 +628,15 @@ fn spawn_save_load_menu(commands: &mut Commands, font: &Handle<Font>, menu_state
                 });
         });
 
-    info!("Spawned save/load menu UI");
+    info!(
+        "Spawned save/load menu UI (selected_index: {}, saves: {})",
+        menu_state.selected_index,
+        menu_state.save_list.len()
+    );
 }
 
 /// Spawn the settings menu UI with audio sliders and graphics settings (Phase 6)
-fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
-    let font = font.clone();
-
+fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application::GameState) {
     commands
         .spawn((
             Node {
@@ -452,15 +672,22 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                 ))
                 .with_children(|panel| {
                     // Title
-                    panel.spawn((
-                        Text::new("SETTINGS"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: TITLE_FONT_SIZE,
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
+                        })
+                        .with_children(|title| {
+                            title.spawn((
+                                Text::new("SETTINGS"),
+                                TextFont {
+                                    font_size: TITLE_FONT_SIZE,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
 
                     // Audio Settings Section
                     panel.spawn(Node {
@@ -468,26 +695,41 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                         ..default()
                     });
 
-                    panel.spawn((
-                        Text::new("Audio Settings"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 20.0,
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::srgb(0.8, 0.8, 0.5)),
-                    ));
+                        })
+                        .with_children(|text_wrapper| {
+                            text_wrapper.spawn((
+                                Text::new("Audio Settings"),
+                                TextFont {
+                                    font_size: 20.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.8, 0.8, 0.5)),
+                            ));
+                        });
 
                     // Master Volume
-                    panel.spawn((
-                        Text::new("Master Volume: 80%"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
+                    let master_vol = game_state.config.audio.master_volume;
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
+                        })
+                        .with_children(|text_wrapper| {
+                            text_wrapper.spawn((
+                                Text::new(format!("Master Volume: {:.0}%", master_vol * 100.0)),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
                     panel.spawn((
                         Node {
                             width: Val::Percent(95.0),
@@ -498,18 +740,26 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                         BackgroundColor(SLIDER_TRACK_COLOR),
                         BorderRadius::all(Val::Px(4.0)),
                     ));
-                    panel.spawn(SettingSlider::new(VolumeSlider::Master, 0.8));
+                    panel.spawn(SettingSlider::new(VolumeSlider::Master, master_vol));
 
                     // Music Volume
-                    panel.spawn((
-                        Text::new("Music Volume: 60%"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
+                    let music_vol = game_state.config.audio.music_volume;
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
+                        })
+                        .with_children(|text_wrapper| {
+                            text_wrapper.spawn((
+                                Text::new(format!("Music Volume: {:.0}%", music_vol * 100.0)),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
                     panel.spawn((
                         Node {
                             width: Val::Percent(95.0),
@@ -520,18 +770,26 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                         BackgroundColor(SLIDER_TRACK_COLOR),
                         BorderRadius::all(Val::Px(4.0)),
                     ));
-                    panel.spawn(SettingSlider::new(VolumeSlider::Music, 0.6));
+                    panel.spawn(SettingSlider::new(VolumeSlider::Music, music_vol));
 
                     // SFX Volume
-                    panel.spawn((
-                        Text::new("SFX Volume: 100%"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
+                    let sfx_vol = game_state.config.audio.sfx_volume;
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
+                        })
+                        .with_children(|text_wrapper| {
+                            text_wrapper.spawn((
+                                Text::new(format!("SFX Volume: {:.0}%", sfx_vol * 100.0)),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
                     panel.spawn((
                         Node {
                             width: Val::Percent(95.0),
@@ -542,18 +800,26 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                         BackgroundColor(SLIDER_TRACK_COLOR),
                         BorderRadius::all(Val::Px(4.0)),
                     ));
-                    panel.spawn(SettingSlider::new(VolumeSlider::Sfx, 1.0));
+                    panel.spawn(SettingSlider::new(VolumeSlider::Sfx, sfx_vol));
 
                     // Ambient Volume
-                    panel.spawn((
-                        Text::new("Ambient Volume: 50%"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
+                    let ambient_vol = game_state.config.audio.ambient_volume;
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
+                        })
+                        .with_children(|text_wrapper| {
+                            text_wrapper.spawn((
+                                Text::new(format!("Ambient Volume: {:.0}%", ambient_vol * 100.0)),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
                     panel.spawn((
                         Node {
                             width: Val::Percent(95.0),
@@ -564,7 +830,7 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                         BackgroundColor(SLIDER_TRACK_COLOR),
                         BorderRadius::all(Val::Px(4.0)),
                     ));
-                    panel.spawn(SettingSlider::new(VolumeSlider::Ambient, 0.5));
+                    panel.spawn(SettingSlider::new(VolumeSlider::Ambient, ambient_vol));
 
                     // Graphics Settings Section
                     panel.spawn(Node {
@@ -572,45 +838,108 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                         ..default()
                     });
 
-                    panel.spawn((
-                        Text::new("Graphics Settings"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 20.0,
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::srgb(0.8, 0.8, 0.5)),
-                    ));
+                        })
+                        .with_children(|text_wrapper| {
+                            text_wrapper.spawn((
+                                Text::new("Graphics Settings"),
+                                TextFont {
+                                    font_size: 20.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.8, 0.8, 0.5)),
+                            ));
+                        });
 
-                    panel.spawn((
-                        Text::new("Resolution: 1920x1080"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                    ));
+                    let graphics = &game_state.config.graphics;
 
-                    panel.spawn((
-                        Text::new("Fullscreen: Enabled"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                    ));
+                    panel
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Px(BUTTON_WIDTH - 60.0),
+                                height: Val::Px(30.0),
+                                margin: UiRect::vertical(Val::Px(5.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(BUTTON_NORMAL_COLOR),
+                            BorderRadius::all(Val::Px(4.0)),
+                            MenuButton::ToggleFullscreen,
+                        ))
+                        .with_children(|button| {
+                            button.spawn((
+                                Text::new(format!(
+                                    "Fullscreen: {}",
+                                    if graphics.fullscreen { "ON" } else { "OFF" }
+                                )),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
 
-                    panel.spawn((
-                        Text::new("VSync: Enabled"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                    ));
+                    panel
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Px(BUTTON_WIDTH - 60.0),
+                                height: Val::Px(30.0),
+                                margin: UiRect::vertical(Val::Px(5.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(BUTTON_NORMAL_COLOR),
+                            BorderRadius::all(Val::Px(4.0)),
+                            MenuButton::ToggleVSync,
+                        ))
+                        .with_children(|button| {
+                            button.spawn((
+                                Text::new(format!(
+                                    "VSync: {}",
+                                    if graphics.vsync { "ON" } else { "OFF" }
+                                )),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+
+                    panel
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Px(BUTTON_WIDTH - 60.0),
+                                height: Val::Px(30.0),
+                                margin: UiRect::vertical(Val::Px(5.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(BUTTON_NORMAL_COLOR),
+                            BorderRadius::all(Val::Px(4.0)),
+                            MenuButton::CycleShadowQuality,
+                        ))
+                        .with_children(|button| {
+                            button.spawn((
+                                Text::new(format!("Shadow Quality: {:?}", graphics.shadow_quality)),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
 
                     // Controls Section
                     panel.spawn(Node {
@@ -618,55 +947,98 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                         ..default()
                     });
 
-                    panel.spawn((
-                        Text::new("Controls"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 20.0,
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::srgb(0.8, 0.8, 0.5)),
-                    ));
+                        })
+                        .with_children(|text_wrapper| {
+                            text_wrapper.spawn((
+                                Text::new("Controls"),
+                                TextFont {
+                                    font_size: 20.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.8, 0.8, 0.5)),
+                            ));
+                        });
 
-                    panel.spawn((
-                        Text::new("Move: Arrow Keys or WASD"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                    ));
+                    let controls = &game_state.config.controls;
 
-                    panel.spawn((
-                        Text::new("Interact: E"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                    ));
+                        })
+                        .with_children(|text_wrapper| {
+                            text_wrapper.spawn((
+                                Text::new(format!("Move Forward: {:?}", controls.move_forward)),
+                                TextFont {
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            ));
+                        });
 
-                    panel.spawn((
-                        Text::new("Menu: ESC"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                    ));
+                        })
+                        .with_children(|text_wrapper| {
+                            text_wrapper.spawn((
+                                Text::new(format!("Move Back: {:?}", controls.move_back)),
+                                TextFont {
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            ));
+                        });
 
-                    panel.spawn((
-                        Text::new("Up/Down: Arrow Up/Down"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
                             ..default()
-                        },
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                    ));
+                        })
+                        .with_children(|text_wrapper| {
+                            text_wrapper.spawn((
+                                Text::new(format!(
+                                    "Turn Left/Right: {:?}/{:?}",
+                                    controls.turn_left, controls.turn_right
+                                )),
+                                TextFont {
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            ));
+                        });
+
+                    panel
+                        .spawn(Node {
+                            width: Val::Auto,
+                            height: Val::Auto,
+                            ..default()
+                        })
+                        .with_children(|text_wrapper| {
+                            text_wrapper.spawn((
+                                Text::new(format!(
+                                    "Interact/Menu: {:?}/{:?}",
+                                    controls.interact, controls.menu
+                                )),
+                                TextFont {
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            ));
+                        });
 
                     // Action buttons
                     panel
@@ -696,7 +1068,6 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                                     button_root.spawn((
                                         Text::new("Apply"),
                                         TextFont {
-                                            font: font.clone(),
                                             font_size: BUTTON_FONT_SIZE,
                                             ..default()
                                         },
@@ -722,7 +1093,6 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                                     button_root.spawn((
                                         Text::new("Reset"),
                                         TextFont {
-                                            font: font.clone(),
                                             font_size: BUTTON_FONT_SIZE,
                                             ..default()
                                         },
@@ -748,7 +1118,6 @@ fn spawn_settings_menu(commands: &mut Commands, font: &Handle<Font>) {
                                     button_root.spawn((
                                         Text::new("Back"),
                                         TextFont {
-                                            font: font.clone(),
                                             font_size: BUTTON_FONT_SIZE,
                                             ..default()
                                         },
@@ -834,15 +1203,32 @@ fn populate_save_list(mut global_state: ResMut<GlobalState>, save_manager: Res<S
 fn menu_cleanup(
     mut commands: Commands,
     menu_query: Query<Entity, With<MenuRoot>>,
+    children_query: Query<&Children>,
     global_state: Res<GlobalState>,
 ) {
+    let menu_count = menu_query.iter().count();
+    info!(
+        "menu_cleanup called: mode={:?}, menu_root_count={}",
+        global_state.0.mode, menu_count
+    );
+
     if matches!(global_state.0.mode, GameMode::Menu(_)) {
+        info!("menu_cleanup: in Menu mode - skipping cleanup");
+        return;
+    }
+
+    if menu_count == 0 {
+        info!("menu_cleanup: no menu entities to cleanup");
         return;
     }
 
     for entity in menu_query.iter() {
-        commands.entity(entity).despawn();
-        info!("Despawned menu UI");
+        info!(
+            "menu_cleanup: despawning entity {:?} due to mode {:?}",
+            entity, global_state.0.mode
+        );
+        despawn_with_children(&mut commands, entity, &children_query);
+        info!("menu_cleanup: despawned entity {:?}", entity);
     }
 }
 
@@ -865,63 +1251,139 @@ fn handle_button_press(
     global_state: &mut ResMut<GlobalState>,
     save_manager: &Res<SaveGameManager>,
 ) {
-    let GameMode::Menu(menu_state) = &mut global_state.0.mode else {
-        return;
-    };
-
     match button {
         MenuButton::Resume => {
+            let GameMode::Menu(menu_state) = &global_state.0.mode else {
+                return;
+            };
             let resume_mode = menu_state.get_resume_mode();
             info!("Resume pressed, returning to: {:?}", resume_mode);
             global_state.0.mode = resume_mode;
         }
         MenuButton::SaveGame => {
-            info!("Save Game pressed");
-            menu_state.set_submenu(MenuType::SaveLoad);
+            if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
+                info!("Save Game pressed");
+                menu_state.set_submenu(MenuType::SaveLoad);
+            }
         }
         MenuButton::LoadGame => {
-            info!("Load Game pressed");
-            menu_state.set_submenu(MenuType::SaveLoad);
+            if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
+                info!("Load Game pressed");
+                menu_state.set_submenu(MenuType::SaveLoad);
+            }
         }
         MenuButton::Settings => {
-            info!("Settings pressed");
-            menu_state.set_submenu(MenuType::Settings);
+            if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
+                info!("Settings pressed");
+                menu_state.set_submenu(MenuType::Settings);
+            }
         }
         MenuButton::Quit => {
             info!("Quit pressed - exiting");
             std::process::exit(0);
         }
         MenuButton::Back => {
-            info!("Back pressed");
-            menu_state.set_submenu(MenuType::Main);
+            if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
+                info!("Back pressed");
+                menu_state.set_submenu(MenuType::Main);
+            }
         }
         MenuButton::Confirm => {
             info!("Confirm pressed");
-            match menu_state.current_submenu {
-                MenuType::SaveLoad => {
-                    save_game_operation(global_state, save_manager);
+            let submenu = if let GameMode::Menu(menu_state) = &global_state.0.mode {
+                Some(menu_state.current_submenu)
+            } else {
+                None
+            };
+
+            match submenu {
+                Some(MenuType::SaveLoad) => {
+                    // Confirm in SaveLoad means user wants to LOAD the selected save
+                    let filename = if let GameMode::Menu(menu_state) = &global_state.0.mode {
+                        menu_state
+                            .save_list
+                            .get(menu_state.selected_index)
+                            .map(|s| s.filename.clone())
+                    } else {
+                        None
+                    };
+
+                    if let Some(f) = filename {
+                        load_game_operation(global_state, save_manager, &f);
+                    } else {
+                        save_game_operation(global_state, save_manager);
+                    }
                 }
-                MenuType::Settings => {
-                    // Settings will be applied by apply_settings system
-                    menu_state.set_submenu(MenuType::Main);
+                Some(MenuType::Settings) => {
+                    if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
+                        menu_state.set_submenu(MenuType::Main);
+                    }
                 }
                 _ => {}
             }
         }
         MenuButton::SelectSave(index) => {
-            info!("Selected save slot: {}", index);
-            menu_state.selected_index = *index;
+            if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
+                info!("Selected save slot: {}", index);
+                menu_state.selected_index = *index;
+            }
+        }
+        MenuButton::NewGame => {
+            info!("New Game pressed");
+            if let Some(campaign) = global_state.0.campaign.clone() {
+                match crate::application::GameState::new_game(campaign) {
+                    Ok((new_state, _)) => {
+                        global_state.0 = new_state;
+                        info!("Started new game from campaign");
+                    }
+                    Err(e) => {
+                        error!("Failed to start new game: {}", e);
+                    }
+                }
+            } else {
+                warn!("New Game pressed but no active campaign found");
+            }
+        }
+        MenuButton::DeleteGame => {
+            info!("Delete Game pressed");
+            delete_game_operation(global_state, save_manager);
+        }
+        MenuButton::ToggleFullscreen => {
+            global_state.0.config.graphics.fullscreen = !global_state.0.config.graphics.fullscreen;
+            info!(
+                "Fullscreen toggled: {}",
+                global_state.0.config.graphics.fullscreen
+            );
+        }
+        MenuButton::ToggleVSync => {
+            global_state.0.config.graphics.vsync = !global_state.0.config.graphics.vsync;
+            info!("VSync toggled: {}", global_state.0.config.graphics.vsync);
+        }
+        MenuButton::CycleShadowQuality => {
+            use crate::sdk::game_config::ShadowQuality;
+            global_state.0.config.graphics.shadow_quality =
+                match global_state.0.config.graphics.shadow_quality {
+                    ShadowQuality::Low => ShadowQuality::Medium,
+                    ShadowQuality::Medium => ShadowQuality::High,
+                    ShadowQuality::High => ShadowQuality::Ultra,
+                    ShadowQuality::Ultra => ShadowQuality::Low,
+                };
+            info!(
+                "Shadow quality cycled: {:?}",
+                global_state.0.config.graphics.shadow_quality
+            );
         }
         MenuButton::Cancel => {
             info!("Cancel pressed");
-            match menu_state.current_submenu {
-                MenuType::Settings => {
-                    // Reset sliders without applying changes
-                    info!("Settings reset - returning to main menu");
-                    menu_state.set_submenu(MenuType::Main);
-                }
-                _ => {
-                    menu_state.set_submenu(MenuType::Main);
+            if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
+                match menu_state.current_submenu {
+                    MenuType::Settings => {
+                        info!("Settings reset - returning to main menu");
+                        menu_state.set_submenu(MenuType::Main);
+                    }
+                    _ => {
+                        menu_state.set_submenu(MenuType::Main);
+                    }
                 }
             }
         }
@@ -978,6 +1440,31 @@ fn load_game_operation(
     }
 }
 
+/// Delete a save game file
+fn delete_game_operation(
+    global_state: &mut ResMut<GlobalState>,
+    save_manager: &Res<SaveGameManager>,
+) {
+    let GameMode::Menu(menu_state) = &mut global_state.0.mode else {
+        return;
+    };
+
+    if let Some(save_info) = menu_state.save_list.get(menu_state.selected_index) {
+        let filename = save_info.filename.clone();
+        match save_manager.delete(&filename) {
+            Ok(_) => {
+                info!("Game deleted successfully: {}", filename);
+                menu_state.save_list.clear(); // Force repopulation
+            }
+            Err(e) => {
+                error!("Failed to delete game: {}", e);
+            }
+        }
+    } else {
+        warn!("Delete Game pressed but no save selected");
+    }
+}
+
 /// Apply settings changes from sliders to GameConfig
 fn apply_settings(
     slider_query: Query<&SettingSlider, Changed<SettingSlider>>,
@@ -1023,19 +1510,17 @@ fn update_button_colors(
         let button_index = match menu_state.current_submenu {
             MenuType::Main => match button {
                 MenuButton::Resume => Some(0),
-                MenuButton::SaveGame => Some(1),
-                MenuButton::LoadGame => Some(2),
-                MenuButton::Settings => Some(3),
-                MenuButton::Quit => Some(4),
+                MenuButton::NewGame => Some(1),
+                MenuButton::SaveGame => Some(2),
+                MenuButton::LoadGame => Some(3),
+                MenuButton::Settings => Some(4),
+                MenuButton::Quit => Some(5),
                 _ => None,
             },
-            MenuType::SaveLoad => {
-                if let MenuButton::SelectSave(idx) = button {
-                    Some(*idx)
-                } else {
-                    None
-                }
-            }
+            MenuType::SaveLoad => match button {
+                MenuButton::SelectSave(idx) => Some(*idx),
+                _ => None,
+            },
             MenuType::Settings => None,
         };
 
@@ -1087,23 +1572,21 @@ fn handle_menu_keyboard(
         return;
     }
 
-    if keyboard.just_pressed(KeyCode::Escape) {
-        if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
-            let resume = menu_state.get_resume_mode();
-            global_state.0.mode = resume;
-        }
-        return;
-    }
-
     if keyboard.just_pressed(KeyCode::ArrowUp) {
         if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
             menu_state.select_previous(item_count);
         }
-    } else if keyboard.just_pressed(KeyCode::ArrowDown) {
+        return; // Consume arrow key input, don't fall through to other handlers
+    }
+
+    if keyboard.just_pressed(KeyCode::ArrowDown) {
         if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
             menu_state.select_next(item_count);
         }
-    } else if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
+        return; // Consume arrow key input, don't fall through to other handlers
+    }
+
+    if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
         // Handle selection based on current menu state
         match submenu {
             MenuType::Main => match selected_index {

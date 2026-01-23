@@ -82,6 +82,16 @@ pub enum MenuButton {
     Cancel,
     /// Select a save slot by index
     SelectSave(usize),
+    /// Start a new game
+    NewGame,
+    /// Delete a save game
+    DeleteGame,
+    /// Toggle fullscreen mode
+    ToggleFullscreen,
+    /// Toggle VSync
+    ToggleVSync,
+    /// Cycle through shadow quality levels
+    CycleShadowQuality,
 }
 
 /// Volume slider identifiers.

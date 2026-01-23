@@ -384,6 +384,23 @@ impl SaveGameManager {
     fn save_path(&self, name: &str) -> PathBuf {
         self.saves_dir.join(format!("{}.ron", name))
     }
+
+    /// Deletes a save game file
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Save file name (without extension)
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if deletion succeeded
+    pub fn delete(&self, name: &str) -> Result<(), SaveGameError> {
+        let path = self.save_path(name);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -460,6 +477,7 @@ mod tests {
                 music: "music".to_string(),
                 sounds: "sounds".to_string(),
                 images: "images".to_string(),
+                fonts: "fonts".to_string(),
             },
             root_path: PathBuf::from("test_campaign"),
             game_config: crate::sdk::game_config::GameConfig::default(),
