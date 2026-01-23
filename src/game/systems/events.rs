@@ -83,7 +83,7 @@ fn handle_events(
     mut simple_dialogue_writer: MessageWriter<SimpleDialogue>,
     content: Res<GameContent>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
-    mut global_state: ResMut<GlobalState>,
+    global_state: ResMut<GlobalState>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
     // Fallback query to find a visual event/tile marker at the same TileCoord when an NPC marker is absent.
     // We exclude NpcMarker here to avoid duplicating NPC matches.
@@ -330,18 +330,42 @@ fn handle_events(
                     log.add(msg);
                 }
 
-                // Transition GameMode to InnManagement
-                use crate::application::{GameMode, InnManagementState};
-                global_state.0.mode = GameMode::InnManagement(InnManagementState {
-                    current_inn_id: innkeeper_id.clone(),
-                    selected_party_slot: None,
-                    selected_roster_slot: None,
-                });
+                // Find innkeeper NPC and trigger dialogue if available
+                if let Some(npc_def) = content.db().npcs.get_npc(innkeeper_id) {
+                    if let Some(dialogue_id) = npc_def.dialogue_id {
+                        // Find NPC entity in the world for visuals (optional)
+                        let speaker_entity = npc_query
+                            .iter()
+                            .find(|(_, marker, _)| marker.npc_id == *innkeeper_id)
+                            .map(|(entity, _, _)| entity);
 
-                let inn_msg = format!("Entering inn (ID: {})", innkeeper_id);
-                println!("{}", inn_msg);
-                if let Some(ref mut log) = game_log {
-                    log.add(inn_msg);
+                        // Trigger innkeeper dialogue instead of auto-opening management UI
+                        dialogue_writer.write(StartDialogue {
+                            dialogue_id,
+                            speaker_entity,
+                            fallback_position: Some(trigger.position),
+                        });
+
+                        if let Some(ref mut log) = game_log {
+                            log.add(format!("Speaking with {}...", npc_def.name));
+                        }
+                    } else {
+                        // Error: Innkeepers must have a dialogue configured
+                        error!("Innkeeper '{}' has no dialogue_id. All innkeepers must have dialogue configured.", innkeeper_id);
+                        if let Some(ref mut log) = game_log {
+                            log.add(format!(
+                                "Error: Innkeeper '{}' is not properly configured",
+                                npc_def.name
+                            ));
+                        }
+                    }
+                } else {
+                    // NPC definition not found
+                    let err = format!("Error: Innkeeper '{}' not found in database", innkeeper_id);
+                    println!("{}", err);
+                    if let Some(ref mut log) = game_log {
+                        log.add(err);
+                    }
                 }
             }
         }
@@ -726,6 +750,7 @@ mod tests {
                 101,
                 1,
                 Some(event_pos),
+                None,
             ));
         }
         // Run one update to let dialogue UI spawn
@@ -793,8 +818,8 @@ mod tests {
     }
 
     #[test]
-    fn test_enter_inn_event_transitions_to_inn_management_mode() {
-        use crate::application::GameMode;
+    fn test_enter_inn_event_triggers_innkeeper_dialogue() {
+        use crate::domain::world::NpcDefinition;
         use crate::game::systems::ui::GameLog;
 
         // Arrange
@@ -821,56 +846,61 @@ mod tests {
         game_state.world.set_current_map(1);
         game_state.world.set_party_position(event_pos);
         // Start in Exploration mode
-        game_state.mode = GameMode::Exploration;
+        game_state.mode = crate::application::GameMode::Exploration;
+
+        // Prepare the content DB with a matching NPC that has a dialogue
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let npc = NpcDefinition {
+            id: "cozy_inn".to_string(),
+            name: "Cozy Innkeeper".to_string(),
+            description: "The inn's proprietor".to_string(),
+            portrait_id: "portraits/inn.png".to_string(),
+            dialogue_id: Some(1u16),
+            quest_ids: vec![],
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: true,
+        };
+        db.npcs.add_npc(npc).unwrap();
+
+        // Add a minimal dialogue so StartDialogue makes sense
+        let mut tree = crate::domain::dialogue::DialogueTree::new(1, "Inn Dialogue".to_string(), 1);
+        let node = crate::domain::dialogue::DialogueNode::new(1, "Welcome!");
+        tree.add_node(node);
+        db.dialogues.add_dialogue(tree);
 
         app.insert_resource(GlobalState(game_state));
-        app.insert_resource(GameContent::new(
-            crate::sdk::database::ContentDatabase::new(),
-        ));
+        app.insert_resource(GameContent::new(db));
         app.insert_resource(GameLog::new());
 
         // Act
         app.update(); // First update: check_for_events writes MapEventTriggered
-        app.update(); // Second update: handle_events processes MapEventTriggered and transitions mode
+        app.update(); // Second update: handle_events processes MapEventTriggered and should write StartDialogue
 
-        // Assert - GameMode should be InnManagement with correct inn_id
-        let global_state = app.world().resource::<GlobalState>();
-        match &global_state.0.mode {
-            GameMode::InnManagement(state) => {
-                assert_eq!(
-                    state.current_inn_id,
-                    "cozy_inn".to_string(),
-                    "Expected innkeeper id to be 'cozy_inn'"
-                );
-                assert_eq!(
-                    state.selected_party_slot, None,
-                    "Expected no selected party slot initially"
-                );
-                assert_eq!(
-                    state.selected_roster_slot, None,
-                    "Expected no selected roster slot initially"
-                );
-            }
-            other_mode => panic!("Expected GameMode::InnManagement, but got {:?}", other_mode),
-        }
+        // Assert - StartDialogue message should be sent
+        let dialogue_messages = app.world().resource::<Messages<StartDialogue>>();
+        let mut reader = dialogue_messages.get_cursor();
+        let messages: Vec<_> = reader.read(dialogue_messages).collect();
+        assert_eq!(messages.len(), 1, "Expected StartDialogue message");
+        assert_eq!(messages[0].dialogue_id, 1u16);
 
-        // Assert - GameLog should contain inn entry message
+        // Assert - GameLog should contain 'Speaking with' message
         let game_log = app.world().resource::<GameLog>();
         let entries = game_log.entries();
         assert!(
             entries
                 .iter()
-                .any(|e| e.contains("Entering inn (ID: cozy_inn)")),
-            "Expected inn entry message in game log. Actual entries: {:?}",
+                .any(|e| e.contains("Speaking with Cozy Innkeeper")),
+            "Expected 'Speaking with' message in game log. Actual entries: {:?}",
             entries
         );
     }
 
     #[test]
-    fn test_enter_inn_event_with_different_inn_ids() {
-        use crate::application::GameMode;
+    fn test_enter_inn_event_triggers_dialogue_for_different_inn_ids() {
+        use crate::domain::world::NpcDefinition;
 
-        // Test that different inn_ids are correctly set in InnManagementState
+        // Arrange
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_message::<MapChangeEvent>();
@@ -893,28 +923,157 @@ mod tests {
         game_state.world.add_map(map);
         game_state.world.set_current_map(1);
         game_state.world.set_party_position(event_pos);
-        game_state.mode = GameMode::Exploration;
+        game_state.mode = crate::application::GameMode::Exploration;
+
+        // Prepare DB with NPC for tutorial_innkeeper_town2 that references dialogue id 9
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let npc = NpcDefinition {
+            id: "tutorial_innkeeper_town2".to_string(),
+            name: "Mountain Innkeeper".to_string(),
+            description: "The innkeeper at the mountain pass".to_string(),
+            portrait_id: "portraits/inn_mountain.png".to_string(),
+            dialogue_id: Some(9u16),
+            quest_ids: vec![],
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: true,
+        };
+        db.npcs.add_npc(npc).unwrap();
+
+        // Add a minimal dialogue with id 9 so StartDialogue is meaningful
+        let mut tree =
+            crate::domain::dialogue::DialogueTree::new(9, "Mountain Inn Dialogue".to_string(), 1);
+        tree.add_node(crate::domain::dialogue::DialogueNode::new(
+            1,
+            "Welcome to the Mountain Rest Inn!",
+        ));
+        db.dialogues.add_dialogue(tree);
 
         app.insert_resource(GlobalState(game_state));
-        app.insert_resource(GameContent::new(
-            crate::sdk::database::ContentDatabase::new(),
-        ));
+        app.insert_resource(GameContent::new(db));
 
         // Act
-        app.update();
+        app.update(); // check_for_events -> MapEventTriggered
+        app.update(); // handle_events -> StartDialogue
+
+        // Assert - StartDialogue message was sent with the expected dialogue id
+        let dialogue_messages = app.world().resource::<Messages<StartDialogue>>();
+        let mut reader = dialogue_messages.get_cursor();
+        let messages: Vec<_> = reader.read(dialogue_messages).collect();
+        assert_eq!(messages.len(), 1, "Expected StartDialogue message");
+        assert_eq!(messages[0].dialogue_id, 9u16);
+    }
+
+    #[test]
+    fn test_enter_inn_dialogue_choice_opens_inn_management() {
+        use crate::domain::dialogue::{DialogueAction, DialogueChoice, DialogueNode, DialogueTree};
+        use crate::domain::world::NpcDefinition;
+        use crate::game::systems::dialogue::SelectDialogueChoice;
+        use crate::game::systems::ui::GameLog;
+
+        // Arrange - Set up app with Event and Dialogue plugins
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_message::<SelectDialogueChoice>();
+        app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(EventPlugin);
+        app.add_plugins(crate::game::systems::dialogue::DialoguePlugin);
+
+        // Create map with EnterInn event
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let event_pos = Position::new(7, 7);
+        map.add_event(
+            event_pos,
+            MapEvent::EnterInn {
+                name: "Test Inn".to_string(),
+                description: "A test inn".to_string(),
+                innkeeper_id: "test_innkeeper".to_string(),
+            },
+        );
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+        game_state.mode = crate::application::GameMode::Exploration;
+
+        // Prepare DB with NPC and dialogue that contains an OpenInnManagement action
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        db.npcs
+            .add_npc(NpcDefinition {
+                id: "test_innkeeper".to_string(),
+                name: "Test Innkeeper".to_string(),
+                description: "Keeper".to_string(),
+                portrait_id: "portraits/inn_test.png".to_string(),
+                dialogue_id: Some(100u16),
+                quest_ids: vec![],
+                faction: None,
+                is_merchant: false,
+                is_innkeeper: true,
+            })
+            .unwrap();
+
+        // Build dialogue 100 with root -> node2 where node2 has OpenInnManagement action
+        let mut tree = DialogueTree::new(100, "Test Inn Dialogue".to_string(), 1);
+        let mut root = DialogueNode::new(1, "Welcome!");
+        root.add_choice(DialogueChoice::new("Manage your party", Some(2)));
+        tree.add_node(root);
+        let mut node2 = DialogueNode::new(2, "Let me help you manage your party.");
+        node2.add_action(DialogueAction::OpenInnManagement {
+            innkeeper_id: "test_innkeeper".to_string(),
+        });
+        node2.is_terminal = true;
+        tree.add_node(node2);
+        db.dialogues.add_dialogue(tree);
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GameLog::new());
+        app.init_resource::<crate::game::components::dialogue::ActiveDialogueUI>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        // Act - trigger EnterInn event via the spawn systems
+        app.update(); // check_for_events -> MapEventTriggered
+        app.update(); // handle_events -> StartDialogue & DialoguePlugin -> DialogueState created
+
+        // Ensure we're in Dialogue mode and at the root node
+        {
+            let gs = app.world().resource::<GlobalState>();
+            match &gs.0.mode {
+                crate::application::GameMode::Dialogue(ds) => {
+                    assert_eq!(ds.active_tree_id, Some(100u16));
+                    assert_eq!(ds.current_node_id, 1);
+                }
+                other => panic!(
+                    "Expected Dialogue mode after StartDialogue, got {:?}",
+                    other
+                ),
+            }
+        }
+
+        // Send SelectDialogueChoice message (choose index 0)
+        {
+            let mut messages = app
+                .world_mut()
+                .resource_mut::<Messages<SelectDialogueChoice>>();
+            messages.write(SelectDialogueChoice { choice_index: 0 });
+        }
+
+        // Process choice which should execute OpenInnManagement and change mode
         app.update();
 
-        // Assert
-        let global_state = app.world().resource::<GlobalState>();
-        match &global_state.0.mode {
-            GameMode::InnManagement(state) => {
-                assert_eq!(
-                    state.current_inn_id,
-                    "tutorial_innkeeper_town2".to_string(),
-                    "Expected innkeeper id to be 'tutorial_innkeeper_town2'"
-                );
+        // Assert - we transitioned to InnManagement and the inn id is correct
+        let gs = app.world().resource::<GlobalState>();
+        match &gs.0.mode {
+            crate::application::GameMode::InnManagement(state) => {
+                assert_eq!(state.current_inn_id, "test_innkeeper".to_string());
             }
-            other_mode => panic!("Expected GameMode::InnManagement, but got {:?}", other_mode),
+            other => panic!(
+                "Expected InnManagement mode after choosing manage option, got {:?}",
+                other
+            ),
         }
     }
 }

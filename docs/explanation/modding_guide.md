@@ -81,6 +81,7 @@ MapId = u32
 ```
 
 **Rules**:
+
 - IDs must be unique within their type
 - IDs can be any positive integer
 - Use consistent numbering schemes (e.g., weapons 1-100, armor 101-200)
@@ -96,6 +97,7 @@ disablements: Disablement(5)  // 5 = 1 + 4 (binary: 0101)
 ```
 
 **Bitfield Values**:
+
 - Bit 0 (value 1): Class 1 (e.g., Knight)
 - Bit 1 (value 2): Class 2 (e.g., Mage)
 - Bit 2 (value 4): Class 3 (e.g., Cleric)
@@ -103,10 +105,12 @@ disablements: Disablement(5)  // 5 = 1 + 4 (binary: 0101)
 - etc.
 
 **Special Cases**:
+
 - `Disablement(0)`: All classes can use
 - `Disablement(255)`: No classes can use (quest items)
 
 **Combining Restrictions**:
+
 ```ron
 // Knight (1) + Cleric (4) = 5
 disablements: Disablement(5)
@@ -179,7 +183,7 @@ Each content type has its own RON file:
 
 **spells.ron**: HashMap of SpellId → Spell
 
-**maps/*.ron**: Individual map files (one per map)
+**maps/\*.ron**: Individual map files (one per map)
 
 ---
 
@@ -221,6 +225,7 @@ Design items in tiers that match player progression:
 ```
 
 **Benefits**:
+
 - Players feel progression
 - Older items remain useful (sell value, backups)
 - Easy to balance
@@ -274,6 +279,7 @@ Cursed or high-risk items with powerful effects:
 ```
 
 **Use Cases**:
+
 - High damage but lowers defense
 - Powerful spell effects but drains HP
 - Stat boosts but character conditions
@@ -344,6 +350,7 @@ events: [
 ```
 
 **Pacing Principles**:
+
 - Start easy, ramp up gradually
 - Mix combat with treasure and dialogue
 - Save hardest encounters for end
@@ -378,6 +385,91 @@ events: [
     ),
 ]
 ```
+
+## Creating Innkeepers
+
+When creating an innkeeper NPC, follow these steps to ensure the NPC integrates correctly with the inn/party-management systems:
+
+1. Define the NPC in `data/npcs.ron` with `is_innkeeper: true`. For example:
+
+```ron
+(
+    id: "your_innkeeper_id",
+    name: "Your Innkeeper Name",
+    portrait_id: "portrait_asset",
+    dialogue_id: Some(999),  // reference to a dialogue tree
+    is_innkeeper: true,
+    is_merchant: false,
+)
+```
+
+2. Create a dialogue in `data/dialogues.ron` that offers the player a party-management option. You can either:
+
+   - Add a choice that executes `OpenInnManagement { innkeeper_id: "your_innkeeper_id" }`, or
+   - Add a terminal node that triggers `TriggerEvent(event_name: "open_inn_party_management")`. When using `TriggerEvent`, ensure the dialogue is started with the innkeeper as the speaker so the runtime can resolve the correct innkeeper ID.
+
+3. Example (simple template):
+
+```ron
+(
+    id: 999,
+    name: "Default Innkeeper Greeting",
+    root_node: 1,
+    nodes: {
+        1: (
+            id: 1,
+            text: "Welcome to my establishment! What can I do for you?",
+            speaker_override: None,
+            choices: [
+                (
+                    text: "I need to manage my party.",
+                    target_node: Some(2),
+                    conditions: [],
+                    actions: [],
+                    ends_dialogue: false,
+                ),
+                (
+                    text: "Nothing right now. Farewell.",
+                    target_node: None,
+                    conditions: [],
+                    actions: [],
+                    ends_dialogue: true,
+                ),
+            ],
+            conditions: [],
+            actions: [],
+            is_terminal: false,
+        ),
+        2: (
+            id: 2,
+            text: "Certainly! Let me help you organize your party.",
+            speaker_override: None,
+            choices: [],
+            conditions: [],
+            actions: [
+                TriggerEvent(
+                    event_name: "open_inn_party_management",
+                ),
+            ],
+            is_terminal: true,
+        ),
+    },
+    speaker_name: Some("Innkeeper"),
+    repeatable: true,
+    associated_quest: None,
+),
+```
+
+4. Finally, reference the dialogue from your NPC definition:
+
+```ron
+dialogue_id: Some(999)
+```
+
+Validation notes:
+
+- The SDK validator checks that every `is_innkeeper: true` NPC has a `dialogue_id` configured. Use `cargo run --bin campaign_validator -- <campaign_path>` to validate your campaign before packaging.
+- The validator will flag missing dialogue IDs as errors.
 
 ---
 
@@ -488,6 +580,7 @@ exits: [
 ```
 
 **Map Connectivity Rules**:
+
 - Every map must be reachable from starting map
 - Provide return paths (players shouldn't get stuck)
 - Use directional exits for immersion
@@ -499,11 +592,13 @@ exits: [
 ### Character Balance
 
 **Class Balance**:
+
 - Pure casters: Low HP (d6), high spell damage
 - Hybrids: Medium HP (d8), some spells
 - Pure fighters: High HP (d10-d12), high physical damage
 
 **Race Balance**:
+
 - Total stat modifiers should sum to +2 to +4
 - Negative modifiers balance positive ones
 - Special abilities count as +1 to +2 stat points
@@ -511,22 +606,26 @@ exits: [
 ### Item Balance
 
 **Weapon Damage by Tier**:
+
 - Tier 1 (levels 1-3): 1d4 to 1d6
 - Tier 2 (levels 4-6): 1d8 to 2d4
 - Tier 3 (levels 7-10): 2d6 to 2d8
 - Tier 4 (levels 11+): 2d10 to 4d6
 
 **Armor AC by Tier**:
+
 - Light armor: +1 to +3
 - Medium armor: +4 to +6
 - Heavy armor: +7 to +10
 
 **Item Value Formula**:
+
 ```
 Value = Base + (Damage × 10) + (AC × 15) + (Bonus × 20)
 ```
 
 **Example**:
+
 ```
 Longsword: 1d8 damage
 Base: 50 gold
@@ -537,11 +636,13 @@ Total: 130 gold
 ### Monster Balance
 
 **XP Award Formula**:
+
 ```
 XP = (Level × 50) + (AC × 10) + (HP Average × 5) + (Special Attacks × 50)
 ```
 
 **Example**:
+
 ```
 Goblin Shaman (Level 3, AC 12, HP 3d6 avg 10, 1 special attack)
 XP = (3 × 50) + (12 × 10) + (10 × 5) + (1 × 50)
@@ -549,6 +650,7 @@ XP = 150 + 120 + 50 + 50 = 370
 ```
 
 **Loot Drop Rate**:
+
 - Common enemies: 25-50% chance
 - Elite enemies: 50-75% chance
 - Bosses: 100% chance + bonus loot
@@ -556,6 +658,7 @@ XP = 150 + 120 + 50 + 50 = 370
 ### Spell Balance
 
 **SP Cost Formula**:
+
 ```
 SP Cost = (Spell Level × 5) + Target Multiplier
 
@@ -567,6 +670,7 @@ Target Multipliers:
 ```
 
 **Damage Scaling**:
+
 - Level 1: 1d6 to 1d8
 - Level 2: 2d6 to 2d8
 - Level 3: 3d6 to 3d8
@@ -575,6 +679,7 @@ Target Multipliers:
 ### Encounter Balance
 
 **Combat Difficulty**:
+
 ```
 Party Power = (Average Party Level) × (Party Size) × 100
 
@@ -585,6 +690,7 @@ Boss Encounter: 200% of Party Power
 ```
 
 **Example**:
+
 ```
 Party: 4 characters, average level 5
 Party Power = 5 × 4 × 100 = 2000
@@ -601,6 +707,7 @@ Or: 2 × Ogres (1000 XP each)
 ### Map Size
 
 **Recommendations**:
+
 - Small maps: 10×10 to 20×20
 - Medium maps: 30×30 to 50×50
 - Large maps: 60×60 to 100×100
@@ -611,6 +718,7 @@ Or: 2 × Ogres (1000 XP each)
 ### Event Density
 
 **Guidelines**:
+
 - 1 event per 10-20 tiles (sparse)
 - 1 event per 5-10 tiles (moderate)
 - 1 event per 2-5 tiles (dense)
@@ -620,6 +728,7 @@ Or: 2 × Ogres (1000 XP each)
 ### Content Database Size
 
 **Recommendations**:
+
 - Items: 100-500 per campaign
 - Monsters: 50-200 per campaign
 - Spells: 30-100 per campaign
@@ -630,6 +739,7 @@ Or: 2 × Ogres (1000 XP each)
 ### RON File Optimization
 
 **Tips**:
+
 - Use consistent indentation (2 or 4 spaces)
 - Remove unnecessary whitespace in production
 - Split large data files by category

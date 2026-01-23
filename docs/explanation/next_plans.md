@@ -30,6 +30,8 @@ Dialog Editor Node Editing needs a scroll bar.
 
 ### Map Editor NPC
 
+Campaign Builder --> Map Editor --> Select Map --> Edit
+
 NPCs placed on the map are not editable. Selecting an NPC on the map does not bring up the NPC editor. It should bring up the NPC editor with the selected NPC's data loaded.
 
 ### NPC Editor
@@ -38,11 +40,15 @@ Campaign Builder --> Dialogue Editor --> Edit
 
 The edit NPC editor does not save changes to the NPC. It should save the NPC to the campaign data.
 
+✅ COMPLETED
+
 ### Quest Editor
 
 Campaign Builder --> Quest Editor --> Edit
 
 The rewards section and ojectives section of the editor run off the edge of the window and is not scrollable. It should fit the window and scale as it does and be scrollable so that all rewards can be seen and edited.
+
+✅ COMPLETED
 
 ### Map Editor Events
 
@@ -107,7 +113,7 @@ Unable to create new nodes makes it impossible to create dialog trees.
 
 ### Procedural Meshes Implementation
 
-[procedural meshes implementation](./procedural_meshes_implementation_plan.md)
+✅ COMPLETED - [procedural meshes implementation](./procedural_meshes_implementation_plan.md)
 
 ### InnKeeper Party management
 
