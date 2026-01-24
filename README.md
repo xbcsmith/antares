@@ -24,6 +24,7 @@ Antares is a modern implementation of classic grid-based dungeon crawling RPGs, 
 - **Equipment System**: Weapons, armor, and items with class restrictions
 - **Quest System**: Track objectives, progress, and rewards
 - **Dialogue System**: Interactive NPC conversations with visual bubbles and choices
+- **In-game Menu System**: Save/load games, configure settings, pause and resume gameplay
 - **Save/Load**: Campaign progress persistence
 
 ### Dialogue System
@@ -36,6 +37,16 @@ Antares is a modern implementation of classic grid-based dungeon crawling RPGs, 
 - **RON Data Format**: Easy-to-edit dialogue content in Rusty Object Notation
 
 See `docs/tutorials/dialogue_system_usage.md` for complete usage guide and examples.
+
+### Game Menu System
+
+- **In-Game Menu**: Press ESC to pause and access menu (works during exploration, combat, and dialogue)
+- **Save/Load**: Create timestamped save files and restore previous game state
+- **Settings Configuration**: Adjust audio volumes (Master, Music, SFX, Ambient)
+- **Resume Gameplay**: Return to exact point you left off, preserving all game state
+- **Quick Access**: Main menu with Resume, Save, Load, Settings, and Quit options
+
+See `docs/how-to/using_game_menu.md` for complete usage guide.
 
 ### Campaign System
 
@@ -54,6 +65,29 @@ Each campaign can customize game settings via `config.ron`:
 - **Camera**: Mode (FirstPerson/Tactical/Isometric), FOV, lighting, shadows
 
 See `campaigns/config.template.ron` for a comprehensive template with examples.
+
+## Keyboard Controls
+
+### Gameplay
+
+| Key | Action          |
+| --- | --------------- |
+| W   | Move forward    |
+| A   | Turn left       |
+| D   | Turn right      |
+| E   | Interact/Use    |
+| ESC | Open/Close menu |
+
+### Menu Navigation
+
+| Key        | Action                   |
+| ---------- | ------------------------ |
+| Up Arrow   | Select previous option   |
+| Down Arrow | Select next option       |
+| Enter      | Confirm selection        |
+| Space      | Confirm selection        |
+| Backspace  | Go back to previous menu |
+| ESC        | Resume gameplay (Resume) |
 
 ## Getting Started
 
@@ -238,6 +272,7 @@ cargo nextest run --all-features
 - ✅ Phase 4: Graphics Configuration
 - ✅ Phase 5: Audio System Foundation
 - ✅ Phase 6: Tutorial Campaign Configuration
+- ✅ Phase 7: Game Menu System (Save/Load/Settings/Resume)
 
 ### Upcoming
 

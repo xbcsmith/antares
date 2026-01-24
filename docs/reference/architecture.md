@@ -148,7 +148,7 @@ src/
 #### 3.3 Layer Architecture Details
 
 **Domain Layer** (`src/domain/`)
-*Purpose*: Pure game logic and data structures, independent of infrastructure concerns
+_Purpose_: Pure game logic and data structures, independent of infrastructure concerns
 
 - **Character System**: Complete character management with AttributePair pattern for stats
 - **Item System**: Comprehensive item types with proficiency-based restrictions
@@ -159,7 +159,7 @@ src/
 - **Resource Systems**: Party-wide resource management (gold, gems, food, light)
 
 **Application Layer** (`src/application/`)
-*Purpose*: Game state management and orchestration between systems
+_Purpose_: Game state management and orchestration between systems
 
 - **GameState**: Main game state container with mode transitions
 - **Campaign Loading**: Campaign system with content override support
@@ -167,14 +167,14 @@ src/
 - **Party Management**: Roster vs party operations with character location tracking
 
 **Game Layer** (`src/game/`)
-*Purpose*: Bevy ECS components and systems for rendering and interaction
+_Purpose_: Bevy ECS components and systems for rendering and interaction
 
 - **Components**: Bevy components for dialogue and game entities
 - **Systems**: Audio, camera, dialogue visualization, UI rendering
 - **Resources**: Bevy resources for managing game state in ECS world
 
 **SDK Layer** (`src/sdk/`)
-*Purpose*: Content creation, validation, and development tools
+_Purpose_: Content creation, validation, and development tools
 
 - **Content Database**: Unified loading and caching of all game content
 - **Validation System**: Cross-reference validation for data integrity
@@ -184,18 +184,21 @@ src/
 #### 3.4 Key Architectural Patterns
 
 **Bevy ECS Integration**
+
 - Domain logic remains pure functions, separate from ECS
 - Game layer provides Bevy component wrappers for domain types
 - Systems handle rendering, input, and audio while domain handles game logic
 - Clean separation prevents game logic from depending on rendering concerns
 
 **Campaign System**
+
 - Base game data in `data/` directory (items, spells, monsters, etc.)
 - Campaigns can override any data file with campaign-specific versions
 - Campaign metadata includes configuration and starting conditions
 - Support for multiple simultaneous campaigns with different content
 
 **Content Creation SDK**
+
 - All game content defined in RON format for easy editing
 - Comprehensive validation tools prevent data corruption
 - Editor tools for all major content types
@@ -1412,6 +1415,7 @@ pub enum CampaignError {
 - **Mod Support**: Easy mod creation and distribution
 
 **Campaign Structure:**
+
 ```
 campaigns/
 └── tutorial/
@@ -1428,24 +1432,23 @@ campaigns/
     └── README.md            # Campaign documentation
 ```
 
-/// Cardinal directions
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Cardinal directions #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
-    North,
-    East,
-    South,
-    West,
+North,
+East,
+South,
+West,
 }
 
 impl Direction {
-    pub fn turn_left(&self) -> Direction {
-        match self {
-            Direction::North => Direction::West,
-            Direction::West => Direction::South,
-            Direction::South => Direction::East,
-            Direction::East => Direction::North,
-        }
-    }
+pub fn turn_left(&self) -> Direction {
+match self {
+Direction::North => Direction::West,
+Direction::West => Direction::South,
+Direction::South => Direction::East,
+Direction::East => Direction::North,
+}
+}
 
     pub fn turn_right(&self) -> Direction {
         match self {
@@ -1464,20 +1467,20 @@ impl Direction {
             Direction::West => Position { x: pos.x - 1, y: pos.y },
         }
     }
+
 }
 
-/// Dice roll specification (e.g., 2d6+3)
-#[derive(Debug, Clone, Copy)]
+/// Dice roll specification (e.g., 2d6+3) #[derive(Debug, Clone, Copy)]
 pub struct DiceRoll {
-    pub count: u8,   // Number of dice
-    pub sides: u8,   // Die size (d4, d6, d8, d10, d12, d20)
-    pub bonus: i8,   // Fixed bonus/penalty
+pub count: u8, // Number of dice
+pub sides: u8, // Die size (d4, d6, d8, d10, d12, d20)
+pub bonus: i8, // Fixed bonus/penalty
 }
 
 impl DiceRoll {
-    pub fn new(count: u8, sides: u8, bonus: i8) -> Self {
-        Self { count, sides, bonus }
-    }
+pub fn new(count: u8, sides: u8, bonus: i8) -> Self {
+Self { count, sides, bonus }
+}
 
     pub fn roll(&self, rng: &mut impl rand::Rng) -> i32 {
         let mut total = self.bonus as i32;
@@ -1486,20 +1489,21 @@ impl DiceRoll {
         }
         total.max(0)
     }
+
 }
 
 /// Game time tracking
 pub struct GameTime {
-    pub day: u32,
-    pub hour: u8,     // 0-23
-    pub minute: u8,   // 0-59
+pub day: u32,
+pub hour: u8, // 0-23
+pub minute: u8, // 0-59
 }
 
 impl GameTime {
-    pub fn advance_minutes(&mut self, minutes: u32) {
-        self.minute += (minutes % 60) as u8;
-        let hours = minutes / 60 + (self.minute / 60) as u32;
-        self.minute %= 60;
+pub fn advance_minutes(&mut self, minutes: u32) {
+self.minute += (minutes % 60) as u8;
+let hours = minutes / 60 + (self.minute / 60) as u32;
+self.minute %= 60;
 
         self.hour += (hours % 24) as u8;
         let days = hours / 24 + (self.hour / 24) as u32;
@@ -1507,117 +1511,116 @@ impl GameTime {
 
         self.day += days;
     }
+
 }
 
 /// Quest log tracking
 pub struct QuestLog {
-    pub active_quests: Vec<Quest>,
-    pub completed_quests: Vec<QuestId>,
+pub active_quests: Vec<Quest>,
+pub completed_quests: Vec<QuestId>,
 }
 
 pub struct Quest {
-    pub id: QuestId,
-    pub name: String,
-    pub description: String,
-    pub objectives: Vec<QuestObjective>,
+pub id: QuestId,
+pub name: String,
+pub description: String,
+pub objectives: Vec<QuestObjective>,
 }
 
 pub struct QuestObjective {
-    pub description: String,
-    pub completed: bool,
+pub description: String,
+pub completed: bool,
 }
 
 pub type QuestId = String;
 
 /// Loot table for monsters
 pub struct LootTable {
-    pub gold: (u32, u32),                    // Min/max gold
-    pub gems: Option<(u8, u8)>,              // Min/max gems (if any)
-    pub items: Vec<(f32, ItemId)>,           // (probability, item_id)
-    pub experience: u32,                     // Base XP value
+pub gold: (u32, u32), // Min/max gold
+pub gems: Option<(u8, u8)>, // Min/max gems (if any)
+pub items: Vec<(f32, ItemId)>, // (probability, item_id)
+pub experience: u32, // Base XP value
 }
 
 /// Attack definition for monsters
 pub struct Attack {
-    pub damage: DiceRoll,
-    pub attack_type: AttackType,
-    pub special_effect: Option<SpecialEffect>,
+pub damage: DiceRoll,
+pub attack_type: AttackType,
+pub special_effect: Option<SpecialEffect>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttackType {
-    Physical,
-    Fire,
-    Cold,
-    Electricity,
-    Acid,
-    Poison,
-    Energy,
+Physical,
+Fire,
+Cold,
+Electricity,
+Acid,
+Poison,
+Energy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpecialEffect {
-    Poison,
-    Disease,
-    Paralysis,
-    Sleep,
-    Drain,      // Level/stat drain
-    Stone,
-    Death,
+Poison,
+Disease,
+Paralysis,
+Sleep,
+Drain, // Level/stat drain
+Stone,
+Death,
 }
 
-/// Spell school identifier
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Spell school identifier #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpellSchool {
-    Cleric,    // Divine magic, healing, protection
-    Sorcerer,  // Arcane magic, offense, utility
+Cleric, // Divine magic, healing, protection
+Sorcerer, // Arcane magic, offense, utility
 }
 
 /// Complete spell definition
 pub struct Spell {
-    pub id: SpellId,
-    pub name: String,
-    pub school: SpellSchool,
-    pub level: u8,                    // 1-7
-    pub sp_cost: u16,                 // Base SP cost
-    pub gem_cost: u16,                // Gem cost (0 if none)
-    pub context: SpellContext,        // When/where castable
-    pub target: SpellTarget,          // Who/what it affects
-    pub description: String,
+pub id: SpellId,
+pub name: String,
+pub school: SpellSchool,
+pub level: u8, // 1-7
+pub sp_cost: u16, // Base SP cost
+pub gem_cost: u16, // Gem cost (0 if none)
+pub context: SpellContext, // When/where castable
+pub target: SpellTarget, // Who/what it affects
+pub description: String,
 }
 
-/// Spell casting context restrictions
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Spell casting context restrictions #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpellContext {
-    Anytime,           // Can cast in or out of combat
-    CombatOnly,        // Only during combat
-    NonCombatOnly,     // Only outside combat
-    OutdoorOnly,       // Only in outdoor areas
-    IndoorOnly,        // Only in indoor areas
-    OutdoorCombat,     // Combat in outdoor areas only
+Anytime, // Can cast in or out of combat
+CombatOnly, // Only during combat
+NonCombatOnly, // Only outside combat
+OutdoorOnly, // Only in outdoor areas
+IndoorOnly, // Only in indoor areas
+OutdoorCombat, // Combat in outdoor areas only
 }
 
-/// Spell target type
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Spell target type #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpellTarget {
-    Self_,             // Caster only
-    SingleCharacter,   // One party member
-    AllCharacters,     // Entire party
-    SingleMonster,     // One enemy
-    MonsterGroup,      // Multiple enemies (up to N)
-    AllMonsters,       // All enemies
-    SpecificMonsters,  // Subset based on type (e.g., undead)
+Self\_, // Caster only
+SingleCharacter, // One party member
+AllCharacters, // Entire party
+SingleMonster, // One enemy
+MonsterGroup, // Multiple enemies (up to N)
+AllMonsters, // All enemies
+SpecificMonsters, // Subset based on type (e.g., undead)
 }
 
 /// Spell casting result
 pub struct SpellResult {
-    pub success: bool,
-    pub effect_message: String,
-    pub damage: Option<i32>,          // For damage spells
-    pub healing: Option<i32>,         // For healing spells
-    pub affected_targets: Vec<usize>, // Indices of affected targets
+pub success: bool,
+pub effect_message: String,
+pub damage: Option<i32>, // For damage spells
+pub healing: Option<i32>, // For healing spells
+pub affected_targets: Vec<usize>, // Indices of affected targets
 }
-```
+
+````
 
 ---
 
@@ -1698,7 +1701,7 @@ fn calculate_sp_from_stat(stat: u8, level: u32) -> u16 {
     let base_sp = level as u16 * 2; // 2 SP per level minimum
     base_sp + (stat_bonus * level as u16 / 2)
 }
-```
+````
 
 **Spell Access by Level:**
 
@@ -1848,6 +1851,42 @@ _Sorcerer Spells:_
 
 **Note:** When loading, reset all temporary attribute values to base values.
 
+#### 5.6 Menu System
+
+The menu system provides in-game access to save/load, settings, and game controls via the ESC key.
+
+**Key Components:**
+
+- **MenuState** (`src/application/menu.rs`): Tracks current submenu, previous game mode, and save file list
+- **MenuPlugin** (`src/game/systems/menu.rs`): Bevy plugin managing UI rendering and interaction
+- **GameConfig** (`src/sdk/game_config.rs`): Configuration stored in save files for per-playthrough settings
+
+**Menu Types:**
+
+- **Main Menu**: Resume, Save Game, Load Game, Settings, Quit
+- **Save/Load Menu**: Browsable save file list with metadata (timestamp, party, location)
+- **Settings Menu**: Audio (Master, Music, SFX, Ambient), Graphics (read-only), Controls (read-only)
+
+**Integration Points:**
+
+- ESC key toggles menu via `GameAction::Menu` (defined in input system)
+- Menu preserves previous mode for Resume functionality (Mode becomes `Menu(MenuState)`)
+- Settings changes persist in save files via `GameState.config`
+- Keyboard navigation: Arrow Keys, Enter/Space to confirm, Backspace to go back
+
+**State Management:**
+
+- MenuState stored in GameMode enum as `Menu(MenuState)`
+- Allows pausing any game mode (Exploration, Combat, Dialogue, InnManagement)
+- Supports Resume functionality by preserving previous mode
+- Thread-safe resource access via Bevy ECS
+
+**Backward Compatibility:**
+
+- `GameConfig` field uses `#[serde(default)]` to load old saves with default settings
+- MenuState serialization/deserialization for save file persistence
+- No breaking changes to existing game state
+
 ---
 
 ### 6. Technology Stack
@@ -1930,6 +1969,7 @@ campaigns/                            # Campaign-specific content
 ```
 
 **Data File Format:**
+
 - **All data files use RON format** (Rusty Object Notation)
 - **Consistent structure** across all content types
 - **Schema validation** through the SDK validation tools
@@ -1937,6 +1977,7 @@ campaigns/                            # Campaign-specific content
 - **Campaign overrides** allow flexible content modification
 
 **Content Loading:**
+
 1. **Base data** loads from `data/` directory
 2. **Campaign data** loads with override priority
 3. **Validation** runs automatically with detailed error reporting
@@ -2494,6 +2535,7 @@ The Antares SDK provides comprehensive tools for creating, editing, and validati
 #### 8.2 Content Editors
 
 **Item Editor** (`cargo run --bin item_editor`)
+
 - Create and edit all item types (Weapon, Armor, Accessory, Consumable, Ammo, Quest)
 - Set classifications and proficiency requirements
 - Define magical bonuses and spell effects
@@ -2501,6 +2543,7 @@ The Antares SDK provides comprehensive tools for creating, editing, and validati
 - Real-time validation with detailed error messages
 
 **Class Editor** (`cargo run --bin class_editor`)
+
 - Define character classes with stat growth patterns
 - Set proficiency requirements and restrictions
 - Configure spell access (Cleric/Sorcerer/None)
@@ -2508,6 +2551,7 @@ The Antares SDK provides comprehensive tools for creating, editing, and validati
 - Export/import class definitions
 
 **Race Editor** (`cargo run --bin race_editor`)
+
 - Create races with stat modifiers
 - Set resistances and special abilities
 - Define incompatible item tags
@@ -2515,6 +2559,7 @@ The Antares SDK provides comprehensive tools for creating, editing, and validati
 - Visual validation of racial traits
 
 **Map Builder** (`cargo run --bin map_builder`)
+
 - Visual map editing with live preview
 - Place events, NPCs, treasures, and encounters
 - Define wall types and special tiles
@@ -2522,6 +2567,7 @@ The Antares SDK provides comprehensive tools for creating, editing, and validati
 - Validate map connectivity and event references
 
 **Dialogue Editor** (`cargo run --bin dialogue_editor`)
+
 - Create node-based dialogue trees
 - Set conditional logic and requirements
 - Define dialogue actions and consequences
@@ -2529,6 +2575,7 @@ The Antares SDK provides comprehensive tools for creating, editing, and validati
 - Validate dialogue completeness and loops
 
 **Quest Editor** (`cargo run --bin quest_editor`)
+
 - Define quest objectives and prerequisites
 - Set quest flags and completion conditions
 - Link quests to NPCs and events
@@ -2538,6 +2585,7 @@ The Antares SDK provides comprehensive tools for creating, editing, and validati
 #### 8.3 Validation Framework
 
 **Campaign Validator** (`cargo run --bin campaign_validator`)
+
 - Comprehensive cross-reference validation
 - Check for missing dependencies and broken links
 - Validate data integrity across all content types
@@ -2545,6 +2593,7 @@ The Antares SDK provides comprehensive tools for creating, editing, and validati
 - Support for campaign-specific content
 
 **Map Validator** (`cargo run --bin validate_map`)
+
 - Validate map structure and connectivity
 - Check event references and NPC placement
 - Verify wall and tile consistency
@@ -2554,12 +2603,14 @@ The Antares SDK provides comprehensive tools for creating, editing, and validati
 #### 8.4 Utility Tools
 
 **Name Generator** (`cargo run --bin name_gen`)
+
 - Generate character names based on race
 - Support for custom name pools
 - Export name lists for use in content
 - Configurable naming patterns
 
 **Template System**
+
 - Pre-built templates for common content types
 - Rapid prototyping of items, characters, and encounters
 - Customizable template parameters
@@ -2618,12 +2669,14 @@ pub struct TemplateRegistry {
 #### 8.7 Quality Assurance
 
 **Automated Testing**
+
 - Round-trip serialization tests for all data types
 - Integration tests across all editors
 - Performance benchmarks for content loading
 - Memory usage validation
 
 **Manual Testing**
+
 - Editor usability testing workflows
 - Content creation walkthroughs
 - Cross-editor compatibility testing
@@ -2663,12 +2716,14 @@ pub struct TemplateRegistry {
 #### 10.1 Missing Core Features
 
 **Save/Load System** (Priority: High)
+
 - Game state serialization and persistence
 - Character progress saving and loading
 - Campaign progress tracking
 - Auto-save functionality
 
 **Procedural Content Generation** (Priority: Medium)
+
 - Random dungeon generation algorithms
 - Procedural quest generation
 - Dynamic encounter creation
@@ -2677,22 +2732,26 @@ pub struct TemplateRegistry {
 #### 10.2 Advanced Features
 
 **Multiplayer Party Management**
+
 - Network-based multiplayer support
 - Shared campaign experiences
 - Cooperative gameplay mechanics
 
 **Advanced AI Behaviors**
+
 - Sophisticated monster AI patterns
 - Dynamic difficulty adjustment
 - Learning AI behaviors
 
 **Audio and Visual Enhancements**
+
 - Voice acting support
 - Advanced visual effects
 - Particle systems
 - Environmental audio
 
 **Platform Support**
+
 - Controller support for consoles
 - Mobile platform compatibility
 - Web-based deployment options
@@ -2700,16 +2759,19 @@ pub struct TemplateRegistry {
 #### 10.3 Content Expansion
 
 **Modding Framework**
+
 - Plugin architecture for custom content
 - Lua scripting support
 - Custom content loading mechanisms
 
 **Advanced Campaign Features**
+
 - Campaign branching and choices
 - Dynamic world events
 - Persistent world changes
 
 **Extended Systems**
+
 - Housing and base building
 - Crafting system
 - Economy simulation
@@ -3217,23 +3279,27 @@ impl ChargeState {
 The Antares architecture has evolved significantly from its initial design:
 
 **Phase 1: Foundation (Initial Architecture)**
+
 - Basic layered design with domain, application, and utility layers
 - Simple data-driven design with JSON/YAML formats
 - Traditional game loop without ECS
 
 **Phase 2: Content Creation (SDK Addition)**
+
 - Comprehensive SDK layer added for content creation
 - RON format adopted for all data files
 - Validation framework and editor tools implemented
 - Campaign system with override support
 
 **Phase 3: Rendering Modernization (Bevy Integration)**
+
 - Bevy ECS adopted for rendering and game loop
 - Component-based architecture for visual systems
 - Clean separation maintained between domain logic and presentation
 - Future-proofed for advanced rendering features
 
 **Phase 4: Advanced Systems (Dialogue & Campaigns)**
+
 - Node-based dialogue system implemented
 - Advanced campaign system with metadata and validation
 - Character definition system for data-driven templates
@@ -3242,6 +3308,7 @@ The Antares architecture has evolved significantly from its initial design:
 #### 13.2 Current Architecture Compliance
 
 **✅ Excellent Compliance Areas:**
+
 - **Layer Architecture**: Clear separation between domain, application, game, and SDK layers
 - **Data-Driven Design**: All content externalized in RON format with override support
 - **Type Safety**: Consistent use of type aliases and strong typing throughout
@@ -3249,6 +3316,7 @@ The Antares architecture has evolved significantly from its initial design:
 - **Testing**: Extensive automated and manual test coverage
 
 **🔄 Areas Requiring Updates:**
+
 - **Documentation**: Now updated to reflect current implementation
 - **Save/Load System**: Core feature pending implementation
 - **Procedural Generation**: Planned feature not yet implemented
