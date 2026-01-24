@@ -12,16 +12,19 @@
 //! See `docs/reference/architecture.md` Section 4.1 for complete specifications.
 
 pub mod dialogue;
+pub mod menu;
 pub mod quests;
 pub mod resources;
 pub mod save_game;
 
+use crate::application::menu::MenuState;
 use crate::domain::character::{Party, Roster};
 use crate::domain::party_manager::{PartyManagementError, PartyManager};
 use crate::domain::types::{GameTime, InnkeeperId};
 use crate::domain::world::World;
 use crate::sdk::campaign_loader::{Campaign, CampaignError};
 use crate::sdk::database::ContentDatabase;
+use crate::sdk::game_config::GameConfig;
 use serde::{Deserialize, Serialize};
 
 // ===== Game Mode =====
@@ -43,7 +46,7 @@ pub enum GameMode {
     /// Turn-based tactical combat containing full combat state
     Combat(crate::domain::combat::engine::CombatState),
     /// Menu system (character management, inventory)
-    Menu,
+    Menu(MenuState),
     /// NPC dialogue and interactions
     Dialogue(crate::application::dialogue::DialogueState),
     /// Inn party management interface
@@ -320,6 +323,10 @@ pub struct GameState {
     pub party: Party,
     /// Active party-wide spell effects
     pub active_spells: ActiveSpells,
+    /// Game configuration (graphics, audio, controls, camera)
+    /// Stored per-save to allow different settings per playthrough
+    #[serde(default)]
+    pub config: GameConfig,
     /// Current game mode
     pub mode: GameMode,
     /// Game time
@@ -410,6 +417,7 @@ impl GameState {
             roster: Roster::new(),
             party: Party::new(),
             active_spells: ActiveSpells::new(),
+            config: GameConfig::default(),
             mode: GameMode::Exploration,
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
             quests: QuestLog::new(),
@@ -473,12 +481,16 @@ impl GameState {
         party.gold = starting_gold;
         party.food = starting_food;
 
+        // Preserve campaign-specific game configuration for state
+        let campaign_config = campaign.game_config.clone();
+
         let mut state = Self {
             campaign: Some(campaign),
             world: World::new(),
             roster: Roster::new(),
             party,
             active_spells: ActiveSpells::new(),
+            config: campaign_config,
             mode: GameMode::Exploration,
             time: GameTime::new(1, 6, 0), // Day 1, 6:00 AM
             quests: QuestLog::new(),
@@ -957,7 +969,8 @@ impl GameState {
 
     /// Enters menu mode
     pub fn enter_menu(&mut self) {
-        self.mode = GameMode::Menu;
+        let prev = self.mode.clone();
+        self.mode = GameMode::Menu(MenuState::new(prev));
     }
 
     /// Enters dialogue mode
@@ -965,9 +978,14 @@ impl GameState {
         self.mode = GameMode::Dialogue(crate::application::dialogue::DialogueState::new());
     }
 
-    /// Returns to exploration mode
+    /// Returns to exploration mode (or resumes previous mode when exiting menu)
     pub fn return_to_exploration(&mut self) {
-        self.mode = GameMode::Exploration;
+        let replaced = std::mem::replace(&mut self.mode, GameMode::Exploration);
+        if let GameMode::Menu(menu_state) = replaced {
+            self.mode = menu_state.get_resume_mode();
+        } else {
+            self.mode = GameMode::Exploration;
+        }
     }
 
     /// Advances game time by the specified number of minutes
@@ -1081,7 +1099,7 @@ mod tests {
         let mut state = GameState::new();
 
         state.enter_menu();
-        assert!(matches!(state.mode, GameMode::Menu));
+        assert!(matches!(state.mode, GameMode::Menu(_)));
 
         state.enter_dialogue();
         assert!(matches!(state.mode, GameMode::Dialogue(_)));
@@ -1504,6 +1522,7 @@ mod tests {
                 music: "music".to_string(),
                 sounds: "sounds".to_string(),
                 images: "images".to_string(),
+                fonts: "fonts".to_string(),
             },
             root_path: std::path::PathBuf::from("test"),
             game_config: crate::sdk::game_config::GameConfig::default(),
@@ -1665,6 +1684,7 @@ mod tests {
                 music: "music".to_string(),
                 sounds: "sounds".to_string(),
                 images: "images".to_string(),
+                fonts: "fonts".to_string(),
             },
             root_path: std::path::PathBuf::from("test"),
             game_config: crate::sdk::game_config::GameConfig::default(),

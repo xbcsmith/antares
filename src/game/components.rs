@@ -4,6 +4,7 @@
 //! Bevy ECS components for game entities
 
 pub mod dialogue;
+pub mod menu;
 
 pub use dialogue::{
     ActiveDialogueUI, DialogueBubble, DialogueBubbleEntity, DialogueTextEntity, TypewriterText,
@@ -11,3 +12,4 @@ pub use dialogue::{
     DIALOGUE_BUBBLE_WIDTH, DIALOGUE_CHOICE_COLOR, DIALOGUE_TEXT_COLOR, DIALOGUE_TEXT_SIZE,
     DIALOGUE_TYPEWRITER_SPEED,
 };
+pub use menu::*;

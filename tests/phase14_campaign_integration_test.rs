@@ -56,6 +56,7 @@ fn create_test_campaign(id: &str, name: &str, version: &str) -> Campaign {
             music: "assets/music".to_string(),
             sounds: "assets/sounds".to_string(),
             images: "assets/images".to_string(),
+            fonts: "assets/fonts".to_string(),
         },
         root_path: PathBuf::from(format!("campaigns/{}", id)),
         game_config: antares::sdk::game_config::GameConfig::default(),

@@ -373,6 +373,30 @@ pub fn parse_key_code(key_str: &str) -> Option<KeyCode> {
     }
 }
 
+/// Toggle the in-game menu: open it if not open, or close it and return to the previous mode if open.
+///
+/// This helper intentionally does not consider movement cooldown so it can be called
+/// from input handlers that must ensure the menu key always works.
+///
+/// # Arguments
+///
+/// * `game_state` - Mutable reference to the current `GameState`
+fn toggle_menu_state(game_state: &mut crate::application::GameState) {
+    use crate::application::menu::MenuState;
+    match &game_state.mode {
+        crate::application::GameMode::Menu(menu_state) => {
+            let resume_mode = menu_state.get_resume_mode();
+            info!("Closing menu, resuming to: {:?}", resume_mode);
+            game_state.mode = resume_mode;
+        }
+        current_mode => {
+            info!("Opening menu from: {:?}", current_mode);
+            let menu_state = MenuState::new(current_mode.clone());
+            game_state.mode = crate::application::GameMode::Menu(menu_state);
+        }
+    }
+}
+
 /// Handle keyboard input and translate to game actions
 ///
 /// This system processes keyboard input using the configured key mappings,
@@ -394,15 +418,52 @@ fn handle_input(
     let current_time = time.elapsed_secs();
     let cooldown = input_config.controls.movement_cooldown;
 
-    // Check cooldown for movement actions
-    if current_time - *last_move_time < cooldown {
+    // Check for menu toggle (ESC key) first — it should always take priority and
+    // must not be blocked by movement cooldown.
+    if input_config
+        .key_map
+        .is_action_just_pressed(GameAction::Menu, &keyboard_input)
+    {
+        let game_state = &mut global_state.0;
+        toggle_menu_state(game_state);
+        info!("Menu toggled: new_mode = {:?}", game_state.mode);
+        return; // Exit early after menu toggle
+    }
+
+    // Throttle movement input using cooldown. Only block when an actual movement
+    // action is being attempted.
+    let is_movement_attempt = input_config
+        .key_map
+        .is_action_pressed(GameAction::MoveForward, &keyboard_input)
+        || input_config
+            .key_map
+            .is_action_pressed(GameAction::MoveBack, &keyboard_input)
+        || input_config
+            .key_map
+            .is_action_pressed(GameAction::TurnLeft, &keyboard_input)
+        || input_config
+            .key_map
+            .is_action_pressed(GameAction::TurnRight, &keyboard_input);
+
+    if is_movement_attempt && (current_time - *last_move_time < cooldown) {
+        // Movement attempted but still within cooldown window - ignore movement input.
         return;
     }
 
     // ALLOW input processing in Dialogue mode to enable "Move to Cancel"
     // But block Interaction actions (doors, etc.) if in Dialogue.
+    // BLOCK all movement/interaction input when in Menu mode (menu system handles its own input)
 
     let game_state = &mut global_state.0;
+
+    // Menu toggle handled above before movement cooldown checks.
+
+    // Block all movement/interaction input when in Menu mode
+    // The menu system (handle_menu_keyboard) handles its own input processing
+    if matches!(game_state.mode, crate::application::GameMode::Menu(_)) {
+        return;
+    }
+
     let world = &mut game_state.world;
     let mut moved = false;
 
@@ -673,6 +734,43 @@ mod tests {
     }
 
     #[test]
+    fn test_toggle_menu_state_from_exploration_and_back() {
+        // Start in Exploration mode
+        let mut state = crate::application::GameState::new();
+        assert!(matches!(
+            state.mode,
+            crate::application::GameMode::Exploration
+        ));
+
+        // Toggle to Menu
+        toggle_menu_state(&mut state);
+        assert!(matches!(state.mode, crate::application::GameMode::Menu(_)));
+
+        // Toggle back to Exploration
+        toggle_menu_state(&mut state);
+        assert!(matches!(
+            state.mode,
+            crate::application::GameMode::Exploration
+        ));
+    }
+
+    #[test]
+    fn test_toggle_menu_state_preserves_previous_mode() {
+        // Ensure the MenuState records the previous mode correctly
+        let mut state = crate::application::GameState::new();
+        toggle_menu_state(&mut state);
+
+        if let crate::application::GameMode::Menu(menu_state) = &state.mode {
+            assert!(matches!(
+                menu_state.get_resume_mode(),
+                crate::application::GameMode::Exploration
+            ));
+        } else {
+            panic!("Expected to be in Menu mode after toggle");
+        }
+    }
+
+    #[test]
     fn test_parse_key_code_invalid() {
         assert_eq!(parse_key_code("InvalidKey"), None);
         assert_eq!(parse_key_code(""), None);
@@ -831,6 +929,147 @@ mod tests {
         let config = ControlsConfig::default();
         let plugin = InputPlugin::new(config.clone());
         assert_eq!(plugin.config, config);
+    }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use bevy::prelude::{App, ButtonInput, KeyCode, Time, Update};
+
+    /// Integration-style test: simulate pressing ESC via `ButtonInput` and ensure the
+    /// input system toggles the in-game menu open and closed.
+    #[test]
+    fn test_escape_opens_and_closes_menu_via_button_input() {
+        // Build a minimal app and register the input system under test.
+        let mut app = App::new();
+
+        // Insert required resources: button input, config, global state, and time.
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        let cfg = ControlsConfig::default();
+        let km = KeyMap::from_controls_config(&cfg);
+        app.insert_resource(InputConfigResource {
+            controls: cfg,
+            key_map: km,
+        });
+
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.insert_resource::<Time>(Time::default());
+        app.insert_resource(PendingRecruitmentContext::default());
+
+        // Register message channels the input system depends on so MessageWriter<T>
+        // parameters are initialized when running the system in tests.
+        app.add_message::<DoorOpenedEvent>();
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<StartDialogue>();
+
+        // Add the handle_input system (the system under test)
+        app.add_systems(Update, handle_input);
+
+        // Press Escape - should open the menu
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::Escape);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(matches!(gs.0.mode, crate::application::GameMode::Menu(_)));
+
+        // Press Escape again - should close the menu and resume previous mode
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::Escape);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(matches!(
+            gs.0.mode,
+            crate::application::GameMode::Exploration
+        ));
+    }
+
+    #[test]
+    fn test_escape_opens_after_movement() {
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+
+        // Basic resources the input system expects
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        let cfg = ControlsConfig::default();
+        app.insert_resource(InputConfigResource {
+            controls: cfg.clone(),
+            key_map: KeyMap::from_controls_config(&cfg),
+        });
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.insert_resource::<Time>(Time::default());
+        app.insert_resource(PendingRecruitmentContext::default());
+
+        // Register messages used by input system
+        app.add_message::<DoorOpenedEvent>();
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<StartDialogue>();
+
+        // Add just the input system (we want to simulate input frames)
+        app.add_systems(Update, handle_input);
+
+        // Frame 1: press MoveForward
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::ArrowUp);
+        }
+        app.update();
+
+        // Frame 2: release MoveForward and press Escape
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.release(KeyCode::ArrowUp);
+            btn.press(KeyCode::Escape);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(matches!(gs.0.mode, crate::application::GameMode::Menu(_)));
+    }
+
+    #[test]
+    fn test_escape_opens_when_move_and_menu_pressed_simultaneously() {
+        use bevy::prelude::*;
+
+        let mut app = App::new();
+
+        // Basic resources the input system expects
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        let cfg = ControlsConfig::default();
+        app.insert_resource(InputConfigResource {
+            controls: cfg.clone(),
+            key_map: KeyMap::from_controls_config(&cfg),
+        });
+        app.insert_resource(GlobalState(crate::application::GameState::new()));
+        app.insert_resource::<Time>(Time::default());
+        app.insert_resource(PendingRecruitmentContext::default());
+
+        // Register messages used by input system
+        app.add_message::<DoorOpenedEvent>();
+        app.add_message::<MapEventTriggered>();
+        app.add_message::<StartDialogue>();
+
+        // Add the input system so frames process input
+        app.add_systems(Update, handle_input);
+
+        // Single frame: press MoveForward and Menu at the same time
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::ArrowUp);
+            btn.press(KeyCode::Escape);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(matches!(gs.0.mode, crate::application::GameMode::Menu(_)));
     }
 }
 

@@ -86,7 +86,7 @@ fn test_game_mode_transitions() {
 
     // Test: Exploration -> Menu -> Exploration
     game_state.enter_menu();
-    assert_eq!(game_state.mode, GameMode::Menu);
+    assert!(matches!(game_state.mode, GameMode::Menu(_)));
 
     game_state.return_to_exploration();
     assert_eq!(game_state.mode, GameMode::Exploration);
@@ -286,7 +286,7 @@ fn test_exploration_loop_simulation() {
 
     // 4. Enter menu to check inventory
     game_state.enter_menu();
-    assert_eq!(game_state.mode, GameMode::Menu);
+    assert!(matches!(game_state.mode, GameMode::Menu(_)));
 
     // 5. Return to exploration
     game_state.return_to_exploration();

@@ -311,6 +311,10 @@ pub struct CampaignAssets {
     /// Images directory
     #[serde(default = "default_images_path")]
     pub images: String,
+
+    /// Fonts directory (for custom campaign fonts)
+    #[serde(default = "default_fonts_path")]
+    pub fonts: String,
 }
 
 fn default_tilesets_path() -> String {
@@ -327,6 +331,10 @@ fn default_sounds_path() -> String {
 
 fn default_images_path() -> String {
     "assets/images".to_string()
+}
+
+fn default_fonts_path() -> String {
+    "assets/fonts".to_string()
 }
 
 impl Campaign {
@@ -513,6 +521,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 music: "assets/music".to_string(),
                 sounds: "assets/sounds".to_string(),
                 images: "assets/images".to_string(),
+                fonts: "assets/fonts".to_string(),
             },
             root_path: PathBuf::new(),
             game_config: crate::sdk::game_config::GameConfig::default(),
