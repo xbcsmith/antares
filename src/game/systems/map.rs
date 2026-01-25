@@ -394,10 +394,6 @@ fn spawn_map(
             for x in 0..map.width {
                 let pos = types::Position::new(x as i32, y as i32);
                 if let Some(tile) = map.get_tile(pos) {
-                    // Determine if this is a perimeter tile
-                    let is_perimeter =
-                        x == 0 || y == 0 || x == map.width - 1 || y == map.height - 1;
-
                     // Render based on terrain type
                     match tile.terrain {
                         world::TerrainType::Water => {
@@ -506,213 +502,160 @@ fn spawn_map(
                         }
                     }
 
-                    // Spawn wall/door based on wall_type or perimeter
-                    if is_perimeter && tile.wall_type == world::WallType::None {
-                        // Add perimeter walls using per-tile visual metadata
-                        let (width_x, height, width_z) = tile
-                            .visual
-                            .mesh_dimensions(tile.terrain, world::WallType::Normal);
-                        let mesh = get_or_create_mesh(
-                            &mut meshes,
-                            &mut mesh_cache,
-                            width_x,
-                            height,
-                            width_z,
-                        );
-                        let y_pos = tile
-                            .visual
-                            .mesh_y_position(tile.terrain, world::WallType::Normal);
+                    // Spawn wall/door based on wall_type
+                    match tile.wall_type {
+                        world::WallType::Normal => {
+                            // Tint/darken the wall material to match the underlying terrain color
+                            // so a Forest Normal wall appears greenish while a Stone Normal wall remains grey.
+                            let (tr, tg, tb) = match tile.terrain {
+                                world::TerrainType::Ground => floor_rgb,
+                                world::TerrainType::Grass => grass_rgb,
+                                world::TerrainType::Water => water_rgb,
+                                world::TerrainType::Lava => (0.8_f32, 0.3_f32, 0.2_f32),
+                                world::TerrainType::Swamp => (0.35_f32, 0.3_f32, 0.2_f32),
+                                world::TerrainType::Stone => stone_rgb,
+                                world::TerrainType::Dirt => dirt_rgb,
+                                world::TerrainType::Forest => forest_rgb,
+                                world::TerrainType::Mountain => mountain_rgb,
+                            };
+                            // Darken a bit to make the wall distinct from the floor
+                            let darken = 0.6_f32;
 
-                        // Apply color tint if specified
-                        let mut base_color = wall_base_color;
-                        if let Some((r, g, b)) = tile.visual.color_tint {
-                            base_color = Color::srgb(
-                                wall_base_rgb.0 * r,
-                                wall_base_rgb.1 * g,
-                                wall_base_rgb.2 * b,
+                            // Use per-tile visual metadata for dimensions
+                            let (width_x, height, width_z) =
+                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                            let mesh = get_or_create_mesh(
+                                &mut meshes,
+                                &mut mesh_cache,
+                                width_x,
+                                height,
+                                width_z,
                             );
+                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+
+                            // Apply base terrain tint, then per-tile color tint if specified
+                            let mut wall_color = Color::srgb(tr * darken, tg * darken, tb * darken);
+                            if let Some((r, g, b)) = tile.visual.color_tint {
+                                wall_color = Color::srgb(
+                                    wall_color.to_srgba().red * r,
+                                    wall_color.to_srgba().green * g,
+                                    wall_color.to_srgba().blue * b,
+                                );
+                            }
+
+                            let tile_wall_material = materials.add(StandardMaterial {
+                                base_color: wall_color,
+                                perceptual_roughness: 0.5,
+                                ..default()
+                            });
+
+                            // Apply rotation if specified
+                            let rotation = bevy::prelude::Quat::from_rotation_y(
+                                tile.visual.rotation_y_radians(),
+                            );
+                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
+                                .with_rotation(rotation);
+
+                            commands.spawn((
+                                Mesh3d(mesh),
+                                MeshMaterial3d(tile_wall_material),
+                                transform,
+                                GlobalTransform::default(),
+                                Visibility::default(),
+                                MapEntity(map.id),
+                                TileCoord(pos),
+                            ));
                         }
+                        world::WallType::Door => {
+                            // Use per-tile visual metadata for dimensions
+                            let (width_x, height, width_z) =
+                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                            let mesh = get_or_create_mesh(
+                                &mut meshes,
+                                &mut mesh_cache,
+                                width_x,
+                                height,
+                                width_z,
+                            );
+                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
 
-                        let material = materials.add(StandardMaterial {
-                            base_color,
-                            perceptual_roughness: 0.5,
-                            ..default()
-                        });
-
-                        // Apply rotation if specified
-                        let rotation =
-                            bevy::prelude::Quat::from_rotation_y(tile.visual.rotation_y_radians());
-                        let transform =
-                            Transform::from_xyz(x as f32, y_pos, y as f32).with_rotation(rotation);
-
-                        commands.spawn((
-                            Mesh3d(mesh),
-                            MeshMaterial3d(material),
-                            transform,
-                            GlobalTransform::default(),
-                            Visibility::default(),
-                            MapEntity(map.id),
-                            TileCoord(pos),
-                        ));
-                    } else {
-                        match tile.wall_type {
-                            world::WallType::Normal => {
-                                // Tint/darken the wall material to match the underlying terrain color
-                                // so a Forest Normal wall appears greenish while a Stone Normal wall remains grey.
-                                let (tr, tg, tb) = match tile.terrain {
-                                    world::TerrainType::Ground => floor_rgb,
-                                    world::TerrainType::Grass => grass_rgb,
-                                    world::TerrainType::Water => water_rgb,
-                                    world::TerrainType::Lava => (0.8_f32, 0.3_f32, 0.2_f32),
-                                    world::TerrainType::Swamp => (0.35_f32, 0.3_f32, 0.2_f32),
-                                    world::TerrainType::Stone => stone_rgb,
-                                    world::TerrainType::Dirt => dirt_rgb,
-                                    world::TerrainType::Forest => forest_rgb,
-                                    world::TerrainType::Mountain => mountain_rgb,
-                                };
-                                // Darken a bit to make the wall distinct from the floor
-                                let darken = 0.6_f32;
-
-                                // Use per-tile visual metadata for dimensions
-                                let (width_x, height, width_z) =
-                                    tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
-                                let mesh = get_or_create_mesh(
-                                    &mut meshes,
-                                    &mut mesh_cache,
-                                    width_x,
-                                    height,
-                                    width_z,
-                                );
-                                let y_pos =
-                                    tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
-
-                                // Apply base terrain tint, then per-tile color tint if specified
-                                let mut wall_color =
-                                    Color::srgb(tr * darken, tg * darken, tb * darken);
-                                if let Some((r, g, b)) = tile.visual.color_tint {
-                                    wall_color = Color::srgb(
-                                        wall_color.to_srgba().red * r,
-                                        wall_color.to_srgba().green * g,
-                                        wall_color.to_srgba().blue * b,
-                                    );
-                                }
-
-                                let tile_wall_material = materials.add(StandardMaterial {
-                                    base_color: wall_color,
-                                    perceptual_roughness: 0.5,
-                                    ..default()
-                                });
-
-                                // Apply rotation if specified
-                                let rotation = bevy::prelude::Quat::from_rotation_y(
-                                    tile.visual.rotation_y_radians(),
-                                );
-                                let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
-                                    .with_rotation(rotation);
-
-                                commands.spawn((
-                                    Mesh3d(mesh),
-                                    MeshMaterial3d(tile_wall_material),
-                                    transform,
-                                    GlobalTransform::default(),
-                                    Visibility::default(),
-                                    MapEntity(map.id),
-                                    TileCoord(pos),
-                                ));
+                            // Apply color tint if specified
+                            let mut base_color = door_color;
+                            if let Some((r, g, b)) = tile.visual.color_tint {
+                                base_color =
+                                    Color::srgb(door_rgb.0 * r, door_rgb.1 * g, door_rgb.2 * b);
                             }
-                            world::WallType::Door => {
-                                // Use per-tile visual metadata for dimensions
-                                let (width_x, height, width_z) =
-                                    tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
-                                let mesh = get_or_create_mesh(
-                                    &mut meshes,
-                                    &mut mesh_cache,
-                                    width_x,
-                                    height,
-                                    width_z,
-                                );
-                                let y_pos =
-                                    tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
 
-                                // Apply color tint if specified
-                                let mut base_color = door_color;
-                                if let Some((r, g, b)) = tile.visual.color_tint {
-                                    base_color =
-                                        Color::srgb(door_rgb.0 * r, door_rgb.1 * g, door_rgb.2 * b);
-                                }
+                            let material = materials.add(StandardMaterial {
+                                base_color,
+                                perceptual_roughness: 0.5,
+                                ..default()
+                            });
 
-                                let material = materials.add(StandardMaterial {
-                                    base_color,
-                                    perceptual_roughness: 0.5,
-                                    ..default()
-                                });
+                            // Apply rotation if specified
+                            let rotation = bevy::prelude::Quat::from_rotation_y(
+                                tile.visual.rotation_y_radians(),
+                            );
+                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
+                                .with_rotation(rotation);
 
-                                // Apply rotation if specified
-                                let rotation = bevy::prelude::Quat::from_rotation_y(
-                                    tile.visual.rotation_y_radians(),
-                                );
-                                let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
-                                    .with_rotation(rotation);
-
-                                commands.spawn((
-                                    Mesh3d(mesh),
-                                    MeshMaterial3d(material),
-                                    transform,
-                                    GlobalTransform::default(),
-                                    Visibility::default(),
-                                    MapEntity(map.id),
-                                    TileCoord(pos),
-                                ));
-                            }
-                            world::WallType::Torch => {
-                                // Use per-tile visual metadata for dimensions
-                                let (width_x, height, width_z) =
-                                    tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
-                                let mesh = get_or_create_mesh(
-                                    &mut meshes,
-                                    &mut mesh_cache,
-                                    width_x,
-                                    height,
-                                    width_z,
-                                );
-                                let y_pos =
-                                    tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
-
-                                // Apply color tint if specified
-                                let mut base_color = wall_base_color;
-                                if let Some((r, g, b)) = tile.visual.color_tint {
-                                    base_color = Color::srgb(
-                                        wall_base_rgb.0 * r,
-                                        wall_base_rgb.1 * g,
-                                        wall_base_rgb.2 * b,
-                                    );
-                                }
-
-                                let material = materials.add(StandardMaterial {
-                                    base_color,
-                                    perceptual_roughness: 0.5,
-                                    ..default()
-                                });
-
-                                // Apply rotation if specified
-                                let rotation = bevy::prelude::Quat::from_rotation_y(
-                                    tile.visual.rotation_y_radians(),
-                                );
-                                let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
-                                    .with_rotation(rotation);
-
-                                commands.spawn((
-                                    Mesh3d(mesh),
-                                    MeshMaterial3d(material),
-                                    transform,
-                                    GlobalTransform::default(),
-                                    Visibility::default(),
-                                    MapEntity(map.id),
-                                    TileCoord(pos),
-                                ));
-                            }
-                            _ => {}
+                            commands.spawn((
+                                Mesh3d(mesh),
+                                MeshMaterial3d(material),
+                                transform,
+                                GlobalTransform::default(),
+                                Visibility::default(),
+                                MapEntity(map.id),
+                                TileCoord(pos),
+                            ));
                         }
+                        world::WallType::Torch => {
+                            // Use per-tile visual metadata for dimensions
+                            let (width_x, height, width_z) =
+                                tile.visual.mesh_dimensions(tile.terrain, tile.wall_type);
+                            let mesh = get_or_create_mesh(
+                                &mut meshes,
+                                &mut mesh_cache,
+                                width_x,
+                                height,
+                                width_z,
+                            );
+                            let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
+
+                            // Apply color tint if specified
+                            let mut base_color = wall_base_color;
+                            if let Some((r, g, b)) = tile.visual.color_tint {
+                                base_color = Color::srgb(
+                                    wall_base_rgb.0 * r,
+                                    wall_base_rgb.1 * g,
+                                    wall_base_rgb.2 * b,
+                                );
+                            }
+
+                            let material = materials.add(StandardMaterial {
+                                base_color,
+                                perceptual_roughness: 0.5,
+                                ..default()
+                            });
+
+                            // Apply rotation if specified
+                            let rotation = bevy::prelude::Quat::from_rotation_y(
+                                tile.visual.rotation_y_radians(),
+                            );
+                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
+                                .with_rotation(rotation);
+
+                            commands.spawn((
+                                Mesh3d(mesh),
+                                MeshMaterial3d(material),
+                                transform,
+                                GlobalTransform::default(),
+                                Visibility::default(),
+                                MapEntity(map.id),
+                                TileCoord(pos),
+                            ));
+                        }
+                        _ => {}
                     }
                 }
             }

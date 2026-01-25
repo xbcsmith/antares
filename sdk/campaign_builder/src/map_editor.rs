@@ -619,42 +619,6 @@ impl VisualMetadataEditor {
         }
     }
 
-        if let Some(sprite) = &tile.visual.sprite {
-            self.enable_sprite = true;
-            self.temp_sprite_sheet = sprite.sheet_path.clone();
-            self.temp_sprite_index = sprite.sprite_index;
-            self.sprite_sheet_input = sprite.sheet_path.clone();
-            self.sprite_index_input = sprite.sprite_index.to_string();
-        } else {
-            self.enable_sprite = false;
-            self.temp_sprite_sheet = String::new();
-            self.temp_sprite_index = 0;
-            self.sprite_sheet_input = String::new();
-            self.sprite_index_input = String::new();
-        }
-
-        if !tile.visual.sprite_layers.is_empty() {
-            self.enable_sprite_layers = true;
-            self.temp_sprite_layers = tile
-                .visual
-                .sprite_layers
-                .iter()
-                .map(|ls| (ls.sprite.sprite_index, 0))
-                .collect();
-        } else {
-            self.enable_sprite_layers = false;
-            self.temp_sprite_layers = Vec::new();
-        }
-
-        if tile.visual.sprite_rule.is_some() {
-            self.enable_sprite_rule = true;
-            self.temp_sprite_rule_type = "fixed".to_string();
-        } else {
-            self.enable_sprite_rule = false;
-            self.temp_sprite_rule_type = "fixed".to_string();
-        }
-    }
-
     /// Convert editor state to TileVisualMetadata
     pub fn to_metadata(&self) -> TileVisualMetadata {
         TileVisualMetadata {
