@@ -73,14 +73,14 @@ fn submenu_transition_cleanup(
 ) {
     // Diagnostic logging: show mode, previous submenu, and how many MenuRoot entities exist
     let menu_count = menu_query.iter().count();
-    info!(
+    debug!(
         "submenu_transition_cleanup called: mode={:?}, previous_submenu={:?}, menu_count={}",
         global_state.0.mode, *previous_submenu, menu_count
     );
 
     let GameMode::Menu(menu_state) = &global_state.0.mode else {
         // Not in menu mode - reset tracking
-        info!(
+        debug!(
             "submenu_transition_cleanup: not in Menu mode - clearing previous_submenu (was: {:?})",
             *previous_submenu
         );
@@ -90,7 +90,7 @@ fn submenu_transition_cleanup(
 
     let current_submenu = menu_state.current_submenu;
 
-    info!(
+    debug!(
         "submenu_transition_cleanup: in Menu - current_submenu={:?}, previous_submenu={:?}, menu_count={}",
         current_submenu, *previous_submenu, menu_count
     );
@@ -101,19 +101,19 @@ fn submenu_transition_cleanup(
             // Submenu changed - log and despawn old UI
             let entities: Vec<Entity> = menu_query.iter().collect();
             if entities.is_empty() {
-                info!(
+                debug!(
                     "submenu_transition_cleanup: submenu changed {:?} -> {:?} but no MenuRoot entities found",
                     prev, current_submenu
                 );
             } else {
-                info!(
+                debug!(
                     "submenu_transition_cleanup: despawning {} MenuRoot entity(ies) for transition: {:?} -> {:?}",
                     entities.len(),
                     prev,
                     current_submenu
                 );
                 for entity in entities.iter() {
-                    info!(
+                    debug!(
                         "submenu_transition_cleanup: despawning entity {:?} for submenu transition {:?} -> {:?}",
                         entity, prev, current_submenu
                     );
@@ -138,13 +138,13 @@ fn menu_setup(
     };
 
     let existing_count = existing_menu.iter().count();
-    info!(
+    debug!(
         "menu_setup called: mode={:?}, current_submenu={:?}, existing_menu_count={}",
         global_state.0.mode, menu_state.current_submenu, existing_count
     );
 
     if !existing_menu.is_empty() {
-        info!(
+        debug!(
             "menu_setup: found {} existing MenuRoot entity(ies) - logging details",
             existing_count
         );
@@ -154,14 +154,14 @@ fn menu_setup(
         for entity in existing_menu.iter() {
             match children_query.get(entity) {
                 Ok(children) => {
-                    info!(
+                    debug!(
                         "menu_setup: existing MenuRoot entity {:?} has {} children",
                         entity,
                         children.len()
                     );
                 }
                 Err(_) => {
-                    info!(
+                    debug!(
                         "menu_setup: existing MenuRoot entity {:?} has no Children component",
                         entity
                     );
@@ -169,7 +169,7 @@ fn menu_setup(
             }
         }
 
-        info!(
+        debug!(
             "menu_setup: skipping spawn due to {} existing MenuRoot entity(ies)",
             existing_count
         );
@@ -178,21 +178,21 @@ fn menu_setup(
 
     match menu_state.current_submenu {
         MenuType::Main => {
-            info!(
+            debug!(
                 "menu_setup: spawning Main menu (selected_index={})",
                 menu_state.selected_index
             );
             spawn_main_menu(&mut commands, menu_state)
         }
         MenuType::SaveLoad => {
-            info!(
+            debug!(
                 "menu_setup: spawning Save/Load menu (selected_index={})",
                 menu_state.selected_index
             );
             spawn_save_load_menu(&mut commands, menu_state)
         }
         MenuType::Settings => {
-            info!("menu_setup: spawning Settings menu");
+            debug!("menu_setup: spawning Settings menu");
             spawn_settings_menu(&mut commands, &global_state.0)
         }
     }
@@ -313,7 +313,7 @@ fn spawn_main_menu(commands: &mut Commands, menu_state: &MenuState) {
                 });
         });
 
-    info!(
+    debug!(
         "Spawned main menu UI (selected_index: {}, current_submenu: {:?})",
         menu_state.selected_index, menu_state.current_submenu
     );
@@ -628,7 +628,7 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                 });
         });
 
-    info!(
+    debug!(
         "Spawned save/load menu UI (selected_index: {}, saves: {})",
         menu_state.selected_index,
         menu_state.save_list.len()
@@ -1128,7 +1128,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                 });
         });
 
-    info!("Spawned settings menu UI");
+    debug!("Spawned settings menu UI");
 }
 
 /// Populate the save list from the filesystem
@@ -1187,7 +1187,7 @@ fn populate_save_list(mut global_state: ResMut<GlobalState>, save_manager: Res<S
             }
 
             menu_state.save_list = save_list;
-            info!(
+            debug!(
                 "Populated save list with {} saves",
                 menu_state.save_list.len()
             );
@@ -1207,28 +1207,28 @@ fn menu_cleanup(
     global_state: Res<GlobalState>,
 ) {
     let menu_count = menu_query.iter().count();
-    info!(
+    debug!(
         "menu_cleanup called: mode={:?}, menu_root_count={}",
         global_state.0.mode, menu_count
     );
 
     if matches!(global_state.0.mode, GameMode::Menu(_)) {
-        info!("menu_cleanup: in Menu mode - skipping cleanup");
+        debug!("menu_cleanup: in Menu mode - skipping cleanup");
         return;
     }
 
     if menu_count == 0 {
-        info!("menu_cleanup: no menu entities to cleanup");
+        debug!("menu_cleanup: no menu entities to cleanup");
         return;
     }
 
     for entity in menu_query.iter() {
-        info!(
+        debug!(
             "menu_cleanup: despawning entity {:?} due to mode {:?}",
             entity, global_state.0.mode
         );
         despawn_with_children(&mut commands, entity, &children_query);
-        info!("menu_cleanup: despawned entity {:?}", entity);
+        debug!("menu_cleanup: despawned entity {:?}", entity);
     }
 }
 
@@ -1240,16 +1240,21 @@ fn menu_button_interaction(
 ) {
     for (interaction, button) in interaction_query.iter_mut() {
         if *interaction == Interaction::Pressed {
+            // Call the unified handler using dereferenced resources so the same logic
+            // is used for both mouse and keyboard-driven actions.
             handle_button_press(button, &mut global_state, &save_manager);
         }
     }
 }
 
 /// Handle button press actions
+///
+/// This accepts plain `&mut GlobalState` and `&SaveGameManager` so it can be
+/// called from both systems and unit tests without wrapping/unwrapping Res/ResMut.
 fn handle_button_press(
     button: &MenuButton,
-    global_state: &mut ResMut<GlobalState>,
-    save_manager: &Res<SaveGameManager>,
+    global_state: &mut GlobalState,
+    save_manager: &SaveGameManager,
 ) {
     match button {
         MenuButton::Resume => {
@@ -1257,39 +1262,50 @@ fn handle_button_press(
                 return;
             };
             let resume_mode = menu_state.get_resume_mode();
-            info!("Resume pressed, returning to: {:?}", resume_mode);
+            debug!("Resume pressed, returning to: {:?}", resume_mode);
             global_state.0.mode = resume_mode;
         }
         MenuButton::SaveGame => {
             if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
-                info!("Save Game pressed");
+                debug!("Save Game pressed");
                 menu_state.set_submenu(MenuType::SaveLoad);
             }
         }
         MenuButton::LoadGame => {
             if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
-                info!("Load Game pressed");
-                menu_state.set_submenu(MenuType::SaveLoad);
+                // If we're already in SaveLoad, perform the load operation for the selected slot.
+                if menu_state.current_submenu == MenuType::SaveLoad {
+                    debug!("Load Game pressed (in SaveLoad)");
+                    if let Some(save_info) = menu_state.save_list.get(menu_state.selected_index) {
+                        let filename = save_info.filename.clone();
+                        load_game_operation(global_state, save_manager, &filename);
+                    } else {
+                        warn!("Load pressed but no save selected");
+                    }
+                } else {
+                    debug!("Load Game pressed (from Main)");
+                    menu_state.set_submenu(MenuType::SaveLoad);
+                }
             }
         }
         MenuButton::Settings => {
             if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
-                info!("Settings pressed");
+                debug!("Settings pressed");
                 menu_state.set_submenu(MenuType::Settings);
             }
         }
         MenuButton::Quit => {
-            info!("Quit pressed - exiting");
+            debug!("Quit pressed - exiting");
             std::process::exit(0);
         }
         MenuButton::Back => {
             if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
-                info!("Back pressed");
+                debug!("Back pressed");
                 menu_state.set_submenu(MenuType::Main);
             }
         }
         MenuButton::Confirm => {
-            info!("Confirm pressed");
+            debug!("Confirm pressed");
             let submenu = if let GameMode::Menu(menu_state) = &global_state.0.mode {
                 Some(menu_state.current_submenu)
             } else {
@@ -1298,21 +1314,8 @@ fn handle_button_press(
 
             match submenu {
                 Some(MenuType::SaveLoad) => {
-                    // Confirm in SaveLoad means user wants to LOAD the selected save
-                    let filename = if let GameMode::Menu(menu_state) = &global_state.0.mode {
-                        menu_state
-                            .save_list
-                            .get(menu_state.selected_index)
-                            .map(|s| s.filename.clone())
-                    } else {
-                        None
-                    };
-
-                    if let Some(f) = filename {
-                        load_game_operation(global_state, save_manager, &f);
-                    } else {
-                        save_game_operation(global_state, save_manager);
-                    }
+                    // In the Save/Load dialog the Confirm button is labeled "Save".
+                    save_game_operation(global_state, save_manager);
                 }
                 Some(MenuType::Settings) => {
                     if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
@@ -1324,17 +1327,17 @@ fn handle_button_press(
         }
         MenuButton::SelectSave(index) => {
             if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
-                info!("Selected save slot: {}", index);
+                debug!("Selected save slot: {}", index);
                 menu_state.selected_index = *index;
             }
         }
         MenuButton::NewGame => {
-            info!("New Game pressed");
+            debug!("New Game pressed");
             if let Some(campaign) = global_state.0.campaign.clone() {
                 match crate::application::GameState::new_game(campaign) {
                     Ok((new_state, _)) => {
                         global_state.0 = new_state;
-                        info!("Started new game from campaign");
+                        debug!("Started new game from campaign");
                     }
                     Err(e) => {
                         error!("Failed to start new game: {}", e);
@@ -1345,19 +1348,19 @@ fn handle_button_press(
             }
         }
         MenuButton::DeleteGame => {
-            info!("Delete Game pressed");
+            debug!("Delete Game pressed");
             delete_game_operation(global_state, save_manager);
         }
         MenuButton::ToggleFullscreen => {
             global_state.0.config.graphics.fullscreen = !global_state.0.config.graphics.fullscreen;
-            info!(
+            debug!(
                 "Fullscreen toggled: {}",
                 global_state.0.config.graphics.fullscreen
             );
         }
         MenuButton::ToggleVSync => {
             global_state.0.config.graphics.vsync = !global_state.0.config.graphics.vsync;
-            info!("VSync toggled: {}", global_state.0.config.graphics.vsync);
+            debug!("VSync toggled: {}", global_state.0.config.graphics.vsync);
         }
         MenuButton::CycleShadowQuality => {
             use crate::sdk::game_config::ShadowQuality;
@@ -1368,17 +1371,17 @@ fn handle_button_press(
                     ShadowQuality::High => ShadowQuality::Ultra,
                     ShadowQuality::Ultra => ShadowQuality::Low,
                 };
-            info!(
+            debug!(
                 "Shadow quality cycled: {:?}",
                 global_state.0.config.graphics.shadow_quality
             );
         }
         MenuButton::Cancel => {
-            info!("Cancel pressed");
+            debug!("Cancel pressed");
             if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
                 match menu_state.current_submenu {
                     MenuType::Settings => {
-                        info!("Settings reset - returning to main menu");
+                        debug!("Settings reset - returning to main menu");
                         menu_state.set_submenu(MenuType::Main);
                     }
                     _ => {
@@ -1391,10 +1394,7 @@ fn handle_button_press(
 }
 
 /// Save the current game state to a file
-fn save_game_operation(
-    global_state: &mut ResMut<GlobalState>,
-    save_manager: &Res<SaveGameManager>,
-) {
+fn save_game_operation(global_state: &mut GlobalState, save_manager: &SaveGameManager) {
     let GameMode::Menu(_menu_state) = &global_state.0.mode else {
         return;
     };
@@ -1406,7 +1406,7 @@ fn save_game_operation(
     // Attempt to save
     match save_manager.save(&filename, &global_state.0) {
         Ok(_) => {
-            info!("Game saved successfully: {}", filename);
+            debug!("Game saved successfully: {}", filename);
             if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
                 menu_state.save_list.clear(); // Clear to force repopulation on next SaveLoad entry
                 menu_state.set_submenu(MenuType::Main);
@@ -1420,13 +1420,13 @@ fn save_game_operation(
 
 /// Load a game state from a save file
 fn load_game_operation(
-    global_state: &mut ResMut<GlobalState>,
-    save_manager: &Res<SaveGameManager>,
+    global_state: &mut GlobalState,
+    save_manager: &SaveGameManager,
     selected_filename: &str,
 ) {
     match save_manager.load(selected_filename) {
         Ok(loaded_state) => {
-            info!("Game loaded successfully: {}", selected_filename);
+            debug!("Game loaded successfully: {}", selected_filename);
 
             // Replace game state
             global_state.0 = loaded_state;
@@ -1441,10 +1441,7 @@ fn load_game_operation(
 }
 
 /// Delete a save game file
-fn delete_game_operation(
-    global_state: &mut ResMut<GlobalState>,
-    save_manager: &Res<SaveGameManager>,
-) {
+fn delete_game_operation(global_state: &mut GlobalState, save_manager: &SaveGameManager) {
     let GameMode::Menu(menu_state) = &mut global_state.0.mode else {
         return;
     };
@@ -1453,7 +1450,7 @@ fn delete_game_operation(
         let filename = save_info.filename.clone();
         match save_manager.delete(&filename) {
             Ok(_) => {
-                info!("Game deleted successfully: {}", filename);
+                debug!("Game deleted successfully: {}", filename);
                 menu_state.save_list.clear(); // Force repopulation
             }
             Err(e) => {
@@ -1479,19 +1476,19 @@ fn apply_settings(
         match slider.slider_type {
             VolumeSlider::Master => {
                 global_state.0.config.audio.master_volume = slider.current_value;
-                info!("Master volume updated to {:.0}%", slider.as_percentage());
+                debug!("Master volume updated to {:.0}%", slider.as_percentage());
             }
             VolumeSlider::Music => {
                 global_state.0.config.audio.music_volume = slider.current_value;
-                info!("Music volume updated to {:.0}%", slider.as_percentage());
+                debug!("Music volume updated to {:.0}%", slider.as_percentage());
             }
             VolumeSlider::Sfx => {
                 global_state.0.config.audio.sfx_volume = slider.current_value;
-                info!("SFX volume updated to {:.0}%", slider.as_percentage());
+                debug!("SFX volume updated to {:.0}%", slider.as_percentage());
             }
             VolumeSlider::Ambient => {
                 global_state.0.config.audio.ambient_volume = slider.current_value;
-                info!("Ambient volume updated to {:.0}%", slider.as_percentage());
+                debug!("Ambient volume updated to {:.0}%", slider.as_percentage());
             }
         }
     }
@@ -1551,7 +1548,8 @@ fn handle_menu_keyboard(
                 menu_state.current_submenu,
                 menu_state.selected_index,
                 match menu_state.current_submenu {
-                    MenuType::Main => 5,
+                    // There are six items on the main menu: Resume, New Game, Save, Load, Settings, Quit
+                    MenuType::Main => 6,
                     MenuType::SaveLoad => menu_state.save_list.len().max(1),
                     MenuType::Settings => 4,
                 },
@@ -1589,46 +1587,27 @@ fn handle_menu_keyboard(
     if keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::Space) {
         // Handle selection based on current menu state
         match submenu {
-            MenuType::Main => match selected_index {
-                0 => {
-                    info!("Selected: Resume");
-                    if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
-                        let resume = menu_state.get_resume_mode();
-                        global_state.0.mode = resume;
-                    }
-                }
-                1 => {
-                    info!("Selected: Save");
-                    save_game_operation(&mut global_state, &save_manager);
-                }
-                2 => {
-                    info!("Selected: Load");
-                    if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
-                        menu_state.set_submenu(MenuType::SaveLoad);
-                        menu_state.save_list.clear();
-                    }
-                }
-                3 => {
-                    info!("Selected: Settings");
-                    if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
-                        menu_state.set_submenu(MenuType::Settings);
-                    }
-                }
-                4 => {
-                    info!("Selected: Quit");
-                    std::process::exit(0);
-                }
-                _ => {}
-            },
+            MenuType::Main => {
+                // Map the selected index to the corresponding MenuButton and reuse the unified handler.
+                let sel_button = match selected_index {
+                    0 => MenuButton::Resume,
+                    1 => MenuButton::NewGame,
+                    2 => MenuButton::SaveGame,
+                    3 => MenuButton::LoadGame,
+                    4 => MenuButton::Settings,
+                    5 => MenuButton::Quit,
+                    _ => return,
+                };
+                handle_button_press(&sel_button, &mut global_state, &save_manager);
+            }
             MenuType::SaveLoad => {
+                // Pressing Enter on a save slot should load it (if there is a save at that index)
                 if selected_index < save_list.len() {
-                    let filename = save_list[selected_index].filename.clone();
-                    info!("Selected save slot: {} ({})", selected_index, filename);
-                    load_game_operation(&mut global_state, &save_manager, &filename);
+                    handle_button_press(&MenuButton::LoadGame, &mut global_state, &save_manager);
                 }
             }
             MenuType::Settings => {
-                info!("Selected settings: {}", selected_index);
+                debug!("Selected settings: {}", selected_index);
             }
         }
     }
@@ -1637,6 +1616,7 @@ fn handle_menu_keyboard(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::GameState;
 
     #[test]
     fn test_menu_button_variants() {
@@ -1856,5 +1836,105 @@ mod tests {
         assert_eq!(MenuType::Settings, MenuType::Settings);
         assert_ne!(MenuType::Settings, MenuType::Main);
         assert_ne!(MenuType::Settings, MenuType::SaveLoad);
+    }
+
+    // Additional tests for menu keyboard / save/load behavior
+
+    #[test]
+    fn test_menu_state_wraps_correctly_with_six_items() {
+        let mut ms = MenuState::new(GameMode::Exploration);
+        ms.selected_index = 5;
+        ms.select_next(6); // should wrap to 0
+        assert_eq!(ms.selected_index, 0);
+
+        ms.select_previous(6); // wrap back to 5
+        assert_eq!(ms.selected_index, 5);
+    }
+
+    #[test]
+    fn test_save_button_opens_saveload_submenu() {
+        use tempfile::TempDir;
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut gs = GlobalState(GameState::new());
+        gs.0.enter_menu();
+
+        // Press Save (simulate button press)
+        handle_button_press(&MenuButton::SaveGame, &mut gs, &manager);
+
+        // Should be in Menu mode and SaveLoad submenu
+        if let GameMode::Menu(ms) = &gs.0.mode {
+            assert_eq!(ms.current_submenu, MenuType::SaveLoad);
+        } else {
+            panic!("Expected to be in Menu mode");
+        }
+    }
+
+    #[test]
+    fn test_confirm_in_saveload_creates_save_and_returns_to_main() {
+        use tempfile::TempDir;
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut gs = GlobalState(GameState::new());
+        gs.0.enter_menu();
+
+        // Enter SaveLoad submenu
+        if let GameMode::Menu(ms) = &mut gs.0.mode {
+            ms.set_submenu(MenuType::SaveLoad);
+        } else {
+            panic!("Expected to be in Menu mode");
+        }
+
+        // No saves initially
+        assert_eq!(manager.list_saves().unwrap().len(), 0);
+
+        // Press Confirm (Save) in SaveLoad
+        handle_button_press(&MenuButton::Confirm, &mut gs, &manager);
+
+        // After save, we should have at least one save file and menu returned to Main
+        let saves = manager.list_saves().unwrap();
+        assert!(!saves.is_empty());
+
+        if let GameMode::Menu(ms) = &gs.0.mode {
+            assert_eq!(ms.current_submenu, MenuType::Main);
+        } else {
+            panic!("Expected to be in Menu mode");
+        }
+    }
+
+    #[test]
+    fn test_load_in_saveload_loads_selected_save() {
+        use tempfile::TempDir;
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        // Create a save named "test_save"
+        let saved_state = GameState::new();
+        manager.save("test_save", &saved_state).unwrap();
+
+        // Create a fresh global state and open SaveLoad with an entry for "test_save"
+        let mut gs = GlobalState(GameState::new());
+        gs.0.enter_menu();
+        if let GameMode::Menu(ms) = &mut gs.0.mode {
+            ms.set_submenu(MenuType::SaveLoad);
+            ms.save_list = vec![SaveGameInfo {
+                filename: "test_save".to_string(),
+                timestamp: "now".to_string(),
+                character_names: vec![],
+                location: "unknown".to_string(),
+                game_version: env!("CARGO_PKG_VERSION").to_string(),
+            }];
+            ms.selected_index = 0;
+        } else {
+            panic!("Expected to be in Menu mode");
+        }
+
+        // Press Load
+        handle_button_press(&MenuButton::LoadGame, &mut gs, &manager);
+
+        // After a successful load the game mode should be Exploration
+        assert!(matches!(gs.0.mode, GameMode::Exploration));
     }
 }

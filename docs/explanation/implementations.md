@@ -107,6 +107,47 @@ Fixed critical bugs in the inn party management UI where mouse clicks, Tab key n
 
 ---
 
+## Bug Fix: In-Game Menu - Save/Load Keyboard & Button Fix - COMPLETED
+
+### Summary
+
+Fixed issues in the in-game main menu and Save/Load dialog:
+
+- Corrected an off-by-one keyboard navigation bug in the main menu so all options (Resume, New Game, Save, Load, Settings, Quit) are reachable via Up/Down and wrap correctly.
+- Unified keyboard and mouse selection handling (Enter/Space now routes to the same handler as button clicks).
+- Implemented Save/Load dialog button behaviors:
+  - \"Save\" (Confirm) now creates a timestamped save and returns to the main menu.
+  - \"Load\" loads the currently selected save; pressing Enter on a selected save slot also loads it.
+- Ensured the Save/Load dialog is fully navigable with the keyboard and that its Save/Load/Delete/Back buttons perform the expected actions.
+
+### Files Modified
+
+- `src/game/systems/menu.rs` (modified)
+  - Fixed main menu keyboard item count and mapping
+  - Routed keyboard Enter to `handle_button_press` so keyboard and mouse are consistent
+  - Implemented Save and Load button behavior in SaveLoad panel
+  - Adjusted helper signatures for testability
+
+### Tests Added
+
+- `game::systems::menu::tests::test_menu_state_wraps_correctly_with_six_items`
+- `game::systems::menu::tests::test_save_button_opens_saveload_submenu`
+- `game::systems::menu::tests::test_confirm_in_saveload_creates_save_and_returns_to_main`
+- `game::systems::menu::tests::test_load_in_saveload_loads_selected_save`
+
+### Validation
+
+All local validation passed after the change:
+
+```
+cargo fmt --all
+cargo check --all-targets --all-features
+cargo clippy --all-targets --all-features -- -D warnings
+cargo nextest run --all-features
+```
+
+---
+
 ## Phase 4: Innkeeper Party Management - Integration Testing and Bug Fixes - COMPLETED
 
 ### Summary

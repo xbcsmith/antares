@@ -34,6 +34,8 @@ Campaign Builder --> Map Editor --> Select Map --> Edit
 
 NPCs placed on the map are not editable. Selecting an NPC on the map does not bring up the NPC editor. It should bring up the NPC editor with the selected NPC's data loaded.
 
+✅ COMPLETED
+
 ### NPC Editor
 
 Campaign Builder --> Dialogue Editor --> Edit
@@ -102,18 +104,19 @@ Unable to create new nodes makes it impossible to create dialog trees.
 
 ## Game Engine
 
-### Warnings
+### Combat System
 
-2026-01-17T21:23:14.969390Z WARN bevy_ecs::error::handler: Encountered an error in command `<bevy_ecs::system::commands::entity_command::despawn::{{closure}} as bevy_ecs::error::command_handling::CommandWithEntity<core::result::Result<(), bevy_ecs::world::error::EntityMutableFetchError>>>::with_entity::{{closure}}`: The entity with ID 600v217 does not exist (enable `track_location` feature for more details)
+The combat system is not implemented in the game engine. When the player encounters an enemy, nothing happens. We need to implement a turn-based combat system in the game engine so that when the player encounters an enemy, the combat system is triggered and the player can fight the enemy. The combat system should include health points, attack points, defense points, and special abilities for both the player and the enemy. The combat system should also include a victory condition for the player to win the fight and a defeat condition for the player to lose the fight.
 
-    If you were attempting to apply a command to this entity,
-    and want to handle this error gracefully, consider using `EntityCommands::queue_handled` or `queue_silenced`.
+Core Components of a Bevy Combat System
 
-✅ COMPLETED -
+    State Management: Use States to manage game flow (e.g., CombatState::PlayerTurn, CombatState::EnemyTurn).
+    Components: Define data structures for combatants, such as Health, Damage, Defense, and Position.
+    Systems: Create functions that query components to perform logic, such as attack_system or damage_calculation_system.
+    Events: Use Bevy's event system for actions, such as AttackEvent or DamageEvent, to handle interactions between entities.
+    Plugin Architecture: Separate logic into plugins for modularity (e.g., CombatPlugin, WeaponPlugin).
 
-### Procedural Meshes Implementation
-
-✅ COMPLETED - [procedural meshes implementation](./procedural_meshes_implementation_plan.md)
+[combat system implementation plan.md](/Users/bsmith/go/src/github.com/xbcsmith/antares/docs/explanation/combat_system_implementation_plan.md)
 
 ### InnKeeper Party management
 
@@ -156,9 +159,11 @@ Supporting custom fonts requires updates to the campaign config to allow specify
 
 ### Game menu implementation
 
+The in game menu is off by one when using the keyboard to select the options on the main menu. Save Game brings up a Save Game dialog that works with the mouse but can not be navigated with the keyboard. Load Game does nothing. It should bring up the list of saved games to load. The Save Game and Load Game dialogs should be navigable with the keyboard. The Save Game dialog has a Save and Load button that do nothing. They should save and load the selected game. THINK HARD and follow the rules in @AGENTS.md
+
 A configurable Keyboard Key (default ESC) should bring up the game menu. Currently it does nothing. We need to implement the game menu. It should include options like new game, save game, load game, delete game, quit, etc. We should also add a Configuration menu option that allows the user to change settings like volume, graphics quality, key bindings, etc and store it in the Save Game RON File. This config would override the default Campaign Config RON file settings once set. Keeping a list of recent saves that the use can pick from to load would also be a feature.
 
-[game menu implementation](./game_menu_implementation_plan.md)
+✅ COMPLETED - [game menu implementation](./game_menu_implementation_plan.md)
 
 ### Teleport to Map
 
@@ -235,3 +240,16 @@ HUD character names do not need numbers next to them. Order can be determined by
 ### Tile Visual Metadata
 
 ✅ COMPLETED - [Tile Visual Metadata](./tile_visual_metadata_implementation_plan.md)
+
+### Warnings
+
+2026-01-17T21:23:14.969390Z WARN bevy_ecs::error::handler: Encountered an error in command `<bevy_ecs::system::commands::entity_command::despawn::{{closure}} as bevy_ecs::error::command_handling::CommandWithEntity<core::result::Result<(), bevy_ecs::world::error::EntityMutableFetchError>>>::with_entity::{{closure}}`: The entity with ID 600v217 does not exist (enable `track_location` feature for more details)
+
+    If you were attempting to apply a command to this entity,
+    and want to handle this error gracefully, consider using `EntityCommands::queue_handled` or `queue_silenced`.
+
+✅ COMPLETED -
+
+### Procedural Meshes Implementation
+
+✅ COMPLETED - [procedural meshes implementation](./procedural_meshes_implementation_plan.md)
