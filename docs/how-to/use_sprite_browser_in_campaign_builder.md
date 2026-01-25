@@ -89,19 +89,19 @@ pub fn show_sprite_browser(
         .selected_text(&selected)
         .show_ui(ui, |ui| {
             for (key, path) in &state.sheets {
-                ui.selectable_value(&mut selected, key.clone(), 
+                ui.selectable_value(&mut selected, key.clone(),
                     format!("{}: {}", key, path));
             }
         });
-    
+
     state.selected_sheet = Some(selected.clone());
-    
+
     // Load sprites for selected sheet
     if let Some(sheet_key) = &state.selected_sheet {
         let sprites = get_sprites_for_sheet(sheet_key)?;
-        
+
         ui.label(format!("Available Sprites ({}):", sprites.len()));
-        
+
         for (index, name) in sprites {
             if ui.selectable_label(
                 state.selected_sprite == Some(index),
@@ -111,7 +111,7 @@ pub fn show_sprite_browser(
             }
         }
     }
-    
+
     Ok(())
 }
 ```
@@ -126,7 +126,7 @@ pub fn get_selected_sprite_reference(
     state: &SpriteBrowserState,
 ) -> Result<Option<SpriteReference>, Box<dyn std::error::Error>> {
     let sheets = browse_sprite_sheets()?;
-    
+
     match (&state.selected_sheet, state.selected_sprite) {
         (Some(sheet_key), Some(sprite_index)) => {
             // Find the texture path for this sheet
@@ -161,25 +161,25 @@ pub fn show_tile_sprite_editor(
 ) -> Result<(), Box<dyn std::error::Error>> {
     ui.group(|ui| {
         ui.label("Sprite Configuration");
-        
+
         // Show current sprite
         if let Some(sprite) = &tile.visual.sprite {
-            ui.label(format!("Current: {} [{}]", 
-                sprite.sheet_path, 
+            ui.label(format!("Current: {} [{}]",
+                sprite.sheet_path,
                 sprite.sprite_index));
-            
+
             if ui.button("Remove Sprite").clicked() {
                 tile.visual.sprite = None;
             }
         } else {
             ui.label("No sprite selected");
         }
-        
+
         // Sprite grid picker
         let sprites = get_sprites_for_sheet(current_sheet)?;
-        
+
         ui.label("Select Sprite:");
-        
+
         // Show as grid (4 columns for compact display)
         let col_count = 4;
         for (idx, chunk) in sprites.chunks(col_count).enumerate() {
@@ -188,7 +188,7 @@ pub fn show_tile_sprite_editor(
                     let is_selected = tile.visual.sprite.as_ref()
                         .map(|s| s.sprite_index == *sprite_index)
                         .unwrap_or(false);
-                    
+
                     if ui.selectable_label(is_selected,
                         format!("[{}]", sprite_index)).clicked() {
                         tile.visual.sprite = Some(SpriteReference {
@@ -201,7 +201,7 @@ pub fn show_tile_sprite_editor(
             });
         }
     });
-    
+
     Ok(())
 }
 ```
@@ -226,7 +226,7 @@ impl SpriteSearchState {
             search_results: Vec::new(),
         }
     }
-    
+
     pub fn update_search(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if self.search_text.is_empty() {
             self.search_results.clear();
@@ -246,18 +246,18 @@ pub fn show_sprite_search(
         let response = TextEdit::singleline(&mut search_state.search_text)
             .desired_width(f32::INFINITY)
             .show(ui);
-        
+
         if response.changed {
             search_state.update_search()?;
         }
     });
-    
+
     if !search_state.search_results.is_empty() {
         ui.separator();
         ui.label(format!("Results ({})", search_state.search_results.len()));
-        
+
         for (sheet, index, name) in &search_state.search_results {
-            if ui.selectable_label(false, 
+            if ui.selectable_label(false,
                 format!("{} [{}]: {}", sheet, index, name)).clicked() {
                 // User selected this sprite
                 // Return (sheet, index) to caller
@@ -265,7 +265,7 @@ pub fn show_sprite_search(
             }
         }
     }
-    
+
     Ok(())
 }
 ```
@@ -281,10 +281,10 @@ pub fn calculate_preview_grid(
     sheet_key: &str,
 ) -> Result<(u32, u32), Box<dyn std::error::Error>> {
     let (cols, rows) = get_sprite_sheet_dimensions(sheet_key)?;
-    
+
     println!("Sprite sheet '{}' has {}x{} grid", sheet_key, cols, rows);
     println!("Total sprites: {}", cols * rows);
-    
+
     Ok((cols, rows))
 }
 ```
@@ -299,10 +299,10 @@ pub fn get_sprite_grid_position(
     sprite_index: u32,
 ) -> Result<(u32, u32), Box<dyn std::error::Error>> {
     let (cols, _) = get_sprite_sheet_dimensions(sheet_key)?;
-    
+
     let col = sprite_index % cols;
     let row = sprite_index / cols;
-    
+
     Ok((col, row))
 }
 ```
@@ -346,7 +346,7 @@ impl SpriteSelectionWidget {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let sheets = browse_sprite_sheets()?;
         let selected_sheet = sheets.first().map(|(k, _)| k.clone()).unwrap_or_default();
-        
+
         Ok(Self {
             sheets,
             selected_sheet,
@@ -354,7 +354,7 @@ impl SpriteSelectionWidget {
             show_search: false,
         })
     }
-    
+
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -369,24 +369,24 @@ impl SpriteSelectionWidget {
                         ui.selectable_value(&mut self.selected_sheet, key.clone(), key);
                     }
                 });
-            
+
             // Search toggle
             if ui.button("🔍").clicked() {
                 self.show_search = !self.show_search;
             }
         });
-        
+
         if self.show_search {
             ui.horizontal(|ui| {
                 TextEdit::singleline(&mut self.search_text)
                     .desired_width(f32::INFINITY)
                     .show(ui);
             });
-            
+
             if !self.search_text.is_empty() {
                 let results = search_sprites(&self.search_text)?;
                 for (sheet, index, name) in results.iter().take(5) {
-                    if ui.selectable_label(false, 
+                    if ui.selectable_label(false,
                         format!("{} [{}]: {}", sheet, index, name)).clicked() {
                         self.selected_sheet = sheet.clone();
                         tile.visual.sprite = Some(SpriteReference {
@@ -400,15 +400,15 @@ impl SpriteSelectionWidget {
         } else {
             // Sprite grid
             let sprites = get_sprites_for_sheet(&self.selected_sheet)?;
-            
+
             for chunk in sprites.chunks(4) {
                 ui.horizontal(|ui| {
                     for (index, name) in chunk {
                         let is_selected = tile.visual.sprite.as_ref()
                             .map(|s| s.sprite_index == *index)
                             .unwrap_or(false);
-                        
-                        if ui.selectable_label(is_selected, 
+
+                        if ui.selectable_label(is_selected,
                             format!("[{}] {}", index, name)).clicked() {
                             tile.visual.sprite = Some(SpriteReference {
                                 sheet_path: format!("sprites/{}.png", self.selected_sheet),
@@ -420,7 +420,7 @@ impl SpriteSelectionWidget {
                 });
             }
         }
-        
+
         Ok(())
     }
 }
@@ -482,7 +482,7 @@ use antares::sdk::map_editor::{SpriteSheetInfo, load_sprite_registry};
 
 static SPRITE_REGISTRY: OnceLock<HashMap<String, SpriteSheetInfo>> = OnceLock::new();
 
-pub fn get_cached_registry() -> Result<&'static HashMap<String, SpriteSheetInfo>, 
+pub fn get_cached_registry() -> Result<&'static HashMap<String, SpriteSheetInfo>,
     Box<dyn std::error::Error>> {
     SPRITE_REGISTRY.get_or_try_init(|| {
         load_sprite_registry()
@@ -494,7 +494,7 @@ pub fn get_cached_registry() -> Result<&'static HashMap<String, SpriteSheetInfo>
 
 ```rust
 // Only load sprites for selected sheet, not all sheets
-pub fn load_sprites_on_demand(sheet_key: &str) 
+pub fn load_sprites_on_demand(sheet_key: &str)
     -> Result<Vec<(u32, String)>, Box<dyn std::error::Error>> {
     use antares::sdk::map_editor::get_sprites_for_sheet;
     get_sprites_for_sheet(sheet_key)
@@ -510,17 +510,17 @@ pub fn load_sprites_on_demand(sheet_key: &str)
 fn test_sprite_selection_creates_valid_reference() {
     use antares::sdk::map_editor::browse_sprite_sheets;
     use antares::domain::world::SpriteReference;
-    
+
     let sheets = browse_sprite_sheets().unwrap();
     assert!(!sheets.is_empty());
-    
+
     let (sheet_key, texture_path) = &sheets[0];
     let reference = SpriteReference {
         sheet_path: texture_path.clone(),
         sprite_index: 0,
         animation: None,
     };
-    
+
     assert_eq!(reference.sprite_index, 0);
 }
 ```

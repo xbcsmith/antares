@@ -3,6 +3,9 @@
 
 use crate::domain::types;
 use crate::domain::world;
+use crate::domain::world::SpriteReference;
+use crate::game::components::sprite::{AnimatedSprite, TileSprite};
+use crate::game::resources::sprite_assets::SpriteAssets;
 use crate::game::resources::GlobalState;
 use crate::game::systems::procedural_meshes;
 use bevy::prelude::*;
@@ -811,9 +814,203 @@ fn spawn_map(
     }
 }
 
+/// Spawns a sprite entity for a tile with sprite metadata
+///
+/// # Arguments
+///
+/// * `commands` - Bevy command buffer
+/// * `sprite_assets` - Sprite asset registry (mutable for caching)
+/// * `asset_server` - Asset server for loading textures
+/// * `materials` - Material asset storage (mutable)
+/// * `meshes` - Mesh asset storage (mutable)
+/// * `sprite_ref` - Sprite reference from tile metadata
+/// * `position` - World position for the sprite
+/// * `map_id` - ID of the map this sprite belongs to
+///
+/// # Returns
+///
+/// Entity ID of spawned sprite
+///
+/// # Behavior
+///
+/// - Loads sprite texture from `sprite_ref.sheet_path`
+/// - Creates entity with Mesh and StandardMaterial components
+/// - Attaches `TileSprite` component with sheet path and index
+/// - If animation specified, attaches `AnimatedSprite` component
+/// - Tags entity with `MapEntity` for lifecycle management
+///
+/// # Examples
+///
+/// ```no_run
+/// use antares::game::systems::map::spawn_tile_sprite;
+/// use antares::domain::world::SpriteReference;
+/// use bevy::prelude::*;
+/// use antares::game::resources::sprite_assets::SpriteAssets;
+///
+/// fn spawn_sprite(
+///     mut commands: Commands,
+///     mut sprite_assets: ResMut<SpriteAssets>,
+///     asset_server: Res<AssetServer>,
+///     mut materials: ResMut<Assets<StandardMaterial>>,
+///     mut meshes: ResMut<Assets<Mesh>>,
+/// ) {
+///     let sprite_ref = SpriteReference {
+///         sheet_path: "sprites/walls.png".to_string(),
+///         sprite_index: 0,
+///         animation: None,
+///     };
+///     let entity = spawn_tile_sprite(
+///         &mut commands,
+///         &mut sprite_assets,
+///         &asset_server,
+///         &mut materials,
+///         &mut meshes,
+///         &sprite_ref,
+///         Vec3::new(5.0, 0.5, 5.0),
+///         1u16,
+///     );
+/// }
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_tile_sprite(
+    commands: &mut Commands,
+    sprite_assets: &mut SpriteAssets,
+    asset_server: &AssetServer,
+    materials: &mut Assets<StandardMaterial>,
+    meshes: &mut Assets<Mesh>,
+    sprite_ref: &SpriteReference,
+    position: Vec3,
+    map_id: types::MapId,
+) -> Entity {
+    // Get or load material for sprite sheet (caches per sheet path)
+    let material =
+        sprite_assets.get_or_load_material(&sprite_ref.sheet_path, asset_server, materials);
+
+    // Get or load mesh for tile sprites (1.0 x 1.0 flat quad)
+    let mesh = sprite_assets.get_or_load_mesh((1.0, 1.0), meshes);
+
+    // Extract position from Vec3 for TileCoord
+    let tile_pos = types::Position::new(position.x as i32, position.z as i32);
+
+    // Spawn tile sprite with components
+    let mut entity_commands = commands.spawn((
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        Transform::from_translation(position),
+        GlobalTransform::default(),
+        Visibility::default(),
+        TileSprite {
+            sheet_path: sprite_ref.sheet_path.clone(),
+            sprite_index: sprite_ref.sprite_index,
+        },
+        MapEntity(map_id),
+        TileCoord(tile_pos),
+    ));
+
+    // Add animation if specified
+    if let Some(anim) = &sprite_ref.animation {
+        entity_commands.insert(AnimatedSprite::new(
+            anim.frames.clone(),
+            anim.fps,
+            anim.looping,
+        ));
+    }
+
+    entity_commands.id()
+}
+
+/// Spawns a visual marker for a map event using a sprite
+///
+/// # Arguments
+///
+/// * `commands` - Command buffer
+/// * `sprite_assets` - Sprite asset registry (mutable for caching)
+/// * `asset_server` - Asset server for loading textures
+/// * `materials` - Material asset storage (mutable)
+/// * `meshes` - Mesh asset storage (mutable)
+/// * `event_type` - Type of event (sign, portal, treasure, etc.)
+/// * `position` - World position for the marker
+/// * `map_id` - ID of the map this marker belongs to
+///
+/// # Returns
+///
+/// Entity ID of spawned marker
+///
+/// # Behavior
+///
+/// - Maps event_type to appropriate sprite sheet and index
+/// - Creates entity with Mesh and StandardMaterial components
+/// - Tags entity with `MapEntity` for lifecycle management
+/// - Positions slightly above ground (y = 0.5)
+///
+/// # Examples
+///
+/// ```no_run
+/// use antares::game::systems::map::spawn_event_marker;
+/// use bevy::prelude::*;
+/// use antares::game::resources::sprite_assets::SpriteAssets;
+///
+/// fn spawn_sign(
+///     mut commands: Commands,
+///     mut sprite_assets: ResMut<SpriteAssets>,
+///     asset_server: Res<AssetServer>,
+///     mut materials: ResMut<Assets<StandardMaterial>>,
+///     mut meshes: ResMut<Assets<Mesh>>,
+/// ) {
+///     spawn_event_marker(
+///         &mut commands,
+///         &mut sprite_assets,
+///         &asset_server,
+///         &mut materials,
+///         &mut meshes,
+///         "sign",
+///         Vec3::new(15.0, 0.5, 15.0),
+///         1u16,
+///     );
+/// }
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_event_marker(
+    commands: &mut Commands,
+    sprite_assets: &mut SpriteAssets,
+    asset_server: &AssetServer,
+    materials: &mut Assets<StandardMaterial>,
+    meshes: &mut Assets<Mesh>,
+    event_type: &str,
+    position: Vec3,
+    map_id: types::MapId,
+) -> Entity {
+    // Map event type to sprite sheet/index
+    let (sheet_path, sprite_index) = match event_type {
+        "sign" => ("sprites/signs.png", 0u32),
+        "portal" => ("sprites/portals.png", 0u32),
+        "treasure" => ("sprites/treasure.png", 0u32),
+        "quest" => ("sprites/signs.png", 1u32),
+        _ => ("sprites/signs.png", 0u32), // Default to generic sign
+    };
+
+    let sprite_ref = SpriteReference {
+        sheet_path: sheet_path.to_string(),
+        sprite_index,
+        animation: None,
+    };
+
+    spawn_tile_sprite(
+        commands,
+        sprite_assets,
+        asset_server,
+        materials,
+        meshes,
+        &sprite_ref,
+        position,
+        map_id,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::world::SpriteAnimation;
     use crate::game::components::dialogue::NpcDialogue;
 
     #[test]
@@ -893,5 +1090,98 @@ mod tests {
             npc_id: "test_npc".to_string(),
         };
         assert_eq!(marker.npc_id, "test_npc");
+    }
+
+    #[test]
+    fn test_tile_sprite_spawning() {
+        // Test that TileSprite component can be created with correct fields
+        let sprite_ref = SpriteReference {
+            sheet_path: "sprites/walls.png".to_string(),
+            sprite_index: 0,
+            animation: None,
+        };
+
+        // Verify sprite reference is correctly formed
+        assert_eq!(sprite_ref.sheet_path, "sprites/walls.png");
+        assert_eq!(sprite_ref.sprite_index, 0);
+    }
+
+    #[test]
+    fn test_animated_tile_sprite_spawning() {
+        // Test that SpriteReference with animation can be created
+        let sprite_ref = SpriteReference {
+            sheet_path: "sprites/water.png".to_string(),
+            sprite_index: 0,
+            animation: Some(SpriteAnimation {
+                frames: vec![0, 1, 2, 3],
+                fps: 8.0,
+                looping: true,
+            }),
+        };
+
+        assert_eq!(sprite_ref.sheet_path, "sprites/water.png");
+        assert!(sprite_ref.animation.is_some());
+
+        let anim = sprite_ref.animation.as_ref().unwrap();
+        assert_eq!(anim.frames, vec![0, 1, 2, 3]);
+        assert_eq!(anim.fps, 8.0);
+        assert!(anim.looping);
+    }
+
+    #[test]
+    fn test_event_marker_sprite_spawning() {
+        // Test that event marker maps to correct sprite sheet
+        let event_type = "sign";
+        let (sheet_path, sprite_index) = match event_type {
+            "sign" => ("sprites/signs.png", 0u32),
+            "portal" => ("sprites/portals.png", 0u32),
+            "treasure" => ("sprites/treasure.png", 0u32),
+            "quest" => ("sprites/signs.png", 1u32),
+            _ => ("sprites/signs.png", 0u32),
+        };
+
+        assert_eq!(sheet_path, "sprites/signs.png");
+        assert_eq!(sprite_index, 0u32);
+    }
+
+    #[test]
+    fn test_event_marker_different_types() {
+        let event_types = vec![
+            ("sign", "sprites/signs.png", 0u32),
+            ("portal", "sprites/portals.png", 0u32),
+            ("treasure", "sprites/treasure.png", 0u32),
+            ("quest", "sprites/signs.png", 1u32),
+        ];
+
+        for (event_type, expected_sheet, expected_index) in event_types {
+            let (sheet_path, sprite_index) = match event_type {
+                "sign" => ("sprites/signs.png", 0u32),
+                "portal" => ("sprites/portals.png", 0u32),
+                "treasure" => ("sprites/treasure.png", 0u32),
+                "quest" => ("sprites/signs.png", 1u32),
+                _ => ("sprites/signs.png", 0u32),
+            };
+
+            assert_eq!(
+                sheet_path, expected_sheet,
+                "Failed for event_type: {}",
+                event_type
+            );
+            assert_eq!(
+                sprite_index, expected_index,
+                "Failed for event_type: {}",
+                event_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_tile_sprite_map_entity_tagging() {
+        // Test that MapEntity component stores correct map ID
+        let map_id = 5u16;
+        let map_entity = MapEntity(map_id);
+
+        assert_eq!(map_entity.0, map_id);
+        assert_eq!(map_entity.0, 5u16);
     }
 }

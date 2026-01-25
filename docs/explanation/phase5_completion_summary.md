@@ -140,7 +140,7 @@ Phase 5 successfully implements sprite registry access and browsing functions in
 
 **Tile Sprites** (5 sheets):
 - `walls` - 4×4 grid, 8 named sprites
-- `doors` - 4×2 grid, 6 named sprites  
+- `doors` - 4×2 grid, 6 named sprites
 - `terrain` - 8×8 grid, 8 named sprites
 - `trees` - 4×4 grid, 4 named sprites
 - `decorations` - 8×8 grid, 6 named sprites

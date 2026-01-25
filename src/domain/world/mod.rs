@@ -27,5 +27,6 @@ pub use events::{trigger_event, EventError, EventResult};
 pub use movement::{check_tile_blocked, move_party, MovementError};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};
 pub use types::{
-    Map, MapEvent, ResolvedNpc, TerrainType, Tile, TileVisualMetadata, WallType, World,
+    Map, MapEvent, ResolvedNpc, SpriteAnimation, SpriteReference, TerrainType, Tile,
+    TileVisualMetadata, WallType, World,
 };

@@ -72,7 +72,6 @@ cargo nextest run --all-features
 **If you can't explain WHY your code differs from architecture.md, IT'S WRONG.**
 
 **IF ANY CHECK FAILS, YOU MUST FIX IT BEFORE PROCEEDING.**
-</parameter>
 
 ---
 
