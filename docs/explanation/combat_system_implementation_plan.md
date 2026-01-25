@@ -450,4 +450,3 @@ Combat system implementation should begin **after** sprite support Phases 1-3 ar
 │  [Party HUD - existing HUD at bottom]       │
 └─────────────────────────────────────────────┘
 ```
-

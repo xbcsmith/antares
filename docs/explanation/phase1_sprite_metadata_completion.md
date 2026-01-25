@@ -66,7 +66,7 @@ Added sprite field with backward compatibility:
 ```rust
 pub struct TileVisualMetadata {
     // ... existing fields (height, width_x, width_z, color_tint, scale, y_offset, rotation_y)
-    
+
     /// Optional sprite reference for texture-based rendering
     /// When set, replaces default 3D mesh with billboarded sprite
     #[serde(default)]
