@@ -15,11 +15,13 @@
 //! - `types`: Core world data structures (Tile, Map, World, etc.)
 //! - `movement`: Party movement and navigation logic
 //! - `events`: Map event handling system
+//! - `sprite_selection`: Procedural sprite selection (Phase 6)
 
 pub mod blueprint;
 mod events;
 mod movement;
 pub mod npc;
+pub mod sprite_selection;
 mod types;
 
 pub use blueprint::MapBlueprint;
@@ -27,6 +29,7 @@ pub use events::{trigger_event, EventError, EventResult};
 pub use movement::{check_tile_blocked, move_party, MovementError};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};
 pub use types::{
-    Map, MapEvent, ResolvedNpc, SpriteAnimation, SpriteReference, TerrainType, Tile,
+    LayeredSprite, Map, MapEvent, ResolvedNpc, SpriteAnimation, SpriteLayer,
+    SpriteMaterialProperties, SpriteReference, SpriteSelectionRule, TerrainType, Tile,
     TileVisualMetadata, WallType, World,
 };

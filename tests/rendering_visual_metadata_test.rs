@@ -345,6 +345,8 @@ fn test_visual_metadata_serialization_roundtrip() {
         y_offset: Some(0.3),
         rotation_y: None,
         sprite: None,
+        sprite_layers: vec![],
+        sprite_rule: None,
     };
 
     // Serialize to RON

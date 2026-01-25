@@ -120,8 +120,12 @@ pub fn spawn_actor_sprite(
     actor_type: ActorType,
 ) -> Entity {
     // Get or load material for sprite sheet (caches per sheet path)
-    let material =
-        sprite_assets.get_or_load_material(&sprite_ref.sheet_path, asset_server, materials);
+    let material = sprite_assets.get_or_load_material(
+        &sprite_ref.sheet_path,
+        asset_server,
+        materials,
+        sprite_ref.material_properties.as_ref(),
+    );
 
     // Get or load mesh for actor sprites (1.0 x 2.0 tall quad)
     let mesh = sprite_assets.get_or_load_mesh((1.0, 2.0), meshes);

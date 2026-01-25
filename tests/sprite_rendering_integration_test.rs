@@ -26,6 +26,7 @@ mod sprite_integration_tests {
             sheet_path: "sprites/walls.png".to_string(),
             sprite_index: 0,
             animation: None,
+            material_properties: None,
         };
 
         assert_eq!(sprite_ref.sheet_path, "sprites/walls.png");
@@ -43,6 +44,7 @@ mod sprite_integration_tests {
                 fps: 8.0,
                 looping: true,
             }),
+            material_properties: None,
         };
 
         assert_eq!(sprite_ref.sheet_path, "sprites/water.png");
@@ -255,9 +257,10 @@ mod sprite_integration_tests {
     #[test]
     fn test_sprite_reference_without_animation() {
         let sprite_ref = SpriteReference {
-            sheet_path: "sprites/walls.png".to_string(),
-            sprite_index: 0,
+            sheet_path: "sprites/terrain.png".to_string(),
+            sprite_index: 5,
             animation: None,
+            material_properties: None,
         };
 
         assert!(sprite_ref.animation.is_none());

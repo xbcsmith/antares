@@ -883,8 +883,13 @@ pub fn spawn_tile_sprite(
     map_id: types::MapId,
 ) -> Entity {
     // Get or load material for sprite sheet (caches per sheet path)
-    let material =
-        sprite_assets.get_or_load_material(&sprite_ref.sheet_path, asset_server, materials);
+    // Phase 6: Pass material properties if defined
+    let material = sprite_assets.get_or_load_material(
+        &sprite_ref.sheet_path,
+        asset_server,
+        materials,
+        sprite_ref.material_properties.as_ref(),
+    );
 
     // Get or load mesh for tile sprites (1.0 x 1.0 flat quad)
     let mesh = sprite_assets.get_or_load_mesh((1.0, 1.0), meshes);
@@ -993,6 +998,7 @@ pub fn spawn_event_marker(
         sheet_path: sheet_path.to_string(),
         sprite_index,
         animation: None,
+        material_properties: None,
     };
 
     spawn_tile_sprite(
@@ -1099,6 +1105,7 @@ mod tests {
             sheet_path: "sprites/walls.png".to_string(),
             sprite_index: 0,
             animation: None,
+            material_properties: None,
         };
 
         // Verify sprite reference is correctly formed
@@ -1117,6 +1124,7 @@ mod tests {
                 fps: 8.0,
                 looping: true,
             }),
+            material_properties: None,
         };
 
         assert_eq!(sprite_ref.sheet_path, "sprites/water.png");

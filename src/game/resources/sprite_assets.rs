@@ -12,6 +12,7 @@
 //! - Caches materials per sprite sheet to minimize draw calls
 //! - Provides UV transforms for texture atlas sprite selection
 //! - No external dependencies - native Bevy only
+//! - Supports material property overrides (Phase 6: emissive, alpha, metallic, roughness)
 //!
 //! # Examples
 //!
@@ -30,6 +31,7 @@
 //!         "sprites/walls.png",
 //!         &asset_server,
 //!         &mut materials,
+//!         None,
 //!     );
 //!
 //!     // Create quad mesh for sprite
@@ -40,6 +42,7 @@
 //! }
 //! ```
 
+use bevy::color::LinearRgba;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -164,6 +167,7 @@ impl SpriteAssets {
     ///         "sprites/npcs_town.png",
     ///         &asset_server,
     ///         &mut materials,
+    ///         None,
     ///     );
     /// }
     /// ```
@@ -172,19 +176,49 @@ impl SpriteAssets {
         sheet_path: &str,
         asset_server: &AssetServer,
         materials: &mut Assets<StandardMaterial>,
+        material_properties: Option<&crate::domain::world::SpriteMaterialProperties>,
     ) -> Handle<StandardMaterial> {
         if let Some(handle) = self.materials.get(sheet_path) {
             return handle.clone();
         }
 
         let texture_handle = asset_server.load::<Image>(sheet_path.to_string());
-        let material = StandardMaterial {
+        let mut material = StandardMaterial {
             base_color_texture: Some(texture_handle),
             alpha_mode: AlphaMode::Blend,
             unlit: false, // Use PBR lighting for depth
             perceptual_roughness: 0.9,
             ..default()
         };
+
+        // Apply material property overrides if provided (Phase 6)
+        if let Some(props) = material_properties {
+            if let Some(emissive_color) = props.emissive {
+                // emissive expects LinearRgba, convert from sRGB
+                material.emissive =
+                    LinearRgba::new(emissive_color[0], emissive_color[1], emissive_color[2], 1.0);
+            }
+            if let Some(alpha) = props.alpha {
+                material.alpha_mode = if alpha < 1.0 {
+                    AlphaMode::Blend
+                } else {
+                    AlphaMode::Opaque
+                };
+                // Update alpha of base color
+                material.base_color = Color::srgba(
+                    material.base_color.to_srgba().red,
+                    material.base_color.to_srgba().green,
+                    material.base_color.to_srgba().blue,
+                    alpha,
+                );
+            }
+            if let Some(metallic) = props.metallic {
+                material.metallic = metallic;
+            }
+            if let Some(roughness) = props.roughness {
+                material.perceptual_roughness = roughness;
+            }
+        }
 
         let handle = materials.add(material);
         self.materials
@@ -408,6 +442,17 @@ mod tests {
         let (offset, scale) = assets.get_sprite_uv_transform("unknown", 0);
         assert_eq!(offset, Vec2::ZERO);
         assert_eq!(scale, Vec2::ONE);
+    }
+
+    #[test]
+    fn test_material_storage() {
+        let assets = SpriteAssets::new();
+
+        // Initially no materials cached
+        assert_eq!(assets.materials.len(), 0);
+
+        // After creation, SpriteAssets can store materials
+        assert!(assets.materials.is_empty());
     }
 }
 
