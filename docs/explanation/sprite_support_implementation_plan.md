@@ -270,7 +270,7 @@ echo "Read: docs/reference/architecture.md Section 7.2 (RON Format)"
 - [ ] Confirm adding `sprite` field won't break existing code
 - [ ] Verify `#[serde(default)]` pattern for backward compatibility
 
-### Implementation Tasks - Phase 1
+### Phase 1: Core Foundation Sprite Metadata
 
 #### 1.1 Define Sprite Reference Structure
 

@@ -52,6 +52,75 @@ pub enum TerrainType {
     Mountain,
 }
 
+// ===== Sprite System =====
+
+/// Reference to a sprite in a sprite sheet (texture atlas)
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::SpriteReference;
+///
+/// let sprite = SpriteReference {
+///     sheet_path: "sprites/walls.png".to_string(),
+///     sprite_index: 3,
+///     animation: None,
+/// };
+/// assert_eq!(sprite.sprite_index, 3);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpriteReference {
+    /// Path to sprite sheet image (relative to campaign or global assets)
+    /// Example: "sprites/walls.png" or "textures/npcs_town.png"
+    pub sheet_path: String,
+
+    /// Index within texture atlas grid (0-indexed, row-major order)
+    /// For 4x4 grid: index 0 = top-left, index 3 = top-right, index 15 = bottom-right
+    pub sprite_index: u32,
+
+    /// Optional animation configuration
+    #[serde(default)]
+    pub animation: Option<SpriteAnimation>,
+}
+
+/// Animation configuration for sprite frames
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::SpriteAnimation;
+///
+/// let anim = SpriteAnimation {
+///     frames: vec![0, 1, 2, 1], // Ping-pong animation
+///     fps: 8.0,
+///     looping: true,
+/// };
+/// assert_eq!(anim.frames.len(), 4);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpriteAnimation {
+    /// Frame indices in animation sequence (refers to sprite_index values)
+    pub frames: Vec<u32>,
+
+    /// Frames per second (default: 8.0)
+    #[serde(default = "default_animation_fps")]
+    pub fps: f32,
+
+    /// Whether animation loops (default: true)
+    #[serde(default = "default_animation_looping")]
+    pub looping: bool,
+}
+
+/// Default FPS for sprite animations
+fn default_animation_fps() -> f32 {
+    8.0
+}
+
+/// Default looping behavior for sprite animations
+fn default_animation_looping() -> bool {
+    true
+}
+
 /// Visual rendering properties for a tile
 ///
 /// All dimensions in world units (1 unit ≈ 10 feet).
@@ -95,6 +164,11 @@ pub struct TileVisualMetadata {
     /// Useful for angled walls, rotated props, diagonal features
     /// Positive = counter-clockwise when viewed from above
     pub rotation_y: Option<f32>,
+
+    /// Optional sprite reference for texture-based rendering
+    /// When set, replaces default 3D mesh with billboarded sprite
+    #[serde(default)]
+    pub sprite: Option<SpriteReference>,
 }
 
 impl TileVisualMetadata {
@@ -249,6 +323,97 @@ impl TileVisualMetadata {
         let scale = self.effective_scale();
         (height * scale / 2.0) + self.effective_y_offset()
     }
+
+    /// Check if sprite rendering is enabled
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, SpriteReference};
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// assert!(!metadata.uses_sprite());
+    ///
+    /// metadata.sprite = Some(SpriteReference {
+    ///     sheet_path: "sprites/walls.png".to_string(),
+    ///     sprite_index: 0,
+    ///     animation: None,
+    /// });
+    /// assert!(metadata.uses_sprite());
+    /// ```
+    pub fn uses_sprite(&self) -> bool {
+        self.sprite.is_some()
+    }
+
+    /// Get sprite sheet path if sprite is configured
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, SpriteReference};
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.sprite_sheet_path(), None);
+    ///
+    /// metadata.sprite = Some(SpriteReference {
+    ///     sheet_path: "sprites/walls.png".to_string(),
+    ///     sprite_index: 0,
+    ///     animation: None,
+    /// });
+    /// assert_eq!(metadata.sprite_sheet_path(), Some("sprites/walls.png"));
+    /// ```
+    pub fn sprite_sheet_path(&self) -> Option<&str> {
+        self.sprite.as_ref().map(|s| s.sheet_path.as_str())
+    }
+
+    /// Get sprite index if sprite is configured
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, SpriteReference};
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.sprite_index(), None);
+    ///
+    /// metadata.sprite = Some(SpriteReference {
+    ///     sheet_path: "sprites/walls.png".to_string(),
+    ///     sprite_index: 42,
+    ///     animation: None,
+    /// });
+    /// assert_eq!(metadata.sprite_index(), Some(42));
+    /// ```
+    pub fn sprite_index(&self) -> Option<u32> {
+        self.sprite.as_ref().map(|s| s.sprite_index)
+    }
+
+    /// Check if sprite has animation configuration
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, SpriteReference, SpriteAnimation};
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// assert!(!metadata.has_animation());
+    ///
+    /// metadata.sprite = Some(SpriteReference {
+    ///     sheet_path: "sprites/walls.png".to_string(),
+    ///     sprite_index: 0,
+    ///     animation: Some(SpriteAnimation {
+    ///         frames: vec![0, 1, 2],
+    ///         fps: 8.0,
+    ///         looping: true,
+    ///     }),
+    /// });
+    /// assert!(metadata.has_animation());
+    /// ```
+    pub fn has_animation(&self) -> bool {
+        self.sprite
+            .as_ref()
+            .and_then(|s| s.animation.as_ref())
+            .is_some()
+    }
 }
 
 /// A single tile in the game world
@@ -400,6 +565,62 @@ impl Tile {
     /// ```
     pub fn with_scale(mut self, scale: f32) -> Self {
         self.visual.scale = Some(scale);
+        self
+    }
+
+    /// Set static sprite for this tile
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    /// use antares::domain::types::Position;
+    ///
+    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    ///     .with_sprite("sprites/walls.png", 5);
+    ///
+    /// assert!(tile.visual.uses_sprite());
+    /// assert_eq!(tile.visual.sprite_index(), Some(5));
+    /// ```
+    pub fn with_sprite(mut self, sheet_path: &str, sprite_index: u32) -> Self {
+        self.visual.sprite = Some(SpriteReference {
+            sheet_path: sheet_path.to_string(),
+            sprite_index,
+            animation: None,
+        });
+        self
+    }
+
+    /// Set animated sprite for this tile
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    /// use antares::domain::types::Position;
+    ///
+    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    ///     .with_animated_sprite("sprites/water.png", vec![0, 1, 2, 3], 4.0, true);
+    ///
+    /// assert!(tile.visual.uses_sprite());
+    /// assert!(tile.visual.has_animation());
+    /// ```
+    pub fn with_animated_sprite(
+        mut self,
+        sheet_path: &str,
+        frames: Vec<u32>,
+        fps: f32,
+        looping: bool,
+    ) -> Self {
+        self.visual.sprite = Some(SpriteReference {
+            sheet_path: sheet_path.to_string(),
+            sprite_index: frames[0], // First frame is base sprite_index
+            animation: Some(SpriteAnimation {
+                frames,
+                fps,
+                looping,
+            }),
+        });
         self
     }
 }
@@ -1998,5 +2219,123 @@ mod tests {
 
         assert_eq!(tile.visual.rotation_y, Some(90.0));
         assert_eq!(tile.visual.effective_rotation_y(), 90.0);
+    }
+
+    // ===== Sprite Reference Tests =====
+
+    #[test]
+    fn test_sprite_reference_serialization() {
+        let sprite = SpriteReference {
+            sheet_path: "sprites/test.png".to_string(),
+            sprite_index: 42,
+            animation: None,
+        };
+
+        let ron_str = ron::to_string(&sprite).unwrap();
+        let deserialized: SpriteReference = ron::from_str(&ron_str).unwrap();
+
+        assert_eq!(sprite, deserialized);
+    }
+
+    #[test]
+    fn test_sprite_animation_defaults() {
+        let ron_str = r#"SpriteAnimation(frames: [0, 1, 2])"#;
+        let anim: SpriteAnimation = ron::from_str(ron_str).unwrap();
+
+        assert_eq!(anim.fps, 8.0);
+        assert!(anim.looping);
+    }
+
+    #[test]
+    fn test_tile_visual_uses_sprite() {
+        let mut metadata = TileVisualMetadata::default();
+        assert!(!metadata.uses_sprite());
+
+        metadata.sprite = Some(SpriteReference {
+            sheet_path: "test.png".to_string(),
+            sprite_index: 0,
+            animation: None,
+        });
+        assert!(metadata.uses_sprite());
+    }
+
+    #[test]
+    fn test_tile_visual_no_sprite() {
+        let metadata = TileVisualMetadata::default();
+        assert!(!metadata.uses_sprite());
+        assert_eq!(metadata.sprite_sheet_path(), None);
+        assert_eq!(metadata.sprite_index(), None);
+        assert!(!metadata.has_animation());
+    }
+
+    #[test]
+    fn test_sprite_sheet_path_accessor() {
+        let metadata = TileVisualMetadata {
+            sprite: Some(SpriteReference {
+                sheet_path: "sprites/walls.png".to_string(),
+                sprite_index: 5,
+                animation: None,
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(metadata.sprite_sheet_path(), Some("sprites/walls.png"));
+    }
+
+    #[test]
+    fn test_tile_with_sprite_builder() {
+        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+            .with_sprite("sprites/test.png", 10);
+
+        assert!(tile.visual.uses_sprite());
+        assert_eq!(tile.visual.sprite_index(), Some(10));
+        assert!(!tile.visual.has_animation());
+    }
+
+    #[test]
+    fn test_tile_with_animated_sprite_builder() {
+        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal).with_animated_sprite(
+            "sprites/water.png",
+            vec![0, 1, 2, 3],
+            4.0,
+            true,
+        );
+
+        assert!(tile.visual.uses_sprite());
+        assert!(tile.visual.has_animation());
+
+        let anim = tile
+            .visual
+            .sprite
+            .as_ref()
+            .unwrap()
+            .animation
+            .as_ref()
+            .unwrap();
+        assert_eq!(anim.frames, vec![0, 1, 2, 3]);
+        assert_eq!(anim.fps, 4.0);
+        assert!(anim.looping);
+    }
+
+    #[test]
+    fn test_backward_compat_no_sprite_field() {
+        // Old RON format without sprite field
+        let ron_str = r#"
+            TileVisualMetadata(
+                height: Some(2.5),
+                width_x: None,
+                width_z: None,
+                color_tint: None,
+                scale: None,
+                y_offset: None,
+                rotation_y: None,
+            )
+        "#;
+
+        let metadata: TileVisualMetadata = ron::from_str(ron_str).unwrap();
+
+        assert_eq!(metadata.height, Some(2.5));
+        assert!(!metadata.uses_sprite());
+        assert_eq!(metadata.sprite, None);
     }
 }

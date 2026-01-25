@@ -20,6 +20,7 @@ fn test_ron_round_trip_with_visual() {
         scale: None,
         y_offset: None,
         rotation_y: None,
+        sprite: None,
     };
 
     // Serialize to RON
@@ -225,6 +226,7 @@ fn test_map_round_trip_preserves_visual() {
         scale: Some(1.2),
         y_offset: Some(0.3),
         rotation_y: None,
+        sprite: None,
     };
 
     // Serialize to RON
