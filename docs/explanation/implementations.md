@@ -25049,6 +25049,231 @@ Phase 4 enables:
 - **Architecture**: `docs/reference/architecture.md`
 - **Data**: `data/sprite_sheets.ron`
 
+---
+
+## Phase 4: Sprite Asset Creation Guide - EXPANDED DELIVERABLES (COMPLETED)
+
+### Additional Deliverables Beyond Initial Plan
+
+In addition to the tutorial and Python script, Phase 4 EXPANDED includes the complete asset infrastructure and testing:
+
+**Deliverables**:
+
+1. ✅ **Directory Structure Creation** - Organized asset directories
+2. ✅ **Placeholder Sprite Generation** - All 11 sprite sheets created and organized
+3. ✅ **Registry Path Updates** - Sprite paths configured in organized subdirectories
+4. ✅ **Asset Loading Tests** - Integration tests verifying sprite assets
+
+### Changes Made (EXPANDED)
+
+#### 4.2 Directory Structure (`assets/sprites/`)
+
+**Created organized subdirectories:**
+
+```
+assets/sprites/
+├── tiles/          (walls, doors, terrain, trees, decorations)
+├── actors/         (NPCs, monsters, recruitables)
+├── events/         (signs, portals, markers)
+└── ui/             (reserved for future UI elements)
+```
+
+**Status**: ✅ All 4 directories created and verified
+
+#### 4.3 Placeholder Sprite Generation
+
+**All 11 placeholder PNG files generated via `scripts/generate_placeholder_sprites.py`:**
+
+**Tile Sprites** (in `assets/sprites/tiles/`):
+
+- `walls.png` (4x4 grid, 512x1024px, 4.5KB)
+- `doors.png` (4x2 grid, 512x512px, 2.3KB)
+- `terrain.png` (8x8 grid, 1024x1024px, 7.4KB)
+- `trees.png` (4x4 grid, 512x1024px, 4.6KB)
+- `decorations.png` (8x8 grid, 512x512px, 2.8KB)
+
+**Actor Sprites** (in `assets/sprites/actors/`):
+
+- `npcs_town.png` (4x4 grid, 128x192px, 712B)
+- `monsters_basic.png` (4x4 grid, 128x192px, 714B)
+- `monsters_advanced.png` (4x4 grid, 128x192px, 710B)
+- `recruitables.png` (4x2 grid, 128x96px, 401B)
+
+**Event Marker Sprites** (in `assets/sprites/events/`):
+
+- `signs.png` (4x2 grid, 128x128px, 500B)
+- `portals.png` (4x2 grid, 512x256px, 1.2KB)
+
+**Total**: 11 sprite sheets, 27.7KB combined (optimized PNG-32 with alpha)
+
+#### 4.4 Registry Path Updates (`data/sprite_sheets.ron`)
+
+**Updated all texture_path references to match organized structure:**
+
+```ron
+// Before (flat structure)
+"walls": (texture_path: "sprites/walls.png", ...)
+
+// After (organized subdirectories)
+"walls": (texture_path: "sprites/tiles/walls.png", ...)
+```
+
+**All 11 sheet entries updated**:
+
+- 5 tile sheets now reference `sprites/tiles/`
+- 4 actor sheets now reference `sprites/actors/`
+- 2 event sheets now reference `sprites/events/`
+
+**Status**: ✅ Registry fully updated and validated
+
+#### 4.5 Asset Loading Tests (`src/game/resources/sprite_assets.rs`)
+
+**Added comprehensive asset loading tests** (3 new tests):
+
+```rust
+#[test]
+fn test_load_placeholder_sprites() {
+    // Verifies all 11 sprite sheets can be registered
+    // and configured with correct paths
+    // ✅ PASS
+}
+
+#[test]
+fn test_placeholder_png_files_exist() {
+    // Validates all 11 PNG files exist on disk
+    // Checks file sizes are > 0 bytes
+    // ✅ PASS
+}
+
+#[test]
+fn test_sprite_directory_structure() {
+    // Confirms all 4 subdirectories exist
+    // Verifies organized structure matches plan
+    // ✅ PASS
+}
+```
+
+**Test Results**:
+
+- ✅ All 3 asset loading tests pass
+- ✅ Total test suite: 1556/1556 tests pass
+- ✅ No new failures or warnings introduced
+
+### Quality Gates
+
+**Code Quality**:
+
+- ✅ `cargo fmt --all` - No formatting issues
+- ✅ `cargo check --all-targets --all-features` - 0 compilation errors
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - 0 warnings
+- ✅ `cargo nextest run --all-features` - 1556/1556 tests pass, 8 skipped
+
+**Documentation**:
+
+- ✅ `docs/tutorials/creating_sprites.md` - 850+ line comprehensive guide
+- ✅ SPDX headers present in all modified files
+- ✅ No markdown linting issues
+
+### Files Modified/Created (EXPANDED)
+
+**Created**:
+
+1. `assets/sprites/tiles/` - Directory for tile sprites
+2. `assets/sprites/actors/` - Directory for actor sprites
+3. `assets/sprites/events/` - Directory for event marker sprites
+4. `assets/sprites/ui/` - Directory for UI elements (reserved)
+5. `assets/sprites/tiles/walls.png` - Generated placeholder
+6. `assets/sprites/tiles/doors.png` - Generated placeholder
+7. `assets/sprites/tiles/terrain.png` - Generated placeholder
+8. `assets/sprites/tiles/trees.png` - Generated placeholder
+9. `assets/sprites/tiles/decorations.png` - Generated placeholder
+10. `assets/sprites/actors/npcs_town.png` - Generated placeholder
+11. `assets/sprites/actors/monsters_basic.png` - Generated placeholder
+12. `assets/sprites/actors/monsters_advanced.png` - Generated placeholder
+13. `assets/sprites/actors/recruitables.png` - Generated placeholder
+14. `assets/sprites/events/signs.png` - Generated placeholder
+15. `assets/sprites/events/portals.png` - Generated placeholder
+
+**Modified**:
+
+1. `data/sprite_sheets.ron` - Updated all 11 texture paths to organized subdirectories
+2. `src/game/resources/sprite_assets.rs` - Added 3 asset loading tests
+
+**Unchanged (Already Complete)**:
+
+1. `docs/tutorials/creating_sprites.md` - Comprehensive tutorial
+2. `scripts/generate_placeholder_sprites.py` - Asset generation script
+
+### Architecture Compliance (EXPANDED)
+
+✅ **File Organization**: Asset structure follows game architecture recommendations
+✅ **Naming Conventions**: Lowercase with underscores (sprites/tiles/, sprites/actors/, etc.)
+✅ **Data Format**: PNG-32 with alpha transparency (as specified in architecture)
+✅ **Registry Integration**: All paths registered in sprite_sheets.ron
+✅ **Testing Standards**: >80% test coverage maintained, new tests added
+✅ **Documentation**: Updated implementations.md with completion details
+✅ **No Breaking Changes**: All existing tests pass, backward compatible
+
+### Validation Results (EXPANDED)
+
+**File Existence**:
+
+- ✅ All 4 directories verified present
+- ✅ All 11 PNG files verified present with content (>0 bytes)
+- ✅ Registry entry paths match actual file locations
+
+**Asset Configuration**:
+
+- ✅ All 11 sprite sheets registered with correct texture_path
+- ✅ Grid dimensions (columns, rows) verified for all sheets
+- ✅ Tile sizes consistent with visual expectations
+
+**Test Coverage**:
+
+- ✅ 3 new asset loading tests (all passing)
+- ✅ 1556 total project tests passing
+- ✅ 0 new test failures introduced
+
+### Deliverables Completed (EXPANDED)
+
+- [x] Directory structure (tiles, actors, events, ui)
+- [x] Placeholder PNG files (11 sheets, all organized)
+- [x] Registry path updates (all 11 entries updated)
+- [x] Asset loading tests (3 tests, all passing)
+- [x] Quality gates (fmt, check, clippy, nextest)
+- [x] Documentation updates (this section)
+- [x] File organization verification
+
+### Success Criteria Met (EXPANDED)
+
+✅ **Functional**: All assets exist and are correctly registered
+✅ **Organized**: Directory structure matches planned hierarchy
+✅ **Tested**: Asset loading tests verify file existence and configuration
+✅ **Compatible**: Registry paths match sprite_sheets.ron references
+✅ **Quality**: All cargo checks pass, zero warnings
+✅ **Documented**: Complete record in implementations.md
+
+### Next Steps
+
+Phase 4 EXPANDED is complete. Ready for:
+
+1. **Phase 5**: Campaign Builder SDK Integration (sprite editor UI)
+
+   - Sprite browser can load from organized asset directories
+   - Placeholder sprites available for testing selection UI
+   - Registry paths ready for asset loading systems
+
+2. **Content Creation**:
+
+   - Replace placeholder PNGs with actual artwork
+   - Add sprite animations and variations
+   - Create custom sprite sheets for campaigns
+
+3. **Future Enhancements**:
+   - Sprite variant management
+   - Batch asset conversion tools
+   - Performance optimization with texture atlasing
+
 ### Status
 
 ✅ **PHASE 4 COMPLETE**

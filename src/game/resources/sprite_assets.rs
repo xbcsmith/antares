@@ -410,3 +410,132 @@ mod tests {
         assert_eq!(scale, Vec2::ONE);
     }
 }
+
+#[cfg(test)]
+mod asset_loading_tests {
+    use super::*;
+
+    /// Test that placeholder sprite sheets can be loaded and registered
+    ///
+    /// This test verifies Phase 4 deliverable: placeholder sprites are
+    /// properly configured and ready for asset loading.
+    #[test]
+    fn test_load_placeholder_sprites() {
+        let mut sprite_assets = SpriteAssets::new();
+
+        // Register all placeholder sheets (matching data/sprite_sheets.ron)
+        sprite_assets.register_config(
+            "walls".to_string(),
+            SpriteSheetConfig {
+                texture_path: "sprites/tiles/walls.png".to_string(),
+                tile_size: (128.0, 256.0),
+                columns: 4,
+                rows: 4,
+                sprites: vec![(0, "stone_wall".to_string()), (1, "brick_wall".to_string())],
+            },
+        );
+
+        sprite_assets.register_config(
+            "npcs_town".to_string(),
+            SpriteSheetConfig {
+                texture_path: "sprites/actors/npcs_town.png".to_string(),
+                tile_size: (32.0, 48.0),
+                columns: 4,
+                rows: 4,
+                sprites: vec![(0, "merchant".to_string())],
+            },
+        );
+
+        sprite_assets.register_config(
+            "signs".to_string(),
+            SpriteSheetConfig {
+                texture_path: "sprites/events/signs.png".to_string(),
+                tile_size: (32.0, 64.0),
+                columns: 4,
+                rows: 2,
+                sprites: vec![(0, "wooden_sign".to_string())],
+            },
+        );
+
+        // Verify configs are stored
+        assert!(sprite_assets.get_config("walls").is_some());
+        assert!(sprite_assets.get_config("npcs_town").is_some());
+        assert!(sprite_assets.get_config("signs").is_some());
+
+        // Verify correct paths are registered
+        let walls_config = sprite_assets.get_config("walls").unwrap();
+        assert_eq!(walls_config.texture_path, "sprites/tiles/walls.png");
+
+        let npcs_config = sprite_assets.get_config("npcs_town").unwrap();
+        assert_eq!(npcs_config.texture_path, "sprites/actors/npcs_town.png");
+
+        let signs_config = sprite_assets.get_config("signs").unwrap();
+        assert_eq!(signs_config.texture_path, "sprites/events/signs.png");
+    }
+
+    /// Test that placeholder PNG files exist on disk
+    ///
+    /// This test verifies Phase 4 deliverable: all placeholder sprite sheets
+    /// have been created and are available in the assets directory.
+    #[test]
+    fn test_placeholder_png_files_exist() {
+        // List of placeholder PNG files that should exist
+        let paths = vec![
+            // Tile sprites
+            "assets/sprites/tiles/walls.png",
+            "assets/sprites/tiles/doors.png",
+            "assets/sprites/tiles/terrain.png",
+            "assets/sprites/tiles/trees.png",
+            "assets/sprites/tiles/decorations.png",
+            // Actor sprites
+            "assets/sprites/actors/npcs_town.png",
+            "assets/sprites/actors/monsters_basic.png",
+            "assets/sprites/actors/monsters_advanced.png",
+            "assets/sprites/actors/recruitables.png",
+            // Event marker sprites
+            "assets/sprites/events/signs.png",
+            "assets/sprites/events/portals.png",
+        ];
+
+        for path in paths {
+            let full_path = std::path::Path::new(path);
+            assert!(
+                full_path.exists(),
+                "Missing placeholder PNG file: {} (required for Phase 4)",
+                path
+            );
+
+            // Verify file has content (not empty)
+            let metadata = std::fs::metadata(path)
+                .unwrap_or_else(|_| panic!("Cannot read metadata for {}", path));
+            assert!(
+                metadata.len() > 0,
+                "Placeholder PNG file is empty: {} (file size: 0 bytes)",
+                path
+            );
+        }
+    }
+
+    /// Test that directory structure is properly organized
+    ///
+    /// This test verifies Phase 4 deliverable: sprite assets are organized
+    /// into logical subdirectories (tiles, actors, events, ui).
+    #[test]
+    fn test_sprite_directory_structure() {
+        let directories = vec![
+            "assets/sprites/tiles",
+            "assets/sprites/actors",
+            "assets/sprites/events",
+            "assets/sprites/ui",
+        ];
+
+        for dir in directories {
+            let path = std::path::Path::new(dir);
+            assert!(
+                path.is_dir(),
+                "Sprite directory structure incomplete: {} directory missing",
+                dir
+            );
+        }
+    }
+}

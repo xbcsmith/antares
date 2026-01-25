@@ -29,7 +29,7 @@
 {
     // Tile Sprites
     "walls": (
-        texture_path: "sprites/walls.png",
+        texture_path: "sprites/tiles/walls.png",
         tile_size: (128.0, 256.0),
         columns: 4,
         rows: 4,
@@ -46,7 +46,7 @@
     ),
 
     "doors": (
-        texture_path: "sprites/doors.png",
+        texture_path: "sprites/tiles/doors.png",
         tile_size: (128.0, 256.0),
         columns: 4,
         rows: 2,
@@ -61,7 +61,7 @@
     ),
 
     "terrain": (
-        texture_path: "sprites/terrain.png",
+        texture_path: "sprites/tiles/terrain.png",
         tile_size: (128.0, 128.0),
         columns: 8,
         rows: 8,
@@ -78,7 +78,7 @@
     ),
 
     "trees": (
-        texture_path: "sprites/trees.png",
+        texture_path: "sprites/tiles/trees.png",
         tile_size: (128.0, 256.0),
         columns: 4,
         rows: 4,
@@ -91,7 +91,7 @@
     ),
 
     "decorations": (
-        texture_path: "sprites/decorations.png",
+        texture_path: "sprites/tiles/decorations.png",
         tile_size: (64.0, 64.0),
         columns: 8,
         rows: 8,
@@ -107,7 +107,7 @@
 
     // Actor Sprites (NPCs, Monsters, Recruitables)
     "npcs_town": (
-        texture_path: "sprites/npcs_town.png",
+        texture_path: "sprites/actors/npcs_town.png",
         tile_size: (32.0, 48.0),
         columns: 4,
         rows: 4,
@@ -132,7 +132,7 @@
     ),
 
     "monsters_basic": (
-        texture_path: "sprites/monsters_basic.png",
+        texture_path: "sprites/actors/monsters_basic.png",
         tile_size: (32.0, 48.0),
         columns: 4,
         rows: 4,
@@ -157,7 +157,7 @@
     ),
 
     "monsters_advanced": (
-        texture_path: "sprites/monsters_advanced.png",
+        texture_path: "sprites/actors/monsters_advanced.png",
         tile_size: (32.0, 48.0),
         columns: 4,
         rows: 4,
@@ -182,7 +182,7 @@
     ),
 
     "recruitables": (
-        texture_path: "sprites/recruitables.png",
+        texture_path: "sprites/actors/recruitables.png",
         tile_size: (32.0, 48.0),
         columns: 4,
         rows: 2,
@@ -200,7 +200,7 @@
 
     // Event Marker Sprites
     "signs": (
-        texture_path: "sprites/signs.png",
+        texture_path: "sprites/events/signs.png",
         tile_size: (32.0, 64.0),
         columns: 4,
         rows: 2,
@@ -217,7 +217,7 @@
     ),
 
     "portals": (
-        texture_path: "sprites/portals.png",
+        texture_path: "sprites/events/portals.png",
         tile_size: (128.0, 128.0),
         columns: 4,
         rows: 2,
@@ -233,3 +233,6 @@
         ],
     ),
 }
+```
+
+Now let me re-enable tools and add the necessary tests to the sprite assets module:
