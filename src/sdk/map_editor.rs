@@ -15,7 +15,7 @@
 //!
 //! ```no_run
 //! use antares::sdk::database::ContentDatabase;
-//! use antares::sdk::map_editor::{browse_monsters, suggest_monster_ids};
+//! use antares::sdk::map_editor::{browse_monsters, suggest_monster_ids, browse_sprite_sheets, get_sprites_for_sheet};
 //! use antares::domain::world::Map;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -65,6 +65,7 @@ pub enum TerrainType {
 ///     sheet_path: "sprites/walls.png".to_string(),
 ///     sprite_index: 3,
 ///     animation: None,
+///     material_properties: None,
 /// };
 /// assert_eq!(sprite.sprite_index, 3);
 /// ```
@@ -506,6 +507,7 @@ impl TileVisualMetadata {
     ///     sheet_path: "sprites/walls.png".to_string(),
     ///     sprite_index: 0,
     ///     animation: None,
+    ///     material_properties: None,
     /// });
     /// assert!(metadata.uses_sprite());
     /// ```
@@ -527,6 +529,7 @@ impl TileVisualMetadata {
     ///     sheet_path: "sprites/walls.png".to_string(),
     ///     sprite_index: 0,
     ///     animation: None,
+    ///     material_properties: None,
     /// });
     /// assert_eq!(metadata.sprite_sheet_path(), Some("sprites/walls.png"));
     /// ```
@@ -548,6 +551,7 @@ impl TileVisualMetadata {
     ///     sheet_path: "sprites/walls.png".to_string(),
     ///     sprite_index: 42,
     ///     animation: None,
+    ///     material_properties: None,
     /// });
     /// assert_eq!(metadata.sprite_index(), Some(42));
     /// ```
@@ -573,6 +577,7 @@ impl TileVisualMetadata {
     ///         fps: 8.0,
     ///         looping: true,
     ///     }),
+    ///     material_properties: None,
     /// });
     /// assert!(metadata.has_animation());
     /// ```

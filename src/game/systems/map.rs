@@ -801,6 +801,7 @@ fn spawn_map(
 ///         sheet_path: "sprites/walls.png".to_string(),
 ///         sprite_index: 0,
 ///         animation: None,
+///         material_properties: None,
 ///     };
 ///     let entity = spawn_tile_sprite(
 ///         &mut commands,

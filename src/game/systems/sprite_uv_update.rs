@@ -39,6 +39,7 @@
 //! ```no_run
 //! use bevy::prelude::*;
 //! use antares::game::systems::sprite_uv_update::update_animated_sprite_uv;
+//! use antares::game::systems::animation::update_sprite_animations;
 //!
 //! fn setup_systems(app: &mut App) {
 //!     app.add_systems(Update, (

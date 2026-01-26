@@ -662,6 +662,7 @@ impl VisualMetadataEditor {
                     sheet_path: self.temp_sprite_sheet.clone(),
                     sprite_index: self.temp_sprite_index,
                     animation: None,
+                    material_properties: None,
                 })
             } else {
                 None
@@ -675,6 +676,7 @@ impl VisualMetadataEditor {
                             sheet_path: self.temp_sprite_sheet.clone(),
                             sprite_index: *sprite_index,
                             animation: None,
+                            material_properties: None,
                         },
                         layer: match idx % 3 {
                             0 => SpriteLayer::Background,

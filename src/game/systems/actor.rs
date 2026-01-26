@@ -18,6 +18,7 @@
 //! use antares::game::systems::actor::spawn_actor_sprite;
 //! use antares::game::components::sprite::ActorType;
 //! use antares::domain::world::SpriteReference;
+//! use antares::game::resources::sprite_assets::SpriteAssets;
 //!
 //! fn spawn_npc(
 //!     mut commands: Commands,
@@ -30,6 +31,7 @@
 //!         sheet_path: "sprites/npcs_town.png".to_string(),
 //!         sprite_index: 3,
 //!         animation: None,
+//!         material_properties: None,
 //!     };
 //!     spawn_actor_sprite(
 //!         &mut commands,
