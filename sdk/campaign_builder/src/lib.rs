@@ -4912,6 +4912,7 @@ mod tests {
             name: "Test NPC".to_string(),
             description: String::new(),
             portrait_id: String::new(),
+            sprite: None,
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,

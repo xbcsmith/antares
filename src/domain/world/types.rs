@@ -942,6 +942,9 @@ pub struct ResolvedNpc {
     pub description: String,
     /// Portrait path from definition
     pub portrait_id: String,
+    /// Optional sprite reference from NPC definition.
+    /// When `Some`, runtime spawning prefers this over default placeholder.
+    pub sprite: Option<SpriteReference>,
     /// Position from placement
     pub position: Position,
     /// Facing direction from placement
@@ -997,6 +1000,7 @@ impl ResolvedNpc {
             name: definition.name.clone(),
             description: definition.description.clone(),
             portrait_id: definition.portrait_id.clone(),
+            sprite: definition.sprite.clone(),
             position: placement.position,
             facing: placement.facing,
             dialogue_id: placement.dialogue_override.or(definition.dialogue_id),
@@ -1398,6 +1402,7 @@ mod map_npc_resolution_tests {
             name: "Elder".to_string(),
             description: "Village elder".to_string(),
             portrait_id: "elder.png".to_string(),
+            sprite: None,
             dialogue_id: Some(5),
             quest_ids: vec![1, 2, 3],
             faction: Some("Village".to_string()),
@@ -1427,6 +1432,7 @@ mod map_npc_resolution_tests {
             name: "Test NPC".to_string(),
             description: "A test NPC".to_string(),
             portrait_id: "test.png".to_string(),
+            sprite: None,
             dialogue_id: Some(42),
             quest_ids: vec![1],
             faction: Some("Test Faction".to_string()),
@@ -1459,6 +1465,44 @@ mod map_npc_resolution_tests {
     }
 
     #[test]
+    fn test_resolved_npc_from_placement_copies_sprite_field_when_present() {
+        // Arrange
+        let sprite = SpriteReference {
+            sheet_path: "sprites/actors/knight.png".to_string(),
+            sprite_index: 7,
+            animation: None,
+            material_properties: None,
+        };
+        let definition =
+            NpcDefinition::new("knight", "Knight", "knight.png").with_sprite(sprite.clone());
+        let placement = NpcPlacement::new("knight", Position::new(1, 1));
+
+        // Act
+        let resolved = ResolvedNpc::from_placement_and_definition(&placement, &definition);
+
+        // Assert
+        assert!(resolved.sprite.is_some());
+        assert_eq!(
+            resolved.sprite.as_ref().unwrap().sheet_path,
+            "sprites/actors/knight.png"
+        );
+        assert_eq!(resolved.sprite.as_ref().unwrap().sprite_index, 7);
+    }
+
+    #[test]
+    fn test_resolved_npc_from_placement_sprite_none_when_definition_none() {
+        // Arrange
+        let definition = NpcDefinition::new("generic", "Generic NPC", "generic.png");
+        let placement = NpcPlacement::new("generic", Position::new(2, 2));
+
+        // Act
+        let resolved = ResolvedNpc::from_placement_and_definition(&placement, &definition);
+
+        // Assert
+        assert!(resolved.sprite.is_none());
+    }
+
+    #[test]
     fn test_resolved_npc_uses_dialogue_override() {
         // Arrange
         let definition = NpcDefinition {
@@ -1466,6 +1510,7 @@ mod map_npc_resolution_tests {
             name: "NPC".to_string(),
             description: "".to_string(),
             portrait_id: "npc.png".to_string(),
+            sprite: None,
             dialogue_id: Some(10),
             quest_ids: vec![],
             faction: None,
