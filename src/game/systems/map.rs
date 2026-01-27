@@ -4,10 +4,13 @@
 use crate::domain::types;
 use crate::domain::world;
 use crate::domain::world::SpriteReference;
-use crate::game::components::sprite::{AnimatedSprite, TileSprite};
+use crate::game::components::sprite::{ActorType, AnimatedSprite, TileSprite};
 use crate::game::resources::sprite_assets::SpriteAssets;
 use crate::game::resources::GlobalState;
+use crate::game::systems::actor::spawn_actor_sprite;
 use crate::game::systems::procedural_meshes;
+
+const DEFAULT_NPC_SPRITE_PATH: &str = "sprites/placeholders/npc_placeholder.png";
 use bevy::prelude::*;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
@@ -112,10 +115,13 @@ impl Plugin for MapRenderingPlugin {
 }
 
 /// System wrapper that creates a cache and calls spawn_map
+#[allow(clippy::too_many_arguments)]
 fn spawn_map_system(
     commands: Commands,
     meshes: ResMut<Assets<Mesh>>,
     materials: ResMut<Assets<StandardMaterial>>,
+    sprite_assets: ResMut<SpriteAssets>,
+    asset_server: Res<AssetServer>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
     mut cache: Local<super::procedural_meshes::ProceduralMeshCache>,
@@ -124,6 +130,8 @@ fn spawn_map_system(
         commands,
         meshes,
         materials,
+        sprite_assets,
+        asset_server,
         global_state,
         content,
         &mut cache,
@@ -132,12 +140,15 @@ fn spawn_map_system(
 
 /// System that handles door opened messages by refreshing map visuals
 #[allow(unused_mut)] // spawn_map requires mut even though clippy doesn't detect it
+#[allow(clippy::too_many_arguments)]
 fn handle_door_opened(
     mut door_messages: MessageReader<DoorOpenedEvent>,
     mut commands: Commands,
     query_existing: Query<Entity, With<MapEntity>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut sprite_assets: ResMut<SpriteAssets>,
+    asset_server: Res<AssetServer>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
 ) {
@@ -159,6 +170,8 @@ fn handle_door_opened(
         commands,
         meshes,
         materials,
+        sprite_assets,
+        asset_server,
         global_state,
         content,
         &mut procedural_cache,
@@ -222,10 +235,13 @@ fn map_change_handler(
 /// System that observes the world's current map and spawns marker entities
 /// (tiles and event triggers) for the active map. When the active map changes
 /// it despawns previously spawned map entities.
+#[allow(clippy::too_many_arguments)]
 fn spawn_map_markers(
     mut commands: Commands,
     meshes: ResMut<Assets<Mesh>>,
     materials: ResMut<Assets<StandardMaterial>>,
+    sprite_assets: ResMut<SpriteAssets>,
+    asset_server: Res<AssetServer>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
     query_existing: Query<(Entity, &MapEntity)>,
@@ -283,6 +299,8 @@ fn spawn_map_markers(
             commands,
             meshes,
             materials,
+            sprite_assets,
+            asset_server,
             global_state,
             content,
             &mut procedural_cache,
@@ -327,11 +345,14 @@ fn get_or_create_mesh(
 /// Note: Spawned entities are tagged with `MapEntity` for lifecycle management
 /// but also tags spawned visual entities with `MapEntity` and `TileCoord` so
 /// they are part of the dynamic despawn/spawn lifecycle.
+#[allow(clippy::too_many_arguments)]
 fn spawn_map(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    global_state: Res<GlobalState>,
+    mut sprite_assets: ResMut<SpriteAssets>,
+    asset_server: Res<AssetServer>,
+    global_state: Res<crate::game::resources::GlobalState>,
     content: Res<crate::application::resources::GameContent>,
     procedural_cache: &mut super::procedural_meshes::ProceduralMeshCache,
 ) {
@@ -678,33 +699,39 @@ fn spawn_map(
 
         // Spawn NPC visual markers (Phase 2: NPC Visual Representation)
         let resolved_npcs = map.resolve_npcs(&content.0.npcs);
-        let npc_color = Color::srgb(0.0, 1.0, 1.0); // Cyan
-        let npc_material = materials.add(StandardMaterial {
-            base_color: npc_color,
-            perceptual_roughness: 0.5,
-            ..default()
-        });
 
-        // Vertical plane representing NPC (billboard-like)
-        // 1.0 wide, 1.8 tall (human height ~6 feet), 0.1 depth
-        let npc_mesh = meshes.add(Cuboid::new(1.0, 1.8, 0.1));
-
+        // For each resolved NPC, spawn an actor sprite. NPCs without specific sprite
+        // assets default to a placeholder sprite sheet.
         for resolved_npc in resolved_npcs.iter() {
             let x = resolved_npc.position.x as f32;
             let y = resolved_npc.position.y as f32;
 
-            // Center the NPC marker at y=0.9 (bottom at 0, top at 1.8)
-            commands.spawn((
-                Mesh3d(npc_mesh.clone()),
-                MeshMaterial3d(npc_material.clone()),
-                Transform::from_xyz(x, 0.9, y),
-                GlobalTransform::default(),
-                Visibility::default(),
+            let sprite_ref = SpriteReference {
+                sheet_path: DEFAULT_NPC_SPRITE_PATH.to_string(),
+                sprite_index: 0,
+                animation: None,
+                material_properties: None,
+            };
+
+            let entity = spawn_actor_sprite(
+                &mut commands,
+                &mut sprite_assets,
+                &asset_server,
+                &mut materials,
+                &mut meshes,
+                &sprite_ref,
+                Vec3::new(x, 0.9, y),
+                ActorType::Npc,
+            );
+
+            // Attach map tags and NPC marker to the spawned actor entity
+            commands.entity(entity).insert((
                 MapEntity(map.id),
                 TileCoord(resolved_npc.position),
                 NpcMarker {
                     npc_id: resolved_npc.npc_id.clone(),
                 },
+                Visibility::default(),
             ));
         }
 
@@ -1135,5 +1162,57 @@ mod tests {
 
         assert_eq!(map_entity.0, map_id);
         assert_eq!(map_entity.0, 5u16);
+    }
+
+    #[test]
+    fn test_spawn_map_spawns_actor_sprite_for_npc() {
+        // Integration-style test: spawn_map startup system should create an ActorSprite for each NPC
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.add_plugins(MapRenderingPlugin);
+
+        // Prepare ContentDatabase with a single NPC definition
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let npc_def =
+            crate::domain::world::npc::NpcDefinition::new("test_npc", "Test NPC", "portrait.png");
+        db.npcs
+            .add_npc(npc_def)
+            .expect("Failed to add NPC to ContentDatabase");
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        // Build GameState with a map containing an NPC placement
+        let mut game_state = crate::application::GameState::new();
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "test_npc",
+                crate::domain::types::Position::new(5, 5),
+            ));
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+
+        // Insert sprite assets resource (default)
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+
+        // Ensure required Assets resources exist for systems
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        // Run startup systems (including spawn_map_system)
+        app.update();
+
+        // Verify there is exactly one entity with ActorSprite + NpcMarker
+        let world_ref = app.world_mut();
+        let mut query =
+            world_ref.query::<(&crate::game::components::sprite::ActorSprite, &NpcMarker)>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(results.len(), 1);
+        let (actor_sprite, npc_marker) = results[0];
+        assert_eq!(npc_marker.npc_id, "test_npc");
+        assert_eq!(actor_sprite.sheet_path, DEFAULT_NPC_SPRITE_PATH);
+        assert_eq!(actor_sprite.sprite_index, 0);
     }
 }
