@@ -28,12 +28,13 @@
 //! - Standard UI components: EditorToolbar, TwoColumnLayout, ActionButtons
 
 use crate::ui_helpers::{
-    autocomplete_portrait_selector, extract_portrait_candidates, resolve_portrait_path,
+    autocomplete_portrait_selector, autocomplete_sprite_sheet_selector,
+    extract_portrait_candidates, extract_sprite_sheet_candidates, resolve_portrait_path,
     ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::dialogue::{DialogueId, DialogueTree};
 use antares::domain::quest::{Quest, QuestId};
-use antares::domain::world::npc::{NpcDefinition, NpcId};
+use antares::domain::world::{NpcDefinition, NpcId, SpriteReference};
 use antares::sdk::tool_config::DisplayConfig;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
@@ -97,6 +98,14 @@ pub struct NpcEditorState {
     #[serde(skip)]
     pub portrait_picker_open: bool,
 
+    /// Available sprite sheet paths (cached from directory scan)
+    #[serde(skip)]
+    pub available_sprite_sheets: Vec<String>,
+
+    /// Whether the sprite sheet picker popup is open
+    #[serde(skip)]
+    pub sprite_picker_open: bool,
+
     /// Cached portrait textures for grid display
     #[serde(skip)]
     pub portrait_textures: HashMap<String, Option<egui::TextureHandle>>,
@@ -137,6 +146,10 @@ pub struct NpcEditBuffer {
     pub faction: String,
     pub is_merchant: bool,
     pub is_innkeeper: bool,
+    /// Optional sprite sheet path (relative to campaign root, e.g. 'assets/sprites/actors/wizard.png')
+    pub sprite_sheet: String,
+    /// Optional sprite index (0-based)
+    pub sprite_index: String,
 }
 
 impl Default for NpcEditBuffer {
@@ -151,6 +164,8 @@ impl Default for NpcEditBuffer {
             faction: String::new(),
             is_merchant: false,
             is_innkeeper: false,
+            sprite_sheet: String::new(),
+            sprite_index: String::new(),
         }
     }
 }
@@ -175,6 +190,8 @@ impl Default for NpcEditorState {
             filter_quest_givers: false,
             available_portraits: Vec::new(),
             portrait_picker_open: false,
+            available_sprite_sheets: Vec::new(),
+            sprite_picker_open: false,
             portrait_textures: HashMap::new(),
             last_campaign_dir: None,
             last_npcs_file: None,
@@ -211,9 +228,11 @@ impl NpcEditorState {
         display_config: &DisplayConfig,
         npcs_file: &str,
     ) -> bool {
-        // Update portrait candidates if campaign directory changed
+        // Update portrait and sprite sheet candidates if campaign directory changed
         if self.last_campaign_dir != campaign_dir.cloned() {
             self.available_portraits = extract_portrait_candidates(campaign_dir);
+            self.available_sprite_sheets =
+                crate::ui_helpers::extract_sprite_sheet_candidates(campaign_dir);
             self.last_campaign_dir = campaign_dir.cloned();
         }
 
@@ -237,6 +256,19 @@ impl NpcEditorState {
                     ui.ctx(),
                     egui::Id::new("autocomplete:portrait:npc_edit_portrait".to_string()),
                     &self.edit_buffer.portrait_id,
+                );
+            }
+        }
+
+        // Show sprite sheet picker popup if open
+        if self.sprite_picker_open {
+            if let Some(selected) = self.show_sprite_sheet_picker(ui.ctx(), campaign_dir) {
+                self.edit_buffer.sprite_sheet = selected;
+                needs_save = true;
+                crate::ui_helpers::store_autocomplete_buffer(
+                    ui.ctx(),
+                    egui::Id::new("autocomplete:sprite:npc_edit_sprite".to_string()),
+                    &self.edit_buffer.sprite_sheet,
                 );
             }
         }
@@ -500,117 +532,49 @@ impl NpcEditorState {
     }
 
     /// Show preview of NPC with portrait
+    ///
+    /// NOTE: Temporarily simplified to a compact summary for faster iteration
+    /// and to isolate parser/formatting issues during development. The full
+    /// rich preview (images, thumbnails) will be restored once the editor's
+    /// UI parsing issues are resolved.
     fn show_preview(
         &mut self,
         ui: &mut egui::Ui,
         npc: &NpcDefinition,
-        campaign_dir: Option<&PathBuf>,
+        _campaign_dir: Option<&PathBuf>,
     ) {
-        let panel_height = crate::ui_helpers::compute_panel_height(
-            ui,
-            crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
-        );
+        ui.vertical_centered(|ui| {
+            ui.add_space(8.0);
+            ui.heading(format!("{} ({})", npc.name, npc.id));
+            ui.add_space(6.0);
 
-        egui::ScrollArea::vertical()
-            .max_height(panel_height)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.group(|ui| {
-                    ui.heading("Basic Info");
-                    ui.label(format!("ID: {}", npc.id));
-                    ui.label(format!("Name: {}", npc.name));
+            if !npc.description.is_empty() {
+                ui.label(&npc.description);
+                ui.add_space(6.0);
+            }
 
-                    if !npc.description.is_empty() {
-                        ui.separator();
-                        ui.label(&npc.description);
-                    }
-                });
+            if let Some(sprite) = &npc.sprite {
+                ui.label(format!(
+                    "Sprite: {} (index {})",
+                    sprite.sheet_path, sprite.sprite_index
+                ));
+            } else {
+                ui.label("Sprite: (none)");
+            }
 
-                ui.add_space(5.0);
-
-                ui.group(|ui| {
-                    ui.heading("Appearance");
-
-                    ui.horizontal(|ui| {
-                        // Portrait display (left side)
-                        let portrait_size = egui::vec2(128.0, 128.0);
-
-                        // Try to load the portrait texture
-                        let has_texture =
-                            self.load_portrait_texture(ui.ctx(), campaign_dir, &npc.portrait_id);
-
-                        if has_texture {
-                            if let Some(Some(texture)) =
-                                self.portrait_textures.get(&npc.portrait_id)
-                            {
-                                ui.add(
-                                    egui::Image::new(texture)
-                                        .fit_to_exact_size(portrait_size)
-                                        .corner_radius(4.0),
-                                );
-                            }
-                        } else {
-                            // Placeholder for missing portrait
-                            show_portrait_placeholder(ui, portrait_size);
-                        }
-
-                        ui.vertical(|ui| {
-                            if !npc.portrait_id.is_empty() {
-                                ui.label(format!("Portrait: {}", npc.portrait_id));
-                            } else {
-                                ui.label("No portrait");
-                            }
-                        });
-                    });
-                });
-
-                ui.add_space(5.0);
-
-                ui.group(|ui| {
-                    ui.heading("Interactions");
-
-                    if let Some(dialogue_id) = &npc.dialogue_id {
-                        ui.label(format!("💬 Dialogue: {}", dialogue_id));
-                    } else {
-                        ui.label("No dialogue");
-                    }
-
-                    if !npc.quest_ids.is_empty() {
-                        ui.label(format!("📜 Quests: {}", npc.quest_ids.len()));
-                        for quest_id in &npc.quest_ids {
-                            ui.label(format!("  • {}", quest_id));
-                        }
-                    } else {
-                        ui.label("No quests");
-                    }
-                });
-
-                ui.add_space(5.0);
-
-                ui.group(|ui| {
-                    ui.heading("Roles & Faction");
-
-                    let mut roles = Vec::new();
-                    if npc.is_merchant {
-                        roles.push("🏪 Merchant");
-                    }
-                    if npc.is_innkeeper {
-                        roles.push("🛏️ Innkeeper");
-                    }
-
-                    if !roles.is_empty() {
-                        for role in roles {
-                            ui.label(role);
-                        }
-                    } else {
-                        ui.label("No special roles");
-                    }
-
-                    if let Some(faction) = &npc.faction {
-                        ui.label(format!("⚔️ Faction: {}", faction));
-                    }
-                });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(format!(
+                    "Dialogue: {}",
+                    npc.dialogue_id
+                        .as_ref()
+                        .map(|d| d.to_string())
+                        .unwrap_or_else(|| "None".to_string())
+                ));
+                ui.add_space(10.0);
+                ui.label(format!("Quests: {}", npc.quest_ids.len()));
             });
+        });
     }
 
     fn show_edit_view(
@@ -691,6 +655,37 @@ impl NpcEditorState {
                     });
                     ui.label(
                         "📁 Relative to campaign assets directory (e.g., '0', '1', 'warrior')",
+                    );
+
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        ui.label("Sprite Sheet:");
+                        crate::ui_helpers::autocomplete_sprite_sheet_selector(
+                            ui,
+                            "npc_edit_sprite",
+                            "",
+                            &mut self.edit_buffer.sprite_sheet,
+                            &self.available_sprite_sheets,
+                            campaign_dir,
+                        );
+
+                        if ui.button("📁").on_hover_text("Browse sprite sheets").clicked() {
+                            self.sprite_picker_open = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Sprite Index:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.edit_buffer.sprite_index)
+                                .id_salt("npc_edit_sprite_index"),
+                        );
+                        ui.label("0-based index (row-major)");
+                    });
+
+                    ui.label(
+                        "📁 Sprite sheets are relative to campaign assets (e.g., 'assets/sprites/actors/wizard.png')",
                     );
                 });
 
@@ -1140,6 +1135,66 @@ impl NpcEditorState {
         selected_portrait
     }
 
+    pub fn show_sprite_sheet_picker(
+        &mut self,
+        ctx: &egui::Context,
+        campaign_dir: Option<&PathBuf>,
+    ) -> Option<String> {
+        let mut selected_sheet: Option<String> = None;
+
+        // Clone the list to avoid borrow conflicts in the UI closure
+        let available = self.available_sprite_sheets.clone();
+
+        egui::Window::new("Select Sprite Sheet")
+            .collapsible(false)
+            .resizable(true)
+            .default_width(500.0)
+            .default_height(500.0)
+            .show(ctx, |ui| {
+                ui.label("Click a sprite sheet to select:");
+                ui.separator();
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+
+                    for sheet in &available {
+                        // Show each candidate as a selectable label with a small preview/action area
+                        ui.horizontal(|ui| {
+                            let resp = ui.selectable_label(false, sheet);
+                            if resp.clicked() {
+                                selected_sheet = Some(sheet.clone());
+                            }
+
+                            // Hover tooltip showing full path (if campaign dir known)
+                            if let Some(dir) = campaign_dir {
+                                let full = dir.join(sheet);
+                                if full.exists() {
+                                    ui.label(egui::RichText::new("•").weak())
+                                        .on_hover_text(format!("Path: {}", full.display()));
+                                } else {
+                                    ui.label(
+                                        egui::RichText::new("⚠")
+                                            .color(egui::Color32::from_rgb(255, 180, 0)),
+                                    )
+                                    .on_hover_text(format!("Missing: {}", full.display()));
+                                }
+                            }
+                        });
+                    }
+                });
+
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("Close").clicked() {
+                        self.sprite_picker_open = false;
+                    }
+                });
+            });
+
+        selected_sheet
+    }
+
     pub(crate) fn start_edit_npc(&mut self, idx: usize) {
         if let Some(npc) = self.npcs.get(idx) {
             self.edit_buffer = NpcEditBuffer {
@@ -1155,6 +1210,14 @@ impl NpcEditorState {
                 faction: npc.faction.as_ref().unwrap_or(&String::new()).clone(),
                 is_merchant: npc.is_merchant,
                 is_innkeeper: npc.is_innkeeper,
+                sprite_sheet: npc
+                    .sprite
+                    .as_ref()
+                    .map_or(String::new(), |s| s.sheet_path.clone()),
+                sprite_index: npc
+                    .sprite
+                    .as_ref()
+                    .map_or(String::new(), |s| s.sprite_index.to_string()),
             };
             self.selected_npc = Some(idx);
             self.mode = NpcEditorMode::Edit;
@@ -1232,6 +1295,18 @@ impl NpcEditorState {
                     .push(format!("Quest ID '{}' does not exist", quest_id_str));
             }
         }
+
+        // Validate sprite fields: if a sprite sheet is specified, a valid numeric index must be provided
+        if !self.edit_buffer.sprite_sheet.trim().is_empty() {
+            if self.edit_buffer.sprite_index.trim().is_empty() {
+                self.validation_errors.push(
+                    "Sprite index must be provided when a sprite sheet is specified".to_string(),
+                );
+            } else if self.edit_buffer.sprite_index.trim().parse::<u32>().is_err() {
+                self.validation_errors
+                    .push("Sprite index must be a valid number".to_string());
+            }
+        }
     }
 
     fn is_valid_id(&self, id: &str) -> bool {
@@ -1256,7 +1331,19 @@ impl NpcEditorState {
             name: self.edit_buffer.name.clone(),
             description: self.edit_buffer.description.clone(),
             portrait_id: self.edit_buffer.portrait_id.clone(),
-            sprite: None,
+            sprite: if self.edit_buffer.sprite_sheet.trim().is_empty() {
+                None
+            } else {
+                match self.edit_buffer.sprite_index.trim().parse::<u32>() {
+                    Ok(idx) => Some(SpriteReference {
+                        sheet_path: self.edit_buffer.sprite_sheet.clone(),
+                        sprite_index: idx,
+                        animation: None,
+                        material_properties: None,
+                    }),
+                    Err(_) => None,
+                }
+            },
             dialogue_id: if self.edit_buffer.dialogue_id.is_empty() {
                 None
             } else {
@@ -1505,6 +1592,107 @@ mod tests {
         assert_eq!(state.npcs.len(), 1);
         assert_eq!(state.npcs[0].id, "test_npc");
         assert_eq!(state.npcs[0].name, "Test NPC");
+    }
+
+    #[test]
+    fn test_save_npc_with_sprite_in_add_mode() {
+        let mut state = NpcEditorState::new();
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "test_npc_sprite".to_string();
+        state.edit_buffer.name = "Test NPC Sprite".to_string();
+        state.edit_buffer.description = "Test sprite desc".to_string();
+        state.edit_buffer.sprite_sheet = "assets/sprites/actors/wizard.png".to_string();
+        state.edit_buffer.sprite_index = "12".to_string();
+
+        let result = state.save_npc();
+        assert!(result);
+        assert_eq!(state.npcs.len(), 1);
+        let saved = &state.npcs[0];
+        assert!(saved.sprite.is_some());
+        let sprite = saved.sprite.as_ref().unwrap();
+        assert_eq!(sprite.sheet_path, "assets/sprites/actors/wizard.png");
+        assert_eq!(sprite.sprite_index, 12);
+    }
+
+    #[test]
+    fn test_start_edit_npc_populates_sprite_fields() {
+        let mut state = NpcEditorState::new();
+
+        let sprite = antares::domain::world::SpriteReference {
+            sheet_path: "assets/sprites/actors/test.png".to_string(),
+            sprite_index: 5,
+            animation: None,
+            material_properties: None,
+        };
+
+        state.npcs.push(NpcDefinition {
+            id: "npc1".to_string(),
+            name: "WithSprite".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            sprite: Some(sprite.clone()),
+            dialogue_id: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+        });
+
+        state.start_edit_npc(0);
+        assert_eq!(state.mode, NpcEditorMode::Edit);
+        assert_eq!(
+            state.edit_buffer.sprite_sheet,
+            "assets/sprites/actors/test.png"
+        );
+        assert_eq!(state.edit_buffer.sprite_index, "5");
+    }
+
+    #[test]
+    fn test_npc_editor_roundtrip_preserves_sprite_metadata() {
+        let temp_path = std::env::temp_dir().join("antares_test_npcs_sprite.ron");
+        // Clean up any previous file
+        let _ = std::fs::remove_file(&temp_path);
+
+        let sprite = antares::domain::world::SpriteReference {
+            sheet_path: "assets/sprites/actors/wizard.png".to_string(),
+            sprite_index: 12,
+            animation: None,
+            material_properties: None,
+        };
+
+        let npc = NpcDefinition {
+            id: "wizard".to_string(),
+            name: "Wizard".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            sprite: Some(sprite.clone()),
+            dialogue_id: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+        };
+
+        let mut state = NpcEditorState::new();
+        state.npcs.push(npc);
+
+        // Save to file
+        state
+            .save_to_file(&temp_path)
+            .expect("Failed to save npcs.ron for test");
+
+        // Load back
+        let contents = std::fs::read_to_string(&temp_path).expect("Failed to read saved npcs file");
+        let loaded: Vec<NpcDefinition> =
+            ron::from_str(&contents).expect("Failed to parse saved npcs.ron");
+        assert_eq!(loaded.len(), 1);
+        let loaded_npc = &loaded[0];
+        assert!(loaded_npc.sprite.is_some());
+        let s = loaded_npc.sprite.as_ref().unwrap();
+        assert_eq!(s.sheet_path, "assets/sprites/actors/wizard.png");
+        assert_eq!(s.sprite_index, 12);
+
+        let _ = std::fs::remove_file(&temp_path);
     }
 
     #[test]

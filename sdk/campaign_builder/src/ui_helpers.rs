@@ -3446,18 +3446,98 @@ pub fn autocomplete_portrait_selector(
         }
 
         // Show clear button
-        if !selected_portrait_id.is_empty()
-            && ui
-                .small_button("✖")
-                .on_hover_text("Clear selection")
-                .clicked()
-        {
-            selected_portrait_id.clear();
-            remove_autocomplete_buffer(ui.ctx(), buffer_id);
-            changed = true;
+        if ui.button("Clear").clicked() {
+            if !selected_portrait_id.is_empty() {
+                selected_portrait_id.clear();
+                changed = true;
+            }
+        }
+    });
+
+    changed
+}
+
+/// Autocomplete selector for sprite sheet paths.
+///
+/// Provides a text autocomplete for sprite sheet candidates discovered in the campaign's
+/// `assets/sprites/` directory. The displayed candidate strings are the relative paths
+/// (relative to the campaign directory), e.g. `assets/sprites/actors/wizard.png`.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI
+/// * `id_salt` - Salt used for the autocomplete id
+/// * `label` - Label shown to the user
+/// * `selected_sheet` - Mutable reference to currently selected sheet path
+/// * `available_sheets` - Candidate sheet paths to suggest
+/// * `campaign_dir` - Optional campaign dir (used to validate/show full path tooltip)
+///
+/// # Returns
+///
+/// Returns `true` if the selection changed (cleared or set)
+pub fn autocomplete_sprite_sheet_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_sheet: &mut String,
+    available_sheets: &[String],
+    campaign_dir: Option<&PathBuf>,
+) -> bool {
+    use crate::ui_helpers::AutocompleteInput;
+
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        ui.label(label);
+
+        // Current display value
+        let current_value = selected_sheet.clone();
+
+        let buffer_id = make_autocomplete_id(ui, "sprite", id_salt);
+
+        // Build candidates from available sprite sheets
+        let candidates: Vec<String> = available_sheets.to_vec();
+
+        // Persistent buffer logic
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_value.clone());
+
+        let mut response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder("Start typing sprite sheet path...")
+            .show(ui, &mut text_buffer);
+
+        // Add tooltip showing full sprite path for current selection
+        if !selected_sheet.is_empty() {
+            if let Some(dir) = campaign_dir {
+                let path = dir.join(selected_sheet);
+                if path.exists() {
+                    response = response.on_hover_text(format!("Sprite path: {}", path.display()));
+                } else {
+                    response = response.on_hover_text(format!(
+                        "⚠ Sprite '{}' not found in campaign assets/sprites",
+                        selected_sheet
+                    ));
+                }
+            } else {
+                response = response.on_hover_text(format!("Sprite: {}", selected_sheet));
+            }
         }
 
-        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+        // Commit valid selections (only accept selections that are in candidates)
+        if response.changed() && !text_buffer.is_empty() && text_buffer != current_value {
+            if candidates.contains(&text_buffer) {
+                *selected_sheet = text_buffer.clone();
+                changed = true;
+            }
+        }
+
+        // Clear button
+        if ui.button("Clear").clicked() {
+            if !selected_sheet.is_empty() {
+                selected_sheet.clear();
+                changed = true;
+            }
+        }
     });
 
     changed
@@ -6049,6 +6129,50 @@ mod tests {
     // =========================================================================
     // Portrait Discovery Tests
     // =========================================================================
+
+    // =========================================================================
+    // Sprite Sheet Discovery Tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_sprite_sheet_candidates_no_campaign_dir() {
+        let candidates = extract_sprite_sheet_candidates(None);
+        assert_eq!(candidates.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_sprite_sheet_candidates_nonexistent_directory() {
+        let campaign_dir = PathBuf::from("/nonexistent/path/to/campaign_sprites");
+        let candidates = extract_sprite_sheet_candidates(Some(&campaign_dir));
+        assert_eq!(candidates.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_sprite_sheet_candidates_with_png_files() {
+        // Create temporary directory structure
+        let temp_dir = std::env::temp_dir().join("antares_test_sprites_png");
+        let sprites_dir = temp_dir.join("assets").join("sprites");
+        let actors_dir = sprites_dir.join("actors");
+
+        // Clean up any existing test directory
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // Create directories
+        std::fs::create_dir_all(&actors_dir).expect("Failed to create test directories");
+
+        // Create test files
+        std::fs::write(sprites_dir.join("background.png"), b"data").expect("Failed to create file");
+        std::fs::write(actors_dir.join("wizard.png"), b"data").expect("Failed to create file");
+        std::fs::write(actors_dir.join("goblin.jpg"), b"data").expect("Failed to create file");
+
+        let candidates = extract_sprite_sheet_candidates(Some(&temp_dir));
+        assert!(candidates.contains(&"assets/sprites/background.png".to_string()));
+        assert!(candidates.contains(&"assets/sprites/actors/wizard.png".to_string()));
+        assert!(candidates.contains(&"assets/sprites/actors/goblin.jpg".to_string()));
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 
     #[test]
     fn test_extract_portrait_candidates_no_campaign_dir() {
