@@ -1369,6 +1369,7 @@ mod map_npc_resolution_tests {
             description: "Vigilant guard".to_string(),
             portrait_id: "guard.png".to_string(),
             dialogue_id: Some(10),
+            sprite: None,
             quest_ids: vec![],
             faction: Some("City Watch".to_string()),
             is_merchant: false,

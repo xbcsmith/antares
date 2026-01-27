@@ -2200,6 +2200,7 @@ mod tests {
             description: "The wise village elder".to_string(),
             portrait_id: "elder.png".to_string(),
             dialogue_id: Some(1),
+            sprite: None,
             quest_ids: vec![1, 2],
             faction: Some("Village".to_string()),
             is_merchant: false,

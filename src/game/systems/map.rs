@@ -706,12 +706,16 @@ fn spawn_map(
             let x = resolved_npc.position.x as f32;
             let y = resolved_npc.position.y as f32;
 
-            let sprite_ref = SpriteReference {
-                sheet_path: DEFAULT_NPC_SPRITE_PATH.to_string(),
-                sprite_index: 0,
-                animation: None,
-                material_properties: None,
-            };
+            // Prefer per-NPC sprite if defined, otherwise use default placeholder
+            let sprite_ref = resolved_npc
+                .sprite
+                .clone()
+                .unwrap_or_else(|| SpriteReference {
+                    sheet_path: DEFAULT_NPC_SPRITE_PATH.to_string(),
+                    sprite_index: 0,
+                    animation: None,
+                    material_properties: None,
+                });
 
             let entity = spawn_actor_sprite(
                 &mut commands,
@@ -1021,6 +1025,7 @@ mod tests {
             name: "Test Merchant".to_string(),
             description: "A test merchant NPC".to_string(),
             portrait_id: "merchant.png".to_string(),
+            sprite: None,
             position: Position::new(5, 5),
             facing: None,
             dialogue_id: Some(100u16), // Dialogue ID present
@@ -1047,6 +1052,7 @@ mod tests {
             name: "Silent NPC".to_string(),
             description: "An NPC with no dialogue".to_string(),
             portrait_id: "silent.png".to_string(),
+            sprite: None,
             position: Position::new(10, 10),
             facing: None,
             dialogue_id: None, // No dialogue ID
@@ -1170,6 +1176,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(bevy::asset::AssetPlugin::default());
+        // Initialize Image asset type for tests to avoid asset handle allocation panic
+        app.init_asset::<bevy::prelude::Image>();
         app.add_plugins(MapRenderingPlugin);
 
         // Prepare ContentDatabase with a single NPC definition
@@ -1214,5 +1222,74 @@ mod tests {
         assert_eq!(npc_marker.npc_id, "test_npc");
         assert_eq!(actor_sprite.sheet_path, DEFAULT_NPC_SPRITE_PATH);
         assert_eq!(actor_sprite.sprite_index, 0);
+    }
+
+    #[test]
+    fn test_spawn_map_prefers_resolved_npc_sprite_over_default() {
+        // Integration-style test: spawn_map should use resolved_npc.sprite when provided
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        // Initialize Image asset type for tests to avoid asset handle allocation panic
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        // Prepare ContentDatabase with a single NPC definition with custom sprite
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let sprite = crate::domain::world::SpriteReference {
+            sheet_path: "sprites/test/custom_npc.png".to_string(),
+            sprite_index: 42,
+            animation: None,
+            material_properties: None,
+        };
+        let mut npc_def =
+            crate::domain::world::npc::NpcDefinition::new("test_npc", "Test NPC", "portrait.png");
+        npc_def = npc_def.with_sprite(sprite.clone());
+        db.npcs
+            .add_npc(npc_def)
+            .expect("Failed to add NPC to ContentDatabase");
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        // Build GameState with a map containing an NPC placement
+        let mut game_state = crate::application::GameState::new();
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.npc_placements
+            .push(crate::domain::world::npc::NpcPlacement::new(
+                "test_npc",
+                crate::domain::types::Position::new(5, 5),
+            ));
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+
+        // Insert sprite assets resource (default)
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+
+        // Ensure required Assets resources exist for systems
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        // Run startup systems (including spawn_map_system)
+        app.update();
+
+        // Verify there is exactly one entity with ActorSprite + NpcMarker
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(
+            Entity,
+            &crate::game::components::sprite::ActorSprite,
+            &NpcMarker,
+        )>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(results.len(), 1);
+        let (entity, actor_sprite, npc_marker) = results[0];
+        assert_eq!(npc_marker.npc_id, "test_npc");
+        assert_eq!(actor_sprite.sheet_path, "sprites/test/custom_npc.png");
+        assert_eq!(actor_sprite.sprite_index, 42);
+
+        // Ensure no AnimatedSprite component was added (since animation was None)
+        assert!(world_ref
+            .get::<crate::game::components::sprite::AnimatedSprite>(entity)
+            .is_none());
     }
 }

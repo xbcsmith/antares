@@ -91,6 +91,10 @@ pub struct NpcDefinition {
     /// Path to portrait image (required)
     pub portrait_id: String,
 
+    /// Optional default dialogue id for NPC interactions
+    #[serde(default)]
+    pub dialogue_id: Option<DialogueId>,
+
     /// Optional sprite reference for this NPC's visual representation.
     ///
     /// When `Some`, the NPC will use the specified sprite sheet and index.

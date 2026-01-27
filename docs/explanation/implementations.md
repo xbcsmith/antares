@@ -1,3 +1,57 @@
+## Phase 2: Runtime Integration & Asset Scanning - COMPLETED
+
+### Summary
+
+**Completion Date**: 2025-01-26
+**Duration**: ~4 hours
+
+Phase 2 integrated per-NPC sprite metadata into runtime spawning and extended the Campaign Builder asset scanner to detect sprite sheets referenced by NPC definitions. The work included changes to map spawn logic to prefer `ResolvedNpc.sprite`, adding integration tests to verify runtime behavior, and updating the AssetManager so sprite sheets referenced in NPC metadata are marked as referenced.
+
+### Components Implemented
+
+1. Spawn Logic
+
+   - Modified `spawn_map` to prefer `resolved_npc.sprite` when present (falls back to `DEFAULT_NPC_SPRITE_PATH`).
+   - Verified `spawn_actor_sprite` supports `sheet_path`, `sprite_index`, `animation`, and `material_properties` (no changes needed).
+
+2. Asset Scanning
+
+   - Extended `AssetManager::scan_npcs_references` to inspect `npc.sprite` and mark `sprite.sheet_path` as referenced, adding `AssetReference::Npc` entries.
+
+3. Tests
+   - Added integration test `test_spawn_map_prefers_resolved_npc_sprite_over_default` in `src/game/systems/map.rs`.
+   - Ensured existing `test_spawn_map_spawns_actor_sprite_for_npc` verifies default placeholder fallback for NPCs without `sprite`.
+   - Added `test_scan_npcs_detects_sprite_sheet_reference_in_metadata` to `sdk/campaign_builder/src/asset_manager.rs`.
+
+### Files Modified
+
+- `src/game/systems/map.rs` — Use `resolved_npc.sprite` when spawning NPC actors; added tests validating custom sprite usage and default fallback.
+- `sdk/campaign_builder/src/asset_manager.rs` — Scan NPC sprite metadata and add tests to verify sprite sheet detection.
+- `src/domain/world/npc.rs` — Ensured `NpcDefinition.sprite: Option<SpriteReference>` remains and restored `dialogue_id` defaults for compatibility.
+- `src/domain/world/types.rs` — `ResolvedNpc` already contains `sprite: Option<SpriteReference>` and is used by spawn logic.
+
+### Testing & Quality Gates
+
+All checks were run locally after implementation:
+
+- `cargo fmt --all` → OK
+- `cargo check --all-targets --all-features` → OK
+- `cargo clippy --all-targets --all-features -- -D warnings` → OK
+- `cargo nextest run --all-features` → OK (new tests included and passing)
+
+### Notes & Decisions
+
+- Placeholder asset creation was left as OPTIONAL (per plan); no new placeholder file was added in this phase.
+- Tests that exercise runtime asset loading initialize the Image asset type with `app.init_asset::<Image>()` to avoid test-time asset handle allocation panics.
+- Backward compatibility preserved: `NpcDefinition.sprite` is optional and uses `#[serde(default)]`, so existing RON files deserialize unchanged.
+
+### Success Criteria (Phase 2)
+
+- NPCs with `sprite` metadata spawn with the custom sprite sheet/index (verified by tests).
+- NPCs without `sprite` fallback to `DEFAULT_NPC_SPRITE_PATH` (verified by tests).
+- Asset manager detects sprite sheet references in NPC definitions (verified by tests).
+- All quality gates (fmt, check, clippy, nextest) pass.
+
 ## Phase 3: Sprite Rendering Integration - COMPLETED
 
 ### Summary
