@@ -232,6 +232,18 @@
             (7, "exit_portal"),
         ],
     ),
+
+    // Minimal placeholder sprite sheets used as fallbacks for missing actor visuals.
+    // Single-cell sheet for the NPC placeholder image.
+    "placeholders": (
+        texture_path: "sprites/placeholders/npc_placeholder.png",
+        tile_size: (32.0, 48.0),
+        columns: 1,
+        rows: 1,
+        sprites: [
+            (0, "npc_placeholder"),
+        ],
+    ),
 }
 ```
 

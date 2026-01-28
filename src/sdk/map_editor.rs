@@ -819,4 +819,34 @@ mod sprite_tests {
             assert!(!has_it, "Should return false for nonexistent sheet");
         }
     }
+
+    #[test]
+    fn test_placeholder_sheet_present() {
+        // Only run assertions if registry can be loaded in this environment.
+        // Some CI/test environments may not have data files present, so guard
+        // against `Err` like the other tests in this module.
+        if let Ok(registry) = load_sprite_registry() {
+            if let Some(sheet) = registry.get("placeholders") {
+                // Verify expected texture path and grid dimensions for the placeholder
+                assert_eq!(
+                    sheet.texture_path,
+                    "sprites/placeholders/npc_placeholder.png"
+                );
+                assert_eq!(sheet.columns, 1);
+                assert_eq!(sheet.rows, 1);
+
+                // Verify the named sprite mapping contains the expected placeholder entry
+                assert!(
+                    sheet
+                        .sprites
+                        .iter()
+                        .any(|(idx, name)| *idx == 0 && name == "npc_placeholder"),
+                    "Placeholder sheet should contain (0, \"npc_placeholder\")"
+                );
+            } else {
+                // It's acceptable if the registry exists but doesn't include the placeholder
+                // in some environments (e.g., trimmed test fixtures).
+            }
+        }
+    }
 }

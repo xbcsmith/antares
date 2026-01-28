@@ -537,6 +537,8 @@ mod asset_loading_tests {
             "assets/sprites/actors/monsters_basic.png",
             "assets/sprites/actors/monsters_advanced.png",
             "assets/sprites/actors/recruitables.png",
+            // Placeholder sprites
+            "assets/sprites/placeholders/npc_placeholder.png",
             // Event marker sprites
             "assets/sprites/events/signs.png",
             "assets/sprites/events/portals.png",
@@ -571,6 +573,7 @@ mod asset_loading_tests {
             "assets/sprites/tiles",
             "assets/sprites/actors",
             "assets/sprites/events",
+            "assets/sprites/placeholders",
             "assets/sprites/ui",
         ];
 

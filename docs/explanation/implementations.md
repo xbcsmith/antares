@@ -30,6 +30,83 @@ Phase 2 integrated per-NPC sprite metadata into runtime spawning and extended th
 - `src/domain/world/npc.rs` — Ensured `NpcDefinition.sprite: Option<SpriteReference>` remains and restored `dialogue_id` defaults for compatibility.
 - `src/domain/world/types.rs` — `ResolvedNpc` already contains `sprite: Option<SpriteReference>` and is used by spawn logic.
 
+### NPC Sprite Metadata System
+
+**Purpose**: Enables per-NPC sprite customization via `SpriteReference` metadata in NPC definitions. NPCs can specify custom sprite sheets, indices, and optional animations instead of using the global `DEFAULT_NPC_SPRITE_PATH` placeholder.
+
+**Affected Files**:
+
+- `antares/src/domain/world/npc.rs` — Added `sprite: Option<SpriteReference>` to `NpcDefinition`
+- `antares/src/domain/world/types.rs` — Propagated `sprite` into `ResolvedNpc`
+- `antares/src/game/systems/map.rs` — `spawn_map` prefers `ResolvedNpc.sprite` over the default placeholder
+- `sdk/campaign_builder/src/asset_manager.rs` — `scan_npcs_references` detects sprite sheet usage
+- `sdk/campaign_builder/src/npc_editor.rs` — Editor UI supports sprite sheet selection and index input
+
+**Data Structure Changes**:
+
+`NpcDefinition` (domain layer):
+
+```rust
+pub struct NpcDefinition {
+    // ...
+    #[serde(default)]
+    pub sprite: Option<SpriteReference>, // NEW FIELD
+    // ...
+}
+```
+
+`ResolvedNpc` (domain layer):
+
+```rust
+pub struct ResolvedNpc {
+    // ...
+    pub sprite: Option<SpriteReference>, // NEW FIELD
+    // ...
+}
+```
+
+**Usage Example** (RON):
+
+```ron
+NpcDefinition(
+    id: "town_guard",
+    name: "Town Guard",
+    portrait_id: "guard.png",
+    sprite: Some(SpriteReference(
+        sheet_path: "sprites/actors/npcs_town.png",
+        sprite_index: 3,
+        animation: None,
+        material_properties: None,
+    )),
+)
+```
+
+**Behavior**:
+
+- When `sprite` is `Some`, runtime spawns use the specified sheet and index.
+- When `sprite` is `None`, runtime falls back to `DEFAULT_NPC_SPRITE_PATH` (backward compatible behavior).
+
+**Testing & Validation**:
+
+- Domain serialization tests:
+  - `test_npc_definition_serializes_with_sprite_field_present`
+  - `test_npc_definition_deserializes_without_sprite_field_defaults_none`
+- `ResolvedNpc` propagation tests:
+  - `test_resolved_npc_from_placement_copies_sprite_field_when_present`
+  - `test_resolved_npc_from_placement_sprite_none_when_definition_none`
+- Runtime spawn integration tests:
+  - `test_spawn_map_prefers_resolved_npc_sprite_over_default`
+  - `test_spawn_map_spawns_actor_sprite_for_npc` (default fallback)
+- Asset Manager test:
+  - `test_scan_npcs_detects_sprite_sheet_reference_in_metadata`
+- Editor round-trip test:
+  - `test_npc_editor_roundtrip_preserves_sprite_metadata`
+
+**Backward Compatibility**:
+
+- Existing `npcs.ron` files without `sprite` continue to deserialize successfully (`#[serde(default)]` ensures `sprite = None`).
+- No breaking changes to the `NpcDefinition::new` constructor signature.
+
 ### Testing & Quality Gates
 
 All checks were run locally after implementation:
@@ -25441,36 +25518,45 @@ The sprite registry (`data/sprite_sheets.ron`) contains 11 sprite sheets with co
 
 - `SpriteAssets` loads configs and caches materials/meshes
 - `get_sprite_uv_transform()` calculates UV coordinates
+- `MapRenderingPlugin` now initializes `SpriteAssets` at startup and registers the sprite-sheet registry
+- Startup system: `register_sprite_sheets_system` loads `data/sprite_sheets.ron` and registers each sheet into `SpriteAssets`
+- This prevents runtime validation panics when startup systems (e.g., `spawn_map_system`) require `SpriteAssets`
 
 **Game Components/Systems** (Phase 3):
 
 - Billboard component renders selected sprites
 - AnimatedSprite component handles frame updates
-- update_billboards system updates sprite positions
+- `update_billboards` system updates sprite positions
+- `spawn_map_system` now relies on `SpriteAssets` being present at startup (registered by the plugin)
 
 **SDK Layer** (Phase 5 - NEW):
 
 - Sprite registry functions enable Campaign Builder UI
+- `load_sprite_registry()` loads `data/sprite_sheets.ron` → `HashMap<String, SpriteSheetInfo>`
 - No domain dependencies
 - Pure query functions for UI consumption
 
 **Data** (Phase 4):
 
 - Sprite sheets registered in `data/sprite_sheets.ron`
-- Placeholder PNG sprites generated via Phase 4 tools
+- New entry added: `"placeholders"` → `texture_path: "sprites/placeholders/npc_placeholder.png"`, `tile_size: (32.0, 48.0)`, `columns: 1`, `rows: 1`, `sprites: [(0, "npc_placeholder")]`
+- Placeholder PNG added at `assets/sprites/placeholders/npc_placeholder.png` (also present in campaign `campaigns/tutorial/assets/sprites/placeholders/`)
 - Artist-created sprites can replace placeholders
 
 ### Testing
 
-**Unit Tests Added** (7 tests in `src/sdk/map_editor.rs::sprite_tests`):
+**Unit Tests Added** (9 tests across `src/sdk/map_editor.rs::sprite_tests` and `src/game/systems/map.rs::tests`):
 
-1. `test_sprite_sheet_info_clone` - Verifies SpriteSheetInfo cloning
+1. `test_sprite_sheet_info_clone` - Verifies `SpriteSheetInfo` cloning
 2. `test_load_sprite_registry_success` - Loads registry from RON file
 3. `test_browse_sprite_sheets_returns_sorted` - Verifies alphabetical sorting
 4. `test_get_sprites_for_sheet_sorts_by_index` - Verifies sprite index sorting
 5. `test_suggest_sprite_sheets_case_insensitive` - Verifies case-insensitive search
 6. `test_search_sprites_limits_results` - Verifies result limit (max 10)
-7. `test_has_sprite_sheet_not_found` - Verifies false for nonexistent sheets
+7. `test_has_sprite_sheet_not_found` - Verifies missing sheets return false
+8. `test_placeholder_sheet_present` - Verifies placeholder entry exists in the loaded registry (`src/sdk/map_editor.rs`)
+9. `test_map_plugin_initializes_sprite_assets_and_registers_sheets` - Integration test ensuring `MapRenderingPlugin` initializes `SpriteAssets` and registers sheets on startup (`src/game/systems/map.rs`)
+10. `test_has_sprite_sheet_not_found` - Verifies false for nonexistent sheets
 
 **Test Coverage**: >80% of sprite functions
 

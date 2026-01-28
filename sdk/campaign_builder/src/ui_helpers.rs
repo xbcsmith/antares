@@ -43,6 +43,7 @@
 //! - [`extract_item_tag_candidates`] - Extracts unique item tags from items
 //! - [`extract_special_ability_candidates`] - Extracts special abilities from races
 //! - [`extract_portrait_candidates`] - Extracts available portrait IDs from campaign assets
+//! - [`extract_sprite_sheet_candidates`] - Extracts available sprite sheet paths from campaign assets
 //! - [`resolve_portrait_path`] - Resolves portrait ID to full file path
 //! - [`AutocompleteCandidateCache`] - Performance cache for candidate lists (invalidate on data changes)
 //!
@@ -3509,17 +3510,17 @@ pub fn autocomplete_sprite_sheet_selector(
         // Add tooltip showing full sprite path for current selection
         if !selected_sheet.is_empty() {
             if let Some(dir) = campaign_dir {
-                let path = dir.join(selected_sheet);
+                let path = dir.join(selected_sheet.as_str());
                 if path.exists() {
                     response = response.on_hover_text(format!("Sprite path: {}", path.display()));
                 } else {
                     response = response.on_hover_text(format!(
                         "⚠ Sprite '{}' not found in campaign assets/sprites",
-                        selected_sheet
+                        selected_sheet.as_str()
                     ));
                 }
             } else {
-                response = response.on_hover_text(format!("Sprite: {}", selected_sheet));
+                response = response.on_hover_text(format!("Sprite: {}", selected_sheet.as_str()));
             }
         }
 
@@ -4121,6 +4122,60 @@ pub fn extract_portrait_candidates(campaign_dir: Option<&PathBuf>) -> Vec<String
     });
 
     portrait_ids
+}
+
+/// Extract sprite sheet candidate paths from a campaign's `assets/sprites` directory.
+///
+/// Returns a vector of relative paths (e.g., "assets/sprites/background.png",
+/// "assets/sprites/actors/wizard.png"). If `campaign_dir` is `None`, the
+/// campaign directory doesn't exist, or there is no `assets/sprites`
+/// directory, an empty vector is returned.
+///
+/// The function traverses the `assets/sprites` tree recursively and returns
+/// deterministic, sorted, deduplicated results suitable for UI pickers.
+pub fn extract_sprite_sheet_candidates(campaign_dir: Option<&PathBuf>) -> Vec<String> {
+    let Some(dir) = campaign_dir else {
+        return Vec::new();
+    };
+
+    let sprites_dir = dir.join("assets").join("sprites");
+
+    // Return empty if directory doesn't exist
+    if !sprites_dir.exists() || !sprites_dir.is_dir() {
+        return Vec::new();
+    }
+
+    let mut candidates: Vec<String> = Vec::new();
+    let mut stack: Vec<PathBuf> = vec![sprites_dir];
+
+    // Iterative DFS to avoid dependency on `walkdir` crate
+    while let Some(path) = stack.pop() {
+        let entries = match std::fs::read_dir(&path) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.is_file() {
+                // Convert to path relative to campaign dir (e.g., assets/sprites/...)
+                if let Ok(rel) = p.strip_prefix(dir) {
+                    if let Some(s) = rel.to_str() {
+                        // Normalize separators to '/' for deterministic tests across platforms
+                        candidates.push(s.replace('\\', "/"));
+                    }
+                }
+            }
+        }
+    }
+
+    // Deterministic ordering and uniqueness
+    candidates.sort();
+    candidates.dedup();
+
+    candidates
 }
 
 /// Resolves a portrait ID to its full file path.

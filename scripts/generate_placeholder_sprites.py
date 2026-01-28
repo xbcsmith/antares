@@ -13,6 +13,12 @@ Usage:
     python scripts/generate_placeholder_sprites.py
     python scripts/generate_placeholder_sprites.py --output-dir custom/path
     python scripts/generate_placeholder_sprites.py --sheets walls terrain
+
+    # Single-sheet mode:
+    # - Use `--type <name>` to produce a single placeholder sheet (e.g. npc)
+    # - Optionally provide `--size WIDTHxHEIGHT` (e.g. 32x48)
+    # - Use `--output` to write a single FILE path (overrides --output-dir for this run)
+    python scripts/generate_placeholder_sprites.py --output campaigns/tutorial/assets/sprites/placeholders/npc_placeholder.png --size 32x48 --type npc
 """
 
 import argparse
@@ -415,6 +421,11 @@ def main():
         description="Generate placeholder sprite PNG files for testing",
     )
     parser.add_argument(
+        "--output",
+        type=Path,
+        help="Output file path for a single placeholder (overrides --output-dir when --type is used)",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("assets/sprites"),
@@ -426,6 +437,16 @@ def main():
         help="Specific sheets to generate (default: all)",
     )
     parser.add_argument(
+        "--size",
+        type=str,
+        help="Single placeholder size as WIDTHxHEIGHT (e.g. 32x48); used with --type",
+    )
+    parser.add_argument(
+        "--type",
+        type=str,
+        help="Generate a single placeholder of a given type (e.g. 'npc'); when set, the script generates only one sheet and exits",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Overwrite existing files",
@@ -433,7 +454,52 @@ def main():
 
     args = parser.parse_args()
 
-    # Ensure output directory exists
+    # If user requested a single placeholder (via --type), handle it and exit early
+    if args.type:
+        # Parse custom size if provided
+        if args.size:
+            try:
+                w, h = map(int, args.size.lower().split("x"))
+            except Exception:
+                parser.error("--size must be WIDTHxHEIGHT, e.g. 32x48")
+        else:
+            # Defaults per recognized types (extendable)
+            defaults = {"npc": (32, 48)}
+            w, h = defaults.get(args.type, (32, 32))
+
+        spec = {
+            "tile_size": (w, h),
+            "columns": 1,
+            "rows": 1,
+            "colors": [(200, 200, 200)],
+            "names": [f"{args.type}_placeholder"],
+        }
+
+        # If an output file path provided, write there directly
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            sheet_name = output_path.stem
+            out_dir = output_path.parent
+
+            if output_path.exists() and not args.force:
+                print(f"⊘ {sheet_name:20} → {output_path.name:30} (exists, use --force to overwrite)")
+            else:
+                create_placeholder_sprite_sheet(sheet_name, spec, out_dir)
+        else:
+            # Use --output-dir if no single-file output provided
+            args.output_dir.mkdir(parents=True, exist_ok=True)
+            sheet_name = f"{args.type}_placeholder"
+            out_dir = args.output_dir
+            if (out_dir / f"{sheet_name}.png").exists() and not args.force:
+                print(f"⊘ {sheet_name:20} → {sheet_name}.png                 (exists, use --force to overwrite)")
+            else:
+                create_placeholder_sprite_sheet(sheet_name, spec, out_dir)
+
+        # Done: generated single placeholder, exit early
+        return
+
+    # Ensure output directory exists for the normal multi-sheet generation flow
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n📦 Generating placeholder sprite sheets...")

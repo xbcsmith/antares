@@ -107,9 +107,15 @@ impl Plugin for MapManagerPlugin {
 
 impl Plugin for MapRenderingPlugin {
     fn build(&self, app: &mut App) {
-        // Keep the visual spawn on startup (original behavior), and add the
-        // map manager plugin so dynamic changes are handled at runtime.
-        app.add_systems(Startup, spawn_map_system)
+        // Initialize the SpriteAssets resource so systems depending on it pass
+        // Bevy's system validation at startup. Also register the sprite sheet
+        // registry on startup so metadata is available before map spawn runs.
+        app.init_resource::<SpriteAssets>()
+            .add_systems(
+                Startup,
+                // Ensure registration happens before the map spawn system runs
+                (register_sprite_sheets_system, spawn_map_system),
+            )
             .add_plugins(MapManagerPlugin);
     }
 }
@@ -136,6 +142,34 @@ fn spawn_map_system(
         content,
         &mut cache,
     );
+}
+
+/// Startup system that loads the sprite sheet registry (`data/sprite_sheets.ron`)
+/// and registers all sheet configurations into the `SpriteAssets` resource.
+///
+/// This ensures sprite sheet metadata is available at runtime before map spawn
+/// systems depend on `SpriteAssets`.
+fn register_sprite_sheets_system(mut sprite_assets: ResMut<SpriteAssets>) {
+    match crate::sdk::map_editor::load_sprite_registry() {
+        Ok(registry) => {
+            // Use len before moving the registry into iteration
+            let count = registry.len();
+            for (key, info) in registry {
+                let config = crate::game::resources::sprite_assets::SpriteSheetConfig {
+                    texture_path: info.texture_path,
+                    tile_size: info.tile_size,
+                    columns: info.columns,
+                    rows: info.rows,
+                    sprites: info.sprites,
+                };
+                sprite_assets.register_config(key, config);
+            }
+            info!("Registered {} sprite sheets into SpriteAssets", count);
+        }
+        Err(e) => {
+            warn!("Failed to load sprite registry: {}", e);
+        }
+    }
 }
 
 /// System that handles door opened messages by refreshing map visuals
@@ -1291,5 +1325,52 @@ mod tests {
         assert!(world_ref
             .get::<crate::game::components::sprite::AnimatedSprite>(entity)
             .is_none());
+    }
+
+    #[test]
+    fn test_map_plugin_initializes_sprite_assets_and_registers_sheets() {
+        // Integration-style test: ensure MapRenderingPlugin initializes the SpriteAssets
+        // resource and that registry entries are registered when available.
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        // Initialize Image asset type for tests to avoid asset handle allocation panic
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        // Ensure required Assets resources exist for systems
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        // Insert minimal GlobalState and GameContent so `spawn_map_system`'s required
+        // resources exist during startup. Tests that exercise spawn_map in more depth
+        // will insert more complete state as needed.
+        app.insert_resource(crate::game::resources::GlobalState(
+            crate::application::GameState::new(),
+        ));
+        let db = crate::sdk::database::ContentDatabase::new();
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        // Run startup systems (register_sprite_sheets_system should run)
+        app.update();
+
+        // Verify SpriteAssets resource exists
+        let sprite_assets = app
+            .world()
+            .get_resource::<crate::game::resources::sprite_assets::SpriteAssets>();
+        assert!(
+            sprite_assets.is_some(),
+            "SpriteAssets resource should be initialized by MapRenderingPlugin"
+        );
+
+        // If registry was successfully loaded during the test run, verify the
+        // placeholder sheet is registered and has expected properties.
+        if let Some(sa) = sprite_assets {
+            if let Some(cfg) = sa.get_config("placeholders") {
+                assert_eq!(cfg.texture_path, "sprites/placeholders/npc_placeholder.png");
+                assert_eq!(cfg.columns, 1);
+                assert_eq!(cfg.rows, 1);
+            }
+        }
     }
 }

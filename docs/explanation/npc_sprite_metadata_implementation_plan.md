@@ -44,6 +44,16 @@
      - _Cons_: Requires script execution, adds new asset to repo
    - **Recommendation**: **Option A (copy existing)** — pragmatic solution, fixes missing texture warnings immediately
 
+**Decisions (chosen for this implementation):**
+
+- **Question 1**: Selected **Option B (defer)** — Per-placement sprite overrides are deferred to Phase 4 to keep Phase 1 focused and reduce scope. This simplifies placement resolution and avoids immediate data migration concerns.
+
+- **Question 2**: Selected **Option B (index-only)** — Campaign Builder V1 implements a sheet picker + index input only. Animation configuration (frames/FPS/loop) is intentionally deferred to a post-MVP phase to keep the editor simple and reliable.
+
+- **Question 3**: Selected **Option A (copy existing)** — Use existing actor asset as placeholder. The placeholder is registered in `data/sprite_sheets.ron` as `"placeholders": (texture_path: "sprites/placeholders/npc_placeholder.png", ...)` and the file is present in assets. This pragmatic choice avoids delaying implementation for asset generation.
+
+_(These decisions were applied during implementation and are documented here for traceability.)_
+
 ---
 
 ## Overview
@@ -378,24 +388,24 @@ Execute these verification steps BEFORE writing any code:
 
 **Complete these in order (check off as you finish each):**
 
-- [ ] **1.5.1**: Architecture.md verification checklist (Section 1.1) completed
-- [ ] **1.5.2**: Add `pub sprite: Option<SpriteReference>` field to `NpcDefinition` struct (after `portrait_id` field, ~line 45)
-- [ ] **1.5.3**: Add `#[serde(default)]` attribute to `sprite` field
-- [ ] **1.5.4**: Add doc comment to `sprite` field (include semantics, backward-compat guarantee, RON example)
-- [ ] **1.5.5**: Add `pub fn with_sprite(mut self, sprite: SpriteReference) -> Self` builder method
-- [ ] **1.5.6**: Add doc comment with example to `with_sprite` method
-- [ ] **1.5.7**: Add `pub sprite: Option<SpriteReference>` field to `ResolvedNpc` struct
-- [ ] **1.5.8**: Add doc comment to `ResolvedNpc.sprite` field
-- [ ] **1.5.9**: Modify `ResolvedNpc::from_placement_and_definition` to copy `definition.sprite` field
-- [ ] **1.5.10**: Add test `test_npc_definition_serializes_with_sprite_field_present`
-- [ ] **1.5.11**: Add test `test_npc_definition_deserializes_without_sprite_field_defaults_none`
-- [ ] **1.5.12**: Add test `test_resolved_npc_from_placement_copies_sprite_field_when_present`
-- [ ] **1.5.13**: Add test `test_resolved_npc_from_placement_sprite_none_when_definition_none`
-- [ ] **1.5.14**: Run `cargo fmt --all` (verify no diffs after formatting)
-- [ ] **1.5.15**: Run `cargo check --all-targets --all-features` (verify 0 errors)
-- [ ] **1.5.16**: Run `cargo clippy --all-targets --all-features -- -D warnings` (verify 0 warnings)
-- [ ] **1.5.17**: Run `cargo nextest run --all-features` (verify all tests pass)
-- [ ] **1.5.18**: Verify Phase 1 Success Criteria (Section 1.6)
+- [x] **1.5.1**: Architecture.md verification checklist (Section 1.1) completed
+- [x] **1.5.2**: Add `pub sprite: Option<SpriteReference>` field to `NpcDefinition` struct (after `portrait_id` field, ~line 45)
+- [x] **1.5.3**: Add `#[serde(default)]` attribute to `sprite` field
+- [x] **1.5.4**: Add doc comment to `sprite` field (include semantics, backward-compat guarantee, RON example)
+- [x] **1.5.5**: Add `pub fn with_sprite(mut self, sprite: SpriteReference) -> Self` builder method
+- [x] **1.5.6**: Add doc comment with example to `with_sprite` method
+- [x] **1.5.7**: Add `pub sprite: Option<SpriteReference>` field to `ResolvedNpc` struct
+- [x] **1.5.8**: Add doc comment to `ResolvedNpc.sprite` field
+- [x] **1.5.9**: Modify `ResolvedNpc::from_placement_and_definition` to copy `definition.sprite` field
+- [x] **1.5.10**: Add test `test_npc_definition_serializes_with_sprite_field_present`
+- [x] **1.5.11**: Add test `test_npc_definition_deserializes_without_sprite_field_defaults_none`
+- [x] **1.5.12**: Add test `test_resolved_npc_from_placement_copies_sprite_field_when_present`
+- [x] **1.5.13**: Add test `test_resolved_npc_from_placement_sprite_none_when_definition_none`
+- [x] **1.5.14**: Run `cargo fmt --all` (verify no diffs after formatting)
+- [x] **1.5.15**: Run `cargo check --all-targets --all-features` (verify 0 errors)
+- [x] **1.5.16**: Run `cargo clippy --all-targets --all-features -- -D warnings` (verify 0 warnings)
+- [x] **1.5.17**: Run `cargo nextest run --all-features` (verify all tests pass)
+- [x] **1.5.18**: Verify Phase 1 Success Criteria (Section 1.6)
 
 #### 1.6 Success Criteria (Phase 1)
 
@@ -403,32 +413,32 @@ Execute these verification steps BEFORE writing any code:
 
 **Compilation & Quality Gates:**
 
-- [ ] `cargo fmt --all` produces no diffs (all code formatted)
-- [ ] `cargo check --all-targets --all-features` exits with 0 errors
+- [x] `cargo fmt --all` produces no diffs (all code formatted)
+- [x] `cargo check --all-targets --all-features` exits with 0 errors
   - Expected output: `Finished dev [unoptimized + debuginfo] target(s) in X.XXs`
-- [ ] `cargo clippy --all-targets --all-features -- -D warnings` exits with 0 warnings
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` exits with 0 warnings
   - Expected output: `Finished dev [unoptimized + debuginfo] target(s) in X.XXs`
-- [ ] `cargo nextest run --all-features` shows all tests passing
+- [x] `cargo nextest run --all-features` shows all tests passing
   - Expected output pattern: `test result: ok. X passed; 0 failed; 0 ignored`
 
 **Test Results:**
 
-- [ ] `test_npc_definition_serializes_with_sprite_field_present` — PASSED
-- [ ] `test_npc_definition_deserializes_without_sprite_field_defaults_none` — PASSED
-- [ ] `test_resolved_npc_from_placement_copies_sprite_field_when_present` — PASSED
-- [ ] `test_resolved_npc_from_placement_sprite_none_when_definition_none` — PASSED
+- [x] `test_npc_definition_serializes_with_sprite_field_present` — PASSED
+- [x] `test_npc_definition_deserializes_without_sprite_field_defaults_none` — PASSED
+- [x] `test_resolved_npc_from_placement_copies_sprite_field_when_present` — PASSED
+- [x] `test_resolved_npc_from_placement_sprite_none_when_definition_none` — PASSED
 
 **Backward Compatibility:**
 
-- [ ] Existing `NpcDefinition::new` signature unchanged (no breaking changes)
-- [ ] RON files without `sprite` field deserialize successfully
-- [ ] Deserialized NPCs without sprite have `sprite = None` (verified by Test 2)
+- [x] Existing `NpcDefinition::new` signature unchanged (no breaking changes)
+- [x] RON files without `sprite` field deserialize successfully
+- [x] Deserialized NPCs without sprite have `sprite = None` (verified by Test 2)
 
 **Code Quality:**
 
-- [ ] No `unwrap()` calls without justification comments
-- [ ] All public items (`sprite` field, `with_sprite` method) have `///` doc comments
-- [ ] Doc comments include examples (verified in Steps 1.5.4 and 1.5.6)
+- [x] No `unwrap()` calls without justification comments
+- [x] All public items (`sprite` field, `with_sprite` method) have `///` doc comments
+- [x] Doc comments include examples (verified in Steps 1.5.4 and 1.5.6)
 
 **IF ANY criterion fails**: STOP, fix the issue, re-run quality gates, then retry checklist.
 
@@ -691,18 +701,18 @@ cargo nextest run --all-features
 
 #### 2.5 Deliverables (Phase 2)
 
-- [ ] **2.5.1**: Modify `spawn_map` to prefer `resolved_npc.sprite` over `DEFAULT_NPC_SPRITE_PATH`
-- [ ] **2.5.2**: Verify `spawn_actor_sprite` handles all `SpriteReference` fields (read-only verification)
-- [ ] **2.5.3**: Add test `test_spawn_map_prefers_resolved_npc_sprite_over_default`
-- [ ] **2.5.4**: Update test `test_spawn_map_spawns_actor_sprite_for_npc` for default fallback
-- [ ] **2.5.5**: Modify `scan_npcs_references` to scan `npc.sprite.sheet_path`
-- [ ] **2.5.6**: Add test `test_scan_npcs_detects_sprite_sheet_reference_in_metadata`
-- [ ] **2.5.7**: (Optional) Add/copy placeholder asset per Open Question 3 answer
-- [ ] **2.5.8**: Run `cargo fmt --all` (0 diffs)
-- [ ] **2.5.9**: Run `cargo check --all-targets --all-features` (0 errors)
-- [ ] **2.5.10**: Run `cargo clippy --all-targets --all-features -- -D warnings` (0 warnings)
-- [ ] **2.5.11**: Run `cargo nextest run --all-features` (all tests pass)
-- [ ] **2.5.12**: Verify Phase 2 Success Criteria (Section 2.6)
+- [x] **2.5.1**: Modify `spawn_map` to prefer `resolved_npc.sprite` over `DEFAULT_NPC_SPRITE_PATH`
+- [x] **2.5.2**: Verify `spawn_actor_sprite` handles all `SpriteReference` fields (read-only verification)
+- [x] **2.5.3**: Add test `test_spawn_map_prefers_resolved_npc_sprite_over_default`
+- [x] **2.5.4**: Update test `test_spawn_map_spawns_actor_sprite_for_npc` for default fallback
+- [x] **2.5.5**: Modify `scan_npcs_references` to scan `npc.sprite.sheet_path`
+- [x] **2.5.6**: Add test `test_scan_npcs_detects_sprite_sheet_reference_in_metadata`
+- [x] **2.5.7**: (Optional) Add/copy placeholder asset per Open Question 3 answer
+- [x] **2.5.8**: Run `cargo fmt --all` (0 diffs)
+- [x] **2.5.9**: Run `cargo check --all-targets --all-features` (0 errors)
+- [x] **2.5.10**: Run `cargo clippy --all-targets --all-features -- -D warnings` (0 warnings)
+- [x] **2.5.11**: Run `cargo nextest run --all-features` (all tests pass)
+- [x] **2.5.12**: Verify Phase 2 Success Criteria (Section 2.6)
 
 #### 2.6 Success Criteria (Phase 2)
 
@@ -710,27 +720,27 @@ cargo nextest run --all-features
 
 **Compilation & Quality Gates:**
 
-- [ ] All 4 cargo commands pass (fmt, check, clippy, nextest run)
-- [ ] No new compiler errors introduced
-- [ ] No new clippy warnings introduced
-- [ ] No test regressions (all existing tests still pass)
+- [x] All 4 cargo commands pass (fmt, check, clippy, nextest run)
+- [x] No new compiler errors introduced
+- [x] No new clippy warnings introduced
+- [x] No test regressions (all existing tests still pass)
 
 **Test Results:**
 
-- [ ] `test_spawn_map_prefers_resolved_npc_sprite_over_default` — PASSED
-- [ ] `test_spawn_map_spawns_actor_sprite_for_npc` — PASSED (default fallback works)
-- [ ] `test_scan_npcs_detects_sprite_sheet_reference_in_metadata` — PASSED
+- [x] `test_spawn_map_prefers_resolved_npc_sprite_over_default` — PASSED
+- [x] `test_spawn_map_spawns_actor_sprite_for_npc` — PASSED (default fallback works)
+- [x] `test_scan_npcs_detects_sprite_sheet_reference_in_metadata` — PASSED
 
 **Runtime Behavior:**
 
-- [ ] NPCs with `sprite` metadata spawn with custom sprite sheet/index
-- [ ] NPCs without `sprite` metadata spawn with `DEFAULT_NPC_SPRITE_PATH` (backward compatible)
-- [ ] Asset manager detects sprite sheet references in NPC definitions
+- [x] NPCs with `sprite` metadata spawn with custom sprite sheet/index
+- [x] NPCs without `sprite` metadata spawn with `DEFAULT_NPC_SPRITE_PATH` (backward compatible)
+- [x] Asset manager detects sprite sheet references in NPC definitions
 
 **IF placeholder asset added:**
 
-- [ ] File exists at `assets/sprites/placeholders/npc_placeholder.png`
-- [ ] No missing texture warnings in logs when spawning default NPCs
+- [x] File exists at `assets/sprites/placeholders/npc_placeholder.png`
+- [x] No missing texture warnings in logs when spawning default NPCs
 
 ---
 
@@ -966,19 +976,19 @@ cargo nextest run --all-features
 
 #### 3.5 Deliverables (Phase 3)
 
-- [ ] **3.5.1**: Add sprite sheet picker UI to `npc_editor.rs`
-- [ ] **3.5.2**: Add sprite index input to `npc_editor.rs`
+- [x] **3.5.1**: Add sprite sheet picker UI to `npc_editor.rs`
+- [x] **3.5.2**: Add sprite index input to `npc_editor.rs`
 - [ ] **3.5.3**: (Optional, if Open Question 2 = A) Add animation config UI
-- [ ] **3.5.4**: Bind UI controls to `NpcDefinition.sprite` field
-- [ ] **3.5.5**: Verify save/load functions handle `sprite` field (automatic via serde)
-- [ ] **3.5.6**: Add test `test_npc_editor_roundtrip_preserves_sprite_metadata`
-- [ ] **3.5.7**: Update `docs/explanation/implementations.md` (add NPC Sprite Metadata section)
+- [x] **3.5.4**: Bind UI controls to `NpcDefinition.sprite` field
+- [x] **3.5.5**: Verify save/load functions handle `sprite` field (automatic via serde)
+- [x] **3.5.6**: Add test `test_npc_editor_roundtrip_preserves_sprite_metadata`
+- [x] **3.5.7**: Update `docs/explanation/implementations.md` (add NPC Sprite Metadata section)
 - [ ] **3.5.8**: (Optional) Update `docs/explanation/sprite_support_implementation_plan.md`
-- [ ] **3.5.9**: Run `cargo fmt --all` (0 diffs)
-- [ ] **3.5.10**: Run `cargo check --all-targets --all-features` (0 errors)
-- [ ] **3.5.11**: Run `cargo clippy --all-targets --all-features -- -D warnings` (0 warnings)
-- [ ] **3.5.12**: Run `cargo nextest run --all-features` (all tests pass)
-- [ ] **3.5.13**: Verify Phase 3 Success Criteria (Section 3.6)
+- [x] **3.5.9**: Run `cargo fmt --all` (0 diffs)
+- [x] **3.5.10**: Run `cargo check --all-targets --all-features` (0 errors)
+- [x] **3.5.11**: Run `cargo clippy --all-targets --all-features -- -D warnings` (0 warnings)
+- [x] **3.5.12**: Run `cargo nextest run --all-features` (all tests pass)
+- [x] **3.5.13**: Verify Phase 3 Success Criteria (Section 3.6)
 
 #### 3.6 Success Criteria (Phase 3)
 
@@ -986,27 +996,27 @@ cargo nextest run --all-features
 
 **Compilation & Quality Gates:**
 
-- [ ] All 4 cargo commands pass (fmt, check, clippy, nextest run)
-- [ ] No compiler errors
-- [ ] No clippy warnings
-- [ ] All tests passing (including new editor test)
+- [x] All 4 cargo commands pass (fmt, check, clippy, nextest run)
+- [x] No compiler errors
+- [x] No clippy warnings
+- [x] All tests passing (including new editor test)
 
 **Test Results:**
 
-- [ ] `test_npc_editor_roundtrip_preserves_sprite_metadata` — PASSED
+- [x] `test_npc_editor_roundtrip_preserves_sprite_metadata` — PASSED
 
 **Editor Functionality:**
 
-- [ ] NPC editor UI displays sprite sheet picker
-- [ ] NPC editor UI displays sprite index input
-- [ ] Selecting sheet + index updates `NpcDefinition.sprite` field
-- [ ] Saving NPC definition persists `sprite` to `npcs.ron`
-- [ ] Loading NPC definition populates UI with saved `sprite` values
+- [x] NPC editor UI displays sprite sheet picker
+- [x] NPC editor UI displays sprite index input
+- [x] Selecting sheet + index updates `NpcDefinition.sprite` field
+- [x] Saving NPC definition persists `sprite` to `npcs.ron`
+- [x] Loading NPC definition populates UI with saved `sprite` values
 
 **Documentation:**
 
-- [ ] `docs/explanation/implementations.md` updated with NPC Sprite Metadata section
-- [ ] Documentation includes purpose, affected files, data structure changes, usage example, testing, backward compatibility
+- [x] `docs/explanation/implementations.md` updated with NPC Sprite Metadata section
+- [x] Documentation includes purpose, affected files, data structure changes, usage example, testing, backward compatibility
 
 **Post-Implementation Verification (not automatable, optional):**
 
@@ -1026,55 +1036,66 @@ cargo nextest run --all-features
 
 **Data Structure Compliance:**
 
-- [ ] `NpcDefinition` structure matches `docs/reference/architecture.md` Section 4 exactly (no unauthorized fields added beyond `sprite`)
-- [ ] `ResolvedNpc` structure matches architecture.md Section 4 exactly
-- [ ] `SpriteReference` structure unchanged from architecture.md definition
-- [ ] No modifications to core domain types beyond documented changes
+- [x] `NpcDefinition` structure matches `docs/reference/architecture.md` Section 4 exactly (no unauthorized fields added beyond `sprite`)
+- [x] `ResolvedNpc` structure matches architecture.md Section 4 exactly
+- [x] `SpriteReference` structure unchanged from architecture.md definition
+- [x] No modifications to core domain types beyond documented changes
 
 **Module Structure Compliance:**
 
-- [ ] No new modules created outside `docs/reference/architecture.md` Section 3.2 structure
-- [ ] `npc.rs` remains in `antares/src/domain/world/` (domain layer)
-- [ ] `types.rs` remains in `antares/src/domain/world/` (domain layer)
-- [ ] `map.rs` remains in `antares/src/game/systems/` (application layer)
-- [ ] `npc_editor.rs` remains in `sdk/campaign_builder/src/` (SDK layer)
+- [x] No new modules created outside `docs/reference/architecture.md` Section 3.2 structure
+- [x] `npc.rs` remains in `antares/src/domain/world/` (domain layer)
+- [x] `types.rs` remains in `antares/src/domain/world/` (domain layer)
+- [x] `map.rs` remains in `antares/src/game/systems/` (application layer)
+- [x] `npc_editor.rs` remains in `sdk/campaign_builder/src/` (SDK layer)
 
 **Type System Compliance:**
 
-- [ ] All type aliases used correctly (`ItemId`, `SpellId`, etc. where applicable)
-- [ ] No raw `u32` or `usize` types used where type aliases exist
-- [ ] `sprite_index` uses `u32` (no type alias defined for sprite indices, per architecture)
-- [ ] No introduction of `String` where path type aliases should be used (if any)
+- [x] All type aliases used correctly (`ItemId`, `SpellId`, etc. where applicable)
+- [x] No raw `u32` or `usize` types used where type aliases exist
+- [x] `sprite_index` uses `u32` (no type alias defined for sprite indices, per architecture)
+- [x] No introduction of `String` where path type aliases should be used (if any)
 
 **Constants & Magic Numbers:**
 
-- [ ] `DEFAULT_NPC_SPRITE_PATH` constant used (not hardcoded string)
-- [ ] No magic numbers introduced (sprite indices use variables/params, not hardcoded values)
-- [ ] All constants defined at module level or appropriate scope
+- [x] `DEFAULT_NPC_SPRITE_PATH` constant used (not hardcoded string)
+- [x] No magic numbers introduced (sprite indices use variables/params, not hardcoded values)
+- [x] All constants defined at module level or appropriate scope
 
 **Data Format Compliance:**
 
-- [ ] RON format used for `npcs.ron` (NOT JSON/YAML)
-- [ ] `#[serde(default)]` used for all optional fields
-- [ ] No breaking serialization format changes
+- [x] RON format used for `npcs.ron` (NOT JSON/YAML)
+- [x] `#[serde(default)]` used for all optional fields
+- [x] No breaking serialization format changes
 
 **Layer Boundary Compliance:**
 
-- [ ] Domain layer (`npc.rs`, `types.rs`) has NO dependencies on infrastructure layer
-- [ ] Domain layer has NO dependencies on application layer
-- [ ] Application layer (`map.rs`, `actor.rs`) can depend on domain layer (allowed)
-- [ ] SDK layer can depend on domain layer (allowed)
+- [x] Domain layer (`npc.rs`, `types.rs`) has NO dependencies on infrastructure layer
+- [x] Domain layer has NO dependencies on application layer
+- [x] Application layer (`map.rs`, `actor.rs`) can depend on domain layer (allowed)
+- [x] SDK layer can depend on domain layer (allowed)
 
 **Dependency Compliance:**
 
-- [ ] `cargo check` passes (verifies no circular dependencies)
-- [ ] No new crate dependencies added without justification
-- [ ] Existing dependencies unchanged
+- [x] `cargo check` passes (verifies no circular dependencies)
+- [x] No new crate dependencies added without justification
+- [x] Existing dependencies unchanged
 
 **AttributePair Pattern (if applicable):**
 
-- [ ] No stats modified in this feature (N/A for NPC sprite metadata)
-- [ ] IF stats were modified, `AttributePair` pattern used correctly
+- [x] No stats modified in this feature (N/A for NPC sprite metadata)
+- [x] IF stats were modified, `AttributePair` pattern used correctly
+
+**Execution Summary:**
+
+- **Execution Date (UTC)**: 2026-01-28T16:04:27Z
+- **Actions performed**:
+  - Ran `cargo fmt --all` (no diffs),
+  - `cargo check --all-targets --all-features` (no errors),
+  - `cargo clippy --all-targets --all-features -- -D warnings` (no warnings),
+  - `cargo nextest run --all-features` (all tests passed).
+- **Tests verified**: Domain and integration tests related to NPC sprite metadata and editor roundtrip all passed (serialization, resolved propagation, spawn behavior, asset scanning, editor save/load).
+- **Result**: No architectural drift detected; all mandatory items PASS. Phase 3 architecture compliance verification is COMPLETE.
 
 **IF ANY item fails:**
 
@@ -1375,6 +1396,6 @@ test result: ok. X passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 ---
 
-**Plan Status**: ✅ READY FOR REVIEW (awaiting user answers to Open Questions and approval)
+**Plan Status**: ✅ IMPLEMENTATION COMPLETE — Phases 1–3 implemented; Phase 3.7 (architecture compliance) executed and verified on 2026-01-28T16:04:27Z.
 
-**Last Updated**: 2025 (comprehensive revision per review feedback)
+**Last Updated**: 2026-01-28 (implementation and compliance verification completed)
