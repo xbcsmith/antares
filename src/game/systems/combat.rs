@@ -52,8 +52,12 @@ use bevy::prelude::*;
 
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
-use crate::domain::combat::engine::{initialize_combat_from_group, CombatState, Combatant};
-use crate::domain::combat::types::{CombatantId, Handicap};
+use crate::domain::combat::engine::{
+    apply_damage, choose_monster_attack, initialize_combat_from_group, resolve_attack, CombatState,
+    Combatant,
+};
+use crate::domain::combat::types::{Attack, CombatStatus, CombatantId, Handicap, SpecialEffect};
+use crate::domain::types::DiceRoll;
 use crate::game::resources::GlobalState;
 
 /// Message emitted when combat has started.
@@ -147,6 +151,9 @@ pub const ACTION_BUTTON_HOVER_COLOR: Color = Color::srgb(0.4, 0.4, 0.5);
 
 /// Color for action button disabled
 pub const ACTION_BUTTON_DISABLED_COLOR: Color = Color::srgb(0.2, 0.2, 0.2);
+
+/// Color for enemy card highlight when in target selection mode
+pub const ENEMY_CARD_HIGHLIGHT_COLOR: Color = Color::srgba(0.35, 0.25, 0.25, 0.95);
 
 /// Bevy resource that contains the authoritative combat state used by ECS systems.
 ///
@@ -247,6 +254,18 @@ pub struct ActionButton {
     pub button_type: ActionButtonType,
 }
 
+/// Resource representing the current target selection state.
+///
+/// When set to `Some(attacker)` the player is selecting a target for that attacker.
+#[derive(Resource, Debug, Clone)]
+pub struct TargetSelection(pub Option<CombatantId>);
+
+impl Default for TargetSelection {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
@@ -257,12 +276,20 @@ impl Plugin for CombatPlugin {
             .add_message::<FleeAction>()
             .insert_resource(CombatResource::new())
             .insert_resource(CombatTurnStateResource::default())
+            .insert_resource(TargetSelection::default())
             // Handle events that indicate combat started
             .add_systems(Update, handle_combat_started)
             // Ensure party members exist in combat on enter
             .add_systems(Update, sync_party_to_combat)
             // Sync back to party when combat ends
             .add_systems(Update, sync_combat_to_party_on_exit)
+            // Phase 3: Player Action Systems
+            .add_systems(Update, combat_input_system)
+            .add_systems(Update, enter_target_selection)
+            .add_systems(Update, select_target)
+            .add_systems(Update, handle_attack_action)
+            .add_systems(Update, handle_defend_action)
+            .add_systems(Update, handle_flee_action)
             // Phase 2: Combat UI systems
             .add_systems(Update, setup_combat_ui)
             .add_systems(Update, cleanup_combat_ui)
@@ -541,6 +568,7 @@ fn setup_combat_ui(
                             // Inline enemy card spawning
                             enemy_panel
                                 .spawn((
+                                    Button,
                                     Node {
                                         width: ENEMY_CARD_WIDTH,
                                         flex_direction: FlexDirection::Column,
@@ -871,6 +899,475 @@ fn update_combat_ui(
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+// ===== Phase 3: Player Action Systems =====
+
+/// Handle input from action buttons and keyboard shortcuts during PlayerTurn.
+///
+/// Emits `DefendAction` / `FleeAction` messages or enters target selection mode
+/// for attacks.
+fn combat_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut interactions: Query<(&Interaction, &ActionButton), (Changed<Interaction>, With<Button>)>,
+    global_state: Res<GlobalState>,
+    combat_res: Res<CombatResource>,
+    mut target_sel: ResMut<TargetSelection>,
+    mut defend_writer: Option<MessageWriter<DefendAction>>,
+    mut flee_writer: Option<MessageWriter<FleeAction>>,
+    turn_state: Res<CombatTurnStateResource>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    // Only accept action input during player turn
+    if !matches!(turn_state.0, CombatTurnState::PlayerTurn) {
+        return;
+    }
+
+    let current_actor = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+        .cloned();
+
+    for (interaction, button) in interactions.iter_mut() {
+        if *interaction != Interaction::None {
+            if let Some(actor) = current_actor {
+                match button.button_type {
+                    ActionButtonType::Attack => {
+                        // Enter target selection mode
+                        target_sel.0 = Some(actor);
+                    }
+                    ActionButtonType::Defend => {
+                        if let Some(ref mut w) = defend_writer {
+                            w.write(DefendAction { combatant: actor });
+                        }
+                    }
+                    ActionButtonType::Flee => {
+                        if let Some(ref mut w) = flee_writer {
+                            w.write(FleeAction);
+                        }
+                    }
+                    ActionButtonType::Cast | ActionButtonType::Item => {
+                        // Not implemented in Phase 3
+                    }
+                }
+            }
+        }
+    }
+
+    // Keyboard shortcuts
+    if keyboard.just_pressed(KeyCode::KeyA) {
+        if let Some(actor) = current_actor {
+            target_sel.0 = Some(actor);
+        }
+    } else if keyboard.just_pressed(KeyCode::KeyD) {
+        if let Some(actor) = current_actor {
+            if let Some(ref mut w) = defend_writer {
+                w.write(DefendAction { combatant: actor });
+            }
+        }
+    } else if keyboard.just_pressed(KeyCode::KeyF) {
+        if let Some(ref mut w) = flee_writer {
+            w.write(FleeAction);
+        }
+    } else if keyboard.just_pressed(KeyCode::Escape) {
+        target_sel.0 = None;
+    }
+}
+
+/// Highlight enemy UI elements when target selection is active.
+fn enter_target_selection(
+    target_sel: Res<TargetSelection>,
+    mut enemy_cards: Query<(&EnemyCard, &mut BackgroundColor)>,
+) {
+    for (_card, mut bg) in enemy_cards.iter_mut() {
+        *bg = if target_sel.0.is_some() {
+            BackgroundColor(ENEMY_CARD_HIGHLIGHT_COLOR)
+        } else {
+            BackgroundColor(Color::srgba(0.2, 0.15, 0.15, 0.9))
+        };
+    }
+}
+
+/// Handle clicks on enemy cards during target selection and emit `AttackAction`.
+fn select_target(
+    mut interactions: Query<(&Interaction, &EnemyCard), (Changed<Interaction>, With<Button>)>,
+    mut target_sel: ResMut<TargetSelection>,
+    mut attack_writer: Option<MessageWriter<AttackAction>>,
+) {
+    if target_sel.0.is_none() {
+        return;
+    }
+
+    let attacker = target_sel.0.unwrap();
+
+    for (interaction, enemy_card) in interactions.iter_mut() {
+        if *interaction != Interaction::None {
+            if let Some(ref mut w) = attack_writer {
+                w.write(AttackAction {
+                    attacker,
+                    target: CombatantId::Monster(enemy_card.participant_index),
+                });
+            }
+            target_sel.0 = None;
+        }
+    }
+}
+
+/// Perform an attack action using the supplied RNG (testable, deterministic).
+pub fn perform_attack_action_with_rng(
+    combat_res: &mut CombatResource,
+    action: &AttackAction,
+    content: &GameContent,
+    global_state: &mut GlobalState,
+    turn_state: &mut CombatTurnStateResource,
+    rng: &mut impl rand::Rng,
+) -> Result<(), crate::domain::combat::engine::CombatError> {
+    use crate::domain::combat::engine::CombatError;
+
+    // Ensure it's the attacker's turn
+    if let Some(current) = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+    {
+        if current != &action.attacker {
+            // Ignore actions from non-current actors
+            return Ok(());
+        }
+    } else {
+        return Ok(());
+    }
+
+    // Choose attack data
+    let attack_data = match action.attacker {
+        CombatantId::Player(_) => {
+            crate::domain::combat::types::Attack::physical(DiceRoll::new(1, 4, 0))
+        }
+        CombatantId::Monster(idx) => {
+            if let Some(Combatant::Monster(mon)) = combat_res.state.participants.get(idx) {
+                choose_monster_attack(mon, rng).unwrap_or(Attack::physical(DiceRoll::new(1, 4, 0)))
+            } else {
+                return Err(CombatError::CombatantNotFound(action.attacker));
+            }
+        }
+    };
+
+    // Resolve attack
+    let (damage, special) = resolve_attack(
+        &combat_res.state,
+        action.attacker,
+        action.target,
+        &attack_data,
+        rng,
+    )?;
+
+    // Apply damage
+    if damage > 0 {
+        let _ = apply_damage(&mut combat_res.state, action.target, damage)?;
+    }
+
+    // Apply special effect if any (map to condition by name)
+    if let Some(effect) = special {
+        let effect_name = match effect {
+            SpecialEffect::Poison => "poison",
+            SpecialEffect::Disease => "disease",
+            SpecialEffect::Paralysis => "paralysis",
+            SpecialEffect::Sleep => "sleep",
+            SpecialEffect::Drain => "drain",
+            SpecialEffect::Stone => "stone",
+            SpecialEffect::Death => "death",
+        };
+
+        if let Some(def) = content.db().conditions.get_condition_by_name(effect_name) {
+            let active = crate::domain::conditions::ActiveCondition::new(
+                def.id.clone(),
+                def.default_duration,
+            );
+            match action.target {
+                CombatantId::Player(idx) => {
+                    if let Some(Combatant::Player(pc)) = combat_res.state.participants.get_mut(idx)
+                    {
+                        pc.active_conditions.push(active);
+                    }
+                }
+                CombatantId::Monster(idx) => {
+                    if let Some(Combatant::Monster(mon)) =
+                        combat_res.state.participants.get_mut(idx)
+                    {
+                        mon.active_conditions.push(active);
+                    }
+                }
+            }
+        }
+    }
+
+    // Check combat end conditions
+    combat_res.state.check_combat_end();
+
+    if combat_res.state.status == CombatStatus::Fled {
+        // Exit immediately if fled
+        global_state.0.exit_combat();
+        return Ok(());
+    }
+
+    // Advance turn and update turn state
+    let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = content
+        .db()
+        .conditions
+        .all_conditions()
+        .into_iter()
+        .filter_map(|id| content.db().conditions.get_condition(id).cloned())
+        .collect();
+
+    let _round_effects = combat_res.state.advance_turn(&cond_defs);
+
+    // Update turn state based on next actor
+    if let Some(next) = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+    {
+        turn_state.0 = match next {
+            CombatantId::Player(_) => CombatTurnState::PlayerTurn,
+            _ => CombatTurnState::EnemyTurn,
+        };
+    }
+
+    Ok(())
+}
+
+/// System wrapper: handle `AttackAction` messages and route to the attack performer.
+fn handle_attack_action(
+    mut reader: MessageReader<AttackAction>,
+    mut combat_res: ResMut<CombatResource>,
+    content: Res<GameContent>,
+    mut global_state: ResMut<GlobalState>,
+    mut turn_state: ResMut<CombatTurnStateResource>,
+) {
+    for action in reader.read() {
+        let mut rng = rand::rng();
+        let _ = perform_attack_action_with_rng(
+            &mut combat_res,
+            action,
+            &content,
+            &mut global_state,
+            &mut turn_state,
+            &mut rng,
+        );
+    }
+}
+
+/// Public helper: perform defend action (applies temporary AC bonus and advances turn).
+pub fn perform_defend_action(
+    combat_res: &mut CombatResource,
+    action: &DefendAction,
+    content: &GameContent,
+    _global_state: &mut GlobalState,
+    turn_state: &mut CombatTurnStateResource,
+) -> Result<(), crate::domain::combat::engine::CombatError> {
+    use crate::domain::combat::engine::CombatError;
+
+    // Ensure it's the actor's turn
+    if let Some(current) = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+    {
+        if current != &action.combatant {
+            return Ok(());
+        }
+    } else {
+        return Ok(());
+    }
+
+    // Apply AC bonus to the combatant
+    match action.combatant {
+        CombatantId::Player(idx) => {
+            if let Some(Combatant::Player(pc)) = combat_res.state.participants.get_mut(idx) {
+                pc.ac.modify(2);
+            } else {
+                return Err(CombatError::CombatantNotFound(action.combatant));
+            }
+        }
+        CombatantId::Monster(idx) => {
+            if let Some(Combatant::Monster(mon)) = combat_res.state.participants.get_mut(idx) {
+                mon.ac.modify(2);
+            } else {
+                return Err(CombatError::CombatantNotFound(action.combatant));
+            }
+        }
+    }
+
+    // Advance turn
+    let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = content
+        .db()
+        .conditions
+        .all_conditions()
+        .into_iter()
+        .filter_map(|id| content.db().conditions.get_condition(id).cloned())
+        .collect();
+
+    let _ = combat_res.state.advance_turn(&cond_defs);
+
+    // Update turn state
+    if let Some(next) = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+    {
+        turn_state.0 = match next {
+            CombatantId::Player(_) => CombatTurnState::PlayerTurn,
+            _ => CombatTurnState::EnemyTurn,
+        };
+    }
+
+    Ok(())
+}
+
+/// System wrapper for defend action
+fn handle_defend_action(
+    mut reader: MessageReader<DefendAction>,
+    mut combat_res: ResMut<CombatResource>,
+    content: Res<GameContent>,
+    mut global_state: ResMut<GlobalState>,
+    mut turn_state: ResMut<CombatTurnStateResource>,
+) {
+    for action in reader.read() {
+        let _ = perform_defend_action(
+            &mut combat_res,
+            action,
+            &content,
+            &mut global_state,
+            &mut turn_state,
+        );
+    }
+}
+
+/// Public helper: perform flee action (returns true on success)
+pub fn perform_flee_action(
+    combat_res: &mut CombatResource,
+    content: &GameContent,
+    global_state: &mut GlobalState,
+    turn_state: &mut CombatTurnStateResource,
+) -> Result<bool, ()> {
+    // Determine current actor
+    let attacker = match combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+    {
+        Some(a) => *a,
+        None => return Ok(false),
+    };
+
+    // Flee only allowed if combat.can_flee is true
+    if !combat_res.state.can_flee {
+        // Consume turn
+        let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = content
+            .db()
+            .conditions
+            .all_conditions()
+            .into_iter()
+            .filter_map(|id| content.db().conditions.get_condition(id).cloned())
+            .collect();
+        combat_res.state.advance_turn(&cond_defs);
+        if let Some(next) = combat_res
+            .state
+            .turn_order
+            .get(combat_res.state.current_turn)
+        {
+            turn_state.0 = match next {
+                CombatantId::Player(_) => CombatTurnState::PlayerTurn,
+                _ => CombatTurnState::EnemyTurn,
+            };
+        }
+        return Ok(false);
+    }
+
+    // Determine flee success based on speed differential (simple rule)
+    let attacker_speed = match attacker {
+        CombatantId::Player(idx) => {
+            if let Some(Combatant::Player(pc)) = combat_res.state.participants.get(idx) {
+                pc.stats.speed.current
+            } else {
+                return Ok(false);
+            }
+        }
+        CombatantId::Monster(idx) => {
+            if let Some(Combatant::Monster(mon)) = combat_res.state.participants.get(idx) {
+                mon.stats.speed.current
+            } else {
+                return Ok(false);
+            }
+        }
+    };
+
+    // Find highest monster speed (if any monster exists)
+    let highest_monster_speed = combat_res
+        .state
+        .participants
+        .iter()
+        .filter_map(|p| {
+            if let Combatant::Monster(m) = p {
+                Some(m.stats.speed.current)
+            } else {
+                None
+            }
+        })
+        .max()
+        .unwrap_or(0);
+
+    let success = attacker_speed >= highest_monster_speed;
+
+    if success {
+        combat_res.state.status = CombatStatus::Fled;
+        global_state.0.exit_combat();
+        return Ok(true);
+    }
+
+    // Failure: consume turn
+    let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = content
+        .db()
+        .conditions
+        .all_conditions()
+        .into_iter()
+        .filter_map(|id| content.db().conditions.get_condition(id).cloned())
+        .collect();
+    combat_res.state.advance_turn(&cond_defs);
+    if let Some(next) = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+    {
+        turn_state.0 = match next {
+            CombatantId::Player(_) => CombatTurnState::PlayerTurn,
+            _ => CombatTurnState::EnemyTurn,
+        };
+    }
+
+    Ok(false)
+}
+
+/// System wrapper for FleeAction
+fn handle_flee_action(
+    mut reader: MessageReader<FleeAction>,
+    mut combat_res: ResMut<CombatResource>,
+    content: Res<GameContent>,
+    mut global_state: ResMut<GlobalState>,
+    mut turn_state: ResMut<CombatTurnStateResource>,
+) {
+    for _ in reader.read() {
+        let _ = perform_flee_action(
+            &mut combat_res,
+            &content,
+            &mut global_state,
+            &mut turn_state,
+        );
     }
 }
 
@@ -1425,5 +1922,271 @@ mod tests {
             .world_mut()
             .query_filtered::<&EnemyCard, With<EnemyCard>>();
         assert_eq!(enemy_cards.iter(app.world()).count(), 2);
+    }
+
+    // ===== Phase 3: Player Action System Tests =====
+
+    #[test]
+    fn test_attack_action_applies_damage() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Prepare game state with one player and one monster
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Attacker".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Test Goblin".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 10, 10, 10),
+            10,
+            10,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        cs.add_monster(monster);
+
+        // Ensure player acts first
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cs.current_turn = 0;
+
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Initialize CombatResource
+        {
+            let mut combat_res = app.world_mut().resource_mut::<CombatResource>();
+            combat_res.state = cs;
+            combat_res.player_orig_indices = vec![Some(0), None];
+        }
+
+        // Deterministic RNG
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+        let mut rng = StdRng::seed_from_u64(42);
+        let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+
+        // Perform attack by calling helper directly with a single borrow to CombatResource
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            let mut gs_local = crate::game::resources::GlobalState(GameState::new());
+            let mut turn_state_local = CombatTurnStateResource::default();
+
+            let attack = AttackAction {
+                attacker: CombatantId::Player(0),
+                target: CombatantId::Monster(1),
+            };
+
+            perform_attack_action_with_rng(
+                &mut cr,
+                &attack,
+                &content,
+                &mut gs_local,
+                &mut turn_state_local,
+                &mut rng,
+            )
+            .expect("attack failed");
+
+            // Monster should have taken some damage
+            if let Some(Combatant::Monster(mon)) = cr.state.participants.get(1) {
+                assert!(mon.hp.current < mon.hp.base);
+            } else {
+                panic!("monster not found");
+            }
+        }
+    }
+
+    #[test]
+    fn test_defend_action_improves_ac() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "Defender".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.ac = crate::domain::character::AttributePair::new(10);
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Initialize CombatResource
+        {
+            let mut combat_res = app.world_mut().resource_mut::<CombatResource>();
+            combat_res.state = cs;
+            combat_res.player_orig_indices = vec![Some(0)];
+        }
+
+        // Perform defend by sending a DefendAction message and letting systems handle it
+        // Perform defend by calling helper directly with a single borrow to CombatResource
+        {
+            let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            let mut gs_local = crate::game::resources::GlobalState(GameState::new());
+            let mut turn_state_local = CombatTurnStateResource::default();
+
+            let action = DefendAction {
+                combatant: CombatantId::Player(0),
+            };
+
+            perform_defend_action(&mut cr, &action, &content, &mut gs_local, &mut turn_state_local)
+                .expect("defend failed");
+
+            if let Some(Combatant::Player(pc)) = cr.state.participants.get(0) {
+                assert!(pc.ac.current >= pc.ac.base + 2);
+            } else {
+                panic!("player missing");
+            }
+        }
+
+    #[test]
+    fn test_flee_success_exits_combat() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "Fleer".to_string(),
+            "human".to_string(),
+            "rogue".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Make hero fast
+        hero.stats.speed.current = 200;
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        let weak_monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Turtle".to_string(),
+            crate::domain::character::Stats::new(8, 8, 8, 8, 8, 8, 8),
+            5,
+            5,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        cs.add_monster(weak_monster);
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cs.current_turn = 0;
+
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Initialize CombatResource
+        {
+            let mut combat_res = app.world_mut().resource_mut::<CombatResource>();
+            combat_res.state = cs;
+            combat_res.player_orig_indices = vec![Some(0), None];
+        }
+
+        // Attempt to flee
+        {
+            let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+            let mut gs_res = app
+                .world_mut()
+                .resource_mut::<crate::game::resources::GlobalState>();
+            let mut combat_res = app.world_mut().resource_mut::<CombatResource>();
+            let mut turn_state = app.world_mut().resource_mut::<CombatTurnStateResource>();
+
+            let success =
+                perform_flee_action(&mut combat_res, &content, &mut gs_res, &mut turn_state)
+                    .expect("flee action failed");
+
+            assert!(success, "Expected flee to succeed due to speed advantage");
+            // Global state should have exited combat
+            assert!(!matches!(gs_res.0.mode, GameMode::Combat(_)));
+        }
+    }
+
+    #[test]
+    fn test_flee_failure_consumes_turn() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "SlowOne".to_string(),
+            "human".to_string(),
+            "peasant".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Slow hero
+        hero.stats.speed.current = 1;
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        let fast_monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Wild Dog".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 10, 10, 10),
+            10,
+            10,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        cs.add_monster(fast_monster);
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cs.current_turn = 0;
+
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Initialize CombatResource
+        {
+            let mut combat_res = app.world_mut().resource_mut::<CombatResource>();
+            combat_res.state = cs;
+            combat_res.player_orig_indices = vec![Some(0), None];
+        }
+
+        // Attempt to flee and expect failure (turn consumed)
+        {
+            let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+            let mut gs_res = app
+                .world_mut()
+                .resource_mut::<crate::game::resources::GlobalState>();
+            let mut combat_res = app.world_mut().resource_mut::<CombatResource>();
+            let mut turn_state = app.world_mut().resource_mut::<CombatTurnStateResource>();
+
+            let success =
+                perform_flee_action(&mut combat_res, &content, &mut gs_res, &mut turn_state)
+                    .expect("flee action execution failed");
+
+            assert!(!success, "Expected flee to fail due to slow speed");
+            // Turn should have advanced (from 0 to 1)
+            assert_eq!(combat_res.state.current_turn, 1);
+        }
     }
 }
