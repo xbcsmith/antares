@@ -12,6 +12,7 @@ use antares::domain::combat::database::MonsterDatabase;
 use antares::domain::combat::engine::{start_combat, CombatState, Combatant};
 use antares::domain::combat::types::{CombatStatus, Handicap};
 use antares::domain::types::MonsterId;
+use bevy::MinimalPlugins;
 
 /// Helper function to create a test character with specific stats
 fn create_test_character(name: &str, class_id: &str, hp: u16) -> Character {
@@ -25,6 +26,64 @@ fn create_test_character(name: &str, class_id: &str, hp: u16) -> Character {
     character.hp.current = hp;
     character.hp.base = hp;
     character
+}
+
+/// Integration test: stepping on an Encounter tile should start combat mode.
+///
+/// This test creates a small map with an `Encounter` MapEvent (using an empty
+/// monster_group so no DB dependency) and verifies that running the EventPlugin
+/// causes the global `GameState` to transition to `GameMode::Combat`.
+#[test]
+fn test_map_event_encounter_triggers_combat() {
+    // Build a minimal app with the event and combat plugins registered
+    let mut app = bevy::prelude::App::new();
+    app.add_plugins(MinimalPlugins);
+
+    // Register messages the EventPlugin depends on
+    app.add_message::<antares::game::systems::map::MapChangeEvent>();
+    app.add_message::<antares::game::systems::dialogue::StartDialogue>();
+    app.add_message::<antares::game::systems::dialogue::SimpleDialogue>();
+
+    // Add the EventPlugin that will detect the encounter and the CombatPlugin to handle combat lifecycle
+    app.add_plugins(antares::game::systems::events::EventPlugin);
+    app.add_plugins(antares::game::systems::combat::CombatPlugin);
+
+    // Create a map and add an Encounter event at position (5,5)
+    let mut map =
+        antares::domain::world::Map::new(1, "TestMap".to_string(), "Desc".to_string(), 10, 10);
+    let event_pos = antares::domain::types::Position::new(5, 5);
+    map.add_event(
+        event_pos,
+        antares::domain::world::MapEvent::Encounter {
+            name: "Ambush".to_string(),
+            description: "A surprise encounter".to_string(),
+            monster_group: vec![], // empty group is sufficient for transition test
+        },
+    );
+
+    // Prepare GameState with the map and place party on the event tile
+    let mut gs = GameState::new();
+    gs.world.add_map(map);
+    gs.world.set_current_map(1);
+    gs.world.set_party_position(event_pos);
+
+    // Insert minimal content and global state resources
+    app.insert_resource(antares::application::resources::GameContent::new(
+        antares::sdk::database::ContentDatabase::new(),
+    ));
+    app.insert_resource(antares::game::resources::GlobalState(gs));
+
+    // Run one frame to process the event trigger and handler
+    app.update();
+
+    // Verify the game mode switched to Combat
+    let gs_after = app
+        .world()
+        .resource::<antares::game::resources::GlobalState>();
+    assert!(matches!(
+        gs_after.0.mode,
+        antares::application::GameMode::Combat(_)
+    ));
 }
 
 #[test]

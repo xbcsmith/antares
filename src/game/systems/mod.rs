@@ -6,6 +6,7 @@ pub mod animation;
 pub mod audio;
 pub mod billboard;
 pub mod camera;
+pub mod combat;
 pub mod dialogue;
 pub mod dialogue_choices;
 pub mod dialogue_validation;

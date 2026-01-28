@@ -10,12 +10,14 @@
 //! - `menu` - Menu system components
 
 pub mod billboard;
+pub mod combat;
 pub mod dialogue;
 pub mod menu;
 pub mod sprite;
 
 // Re-export commonly used types
 pub use billboard::Billboard;
+pub use combat::{CombatHudRoot, CombatantMarker, TargetSelector, TurnIndicator};
 pub use dialogue::{
     ActiveDialogueUI, DialogueBubble, DialogueBubbleEntity, DialogueTextEntity, TypewriterText,
     DIALOGUE_BACKGROUND_COLOR, DIALOGUE_BUBBLE_HEIGHT, DIALOGUE_BUBBLE_PADDING,
