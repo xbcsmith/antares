@@ -1118,28 +1118,46 @@ impl AssetManager {
         }
     }
 
-    /// Scans NPCs for asset references (portrait images)
+    /// Scans NPCs for asset references (portrait images and sprite sheets)
     fn scan_npcs_references(&mut self, npcs: &[antares::domain::world::npc::NpcDefinition]) {
         for npc in npcs {
             // NPCs reference portrait images via portrait_id field
             let portrait_id = &npc.portrait_id;
 
-            // Skip empty portrait IDs
-            if portrait_id.is_empty() {
-                continue;
+            // Try common portrait path patterns if portrait_id is present
+            if !portrait_id.is_empty() {
+                let potential_paths = vec![
+                    format!("assets/portraits/{}.png", portrait_id),
+                    format!("portraits/{}.png", portrait_id),
+                    format!("assets/portraits/{}.jpg", portrait_id),
+                    format!("portraits/{}.jpg", portrait_id),
+                ];
+
+                for path_str in potential_paths {
+                    let path = PathBuf::from(&path_str);
+                    if let Some(asset) = self.assets.get_mut(&path) {
+                        asset.is_referenced = true;
+                        // Only add reference if not already added for this NPC
+                        if !asset.references.iter().any(|r| {
+                            if let AssetReference::Npc { id, .. } = r {
+                                id == &npc.id
+                            } else {
+                                false
+                            }
+                        }) {
+                            asset.references.push(AssetReference::Npc {
+                                id: npc.id.clone(),
+                                name: npc.name.clone(),
+                            });
+                        }
+                    }
+                }
             }
 
-            // Try common portrait path patterns
-            let potential_paths = vec![
-                format!("assets/portraits/{}.png", portrait_id),
-                format!("portraits/{}.png", portrait_id),
-                format!("assets/portraits/{}.jpg", portrait_id),
-                format!("portraits/{}.jpg", portrait_id),
-            ];
-
-            for path_str in potential_paths {
-                let path = PathBuf::from(&path_str);
-                if let Some(asset) = self.assets.get_mut(&path) {
+            // Scan sprite sheet references if present on the NPC definition
+            if let Some(sprite) = &npc.sprite {
+                let sprite_path = PathBuf::from(&sprite.sheet_path);
+                if let Some(asset) = self.assets.get_mut(&sprite_path) {
                     asset.is_referenced = true;
                     // Only add reference if not already added for this NPC
                     if !asset.references.iter().any(|r| {
@@ -2026,13 +2044,14 @@ mod tests {
 
         let mut manager = AssetManager::new(PathBuf::from("/tmp/test_campaign"));
 
+        // Add an asset that should match potential path patterns for portraits
         let portrait_path = PathBuf::from("assets/portraits/elder_1.png");
         manager.assets.insert(
             portrait_path.clone(),
             Asset {
                 path: portrait_path.clone(),
                 asset_type: AssetType::Portrait,
-                size: 3072,
+                size: 4096,
                 modified: SystemTime::now(),
                 is_referenced: false,
                 references: Vec::new(),
@@ -2044,6 +2063,7 @@ mod tests {
             name: "Village Elder".to_string(),
             description: "The wise elder of the village".to_string(),
             portrait_id: "elder_1".to_string(),
+            sprite: None,
             dialogue_id: None,
             quest_ids: vec![],
             faction: Some("Village".to_string()),
@@ -2061,6 +2081,64 @@ mod tests {
             AssetReference::Npc { id, name } => {
                 assert_eq!(id, "village_elder");
                 assert_eq!(name, "Village Elder");
+            }
+            _ => panic!("Expected NPC reference"),
+        }
+    }
+
+    #[test]
+    fn test_scan_npcs_detects_sprite_sheet_reference_in_metadata() {
+        use antares::domain::world::npc::NpcDefinition;
+        use antares::domain::world::SpriteReference;
+        use std::path::PathBuf;
+        use std::time::SystemTime;
+
+        let mut manager = AssetManager::new(PathBuf::from("/tmp/test_campaign"));
+
+        // Add an asset that should match the sprite sheet path
+        let sprite_path = PathBuf::from("assets/sprites/actors/test_npc.png");
+        manager.assets.insert(
+            sprite_path.clone(),
+            Asset {
+                path: sprite_path.clone(),
+                asset_type: AssetType::Tileset,
+                size: 1024,
+                modified: SystemTime::now(),
+                is_referenced: false,
+                references: Vec::new(),
+            },
+        );
+
+        let sprite = SpriteReference {
+            sheet_path: "assets/sprites/actors/test_npc.png".to_string(),
+            sprite_index: 5,
+            animation: None,
+            material_properties: None,
+        };
+
+        let npc = NpcDefinition {
+            id: "test_npc".to_string(),
+            name: "Test NPC".to_string(),
+            description: "A test NPC".to_string(),
+            portrait_id: "portrait.png".to_string(),
+            sprite: Some(sprite),
+            dialogue_id: None,
+            quest_ids: vec![],
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+        };
+
+        manager.scan_references(&[], &[], &[], &[], &[], &[], &[npc]);
+
+        let asset = manager.assets.get(&sprite_path).unwrap();
+        assert!(asset.is_referenced);
+        assert_eq!(asset.references.len(), 1);
+        assert_eq!(asset.references[0].category(), "NPC");
+        match &asset.references[0] {
+            AssetReference::Npc { id, name } => {
+                assert_eq!(id, "test_npc");
+                assert_eq!(name, "Test NPC");
             }
             _ => panic!("Expected NPC reference"),
         }
@@ -2126,6 +2204,7 @@ mod tests {
                 name: "Village Elder".to_string(),
                 description: "The wise elder".to_string(),
                 portrait_id: "elder_1".to_string(),
+                sprite: None,
                 dialogue_id: None,
                 quest_ids: vec![5],
                 faction: Some("Village".to_string()),
@@ -2137,6 +2216,7 @@ mod tests {
                 name: "Merchant".to_string(),
                 description: "A traveling merchant".to_string(),
                 portrait_id: "merchant_1".to_string(),
+                sprite: None,
                 dialogue_id: None,
                 quest_ids: vec![],
                 faction: Some("Merchants Guild".to_string()),
@@ -2148,6 +2228,7 @@ mod tests {
                 name: "Arcturus Brother".to_string(),
                 description: "A local villager".to_string(),
                 portrait_id: "npc_015".to_string(),
+                sprite: None,
                 dialogue_id: None,
                 quest_ids: vec![1, 3],
                 faction: Some("Village".to_string()),

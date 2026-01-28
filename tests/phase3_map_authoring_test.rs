@@ -20,6 +20,9 @@ fn test_ron_round_trip_with_visual() {
         scale: None,
         y_offset: None,
         rotation_y: None,
+        sprite: None,
+        sprite_layers: vec![],
+        sprite_rule: None,
     };
 
     // Serialize to RON
@@ -218,6 +221,8 @@ fn test_map_round_trip_preserves_visual() {
     // Modify a tile with visual metadata (position 2,2 which is index y*width+x = 2*5+2 = 12)
     let tile_index = 2 * 5 + 2; // y * width + x
     map.tiles[tile_index].visual = TileVisualMetadata {
+        sprite_layers: vec![],
+        sprite_rule: None,
         height: Some(2.8),
         width_x: Some(0.9),
         width_z: Some(0.8),
@@ -225,6 +230,7 @@ fn test_map_round_trip_preserves_visual() {
         scale: Some(1.2),
         y_offset: Some(0.3),
         rotation_y: None,
+        sprite: None,
     };
 
     // Serialize to RON

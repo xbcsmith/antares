@@ -52,6 +52,233 @@ pub enum TerrainType {
     Mountain,
 }
 
+// ===== Sprite System =====
+
+/// Reference to a sprite in a sprite sheet (texture atlas)
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::SpriteReference;
+///
+/// let sprite = SpriteReference {
+///     sheet_path: "sprites/walls.png".to_string(),
+///     sprite_index: 3,
+///     animation: None,
+///     material_properties: None,
+/// };
+/// assert_eq!(sprite.sprite_index, 3);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpriteReference {
+    /// Path to sprite sheet image (relative to campaign or global assets)
+    /// Example: "sprites/walls.png" or "textures/npcs_town.png"
+    pub sheet_path: String,
+
+    /// Index within texture atlas grid (0-indexed, row-major order)
+    /// For 4x4 grid: index 0 = top-left, index 3 = top-right, index 15 = bottom-right
+    pub sprite_index: u32,
+
+    /// Optional animation configuration
+    #[serde(default)]
+    pub animation: Option<SpriteAnimation>,
+
+    /// Material property overrides for this sprite (Phase 6)
+    /// Allows per-sprite customization of emissive color, alpha, metallic, roughness
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material_properties: Option<SpriteMaterialProperties>,
+}
+
+/// Animation configuration for sprite frames
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::SpriteAnimation;
+///
+/// let anim = SpriteAnimation {
+///     frames: vec![0, 1, 2, 1], // Ping-pong animation
+///     fps: 8.0,
+///     looping: true,
+/// };
+/// assert_eq!(anim.frames.len(), 4);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpriteAnimation {
+    /// Frame indices in animation sequence (refers to sprite_index values)
+    pub frames: Vec<u32>,
+
+    /// Frames per second (default: 8.0)
+    #[serde(default = "default_animation_fps")]
+    pub fps: f32,
+
+    /// Whether animation loops (default: true)
+    #[serde(default = "default_animation_looping")]
+    pub looping: bool,
+}
+
+/// Default FPS for sprite animations
+fn default_animation_fps() -> f32 {
+    8.0
+}
+
+/// Default looping behavior for sprite animations
+fn default_animation_looping() -> bool {
+    true
+}
+
+// ===== Phase 6: Advanced Sprite Features =====
+
+/// Material property overrides for sprites
+///
+/// Allows per-sprite customization of PBR material properties.
+/// All fields are optional; None means use default material properties.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::SpriteMaterialProperties;
+///
+/// let props = SpriteMaterialProperties {
+///     emissive: Some([0.0, 1.0, 0.0]),
+///     alpha: None,
+///     metallic: None,
+///     roughness: None,
+/// };
+/// assert_eq!(props.emissive, Some([0.0, 1.0, 0.0]));
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct SpriteMaterialProperties {
+    /// Emissive color (RGB, 0.0-1.0 range)
+    /// Creates a glowing effect independent of lighting
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emissive: Option<[f32; 3]>,
+
+    /// Alpha/transparency override (0.0 = fully transparent, 1.0 = fully opaque)
+    /// Overrides alpha channel from sprite sheet
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha: Option<f32>,
+
+    /// Metallic factor for PBR (0.0 = non-metallic, 1.0 = fully metallic)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metallic: Option<f32>,
+
+    /// Roughness factor for PBR (0.0 = polished, 1.0 = rough)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roughness: Option<f32>,
+}
+
+/// Sprite layer depth for layering multiple sprites per tile
+///
+/// Used for sprite layering system (Phase 6) to order sprites
+/// in Z-order without requiring separate Z coordinates.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::SpriteLayer;
+///
+/// let layer = SpriteLayer::Foreground;
+/// assert!(layer > SpriteLayer::Midground);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum SpriteLayer {
+    /// Background layer (rendered first, behind everything)
+    /// Z-depth: 0
+    Background = 0,
+    /// Midground layer (default, most sprites here)
+    /// Z-depth: 1
+    Midground = 1,
+    /// Foreground layer (rendered last, in front)
+    /// Z-depth: 2
+    Foreground = 2,
+}
+
+/// Sprite with layer information for multi-layered tiles
+///
+/// Represents a single sprite in a layered sprite stack.
+/// Multiple LayeredSprites can be applied to one tile
+/// for complex visual effects.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::{LayeredSprite, SpriteLayer, SpriteReference};
+///
+/// let sprite = LayeredSprite {
+///     sprite: SpriteReference {
+///         sheet_path: "terrain.png".to_string(),
+///         sprite_index: 0,
+///         animation: None,
+///         material_properties: None,
+///     },
+///     layer: SpriteLayer::Background,
+///     offset_y: 0.0,
+/// };
+/// assert_eq!(sprite.layer, SpriteLayer::Background);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LayeredSprite {
+    /// Sprite reference (sheet path, index, animation)
+    pub sprite: SpriteReference,
+
+    /// Layer depth (controls rendering order)
+    pub layer: SpriteLayer,
+
+    /// Vertical Y-axis offset from base position
+    /// Positive = raised, negative = sunken
+    #[serde(default)]
+    pub offset_y: f32,
+}
+
+/// Procedural sprite selection rule for automatic sprite variation
+///
+/// Allows tiles to automatically select different sprites based on
+/// context (fixed, randomized, or auto-tiling rules).
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::SpriteSelectionRule;
+///
+/// let rule = SpriteSelectionRule::Random {
+///     sheet_path: "grass.png".to_string(),
+///     sprite_indices: vec![0, 1, 2, 3],
+///     seed: Some(42),
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SpriteSelectionRule {
+    /// Fixed sprite (no variation)
+    Fixed {
+        /// Path to sprite sheet
+        sheet_path: String,
+        /// Index of sprite to use
+        sprite_index: u32,
+    },
+    /// Random variation from a list of sprite indices
+    /// Deterministic if seed is provided
+    Random {
+        /// Path to sprite sheet
+        sheet_path: String,
+        /// Available sprite indices for random selection
+        sprite_indices: Vec<u32>,
+        /// Optional seed for deterministic random selection
+        /// If None, uses tile position as seed for consistency
+        seed: Option<u64>,
+    },
+    /// Autotile selection based on neighbor tiles
+    /// Useful for seamless tiling (grass, water, walls)
+    Autotile {
+        /// Path to sprite sheet
+        sheet_path: String,
+        /// Mapping from 4-bit neighbor bitmask to sprite index
+        /// Bits: [North, East, South, West]
+        /// E.g., 0b0011 = North and East neighbors = index 5
+        rules: std::collections::HashMap<u8, u32>,
+    },
+}
+
 /// Visual rendering properties for a tile
 ///
 /// All dimensions in world units (1 unit ≈ 10 feet).
@@ -95,6 +322,22 @@ pub struct TileVisualMetadata {
     /// Useful for angled walls, rotated props, diagonal features
     /// Positive = counter-clockwise when viewed from above
     pub rotation_y: Option<f32>,
+
+    /// Optional sprite reference for texture-based rendering
+    /// When set, replaces default 3D mesh with billboarded sprite
+    #[serde(default)]
+    pub sprite: Option<SpriteReference>,
+
+    /// Multiple sprite layers for complex visuals (Phase 6)
+    /// Allows stacking sprites (background, midground, foreground)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sprite_layers: Vec<LayeredSprite>,
+
+    /// Procedural sprite selection rule (Phase 6)
+    /// If set, overrides the fixed `sprite` field
+    /// Useful for random variation or autotiling
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sprite_rule: Option<SpriteSelectionRule>,
 }
 
 impl TileVisualMetadata {
@@ -249,6 +492,101 @@ impl TileVisualMetadata {
         let scale = self.effective_scale();
         (height * scale / 2.0) + self.effective_y_offset()
     }
+
+    /// Check if sprite rendering is enabled
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, SpriteReference};
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// assert!(!metadata.uses_sprite());
+    ///
+    /// metadata.sprite = Some(SpriteReference {
+    ///     sheet_path: "sprites/walls.png".to_string(),
+    ///     sprite_index: 0,
+    ///     animation: None,
+    ///     material_properties: None,
+    /// });
+    /// assert!(metadata.uses_sprite());
+    /// ```
+    pub fn uses_sprite(&self) -> bool {
+        self.sprite.is_some()
+    }
+
+    /// Get sprite sheet path if sprite is configured
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, SpriteReference};
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.sprite_sheet_path(), None);
+    ///
+    /// metadata.sprite = Some(SpriteReference {
+    ///     sheet_path: "sprites/walls.png".to_string(),
+    ///     sprite_index: 0,
+    ///     animation: None,
+    ///     material_properties: None,
+    /// });
+    /// assert_eq!(metadata.sprite_sheet_path(), Some("sprites/walls.png"));
+    /// ```
+    pub fn sprite_sheet_path(&self) -> Option<&str> {
+        self.sprite.as_ref().map(|s| s.sheet_path.as_str())
+    }
+
+    /// Get sprite index if sprite is configured
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, SpriteReference};
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.sprite_index(), None);
+    ///
+    /// metadata.sprite = Some(SpriteReference {
+    ///     sheet_path: "sprites/walls.png".to_string(),
+    ///     sprite_index: 42,
+    ///     animation: None,
+    ///     material_properties: None,
+    /// });
+    /// assert_eq!(metadata.sprite_index(), Some(42));
+    /// ```
+    pub fn sprite_index(&self) -> Option<u32> {
+        self.sprite.as_ref().map(|s| s.sprite_index)
+    }
+
+    /// Check if sprite has animation configuration
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, SpriteReference, SpriteAnimation};
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// assert!(!metadata.has_animation());
+    ///
+    /// metadata.sprite = Some(SpriteReference {
+    ///     sheet_path: "sprites/walls.png".to_string(),
+    ///     sprite_index: 0,
+    ///     animation: Some(SpriteAnimation {
+    ///         frames: vec![0, 1, 2],
+    ///         fps: 8.0,
+    ///         looping: true,
+    ///     }),
+    ///     material_properties: None,
+    /// });
+    /// assert!(metadata.has_animation());
+    /// ```
+    pub fn has_animation(&self) -> bool {
+        self.sprite
+            .as_ref()
+            .and_then(|s| s.animation.as_ref())
+            .is_some()
+    }
 }
 
 /// A single tile in the game world
@@ -402,6 +740,64 @@ impl Tile {
         self.visual.scale = Some(scale);
         self
     }
+
+    /// Set static sprite for this tile
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    /// use antares::domain::types::Position;
+    ///
+    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    ///     .with_sprite("sprites/walls.png", 5);
+    ///
+    /// assert!(tile.visual.uses_sprite());
+    /// assert_eq!(tile.visual.sprite_index(), Some(5));
+    /// ```
+    pub fn with_sprite(mut self, sheet_path: &str, sprite_index: u32) -> Self {
+        self.visual.sprite = Some(SpriteReference {
+            sheet_path: sheet_path.to_string(),
+            sprite_index,
+            animation: None,
+            material_properties: None,
+        });
+        self
+    }
+
+    /// Set animated sprite for this tile
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{Tile, TerrainType, WallType};
+    /// use antares::domain::types::Position;
+    ///
+    /// let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+    ///     .with_animated_sprite("sprites/water.png", vec![0, 1, 2, 3], 4.0, true);
+    ///
+    /// assert!(tile.visual.uses_sprite());
+    /// assert!(tile.visual.has_animation());
+    /// ```
+    pub fn with_animated_sprite(
+        mut self,
+        sheet_path: &str,
+        frames: Vec<u32>,
+        fps: f32,
+        looping: bool,
+    ) -> Self {
+        self.visual.sprite = Some(SpriteReference {
+            sheet_path: sheet_path.to_string(),
+            sprite_index: frames[0], // First frame is base sprite_index
+            animation: Some(SpriteAnimation {
+                frames,
+                fps,
+                looping,
+            }),
+            material_properties: None,
+        });
+        self
+    }
 }
 
 // ===== Map Event System =====
@@ -546,6 +942,9 @@ pub struct ResolvedNpc {
     pub description: String,
     /// Portrait path from definition
     pub portrait_id: String,
+    /// Optional sprite reference from NPC definition.
+    /// When `Some`, runtime spawning prefers this over default placeholder.
+    pub sprite: Option<SpriteReference>,
     /// Position from placement
     pub position: Position,
     /// Facing direction from placement
@@ -601,6 +1000,7 @@ impl ResolvedNpc {
             name: definition.name.clone(),
             description: definition.description.clone(),
             portrait_id: definition.portrait_id.clone(),
+            sprite: definition.sprite.clone(),
             position: placement.position,
             facing: placement.facing,
             dialogue_id: placement.dialogue_override.or(definition.dialogue_id),
@@ -969,6 +1369,7 @@ mod map_npc_resolution_tests {
             description: "Vigilant guard".to_string(),
             portrait_id: "guard.png".to_string(),
             dialogue_id: Some(10),
+            sprite: None,
             quest_ids: vec![],
             faction: Some("City Watch".to_string()),
             is_merchant: false,
@@ -1002,6 +1403,7 @@ mod map_npc_resolution_tests {
             name: "Elder".to_string(),
             description: "Village elder".to_string(),
             portrait_id: "elder.png".to_string(),
+            sprite: None,
             dialogue_id: Some(5),
             quest_ids: vec![1, 2, 3],
             faction: Some("Village".to_string()),
@@ -1031,6 +1433,7 @@ mod map_npc_resolution_tests {
             name: "Test NPC".to_string(),
             description: "A test NPC".to_string(),
             portrait_id: "test.png".to_string(),
+            sprite: None,
             dialogue_id: Some(42),
             quest_ids: vec![1],
             faction: Some("Test Faction".to_string()),
@@ -1063,6 +1466,44 @@ mod map_npc_resolution_tests {
     }
 
     #[test]
+    fn test_resolved_npc_from_placement_copies_sprite_field_when_present() {
+        // Arrange
+        let sprite = SpriteReference {
+            sheet_path: "sprites/actors/knight.png".to_string(),
+            sprite_index: 7,
+            animation: None,
+            material_properties: None,
+        };
+        let definition =
+            NpcDefinition::new("knight", "Knight", "knight.png").with_sprite(sprite.clone());
+        let placement = NpcPlacement::new("knight", Position::new(1, 1));
+
+        // Act
+        let resolved = ResolvedNpc::from_placement_and_definition(&placement, &definition);
+
+        // Assert
+        assert!(resolved.sprite.is_some());
+        assert_eq!(
+            resolved.sprite.as_ref().unwrap().sheet_path,
+            "sprites/actors/knight.png"
+        );
+        assert_eq!(resolved.sprite.as_ref().unwrap().sprite_index, 7);
+    }
+
+    #[test]
+    fn test_resolved_npc_from_placement_sprite_none_when_definition_none() {
+        // Arrange
+        let definition = NpcDefinition::new("generic", "Generic NPC", "generic.png");
+        let placement = NpcPlacement::new("generic", Position::new(2, 2));
+
+        // Act
+        let resolved = ResolvedNpc::from_placement_and_definition(&placement, &definition);
+
+        // Assert
+        assert!(resolved.sprite.is_none());
+    }
+
+    #[test]
     fn test_resolved_npc_uses_dialogue_override() {
         // Arrange
         let definition = NpcDefinition {
@@ -1070,6 +1511,7 @@ mod map_npc_resolution_tests {
             name: "NPC".to_string(),
             description: "".to_string(),
             portrait_id: "npc.png".to_string(),
+            sprite: None,
             dialogue_id: Some(10),
             quest_ids: vec![],
             faction: None,
@@ -1998,5 +2440,426 @@ mod tests {
 
         assert_eq!(tile.visual.rotation_y, Some(90.0));
         assert_eq!(tile.visual.effective_rotation_y(), 90.0);
+    }
+
+    // ===== Sprite Reference Tests =====
+
+    #[test]
+    fn test_sprite_reference_serialization() {
+        let sprite = SpriteReference {
+            sheet_path: "sprites/walls.png".to_string(),
+            sprite_index: 3,
+            animation: None,
+            material_properties: None,
+        };
+
+        let ron_str = ron::to_string(&sprite).unwrap();
+        let deserialized: SpriteReference = ron::from_str(&ron_str).unwrap();
+
+        assert_eq!(sprite, deserialized);
+    }
+
+    #[test]
+    fn test_sprite_animation_defaults() {
+        let ron_str = r#"SpriteAnimation(frames: [0, 1, 2])"#;
+        let anim: SpriteAnimation = ron::from_str(ron_str).unwrap();
+
+        assert_eq!(anim.fps, 8.0);
+        assert!(anim.looping);
+    }
+
+    #[test]
+    fn test_tile_visual_uses_sprite() {
+        let mut metadata = TileVisualMetadata::default();
+        assert!(!metadata.uses_sprite());
+
+        metadata.sprite = Some(SpriteReference {
+            sheet_path: "sprites/walls.png".to_string(),
+            sprite_index: 0,
+            animation: None,
+            material_properties: None,
+        });
+        assert!(metadata.uses_sprite());
+    }
+
+    #[test]
+    fn test_tile_visual_no_sprite() {
+        let metadata = TileVisualMetadata::default();
+        assert!(!metadata.uses_sprite());
+        assert_eq!(metadata.sprite_sheet_path(), None);
+        assert_eq!(metadata.sprite_index(), None);
+        assert!(!metadata.has_animation());
+    }
+
+    #[test]
+    fn test_sprite_sheet_path_accessor() {
+        let metadata = TileVisualMetadata {
+            sprite: Some(SpriteReference {
+                sheet_path: "sprites/walls.png".to_string(),
+                sprite_index: 0,
+                animation: None,
+                material_properties: None,
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(metadata.sprite_sheet_path(), Some("sprites/walls.png"));
+    }
+
+    #[test]
+    fn test_tile_with_sprite_builder() {
+        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal)
+            .with_sprite("sprites/test.png", 10);
+
+        assert!(tile.visual.uses_sprite());
+        assert_eq!(tile.visual.sprite_index(), Some(10));
+        assert!(!tile.visual.has_animation());
+    }
+
+    #[test]
+    fn test_tile_with_animated_sprite_builder() {
+        let tile = Tile::new(0, 0, TerrainType::Ground, WallType::Normal).with_animated_sprite(
+            "sprites/water.png",
+            vec![0, 1, 2, 3],
+            4.0,
+            true,
+        );
+
+        assert!(tile.visual.uses_sprite());
+        assert!(tile.visual.has_animation());
+
+        let anim = tile
+            .visual
+            .sprite
+            .as_ref()
+            .unwrap()
+            .animation
+            .as_ref()
+            .unwrap();
+        assert_eq!(anim.frames, vec![0, 1, 2, 3]);
+        assert_eq!(anim.fps, 4.0);
+        assert!(anim.looping);
+    }
+
+    #[test]
+    fn test_backward_compat_no_sprite_field() {
+        // Old RON format without sprite field
+        let ron_str = r#"
+            TileVisualMetadata(
+                height: Some(2.5),
+                width_x: None,
+                width_z: None,
+                color_tint: None,
+                scale: None,
+                y_offset: None,
+                rotation_y: None,
+            )
+        "#;
+
+        let metadata: TileVisualMetadata = ron::from_str(ron_str).unwrap();
+
+        assert_eq!(metadata.height, Some(2.5));
+        assert!(!metadata.uses_sprite());
+        assert_eq!(metadata.sprite, None);
+    }
+
+    // ===== Phase 6: Advanced Features Tests =====
+
+    #[test]
+    fn test_sprite_layer_ordering() {
+        assert!(SpriteLayer::Background < SpriteLayer::Midground);
+        assert!(SpriteLayer::Midground < SpriteLayer::Foreground);
+        assert_eq!(SpriteLayer::Background as u8, 0);
+        assert_eq!(SpriteLayer::Midground as u8, 1);
+        assert_eq!(SpriteLayer::Foreground as u8, 2);
+    }
+
+    #[test]
+    fn test_layered_sprite_creation() {
+        let sprite = LayeredSprite {
+            sprite: SpriteReference {
+                sheet_path: "terrain.png".to_string(),
+                sprite_index: 0,
+                animation: None,
+                material_properties: None,
+            },
+            layer: SpriteLayer::Background,
+            offset_y: 0.0,
+        };
+
+        assert_eq!(sprite.layer, SpriteLayer::Background);
+        assert_eq!(sprite.offset_y, 0.0);
+        assert_eq!(sprite.sprite.sprite_index, 0);
+    }
+
+    #[test]
+    fn test_layered_sprite_with_offset() {
+        let sprite = LayeredSprite {
+            sprite: SpriteReference {
+                sheet_path: "decoration.png".to_string(),
+                sprite_index: 5,
+                animation: None,
+                material_properties: None,
+            },
+            layer: SpriteLayer::Foreground,
+            offset_y: 0.5,
+        };
+
+        assert_eq!(sprite.layer, SpriteLayer::Foreground);
+        assert_eq!(sprite.offset_y, 0.5);
+    }
+
+    #[test]
+    fn test_sprite_material_properties_emissive() {
+        let props = SpriteMaterialProperties {
+            emissive: Some([1.0, 0.0, 0.0]),
+            alpha: None,
+            metallic: None,
+            roughness: None,
+        };
+
+        assert_eq!(props.emissive, Some([1.0, 0.0, 0.0]));
+        assert_eq!(props.alpha, None);
+    }
+
+    #[test]
+    fn test_sprite_material_properties_alpha() {
+        let props = SpriteMaterialProperties {
+            emissive: None,
+            alpha: Some(0.5),
+            metallic: None,
+            roughness: None,
+        };
+
+        assert_eq!(props.alpha, Some(0.5));
+    }
+
+    #[test]
+    fn test_sprite_material_properties_metallic_roughness() {
+        let props = SpriteMaterialProperties {
+            emissive: None,
+            alpha: None,
+            metallic: Some(0.8),
+            roughness: Some(0.3),
+        };
+
+        assert_eq!(props.metallic, Some(0.8));
+        assert_eq!(props.roughness, Some(0.3));
+    }
+
+    #[test]
+    fn test_sprite_material_properties_all_fields() {
+        let props = SpriteMaterialProperties {
+            emissive: Some([0.5, 0.5, 0.5]),
+            alpha: Some(0.8),
+            metallic: Some(0.6),
+            roughness: Some(0.4),
+        };
+
+        assert_eq!(props.emissive, Some([0.5, 0.5, 0.5]));
+        assert_eq!(props.alpha, Some(0.8));
+        assert_eq!(props.metallic, Some(0.6));
+        assert_eq!(props.roughness, Some(0.4));
+    }
+
+    #[test]
+    fn test_sprite_material_properties_default() {
+        let props = SpriteMaterialProperties::default();
+
+        assert_eq!(props.emissive, None);
+        assert_eq!(props.alpha, None);
+        assert_eq!(props.metallic, None);
+        assert_eq!(props.roughness, None);
+    }
+
+    #[test]
+    fn test_sprite_reference_with_material_properties() {
+        let sprite = SpriteReference {
+            sheet_path: "portal.png".to_string(),
+            sprite_index: 0,
+            animation: None,
+            material_properties: Some(SpriteMaterialProperties {
+                emissive: Some([0.0, 1.0, 0.0]),
+                alpha: None,
+                metallic: None,
+                roughness: None,
+            }),
+        };
+
+        assert!(sprite.material_properties.is_some());
+        assert_eq!(
+            sprite.material_properties.unwrap().emissive,
+            Some([0.0, 1.0, 0.0])
+        );
+    }
+
+    #[test]
+    fn test_sprite_selection_rule_fixed() {
+        let rule = SpriteSelectionRule::Fixed {
+            sheet_path: "walls.png".to_string(),
+            sprite_index: 3,
+        };
+
+        match rule {
+            SpriteSelectionRule::Fixed {
+                sheet_path,
+                sprite_index,
+            } => {
+                assert_eq!(sheet_path, "walls.png");
+                assert_eq!(sprite_index, 3);
+            }
+            _ => panic!("Expected Fixed rule"),
+        }
+    }
+
+    #[test]
+    fn test_sprite_selection_rule_random() {
+        let rule = SpriteSelectionRule::Random {
+            sheet_path: "grass.png".to_string(),
+            sprite_indices: vec![0, 1, 2, 3],
+            seed: Some(42),
+        };
+
+        match rule {
+            SpriteSelectionRule::Random {
+                sheet_path,
+                sprite_indices,
+                seed,
+            } => {
+                assert_eq!(sheet_path, "grass.png");
+                assert_eq!(sprite_indices.len(), 4);
+                assert_eq!(seed, Some(42));
+            }
+            _ => panic!("Expected Random rule"),
+        }
+    }
+
+    #[test]
+    fn test_sprite_selection_rule_autotile() {
+        let mut rules = HashMap::new();
+        rules.insert(0b0011, 5);
+
+        let rule = SpriteSelectionRule::Autotile {
+            sheet_path: "terrain.png".to_string(),
+            rules,
+        };
+
+        match rule {
+            SpriteSelectionRule::Autotile {
+                sheet_path,
+                rules: rule_map,
+            } => {
+                assert_eq!(sheet_path, "terrain.png");
+                assert_eq!(rule_map.get(&0b0011), Some(&5));
+            }
+            _ => panic!("Expected Autotile rule"),
+        }
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_tile_visual_metadata_with_sprite_layers() {
+        let mut metadata = TileVisualMetadata::default();
+        metadata.sprite_layers = vec![
+            LayeredSprite {
+                sprite: SpriteReference {
+                    sheet_path: "bg.png".to_string(),
+                    sprite_index: 0,
+                    animation: None,
+                    material_properties: None,
+                },
+                layer: SpriteLayer::Background,
+                offset_y: 0.0,
+            },
+            LayeredSprite {
+                sprite: SpriteReference {
+                    sheet_path: "fg.png".to_string(),
+                    sprite_index: 1,
+                    animation: None,
+                    material_properties: None,
+                },
+                layer: SpriteLayer::Foreground,
+                offset_y: 0.2,
+            },
+        ];
+
+        assert_eq!(metadata.sprite_layers.len(), 2);
+        assert_eq!(metadata.sprite_layers[0].layer, SpriteLayer::Background);
+        assert_eq!(metadata.sprite_layers[1].layer, SpriteLayer::Foreground);
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_tile_visual_metadata_with_sprite_rule() {
+        let mut metadata = TileVisualMetadata::default();
+        metadata.sprite_rule = Some(SpriteSelectionRule::Random {
+            sheet_path: "grass.png".to_string(),
+            sprite_indices: vec![0, 1, 2, 3],
+            seed: None,
+        });
+
+        assert!(metadata.sprite_rule.is_some());
+    }
+
+    #[test]
+    fn test_backward_compat_no_sprite_layers() {
+        // Old format without sprite_layers should deserialize
+        let ron_str = r#"
+            TileVisualMetadata(
+                height: Some(1.0),
+                width_x: None,
+                width_z: None,
+                color_tint: None,
+                scale: None,
+                y_offset: None,
+                rotation_y: None,
+                sprite: None,
+            )
+        "#;
+
+        let metadata: TileVisualMetadata = ron::from_str(ron_str).unwrap();
+        assert_eq!(metadata.sprite_layers.len(), 0);
+        assert_eq!(metadata.sprite_rule, None);
+    }
+
+    #[test]
+    fn test_sprite_layers_serialization() {
+        let layers = vec![LayeredSprite {
+            sprite: SpriteReference {
+                sheet_path: "test.png".to_string(),
+                sprite_index: 0,
+                animation: None,
+                material_properties: None,
+            },
+            layer: SpriteLayer::Background,
+            offset_y: 0.0,
+        }];
+
+        // Should be serializable to RON
+        let ron_str = ron::to_string(&layers).unwrap();
+        assert!(ron_str.contains("Background"));
+
+        // Should be deserializable back
+        let deserialized: Vec<LayeredSprite> = ron::from_str(&ron_str).unwrap();
+        assert_eq!(deserialized.len(), 1);
+        assert_eq!(deserialized[0].layer, SpriteLayer::Background);
+    }
+
+    #[test]
+    fn test_sprite_material_properties_serialization() {
+        let props = SpriteMaterialProperties {
+            emissive: Some([1.0, 0.5, 0.0]),
+            alpha: Some(0.8),
+            metallic: Some(0.5),
+            roughness: Some(0.6),
+        };
+
+        let ron_str = ron::to_string(&props).unwrap();
+        let deserialized: SpriteMaterialProperties = ron::from_str(&ron_str).unwrap();
+
+        assert_eq!(deserialized.emissive, props.emissive);
+        assert_eq!(deserialized.alpha, props.alpha);
+        assert_eq!(deserialized.metallic, props.metallic);
+        assert_eq!(deserialized.roughness, props.roughness);
     }
 }

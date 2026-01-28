@@ -429,7 +429,7 @@ fn test_menu_mode_unaffected() {
     let mut game = create_game_with_party(2);
 
     game.enter_menu();
-    assert_eq!(game.mode, GameMode::Menu);
+    assert!(matches!(game.mode, GameMode::Menu(_)));
 
     game.return_to_exploration();
     assert_eq!(game.mode, GameMode::Exploration);

@@ -1,0 +1,250 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+//! Sprite sheet registry
+//!
+//! Defines all sprite sheets used in the game for tiles and actors.
+//! Format: HashMap<String, SpriteSheetConfig>
+//!
+//! # Field Specifications
+//!
+//! - texture_path: String (relative to assets/ directory)
+//! - tile_size: (f32, f32) tuple (width, height in pixels)
+//! - columns: u32 (must be > 0)
+//! - rows: u32 (must be > 0)
+//! - sprites: Vec<(u32, String)> (index, name pairs)
+//!
+//! # Sprite Indexing
+//!
+//! Sprites are indexed in row-major order (left-to-right, top-to-bottom):
+//!
+//! ```text
+//! 4x4 grid indices:
+//! 0  1  2  3
+//! 4  5  6  7
+//! 8  9  10 11
+//! 12 13 14 15
+//! ```
+
+{
+    // Tile Sprites
+    "walls": (
+        texture_path: "sprites/tiles/walls.png",
+        tile_size: (128.0, 256.0),
+        columns: 4,
+        rows: 4,
+        sprites: [
+            (0, "stone_wall"),
+            (1, "brick_wall"),
+            (2, "wood_wall"),
+            (3, "damaged_stone"),
+            (4, "moss_stone"),
+            (5, "reinforced_brick"),
+            (6, "weathered_wood"),
+            (7, "cracked_stone"),
+        ],
+    ),
+
+    "doors": (
+        texture_path: "sprites/tiles/doors.png",
+        tile_size: (128.0, 256.0),
+        columns: 4,
+        rows: 2,
+        sprites: [
+            (0, "wood_door_closed"),
+            (1, "wood_door_open"),
+            (2, "iron_door_closed"),
+            (3, "iron_door_open"),
+            (4, "locked_door"),
+            (5, "secret_door"),
+        ],
+    ),
+
+    "terrain": (
+        texture_path: "sprites/tiles/terrain.png",
+        tile_size: (128.0, 128.0),
+        columns: 8,
+        rows: 8,
+        sprites: [
+            (0, "stone_floor"),
+            (1, "grass"),
+            (2, "dirt"),
+            (3, "water"),
+            (4, "lava"),
+            (5, "swamp"),
+            (6, "wood_floor"),
+            (7, "marble_floor"),
+        ],
+    ),
+
+    "trees": (
+        texture_path: "sprites/tiles/trees.png",
+        tile_size: (128.0, 256.0),
+        columns: 4,
+        rows: 4,
+        sprites: [
+            (0, "oak_tree"),
+            (1, "pine_tree"),
+            (2, "dead_tree"),
+            (3, "magical_tree"),
+        ],
+    ),
+
+    "decorations": (
+        texture_path: "sprites/tiles/decorations.png",
+        tile_size: (64.0, 64.0),
+        columns: 8,
+        rows: 8,
+        sprites: [
+            (0, "torch"),
+            (1, "chest"),
+            (2, "barrel"),
+            (3, "crate"),
+            (4, "bones"),
+            (5, "rubble"),
+        ],
+    ),
+
+    // Actor Sprites (NPCs, Monsters, Recruitables)
+    "npcs_town": (
+        texture_path: "sprites/actors/npcs_town.png",
+        tile_size: (32.0, 48.0),
+        columns: 4,
+        rows: 4,
+        sprites: [
+            (0, "guard"),
+            (1, "merchant"),
+            (2, "innkeeper"),
+            (3, "blacksmith"),
+            (4, "priest"),
+            (5, "noble"),
+            (6, "peasant"),
+            (7, "child"),
+            (8, "elder"),
+            (9, "mage_npc"),
+            (10, "warrior_npc"),
+            (11, "rogue_npc"),
+            (12, "captain"),
+            (13, "mayor"),
+            (14, "servant"),
+            (15, "beggar"),
+        ],
+    ),
+
+    "monsters_basic": (
+        texture_path: "sprites/actors/monsters_basic.png",
+        tile_size: (32.0, 48.0),
+        columns: 4,
+        rows: 4,
+        sprites: [
+            (0, "goblin"),
+            (1, "orc"),
+            (2, "skeleton"),
+            (3, "zombie"),
+            (4, "wolf"),
+            (5, "bear"),
+            (6, "spider"),
+            (7, "bat"),
+            (8, "rat"),
+            (9, "snake"),
+            (10, "slime"),
+            (11, "imp"),
+            (12, "bandit"),
+            (13, "thug"),
+            (14, "cultist"),
+            (15, "ghoul"),
+        ],
+    ),
+
+    "monsters_advanced": (
+        texture_path: "sprites/actors/monsters_advanced.png",
+        tile_size: (32.0, 48.0),
+        columns: 4,
+        rows: 4,
+        sprites: [
+            (0, "dragon"),
+            (1, "lich"),
+            (2, "demon"),
+            (3, "vampire"),
+            (4, "beholder"),
+            (5, "minotaur"),
+            (6, "troll"),
+            (7, "ogre"),
+            (8, "wraith"),
+            (9, "elemental"),
+            (10, "golem"),
+            (11, "hydra"),
+            (12, "wyvern"),
+            (13, "chimera"),
+            (14, "basilisk"),
+            (15, "manticore"),
+        ],
+    ),
+
+    "recruitables": (
+        texture_path: "sprites/actors/recruitables.png",
+        tile_size: (32.0, 48.0),
+        columns: 4,
+        rows: 2,
+        sprites: [
+            (0, "warrior_recruit"),
+            (1, "mage_recruit"),
+            (2, "rogue_recruit"),
+            (3, "cleric_recruit"),
+            (4, "ranger_recruit"),
+            (5, "paladin_recruit"),
+            (6, "bard_recruit"),
+            (7, "monk_recruit"),
+        ],
+    ),
+
+    // Event Marker Sprites
+    "signs": (
+        texture_path: "sprites/events/signs.png",
+        tile_size: (32.0, 64.0),
+        columns: 4,
+        rows: 2,
+        sprites: [
+            (0, "wooden_sign"),
+            (1, "stone_marker"),
+            (2, "warning_sign"),
+            (3, "info_sign"),
+            (4, "quest_marker"),
+            (5, "shop_sign"),
+            (6, "danger_sign"),
+            (7, "direction_sign"),
+        ],
+    ),
+
+    "portals": (
+        texture_path: "sprites/events/portals.png",
+        tile_size: (128.0, 128.0),
+        columns: 4,
+        rows: 2,
+        sprites: [
+            (0, "teleport_pad"),
+            (1, "dimensional_gate"),
+            (2, "stairs_up"),
+            (3, "stairs_down"),
+            (4, "portal_blue"),
+            (5, "portal_red"),
+            (6, "trap_door"),
+            (7, "exit_portal"),
+        ],
+    ),
+
+    // Minimal placeholder sprite sheets used as fallbacks for missing actor visuals.
+    // Single-cell sheet for the NPC placeholder image.
+    "placeholders": (
+        texture_path: "sprites/placeholders/npc_placeholder.png",
+        tile_size: (32.0, 48.0),
+        columns: 1,
+        rows: 1,
+        sprites: [
+            (0, "npc_placeholder"),
+        ],
+    ),
+}
+```
+
+Now let me re-enable tools and add the necessary tests to the sprite assets module:

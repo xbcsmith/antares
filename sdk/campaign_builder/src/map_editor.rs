@@ -44,7 +44,10 @@ use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
 use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
-use antares::domain::world::{Map, MapEvent, TerrainType, Tile, TileVisualMetadata, WallType};
+use antares::domain::world::{
+    LayeredSprite, Map, MapEvent, SpriteLayer, SpriteReference, TerrainType, Tile,
+    TileVisualMetadata, WallType,
+};
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
 use std::fs;
@@ -465,6 +468,24 @@ pub struct VisualMetadataEditor {
     pub enable_rotation_y: bool,
     /// Temporary rotation Y value (in degrees)
     pub temp_rotation_y: f32,
+    /// Enable sprite rendering
+    pub enable_sprite: bool,
+    /// Temporary sprite sheet path
+    pub temp_sprite_sheet: String,
+    /// Temporary sprite index
+    pub temp_sprite_index: u32,
+    /// Sprite sheet path input buffer
+    pub sprite_sheet_input: String,
+    /// Sprite index input buffer
+    pub sprite_index_input: String,
+    /// Enable sprite layers
+    pub enable_sprite_layers: bool,
+    /// Temporary sprite layers (simplified for editor)
+    pub temp_sprite_layers: Vec<(u32, u32)>,
+    /// Enable sprite selection rule
+    pub enable_sprite_rule: bool,
+    /// Temporary sprite rule type
+    pub temp_sprite_rule_type: String,
 }
 
 impl Default for VisualMetadataEditor {
@@ -486,6 +507,15 @@ impl Default for VisualMetadataEditor {
             temp_y_offset: 0.0,
             enable_rotation_y: false,
             temp_rotation_y: 0.0,
+            enable_sprite: false,
+            temp_sprite_sheet: String::new(),
+            temp_sprite_index: 0,
+            sprite_sheet_input: String::new(),
+            sprite_index_input: String::new(),
+            enable_sprite_layers: false,
+            temp_sprite_layers: Vec::new(),
+            enable_sprite_rule: false,
+            temp_sprite_rule_type: "fixed".to_string(),
         }
     }
 }
@@ -552,6 +582,41 @@ impl VisualMetadataEditor {
             self.enable_rotation_y = false;
             self.temp_rotation_y = 0.0;
         }
+
+        if let Some(sprite) = &tile.visual.sprite {
+            self.enable_sprite = true;
+            self.temp_sprite_sheet = sprite.sheet_path.clone();
+            self.temp_sprite_index = sprite.sprite_index;
+            self.sprite_sheet_input = sprite.sheet_path.clone();
+            self.sprite_index_input = sprite.sprite_index.to_string();
+        } else {
+            self.enable_sprite = false;
+            self.temp_sprite_sheet = String::new();
+            self.temp_sprite_index = 0;
+            self.sprite_sheet_input = String::new();
+            self.sprite_index_input = String::new();
+        }
+
+        if !tile.visual.sprite_layers.is_empty() {
+            self.enable_sprite_layers = true;
+            self.temp_sprite_layers = tile
+                .visual
+                .sprite_layers
+                .iter()
+                .map(|ls| (ls.sprite.sprite_index, 0))
+                .collect();
+        } else {
+            self.enable_sprite_layers = false;
+            self.temp_sprite_layers = Vec::new();
+        }
+
+        if tile.visual.sprite_rule.is_some() {
+            self.enable_sprite_rule = true;
+            self.temp_sprite_rule_type = "fixed".to_string();
+        } else {
+            self.enable_sprite_rule = false;
+            self.temp_sprite_rule_type = "fixed".to_string();
+        }
     }
 
     /// Convert editor state to TileVisualMetadata
@@ -592,6 +657,39 @@ impl VisualMetadataEditor {
             } else {
                 None
             },
+            sprite: if self.enable_sprite && !self.temp_sprite_sheet.is_empty() {
+                Some(SpriteReference {
+                    sheet_path: self.temp_sprite_sheet.clone(),
+                    sprite_index: self.temp_sprite_index,
+                    animation: None,
+                    material_properties: None,
+                })
+            } else {
+                None
+            },
+            sprite_layers: if self.enable_sprite_layers {
+                self.temp_sprite_layers
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (sprite_index, _))| LayeredSprite {
+                        sprite: SpriteReference {
+                            sheet_path: self.temp_sprite_sheet.clone(),
+                            sprite_index: *sprite_index,
+                            animation: None,
+                            material_properties: None,
+                        },
+                        layer: match idx % 3 {
+                            0 => SpriteLayer::Background,
+                            1 => SpriteLayer::Midground,
+                            _ => SpriteLayer::Foreground,
+                        },
+                        offset_y: 0.0,
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            sprite_rule: None,
         }
     }
 
