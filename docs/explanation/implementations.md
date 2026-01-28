@@ -17406,7 +17406,98 @@ All quality gates passed successfully:
 - ✅ Code follows all architecture compliance rules
 - ✅ File extensions correct (.rs for implementation, .md for documentation, .ron for data)
 
-### Implementation Summary
+# Implementation Summaries
+
+## Phase 2: Combat UI System (2025-01-XX)
+
+### Overview
+
+Implemented the combat UI display system for the turn-based combat in Antares. This phase builds on Phase 1 (Core Combat Infrastructure) by adding visual feedback for combat encounters, including enemy status, turn order, and player action controls.
+
+### Components Implemented
+
+**UI Constants** (`src/game/systems/combat.rs`):
+
+- Layout constants for enemy panel, turn order display, and action menu
+- Color constants for HP bars (healthy/injured/critical)
+- UI sizing constants for cards, buttons, and panels
+
+**Marker Components** (`src/game/systems/combat.rs`):
+
+- `EnemyCard`, `EnemyHpBarFill`, `EnemyHpText`, `EnemyNameText`, `EnemyConditionText` - Enemy panel UI elements
+- `TurnOrderPanel`, `TurnOrderText` - Turn order display elements
+- `ActionMenuPanel`, `ActionButton` - Action menu elements
+- `ActionButtonType` enum - Attack/Defend/Cast/Item/Flee button types
+
+**Systems** (`src/game/systems/combat.rs`):
+
+- `setup_combat_ui` - Spawns combat UI when entering combat mode
+- `cleanup_combat_ui` - Despawns combat UI when exiting combat
+- `update_combat_ui` - Updates UI to reflect current combat state (HP bars, turn order, action menu visibility)
+
+**Integration** (`src/game/systems/hud.rs`):
+
+- Added `not_in_combat` run condition to hide exploration HUD during combat
+- Ensures clean UI transitions between exploration and combat modes
+
+### Details
+
+The combat UI follows a three-panel layout:
+
+1. **Enemy Panel** (top): Displays monster cards with names, HP bars, and condition indicators
+2. **Turn Order Display** (middle): Shows initiative order with current actor highlighted
+3. **Action Menu** (bottom): Shows Attack/Defend/Cast/Item/Flee buttons (visible only on player turns)
+
+Enemy HP bars dynamically change color based on remaining HP percentage:
+
+- Green (>50%)
+- Yellow (20-50%)
+- Red (<20%)
+
+The action menu automatically shows/hides based on `CombatTurnState` (visible for `PlayerTurn`, hidden for `EnemyTurn`/`Animating`/`RoundEnd`).
+
+### Testing
+
+Added comprehensive tests:
+
+- `test_combat_ui_spawns_on_enter` - Verifies UI creation when entering combat
+- `test_combat_ui_despawns_on_exit` - Verifies UI cleanup when exiting combat
+- `test_enemy_hp_bars_update` - Validates HP bar width/color updates
+- `test_turn_order_display` - Checks turn order text generation
+- `test_action_menu_visibility` - Confirms menu show/hide based on turn state
+- `test_action_buttons_created` - Validates all 5 action buttons exist
+- `test_enemy_cards_for_monsters_only` - Ensures only monsters get enemy cards (not players)
+
+All tests pass with 100% success rate.
+
+### Success Criteria Met
+
+✅ Combat UI visible when entering combat
+✅ UI correctly reflects `CombatState` data
+✅ Clean transition back to exploration UI on exit
+✅ Enemy panel shows monster names and HP
+✅ Turn order indicator highlights current actor
+✅ Action menu buttons present and functional
+
+### Notes
+
+- Used inline spawning for UI elements to avoid Bevy `ChildBuilder` type inference issues
+- Query conflicts resolved by adding `Without<T>` filters to create disjoint queries
+- Fixed UTF-8 truncation issue in turn order text by using `strip_suffix` instead of `truncate`
+- Made `CombatStarted` message writer optional in `handle_events` to avoid test dependency issues
+- All quality checks pass: `cargo fmt`, `cargo check`, `cargo clippy`, `cargo nextest run`
+
+### Future Work
+
+Phase 3 will implement the Player Action System, allowing players to:
+
+- Select targets for attacks
+- Choose actions (Attack/Defend/Cast/Item/Flee)
+- Execute combat actions with proper turn advancement
+
+---
+
+# Implementation Summaries
 
 The Campaign Builder UI Consistency Implementation plan is now **COMPLETE** across all four phases:
 

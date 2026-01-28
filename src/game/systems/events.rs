@@ -81,7 +81,7 @@ fn handle_events(
     mut map_change_writer: MessageWriter<MapChangeEvent>,
     mut dialogue_writer: MessageWriter<StartDialogue>,
     mut simple_dialogue_writer: MessageWriter<SimpleDialogue>,
-    mut combat_started_writer: MessageWriter<crate::game::systems::combat::CombatStarted>,
+    mut combat_started_writer: Option<MessageWriter<crate::game::systems::combat::CombatStarted>>,
     content: Res<GameContent>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
     mut global_state: ResMut<GlobalState>,
@@ -176,8 +176,10 @@ fn handle_events(
                         // Debug: print mode after successful attempt
                         info!("Mode after start_encounter: {:?}", global_state.0.mode);
 
-                        // Notify other systems that combat has started
-                        combat_started_writer.write(crate::game::systems::combat::CombatStarted {});
+                        // Notify other systems that combat has started (if CombatPlugin is registered)
+                        if let Some(ref mut writer) = combat_started_writer {
+                            writer.write(crate::game::systems::combat::CombatStarted {});
+                        }
                     }
                     Err(e) => {
                         error!("Failed to start encounter: {}", e);

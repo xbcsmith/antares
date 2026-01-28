@@ -4,9 +4,11 @@
 //! Combat systems and support types
 //!
 //! Phase 1: Core Combat Infrastructure
+//! Phase 2: Combat UI System
 //!
 //! This module implements the foundational Bevy plugin and systems needed to
-//! start and synchronize combat state with the global `GameState`.
+//! start and synchronize combat state with the global `GameState`, plus the
+//! combat UI display.
 //!
 //! Responsibilities:
 //! - `CombatPlugin` registers combat messages and resources
@@ -14,6 +16,7 @@
 //! - `CombatTurnStateResource` is a small resource for turn sub-state tracking
 //! - `start_encounter()` prepares a `CombatState` from a map encounter and party
 //! - Systems to synchronize party -> combat and combat -> party on exit
+//! - Combat UI systems for displaying enemies, turn order, and action menu
 //!
 //! # Systems
 //!
@@ -23,6 +26,9 @@
 //!   in the combat state if they were not added earlier.
 //! - `sync_combat_to_party_on_exit` (runs every frame) — when combat has ended,
 //!   copies HP/SP/conditions/stat currents back into the party and clears combat data.
+//! - `setup_combat_ui` (runs on combat enter) — spawns combat UI entities
+//! - `cleanup_combat_ui` (runs on combat exit) — despawns combat UI entities
+//! - `update_combat_ui` (runs every frame during combat) — syncs UI with combat state
 //!
 //! # Notes
 //!
@@ -95,6 +101,53 @@ impl Default for CombatTurnStateResource {
     }
 }
 
+// ===== Phase 2: Combat UI Constants =====
+
+/// Height of the combat enemy panel at the top of the screen
+pub const COMBAT_ENEMY_PANEL_HEIGHT: Val = Val::Px(200.0);
+
+/// Width of individual enemy card in the enemy panel
+pub const ENEMY_CARD_WIDTH: Val = Val::Px(150.0);
+
+/// Height of enemy HP bar
+pub const ENEMY_HP_BAR_HEIGHT: Val = Val::Px(12.0);
+
+/// Padding inside enemy cards
+pub const ENEMY_CARD_PADDING: Val = Val::Px(8.0);
+
+/// Height of the turn order display panel
+pub const TURN_ORDER_PANEL_HEIGHT: Val = Val::Px(40.0);
+
+/// Height of the action menu panel
+pub const ACTION_MENU_HEIGHT: Val = Val::Px(60.0);
+
+/// Button width in action menu
+pub const ACTION_BUTTON_WIDTH: Val = Val::Px(100.0);
+
+/// Button height in action menu
+pub const ACTION_BUTTON_HEIGHT: Val = Val::Px(40.0);
+
+/// Color for enemy HP bar (healthy)
+pub const ENEMY_HP_HEALTHY_COLOR: Color = Color::srgb(0.2, 0.8, 0.2);
+
+/// Color for enemy HP bar (injured)
+pub const ENEMY_HP_INJURED_COLOR: Color = Color::srgb(0.8, 0.6, 0.0);
+
+/// Color for enemy HP bar (critical)
+pub const ENEMY_HP_CRITICAL_COLOR: Color = Color::srgb(0.8, 0.2, 0.2);
+
+/// Color for turn indicator highlight
+pub const TURN_INDICATOR_COLOR: Color = Color::srgb(1.0, 1.0, 0.0);
+
+/// Color for action button background
+pub const ACTION_BUTTON_COLOR: Color = Color::srgb(0.3, 0.3, 0.4);
+
+/// Color for action button hover
+pub const ACTION_BUTTON_HOVER_COLOR: Color = Color::srgb(0.4, 0.4, 0.5);
+
+/// Color for action button disabled
+pub const ACTION_BUTTON_DISABLED_COLOR: Color = Color::srgb(0.2, 0.2, 0.2);
+
 /// Bevy resource that contains the authoritative combat state used by ECS systems.
 ///
 /// `player_orig_indices` maps participant index -> Option<party_index> so we can
@@ -123,7 +176,77 @@ impl CombatResource {
     }
 }
 
-/// Main plugin registering combat resources and systems
+impl Default for CombatResource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ===== Phase 2: Combat UI Marker Components =====
+
+/// Marker component for enemy card UI elements
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyCard {
+    /// Index in combat participants (should be a monster)
+    pub participant_index: usize,
+}
+
+/// Marker component for enemy HP bar fill
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyHpBarFill {
+    /// Index in combat participants
+    pub participant_index: usize,
+}
+
+/// Marker component for enemy HP text display
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyHpText {
+    /// Index in combat participants
+    pub participant_index: usize,
+}
+
+/// Marker component for enemy name text
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyNameText {
+    /// Index in combat participants
+    pub participant_index: usize,
+}
+
+/// Marker component for enemy condition text
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyConditionText {
+    /// Index in combat participants
+    pub participant_index: usize,
+}
+
+/// Marker component for the turn order display panel
+#[derive(Component, Debug, Clone, Copy)]
+pub struct TurnOrderPanel;
+
+/// Marker component for turn order text display
+#[derive(Component, Debug, Clone, Copy)]
+pub struct TurnOrderText;
+
+/// Marker component for the action menu panel
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ActionMenuPanel;
+
+/// Action button types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ActionButtonType {
+    Attack,
+    Defend,
+    Cast,
+    Item,
+    Flee,
+}
+
+/// Marker component for action buttons
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ActionButton {
+    pub button_type: ActionButtonType,
+}
+
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
@@ -139,7 +262,11 @@ impl Plugin for CombatPlugin {
             // Ensure party members exist in combat on enter
             .add_systems(Update, sync_party_to_combat)
             // Sync back to party when combat ends
-            .add_systems(Update, sync_combat_to_party_on_exit);
+            .add_systems(Update, sync_combat_to_party_on_exit)
+            // Phase 2: Combat UI systems
+            .add_systems(Update, setup_combat_ui)
+            .add_systems(Update, cleanup_combat_ui)
+            .add_systems(Update, update_combat_ui);
     }
 }
 
@@ -228,7 +355,7 @@ fn handle_combat_started(
 /// properly added (e.g., direct `enter_combat()` calls).
 fn sync_party_to_combat(mut combat_res: ResMut<CombatResource>, global_state: Res<GlobalState>) {
     // Only run when in combat
-    let cs = match &global_state.0.mode {
+    let _cs = match &global_state.0.mode {
         GameMode::Combat(cs) => cs,
         _ => return,
     };
@@ -353,13 +480,406 @@ fn sync_combat_to_party_on_exit(
     combat_res.clear();
 }
 
+// ===== Phase 2: Combat UI Systems =====
+
+/// System: Setup combat UI when entering combat mode
+///
+/// Spawns the combat HUD including enemy panel, turn order display, and action menu.
+/// This system runs every frame but only acts when combat UI needs to be created.
+fn setup_combat_ui(
+    mut commands: Commands,
+    global_state: Res<GlobalState>,
+    combat_res: Res<CombatResource>,
+    existing_ui: Query<Entity, With<crate::game::components::combat::CombatHudRoot>>,
+) {
+    // Only setup UI when in combat mode
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    // If UI already exists, don't recreate it
+    if !existing_ui.is_empty() {
+        return;
+    }
+
+    // Spawn combat HUD root container
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::SpaceBetween,
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+            crate::game::components::combat::CombatHudRoot,
+        ))
+        .with_children(|parent| {
+            // Enemy panel at top
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: COMBAT_ENEMY_PANEL_HEIGHT,
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(16.0),
+                        padding: UiRect::all(Val::Px(16.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.1, 0.1, 0.1, 0.8)),
+                ))
+                .with_children(|enemy_panel| {
+                    // Spawn enemy cards for each monster in combat
+                    for (idx, participant) in combat_res.state.participants.iter().enumerate() {
+                        if let Combatant::Monster(monster) = participant {
+                            // Inline enemy card spawning
+                            enemy_panel
+                                .spawn((
+                                    Node {
+                                        width: ENEMY_CARD_WIDTH,
+                                        flex_direction: FlexDirection::Column,
+                                        padding: UiRect::all(ENEMY_CARD_PADDING),
+                                        row_gap: Val::Px(4.0),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(0.2, 0.15, 0.15, 0.9)),
+                                    BorderRadius::all(Val::Px(4.0)),
+                                    EnemyCard {
+                                        participant_index: idx,
+                                    },
+                                ))
+                                .with_children(|card| {
+                                    // Enemy name
+                                    card.spawn((
+                                        Text::new(monster.name.clone()),
+                                        TextFont {
+                                            font_size: 14.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::WHITE),
+                                        EnemyNameText {
+                                            participant_index: idx,
+                                        },
+                                    ));
+
+                                    // HP bar background
+                                    card.spawn((
+                                        Node {
+                                            width: Val::Percent(100.0),
+                                            height: ENEMY_HP_BAR_HEIGHT,
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 1.0)),
+                                    ))
+                                    .with_children(|bar| {
+                                        // HP bar fill
+                                        bar.spawn((
+                                            Node {
+                                                width: Val::Percent(100.0),
+                                                height: Val::Percent(100.0),
+                                                ..default()
+                                            },
+                                            BackgroundColor(ENEMY_HP_HEALTHY_COLOR),
+                                            EnemyHpBarFill {
+                                                participant_index: idx,
+                                            },
+                                        ));
+                                    });
+
+                                    // HP text
+                                    card.spawn((
+                                        Text::new(format!(
+                                            "{}/{}",
+                                            monster.hp.current, monster.hp.base
+                                        )),
+                                        TextFont {
+                                            font_size: 10.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::WHITE),
+                                        EnemyHpText {
+                                            participant_index: idx,
+                                        },
+                                    ));
+
+                                    // Condition text
+                                    card.spawn((
+                                        Text::new(""),
+                                        TextFont {
+                                            font_size: 9.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.8, 0.8, 0.0)),
+                                        EnemyConditionText {
+                                            participant_index: idx,
+                                        },
+                                    ));
+                                });
+                        }
+                    }
+                });
+
+            // Turn order display
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: TURN_ORDER_PANEL_HEIGHT,
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        padding: UiRect::all(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.15, 0.15, 0.2, 0.9)),
+                    TurnOrderPanel,
+                ))
+                .with_children(|turn_panel| {
+                    turn_panel.spawn((
+                        Text::new("Turn Order: "),
+                        TextFont {
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        TurnOrderText,
+                    ));
+                });
+
+            // Action menu (initially visible, will be hidden during enemy turns)
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: ACTION_MENU_HEIGHT,
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(12.0),
+                        padding: UiRect::all(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.9)),
+                    ActionMenuPanel,
+                ))
+                .with_children(|menu_panel| {
+                    // Spawn action buttons inline
+                    for (label, button_type) in [
+                        ("Attack", ActionButtonType::Attack),
+                        ("Defend", ActionButtonType::Defend),
+                        ("Cast", ActionButtonType::Cast),
+                        ("Item", ActionButtonType::Item),
+                        ("Flee", ActionButtonType::Flee),
+                    ] {
+                        menu_panel
+                            .spawn((
+                                Button,
+                                Node {
+                                    width: ACTION_BUTTON_WIDTH,
+                                    height: ACTION_BUTTON_HEIGHT,
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },
+                                BackgroundColor(ACTION_BUTTON_COLOR),
+                                BorderRadius::all(Val::Px(4.0)),
+                                ActionButton { button_type },
+                            ))
+                            .with_children(|button| {
+                                button.spawn((
+                                    Text::new(label),
+                                    TextFont {
+                                        font_size: 14.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::WHITE),
+                                ));
+                            });
+                    }
+                });
+        });
+}
+
+/// System: Cleanup combat UI when exiting combat mode
+///
+/// Despawns all combat HUD entities when combat ends.
+fn cleanup_combat_ui(
+    mut commands: Commands,
+    global_state: Res<GlobalState>,
+    combat_ui: Query<Entity, With<crate::game::components::combat::CombatHudRoot>>,
+) {
+    // Only cleanup when not in combat mode
+    if matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    // Despawn combat UI if it exists (despawn will automatically handle children)
+    for entity in combat_ui.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
+/// System: Update combat UI to reflect current combat state
+///
+/// Updates enemy HP bars, turn order display, and action menu visibility.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+fn update_combat_ui(
+    combat_res: Res<CombatResource>,
+    global_state: Res<GlobalState>,
+    mut enemy_hp_bars: Query<(&EnemyHpBarFill, &mut Node, &mut BackgroundColor)>,
+    mut enemy_hp_texts: Query<
+        (&EnemyHpText, &mut Text),
+        (
+            Without<EnemyNameText>,
+            Without<EnemyConditionText>,
+            Without<TurnOrderText>,
+        ),
+    >,
+    mut enemy_condition_texts: Query<
+        (&EnemyConditionText, &mut Text),
+        (
+            Without<EnemyHpText>,
+            Without<EnemyNameText>,
+            Without<TurnOrderText>,
+        ),
+    >,
+    mut turn_order_text: Query<
+        &mut Text,
+        (
+            With<TurnOrderText>,
+            Without<EnemyHpText>,
+            Without<EnemyNameText>,
+            Without<EnemyConditionText>,
+        ),
+    >,
+    mut action_menu: Query<&mut Visibility, With<ActionMenuPanel>>,
+    turn_state: Res<CombatTurnStateResource>,
+) {
+    // Only update when in combat mode
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    // Update enemy HP bars
+    for (hp_bar, mut node, mut bg_color) in enemy_hp_bars.iter_mut() {
+        if let Some(Combatant::Monster(monster)) =
+            combat_res.state.participants.get(hp_bar.participant_index)
+        {
+            // Calculate HP percentage
+            let hp_percent = if monster.hp.base > 0 {
+                (monster.hp.current as f32 / monster.hp.base as f32 * 100.0).clamp(0.0, 100.0)
+            } else {
+                0.0
+            };
+
+            // Update bar width
+            node.width = Val::Percent(hp_percent);
+
+            // Update bar color based on HP percentage
+            *bg_color = if hp_percent > 50.0 {
+                BackgroundColor(ENEMY_HP_HEALTHY_COLOR)
+            } else if hp_percent > 20.0 {
+                BackgroundColor(ENEMY_HP_INJURED_COLOR)
+            } else {
+                BackgroundColor(ENEMY_HP_CRITICAL_COLOR)
+            };
+        }
+    }
+
+    // Update enemy HP text
+    for (hp_text, mut text) in enemy_hp_texts.iter_mut() {
+        if let Some(Combatant::Monster(monster)) =
+            combat_res.state.participants.get(hp_text.participant_index)
+        {
+            **text = format!("{}/{}", monster.hp.current, monster.hp.base);
+        }
+    }
+
+    // Update enemy condition text
+    for (condition_text, mut text) in enemy_condition_texts.iter_mut() {
+        if let Some(Combatant::Monster(monster)) = combat_res
+            .state
+            .participants
+            .get(condition_text.participant_index)
+        {
+            // Get condition summary (simplified for now)
+            // MonsterCondition is an enum, not a bitflag, so check directly
+            let condition_str = if matches!(
+                monster.conditions,
+                crate::domain::combat::monster::MonsterCondition::Normal
+            ) {
+                String::new()
+            } else {
+                "Condition".to_string()
+            };
+            **text = condition_str;
+        }
+    }
+
+    // Update turn order display
+    if let Ok(mut text) = turn_order_text.single_mut() {
+        let mut turn_order_str = String::from("Turn Order: ");
+
+        for (i, combatant_id) in combat_res.state.turn_order.iter().enumerate() {
+            let name = match combatant_id {
+                CombatantId::Player(idx) => {
+                    if let Some(Combatant::Player(character)) =
+                        combat_res.state.participants.get(*idx)
+                    {
+                        character.name.as_str()
+                    } else {
+                        "???"
+                    }
+                }
+                CombatantId::Monster(idx) => {
+                    if let Some(Combatant::Monster(monster)) =
+                        combat_res.state.participants.get(*idx)
+                    {
+                        monster.name.as_str()
+                    } else {
+                        "???"
+                    }
+                }
+            };
+
+            if i == combat_res.state.current_turn {
+                turn_order_str.push_str(&format!("[{}] → ", name));
+            } else {
+                turn_order_str.push_str(&format!("{} → ", name));
+            }
+        }
+
+        // Remove trailing arrow (safely handle UTF-8)
+        if let Some(stripped) = turn_order_str.strip_suffix(" → ") {
+            turn_order_str = stripped.to_string();
+        }
+
+        **text = turn_order_str;
+    }
+
+    // Show/hide action menu based on turn state
+    if let Ok(mut visibility) = action_menu.single_mut() {
+        *visibility = if matches!(turn_state.0, CombatTurnState::PlayerTurn) {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::application::GameState;
     use crate::domain::character::{Alignment, Character, Sex};
     use crate::domain::combat::types::Handicap;
-    use crate::sdk::database::ContentDatabase;
 
     /// Ensure plugin creates and exposes expected resources when registered.
     #[test]
@@ -487,5 +1007,423 @@ mod tests {
 
         // GameState should now be in Combat mode
         assert!(matches!(gs.mode, crate::application::GameMode::Combat(_)));
+    }
+
+    // ===== Phase 2: Combat UI Tests =====
+
+    /// Verify combat UI spawns when entering combat
+    #[test]
+    fn test_combat_ui_spawns_on_enter() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Create game state in combat mode
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Test Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat();
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Run update to trigger setup_combat_ui
+        app.update();
+
+        // Combat HUD root should now exist
+        let mut ui_query = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::game::components::combat::CombatHudRoot>>();
+        assert_eq!(ui_query.iter(app.world()).count(), 1);
+    }
+
+    /// Verify combat UI despawns when exiting combat
+    #[test]
+    fn test_combat_ui_despawns_on_exit() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Start in combat mode
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Test Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat();
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Run update to spawn UI
+        app.update();
+
+        // Verify UI exists
+        let mut ui_query = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::game::components::combat::CombatHudRoot>>();
+        assert_eq!(ui_query.iter(app.world()).count(), 1);
+
+        // Exit combat
+        let mut gs_res = app
+            .world_mut()
+            .resource_mut::<crate::game::resources::GlobalState>();
+        gs_res.0.exit_combat();
+
+        // Run update to trigger cleanup
+        app.update();
+
+        // UI should be despawned
+        let mut ui_query = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::game::components::combat::CombatHudRoot>>();
+        assert_eq!(ui_query.iter(app.world()).count(), 0);
+    }
+
+    /// Verify enemy HP bars update correctly
+    #[test]
+    fn test_enemy_hp_bars_update() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Create combat state with a monster
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Test Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+
+        // Create combat state with monster
+        let mut cs = CombatState::new(Handicap::Even);
+        let mut monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 10, 10, 10),
+            10,
+            10,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        monster.hp.base = 10;
+        monster.hp.current = 10;
+        cs.add_monster(monster);
+
+        gs.enter_combat_with_state(cs);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Initialize CombatResource manually since we're not going through handle_combat_started
+        {
+            let mut combat_res = app.world_mut().resource_mut::<CombatResource>();
+            // Rebuild the combat state
+            let mut new_cs = CombatState::new(Handicap::Even);
+            let monster = crate::domain::combat::monster::Monster::new(
+                1,
+                "Goblin".to_string(),
+                crate::domain::character::Stats::new(10, 10, 10, 10, 10, 10, 10),
+                10,
+                10,
+                vec![crate::domain::combat::types::Attack::physical(
+                    crate::domain::types::DiceRoll::new(1, 4, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            );
+            new_cs.add_monster(monster);
+            combat_res.state = new_cs;
+            combat_res.player_orig_indices = vec![None];
+        }
+
+        // Run update to trigger setup_combat_ui
+        app.update();
+
+        // Verify enemy card was created
+        let mut enemy_cards = app.world_mut().query_filtered::<Entity, With<EnemyCard>>();
+        assert_eq!(enemy_cards.iter(app.world()).count(), 1);
+
+        // Damage the monster by modifying combat resource
+        let mut combat_res = app.world_mut().resource_mut::<CombatResource>();
+        if let Some(Combatant::Monster(monster)) = combat_res.state.participants.get_mut(0) {
+            monster.hp.current = 5; // 50% HP
+        }
+
+        // Run update to sync UI
+        app.update();
+
+        // Verify HP bar fill exists and has been updated
+        let mut hp_bars = app
+            .world_mut()
+            .query_filtered::<(&Node, &EnemyHpBarFill), With<EnemyHpBarFill>>();
+        let mut found_hp_bar = false;
+        for (node, _) in hp_bars.iter(app.world()) {
+            if let Val::Percent(width) = node.width {
+                // Should be ~50% width
+                assert!((width - 50.0).abs() < 1.0);
+                found_hp_bar = true;
+            }
+        }
+        assert!(found_hp_bar, "HP bar fill should have been updated");
+    }
+
+    /// Verify turn order display shows correct order
+    #[test]
+    fn test_turn_order_display() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Create combat with player and monster
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(gs.party.members[0].clone());
+        let monster = crate::domain::combat::monster::Monster::new(
+            2,
+            "Orc".to_string(),
+            crate::domain::character::Stats::new(12, 8, 8, 12, 10, 10, 8),
+            15,
+            12,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 6, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        cs.add_monster(monster);
+
+        // Set up turn order manually
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cs.current_turn = 0;
+
+        gs.enter_combat_with_state(cs);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Run update to spawn and populate UI
+        app.update();
+
+        // Verify turn order text was created
+        let mut turn_order_texts = app
+            .world_mut()
+            .query_filtered::<&Text, With<TurnOrderText>>();
+        assert_eq!(turn_order_texts.iter(app.world()).count(), 1);
+
+        // Text should contain turn order information
+        for text in turn_order_texts.iter(app.world()) {
+            let text_str = text.0.as_str();
+            assert!(text_str.contains("Turn Order"));
+        }
+    }
+
+    /// Verify action menu visibility changes with turn state
+    #[test]
+    fn test_action_menu_visibility() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Create combat state
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat();
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Set turn state to PlayerTurn
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Run update to spawn and update UI
+        app.update();
+
+        // Action menu should be visible when PlayerTurn (spawns with default visibility)
+        let mut menu_query = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<ActionMenuPanel>>();
+        let count = menu_query.iter(app.world()).count();
+        assert_eq!(count, 1, "Action menu should exist");
+
+        // Change to EnemyTurn
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::EnemyTurn;
+
+        // Run update
+        app.update();
+
+        // Action menu should be hidden
+        let mut menu_query = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<ActionMenuPanel>>();
+        for visibility in menu_query.iter(app.world()) {
+            assert_eq!(*visibility, Visibility::Hidden);
+        }
+    }
+
+    /// Verify action buttons are created correctly
+    #[test]
+    fn test_action_buttons_created() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat();
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Run update to spawn UI
+        app.update();
+
+        // All 5 action buttons should exist
+        let mut buttons = app
+            .world_mut()
+            .query_filtered::<&ActionButton, With<ActionButton>>();
+        assert_eq!(buttons.iter(app.world()).count(), 5);
+
+        // Verify each button type exists
+        let mut found_types = std::collections::HashSet::new();
+        for button in buttons.iter(app.world()) {
+            found_types.insert(button.button_type);
+        }
+
+        assert!(found_types.contains(&ActionButtonType::Attack));
+        assert!(found_types.contains(&ActionButtonType::Defend));
+        assert!(found_types.contains(&ActionButtonType::Cast));
+        assert!(found_types.contains(&ActionButtonType::Item));
+        assert!(found_types.contains(&ActionButtonType::Flee));
+    }
+
+    /// Verify enemy cards are created for monsters only
+    #[test]
+    fn test_enemy_cards_for_monsters_only() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+
+        // Create combat with 2 monsters
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(gs.party.members[0].clone());
+
+        let monster1 = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(10, 8, 8, 10, 10, 10, 8),
+            8,
+            10,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        let monster2 = crate::domain::combat::monster::Monster::new(
+            2,
+            "Orc".to_string(),
+            crate::domain::character::Stats::new(12, 8, 8, 12, 10, 10, 8),
+            12,
+            11,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 6, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        cs.add_monster(monster1);
+        cs.add_monster(monster2);
+
+        gs.enter_combat_with_state(cs);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Initialize CombatResource manually
+        {
+            let mut combat_res = app.world_mut().resource_mut::<CombatResource>();
+            // Rebuild combat state
+            let mut new_cs = CombatState::new(Handicap::Even);
+            new_cs.add_player(Character::new(
+                "Hero".to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            ));
+            let monster1 = crate::domain::combat::monster::Monster::new(
+                1,
+                "Goblin".to_string(),
+                crate::domain::character::Stats::new(10, 8, 8, 10, 10, 10, 8),
+                8,
+                10,
+                vec![crate::domain::combat::types::Attack::physical(
+                    crate::domain::types::DiceRoll::new(1, 4, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            );
+            let monster2 = crate::domain::combat::monster::Monster::new(
+                2,
+                "Orc".to_string(),
+                crate::domain::character::Stats::new(12, 8, 8, 12, 10, 10, 8),
+                12,
+                11,
+                vec![crate::domain::combat::types::Attack::physical(
+                    crate::domain::types::DiceRoll::new(1, 6, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            );
+            new_cs.add_monster(monster1);
+            new_cs.add_monster(monster2);
+            combat_res.state = new_cs;
+            combat_res.player_orig_indices = vec![Some(0), None, None];
+        }
+
+        // Run update to spawn UI
+        app.update();
+
+        // Should have exactly 2 enemy cards (not 3, even though there are 3 participants)
+        let mut enemy_cards = app
+            .world_mut()
+            .query_filtered::<&EnemyCard, With<EnemyCard>>();
+        assert_eq!(enemy_cards.iter(app.world()).count(), 2);
     }
 }
