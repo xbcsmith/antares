@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod actor;
+pub mod animation;
 pub mod audio;
+pub mod billboard;
 pub mod camera;
 pub mod dialogue;
 pub mod dialogue_choices;
@@ -16,4 +19,5 @@ pub mod menu;
 pub mod procedural_meshes;
 pub mod quest;
 pub mod recruitment_dialog;
+pub mod sprite_uv_update;
 pub mod ui;

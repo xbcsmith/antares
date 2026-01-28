@@ -1,1 +1,0 @@
-You are an elite Rust Game Developer. Implement ${PHASE_TEXT}  from ${IMPLEMENTATION_PLAN}  DO NOT SKIP TASKS or DELIVERABLES. THINK HARD and follow the rules in @AGENTS.md

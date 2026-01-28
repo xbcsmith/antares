@@ -9,7 +9,7 @@
 //! # Examples
 //!
 //! ```no_run
-//! use crate::game::components::menu::{MenuButton, MenuRoot, MENU_WIDTH};
+//! use antares::game::components::menu::{MenuButton, MenuRoot, MENU_WIDTH};
 //!
 //! // Marker component can be instantiated
 //! let _root = MenuRoot;
@@ -57,7 +57,7 @@ pub struct SettingsPanel;
 /// # Examples
 ///
 /// ```
-/// use crate::game::components::menu::MenuButton;
+/// use antares::game::components::menu::MenuButton;
 ///
 /// let resume = MenuButton::Resume;
 /// let slot = MenuButton::SelectSave(2);
@@ -117,7 +117,7 @@ pub enum VolumeSlider {
 /// # Examples
 ///
 /// ```
-/// use crate::game::components::menu::{SettingSlider, VolumeSlider};
+/// use antares::game::components::menu::{SettingSlider, VolumeSlider};
 ///
 /// let slider = SettingSlider::new(VolumeSlider::Master, 0.8);
 /// assert_eq!(slider.current_value, 0.8);
@@ -142,7 +142,7 @@ impl SettingSlider {
     /// # Examples
     ///
     /// ```
-    /// use crate::game::components::menu::{SettingSlider, VolumeSlider};
+    /// use antares::game::components::menu::{SettingSlider, VolumeSlider};
     ///
     /// let slider = SettingSlider::new(VolumeSlider::Master, 0.8);
     /// assert_eq!(slider.current_value, 0.8);

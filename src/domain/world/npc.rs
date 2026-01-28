@@ -41,6 +41,7 @@
 use crate::domain::dialogue::DialogueId;
 use crate::domain::quest::QuestId;
 use crate::domain::types::{Direction, Position};
+use crate::domain::world::SpriteReference;
 use serde::{Deserialize, Serialize};
 
 /// NPC identifier
@@ -90,9 +91,39 @@ pub struct NpcDefinition {
     /// Path to portrait image (required)
     pub portrait_id: String,
 
-    /// Reference to default dialogue tree
+    /// Optional default dialogue id for NPC interactions
     #[serde(default)]
     pub dialogue_id: Option<DialogueId>,
+
+    /// Optional sprite reference for this NPC's visual representation.
+    ///
+    /// When `Some`, the NPC will use the specified sprite sheet and index.
+    /// When `None`, falls back to `DEFAULT_NPC_SPRITE_PATH` (placeholder).
+    ///
+    /// Backward compatibility: Old RON files without this field will deserialize
+    /// with `sprite = None` via `#[serde(default)]`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::npc::NpcDefinition;
+    /// use antares::domain::world::SpriteReference;
+    ///
+    /// let npc = NpcDefinition {
+    ///     id: "guard_001".to_string(),
+    ///     name: "City Guard".to_string(),
+    ///     description: "A vigilant guard".to_string(),
+    ///     portrait_id: "guard.png".to_string(),
+    ///     dialogue_id: None,
+    ///     quest_ids: vec![],
+    ///     faction: None,
+    ///     is_merchant: false,
+    ///     is_innkeeper: false,
+    ///     sprite: None,
+    /// };
+    /// ```
+    #[serde(default)]
+    pub sprite: Option<SpriteReference>,
 
     /// Quests this NPC gives or is involved with
     #[serde(default)]
@@ -145,6 +176,7 @@ impl NpcDefinition {
             name: name.into(),
             description: String::new(),
             portrait_id: portrait_id.into(),
+            sprite: None,
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -179,6 +211,7 @@ impl NpcDefinition {
             name: name.into(),
             description: String::new(),
             portrait_id: portrait_id.into(),
+            sprite: None,
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -213,6 +246,7 @@ impl NpcDefinition {
             name: name.into(),
             description: String::new(),
             portrait_id: portrait_id.into(),
+            sprite: None,
             dialogue_id: None,
             quest_ids: Vec::new(),
             faction: None,
@@ -253,6 +287,37 @@ impl NpcDefinition {
     /// ```
     pub fn gives_quests(&self) -> bool {
         !self.quest_ids.is_empty()
+    }
+
+    /// Sets the sprite reference for this NPC (builder pattern).
+    ///
+    /// # Arguments
+    ///
+    /// * `sprite` - The sprite reference to use for this NPC
+    ///
+    /// # Returns
+    ///
+    /// Self with sprite field set
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::npc::NpcDefinition;
+    /// use antares::domain::world::SpriteReference;
+    ///
+    /// let sprite = SpriteReference {
+    ///     sheet_path: "sprites/actors/npcs_town.png".to_string(),
+    ///     sprite_index: 2,
+    ///     animation: None,
+    ///     material_properties: None,
+    /// };
+    ///
+    /// let npc = NpcDefinition::new("Guard", "City Guard", "guard.png")
+    ///     .with_sprite(sprite);
+    /// ```
+    pub fn with_sprite(mut self, sprite: SpriteReference) -> Self {
+        self.sprite = Some(sprite);
+        self
     }
 }
 
@@ -434,6 +499,7 @@ mod tests {
             name: "Village Elder".to_string(),
             description: "Wise elder".to_string(),
             portrait_id: "elder.png".to_string(),
+            sprite: None,
             dialogue_id: Some(1),
             quest_ids: vec![1, 2, 3],
             faction: Some("Village".to_string()),
@@ -460,6 +526,42 @@ mod tests {
         assert_eq!(deserialized.description, "");
         assert_eq!(deserialized.dialogue_id, None);
         assert_eq!(deserialized.quest_ids.len(), 0);
+    }
+
+    #[test]
+    fn test_npc_definition_serializes_with_sprite_field_present() {
+        let sprite = crate::domain::world::SpriteReference {
+            sheet_path: "sprites/test/custom.png".to_string(),
+            sprite_index: 42,
+            animation: None,
+            material_properties: None,
+        };
+        let npc = NpcDefinition::new("test_npc", "Test NPC", "test.png").with_sprite(sprite);
+
+        let ron_str = ron::to_string(&npc).expect("Failed to serialize to RON");
+        let deserialized: NpcDefinition =
+            ron::from_str(&ron_str).expect("Failed to deserialize from RON");
+
+        assert!(deserialized.sprite.is_some());
+        assert_eq!(
+            deserialized.sprite.as_ref().unwrap().sheet_path,
+            "sprites/test/custom.png"
+        );
+        assert_eq!(deserialized.sprite.as_ref().unwrap().sprite_index, 42);
+    }
+
+    #[test]
+    fn test_npc_definition_deserializes_without_sprite_field_defaults_none() {
+        let ron_str = r#"
+NpcDefinition(
+    id: "old_npc",
+    name: "Old NPC",
+    portrait_id: "portrait.png",
+)
+"#;
+        let npc: NpcDefinition = ron::from_str(ron_str).expect("Failed to deserialize old format");
+        assert!(npc.sprite.is_none());
+        assert_eq!(npc.name, "Old NPC");
     }
 
     #[test]
@@ -533,6 +635,7 @@ mod tests {
             name: "Complete NPC".to_string(),
             description: "An NPC with all fields set".to_string(),
             portrait_id: "complete.png".to_string(),
+            sprite: None,
             dialogue_id: Some(10),
             quest_ids: vec![1, 2, 3, 4],
             faction: Some("Test Faction".to_string()),

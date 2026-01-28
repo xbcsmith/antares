@@ -18,7 +18,7 @@
 //! use antares::domain::dialogue::{DialogueId, NodeId};
 //!
 //! // Start a dialogue tree (ID 1) at root node (ID 1)
-//! let state = DialogueState::start(1 as DialogueId, 1 as NodeId);
+//! let state = DialogueState::start(1 as DialogueId, 1 as NodeId, None, None);
 //! assert!(state.is_active());
 //! assert_eq!(state.current_node_id, 1);
 //! ```
@@ -174,7 +174,7 @@ impl DialogueState {
     /// use antares::application::dialogue::DialogueState;
     /// use antares::domain::dialogue::NodeId;
     ///
-    /// let mut state = DialogueState::start(1, 1);
+    /// let mut state = DialogueState::start(1, 1, None, None);
     /// state.advance_to(2);
     /// assert_eq!(state.current_node_id, 2);
     /// assert_eq!(state.dialogue_history, vec![1, 2]);
@@ -235,7 +235,7 @@ impl DialogueState {
     /// ```
     /// use antares::application::dialogue::DialogueState;
     ///
-    /// let mut state = DialogueState::start(1, 1);
+    /// let mut state = DialogueState::start(1, 1, None, None);
     /// state.end();
     /// assert!(!state.is_active());
     /// assert!(state.dialogue_history.is_empty());
