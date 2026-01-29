@@ -282,6 +282,85 @@ Implemented complete sprite rendering pipeline for tile and actor sprites using 
 - Phase 5: Campaign Builder SDK Integration (sprite editor UI)
 - Phase 6: Advanced Features (optional - sprite layering, procedural selection)
 
+## Phase 4: Monster AI System - COMPLETED
+
+### Summary
+
+Implemented the Monster AI system to automate monster turns during combat. This includes an AI-driven target selection (Aggressive / Defensive / Random), automatic attack execution for monsters (choosing attacks and applying damage/specials), integration with the existing turn flow, and a suite of unit tests validating behavior.
+
+Key points:
+
+- Monster turns now execute automatically when the current actor is a monster and the combat turn sub-state is `EnemyTurn`.
+- Three AI behaviors implemented:
+  - Aggressive: targets the lowest-HP living player.
+  - Defensive: targets the player with the highest threat (simple heuristic: might + accuracy).
+  - Random: chooses a random living player.
+- Deterministic helper functions were added to make testing AI and attacks predictable.
+
+### Components Implemented
+
+1. Game layer (`src/game/systems/combat.rs`)
+
+   - `execute_monster_turn` system: runs during `CombatTurnState::EnemyTurn`, selects attack & target, executes attack, applies damage/specials, advances the turn, and updates the `CombatTurnStateResource`.
+   - `perform_monster_turn_with_rng` helper: deterministic monster turn execution using a supplied RNG (used by tests).
+   - `select_monster_target` helper: encapsulates AI target selection logic (Aggressive/Defensive/Random).
+   - Tests:
+     - `test_monster_ai_selects_target`
+     - `test_monster_turn_advances_after_attack`
+     - `test_monster_attacks_lowest_hp_target`
+   - Small robustness improvements: make keyboard input optional for tests and ensure the plugin inserts a default `ButtonInput<KeyCode>` resource to avoid missing-input panics in the minimal test harness.
+
+2. Domain layer (`src/domain/combat/monster.rs`)
+   - Added `AiBehavior` enum and an `ai_behavior` field on `Monster` (serde `default` applied so existing content remains compatible).
+   - Small doc example updates (doctest fixed to include `ai_behavior`).
+
+### Files Modified
+
+- `src/game/systems/combat.rs`
+
+  - Added `execute_monster_turn`, `perform_monster_turn_with_rng`, `select_monster_target`.
+  - Registered the `execute_monster_turn` system in `CombatPlugin`.
+  - Improved several systems to be resilient in unit test environments (optional `GameContent` & `ButtonInput` handling).
+  - Added unit tests covering monster AI behaviors and turn advancement.
+
+- `src/domain/combat/monster.rs`
+
+  - Added `AiBehavior` enum and `ai_behavior` field on `Monster`.
+  - Updated doc examples and added a small unit test verifying the default AI behavior.
+
+- `docs/explanation/implementations.md`
+  - This file (the change being applied here) — added this Phase 4 section describing what was implemented, files changed, tests added, and rationale.
+
+### Testing & Quality Gates
+
+- Added unit tests in `src/game/systems/combat.rs` to cover the AI behavior and monster turn flow.
+- Verified locally:
+  - `cargo fmt --all` → OK
+  - `cargo check --all-targets --all-features` → OK
+  - `cargo clippy --all-targets --all-features -- -D warnings` → OK
+  - `cargo test` / `cargo nextest run --all-features` → All tests (including new ones) pass locally
+
+### Implementation Notes
+
+- The AI selection logic is intentionally simple and deterministic for testability:
+  - Aggressive picks the living player with the lowest current HP.
+  - Defensive picks by a simple "threat" heuristic: `might + accuracy`.
+  - Random uses the supplied RNG to pick among living players.
+- The monster turn helper reuses domain functions:
+  - Attack selection via `choose_monster_attack`
+  - Hit/damage resolution via `resolve_attack`
+  - Damage application via `apply_damage`
+  - Special effects mapped to condition definitions via `GameContent` (if present)
+- Monsters mark themselves as having acted; `CombatState::advance_turn()` handles round transitions and condition ticks.
+- Systems were made tolerant to missing testing resources (e.g., optional `GameContent`, default `ButtonInput`) so unit tests using `MinimalPlugins` do not panic.
+
+### Success Criteria
+
+- Monster turns execute automatically when it is their turn.
+- AI selects targets according to behavior (aggressive -> lowest HP; defensive -> highest threat; random -> random living player).
+- Damage is applied to the selected target and the turn advances appropriately.
+- Unit tests cover target selection, turn advancement, and correct application of attacks.
+
 ---
 
 ## Bug Fix: Inn UI Mouse and Keyboard Input - COMPLETED

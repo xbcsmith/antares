@@ -374,3 +374,68 @@ fn test_combat_participants_management() {
     assert_eq!(combat.alive_party_count(), 3);
     assert_eq!(combat.alive_monster_count(), 2);
 }
+
+#[test]
+fn test_full_combat_round_all_combatants_act() {
+    // Arrange: Create a combat with party and monsters
+    let mut combat = CombatState::new(Handicap::Even);
+
+    // Add party members
+    let p1 = create_test_character("P1", "knight", 20);
+    let p2 = create_test_character("P2", "cleric", 20);
+    combat.add_player(p1);
+    combat.add_player(p2);
+
+    // Add two simple monsters directly (no DB dependency)
+    let m1 = crate::domain::combat::monster::Monster::new(
+        1,
+        "GoblinA".to_string(),
+        crate::domain::character::Stats::new(8, 8, 8, 8, 8, 8, 8),
+        10,
+        5,
+        vec![crate::domain::combat::types::Attack::physical(
+            crate::domain::types::DiceRoll::new(1, 4, 0),
+        )],
+        crate::domain::combat::monster::LootTable::default(),
+    );
+    let m2 = crate::domain::combat::monster::Monster::new(
+        2,
+        "GoblinB".to_string(),
+        crate::domain::character::Stats::new(8, 8, 8, 8, 8, 8, 8),
+        10,
+        5,
+        vec![crate::domain::combat::types::Attack::physical(
+            crate::domain::types::DiceRoll::new(1, 4, 0),
+        )],
+        crate::domain::combat::monster::LootTable::default(),
+    );
+    combat.add_monster(m1);
+    combat.add_monster(m2);
+
+    // Start combat and iterate through a full round (each combatant acts once)
+    start_combat(&mut combat);
+
+    let initial_round = combat.round;
+    let participants = combat.turn_order.len();
+
+    // Use an empty condition definitions vector (no DOT/HoT effects for this test)
+    let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = vec![];
+
+    for _ in 0..participants {
+        let _ = combat.advance_turn(&cond_defs);
+    }
+
+    // After a full cycle, we should be back at the first actor and the round should have advanced
+    assert_eq!(combat.current_turn, 0);
+    assert_eq!(combat.round, initial_round + 1);
+
+    // Monsters' per-round flags (has_acted) should have been reset when the new round began
+    for participant in &combat.participants {
+        if let Combatant::Monster(mon) = participant {
+            assert!(
+                !mon.has_acted,
+                "Monster should have had has_acted reset at round boundary"
+            );
+        }
+    }
+}

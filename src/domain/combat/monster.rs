@@ -236,6 +236,23 @@ impl Default for LootTable {
     }
 }
 
+/// AI behavior for monsters used by the combat AI systems.
+// ===== Monster AI Behavior =====
+//
+/// AI behavior modes for monsters
+///
+/// This determines how a monster selects targets during its turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum AiBehavior {
+    /// Aggressive: prefer attacking the lowest HP target.
+    Aggressive,
+    /// Defensive: focus on the highest threat (e.g., highest offensive capability).
+    Defensive,
+    /// Random: select a valid target at random.
+    #[default]
+    Random,
+}
+
 // ===== Monster =====
 
 /// Monster definition for combat encounters
@@ -263,6 +280,7 @@ impl Default for LootTable {
 ///     can_advance: false,
 ///     is_undead: false,
 ///     magic_resistance: 0,
+///     ai_behavior: AiBehavior::Random,
 ///     conditions: MonsterCondition::Normal,
 ///     active_conditions: Vec::new(),
 ///     has_acted: false,
@@ -305,6 +323,9 @@ pub struct Monster {
     /// Magic resistance percentage (0-100)
     #[serde(default)]
     pub magic_resistance: u8,
+    /// AI behavior preference for the monster (affects target selection/decision making)
+    #[serde(default)]
+    pub ai_behavior: AiBehavior,
     /// Current condition (paralyzed, asleep, etc.) - runtime state, defaults to Normal
     #[serde(default)]
     pub conditions: MonsterCondition,
@@ -343,6 +364,7 @@ impl Monster {
             can_advance: false,
             is_undead: false,
             magic_resistance: 0,
+            ai_behavior: AiBehavior::default(),
             conditions: MonsterCondition::Normal,
             active_conditions: Vec::new(),
             has_acted: false,
@@ -658,5 +680,15 @@ mod tests {
         assert!(monster.has_acted);
         monster.reset_turn();
         assert!(!monster.has_acted);
+    }
+
+    #[test]
+    fn test_ai_behavior_default() {
+        let stats = Stats::new(10, 8, 6, 10, 8, 7, 5);
+        let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
+        let loot = LootTable::none();
+
+        let monster = Monster::new(42, "AI Test".to_string(), stats, 10, 5, attacks, loot);
+        assert_eq!(monster.ai_behavior, AiBehavior::Random);
     }
 }
