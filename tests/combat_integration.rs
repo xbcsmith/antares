@@ -7,11 +7,13 @@
 //! verifying that all systems work together correctly.
 
 use antares::application::GameState;
-use antares::domain::character::{Alignment, Character, Sex};
+use antares::domain::character::{Alignment, Character, Sex, Stats};
 use antares::domain::combat::database::MonsterDatabase;
 use antares::domain::combat::engine::{start_combat, CombatState, Combatant};
-use antares::domain::combat::types::{CombatStatus, Handicap};
-use antares::domain::types::MonsterId;
+use antares::domain::combat::monster::{LootTable, Monster};
+use antares::domain::combat::types::{Attack, CombatStatus, Handicap};
+use antares::domain::conditions::ConditionDefinition;
+use antares::domain::types::{DiceRoll, MonsterId};
 use bevy::MinimalPlugins;
 
 /// Helper function to create a test character with specific stats
@@ -387,27 +389,23 @@ fn test_full_combat_round_all_combatants_act() {
     combat.add_player(p2);
 
     // Add two simple monsters directly (no DB dependency)
-    let m1 = crate::domain::combat::monster::Monster::new(
+    let m1 = Monster::new(
         1,
         "GoblinA".to_string(),
-        crate::domain::character::Stats::new(8, 8, 8, 8, 8, 8, 8),
+        Stats::new(8, 8, 8, 8, 8, 8, 8),
         10,
         5,
-        vec![crate::domain::combat::types::Attack::physical(
-            crate::domain::types::DiceRoll::new(1, 4, 0),
-        )],
-        crate::domain::combat::monster::LootTable::default(),
+        vec![Attack::physical(DiceRoll::new(1, 4, 0))],
+        LootTable::default(),
     );
-    let m2 = crate::domain::combat::monster::Monster::new(
+    let m2 = Monster::new(
         2,
         "GoblinB".to_string(),
-        crate::domain::character::Stats::new(8, 8, 8, 8, 8, 8, 8),
+        Stats::new(8, 8, 8, 8, 8, 8, 8),
         10,
         5,
-        vec![crate::domain::combat::types::Attack::physical(
-            crate::domain::types::DiceRoll::new(1, 4, 0),
-        )],
-        crate::domain::combat::monster::LootTable::default(),
+        vec![Attack::physical(DiceRoll::new(1, 4, 0))],
+        LootTable::default(),
     );
     combat.add_monster(m1);
     combat.add_monster(m2);
@@ -419,7 +417,7 @@ fn test_full_combat_round_all_combatants_act() {
     let participants = combat.turn_order.len();
 
     // Use an empty condition definitions vector (no DOT/HoT effects for this test)
-    let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = vec![];
+    let cond_defs: Vec<ConditionDefinition> = vec![];
 
     for _ in 0..participants {
         let _ = combat.advance_turn(&cond_defs);

@@ -260,6 +260,64 @@ impl AudioSettings {
 /// });
 /// # }
 /// ```
+/// Message to request background music playback.
+///
+/// Other systems can listen for this message and perform appropriate track
+/// changes (e.g., start combat music on combat start, restore exploration
+/// music on combat end).
+#[derive(Message, Clone)]
+pub struct PlayMusic {
+    /// Identifier for the music track (campaign-defined string)
+    pub track_id: String,
+    /// Whether the track should loop
+    pub looped: bool,
+}
+
+/// Message to request a one-shot sound effect.
+///
+/// Systems that handle SFX should respect `AudioSettings` (volume/enabled).
+#[derive(Message, Clone)]
+pub struct PlaySfx {
+    /// Identifier for the sound effect to play
+    pub sfx_id: String,
+}
+
+/// Lightweight handler that consumes audio messages and forwards them to the
+/// audio subsystem (placeholder - currently logs the intent and respects
+/// `AudioSettings`).
+fn handle_audio_messages(
+    mut music_reader: MessageReader<PlayMusic>,
+    mut sfx_reader: MessageReader<PlaySfx>,
+    settings: Res<AudioSettings>,
+) {
+    // Handle music requests
+    for ev in music_reader.read() {
+        if settings.enabled {
+            info!(
+                "Audio: PlayMusic track='{}' looped={} volume={}",
+                ev.track_id,
+                ev.looped,
+                settings.effective_music_volume()
+            );
+        } else {
+            debug!("Audio disabled; PlayMusic '{}' ignored", ev.track_id);
+        }
+    }
+
+    // Handle SFX requests
+    for ev in sfx_reader.read() {
+        if settings.enabled {
+            info!(
+                "Audio: PlaySfx sfx='{}' volume={}",
+                ev.sfx_id,
+                settings.effective_sfx_volume()
+            );
+        } else {
+            debug!("Audio disabled; PlaySfx '{}' ignored", ev.sfx_id);
+        }
+    }
+}
+
 pub struct AudioPlugin {
     /// Audio configuration to use for initializing AudioSettings
     pub config: AudioConfig,
@@ -269,13 +327,15 @@ impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
         let settings = AudioSettings::from_config(&self.config);
 
-        app.insert_resource(settings);
+        // Insert the runtime audio settings resource, register audio messages,
+        // and add a simple handler that will eventually be replaced by a real
+        // playback system (Bevy Audio integration).
+        app.insert_resource(settings)
+            .add_message::<PlayMusic>()
+            .add_message::<PlaySfx>()
+            .add_systems(Update, handle_audio_messages);
 
-        // Future: Add audio playback systems here
-        // Example:
-        // app.add_systems(Update, play_background_music);
-        // app.add_systems(Update, handle_sfx_events);
-        // app.add_systems(Update, update_ambient_sounds);
+        // Future: Hook up to concrete audio playback (Bevy's audio) here.
     }
 }
 

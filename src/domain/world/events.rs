@@ -224,6 +224,54 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
     Ok(result)
 }
 
+/// Roll for a random encounter based on the world's current map encounter table
+/// and the terrain modifier at the party position. Returns `Some(monster_group)`
+/// when an encounter should occur, otherwise `None`.
+///
+/// `R` is the RNG implementation used by the project's random helper (e.g. `rand::rng()`).
+pub fn random_encounter<R: rand::Rng>(world: &World, rng: &mut R) -> Option<Vec<u8>> {
+    // Get the current map (return None if not present)
+    let map = world.get_current_map()?;
+
+    // Respect the map's safe-zone flag
+    if !map.allow_random_encounters {
+        return None;
+    }
+
+    // Must have a configured encounter table
+    let table = match &map.encounter_table {
+        Some(t) => t,
+        None => return None,
+    };
+
+    // No groups or zero chance => no encounter
+    if table.groups.is_empty() || table.encounter_rate <= 0.0 {
+        return None;
+    }
+
+    // Compute terrain modifier (defaults to 1.0)
+    let terrain_modifier = map
+        .get_tile(world.party_position)
+        .map(|tile| {
+            table
+                .terrain_modifiers
+                .get(&tile.terrain)
+                .cloned()
+                .unwrap_or(1.0)
+        })
+        .unwrap_or(1.0);
+
+    let chance = (table.encounter_rate * terrain_modifier).clamp(0.0, 1.0);
+
+    // Roll for encounter
+    if rng.random::<f32>() <= chance {
+        let idx = rng.random_range(0..table.groups.len());
+        Some(table.groups[idx].clone())
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,6 +449,70 @@ mod tests {
             }
             _ => panic!("Expected Sign event"),
         }
+    }
+
+    #[test]
+    fn test_random_encounter_triggers() {
+        // Arrange: Create a map with an encounter table that guarantees an encounter
+        let mut world = World::new();
+        let mut map = Map::new(
+            1,
+            "Encounter Map".to_string(),
+            "Random encounter test".to_string(),
+            10,
+            10,
+        );
+
+        // Configure encounter table: 100% base rate and a single group [1,2,3]
+        let mut table = crate::domain::world::EncounterTable::default();
+        table.encounter_rate = 1.0;
+        table.groups.push(vec![1u8, 2u8, 3u8]);
+
+        map.encounter_table = Some(table);
+        map.allow_random_encounters = true;
+
+        world.add_map(map);
+        world.set_current_map(1);
+        world.set_party_position(Position::new(5, 5));
+
+        // Act
+        let mut rng = rand::rng();
+        let result = random_encounter(&world, &mut rng);
+
+        // Assert
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), vec![1u8, 2u8, 3u8]);
+    }
+
+    #[test]
+    fn test_safe_zones_prevent_encounters() {
+        // Arrange: Map has an encounter table but random encounters are disabled
+        let mut world = World::new();
+        let mut map = Map::new(
+            1,
+            "Safe Map".to_string(),
+            "No encounters here".to_string(),
+            10,
+            10,
+        );
+
+        let mut table = crate::domain::world::EncounterTable::default();
+        table.encounter_rate = 1.0;
+        table.groups.push(vec![1u8]);
+
+        map.encounter_table = Some(table);
+        map.allow_random_encounters = false; // safe zone
+
+        world.add_map(map);
+        world.set_current_map(1);
+        world.set_party_position(Position::new(2, 2));
+
+        // Act
+        let mut rng = rand::rng();
+        let result = random_encounter(&world, &mut rng);
+
+        // Assert: No encounter should be returned in a safe zone
+        assert!(result.is_none());
     }
 
     #[test]

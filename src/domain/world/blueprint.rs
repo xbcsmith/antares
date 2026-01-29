@@ -214,6 +214,8 @@ impl From<MapBlueprint> for Map {
             height: bp.height,
             tiles,
             events,
+            encounter_table: None,
+            allow_random_encounters: true,
             npc_placements,
         }
     }

@@ -926,7 +926,41 @@ impl GameState {
         let position = crate::domain::world::move_party(&mut self.world, direction)
             .map_err(MoveHandleError::Movement)?;
 
-        // Trigger the map event at the resulting position
+        // If there is no explicit map event at this position, first roll for a
+        // random encounter (map-level encounter tables / terrain modifiers apply).
+        // Tile events take precedence: if there is an event placed on the tile,
+        // we will let trigger_event handle it instead.
+        if self
+            .world
+            .get_current_map()
+            .and_then(|m| m.get_event(position))
+            .is_none()
+        {
+            let mut rng = rand::rng();
+            if let Some(monster_group) =
+                crate::domain::world::random_encounter(&self.world, &mut rng)
+            {
+                // Build combat state and initialize from the monster group
+                let mut cs = crate::domain::combat::engine::CombatState::new(
+                    crate::domain::combat::types::Handicap::Even,
+                );
+
+                crate::domain::combat::engine::initialize_combat_from_group(
+                    &mut cs,
+                    content,
+                    &monster_group,
+                )
+                .map_err(MoveHandleError::CombatInit)?;
+
+                // Enter combat with prepared combat state
+                self.mode = GameMode::Combat(cs);
+
+                // Combat occurred instead of triggering a tile event; return early.
+                return Ok(());
+            }
+        }
+
+        // No random encounter (or a tile event exists) - handle tile event as before
         let ev = crate::domain::world::trigger_event(&mut self.world, position)
             .map_err(MoveHandleError::Event)?;
 

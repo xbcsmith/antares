@@ -25,11 +25,11 @@ pub mod sprite_selection;
 mod types;
 
 pub use blueprint::MapBlueprint;
-pub use events::{trigger_event, EventError, EventResult};
+pub use events::{random_encounter, trigger_event, EventError, EventResult};
 pub use movement::{check_tile_blocked, move_party, MovementError};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};
 pub use types::{
-    LayeredSprite, Map, MapEvent, ResolvedNpc, SpriteAnimation, SpriteLayer,
+    EncounterTable, LayeredSprite, Map, MapEvent, ResolvedNpc, SpriteAnimation, SpriteLayer,
     SpriteMaterialProperties, SpriteReference, SpriteSelectionRule, TerrainType, Tile,
     TileVisualMetadata, WallType, World,
 };

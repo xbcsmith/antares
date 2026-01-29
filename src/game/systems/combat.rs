@@ -57,7 +57,7 @@ use crate::domain::combat::engine::{
     Combatant,
 };
 use crate::domain::combat::types::{Attack, CombatStatus, CombatantId, Handicap, SpecialEffect};
-use crate::domain::types::DiceRoll;
+use crate::domain::types::{DiceRoll, ItemId};
 use crate::game::resources::GlobalState;
 
 /// Message emitted when combat has started.
@@ -82,6 +82,14 @@ pub struct DefendAction {
 /// Player attempts to flee (registered by the plugin)
 #[derive(Message)]
 pub struct FleeAction;
+
+/// Message emitted when combat ends in victory
+#[derive(Message)]
+pub struct CombatVictory;
+
+/// Message emitted when combat ends in defeat
+#[derive(Message)]
+pub struct CombatDefeat;
 
 /// Combat turn sub-states used by the UI / systems.
 ///
@@ -165,6 +173,8 @@ pub struct CombatResource {
     /// For each participant index in `state.participants`, `Some(idx)` if that
     /// participant is a player and `idx` is the original party index.
     pub player_orig_indices: Vec<Option<usize>>,
+    /// Whether the combat resolution (victory/defeat) has been handled.
+    pub resolution_handled: bool,
 }
 
 impl CombatResource {
@@ -173,6 +183,7 @@ impl CombatResource {
         Self {
             state: CombatState::new(Handicap::Even),
             player_orig_indices: Vec::new(),
+            resolution_handled: false,
         }
     }
 
@@ -180,6 +191,7 @@ impl CombatResource {
     pub fn clear(&mut self) {
         self.state = CombatState::new(Handicap::Even);
         self.player_orig_indices.clear();
+        self.resolution_handled = false;
     }
 }
 
@@ -254,6 +266,25 @@ pub struct ActionButton {
     pub button_type: ActionButtonType,
 }
 
+/// Marker component for victory summary UI root
+#[derive(Component, Debug, Clone, Copy)]
+pub struct VictorySummaryRoot;
+
+/// Marker component for defeat summary UI root
+#[derive(Component, Debug, Clone, Copy)]
+pub struct DefeatSummaryRoot;
+
+/// Marker component for floating damage numbers (spawned on hits)
+#[derive(Component, Debug, Clone, Copy)]
+pub struct FloatingDamage {
+    /// Remaining lifetime for the damage number in seconds
+    pub remaining: f32,
+}
+
+/// Marker component for floating damage text node
+#[derive(Component, Debug, Clone, Copy)]
+pub struct DamageText;
+
 /// Resource representing the current target selection state.
 ///
 /// When set to `Some(attacker)` the player is selecting a target for that attacker.
@@ -268,6 +299,8 @@ impl Plugin for CombatPlugin {
             .add_message::<AttackAction>()
             .add_message::<DefendAction>()
             .add_message::<FleeAction>()
+            .add_message::<CombatVictory>()
+            .add_message::<CombatDefeat>()
             .insert_resource(CombatResource::new())
             .insert_resource(CombatTurnStateResource::default())
             .insert_resource(TargetSelection::default())
@@ -287,10 +320,15 @@ impl Plugin for CombatPlugin {
             .add_systems(Update, handle_flee_action)
             // Phase 4: Monster AI Systems
             .add_systems(Update, execute_monster_turn)
+            // Phase 5: Combat resolution & rewards
+            .add_systems(Update, check_combat_resolution)
+            .add_systems(Update, handle_combat_victory)
+            .add_systems(Update, handle_combat_defeat)
             // Phase 2: Combat UI systems
             .add_systems(Update, setup_combat_ui)
             .add_systems(Update, cleanup_combat_ui)
-            .add_systems(Update, update_combat_ui);
+            .add_systems(Update, update_combat_ui)
+            .add_systems(Update, cleanup_floating_damage);
     }
 }
 
@@ -350,6 +388,7 @@ fn handle_combat_started(
     mut reader: MessageReader<CombatStarted>,
     mut combat_res: ResMut<CombatResource>,
     global_state: Res<GlobalState>,
+    mut music_writer: Option<MessageWriter<crate::game::systems::audio::PlayMusic>>,
 ) {
     for _ in reader.read() {
         // Only proceed if the global state is actually in combat mode
@@ -370,6 +409,14 @@ fn handle_combat_started(
                 }
             }
             combat_res.player_orig_indices = mapping;
+
+            // Request combat music transition (if audio plugin is registered)
+            if let Some(ref mut w) = music_writer {
+                w.write(crate::game::systems::audio::PlayMusic {
+                    track_id: "combat_theme".to_string(),
+                    looped: true,
+                });
+            }
         }
     }
 }
@@ -1150,6 +1197,8 @@ fn handle_attack_action(
     content: Option<Res<GameContent>>,
     mut global_state: ResMut<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
+    mut commands: Commands,
+    mut sfx_writer: Option<MessageWriter<crate::game::systems::audio::PlaySfx>>,
 ) {
     // Some tests or minimal harnesses may not register the full `GameContent` resource.
     // Use a lightweight in-memory database fallback so systems are resilient in tests.
@@ -1157,6 +1206,28 @@ fn handle_attack_action(
 
     for action in reader.read() {
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+
+        // Capture pre-attack HP for the target so we can show damage numbers
+        let pre_hp: u16 = match action.target {
+            CombatantId::Player(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Player(pc) => Some(pc.hp.current),
+                    _ => None,
+                })
+                .unwrap_or(0),
+            CombatantId::Monster(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Monster(m) => Some(m.hp.current),
+                    _ => None,
+                })
+                .unwrap_or(0),
+        };
 
         let mut rng = rand::rng();
         let _ = perform_attack_action_with_rng(
@@ -1167,6 +1238,69 @@ fn handle_attack_action(
             &mut turn_state,
             &mut rng,
         );
+
+        // Compute post-attack HP and damage dealt
+        let post_hp: u16 = match action.target {
+            CombatantId::Player(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Player(pc) => Some(pc.hp.current),
+                    _ => None,
+                })
+                .unwrap_or(0),
+            CombatantId::Monster(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Monster(m) => Some(m.hp.current),
+                    _ => None,
+                })
+                .unwrap_or(0),
+        };
+
+        let dmg = (pre_hp as i32 - post_hp as i32).max(0) as u32;
+
+        if dmg > 0 {
+            // Spawn a simple floating damage UI node that auto-despawns
+            commands
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Auto,
+                        height: Val::Auto,
+                        ..default()
+                    },
+                    FloatingDamage { remaining: 1.2 },
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new(format!("-{}", dmg)),
+                        TextFont {
+                            font_size: 18.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        DamageText,
+                    ));
+                });
+
+            // Play hit SFX (hook into audio system if present)
+            if let Some(ref mut w) = sfx_writer {
+                w.write(crate::game::systems::audio::PlaySfx {
+                    sfx_id: "combat_hit".to_string(),
+                });
+            }
+        } else {
+            // Play miss SFX if desired
+            if let Some(ref mut w) = sfx_writer {
+                w.write(crate::game::systems::audio::PlaySfx {
+                    sfx_id: "combat_miss".to_string(),
+                });
+            }
+        }
     }
 }
 
@@ -1627,6 +1761,362 @@ fn execute_monster_turn(
             &mut turn_state,
             &mut rng,
         );
+    }
+}
+
+// ===== Phase 5: Combat Resolution & Rewards =====
+
+/// System: Detect when combat ends (Victory/Defeat) and emit an appropriate message
+///
+/// This ensures the resolution is only handled once by tracking a flag in
+/// `CombatResource`.
+fn check_combat_resolution(
+    mut victory_writer: Option<MessageWriter<CombatVictory>>,
+    mut defeat_writer: Option<MessageWriter<CombatDefeat>>,
+    mut combat_res: ResMut<CombatResource>,
+    global_state: Res<GlobalState>,
+) {
+    // Only consider when in combat
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        return;
+    }
+
+    if combat_res.resolution_handled {
+        return;
+    }
+
+    match combat_res.state.status {
+        CombatStatus::Victory => {
+            if let Some(ref mut w) = victory_writer {
+                w.write(CombatVictory);
+            }
+            combat_res.resolution_handled = true;
+        }
+        CombatStatus::Defeat => {
+            if let Some(ref mut w) = defeat_writer {
+                w.write(CombatDefeat);
+            }
+            combat_res.resolution_handled = true;
+        }
+        _ => {}
+    }
+}
+
+/// Summary of rewards from a victorious combat - returned by the reward processor.
+pub struct VictorySummary {
+    pub total_xp: u64,
+    pub xp_awarded: Vec<(usize, u64)>, // (party_index, xp_amount)
+    pub total_gold: u32,
+    pub total_gems: u32,
+    pub items: Vec<ItemId>,
+}
+
+/// Process victory rewards using the provided RNG. This will:
+/// - Sum monster XP and distribute it to living party members
+/// - Roll gold/gem drops and add them to the party
+/// - Resolve item drops and add them to party members' inventories (if space)
+pub fn process_combat_victory_with_rng(
+    combat_res: &mut CombatResource,
+    _content: &GameContent,
+    global_state: &mut GlobalState,
+    rng: &mut impl rand::Rng,
+) -> Result<VictorySummary, crate::domain::combat::engine::CombatError> {
+    // Sum XP from dead monsters
+    let mut total_xp: u64 = 0;
+    for participant in &combat_res.state.participants {
+        if let Combatant::Monster(mon) = participant {
+            if !mon.is_alive() {
+                total_xp = total_xp.saturating_add(mon.loot.experience as u64);
+            }
+        }
+    }
+
+    // Determine recipient party indices (from mapping); fallback to living party members
+    let mut recipients: Vec<usize> = Vec::new();
+    for (idx, participant) in combat_res.state.participants.iter().enumerate() {
+        if let Combatant::Player(pc) = participant {
+            if pc.is_alive() {
+                if let Some(Some(party_idx)) = combat_res.player_orig_indices.get(idx).cloned() {
+                    if party_idx < global_state.0.party.members.len() {
+                        recipients.push(party_idx);
+                    }
+                }
+            }
+        }
+    }
+
+    if recipients.is_empty() {
+        for (i, member) in global_state.0.party.members.iter().enumerate() {
+            if member.is_alive() {
+                recipients.push(i);
+            }
+        }
+    }
+
+    let mut xp_awarded: Vec<(usize, u64)> = Vec::new();
+    if !recipients.is_empty() && total_xp > 0 {
+        let per = total_xp / recipients.len() as u64;
+        let mut remainder = total_xp % recipients.len() as u64;
+
+        for &party_idx in &recipients {
+            let mut award = per;
+            if remainder > 0 {
+                award += 1;
+                remainder -= 1;
+            }
+
+            // Award experience using domain helper (respects dead checks)
+            let _ = crate::domain::progression::award_experience(
+                &mut global_state.0.party.members[party_idx],
+                award,
+            );
+            xp_awarded.push((party_idx, award));
+        }
+    }
+
+    // Roll gold/gems/items from dead monsters and award to party
+    let mut total_gold: u32 = 0;
+    let mut total_gems: u32 = 0u32;
+    let mut items_dropped: Vec<ItemId> = Vec::new();
+
+    for participant in &combat_res.state.participants {
+        if let Combatant::Monster(mon) = participant {
+            if !mon.is_alive() {
+                // Gold
+                if mon.loot.gold_max >= mon.loot.gold_min {
+                    let gold = if mon.loot.gold_max == mon.loot.gold_min {
+                        mon.loot.gold_min
+                    } else {
+                        rng.random_range(mon.loot.gold_min..=mon.loot.gold_max)
+                    };
+                    total_gold = total_gold.saturating_add(gold);
+                }
+
+                // Gems
+                if mon.loot.gems_max >= mon.loot.gems_min {
+                    let gems = if mon.loot.gems_max == mon.loot.gems_min {
+                        mon.loot.gems_min as u32
+                    } else {
+                        rng.random_range(mon.loot.gems_min..=mon.loot.gems_max) as u32
+                    };
+                    total_gems = total_gems.saturating_add(gems);
+                }
+
+                // Items (probabilistic)
+                for (prob, item_id) in &mon.loot.items {
+                    if rng.random::<f32>() < *prob {
+                        items_dropped.push(*item_id);
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply currency to party (pooled)
+    global_state.0.party.gold = global_state.0.party.gold.saturating_add(total_gold);
+    global_state.0.party.gems = global_state.0.party.gems.saturating_add(total_gems);
+
+    // Distribute items to first available living party members
+    for item_id in &items_dropped {
+        let mut placed = false;
+        for &party_idx in &recipients {
+            if let Some(member) = global_state.0.party.members.get_mut(party_idx) {
+                if member.inventory.has_space() {
+                    let _ = member.inventory.add_item(*item_id, 0);
+                    placed = true;
+                    break;
+                }
+            }
+        }
+
+        // If no recipient had space, attempt to stash on any living member
+        if !placed {
+            for member in global_state.0.party.members.iter_mut() {
+                if member.is_alive() && member.inventory.has_space() {
+                    let _ = member.inventory.add_item(*item_id, 0);
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(VictorySummary {
+        total_xp,
+        xp_awarded,
+        total_gold,
+        total_gems,
+        items: items_dropped,
+    })
+}
+
+/// System: Handle CombatVictory messages and apply rewards.
+///
+/// This runs as a system wrapper and spawns a simple victory summary UI.
+fn handle_combat_victory(
+    mut reader: MessageReader<CombatVictory>,
+    mut combat_res: ResMut<CombatResource>,
+    content: Option<Res<GameContent>>,
+    mut global_state: ResMut<GlobalState>,
+    mut commands: Commands,
+    mut music_writer: Option<MessageWriter<crate::game::systems::audio::PlayMusic>>,
+    mut sfx_writer: Option<MessageWriter<crate::game::systems::audio::PlaySfx>>,
+) {
+    let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+
+    for _ in reader.read() {
+        let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+        let mut rng = rand::rng();
+
+        if let Ok(summary) = process_combat_victory_with_rng(
+            &mut combat_res,
+            content_ref,
+            &mut global_state,
+            &mut rng,
+        ) {
+            // Spawn a simple victory UI
+            commands
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+                    VictorySummaryRoot,
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new(format!(
+                            "Victory! XP: {}  Gold: {}  Gems: {}  Items: {:?}",
+                            summary.total_xp, summary.total_gold, summary.total_gems, summary.items
+                        )),
+                        TextFont {
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+
+            // Play victory SFX and transition back to exploration music (if audio plugin present)
+            if let Some(ref mut w) = sfx_writer {
+                w.write(crate::game::systems::audio::PlaySfx {
+                    sfx_id: "victory_fanfare".to_string(),
+                });
+            }
+            if let Some(ref mut w) = music_writer {
+                w.write(crate::game::systems::audio::PlayMusic {
+                    track_id: "exploration_theme".to_string(),
+                    looped: true,
+                });
+            }
+        }
+
+        // Exit combat (will trigger sync back to party on next frame)
+        global_state.0.exit_combat();
+    }
+}
+
+/// Process defeat state (non-UI part) - updates global game mode/state.
+pub fn process_combat_defeat_state(
+    _combat_res: &mut CombatResource,
+    global_state: &mut GlobalState,
+) {
+    // Exit combat and open menu (allow player to load/quit)
+    global_state.0.exit_combat();
+    global_state.0.enter_menu();
+}
+
+/// System: Handle CombatDefeat messages and display defeat UI + menu
+fn handle_combat_defeat(
+    mut reader: MessageReader<CombatDefeat>,
+    mut combat_res: ResMut<CombatResource>,
+    mut global_state: ResMut<GlobalState>,
+    mut commands: Commands,
+    mut music_writer: Option<MessageWriter<crate::game::systems::audio::PlayMusic>>,
+    mut sfx_writer: Option<MessageWriter<crate::game::systems::audio::PlaySfx>>,
+) {
+    for _ in reader.read() {
+        process_combat_defeat_state(&mut combat_res, &mut global_state);
+
+        // Spawn simple defeat UI overlay
+        commands
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+                DefeatSummaryRoot,
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    Text::new("You have been defeated. Returning to menu...".to_string()),
+                    TextFont {
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
+
+        // Play defeat SFX / music (if available)
+        if let Some(ref mut w) = sfx_writer {
+            w.write(crate::game::systems::audio::PlaySfx {
+                sfx_id: "defeat_sound".to_string(),
+            });
+        }
+        if let Some(ref mut w) = music_writer {
+            w.write(crate::game::systems::audio::PlayMusic {
+                track_id: "defeat_music".to_string(),
+                looped: false,
+            });
+        }
+        commands
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.2, 0.0, 0.0, 0.7)),
+                DefeatSummaryRoot,
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    Text::new("Defeat! You have been defeated."),
+                    TextFont {
+                        font_size: 18.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
+    }
+}
+
+/// Cleanup system for floating damage UI nodes. Decrements remaining lifetime
+/// and despawns the node when time is up.
+fn cleanup_floating_damage(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut query: Query<(Entity, &mut FloatingDamage)>,
+) {
+    for (entity, mut fd) in query.iter_mut() {
+        fd.remaining -= time.delta_secs();
+        if fd.remaining <= 0.0 {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -2181,6 +2671,233 @@ mod tests {
             .world_mut()
             .query_filtered::<&EnemyCard, With<EnemyCard>>();
         assert_eq!(enemy_cards.iter(app.world()).count(), 2);
+    }
+
+    /// Verify combat victory distributes XP to living party members
+    #[test]
+    fn test_victory_distributes_xp() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Prepare game state with two party members
+        let mut gs = GameState::new();
+        let p1 = Character::new(
+            "P1".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let p2 = Character::new(
+            "P2".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(p1.clone()).unwrap();
+        gs.party.add_member(p2.clone()).unwrap();
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Build combat state: two players and one dead monster with 100 XP
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(p1.clone());
+        cs.add_player(p2.clone());
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Killed".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 10, 10, 10),
+            0, // dead
+            5,
+            vec![],
+            crate::domain::combat::monster::LootTable::new(0, 0, 0, 0, 100),
+        );
+        cs.add_monster(monster);
+        cs.status = CombatStatus::Victory;
+        cs.turn_order = vec![
+            CombatantId::Player(0),
+            CombatantId::Player(1),
+            CombatantId::Monster(2),
+        ];
+        cs.current_turn = 0;
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1), None];
+        }
+
+        // Call helper with deterministic RNG
+        {
+            use rand::rngs::StdRng;
+            use rand::SeedableRng;
+            let mut rng = StdRng::seed_from_u64(42);
+            let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+
+            {
+                // Remove the GlobalState resource from the world to avoid overlapping
+                // mutable borrows, operate on it, then re-insert the updated resource.
+                let world = app.world_mut();
+
+                let mut gs_owned = world
+                    .remove_resource::<crate::game::resources::GlobalState>()
+                    .expect("missing GlobalState resource for test");
+
+                let mut cr = world.resource_mut::<CombatResource>();
+
+                let summary =
+                    process_combat_victory_with_rng(&mut cr, &content, &mut gs_owned, &mut rng)
+                        .expect("victory processing failed");
+
+                // Release the mutable borrow to CombatResource before reinserting GlobalState
+                drop(cr);
+
+                // Reinsert the updated GlobalState
+                world.insert_resource(gs_owned);
+
+                // Fetch updated global state for assertions
+                let gs_after = app
+                    .world()
+                    .resource::<crate::game::resources::GlobalState>();
+
+                // 100 XP split between 2 living party members = 50 each
+                assert_eq!(gs_after.0.party.members[0].experience, 50);
+                assert_eq!(gs_after.0.party.members[1].experience, 50);
+                assert_eq!(summary.total_xp, 100);
+            }
+        }
+    }
+
+    /// Verify victory awards gold to the party
+    #[test]
+    fn test_victory_awards_gold() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Prepare game state with one party member
+        let mut gs = GameState::new();
+        let p = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(p.clone()).unwrap();
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Build combat state with one dead monster with fixed gold 25
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(p.clone());
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Looty".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 10, 10, 10),
+            0, // dead
+            5,
+            vec![],
+            crate::domain::combat::monster::LootTable::new(25, 25, 0, 0, 0),
+        );
+        cs.add_monster(monster);
+        cs.status = CombatStatus::Victory;
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None];
+        }
+
+        // Process victory
+        {
+            use rand::rngs::StdRng;
+            use rand::SeedableRng;
+            let mut rng = StdRng::seed_from_u64(99);
+            let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+            {
+                // Avoid overlapping mutable borrows by removing GlobalState, mutating it,
+                // and then reinserting it back into the world.
+                let world = app.world_mut();
+
+                let mut gs_owned = world
+                    .remove_resource::<crate::game::resources::GlobalState>()
+                    .expect("missing GlobalState resource for test");
+
+                let mut cr = world.resource_mut::<CombatResource>();
+
+                let summary =
+                    process_combat_victory_with_rng(&mut cr, &content, &mut gs_owned, &mut rng)
+                        .expect("victory processing failed");
+
+                // Release the mutable borrow to CombatResource before reinserting GlobalState
+                drop(cr);
+
+                // Reinsert the updated GlobalState
+                world.insert_resource(gs_owned);
+
+                // Fetch updated global state for assertions
+                let gs_after = app
+                    .world()
+                    .resource::<crate::game::resources::GlobalState>();
+
+                assert_eq!(summary.total_gold, 25);
+                assert_eq!(gs_after.0.party.gold, 25);
+            }
+        }
+    }
+
+    /// Verify defeat triggers menu/game over flow
+    #[test]
+    fn test_defeat_triggers_game_over() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Create a game state with one dead party member and set combat state to Defeat
+        let mut gs = GameState::new();
+        let mut dead = Character::new(
+            "Dead".to_string(),
+            "human".to_string(),
+            "peasant".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        dead.hp.current = 0;
+        gs.party.add_member(dead).unwrap();
+        gs.enter_combat();
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        {
+            // Read the party member first (immutable borrow) to avoid overlapping
+            // with the subsequent mutable borrow of the world.
+            let p = app
+                .world()
+                .resource::<crate::game::resources::GlobalState>()
+                .0
+                .party
+                .members[0]
+                .clone();
+
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            let mut cs = CombatState::new(Handicap::Even);
+            cs.add_player(p);
+            cs.status = CombatStatus::Defeat;
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+            cr.resolution_handled = false;
+        }
+
+        // Run update so the resolution system emits the message and the handler runs
+        app.update();
+        app.update();
+
+        // Verify game entered Menu mode (game over handling)
+        let gs_after = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        assert!(matches!(gs_after.0.mode, GameMode::Menu(_)));
     }
 
     // ===== Phase 3: Player Action System Tests =====
