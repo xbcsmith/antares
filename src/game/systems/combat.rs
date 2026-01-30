@@ -2744,16 +2744,14 @@ mod tests {
                     .remove_resource::<crate::game::resources::GlobalState>()
                     .expect("missing GlobalState resource for test");
 
-                let mut cr = world.resource_mut::<CombatResource>();
+                let summary = {
+                    let mut cr = world.resource_mut::<CombatResource>();
 
-                let summary =
                     process_combat_victory_with_rng(&mut cr, &content, &mut gs_owned, &mut rng)
-                        .expect("victory processing failed");
+                        .expect("victory processing failed")
+                };
 
-                // Release the mutable borrow to CombatResource before reinserting GlobalState
-                drop(cr);
-
-                // Reinsert the updated GlobalState
+                // Reinsert the updated GlobalState (the mutable borrow ended when the inner block closed)
                 world.insert_resource(gs_owned);
 
                 // Fetch updated global state for assertions
@@ -2824,16 +2822,14 @@ mod tests {
                     .remove_resource::<crate::game::resources::GlobalState>()
                     .expect("missing GlobalState resource for test");
 
-                let mut cr = world.resource_mut::<CombatResource>();
+                let summary = {
+                    let mut cr = world.resource_mut::<CombatResource>();
 
-                let summary =
                     process_combat_victory_with_rng(&mut cr, &content, &mut gs_owned, &mut rng)
-                        .expect("victory processing failed");
+                        .expect("victory processing failed")
+                };
 
-                // Release the mutable borrow to CombatResource before reinserting GlobalState
-                drop(cr);
-
-                // Reinsert the updated GlobalState
+                // Reinsert the updated GlobalState (the mutable borrow ended when the inner block closed)
                 world.insert_resource(gs_owned);
 
                 // Fetch updated global state for assertions

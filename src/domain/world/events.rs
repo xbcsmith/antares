@@ -464,9 +464,11 @@ mod tests {
         );
 
         // Configure encounter table: 100% base rate and a single group [1,2,3]
-        let mut table = crate::domain::world::EncounterTable::default();
-        table.encounter_rate = 1.0;
-        table.groups.push(vec![1u8, 2u8, 3u8]);
+        let table = crate::domain::world::EncounterTable {
+            encounter_rate: 1.0,
+            groups: vec![vec![1u8, 2u8, 3u8]],
+            ..Default::default()
+        };
 
         map.encounter_table = Some(table);
         map.allow_random_encounters = true;
@@ -496,9 +498,11 @@ mod tests {
             10,
         );
 
-        let mut table = crate::domain::world::EncounterTable::default();
-        table.encounter_rate = 1.0;
-        table.groups.push(vec![1u8]);
+        let table = crate::domain::world::EncounterTable {
+            encounter_rate: 1.0,
+            groups: vec![vec![1u8]],
+            ..Default::default()
+        };
 
         map.encounter_table = Some(table);
         map.allow_random_encounters = false; // safe zone
