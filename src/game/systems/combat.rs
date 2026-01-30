@@ -73,6 +73,14 @@ pub struct AttackAction {
     pub target: CombatantId,
 }
 
+/// Player-initiated cast spell message (registered by the plugin)
+#[derive(Message)]
+pub struct CastSpellAction {
+    pub caster: CombatantId,
+    pub spell_id: crate::domain::types::SpellId,
+    pub target: CombatantId,
+}
+
 /// Player defends this turn (registered by the plugin)
 #[derive(Message)]
 pub struct DefendAction {
@@ -266,6 +274,28 @@ pub struct ActionButton {
     pub button_type: ActionButtonType,
 }
 
+/// Marker component for the spell selection panel UI
+///
+/// Spawned when the player requests to cast a spell for a specific caster.
+/// The `caster` field indicates which participant's spell list the panel is
+/// displaying.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SpellSelectionPanel {
+    /// Participant index (player) that owns this panel
+    pub caster: CombatantId,
+}
+
+/// Marker component for an individual spell button inside the spell selection panel
+///
+/// Stores the `spell_id` for the button and the `sp_cost` for display convenience.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SpellButton {
+    /// Identifier of the spell this button will cast
+    pub spell_id: crate::domain::types::SpellId,
+    /// SP cost (display-only convenience)
+    pub sp_cost: u16,
+}
+
 /// Marker component for victory summary UI root
 #[derive(Component, Debug, Clone, Copy)]
 pub struct VictorySummaryRoot;
@@ -297,6 +327,7 @@ impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<CombatStarted>()
             .add_message::<AttackAction>()
+            .add_message::<CastSpellAction>()
             .add_message::<DefendAction>()
             .add_message::<FleeAction>()
             .add_message::<CombatVictory>()
@@ -316,6 +347,7 @@ impl Plugin for CombatPlugin {
             .add_systems(Update, enter_target_selection)
             .add_systems(Update, select_target)
             .add_systems(Update, handle_attack_action)
+            .add_systems(Update, handle_cast_spell_action)
             .add_systems(Update, handle_defend_action)
             .add_systems(Update, handle_flee_action)
             // Phase 4: Monster AI Systems
@@ -1190,6 +1222,67 @@ pub fn perform_attack_action_with_rng(
     Ok(())
 }
 
+pub fn perform_cast_action_with_rng(
+    combat_res: &mut CombatResource,
+    action: &CastSpellAction,
+    content: &GameContent,
+    global_state: &mut GlobalState,
+    turn_state: &mut CombatTurnStateResource,
+    rng: &mut impl rand::Rng,
+) -> Result<(), crate::domain::combat::engine::CombatError> {
+    // Ensure it's the caster's turn
+    if let Some(current) = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+    {
+        if current != &action.caster {
+            // Ignore actions from non-current actors
+            return Ok(());
+        }
+    } else {
+        return Ok(());
+    }
+
+    // Execute the spell via the domain-level helper. It handles validation,
+    // resource consumption and applies effects to combat participants.
+    // We treat casting failures (insufficient SP, silenced, etc.) as non-fatal no-ops.
+    let cast_result = crate::domain::combat::spell_casting::execute_spell_cast_by_id(
+        &mut combat_res.state,
+        action.caster,
+        action.spell_id,
+        action.target,
+        content.db(),
+        rng,
+    );
+
+    if let Err(_err) = cast_result {
+        // Casting failed (insufficient SP, wrong class, silenced, etc.)
+        // For now, treat this as a no-op from a combat flow perspective.
+        return Ok(());
+    }
+
+    // If the combat state indicates a flee, exit combat immediately
+    if combat_res.state.status == CombatStatus::Fled {
+        global_state.0.exit_combat();
+        return Ok(());
+    }
+
+    // Update turn state based on next actor (the domain helper advanced the turn)
+    if let Some(next) = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+    {
+        turn_state.0 = match next {
+            CombatantId::Player(_) => CombatTurnState::PlayerTurn,
+            _ => CombatTurnState::EnemyTurn,
+        };
+    }
+
+    Ok(())
+}
+
 /// System wrapper: handle `AttackAction` messages and route to the attack performer.
 fn handle_attack_action(
     mut reader: MessageReader<AttackAction>,
@@ -1240,6 +1333,122 @@ fn handle_attack_action(
         );
 
         // Compute post-attack HP and damage dealt
+        let post_hp: u16 = match action.target {
+            CombatantId::Player(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Player(pc) => Some(pc.hp.current),
+                    _ => None,
+                })
+                .unwrap_or(0),
+            CombatantId::Monster(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Monster(m) => Some(m.hp.current),
+                    _ => None,
+                })
+                .unwrap_or(0),
+        };
+
+        let dmg = (pre_hp as i32 - post_hp as i32).max(0) as u32;
+
+        if dmg > 0 {
+            // Spawn a simple floating damage UI node that auto-despawns
+            commands
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Auto,
+                        height: Val::Auto,
+                        ..default()
+                    },
+                    FloatingDamage { remaining: 1.2 },
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new(format!("-{}", dmg)),
+                        TextFont {
+                            font_size: 18.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        DamageText,
+                    ));
+                });
+
+            // Play hit SFX (hook into audio system if present)
+            if let Some(ref mut w) = sfx_writer {
+                w.write(crate::game::systems::audio::PlaySfx {
+                    sfx_id: "combat_hit".to_string(),
+                });
+            }
+        } else {
+            // Play miss SFX if desired
+            if let Some(ref mut w) = sfx_writer {
+                w.write(crate::game::systems::audio::PlaySfx {
+                    sfx_id: "combat_miss".to_string(),
+                });
+            }
+        }
+    }
+}
+
+/// System wrapper: handle `CastSpellAction` messages and route to the spell performer.
+fn handle_cast_spell_action(
+    mut reader: MessageReader<CastSpellAction>,
+    mut combat_res: ResMut<CombatResource>,
+    content: Option<Res<GameContent>>,
+    mut global_state: ResMut<GlobalState>,
+    mut turn_state: ResMut<CombatTurnStateResource>,
+    mut commands: Commands,
+    mut sfx_writer: Option<MessageWriter<crate::game::systems::audio::PlaySfx>>,
+) {
+    // Some tests or minimal harnesses may not register the full `GameContent` resource.
+    // Use a lightweight in-memory database fallback so systems are resilient in tests.
+    let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+
+    for action in reader.read() {
+        let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+
+        // Capture pre-spell HP for the target so we can show damage numbers
+        let pre_hp: u16 = match action.target {
+            CombatantId::Player(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Player(pc) => Some(pc.hp.current),
+                    _ => None,
+                })
+                .unwrap_or(0),
+            CombatantId::Monster(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Monster(m) => Some(m.hp.current),
+                    _ => None,
+                })
+                .unwrap_or(0),
+        };
+
+        let mut rng = rand::rng();
+
+        // Perform the cast (domain-level). This consumes SP/gems and applies effects.
+        let _ = perform_cast_action_with_rng(
+            &mut combat_res,
+            action,
+            content_ref,
+            &mut global_state,
+            &mut turn_state,
+            &mut rng,
+        );
+
+        // Compute post-spell HP and damage dealt
         let post_hp: u16 = match action.target {
             CombatantId::Player(idx) => combat_res
                 .state

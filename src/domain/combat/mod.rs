@@ -13,6 +13,7 @@
 pub mod database;
 pub mod engine;
 pub mod monster;
+pub mod spell_casting;
 pub mod types;
 
 pub use database::{MonsterDatabase, MonsterDatabaseError, MonsterDefinition};

@@ -1,7 +1,7 @@
 # Combat System Completion Plan
 
-**Document Version:** 2.0 (Revised)  
-**Last Updated:** 2025-01-XX  
+**Document Version:** 2.0 (Revised)
+**Last Updated:** 2025-01-XX
 **Status:** ✅ AI-READY (95% Autonomous Execution)
 
 ---
@@ -139,8 +139,8 @@ This document provides a comprehensive, phased approach to complete the Antares 
 
 ### Phase 7: Spell Casting System
 
-**Estimated Time:** 5-8 hours  
-**Blocks:** Phase 9 (needs action system), Phase 14 (needs complete combat)  
+**Estimated Time:** 5-8 hours
+**Blocks:** Phase 9 (needs action system), Phase 14 (needs complete combat)
 **Blocked By:** None (can start immediately)
 
 Complete the spell casting flow to enable players to cast spells during combat.
@@ -850,8 +850,8 @@ Verify each checkbox with provided command:
 
 ### Phase 8: Item Usage System
 
-**Estimated Time:** 4-6 hours  
-**Blocks:** Phase 14 (complete combat)  
+**Estimated Time:** 4-6 hours
+**Blocks:** Phase 14 (complete combat)
 **Blocked By:** Phase 7 (shares target selection and action pattern)
 
 Complete the item usage flow to enable players to use consumable items during combat.
@@ -1417,8 +1417,8 @@ cargo nextest run --all-features
 
 ### Phase 9: Turn Indicator Visual
 
-**Estimated Time:** 2-3 hours  
-**Blocks:** None  
+**Estimated Time:** 2-3 hours
+**Blocks:** None
 **Blocked By:** Phase 7, 8 (needs action execution to trigger visual updates)
 
 Add visual indicator showing which combatant is currently acting.
@@ -1712,9 +1712,9 @@ This revised plan provides AI-ready implementation guidance with:
 
 ---
 
-**Plan Version:** 2.0 (Revised)  
-**AI-Optimization Standard:** ✅ COMPLIANT  
-**AGENTS.md Compliance:** ✅ VERIFIED  
+**Plan Version:** 2.0 (Revised)
+**AI-Optimization Standard:** ✅ COMPLIANT
+**AGENTS.md Compliance:** ✅ VERIFIED
 **Architecture Compliance:** ✅ ENFORCED
 
 ---

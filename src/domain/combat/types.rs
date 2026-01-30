@@ -190,6 +190,33 @@ pub enum CombatStatus {
     Surrendered,
 }
 
+/// High-level actions a combatant can take on their turn.
+///
+/// This enum represents choices available to players (and AI): Attack,
+/// Defend, Flee, Cast a Spell, or Use an Item.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::combat::types::TurnAction;
+///
+/// let a = TurnAction::Attack;
+/// assert!(matches!(a, TurnAction::Attack));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TurnAction {
+    /// Physical or ranged attack
+    Attack,
+    /// Defend (temporary AC/defense bonus)
+    Defend,
+    /// Attempt to flee the encounter
+    Flee,
+    /// Cast a spell (select a spell and target)
+    CastSpell,
+    /// Use an item from inventory
+    UseItem,
+}
+
 // ===== CombatantId =====
 
 /// Identifier for a combatant in battle

@@ -387,6 +387,91 @@ Key points:
 
 ---
 
+## Phase 7: Spell Casting System - COMPLETED
+
+### Summary
+
+**Completion Date**: 2026-01-30
+**Duration**: ~1.5 days
+
+Phase 7 implements a domain-accurate spell-casting system integrated with the combat engine and a minimal game-layer plumbing for spell requests from the UI. The implementation reuses the existing magic validation / resource logic and focuses on safely applying spell effects (damage and conditions) to combat participants, and on exposing a small set of UI markers/messages to drive later UI work.
+
+### Components Implemented
+
+- Domain
+
+  - `src/domain/combat/spell_casting.rs` (new)
+    - `SpellCastAction` (domain action representation)
+    - `SpellCastResult` and `SpellCastError` (combat-facing result/errs)
+    - `validate_spell_cast` and `validate_spell_cast_by_id` (wrappers mapping `SpellError` → `SpellCastError`)
+    - `execute_spell_cast_with_spell` and `execute_spell_cast_by_id` (apply SP/gems consumption, per-target damage, and apply conditions)
+    - Comprehensive unit tests (validation, resource deduction, silenced condition, paladin delayed access, and end-to-end flow)
+  - `src/domain/combat/mod.rs`
+    - Exported `spell_casting` module (`pub mod spell_casting; pub use spell_casting::*;`)
+  - `src/domain/combat/types.rs`
+    - Added `TurnAction` enum with variants: `Attack`, `Defend`, `Flee`, `CastSpell`, `UseItem`
+
+- Game layer
+  - `src/game/systems/combat.rs`
+    - Added `CastSpellAction` message (player → combat system)
+    - Added `perform_cast_action_with_rng` helper and `handle_cast_spell_action` system to execute cast requests and advance turn flow
+    - Added minimal UI marker components: `SpellSelectionPanel` and `SpellButton` (placeholders for Phase 8 UI work)
+    - Hooked `CastSpellAction` into the `CombatPlugin` message pipeline
+
+### Testing
+
+- Unit tests added in `src/domain/combat/spell_casting.rs`:
+  - `test_validate_spell_cast_success`
+  - `test_validate_spell_cast_insufficient_sp`
+  - `test_validate_spell_cast_wrong_class`
+  - `test_validate_spell_cast_paladin_level_3_can_cast`
+  - `test_validate_spell_cast_paladin_level_2_cannot_cast`
+  - `test_execute_spell_cast_deducts_sp_and_gems`
+  - `test_silenced_condition_prevents_casting`
+  - `test_full_spell_casting_flow` (end-to-end scenario: caster casts at monster and state changes observed)
+
+These tests exercise the validation logic, resource deductions, class-level gating (paladin), silenced condition behavior, and an integration-style casting flow with deterministic RNG.
+
+### Architecture Compliance
+
+- Uses architecture-defined type aliases and data structures:
+  - `SpellId`, `CombatantId`, `Spell`, `SpellResult`, `SpellError`
+- Respects the AttributePair pattern (current/base) and manipulates stats using existing APIs (`hp.modify()` etc.)
+- New real code file contains SPDX header per project standards.
+
+### Quality Gates
+
+- Commands executed so far:
+  - `cargo check --all-targets --all-features` → Passed (no compilation errors)
+- Remaining gates (to be executed and verified next):
+  - `cargo fmt --all` (formatting)
+  - `cargo clippy --all-targets --all-features -- -D warnings` (lint; warnings treated as errors)
+  - `cargo nextest run --all-features` (tests; >80% coverage goal)
+- Notes: Minor warnings detected during `cargo check` (unused temporary variable and one `mut` in a test). These will be cleaned up during the final quality pass before claiming full completion.
+
+### Known Issues / Future Work
+
+- UI: `SpellSelectionPanel` and `SpellButton` are markers / scaffolding. Full interactive spell-selection UI (panel, selection, confirmation, tooltips) is planned for the next phase.
+- Per-target damage reporting: The domain execution computes and applies per-target damage, but the `SpellResult` aggregates totals. Consider extending the result model if fine-grained per-target damage is needed by UI/analytics.
+- Additional integration tests will be added to exercise the UI → message → engine flow once the full spell selection UI is implemented.
+
+### Files Modified / Created
+
+- Created:
+  - `src/domain/combat/spell_casting.rs` (new module, unit tests)
+- Modified:
+  - `src/domain/combat/mod.rs` (exported new module)
+  - `src/domain/combat/types.rs` (added `TurnAction`)
+  - `src/game/systems/combat.rs` (added messages, systems, UI markers)
+  - `docs/explanation/implementations.md` (this summary)
+
+### Success Criteria
+
+- Domain-level validation and execution of spells implemented and covered by unit tests.
+- `cargo check` passes; remaining quality gates scheduled and will be run/fixed until zero warnings and all tests pass.
+
+---
+
 ## Bug Fix: Inn UI Mouse and Keyboard Input - COMPLETED
 
 ### Summary

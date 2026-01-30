@@ -1,8 +1,8 @@
 # Combat System Completion Plan - Comprehensive Review
 
-**Review Date:** 2025-01-XX  
-**Reviewer:** AI Agent (Architecture & AGENTS.md Compliance)  
-**Document Under Review:** `docs/explanation/combat_system_completion_plan.md`  
+**Review Date:** 2025-01-XX
+**Reviewer:** AI Agent (Architecture & AGENTS.md Compliance)
+**Document Under Review:** `docs/explanation/combat_system_completion_plan.md`
 **Status:** ❌ REQUIRES MAJOR REVISIONS
 
 ---
@@ -52,7 +52,7 @@ The combat system completion plan provides a solid **conceptual framework** but 
 
 ### Issue 1: Missing Architecture Section References
 
-**Severity:** CRITICAL  
+**Severity:** CRITICAL
 **Impact:** AI agents will create incorrect data structures
 
 **Problem:**
@@ -85,7 +85,7 @@ The combat system completion plan provides a solid **conceptual framework** but 
 
 ### Issue 2: No Specific File Paths
 
-**Severity:** CRITICAL  
+**Severity:** CRITICAL
 **Impact:** AI agents won't know where to place code
 
 **Problem:**
@@ -186,7 +186,7 @@ You MUST use these type aliases from architecture.md Section 4.6:
 
 ### Issue 4: Constants Not Referenced
 
-**Severity:** HIGH  
+**Severity:** HIGH
 **Impact:** Magic numbers will be hardcoded
 
 **Problem:**
@@ -218,7 +218,7 @@ From architecture.md Section 4.3 L361-394:
 
 ### Issue 5: No Module Structure Guidance
 
-**Severity:** HIGH  
+**Severity:** HIGH
 **Impact:** AI agents will create modules in wrong locations
 
 **Problem:**
@@ -294,7 +294,7 @@ cargo fmt --all
 ```
 ````
 
-**Expected:** No output (silent success)  
+**Expected:** No output (silent success)
 **If fails:** Run `rustfmt --version`, verify `rustfmt 1.7.0+` installed
 
 #### 2. Check Compilation
@@ -325,7 +325,7 @@ cargo clippy --all-targets --all-features -- -D warnings
     Finished `dev` profile [unoptimized + debuginfo] target(s) in X.XXs
 ```
 
-**Count:** ZERO warnings (warnings treated as errors with `-D`)  
+**Count:** ZERO warnings (warnings treated as errors with `-D`)
 **If fails:** Fix first warning, re-run, repeat until zero
 
 #### 4. Run Tests
@@ -341,7 +341,7 @@ cargo nextest run --all-features
        Tests: X passed, 0 failed
 ```
 
-**Minimum Coverage:** >80% per AGENTS.md  
+**Minimum Coverage:** >80% per AGENTS.md
 **If fails:** Read failure output, fix test or code, repeat
 
 #### 5. Final Verification
