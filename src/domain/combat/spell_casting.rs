@@ -308,7 +308,8 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                             total_damage += dmg;
 
                             for cond in &spell.applied_conditions {
-                                let _ = apply_condition_to_character_by_id(pc.as_mut(), cond, content);
+                                let _ =
+                                    apply_condition_to_character_by_id(pc.as_mut(), cond, content);
                             }
                         }
                         _ => return Err(SpellCastError::InvalidTarget),
@@ -316,14 +317,14 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                 } else {
                     return Err(SpellCastError::InvalidTarget);
                 }
-
+            }
             SpellTarget::AllCharacters => {
                 for (i, participant) in combat_state.participants.iter_mut().enumerate() {
                     if let Combatant::Player(pc) = participant {
                         let base = dice.roll(rng);
-                        let dmg = (base + bonus).max(0) as i32;
+                        let dmg = (base + bonus).max(0);
 
-                        pc.hp.modify(-(dmg as i32));
+                        pc.hp.modify(-dmg);
                         affected.push(i);
                         total_damage += dmg;
 
@@ -337,13 +338,13 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
             SpellTarget::Self_ => {
                 // Self target (caster)
                 let base = dice.roll(rng);
-                let dmg = (base + bonus).max(0) as i32;
+                let dmg = (base + bonus).max(0);
 
                 // Re-borrow the caster mutably to apply self damage/conditions
                 if let Some(crate::domain::combat::engine::Combatant::Player(pc)) =
                     combat_state.get_combatant_mut(&caster)
                 {
-                    pc.hp.modify(-(dmg as i32));
+                    pc.hp.modify(-dmg);
                     if let CombatantId::Player(idx) = caster {
                         affected.push(idx);
                     }

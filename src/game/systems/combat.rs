@@ -81,6 +81,15 @@ pub struct CastSpellAction {
     pub target: CombatantId,
 }
 
+/// Player-initiated use item message (registered by the plugin)
+#[derive(Message)]
+pub struct UseItemAction {
+    pub user: CombatantId,
+    /// Index into the user's inventory (0-based)
+    pub inventory_index: usize,
+    pub target: CombatantId,
+}
+
 /// Player defends this turn (registered by the plugin)
 #[derive(Message)]
 pub struct DefendAction {
@@ -296,6 +305,28 @@ pub struct SpellButton {
     pub sp_cost: u16,
 }
 
+/// Marker component for the item selection panel UI
+///
+/// Spawned when the player requests to use an item for a specific caster.
+/// The `user` field indicates which participant's inventory the panel is
+/// displaying.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ItemSelectionPanel {
+    /// Participant index (player) that owns this panel
+    pub user: CombatantId,
+}
+
+/// Marker component for an individual item button inside the item selection panel
+///
+/// Stores the `item_id` and remaining `charges` for display convenience.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ItemButton {
+    /// Identifier of the item this button will use
+    pub item_id: crate::domain::types::ItemId,
+    /// Charges remaining in this inventory slot
+    pub charges: u8,
+}
+
 /// Marker component for victory summary UI root
 #[derive(Component, Debug, Clone, Copy)]
 pub struct VictorySummaryRoot;
@@ -328,6 +359,7 @@ impl Plugin for CombatPlugin {
         app.add_message::<CombatStarted>()
             .add_message::<AttackAction>()
             .add_message::<CastSpellAction>()
+            .add_message::<UseItemAction>()
             .add_message::<DefendAction>()
             .add_message::<FleeAction>()
             .add_message::<CombatVictory>()
@@ -348,6 +380,7 @@ impl Plugin for CombatPlugin {
             .add_systems(Update, select_target)
             .add_systems(Update, handle_attack_action)
             .add_systems(Update, handle_cast_spell_action)
+            .add_systems(Update, handle_use_item_action)
             .add_systems(Update, handle_defend_action)
             .add_systems(Update, handle_flee_action)
             // Phase 4: Monster AI Systems
@@ -1283,6 +1316,71 @@ pub fn perform_cast_action_with_rng(
     Ok(())
 }
 
+/// Perform an item use action (domain -> game glue).
+///
+/// Executes the domain item usage helper which consumes inventory charges and
+/// applies consumable effects (healing, cure, attribute boosts, etc.). Failures
+/// (invalid slot, restrictions) are treated as non-fatal no-ops to keep the
+/// game loop robust.
+pub fn perform_use_item_action_with_rng(
+    combat_res: &mut CombatResource,
+    action: &UseItemAction,
+    content: &GameContent,
+    global_state: &mut GlobalState,
+    turn_state: &mut CombatTurnStateResource,
+    rng: &mut impl rand::Rng,
+) -> Result<(), crate::domain::combat::engine::CombatError> {
+    // Ensure it's the actor's turn
+    if let Some(current) = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+    {
+        if current != &action.user {
+            // Ignore actions from non-current actors
+            return Ok(());
+        }
+    } else {
+        return Ok(());
+    }
+
+    // Execute the item use via the domain-level helper. It handles validation,
+    // charge consumption and effect application.
+    let res = crate::domain::combat::item_usage::execute_item_use_by_slot(
+        &mut combat_res.state,
+        action.user,
+        action.inventory_index,
+        action.target,
+        content.db(),
+        rng,
+    );
+
+    if let Err(_err) = res {
+        // Usage failed (invalid slot, restriction, etc.) - treat as a no-op
+        return Ok(());
+    }
+
+    // If the combat state indicates a flee/exit, exit combat immediately
+    if combat_res.state.status == CombatStatus::Fled {
+        global_state.0.exit_combat();
+        return Ok(());
+    }
+
+    // Update turn state based on next actor (the domain helper advanced the turn)
+    if let Some(next) = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+    {
+        turn_state.0 = match next {
+            CombatantId::Player(_) => CombatTurnState::PlayerTurn,
+            _ => CombatTurnState::EnemyTurn,
+        };
+    }
+
+    Ok(())
+}
+
 /// System wrapper: handle `AttackAction` messages and route to the attack performer.
 fn handle_attack_action(
     mut reader: MessageReader<AttackAction>,
@@ -1393,6 +1491,272 @@ fn handle_attack_action(
                     sfx_id: "combat_miss".to_string(),
                 });
             }
+        }
+    }
+}
+
+/// System wrapper: handle `UseItemAction` messages and route to the item performer.
+///
+/// This is analogous to the spell handler: it captures pre-use HP/SP for the
+/// target so we can spawn UI feedback (floating numbers), performs the domain
+/// item use, then computes post-use HP/SP and spawns visual feedback and SFX.
+fn handle_use_item_action(
+    mut reader: MessageReader<UseItemAction>,
+    mut combat_res: ResMut<CombatResource>,
+    content: Option<Res<GameContent>>,
+    mut global_state: ResMut<GlobalState>,
+    mut turn_state: ResMut<CombatTurnStateResource>,
+    mut commands: Commands,
+    mut sfx_writer: Option<MessageWriter<crate::game::systems::audio::PlaySfx>>,
+) {
+    // Some tests or minimal harnesses may not register the full `GameContent` resource.
+    // Use a lightweight in-memory database fallback so systems are resilient in tests.
+    let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+
+    for action in reader.read() {
+        let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+
+        // Capture pre-use HP/SP for the target so we can show numbers
+        let (pre_hp, pre_sp): (u16, u16) = match action.target {
+            CombatantId::Player(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Player(pc) => Some((pc.hp.current, pc.sp.current)),
+                    _ => None,
+                })
+                .unwrap_or((0, 0)),
+            CombatantId::Monster(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Monster(m) => Some((m.hp.current, 0)),
+                    _ => None,
+                })
+                .unwrap_or((0, 0)),
+        };
+
+        let mut rng = rand::rng();
+
+        // Perform the use (domain-level). This consumes inventory charges and applies effects.
+        let _ = perform_use_item_action_with_rng(
+            &mut combat_res,
+            action,
+            content_ref,
+            &mut global_state,
+            &mut turn_state,
+            &mut rng,
+        );
+
+        // Compute post-use HP/SP and differences
+        let (post_hp, post_sp): (u16, u16) = match action.target {
+            CombatantId::Player(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Player(pc) => Some((pc.hp.current, pc.sp.current)),
+                    _ => None,
+                })
+                .unwrap_or((0, 0)),
+            CombatantId::Monster(idx) => combat_res
+                .state
+                .participants
+                .get(idx)
+                .and_then(|p| match p {
+                    Combatant::Monster(m) => Some((m.hp.current, 0)),
+                    _ => None,
+                })
+                .unwrap_or((0, 0)),
+        };
+
+        let hp_delta = post_hp as i32 - pre_hp as i32;
+        let sp_delta = post_sp as i32 - pre_sp as i32;
+
+        if hp_delta < 0 {
+            // Damage occurred - show as negative
+            let dmg = (-hp_delta) as u32;
+            commands
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Auto,
+                        height: Val::Auto,
+                        ..default()
+                    },
+                    FloatingDamage { remaining: 1.2 },
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new(format!("-{}", dmg)),
+                        TextFont {
+                            font_size: 18.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                        DamageText,
+                    ));
+                });
+
+            if let Some(ref mut w) = sfx_writer {
+                w.write(crate::game::systems::audio::PlaySfx {
+                    sfx_id: "combat_hit".to_string(),
+                });
+            }
+        } else if hp_delta > 0 {
+            // Healing occurred - show as positive (green)
+            let healed = hp_delta as u32;
+            commands
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Auto,
+                        height: Val::Auto,
+                        ..default()
+                    },
+                    FloatingDamage { remaining: 1.2 },
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new(format!("+{}", healed)),
+                        TextFont {
+                            font_size: 18.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.2, 0.8, 0.2)),
+                        DamageText,
+                    ));
+                });
+
+            if let Some(ref mut w) = sfx_writer {
+                w.write(crate::game::systems::audio::PlaySfx {
+                    sfx_id: "combat_heal".to_string(),
+                });
+            }
+        } else if sp_delta > 0 {
+            // SP restored - show a small blue indicator
+            let restored = sp_delta as u32;
+            commands
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Auto,
+                        height: Val::Auto,
+                        ..default()
+                    },
+                    FloatingDamage { remaining: 1.2 },
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new(format!("+{} SP", restored)),
+                        TextFont {
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.4, 0.8, 1.0)),
+                        DamageText,
+                    ));
+                });
+
+            if let Some(ref mut w) = sfx_writer {
+                w.write(crate::game::systems::audio::PlaySfx {
+                    sfx_id: "combat_heal".to_string(),
+                });
+            }
+        } else {
+            // No numeric feedback; play a small 'miss' sfx if desired
+            if let Some(ref mut w) = sfx_writer {
+                w.write(crate::game::systems::audio::PlaySfx {
+                    sfx_id: "combat_miss".to_string(),
+                });
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod perform_use_item_tests {
+    use super::*;
+    use crate::application::GameState;
+    use crate::domain::character::{Alignment, Character, Sex};
+    use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+    use crate::game::resources::GlobalState;
+    use crate::sdk::database::ContentDatabase;
+
+    #[test]
+    fn test_perform_use_item_action_heal_consumes_and_heals() {
+        // Setup content DB and a healing potion
+        // Prepare content DB with a healing potion
+        let mut content = GameContent::new(ContentDatabase::new());
+        let potion = Item {
+            id: 50,
+            name: "Test Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(20),
+                is_combat_usable: true,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+        };
+        // Mutate the inner DB directly so tests can set up content in-place
+        content.0.items.add_item(potion).unwrap();
+
+        // Prepare combat state and player
+        let mut combat_res = CombatResource::new();
+        let mut player = Character::new(
+            "Tester".to_string(),
+            "human".to_string(),
+            "none".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        player.hp.base = 50;
+        player.hp.current = 20;
+        player.inventory.add_item(50, 1).unwrap();
+
+        combat_res.state.add_player(player);
+
+        // Ensure turn order contains the player as the current actor
+        combat_res.state.turn_order = vec![CombatantId::Player(0)];
+        combat_res.state.current_turn = 0;
+
+        let mut global_state = GlobalState(GameState::new());
+        let mut turn_state = CombatTurnStateResource::default();
+        let mut rng = rand::rng();
+
+        let action = UseItemAction {
+            user: CombatantId::Player(0),
+            inventory_index: 0,
+            target: CombatantId::Player(0),
+        };
+
+        let _ = perform_use_item_action_with_rng(
+            &mut combat_res,
+            &action,
+            &content,
+            &mut global_state,
+            &mut turn_state,
+            &mut rng,
+        );
+
+        // Verify player healed and inventory slot consumed
+        if let Some(Combatant::Player(pc_after)) =
+            combat_res.state.get_combatant(&CombatantId::Player(0))
+        {
+            assert!(pc_after.hp.current > 20);
+            assert!(pc_after.inventory.items.is_empty());
+        } else {
+            panic!("player not present after action");
         }
     }
 }

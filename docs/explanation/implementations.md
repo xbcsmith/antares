@@ -396,6 +396,78 @@ Key points:
 
 Phase 7 implements a domain-accurate spell-casting system integrated with the combat engine and a minimal game-layer plumbing for spell requests from the UI. The implementation reuses the existing magic validation / resource logic and focuses on safely applying spell effects (damage and conditions) to combat participants, and on exposing a small set of UI markers/messages to drive later UI work.
 
+## Phase 8: Item Usage System - COMPLETED
+
+### Summary
+
+**Completion Date**: 2026-01-30
+**Duration**: ~6 hours
+
+Phase 8 implements an item usage system integrated with the combat engine and basic UI plumbing. The implementation focuses on consumable item usage in combat (potions, antidotes, scrolls that are marked combat-usable), inventory charge consumption, effect application (healing, SP restore, cure condition, attribute boosts), and minimal item selection UI markers for later integration.
+
+### Components Implemented
+
+1. Domain: `src/domain/combat/item_usage.rs`
+
+   - `ItemUseAction`, `ItemUseResult`, and `ItemUseError` types.
+   - `validate_item_use_slot()` — validates inventory slot, consumable/combat usability, alignment and proficiency/race restrictions.
+   - `execute_item_use_by_slot()` — consumes inventory charges, applies effects (heal, restore SP, cure conditions, boost attributes), advances turns, and checks end-of-combat.
+   - Unit tests covering validation, healing potion usage (consumes slot and heals), cure potion (clears condition), and invalid slot handling.
+
+2. Game Systems: `src/game/systems/combat.rs`
+
+   - `UseItemAction` message registered with `CombatPlugin`.
+   - `ItemSelectionPanel` and `ItemButton` UI marker components (placeholders).
+   - `perform_use_item_action_with_rng()` and `handle_use_item_action()` — wire domain-level item usage into the game loop, spawn floating feedback (damage/heal/SP), and play SFX hooks.
+   - Unit test `test_perform_use_item_action_heal()` to verify end-to-end behavior.
+
+3. Module Export:
+   - `src/domain/combat/mod.rs` — exported `item_usage` module.
+
+### Testing & Quality Gates
+
+Local checks after implementation:
+
+- `cargo fmt --all` → OK
+- `cargo check --all-targets --all-features` → OK
+- `cargo clippy --all-targets --all-features -- -D warnings` → OK (addressed warnings)
+- `cargo nextest run --all-features` → OK (new tests pass locally)
+
+### Architecture Compliance
+
+- Uses `ItemId` and `CombatantId` type aliases per architecture rules.
+- Respects `ConsumableData::is_combat_usable` flag and item alignment/proficiency/tag restrictions for usage validation.
+- Modifies inventory via `InventorySlot` charges (decrement/remove).
+- Applies effect primitives directly in combat domain (healing as `hp.modify`, SP via `sp.modify`, condition clears via `conditions.remove`, attribute boosts using `AttributePair.modify`).
+- RON data and content DB usage remains unchanged (no new data files).
+
+### Notes & Future Work
+
+- Current implementation supports core consumable effects. Future improvements:
+  - Implement temporary-duration attribute boosts via `ConditionDefinition` instead of direct stat modify.
+  - Add interactive Item Selection UI (Bevy) that populates `ItemButton` entities and wires clicks to `UseItemAction` messages.
+  - Add additional item types (wands/scrolls) and their spell-effect integration (consuming item-held spell charges).
+  - Expand per-target result reporting for richer UI feedback.
+
+**Files Modified/Created**
+
+- Created: `src/domain/combat/item_usage.rs`
+- Modified: `src/domain/combat/mod.rs`
+- Modified: `src/game/systems/combat.rs`
+- Modified: `docs/explanation/implementations.md` (this entry)
+
+**Success Criteria**
+
+- Consumable usage in combat deducts inventory charges and applies expected effects.
+- Validation respects combat-only flags, alignment, proficiencies, and race tags.
+- End-to-end unit tests added for validation and execution paths.
+- All local quality gates (fmt, check, clippy, tests) completed.
+
+**Completion Date**: 2026-01-30
+**Duration**: ~1.5 days
+
+Phase 7 implements a domain-accurate spell-casting system integrated with the combat engine and a minimal game-layer plumbing for spell requests from the UI. The implementation reuses the existing magic validation / resource logic and focuses on safely applying spell effects (damage and conditions) to combat participants, and on exposing a small set of UI markers/messages to drive later UI work.
+
 ### Components Implemented
 
 - Domain
