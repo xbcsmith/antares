@@ -466,6 +466,56 @@ Local checks after implementation:
 **Completion Date**: 2026-01-30
 **Duration**: ~1.5 days
 
+## Phase 9: Turn Indicator Visual - COMPLETED
+
+### Summary
+
+**Completion Date**: 2026-01-30
+**Duration**: ~2 hours
+
+Phase 9 adds an in-combat visual turn indicator. The feature is a pure game/UI-layer implementation that displays which combatant is currently acting and updates/hides the indicator as turns progress and during animations.
+
+### Components Implemented
+
+1. Game Systems: `src/game/systems/combat_visual.rs` (new)
+
+   - `spawn_turn_indicator()` — spawns a small visual indicator attached to the current combatant (enemy card for monsters, a "YOUR TURN" banner for player turns).
+   - `update_turn_indicator()` — moves or respawns the indicator when the current actor changes.
+   - `hide_indicator_during_animation()` — hides/shows the indicator based on `CombatTurnStateResource`.
+   - Unit tests verify: indicator spawn on combat enter, moves when the turn changes, and hides during animation state.
+
+2. Module & Integration:
+   - `src/game/systems/mod.rs` — registered new `combat_visual` module.
+   - `src/game/systems/combat.rs` — registered the visual systems with `CombatPlugin` and documented the new systems in the module header.
+
+### Testing & Quality Gates
+
+Local checks after implementation:
+
+- `cargo fmt --all` → OK
+- `cargo check --all-targets --all-features` → OK
+- `cargo clippy --all-targets --all-features -- -D warnings` → OK
+- `cargo nextest run --all-features` → OK (new tests pass locally)
+
+### Architecture Compliance
+
+- Uses `CombatantId` for actor references (per architecture).
+- No domain-layer changes were required; this is a Bevy/UI feature only.
+- New files include SPDX header and public doc comments where appropriate.
+
+### Files Modified/Created
+
+- Created: `src/game/systems/combat_visual.rs`
+- Modified: `src/game/systems/mod.rs`
+- Modified: `src/game/systems/combat.rs` (registered systems)
+- Modified: `docs/explanation/implementations.md` (this entry)
+
+### Success Criteria
+
+- Indicator is visible on the current actor and moves correctly between turns.
+- Indicator is hidden while combat animations are playing.
+- All local quality gates (fmt, check, clippy, tests) pass.
+
 Phase 7 implements a domain-accurate spell-casting system integrated with the combat engine and a minimal game-layer plumbing for spell requests from the UI. The implementation reuses the existing magic validation / resource logic and focuses on safely applying spell effects (damage and conditions) to combat participants, and on exposing a small set of UI markers/messages to drive later UI work.
 
 ### Components Implemented

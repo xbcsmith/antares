@@ -59,6 +59,9 @@ use crate::domain::combat::engine::{
 use crate::domain::combat::types::{Attack, CombatStatus, CombatantId, Handicap, SpecialEffect};
 use crate::domain::types::{DiceRoll, ItemId};
 use crate::game::resources::GlobalState;
+use crate::game::systems::combat_visual::{
+    hide_indicator_during_animation, spawn_turn_indicator, update_turn_indicator,
+};
 
 /// Message emitted when combat has started.
 ///
@@ -391,6 +394,17 @@ impl Plugin for CombatPlugin {
             .add_systems(Update, handle_combat_defeat)
             // Phase 2: Combat UI systems
             .add_systems(Update, setup_combat_ui)
+            // Spawn the turn indicator after UI is created
+            .add_systems(Update, spawn_turn_indicator.after(setup_combat_ui))
+            // Update/move the indicator when the current actor changes
+            .add_systems(Update, update_turn_indicator.after(spawn_turn_indicator))
+            // Hide indicator during animations and ensure visibility is updated before the main UI update
+            .add_systems(
+                Update,
+                hide_indicator_during_animation
+                    .after(update_turn_indicator)
+                    .before(update_combat_ui),
+            )
             .add_systems(Update, cleanup_combat_ui)
             .add_systems(Update, update_combat_ui)
             .add_systems(Update, cleanup_floating_damage);
