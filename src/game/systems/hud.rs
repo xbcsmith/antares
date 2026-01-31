@@ -13,6 +13,7 @@
 //! Card count is dynamic and matches party size (1-6 members).
 //! Each card displays portrait, HP bar with overlay text, and conditions.
 
+use crate::application::GameMode;
 use crate::domain::character::{Condition, PARTY_MAX_SIZE};
 use crate::domain::conditions::ActiveCondition;
 use crate::domain::types::Direction;
@@ -161,9 +162,17 @@ impl Plugin for HudPlugin {
                     update_hud,
                     update_compass,
                     update_portraits,
-                ),
+                )
+                    .run_if(not_in_combat),
             );
     }
+}
+
+/// Run condition: returns true when not in combat mode
+///
+/// Used to hide exploration HUD during combat.
+fn not_in_combat(global_state: Res<GlobalState>) -> bool {
+    !matches!(global_state.0.mode, GameMode::Combat(_))
 }
 
 // ===== Systems =====

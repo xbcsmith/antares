@@ -81,9 +81,10 @@ fn handle_events(
     mut map_change_writer: MessageWriter<MapChangeEvent>,
     mut dialogue_writer: MessageWriter<StartDialogue>,
     mut simple_dialogue_writer: MessageWriter<SimpleDialogue>,
+    mut combat_started_writer: Option<MessageWriter<crate::game::systems::combat::CombatStarted>>,
     content: Res<GameContent>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
-    global_state: ResMut<GlobalState>,
+    mut global_state: ResMut<GlobalState>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
     // Fallback query to find a visual event/tile marker at the same TileCoord when an NPC marker is absent.
     // We exclude NpcMarker here to avoid duplicating NPC matches.
@@ -161,7 +162,32 @@ fn handle_events(
                 if let Some(ref mut log) = game_log {
                     log.add(msg);
                 }
-                // TODO: Start combat
+
+                // Debug: print current mode before attempting to start combat
+                info!("Mode before start_encounter: {:?}", global_state.0.mode);
+
+                // Attempt to start combat using the combat helper (copies party and loads monsters)
+                match crate::game::systems::combat::start_encounter(
+                    &mut global_state.0,
+                    &content,
+                    monster_group,
+                ) {
+                    Ok(()) => {
+                        // Debug: print mode after successful attempt
+                        info!("Mode after start_encounter: {:?}", global_state.0.mode);
+
+                        // Notify other systems that combat has started (if CombatPlugin is registered)
+                        if let Some(ref mut writer) = combat_started_writer {
+                            writer.write(crate::game::systems::combat::CombatStarted {});
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to start encounter: {}", e);
+                        if let Some(ref mut log) = game_log {
+                            log.add(format!("Failed to start encounter: {}", e));
+                        }
+                    }
+                }
             }
             MapEvent::NpcDialogue { npc_id, .. } => {
                 // Look up NPC in database

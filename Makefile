@@ -72,7 +72,8 @@ megalint: ; $(info $(M) running all the things...) @ ## Runs all the things
 	$Q $(CARGO) fmt --all \
 	    && $(CARGO) check --all-targets --all-features \
 		&& $(CARGO) clippy --all-targets --all-features -- -D warnings \
-		&& $(CARGO) test --all-features
+		&& $(CARGO) nextest run --all-features \
+		&& $(CARGO) test --doc
 
 # Generate documentation
 doc: ; $(info $(M) running cargo doc...) @ ## Runs a cargo doc

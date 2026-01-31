@@ -30,7 +30,7 @@ pub enum WallType {
 }
 
 /// Terrain type for tiles
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TerrainType {
     /// Normal walkable ground
     Ground,
@@ -909,6 +909,22 @@ pub enum MapEvent {
 #[allow(dead_code)]
 pub const DEFAULT_RECRUITMENT_DIALOGUE_ID: crate::domain::dialogue::DialogueId = 1000;
 
+/// Encounter table definition for random encounters configured per map
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct EncounterTable {
+    /// Base chance per step (0.0 - 1.0) of triggering an encounter on this map
+    #[serde(default = "default_encounter_rate")]
+    pub encounter_rate: f32,
+
+    /// Monster groups available in this area (each entry is a monster_group Vec<u8>)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<Vec<u8>>,
+
+    /// Terrain-based modifiers to multiply the base encounter rate
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub terrain_modifiers: HashMap<TerrainType, f32>,
+}
+
 // ===== Resolved NPC =====
 
 /// Resolved NPC combining placement and definition data
@@ -1045,6 +1061,15 @@ pub struct Map {
     pub tiles: Vec<Tile>,
     /// Events at specific positions
     pub events: HashMap<Position, MapEvent>,
+
+    /// Optional random encounter table for this map
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encounter_table: Option<EncounterTable>,
+
+    /// Whether random encounters are allowed on this map (towns/inns should set to false)
+    #[serde(default = "default_allow_random_encounters")]
+    pub allow_random_encounters: bool,
+
     /// NPC placements (references to NPC definitions)
     #[serde(default)]
     pub npc_placements: Vec<crate::domain::world::npc::NpcPlacement>,
@@ -1052,6 +1077,14 @@ pub struct Map {
 
 fn default_map_name() -> String {
     "Unnamed Map".to_string()
+}
+
+fn default_encounter_rate() -> f32 {
+    0.05 // Default 5% chance per step
+}
+
+fn default_allow_random_encounters() -> bool {
+    true
 }
 
 impl Map {
@@ -1090,6 +1123,8 @@ impl Map {
             height,
             tiles,
             events: HashMap::new(),
+            encounter_table: None,
+            allow_random_encounters: default_allow_random_encounters(),
             npc_placements: Vec::new(),
         }
     }
