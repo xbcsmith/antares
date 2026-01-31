@@ -7,11 +7,14 @@
 //! verifying that all systems work together correctly.
 
 use antares::application::GameState;
-use antares::domain::character::{Alignment, Character, Sex};
+use antares::domain::character::{Alignment, Character, Sex, Stats};
 use antares::domain::combat::database::MonsterDatabase;
 use antares::domain::combat::engine::{start_combat, CombatState, Combatant};
-use antares::domain::combat::types::{CombatStatus, Handicap};
-use antares::domain::types::MonsterId;
+use antares::domain::combat::monster::{LootTable, Monster};
+use antares::domain::combat::types::{Attack, CombatStatus, Handicap};
+use antares::domain::conditions::ConditionDefinition;
+use antares::domain::types::{DiceRoll, MonsterId};
+use bevy::MinimalPlugins;
 
 /// Helper function to create a test character with specific stats
 fn create_test_character(name: &str, class_id: &str, hp: u16) -> Character {
@@ -25,6 +28,64 @@ fn create_test_character(name: &str, class_id: &str, hp: u16) -> Character {
     character.hp.current = hp;
     character.hp.base = hp;
     character
+}
+
+/// Integration test: stepping on an Encounter tile should start combat mode.
+///
+/// This test creates a small map with an `Encounter` MapEvent (using an empty
+/// monster_group so no DB dependency) and verifies that running the EventPlugin
+/// causes the global `GameState` to transition to `GameMode::Combat`.
+#[test]
+fn test_map_event_encounter_triggers_combat() {
+    // Build a minimal app with the event and combat plugins registered
+    let mut app = bevy::prelude::App::new();
+    app.add_plugins(MinimalPlugins);
+
+    // Register messages the EventPlugin depends on
+    app.add_message::<antares::game::systems::map::MapChangeEvent>();
+    app.add_message::<antares::game::systems::dialogue::StartDialogue>();
+    app.add_message::<antares::game::systems::dialogue::SimpleDialogue>();
+
+    // Add the EventPlugin that will detect the encounter and the CombatPlugin to handle combat lifecycle
+    app.add_plugins(antares::game::systems::events::EventPlugin);
+    app.add_plugins(antares::game::systems::combat::CombatPlugin);
+
+    // Create a map and add an Encounter event at position (5,5)
+    let mut map =
+        antares::domain::world::Map::new(1, "TestMap".to_string(), "Desc".to_string(), 10, 10);
+    let event_pos = antares::domain::types::Position::new(5, 5);
+    map.add_event(
+        event_pos,
+        antares::domain::world::MapEvent::Encounter {
+            name: "Ambush".to_string(),
+            description: "A surprise encounter".to_string(),
+            monster_group: vec![], // empty group is sufficient for transition test
+        },
+    );
+
+    // Prepare GameState with the map and place party on the event tile
+    let mut gs = GameState::new();
+    gs.world.add_map(map);
+    gs.world.set_current_map(1);
+    gs.world.set_party_position(event_pos);
+
+    // Insert minimal content and global state resources
+    app.insert_resource(antares::application::resources::GameContent::new(
+        antares::sdk::database::ContentDatabase::new(),
+    ));
+    app.insert_resource(antares::game::resources::GlobalState(gs));
+
+    // Run one frame to process the event trigger and handler
+    app.update();
+
+    // Verify the game mode switched to Combat
+    let gs_after = app
+        .world()
+        .resource::<antares::game::resources::GlobalState>();
+    assert!(matches!(
+        gs_after.0.mode,
+        antares::application::GameMode::Combat(_)
+    ));
 }
 
 #[test]
@@ -314,4 +375,65 @@ fn test_combat_participants_management() {
     assert_eq!(combat.participants.len(), 5);
     assert_eq!(combat.alive_party_count(), 3);
     assert_eq!(combat.alive_monster_count(), 2);
+}
+
+#[test]
+fn test_full_combat_round_all_combatants_act() {
+    // Arrange: Create a combat with party and monsters
+    let mut combat = CombatState::new(Handicap::Even);
+
+    // Add party members
+    let p1 = create_test_character("P1", "knight", 20);
+    let p2 = create_test_character("P2", "cleric", 20);
+    combat.add_player(p1);
+    combat.add_player(p2);
+
+    // Add two simple monsters directly (no DB dependency)
+    let m1 = Monster::new(
+        1,
+        "GoblinA".to_string(),
+        Stats::new(8, 8, 8, 8, 8, 8, 8),
+        10,
+        5,
+        vec![Attack::physical(DiceRoll::new(1, 4, 0))],
+        LootTable::default(),
+    );
+    let m2 = Monster::new(
+        2,
+        "GoblinB".to_string(),
+        Stats::new(8, 8, 8, 8, 8, 8, 8),
+        10,
+        5,
+        vec![Attack::physical(DiceRoll::new(1, 4, 0))],
+        LootTable::default(),
+    );
+    combat.add_monster(m1);
+    combat.add_monster(m2);
+
+    // Start combat and iterate through a full round (each combatant acts once)
+    start_combat(&mut combat);
+
+    let initial_round = combat.round;
+    let participants = combat.turn_order.len();
+
+    // Use an empty condition definitions vector (no DOT/HoT effects for this test)
+    let cond_defs: Vec<ConditionDefinition> = vec![];
+
+    for _ in 0..participants {
+        let _ = combat.advance_turn(&cond_defs);
+    }
+
+    // After a full cycle, we should be back at the first actor and the round should have advanced
+    assert_eq!(combat.current_turn, 0);
+    assert_eq!(combat.round, initial_round + 1);
+
+    // Monsters' per-round flags (has_acted) should have been reset when the new round began
+    for participant in &combat.participants {
+        if let Combatant::Monster(mon) = participant {
+            assert!(
+                !mon.has_acted,
+                "Monster should have had has_acted reset at round boundary"
+            );
+        }
+    }
 }

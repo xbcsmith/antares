@@ -258,6 +258,9 @@ impl Plugin for AntaresPlugin {
         app.add_plugins(antares::game::systems::inn_ui::InnUiPlugin);
         app.add_plugins(antares::game::systems::recruitment_dialog::RecruitmentDialogPlugin);
         app.add_plugins(antares::game::systems::menu::MenuPlugin);
+
+        // Core combat plugin (Phase 1: Core Combat Infrastructure)
+        app.add_plugins(antares::game::systems::combat::CombatPlugin);
     }
 }
 
