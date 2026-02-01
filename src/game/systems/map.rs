@@ -22,6 +22,9 @@ type MeshDimensions = (OrderedFloat<f32>, OrderedFloat<f32>, OrderedFloat<f32>);
 /// Type alias for the mesh cache HashMap
 type MeshCache = HashMap<MeshDimensions, Handle<Mesh>>;
 
+/// Offset to center map objects within their tile (matches camera centering)
+const TILE_CENTER_OFFSET: f32 = 0.5;
+
 /// Plugin that renders the current map using Bevy meshes/materials.
 ///
 /// Note: The visual rendering plugin remains focused on rendering. The map
@@ -470,7 +473,11 @@ fn spawn_map(
                             commands.spawn((
                                 Mesh3d(water_mesh.clone()),
                                 MeshMaterial3d(water_material.clone()),
-                                Transform::from_xyz(x as f32, -0.1, y as f32),
+                                Transform::from_xyz(
+                                    x as f32 + TILE_CENTER_OFFSET,
+                                    -0.1,
+                                    y as f32 + TILE_CENTER_OFFSET,
+                                ),
                                 GlobalTransform::default(),
                                 Visibility::default(),
                                 MapEntity(map.id),
@@ -510,8 +517,12 @@ fn spawn_map(
                             let rotation = bevy::prelude::Quat::from_rotation_y(
                                 tile.visual.rotation_y_radians(),
                             );
-                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
-                                .with_rotation(rotation);
+                            let transform = Transform::from_xyz(
+                                x as f32 + TILE_CENTER_OFFSET,
+                                y_pos,
+                                y as f32 + TILE_CENTER_OFFSET,
+                            )
+                            .with_rotation(rotation);
 
                             commands.spawn((
                                 Mesh3d(mesh),
@@ -528,7 +539,11 @@ fn spawn_map(
                             commands.spawn((
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(grass_material.clone()),
-                                Transform::from_xyz(x as f32, 0.0, y as f32),
+                                Transform::from_xyz(
+                                    x as f32 + TILE_CENTER_OFFSET,
+                                    0.0,
+                                    y as f32 + TILE_CENTER_OFFSET,
+                                ),
                                 GlobalTransform::default(),
                                 Visibility::default(),
                                 MapEntity(map.id),
@@ -550,7 +565,11 @@ fn spawn_map(
                             commands.spawn((
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(grass_material.clone()),
-                                Transform::from_xyz(x as f32, 0.0, y as f32),
+                                Transform::from_xyz(
+                                    x as f32 + TILE_CENTER_OFFSET,
+                                    0.0,
+                                    y as f32 + TILE_CENTER_OFFSET,
+                                ),
                                 GlobalTransform::default(),
                                 Visibility::default(),
                                 MapEntity(map.id),
@@ -562,7 +581,11 @@ fn spawn_map(
                             commands.spawn((
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(floor_material.clone()),
-                                Transform::from_xyz(x as f32, 0.0, y as f32),
+                                Transform::from_xyz(
+                                    x as f32 + TILE_CENTER_OFFSET,
+                                    0.0,
+                                    y as f32 + TILE_CENTER_OFFSET,
+                                ),
                                 GlobalTransform::default(),
                                 Visibility::default(),
                                 MapEntity(map.id),
@@ -622,8 +645,12 @@ fn spawn_map(
                             let rotation = bevy::prelude::Quat::from_rotation_y(
                                 tile.visual.rotation_y_radians(),
                             );
-                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
-                                .with_rotation(rotation);
+                            let transform = Transform::from_xyz(
+                                x as f32 + TILE_CENTER_OFFSET,
+                                y_pos,
+                                y as f32 + TILE_CENTER_OFFSET,
+                            )
+                            .with_rotation(rotation);
 
                             commands.spawn((
                                 Mesh3d(mesh),
@@ -711,8 +738,12 @@ fn spawn_map(
                             let rotation = bevy::prelude::Quat::from_rotation_y(
                                 tile.visual.rotation_y_radians(),
                             );
-                            let transform = Transform::from_xyz(x as f32, y_pos, y as f32)
-                                .with_rotation(rotation);
+                            let transform = Transform::from_xyz(
+                                x as f32 + TILE_CENTER_OFFSET,
+                                y_pos,
+                                y as f32 + TILE_CENTER_OFFSET,
+                            )
+                            .with_rotation(rotation);
 
                             commands.spawn((
                                 Mesh3d(mesh),
@@ -772,7 +803,7 @@ fn spawn_map(
                 &mut materials,
                 &mut meshes,
                 &sprite_ref,
-                Vec3::new(x, 0.9, y),
+                Vec3::new(x + TILE_CENTER_OFFSET, 0.9, y + TILE_CENTER_OFFSET),
                 ActorType::Npc,
             );
 
@@ -1087,6 +1118,21 @@ mod tests {
         let npc_dialogue = NpcDialogue::new(npc.dialogue_id.unwrap(), npc.name.clone());
         assert_eq!(npc_dialogue.dialogue_id, 100u16);
         assert_eq!(npc_dialogue.npc_name, "Test Merchant");
+    }
+
+    #[test]
+    fn test_tile_positions_are_centered() {
+        // Verify the TILE_CENTER_OFFSET constant is 0.5
+        assert_eq!(TILE_CENTER_OFFSET, 0.5);
+
+        // Verify centered position calculation
+        let tile_x = 5;
+        let tile_y = 10;
+        let centered_x = tile_x as f32 + TILE_CENTER_OFFSET;
+        let centered_z = tile_y as f32 + TILE_CENTER_OFFSET;
+
+        assert_eq!(centered_x, 5.5);
+        assert_eq!(centered_z, 10.5);
     }
 
     #[test]
