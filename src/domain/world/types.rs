@@ -1036,6 +1036,158 @@ impl Default for RailingConfig {
     }
 }
 
+// ===== Performance & Polish Types (Phase 5) =====
+
+/// Level of detail for procedurally generated objects
+///
+/// Distance-based visual simplification to improve performance on large maps.
+/// Objects fade between detail levels as the camera moves away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DetailLevel {
+    /// Full quality: complete branch graphs, all foliage, detailed geometry
+    /// Distance: < 10 tiles from camera
+    Full,
+    /// Simplified: fewer branches, clustered foliage, reduced vertices
+    /// Distance: 10-30 tiles from camera
+    Simplified,
+    /// Billboard: flat impostor sprite, no geometry
+    /// Distance: > 30 tiles from camera
+    Billboard,
+}
+
+impl DetailLevel {
+    /// Get the squared distance threshold for this detail level (in world units)
+    /// Used to avoid repeated sqrt calculations in distance checks
+    ///
+    /// # Returns
+    ///
+    /// Squared distance in world units (1 unit ≈ 10 feet, so 10 tiles ≈ 3.33 units)
+    pub fn distance_threshold_squared(self) -> f32 {
+        match self {
+            DetailLevel::Full => 100.0,       // 10 tiles squared
+            DetailLevel::Simplified => 900.0, // 30 tiles squared
+            DetailLevel::Billboard => f32::INFINITY,
+        }
+    }
+
+    /// Get the maximum distance for this detail level
+    pub fn max_distance(self) -> f32 {
+        match self {
+            DetailLevel::Full => 10.0,
+            DetailLevel::Simplified => 30.0,
+            DetailLevel::Billboard => f32::INFINITY,
+        }
+    }
+
+    /// Select the appropriate detail level for a given distance
+    ///
+    /// # Arguments
+    ///
+    /// * `distance` - Distance from camera to object in world units
+    ///
+    /// # Returns
+    ///
+    /// The recommended detail level for this distance
+    pub fn from_distance(distance: f32) -> Self {
+        if distance < 10.0 {
+            DetailLevel::Full
+        } else if distance < 30.0 {
+            DetailLevel::Simplified
+        } else {
+            DetailLevel::Billboard
+        }
+    }
+}
+
+/// Configuration for GPU mesh instancing
+///
+/// Stores transform data for multiple instances of the same mesh to be drawn
+/// in a single draw call, significantly reducing GPU overhead.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstanceData {
+    /// World position (x, y, z)
+    pub position: [f32; 3],
+    /// Scale (uniform)
+    pub scale: f32,
+    /// Rotation in radians around Y-axis
+    pub rotation_y: f32,
+}
+
+impl InstanceData {
+    /// Create a new instance at the specified position
+    ///
+    /// # Arguments
+    ///
+    /// * `position` - World coordinates [x, y, z]
+    ///
+    /// # Examples
+    ///
+    /// ```text
+    /// use antares::domain::world::types::InstanceData;
+    ///
+    /// let instance = InstanceData::new([1.0, 0.0, 2.0]);
+    /// assert_eq!(instance.position, [1.0, 0.0, 2.0]);
+    /// assert_eq!(instance.scale, 1.0);
+    /// assert_eq!(instance.rotation_y, 0.0);
+    /// ```
+    pub fn new(position: [f32; 3]) -> Self {
+        Self {
+            position,
+            scale: 1.0,
+            rotation_y: 0.0,
+        }
+    }
+
+    /// Set the scale
+    pub fn with_scale(mut self, scale: f32) -> Self {
+        self.scale = scale;
+        self
+    }
+
+    /// Set the rotation
+    pub fn with_rotation(mut self, rotation_y: f32) -> Self {
+        self.rotation_y = rotation_y;
+        self
+    }
+}
+
+/// Async mesh generation task identifier
+///
+/// Used to track background mesh generation tasks and retrieve their results
+/// without blocking the main game loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AsyncMeshTaskId(pub u64);
+
+impl AsyncMeshTaskId {
+    /// Create a new task ID from a raw u64
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+/// Configuration for async mesh generation
+///
+/// Controls how procedural meshes are generated on background threads
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AsyncMeshConfig {
+    /// Maximum number of concurrent mesh generation tasks
+    pub max_concurrent_tasks: usize,
+    /// Whether to prioritize closer objects
+    pub prioritize_by_distance: bool,
+    /// Timeout in milliseconds for mesh generation
+    pub generation_timeout_ms: u64,
+}
+
+impl Default for AsyncMeshConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent_tasks: 4,
+            prioritize_by_distance: true,
+            generation_timeout_ms: 5000,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MapEvent {
     /// Random monster encounter
