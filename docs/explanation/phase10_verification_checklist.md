@@ -33,14 +33,14 @@
   - [x] Tracks blocking behavior
   - [x] Properly derives Component
   - [x] Has constructor: `FurnitureEntity::new()`
-  
+
 - [x] Interactable component created
   - [x] Has interaction_type field
   - [x] Has interaction_distance field
   - [x] Default distance constant (2.0 units)
   - [x] Constructor: `Interactable::new()`
   - [x] Builder: `Interactable::with_distance()`
-  
+
 - [x] InteractionType enum created
   - [x] OpenChest variant for containers
   - [x] SitOnChair variant for seating

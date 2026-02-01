@@ -297,7 +297,7 @@ fn test_get_interaction_type_chest() {
 #[test]
 fn test_furniture_material_wood_properties() {
     let material = FurnitureMaterial::Wood;
-    
+
     assert!(material.metallic() < 0.2);
     assert!(material.roughness() > 0.6);
 }
