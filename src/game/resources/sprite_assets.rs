@@ -45,6 +45,7 @@
 use bevy::color::LinearRgba;
 use bevy::prelude::*;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Configuration for a sprite sheet (texture atlas)
 ///
@@ -171,6 +172,65 @@ impl SpriteAssets {
     ///     );
     /// }
     /// ```
+    ///
+    /// Resolution notes:
+    /// - Prefer campaign-local assets under `<campaign>/assets/...` when present.
+    /// - Fall back to the provided logical path (e.g. `sprites/...`) or an absolute
+    ///   file found on disk if necessary.
+    fn resolve_texture_path_for_load(&self, sheet_path: &str) -> String {
+        // Normalize a bit (strip leading "./" which sometimes appears in paths)
+        let normalized = sheet_path
+            .strip_prefix("./")
+            .unwrap_or(sheet_path)
+            .to_string();
+
+        // Candidate order:
+        // 1) campaign assets (assets/<normalized>) when available
+        // 2) the normalized path as provided (e.g. "sprites/...")
+        let mut candidates: Vec<String> = Vec::new();
+        if !normalized.starts_with("assets/") {
+            candidates.push(format!("assets/{}", normalized));
+        }
+        candidates.push(normalized.clone());
+        candidates.dedup();
+
+        // If BEVY_ASSET_ROOT is set (campaign runtime), prefer candidates that exist there.
+        if let Ok(bevy_root) = std::env::var("BEVY_ASSET_ROOT") {
+            for cand in &candidates {
+                let candidate_abs = std::path::Path::new(&bevy_root).join(cand);
+                if candidate_abs.exists() {
+                    return cand.clone();
+                }
+            }
+        }
+
+        // 2) Next, prefer candidates that exist relative to current working dir.
+        for c in &candidates {
+            if Path::new(c).exists() {
+                return c.clone();
+            }
+        }
+
+        // 3) Attempt to fallback to the global placeholder sheet when available.
+        // This avoids hard errors when individual sprite sheets are missing and
+        // provides a consistent visual fallback for missing campaign assets.
+        let placeholder = "assets/sprites/placeholders/npc_placeholder.png";
+
+        if placeholder != normalized {
+            if let Ok(root) = std::env::var("BEVY_ASSET_ROOT") {
+                if Path::new(&root).join(placeholder).exists() {
+                    return placeholder.to_string();
+                }
+            }
+            if Path::new(placeholder).exists() {
+                return placeholder.to_string();
+            }
+        }
+
+        // 4) If nothing matched, return the normalized logical path; AssetServer may still resolve it.
+        normalized
+    }
+
     pub fn get_or_load_material(
         &mut self,
         sheet_path: &str,
@@ -178,11 +238,35 @@ impl SpriteAssets {
         materials: &mut Assets<StandardMaterial>,
         material_properties: Option<&crate::domain::world::SpriteMaterialProperties>,
     ) -> Handle<StandardMaterial> {
+        // Return cached handle if we already loaded this logical sheet path.
         if let Some(handle) = self.materials.get(sheet_path) {
             return handle.clone();
         }
 
-        let texture_handle = asset_server.load::<Image>(sheet_path.to_string());
+        // Resolve the concrete path we should ask the AssetServer to load.
+        // This prefers `<campaign>/assets/...` when available, and falls back to
+        // the provided path (or an absolute path found on disk).
+        let chosen_path = self.resolve_texture_path_for_load(sheet_path);
+
+        if chosen_path != sheet_path {
+            debug!(
+                "get_or_load_material: resolved '{}' -> '{}'",
+                sheet_path, chosen_path
+            );
+        }
+
+        // If the resolver selected the placeholder sheet because the requested
+        // texture was missing, emit a warning so the developer sees why the
+        // placeholder was used.
+        let placeholder = "assets/sprites/placeholders/npc_placeholder.png";
+        if chosen_path == placeholder && sheet_path != placeholder {
+            warn!(
+                "Sprite '{}' not found in campaign assets; falling back to placeholder '{}'",
+                sheet_path, placeholder
+            );
+        }
+
+        let texture_handle = asset_server.load::<Image>(chosen_path.clone());
         let mut material = StandardMaterial {
             base_color_texture: Some(texture_handle),
             alpha_mode: AlphaMode::Blend,
@@ -221,8 +305,15 @@ impl SpriteAssets {
         }
 
         let handle = materials.add(material);
+
+        // Cache the handle under both the logical sheet path and the concrete path we used
+        // so future callers using either form will reuse the material.
         self.materials
             .insert(sheet_path.to_string(), handle.clone());
+        if chosen_path != sheet_path {
+            self.materials.insert(chosen_path, handle.clone());
+        }
+
         handle
     }
 
@@ -516,6 +607,62 @@ mod asset_loading_tests {
 
         let signs_config = sprite_assets.get_config("signs").unwrap();
         assert_eq!(signs_config.texture_path, "sprites/events/signs.png");
+    }
+
+    #[test]
+    fn test_resolve_texture_path_prefers_campaign_assets() {
+        // Preserve existing env var if present
+        let prev = std::env::var("BEVY_ASSET_ROOT").ok();
+        std::env::set_var("BEVY_ASSET_ROOT", "campaigns/tutorial");
+
+        let sprite_assets = SpriteAssets::new();
+        let resolved =
+            sprite_assets.resolve_texture_path_for_load("sprites/placeholders/npc_placeholder.png");
+
+        // The tutorial campaign contains assets/sprites/placeholders/npc_placeholder.png;
+        // the resolver should prefer the campaign assets prefix.
+        assert_eq!(resolved, "assets/sprites/placeholders/npc_placeholder.png");
+
+        // Restore env var
+        if let Some(v) = prev {
+            std::env::set_var("BEVY_ASSET_ROOT", v);
+        } else {
+            std::env::remove_var("BEVY_ASSET_ROOT");
+        }
+    }
+
+    #[test]
+    fn test_resolve_texture_path_uses_project_assets_when_no_campaign() {
+        // Ensure BEVY_ASSET_ROOT is not set so the resolver falls back to the
+        // repository assets directory (present during tests).
+        let prev = std::env::var("BEVY_ASSET_ROOT").ok();
+        std::env::remove_var("BEVY_ASSET_ROOT");
+
+        let sprite_assets = SpriteAssets::new();
+        let resolved =
+            sprite_assets.resolve_texture_path_for_load("sprites/placeholders/npc_placeholder.png");
+
+        assert_eq!(resolved, "assets/sprites/placeholders/npc_placeholder.png");
+
+        if let Some(v) = prev {
+            std::env::set_var("BEVY_ASSET_ROOT", v);
+        }
+    }
+
+    #[test]
+    fn test_resolve_texture_path_falls_back_to_placeholder_when_missing() {
+        // Ensure BEVY_ASSET_ROOT is not set so the resolver checks repository assets.
+        let prev = std::env::var("BEVY_ASSET_ROOT").ok();
+        std::env::remove_var("BEVY_ASSET_ROOT");
+
+        let sprite_assets = SpriteAssets::new();
+        let resolved =
+            sprite_assets.resolve_texture_path_for_load("sprites/actors/does_not_exist.png");
+        assert_eq!(resolved, "assets/sprites/placeholders/npc_placeholder.png");
+
+        if let Some(v) = prev {
+            std::env::set_var("BEVY_ASSET_ROOT", v);
+        }
     }
 
     /// Test that placeholder PNG files exist on disk

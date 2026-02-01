@@ -78,7 +78,7 @@ system rules:
   </plan_style_guide>
 
 Write an phased approach implementation plan for implementing phases in your list
-of recommended implementation order. Write the plan to docs/explanations.
+of recommended implementation order. Write the plan to docs/explanation/{feature_name}_implementation_plan.md.
 
 ## Implementation Plan
 

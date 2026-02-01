@@ -36,6 +36,12 @@ NPCs placed on the map are not editable. Selecting an NPC on the map does not br
 
 ✅ COMPLETED
 
+Campaign Builder --> Map Editor --> Select Map --> Edit
+
+NPCs placed on the map can not be removed. Add a remove NPC button that removes the selected NPC from the map.
+
+
+
 ### NPC Editor
 
 Campaign Builder --> Dialogue Editor --> Edit
@@ -103,6 +109,28 @@ Unable to create new nodes makes it impossible to create dialog trees.
 ✅ COMPLETED - Need to be able to set starting position for player characters in map editor. (It is done in the campaign.ron)
 
 ## Game Engine
+
+### Advanced Procedural Meshes
+
+The procedural meshes are not complete. We need to implement advanced procedural meshes in the game engine so that we can create complex environments and objects in the game. We need to create more complicated trees, shrubs,  grass, signs, thrones, benches, tables, chairs, chests, torches, structures, and objects. Research procedural mesh generation in Bevy and implement advanced procedural meshes in the game engine. I would like to keep the feel of the game the same but with more detailed and complex objects.
+
+Valoren has examples of procedural meshes. I do not want the blocky look of Valoren. But it has some good examples of procedural meshes.
+
+Articles on procedural meshes:
+
+https://clynamen.github.io/blog/2021/01/04/terrain_generation_bevy/
+
+https://medium.com/@heyfebin/the-impatient-programmers-guide-to-bevy-and-rust-chapter-2-let-there-be-a-world-procedural-57710a20eb43
+
+https://dev.to/mikeam565/rust-game-dev-log-5-improved-terrain-generation-dynamic-grass-in-an-endless-world-291i
+
+Write a plan with a phased approach to implementing advanced procedural meshes in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+### Party View Point
+
+The view point of the party is not centered. When the party approaches a door the door is not centereed on the screen it is off by half. This behavior applies to all objects in the game. It makes navigation very difficult. The party view point should be centered.
+
+[viewport centering fix implementation](./viewport_centering_fix_implementation.md)
 
 ### Combat System
 
@@ -215,7 +243,7 @@ Full domain change: Change `CharacterDefinition` to store `AttributePair`/`Attri
 
 ### Sprite Support (After Tile Visual Metadata)
 
-[Sprite Support](./sprite_support_implementation_plan.md)
+✅ COMPLETED - [Sprite Support](./sprite_support_implementation_plan.md)
 
 ### Game Play
 

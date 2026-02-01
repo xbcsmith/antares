@@ -964,7 +964,33 @@ impl MapEditorState {
         self.has_changes = true;
     }
 
-    /// Removes an NPC placement by index
+    /// Removes an NPC placement by index.
+    ///
+    /// This will:
+    /// - Remove the NPC placement at `index` from `map.npc_placements` if it exists.
+    /// - Push an `EditorAction::NpcPlacementRemoved` onto the undo stack so the action
+    ///   can be undone via `undo()`.
+    /// - Mark the editor as having changes (`has_changes = true`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::map_editor::MapEditorState;
+    /// use antares::domain::world::npc::NpcPlacement;
+    /// use antares::domain::world::Map;
+    /// use antares::domain::types::Position;
+    ///
+    /// let mut state =
+    ///     MapEditorState::new(Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10));
+    /// state.add_npc_placement(NpcPlacement::new("guard", Position::new(3, 3)));
+    /// assert_eq!(state.map.npc_placements.len(), 1);
+    /// state.remove_npc_placement(0);
+    /// assert_eq!(state.map.npc_placements.len(), 0);
+    /// state.undo();
+    /// assert_eq!(state.map.npc_placements.len(), 1);
+    /// ```
+    ///
+    /// Note: If `index` is out of range this is a no-op.
     pub fn remove_npc_placement(&mut self, index: usize) {
         if index < self.map.npc_placements.len() {
             let placement = self.map.npc_placements.remove(index);
@@ -3005,8 +3031,12 @@ impl MapsEditorState {
                     ui.label(format!("Blocked: {}", tile.blocked));
                 }
 
-                if let Some(placement) =
-                    editor.map.npc_placements.iter().find(|n| n.position == pos)
+                if let Some((idx, placement)) = editor
+                    .map
+                    .npc_placements
+                    .iter()
+                    .enumerate()
+                    .find(|(_, n)| n.position == pos)
                 {
                     ui.separator();
                     ui.label("NPC:");
@@ -3016,13 +3046,25 @@ impl MapsEditorState {
                         .find(|n| n.id == placement.npc_id)
                         .map(|n| n.name.as_str())
                         .unwrap_or("Unknown");
+                    // Clone values we need so we don't hold an immutable borrow while mutating the vector below
+                    let npc_id = placement.npc_id.clone();
                     ui.label(format!("Name: {}", name));
-                    ui.label(format!("ID: {}", placement.npc_id));
+                    ui.label(format!("ID: {}", npc_id));
 
-                    // Allow quick navigation to NPC editor for this NPC
+                    // Drop the temporary borrow of the placement so we can mutate the placements vector.
+                    let _ = placement;
+
+                    // Allow quick navigation to NPC editor for this NPC and removal
                     ui.horizontal(|ui| {
                         if ui.button("✏️ Edit NPC").clicked() {
-                            requested_open_npc = Some(placement.npc_id.clone());
+                            requested_open_npc = Some(npc_id.clone());
+                        }
+                        if ui
+                            .button("🗑️ Remove NPC")
+                            .on_hover_text("Remove this NPC placement from the map")
+                            .clicked()
+                        {
+                            editor.remove_npc_placement(idx);
                         }
                     });
                 }
@@ -4341,7 +4383,48 @@ mod tests {
         assert!(state.map.get_event(pos).is_none());
     }
 
-    // test_add_remove_npc removed as it relied on deprecated Npc struct
+    // Previously a test for add/remove NPC relied on a deprecated Npc struct. We now
+    // provide targeted tests for MapEditorState::remove_npc_placement behavior.
+
+    #[test]
+    fn test_remove_npc_placement_removes_and_undo_restores() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let p1 = NpcPlacement::new("npc_one", Position::new(1, 1));
+        let p2 = NpcPlacement::new("npc_two", Position::new(2, 2));
+        state.add_npc_placement(p1.clone());
+        state.add_npc_placement(p2.clone());
+
+        assert_eq!(state.map.npc_placements.len(), 2);
+        // Remove first placement (index 0)
+        state.remove_npc_placement(0);
+        assert_eq!(state.map.npc_placements.len(), 1);
+        assert_eq!(state.map.npc_placements[0], p2);
+
+        // Undo should restore the removed placement at the original index
+        state.undo();
+        assert_eq!(state.map.npc_placements.len(), 2);
+        assert_eq!(state.map.npc_placements[0], p1);
+        assert_eq!(state.map.npc_placements[1], p2);
+
+        // Redo should re-apply the removal
+        state.redo();
+        assert_eq!(state.map.npc_placements.len(), 1);
+        assert_eq!(state.map.npc_placements[0], p2);
+    }
+
+    #[test]
+    fn test_remove_npc_placement_out_of_range_noop() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        // Initially empty
+        assert_eq!(state.map.npc_placements.len(), 0);
+        // Removing out of range index should be a noop
+        state.remove_npc_placement(5);
+        assert_eq!(state.map.npc_placements.len(), 0);
+        // has_changes should remain false
+        assert_eq!(state.has_changes, false);
+    }
 
     #[test]
     fn test_fill_region() {
