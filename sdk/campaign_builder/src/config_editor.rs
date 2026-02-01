@@ -24,6 +24,7 @@
 //! ```
 
 use crate::ui_helpers::{EditorToolbar, ToolbarAction};
+use antares::game::resources::grass_quality_settings::GrassDensity;
 use antares::sdk::game_config::{CameraMode, GameConfig, ShadowQuality};
 use eframe::egui;
 use std::path::PathBuf;
@@ -45,6 +46,7 @@ pub struct ConfigEditorState {
     pub audio_expanded: bool,
     pub controls_expanded: bool,
     pub camera_expanded: bool,
+    pub graphics_quality_expanded: bool,
 
     /// Edit buffers for key bindings
     pub controls_move_forward_buffer: String,
@@ -68,6 +70,9 @@ pub struct ConfigEditorState {
 
     /// Track last campaign directory to detect changes
     pub last_campaign_dir: Option<PathBuf>,
+
+    /// Phase 6: Grass quality settings
+    pub grass_density: GrassDensity,
 }
 
 impl Default for ConfigEditorState {
@@ -90,6 +95,8 @@ impl Default for ConfigEditorState {
             last_captured_key: None,
             needs_initial_load: true,
             last_campaign_dir: None,
+            graphics_quality_expanded: false,
+            grass_density: GrassDensity::Medium,
         }
     }
 }
@@ -242,12 +249,69 @@ impl ConfigEditorState {
             .show(ui, |ui| {
                 self.show_graphics_section(ui, unsaved_changes);
                 ui.add_space(5.0);
+                self.show_graphics_quality_section(ui, unsaved_changes);
+                ui.add_space(5.0);
                 self.show_audio_section(ui, unsaved_changes);
                 ui.add_space(5.0);
                 self.show_controls_section(ui, unsaved_changes);
                 ui.add_space(5.0);
                 self.show_camera_section(ui, unsaved_changes);
             });
+    }
+
+    /// Show Phase 6 graphics quality settings (grass density, etc.)
+    fn show_graphics_quality_section(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
+        let section_open = ui.collapsing("🌱 Graphics Quality (Phase 6)", |ui| {
+            ui.add_space(5.0);
+
+            // Grass Density Quality Setting
+            ui.horizontal(|ui| {
+                ui.label("Grass Density:");
+                let density_options = [GrassDensity::Low, GrassDensity::Medium, GrassDensity::High];
+                let density_names = [
+                    GrassDensity::Low.name(),
+                    GrassDensity::Medium.name(),
+                    GrassDensity::High.name(),
+                ];
+                let mut selected_index = density_options
+                    .iter()
+                    .position(|&x| x == self.grass_density)
+                    .unwrap_or(1);
+
+                let original_index = selected_index;
+                egui::ComboBox::from_id_salt("grass_density")
+                    .selected_text(density_names[selected_index])
+                    .show_index(ui, &mut selected_index, density_names.len(), |i| {
+                        egui::WidgetText::from(density_names[i])
+                    });
+
+                if selected_index != original_index {
+                    self.grass_density = density_options[selected_index];
+                    *unsaved_changes = true;
+                }
+            });
+
+            ui.label("Grass blades per tile: ");
+            ui.indent("grass_info", |ui| {
+                let (min, max) = self.grass_density.blade_count_range();
+                ui.label(format!("Range: {} - {} blades per tile", min, max));
+                match self.grass_density {
+                    GrassDensity::Low => {
+                        ui.label("Optimized for older hardware and integrated graphics");
+                    }
+                    GrassDensity::Medium => {
+                        ui.label("Balanced default for standard desktop hardware");
+                    }
+                    GrassDensity::High => {
+                        ui.label("Maximum visual fidelity for modern gaming systems");
+                    }
+                }
+            });
+
+            ui.add_space(5.0);
+        });
+
+        self.graphics_quality_expanded = section_open.openness > 0.0;
     }
 
     /// Show the graphics configuration section

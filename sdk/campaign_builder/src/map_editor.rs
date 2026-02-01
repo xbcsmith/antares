@@ -327,6 +327,51 @@ pub enum VisualPreset {
     Rotated90,
     /// Diagonal wall (rotation_y=45.0, width_z=0.2)
     DiagonalWall,
+
+    // ===== Phase 6: Advanced Terrain Variants =====
+    /// Short tree (height=1.0, scale=0.6, medium green tint)
+    ShortTree,
+    /// Medium tree (height=2.0, scale=0.8, medium green tint)
+    MediumTree,
+    /// Tall tree (height=3.0, scale=1.2, medium green tint)
+    TallTree,
+    /// Dead tree (height=2.5, scale=0.7, brown/gray tint)
+    DeadTree,
+
+    /// Small shrub (height=0.4, scale=0.4, dark green tint)
+    SmallShrub,
+    /// Large shrub (height=0.8, scale=0.9, dark green tint)
+    LargeShrub,
+    /// Flowering shrub (height=0.6, scale=0.7, flower pink tint)
+    FloweringShrub,
+
+    /// Short grass (height=0.2, scale=0.8, light green tint)
+    ShortGrass,
+    /// Tall grass (height=0.4, scale=1.0, medium green tint)
+    TallGrass,
+    /// Dried grass (height=0.3, scale=0.9, brown/tan tint)
+    DriedGrass,
+
+    /// Low peak (height=1.5, rotation_y=0.0, light gray tint)
+    LowPeak,
+    /// High peak (height=3.0, rotation_y=0.0, medium gray tint)
+    HighPeak,
+    /// Jagged peak (height=5.0, rotation_y=15.0, dark gray tint)
+    JaggedPeak,
+
+    /// Shallow swamp (height=0.1, scale=1.2, murky blue-green tint)
+    ShallowSwamp,
+    /// Deep swamp (height=0.3, scale=1.1, dark murky tint)
+    DeepSwamp,
+    /// Murky swamp (height=0.5, scale=1.0, very dark swamp tint)
+    MurkySwamp,
+
+    /// Lava pool (height=0.2, scale=1.0, bright red-orange emissive)
+    LavaPool,
+    /// Lava flow (height=0.3, scale=1.1, bright orange emissive)
+    LavaFlow,
+    /// Volcanic vent (height=0.4, scale=0.8, intense yellow-orange emissive)
+    VolcanicVent,
 }
 
 impl VisualPreset {
@@ -346,6 +391,31 @@ impl VisualPreset {
             VisualPreset::Rotated45 => "Rotated 45°",
             VisualPreset::Rotated90 => "Rotated 90°",
             VisualPreset::DiagonalWall => "Diagonal Wall",
+            // Phase 6 trees
+            VisualPreset::ShortTree => "Short Tree",
+            VisualPreset::MediumTree => "Medium Tree",
+            VisualPreset::TallTree => "Tall Tree",
+            VisualPreset::DeadTree => "Dead Tree",
+            // Phase 6 shrubs
+            VisualPreset::SmallShrub => "Small Shrub",
+            VisualPreset::LargeShrub => "Large Shrub",
+            VisualPreset::FloweringShrub => "Flowering Shrub",
+            // Phase 6 grass
+            VisualPreset::ShortGrass => "Short Grass",
+            VisualPreset::TallGrass => "Tall Grass",
+            VisualPreset::DriedGrass => "Dried Grass",
+            // Phase 6 mountains
+            VisualPreset::LowPeak => "Low Peak",
+            VisualPreset::HighPeak => "High Peak",
+            VisualPreset::JaggedPeak => "Jagged Peak",
+            // Phase 6 swamp
+            VisualPreset::ShallowSwamp => "Shallow Swamp",
+            VisualPreset::DeepSwamp => "Deep Swamp",
+            VisualPreset::MurkySwamp => "Murky Swamp",
+            // Phase 6 lava
+            VisualPreset::LavaPool => "Lava Pool",
+            VisualPreset::LavaFlow => "Lava Flow",
+            VisualPreset::VolcanicVent => "Volcanic Vent",
         }
     }
 
@@ -365,6 +435,31 @@ impl VisualPreset {
             VisualPreset::Rotated45,
             VisualPreset::Rotated90,
             VisualPreset::DiagonalWall,
+            // Phase 6 trees
+            VisualPreset::ShortTree,
+            VisualPreset::MediumTree,
+            VisualPreset::TallTree,
+            VisualPreset::DeadTree,
+            // Phase 6 shrubs
+            VisualPreset::SmallShrub,
+            VisualPreset::LargeShrub,
+            VisualPreset::FloweringShrub,
+            // Phase 6 grass
+            VisualPreset::ShortGrass,
+            VisualPreset::TallGrass,
+            VisualPreset::DriedGrass,
+            // Phase 6 mountains
+            VisualPreset::LowPeak,
+            VisualPreset::HighPeak,
+            VisualPreset::JaggedPeak,
+            // Phase 6 swamp
+            VisualPreset::ShallowSwamp,
+            VisualPreset::DeepSwamp,
+            VisualPreset::MurkySwamp,
+            // Phase 6 lava
+            VisualPreset::LavaPool,
+            VisualPreset::LavaFlow,
+            VisualPreset::VolcanicVent,
         ]
     }
 
@@ -425,6 +520,126 @@ impl VisualPreset {
             VisualPreset::DiagonalWall => TileVisualMetadata {
                 rotation_y: Some(45.0),
                 width_z: Some(0.2),
+                ..Default::default()
+            },
+            // Phase 6: Tree variants
+            VisualPreset::ShortTree => TileVisualMetadata {
+                height: Some(1.0),
+                scale: Some(0.6),
+                color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                ..Default::default()
+            },
+            VisualPreset::MediumTree => TileVisualMetadata {
+                height: Some(2.0),
+                scale: Some(0.8),
+                color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                ..Default::default()
+            },
+            VisualPreset::TallTree => TileVisualMetadata {
+                height: Some(3.0),
+                scale: Some(1.2),
+                color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                ..Default::default()
+            },
+            VisualPreset::DeadTree => TileVisualMetadata {
+                height: Some(2.5),
+                scale: Some(0.7),
+                color_tint: Some((0.6, 0.5, 0.4)), // Brown/gray tint
+                ..Default::default()
+            },
+            // Phase 6: Shrub variants
+            VisualPreset::SmallShrub => TileVisualMetadata {
+                height: Some(0.4),
+                scale: Some(0.4),
+                color_tint: Some((0.3, 0.6, 0.3)), // Dark green tint
+                ..Default::default()
+            },
+            VisualPreset::LargeShrub => TileVisualMetadata {
+                height: Some(0.8),
+                scale: Some(0.9),
+                color_tint: Some((0.3, 0.6, 0.3)), // Dark green tint
+                ..Default::default()
+            },
+            VisualPreset::FloweringShrub => TileVisualMetadata {
+                height: Some(0.6),
+                scale: Some(0.7),
+                color_tint: Some((0.8, 0.5, 0.7)), // Flower pink tint
+                ..Default::default()
+            },
+            // Phase 6: Grass variants
+            VisualPreset::ShortGrass => TileVisualMetadata {
+                height: Some(0.2),
+                scale: Some(0.8),
+                color_tint: Some((0.6, 0.9, 0.6)), // Light green tint
+                ..Default::default()
+            },
+            VisualPreset::TallGrass => TileVisualMetadata {
+                height: Some(0.4),
+                scale: Some(1.0),
+                color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                ..Default::default()
+            },
+            VisualPreset::DriedGrass => TileVisualMetadata {
+                height: Some(0.3),
+                scale: Some(0.9),
+                color_tint: Some((0.7, 0.6, 0.4)), // Brown/tan tint
+                ..Default::default()
+            },
+            // Phase 6: Mountain variants
+            VisualPreset::LowPeak => TileVisualMetadata {
+                height: Some(1.5),
+                rotation_y: Some(0.0),
+                color_tint: Some((0.8, 0.8, 0.8)), // Light gray tint
+                ..Default::default()
+            },
+            VisualPreset::HighPeak => TileVisualMetadata {
+                height: Some(3.0),
+                rotation_y: Some(0.0),
+                color_tint: Some((0.7, 0.7, 0.7)), // Medium gray tint
+                ..Default::default()
+            },
+            VisualPreset::JaggedPeak => TileVisualMetadata {
+                height: Some(5.0),
+                rotation_y: Some(15.0),
+                color_tint: Some((0.5, 0.5, 0.5)), // Dark gray tint
+                ..Default::default()
+            },
+            // Phase 6: Swamp variants
+            VisualPreset::ShallowSwamp => TileVisualMetadata {
+                height: Some(0.1),
+                scale: Some(1.2),
+                color_tint: Some((0.3, 0.5, 0.4)), // Murky blue-green tint
+                ..Default::default()
+            },
+            VisualPreset::DeepSwamp => TileVisualMetadata {
+                height: Some(0.3),
+                scale: Some(1.1),
+                color_tint: Some((0.2, 0.3, 0.3)), // Dark murky tint
+                ..Default::default()
+            },
+            VisualPreset::MurkySwamp => TileVisualMetadata {
+                height: Some(0.5),
+                scale: Some(1.0),
+                color_tint: Some((0.15, 0.2, 0.2)), // Very dark swamp tint
+                ..Default::default()
+            },
+            // Phase 6: Lava variants
+            VisualPreset::LavaPool => TileVisualMetadata {
+                height: Some(0.2),
+                scale: Some(1.0),
+                color_tint: Some((1.0, 0.3, 0.0)), // Bright red-orange emissive
+                ..Default::default()
+            },
+            VisualPreset::LavaFlow => TileVisualMetadata {
+                height: Some(0.3),
+                scale: Some(1.1),
+                color_tint: Some((1.0, 0.5, 0.0)), // Bright orange emissive
+                ..Default::default()
+            },
+            VisualPreset::VolcanicVent => TileVisualMetadata {
+                height: Some(0.4),
+                scale: Some(0.8),
+                color_tint: Some((1.0, 0.8, 0.0)), // Intense yellow-orange emissive
                 ..Default::default()
             },
         }
