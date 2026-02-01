@@ -29,7 +29,8 @@ pub use events::{random_encounter, trigger_event, EventError, EventResult};
 pub use movement::{check_tile_blocked, move_party, MovementError};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};
 pub use types::{
-    EncounterTable, FurnitureType, LayeredSprite, Map, MapEvent, ResolvedNpc, SpriteAnimation,
-    SpriteLayer, SpriteMaterialProperties, SpriteReference, SpriteSelectionRule, TerrainType, Tile,
-    TileVisualMetadata, WallType, World,
+    ArchConfig, ColumnConfig, ColumnStyle, DoorFrameConfig, EncounterTable, FurnitureType,
+    LayeredSprite, Map, MapEvent, RailingConfig, ResolvedNpc, SpriteAnimation, SpriteLayer,
+    SpriteMaterialProperties, SpriteReference, SpriteSelectionRule, StructureType, TerrainType,
+    Tile, TileVisualMetadata, WallSegmentConfig, WallType, World,
 };

@@ -857,6 +857,185 @@ impl FurnitureType {
     }
 }
 
+// ===== Architectural Structure Components =====
+
+/// Types of architectural structure components for dungeons and areas
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum StructureType {
+    /// Vertical support column
+    Column,
+    /// Arched opening
+    Arch,
+    /// Wall segment
+    WallSegment,
+    /// Door frame
+    DoorFrame,
+    /// Safety railing
+    Railing,
+}
+
+impl StructureType {
+    /// Returns all structure type variants
+    pub fn all() -> &'static [StructureType] {
+        &[
+            StructureType::Column,
+            StructureType::Arch,
+            StructureType::WallSegment,
+            StructureType::DoorFrame,
+            StructureType::Railing,
+        ]
+    }
+
+    /// Returns human-readable name for the structure type
+    pub fn name(self) -> &'static str {
+        match self {
+            StructureType::Column => "Column",
+            StructureType::Arch => "Arch",
+            StructureType::WallSegment => "Wall Segment",
+            StructureType::DoorFrame => "Door Frame",
+            StructureType::Railing => "Railing",
+        }
+    }
+}
+
+/// Architectural styles for columns
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ColumnStyle {
+    /// Plain cylindrical column
+    Plain,
+    /// Classical Doric style with simple capital
+    Doric,
+    /// Classical Ionic style with scroll capital
+    Ionic,
+}
+
+impl ColumnStyle {
+    /// Returns all column style variants
+    pub fn all() -> &'static [ColumnStyle] {
+        &[ColumnStyle::Plain, ColumnStyle::Doric, ColumnStyle::Ionic]
+    }
+
+    /// Returns human-readable name for the column style
+    pub fn name(self) -> &'static str {
+        match self {
+            ColumnStyle::Plain => "Plain",
+            ColumnStyle::Doric => "Doric",
+            ColumnStyle::Ionic => "Ionic",
+        }
+    }
+}
+
+/// Configuration for column generation
+#[derive(Clone, Debug)]
+pub struct ColumnConfig {
+    /// Height of the column (default: 3.0)
+    pub height: f32,
+    /// Radius of the column shaft (default: 0.3)
+    pub radius: f32,
+    /// Architectural style
+    pub style: ColumnStyle,
+}
+
+impl Default for ColumnConfig {
+    fn default() -> Self {
+        Self {
+            height: 3.0,
+            radius: 0.3,
+            style: ColumnStyle::Plain,
+        }
+    }
+}
+
+/// Configuration for arch generation
+#[derive(Clone, Debug)]
+pub struct ArchConfig {
+    /// Width of the arch opening (default: 2.0)
+    pub width: f32,
+    /// Height to the top of the arch (default: 3.0)
+    pub height: f32,
+    /// Thickness of the arch structure (default: 0.3)
+    pub thickness: f32,
+}
+
+impl Default for ArchConfig {
+    fn default() -> Self {
+        Self {
+            width: 2.0,
+            height: 3.0,
+            thickness: 0.3,
+        }
+    }
+}
+
+/// Configuration for wall segment generation
+#[derive(Clone, Debug)]
+pub struct WallSegmentConfig {
+    /// Length of the wall segment (default: 2.0)
+    pub length: f32,
+    /// Height of the wall segment (default: 2.5)
+    pub height: f32,
+    /// Thickness of the wall (default: 0.2)
+    pub thickness: f32,
+    /// Whether the wall has a window opening
+    pub has_window: bool,
+}
+
+impl Default for WallSegmentConfig {
+    fn default() -> Self {
+        Self {
+            length: 2.0,
+            height: 2.5,
+            thickness: 0.2,
+            has_window: false,
+        }
+    }
+}
+
+/// Configuration for door frame generation
+#[derive(Clone, Debug)]
+pub struct DoorFrameConfig {
+    /// Width of the door opening (default: 1.0)
+    pub width: f32,
+    /// Height of the door opening (default: 2.5)
+    pub height: f32,
+    /// Thickness of the frame (default: 0.15)
+    pub frame_thickness: f32,
+}
+
+impl Default for DoorFrameConfig {
+    fn default() -> Self {
+        Self {
+            width: 1.0,
+            height: 2.5,
+            frame_thickness: 0.15,
+        }
+    }
+}
+
+/// Configuration for railing generation
+#[derive(Clone, Debug)]
+pub struct RailingConfig {
+    /// Length of the railing (default: 2.0)
+    pub length: f32,
+    /// Height of the railing (default: 1.0)
+    pub height: f32,
+    /// Radius of the posts (default: 0.08)
+    pub post_radius: f32,
+    /// Number of posts (default: 4)
+    pub post_count: usize,
+}
+
+impl Default for RailingConfig {
+    fn default() -> Self {
+        Self {
+            length: 2.0,
+            height: 1.0,
+            post_radius: 0.08,
+            post_count: 4,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MapEvent {
     /// Random monster encounter

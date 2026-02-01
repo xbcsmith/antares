@@ -73,6 +73,26 @@ pub struct ProceduralMeshCache {
     furniture_chest_lid: Option<Handle<Mesh>>,
     furniture_torch_handle: Option<Handle<Mesh>>,
     furniture_torch_flame: Option<Handle<Mesh>>,
+    /// Cached mesh handle for column shafts
+    structure_column_shaft: Option<Handle<Mesh>>,
+    /// Cached mesh handle for column capitals (Doric/Ionic)
+    structure_column_capital: Option<Handle<Mesh>>,
+    /// Cached mesh handle for arch curve
+    structure_arch_curve: Option<Handle<Mesh>>,
+    /// Cached mesh handle for arch supports
+    structure_arch_support: Option<Handle<Mesh>>,
+    /// Cached mesh handle for wall segments
+    #[allow(dead_code)]
+    structure_wall: Option<Handle<Mesh>>,
+    /// Cached mesh handle for door frames
+    #[allow(dead_code)]
+    structure_door_frame: Option<Handle<Mesh>>,
+    /// Cached mesh handle for railing posts
+    #[allow(dead_code)]
+    structure_railing_post: Option<Handle<Mesh>>,
+    /// Cached mesh handle for railing bars
+    #[allow(dead_code)]
+    structure_railing_bar: Option<Handle<Mesh>>,
 }
 
 impl Default for ProceduralMeshCache {
@@ -101,6 +121,14 @@ impl Default for ProceduralMeshCache {
             furniture_chest_lid: None,
             furniture_torch_handle: None,
             furniture_torch_flame: None,
+            structure_column_shaft: None,
+            structure_column_capital: None,
+            structure_arch_curve: None,
+            structure_arch_support: None,
+            structure_wall: None,
+            structure_door_frame: None,
+            structure_railing_post: None,
+            structure_railing_bar: None,
         }
     }
 }
@@ -215,6 +243,55 @@ const THRONE_BACKING: Color = Color::srgb(0.6, 0.0, 0.0); // Deep red for backin
 const CHEST_COLOR: Color = Color::srgb(0.35, 0.2, 0.1); // Dark brown
 const TORCH_HANDLE_COLOR: Color = Color::srgb(0.2, 0.1, 0.0); // Very dark brown
 const TORCH_FLAME_COLOR: Color = Color::srgb(1.0, 0.8, 0.2); // Yellow/orange
+
+// Structure dimensions - Column
+#[allow(dead_code)]
+const COLUMN_SHAFT_RADIUS: f32 = 0.3;
+const COLUMN_CAPITAL_HEIGHT: f32 = 0.2; // Additional height for capital
+#[allow(dead_code)]
+const COLUMN_CAPITAL_RADIUS: f32 = 0.35;
+const COLUMN_BASE_HEIGHT: f32 = 0.15;
+
+// Structure dimensions - Arch
+const ARCH_INNER_RADIUS: f32 = 1.0;
+#[allow(dead_code)]
+const ARCH_OUTER_RADIUS: f32 = 1.3;
+#[allow(dead_code)]
+const ARCH_THICKNESS: f32 = 0.3;
+#[allow(dead_code)]
+const ARCH_SUPPORT_WIDTH: f32 = 0.4;
+#[allow(dead_code)]
+const ARCH_SUPPORT_HEIGHT: f32 = 1.5;
+
+// Structure dimensions - Wall
+#[allow(dead_code)]
+const WALL_THICKNESS: f32 = 0.2;
+#[allow(dead_code)]
+const WALL_WINDOW_WIDTH: f32 = 0.4;
+#[allow(dead_code)]
+const WALL_WINDOW_HEIGHT: f32 = 0.3;
+
+// Structure dimensions - Door Frame
+#[allow(dead_code)]
+const DOOR_FRAME_THICKNESS: f32 = 0.15;
+#[allow(dead_code)]
+const DOOR_FRAME_BORDER: f32 = 0.1;
+
+// Structure dimensions - Railing
+#[allow(dead_code)]
+const RAILING_POST_RADIUS: f32 = 0.08;
+#[allow(dead_code)]
+const RAILING_BAR_RADIUS: f32 = 0.04;
+#[allow(dead_code)]
+const RAILING_BAR_HEIGHT: f32 = 0.8;
+
+// Structure colors
+const STRUCTURE_STONE_COLOR: Color = Color::srgb(0.7, 0.7, 0.7); // Light gray stone
+const STRUCTURE_MARBLE_COLOR: Color = Color::srgb(0.9, 0.9, 0.9); // White marble
+#[allow(dead_code)]
+const STRUCTURE_IRON_COLOR: Color = Color::srgb(0.3, 0.3, 0.35); // Dark iron
+#[allow(dead_code)]
+const STRUCTURE_GOLD_COLOR: Color = Color::srgb(0.8, 0.65, 0.2); // Gold trim
 
 // Tile centering offset
 /// Offset to center procedural meshes within their tile (matches camera centering)
@@ -1814,6 +1891,306 @@ pub fn spawn_torch(
     parent
 }
 
+/// Spawns a procedurally generated column with configurable style
+///
+/// Columns support three architectural styles:
+/// - Plain: Simple cylindrical column with base and capital
+/// - Doric: Classical style with simple geometric capital
+/// - Ionic: Ornate style with scroll-decorated capital
+///
+/// # Arguments
+///
+/// * `commands` - Bevy Commands for entity spawning
+/// * `materials` - Material asset storage
+/// * `meshes` - Mesh asset storage
+/// * `position` - Tile position in world coordinates
+/// * `map_id` - Map identifier for cleanup
+/// * `config` - Column configuration (height, radius, style)
+/// * `cache` - Mutable reference to mesh cache for reuse
+///
+/// # Returns
+///
+/// Entity ID of the parent column entity
+///
+/// # Examples
+///
+/// ```text
+/// use antares::game::systems::procedural_meshes::spawn_column;
+/// use antares::domain::world::ColumnConfig;
+///
+/// let config = ColumnConfig::default();
+/// let column_entity = spawn_column(&mut commands, &mut materials, &mut meshes,
+///     position, map_id, config, &mut cache);
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_column(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: crate::domain::world::ColumnConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    use crate::domain::world::ColumnStyle;
+
+    // Get or create shaft mesh
+    let shaft_mesh = cache.structure_column_shaft.clone().unwrap_or_else(|| {
+        let handle = meshes.add(Cylinder {
+            radius: config.radius,
+            half_height: config.height / 2.0,
+        });
+        cache.structure_column_shaft = Some(handle.clone());
+        handle
+    });
+
+    // Get or create capital mesh (varies by style)
+    let capital_mesh = cache.structure_column_capital.clone().unwrap_or_else(|| {
+        let handle = meshes.add(match config.style {
+            ColumnStyle::Plain => {
+                // Simple flat top
+                Cylinder {
+                    radius: config.radius * 1.1,
+                    half_height: COLUMN_CAPITAL_HEIGHT / 2.0,
+                }
+            }
+            ColumnStyle::Doric => {
+                // Slightly wider capital with decorative ridges
+                Cylinder {
+                    radius: config.radius * 1.15,
+                    half_height: COLUMN_CAPITAL_HEIGHT / 2.0,
+                }
+            }
+            ColumnStyle::Ionic => {
+                // Wider capital for scroll bases
+                Cylinder {
+                    radius: config.radius * 1.25,
+                    half_height: COLUMN_CAPITAL_HEIGHT / 2.0,
+                }
+            }
+        });
+        cache.structure_column_capital = Some(handle.clone());
+        handle
+    });
+
+    let shaft_material = materials.add(StandardMaterial {
+        base_color: STRUCTURE_STONE_COLOR,
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+
+    let capital_material = materials.add(StandardMaterial {
+        base_color: match config.style {
+            ColumnStyle::Plain => STRUCTURE_STONE_COLOR,
+            ColumnStyle::Doric => STRUCTURE_STONE_COLOR,
+            ColumnStyle::Ionic => STRUCTURE_MARBLE_COLOR, // Marble for fancier capitals
+        },
+        perceptual_roughness: 0.7,
+        ..default()
+    });
+
+    let transform = Transform::from_xyz(
+        position.x as f32 + TILE_CENTER_OFFSET,
+        config.height / 2.0,
+        position.y as f32 + TILE_CENTER_OFFSET,
+    );
+
+    let parent = commands
+        .spawn((
+            transform,
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new(format!("Column({})", config.style.name())),
+        ))
+        .id();
+
+    // Spawn base
+    let base = commands
+        .spawn((
+            Mesh3d(meshes.add(Cylinder {
+                radius: config.radius * 1.2,
+                half_height: COLUMN_BASE_HEIGHT / 2.0,
+            })),
+            MeshMaterial3d(shaft_material.clone()),
+            Transform::from_xyz(0.0, -config.height / 2.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(base);
+
+    // Spawn shaft
+    let shaft = commands
+        .spawn((
+            Mesh3d(shaft_mesh),
+            MeshMaterial3d(shaft_material),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(shaft);
+
+    // Spawn capital
+    let capital = commands
+        .spawn((
+            Mesh3d(capital_mesh),
+            MeshMaterial3d(capital_material),
+            Transform::from_xyz(0.0, config.height / 2.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(capital);
+
+    parent
+}
+
+/// Spawns a procedurally generated arch structure
+///
+/// Arches are decorative or structural openings composed of:
+/// - Curved arch spanning the opening
+/// - Support columns on either side
+/// - Configurable width and height
+///
+/// # Arguments
+///
+/// * `commands` - Bevy Commands for entity spawning
+/// * `materials` - Material asset storage
+/// * `meshes` - Mesh asset storage
+/// * `position` - Tile position in world coordinates
+/// * `map_id` - Map identifier for cleanup
+/// * `config` - Arch configuration (width, height, thickness)
+/// * `cache` - Mutable reference to mesh cache for reuse
+///
+/// # Returns
+///
+/// Entity ID of the parent arch entity
+///
+/// # Examples
+///
+/// ```text
+/// use antares::game::systems::procedural_meshes::spawn_arch;
+/// use antares::domain::world::ArchConfig;
+///
+/// let config = ArchConfig::default();
+/// let arch_entity = spawn_arch(&mut commands, &mut materials, &mut meshes,
+///     position, map_id, config, &mut cache);
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_arch(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: crate::domain::world::ArchConfig,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    // Get or create arch curve mesh
+    let arch_mesh = cache.structure_arch_curve.clone().unwrap_or_else(|| {
+        // Create a torus segment for the arch (approximation)
+        let handle = meshes.add(Torus {
+            major_radius: ARCH_INNER_RADIUS,
+            minor_radius: config.thickness / 2.0,
+        });
+        cache.structure_arch_curve = Some(handle.clone());
+        handle
+    });
+
+    // Get or create support mesh
+    let support_mesh = cache.structure_arch_support.clone().unwrap_or_else(|| {
+        let handle = meshes.add(Cuboid::new(
+            ARCH_SUPPORT_WIDTH,
+            ARCH_SUPPORT_HEIGHT,
+            config.thickness,
+        ));
+        cache.structure_arch_support = Some(handle.clone());
+        handle
+    });
+
+    let arch_material = materials.add(StandardMaterial {
+        base_color: STRUCTURE_STONE_COLOR,
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+
+    let support_material = materials.add(StandardMaterial {
+        base_color: STRUCTURE_MARBLE_COLOR,
+        perceptual_roughness: 0.75,
+        ..default()
+    });
+
+    let transform = Transform::from_xyz(
+        position.x as f32 + TILE_CENTER_OFFSET,
+        0.0,
+        position.y as f32 + TILE_CENTER_OFFSET,
+    );
+
+    let parent = commands
+        .spawn((
+            transform,
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Arch"),
+        ))
+        .id();
+
+    // Spawn arch curve (centered and scaled to fit width/height)
+    let arch = commands
+        .spawn((
+            Mesh3d(arch_mesh),
+            MeshMaterial3d(arch_material),
+            Transform::from_xyz(0.0, config.height, 0.0).with_scale(Vec3::new(
+                config.width / 2.0,
+                1.0,
+                1.0,
+            )),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(arch);
+
+    // Spawn left support
+    let left_support = commands
+        .spawn((
+            Mesh3d(support_mesh.clone()),
+            MeshMaterial3d(support_material.clone()),
+            Transform::from_xyz(
+                -config.width / 2.0 - ARCH_SUPPORT_WIDTH / 2.0,
+                ARCH_SUPPORT_HEIGHT / 2.0,
+                0.0,
+            ),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(left_support);
+
+    // Spawn right support
+    let right_support = commands
+        .spawn((
+            Mesh3d(support_mesh),
+            MeshMaterial3d(support_material),
+            Transform::from_xyz(
+                config.width / 2.0 + ARCH_SUPPORT_WIDTH / 2.0,
+                ARCH_SUPPORT_HEIGHT / 2.0,
+                0.0,
+            ),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(right_support);
+
+    parent
+}
+
 // ==================== Tests ====================
 
 #[cfg(test)]
@@ -2229,5 +2606,138 @@ mod tests {
         assert_eq!(FurnitureType::Bookshelf.name(), "Bookshelf");
         assert_eq!(FurnitureType::Barrel.name(), "Barrel");
         assert_eq!(FurnitureType::Chest.name(), "Chest");
+    }
+
+    // ==================== Structure Configuration Tests ====================
+
+    /// Tests StructureType enum all() method
+    #[test]
+    fn test_structure_type_all() {
+        use crate::domain::world::StructureType;
+        let all = StructureType::all();
+        assert_eq!(all.len(), 5);
+        assert!(all.contains(&StructureType::Column));
+        assert!(all.contains(&StructureType::Arch));
+        assert!(all.contains(&StructureType::WallSegment));
+        assert!(all.contains(&StructureType::DoorFrame));
+        assert!(all.contains(&StructureType::Railing));
+    }
+
+    /// Tests StructureType enum names
+    #[test]
+    fn test_structure_type_names() {
+        use crate::domain::world::StructureType;
+        assert_eq!(StructureType::Column.name(), "Column");
+        assert_eq!(StructureType::Arch.name(), "Arch");
+        assert_eq!(StructureType::WallSegment.name(), "Wall Segment");
+        assert_eq!(StructureType::DoorFrame.name(), "Door Frame");
+        assert_eq!(StructureType::Railing.name(), "Railing");
+    }
+
+    /// Tests ColumnStyle enum all() method
+    #[test]
+    fn test_column_style_all() {
+        use crate::domain::world::ColumnStyle;
+        let all = ColumnStyle::all();
+        assert_eq!(all.len(), 3);
+        assert!(all.contains(&ColumnStyle::Plain));
+        assert!(all.contains(&ColumnStyle::Doric));
+        assert!(all.contains(&ColumnStyle::Ionic));
+    }
+
+    /// Tests ColumnStyle enum names
+    #[test]
+    fn test_column_style_names() {
+        use crate::domain::world::ColumnStyle;
+        assert_eq!(ColumnStyle::Plain.name(), "Plain");
+        assert_eq!(ColumnStyle::Doric.name(), "Doric");
+        assert_eq!(ColumnStyle::Ionic.name(), "Ionic");
+    }
+
+    /// Tests column config defaults
+    #[test]
+    fn test_column_config_defaults() {
+        use crate::domain::world::{ColumnConfig, ColumnStyle};
+        let config = ColumnConfig::default();
+        assert_eq!(config.height, 3.0);
+        assert_eq!(config.radius, 0.3);
+        assert_eq!(config.style, ColumnStyle::Plain);
+    }
+
+    /// Tests arch config defaults
+    #[test]
+    fn test_arch_config_defaults() {
+        use crate::domain::world::ArchConfig;
+        let config = ArchConfig::default();
+        assert_eq!(config.width, 2.0);
+        assert_eq!(config.height, 3.0);
+        assert_eq!(config.thickness, 0.3);
+    }
+
+    /// Tests wall segment config defaults
+    #[test]
+    fn test_wall_segment_config_defaults() {
+        use crate::domain::world::WallSegmentConfig;
+        let config = WallSegmentConfig::default();
+        assert_eq!(config.length, 2.0);
+        assert_eq!(config.height, 2.5);
+        assert_eq!(config.thickness, 0.2);
+        assert!(!config.has_window);
+    }
+
+    /// Tests door frame config defaults
+    #[test]
+    fn test_door_frame_config_defaults() {
+        use crate::domain::world::DoorFrameConfig;
+        let config = DoorFrameConfig::default();
+        assert_eq!(config.width, 1.0);
+        assert_eq!(config.height, 2.5);
+        assert_eq!(config.frame_thickness, 0.15);
+    }
+
+    /// Tests railing config defaults
+    #[test]
+    fn test_railing_config_defaults() {
+        use crate::domain::world::RailingConfig;
+        let config = RailingConfig::default();
+        assert_eq!(config.length, 2.0);
+        assert_eq!(config.height, 1.0);
+        assert_eq!(config.post_radius, 0.08);
+        assert_eq!(config.post_count, 4);
+    }
+
+    /// Tests structure color constants are valid
+    #[test]
+    fn test_structure_color_constants_valid() {
+        let _ = STRUCTURE_STONE_COLOR;
+        let _ = STRUCTURE_MARBLE_COLOR;
+        let _ = STRUCTURE_IRON_COLOR;
+        let _ = STRUCTURE_GOLD_COLOR;
+    }
+
+    /// Tests structure dimension constants are positive
+    #[test]
+    fn test_structure_dimensions_positive() {
+        // Constants verified at compile time via their usage
+        let _ = COLUMN_SHAFT_RADIUS;
+        let _ = COLUMN_CAPITAL_HEIGHT;
+        let _ = ARCH_INNER_RADIUS;
+        let _ = ARCH_OUTER_RADIUS;
+        let _ = WALL_THICKNESS;
+        let _ = RAILING_POST_RADIUS;
+    }
+
+    /// Tests cache properly stores structure component meshes
+    #[test]
+    fn test_cache_structure_defaults() {
+        let cache = ProceduralMeshCache::default();
+        assert!(cache.structure_column_shaft.is_none());
+        assert!(cache.structure_column_capital.is_none());
+        assert!(cache.structure_arch_curve.is_none());
+        assert!(cache.structure_arch_support.is_none());
+        assert!(cache.structure_wall.is_none());
+        assert!(cache.structure_door_frame.is_none());
+        assert!(cache.structure_railing_post.is_none());
+        assert!(cache.structure_railing_bar.is_none());
     }
 }

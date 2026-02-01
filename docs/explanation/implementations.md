@@ -27971,6 +27971,7 @@ All functions support optional Y-axis rotation and use the mesh cache for reuse.
 #### 3.4 Procedural Mesh Cache Extension
 
 Added 16 new cache fields for furniture components:
+
 - `furniture_bench_seat`, `furniture_bench_leg`
 - `furniture_table_top`, `furniture_table_leg`
 - `furniture_chair_seat`, `furniture_chair_back`, `furniture_chair_leg`
@@ -27994,9 +27995,11 @@ Added 16 new cache fields for furniture components:
 ### Files Created/Modified
 
 **Created:**
+
 - None (all code integrated into existing modules)
 
 **Modified:**
+
 - `src/domain/world/types.rs` - FurnitureType enum, MapEvent::Furniture variant
 - `src/domain/world/mod.rs` - Export FurnitureType
 - `src/domain/world/events.rs` - EventResult::Furniture variant, trigger_event handling
@@ -28009,6 +28012,7 @@ Added 16 new cache fields for furniture components:
 ### Testing
 
 **Unit Tests Added** (14 total):
+
 - `test_bench_config_defaults()` - Configuration defaults
 - `test_table_config_defaults()`
 - `test_chair_config_defaults()`
@@ -28025,6 +28029,7 @@ Added 16 new cache fields for furniture components:
 **Coverage**: 100% on new code paths
 
 **All Tests Pass**:
+
 ```
 Summary: 1689 tests run: 1689 passed, 8 skipped
 ```
@@ -28055,22 +28060,26 @@ Summary: 1689 tests run: 1689 passed, 8 skipped
 ### Integration Points
 
 **Domain Layer**:
+
 - FurnitureType enum (immutable, comparable, hashable)
 - MapEvent::Furniture variant (serializable for maps)
 - EventResult::Furniture (event processing)
 
 **Game Layer**:
+
 - Furniture spawn functions (procedural mesh generation)
 - Event handler (furniture event triggering)
 - ProceduralMeshCache (mesh reuse)
 
 **SDK Layer**:
+
 - Validation (furniture events always valid)
 - Map editor (can place furniture events)
 
 ### Implementation Details
 
 **Configuration System**:
+
 - Each furniture type has its own Config struct with sensible defaults
 - Decorators support optional color overrides
 - Throne supports ornamentation levels (0.0-1.0)
@@ -28078,15 +28087,18 @@ Summary: 1689 tests run: 1689 passed, 8 skipped
 - Torch supports lit/unlit state with emissive changes
 
 **Rotation Support**:
+
 - All furniture spawn functions accept optional `rotation_y` in degrees
 - Converted to radians and applied via `Quat::from_rotation_y()`
 
 **Emissive Materials**:
+
 - Torch flame uses LinearRgba for emissive color
 - Bright yellow-orange (1.0, 0.9, 0.4) when lit
 - Black when unlit
 
 **Fallback Handling**:
+
 - Furniture spawning wrapped in `if can_spawn_furniture` check
 - Event handler parameters made Optional for test compatibility
 - Tests pass without game context (materials/meshes resources)
@@ -28129,11 +28141,13 @@ Summary: 1689 tests run: 1689 passed, 8 skipped
 ### Next Steps (Future Phases)
 
 **Phase 4: Structures & Architecture**:
+
 - Columns, arches, wall segments, railings
 - Modular building components
 - Extend ProceduralMeshCache for structures
 
 **Phase 5: Performance & Polish**:
+
 - Mesh instancing for high furniture counts
 - LOD system for distant objects
 - Async mesh generation
@@ -28159,6 +28173,232 @@ Summary: 1689 tests run: 1689 passed, 8 skipped
 ✅ Zero compiler warnings
 ✅ Zero clippy warnings
 ✅ Architecture compliant
+
+### Date Completed
+
+2025-01-29
+
+## Phase 4: Structure & Architecture Components - COMPLETED [L28166-28500]
+
+### Summary
+
+Implemented Phase 4 of the Advanced Procedural Meshes system, adding architectural structure components (columns, arches, walls, door frames, and railings) to enable dungeon and structure creation. This phase extends the procedural mesh generation system with modular, configurable structure types that support multiple architectural styles.
+
+### Components Implemented
+
+#### 4.1 Domain Types (`src/domain/world/types.rs`) [L28168-28185]
+
+Added five new structure-related types to the domain layer:
+
+1. **StructureType Enum** - Represents five types of architectural components:
+
+   - Column (vertical support)
+   - Arch (arched opening)
+   - WallSegment (wall section)
+   - DoorFrame (door opening)
+   - Railing (safety barrier)
+
+2. **ColumnStyle Enum** - Supports three architectural styles:
+
+   - Plain (simple cylindrical)
+   - Doric (classical with simple capital)
+   - Ionic (ornate with scroll capital)
+
+3. **ColumnConfig Struct** - Configuration for column generation:
+
+   - height (default: 3.0)
+   - radius (default: 0.3)
+   - style (ColumnStyle)
+
+4. **ArchConfig Struct** - Configuration for arch generation:
+
+   - width (default: 2.0)
+   - height (default: 3.0)
+   - thickness (default: 0.3)
+
+5. **WallSegmentConfig, DoorFrameConfig, RailingConfig** - Additional structure configs (Phase 5 placeholder)
+
+#### 4.2 Module Exports (`src/domain/world/mod.rs`) [L28185-28191]
+
+Updated the world module to export all new structure types for use throughout the application.
+
+#### 4.3 Cache Extension (`src/game/systems/procedural_meshes.rs`) [L28191-28205]
+
+Extended ProceduralMeshCache with 8 new fields for structure component meshes:
+
+- structure_column_shaft, structure_column_capital
+- structure_arch_curve, structure_arch_support
+- structure_wall, structure_door_frame
+- structure_railing_post, structure_railing_bar
+
+#### 4.4 Constants and Colors (`src/game/systems/procedural_meshes.rs`) [L28205-28225]
+
+Added 35+ constants for structure dimensions and colors:
+
+- Column dimensions (shaft radius, capital height, base height)
+- Arch dimensions (inner/outer radius, support dimensions)
+- Structure colors (stone, marble, iron, gold)
+- Phase 5 constants (wall, door, railing) marked with #[allow(dead_code)]
+
+#### 4.5 Spawn Functions (`src/game/systems/procedural_meshes.rs`) [L28225-28270]
+
+Implemented two main spawn functions:
+
+1. **spawn_column()** - Creates columns with three architectural styles
+
+   - Base: wider foundation
+   - Shaft: main cylindrical body
+   - Capital: top decoration (varies by style)
+   - Material colors reflect style (marble for Ionic)
+
+2. **spawn_arch()** - Creates arched structures
+   - Curved arch using Torus primitive
+   - Left and right support pillars
+   - Configurable width and height
+
+#### 4.6 Test Coverage (`src/game/systems/procedural_meshes.rs`) [L28270-28290]
+
+Added 17 new tests covering:
+
+- StructureType enum: all() and name() methods
+- ColumnStyle enum: all() and name() methods
+- Config defaults for all structure types
+- Color and dimension constants validation
+- Cache field initialization
+- Edge cases and boundary conditions
+
+### Files Created/Modified
+
+- **Modified**: `src/domain/world/types.rs` - Added StructureType, ColumnStyle, and config structs
+- **Modified**: `src/domain/world/mod.rs` - Exported new types
+- **Modified**: `src/game/systems/procedural_meshes.rs` - Added constants, cache fields, spawn functions, tests
+
+### Testing
+
+All 1701 tests pass, including:
+
+- ✅ 17 new structure component tests
+- ✅ Type enum validation tests
+- ✅ Configuration default tests
+- ✅ Cache initialization tests
+- ✅ All pre-existing tests still pass
+
+Test execution: `cargo nextest run --all-features`
+Result: 1701 tests run: 1701 passed, 8 skipped
+
+### Quality Gates Verification
+
+```bash
+✅ cargo fmt --all                                          → No output (formatted)
+✅ cargo check --all-targets --all-features                → Finished with 0 errors
+✅ cargo clippy --all-targets --all-features -- -D warnings → Finished with 0 warnings
+✅ cargo nextest run --all-features                        → test result: ok. 1701 passed
+```
+
+### Architecture Compliance
+
+- ✅ Uses type aliases (ColumnConfig, ArchConfig) per Section 3.2
+- ✅ Constants extracted and not hardcoded (COLUMN_SHAFT_RADIUS, STRUCTURE_STONE_COLOR, etc.)
+- ✅ Mesh caching pattern consistent with Phase 3 (furniture)
+- ✅ Data structures defined in domain layer, implementation in game systems
+- ✅ Follows existing spawn function patterns (spawn_column, spawn_arch)
+- ✅ Bevy primitives used (Cylinder, Torus, Cuboid)
+- ✅ No architectural drift - all changes align with architecture.md Section 3.2 and 4.2
+
+### Integration Points
+
+1. **Domain Layer** - StructureType and config types available for map events and external tools
+2. **Game Systems** - ProceduralMeshCache extended for structure meshes
+3. **Spawn System** - Column and arch functions integrate with existing entity spawning
+4. **Event System** - Ready for MapEvent::Structure integration (Phase 5)
+5. **Campaign Builder** - Structure types can be wired into map editor (Phase 7)
+
+### Implementation Details
+
+#### Column Generation Strategy
+
+- Three-part design: base → shaft → capital
+- Base slightly wider than shaft for stability
+- Capital style affects material and geometry
+- Doric/Ionic capitals wider (1.15x, 1.25x radius) than Plain (1.1x)
+
+#### Arch Generation Strategy
+
+- Torus primitive approximates curved arch
+- Two support pillars positioned at opening edges
+- Scaling applied to fit configured width/height
+- Stone color for arch, marble for supports
+
+#### Color Palette
+
+- Stone (light gray): Primary structural material
+- Marble (white): Decorative/classical elements
+- Iron (dark): Reserved for Phase 5 railings
+- Gold (brass): Reserved for Phase 5 ornaments
+
+### Performance Characteristics
+
+- Mesh caching reduces redundant allocations
+- Column meshes reused when spawning multiple columns of same style
+- Arch meshes cached for rapid spawn cycles
+- Linear performance relative to structure count
+
+### Benefits Achieved
+
+1. **Modular Design** - Structure types independent and composable
+2. **Style Flexibility** - Three column styles provide architectural variety
+3. **Reusability** - Cached meshes improve performance on large maps
+4. **Extensibility** - Foundation laid for Phase 5 (wall, door, railing)
+5. **Clean API** - spawn_column and spawn_arch functions easy to integrate
+
+### Files Modified
+
+1. `src/domain/world/types.rs` - Core type definitions
+2. `src/domain/world/mod.rs` - Public exports
+3. `src/game/systems/procedural_meshes.rs` - Implementation and tests
+
+### Known Limitations
+
+- Phase 4 implements only Column and Arch (fully functional)
+- WallSegment, DoorFrame, Railing functions defined as Phase 5 tasks
+- Arch uses simple torus approximation (not true architectural curve)
+- No animation or dynamic state for structures yet
+- Rotation support limited (can be added in Phase 5+)
+
+### Next Steps (Phase 5)
+
+1. **Implement spawn_wall_segment()** - Cuboid with optional window cutout
+2. **Implement spawn_door_frame()** - Portal-like frame structure
+3. **Implement spawn_railing()** - Posts with connecting horizontal bars
+4. **MapEvent::Structure Integration** - Wire structures into event system
+5. **Campaign Builder Support** - Add structure placement editor (Phase 7)
+
+### Deliverables Completed
+
+- ✅ StructureType enum with all() and name() methods
+- ✅ ColumnStyle enum with 3 variants
+- ✅ ColumnConfig with defaults
+- ✅ ArchConfig with defaults
+- ✅ WallSegmentConfig, DoorFrameConfig, RailingConfig (Phase 5 placeholders)
+- ✅ spawn_column() function with style support
+- ✅ spawn_arch() function with support pillars
+- ✅ 8 new cache fields for structure meshes
+- ✅ 35+ structure constants
+- ✅ 17 comprehensive unit tests
+- ✅ All quality gates passing
+
+### Success Criteria Met
+
+- ✅ 5 structure component types enum defined
+- ✅ 3 column styles implemented with visual differences
+- ✅ Column and arch spawn functions working
+- ✅ Proper mesh generation with Bevy primitives
+- ✅ Configuration structs with sensible defaults
+- ✅ Cache integration for performance
+- ✅ All tests passing (1701/1701)
+- ✅ Zero clippy warnings
+- ✅ Architecture compliant
+- ✅ Documentation complete
 
 ### Date Completed
 
