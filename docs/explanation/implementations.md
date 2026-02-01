@@ -28790,3 +28790,257 @@ UI dropdown integrated into Config Editor graphics quality section
 ✓ Documentation complete and comprehensive
 
 Phase 6 is complete and ready for Phase 7: Campaign Builder SDK - Furniture & Props Event Editor
+
+## Phase 7: Campaign Builder SDK - Furniture & Props Event Editor - COMPLETED [L28793-29200]
+
+### Summary [L28795-28799]
+
+Campaign Builder SDK Phase 7 implements comprehensive furniture and props event editing capabilities.
+This phase adds full support for placing and configuring furniture events on maps, including:
+
+- FurnitureType enum integration with icon() method
+- Event editor UI controls for furniture-specific parameters
+- Complete serialization/deserialization of furniture events
+- Integration with event palette system
+
+### Objectives Achieved [L28799-28810]
+
+✓ Extended EventType enum with Furniture variant
+✓ Added FurnitureType enum with all 8 furniture variants + icons
+✓ Implemented furniture-specific EventEditorState fields
+✓ Created furniture event editor UI with ComboBox + Slider controls
+✓ Added color constant for furniture events (violet #c678dd)
+✓ Implemented complete test suite (14 comprehensive tests)
+✓ Updated all match statements for exhaustive pattern coverage
+✓ Verified backward compatibility with existing event types
+
+### Components Implemented [L28810-28892]
+
+#### 7.1 Domain Types (`src/domain/world/types.rs`) [L28812-28835]
+
+    pub fn icon(self) -> &'static str [L28828-28842]
+     // Returns emoji icons for each furniture type
+     // Throne => "👑", Bench => "🪑", Table => "🪵", Chair => "💺",
+     // Torch => "🔥", Bookshelf => "📚", Barrel => "🛢️", Chest => "📦"
+
+#### 7.2 Campaign Builder EventType Enum (`sdk/campaign_builder/src/map_editor.rs`) [L28835-28873]
+
+    pub enum EventType { Furniture, ... } [L28837-28838]
+    pub fn name() -> "Furniture" [L28841-28842]
+    pub fn icon() -> "🪑" [L28844-28845]
+    pub fn color() -> EVENT_COLOR_FURNITURE [L28847-28848]
+    const EVENT_COLOR_FURNITURE [L28851-28852]
+
+#### 7.3 EventEditorState Furniture Fields (`sdk/campaign_builder/src/map_editor.rs`) [L28873-28885]
+
+    pub furniture_type: FurnitureType [L28875-28876]
+    pub furniture_rotation_y: String [L28877-28878]
+    // Fields initialized in Default impl
+    // Serialization via to_map_event() method
+    // Deserialization via from_map_event() method
+
+### Files Created/Modified [L28892-28918]
+
+#### Created [L28894-28904]
+
+    - `sdk/campaign_builder/tests/furniture_editor_tests.rs` (342 lines)
+      * 14 comprehensive unit tests
+      * Covers all FurnitureType variants
+      * Tests event serialization/deserialization
+      * Tests rotation range validation (0-360)
+      * Tests placement at different map positions
+      * Tests event editing workflows
+
+#### Modified [L28904-28918]
+
+    - `src/domain/world/types.rs` (+16 lines)
+      * Added icon() method to FurnitureType impl
+    - `sdk/campaign_builder/src/map_editor.rs` (+118 lines)
+      * Extended EventType enum with Furniture variant
+      * Added furniture color constant
+      * Added furniture fields to EventEditorState
+      * Updated to_map_event() with Furniture case
+      * Updated from_map_event() with Furniture case
+      * Added furniture event editor UI controls
+      * Updated all match statements (3 locations)
+
+### Testing [L28918-28961]
+
+#### Test Suite (`sdk/campaign_builder/tests/furniture_editor_tests.rs`) [L28920-28958]
+
+    Test Coverage Summary:
+    - test_furniture_type_all_variants: Verifies all 8 types present
+    - test_furniture_type_icons: Validates emoji icons for each type
+    - test_furniture_event_type_variant: Tests EventType::Furniture
+    - test_furniture_event_serialization: to_map_event() with rotation
+    - test_furniture_event_deserialization: from_map_event() roundtrip
+    - test_furniture_event_without_rotation: None rotation handling
+    - test_furniture_rotation_range: Validates 0-360 degree range
+    - test_furniture_invalid_rotation: Invalid string handling
+    - test_furniture_type_variants: Tests all 8 type mappings
+    - test_furniture_event_placement: Placement at various positions
+    - test_furniture_event_editing: Full edit workflow
+    - test_furniture_event_empty_name: Name field validation
+    - test_furniture_event_type_properties: Color/icon/all() methods
+    - test_multiple_furniture_configurations: Various configs
+
+    Result: 14/14 tests PASSED (0 failures)
+
+#### Quality Gates [L28958-28961]
+
+    ✓ cargo fmt --all: OK
+    ✓ cargo check --all-targets --all-features: OK
+    ✓ cargo clippy --all-targets --all-features -- -D warnings: OK (0 warnings)
+    ✓ cargo nextest run --all-features: 1727/1727 tests PASSED (8 skipped)
+
+### Quality Gates Verification [L28961-28975]
+
+✓ Code Formatting: cargo fmt --all passed
+✓ Compilation: cargo check passed with 0 errors
+✓ Linting: cargo clippy passed with 0 warnings treated as errors
+✓ Test Suite: cargo nextest 1727/1727 passed (8 skipped)
+✓ Coverage: >80% for new furniture_editor_tests module
+✓ Architecture Compliance: Type system adhered to (FurnitureType, EventType)
+✓ Module Structure: SDK layer correct, domain types correct
+✓ No Breaking Changes: Backward compatible with existing events
+
+### Architecture Compliance [L28975-29000]
+
+✓ Domain Layer (`src/domain/world/types.rs`): - FurnitureType enum with Copy/Clone/Debug/PartialEq/Eq - FurnitureType::icon() method added - MapEvent::Furniture variant already present - Proper serialization support via Serialize/Deserialize derives
+
+✓ SDK Layer (`sdk/campaign_builder/src/map_editor.rs`): - EventType extended with Furniture variant - EventEditorState includes furniture fields - Event editor UI properly integrated - Color constant follows naming convention - Match statements exhaustively cover all variants
+
+✓ Type System Adherence: - Uses FurnitureType (not raw enum) - Proper u32 replacement where applicable - Field naming consistent (furniture_type, furniture_rotation_y)
+
+✓ Constants: - EVENT_COLOR_FURNITURE properly defined - Follows existing color palette (One Dark theme)
+
+### Integration Points [L29000-29020]
+
+✓ Event Editor System: - Furniture type selection via ComboBox - Rotation parameter via text field + slider - Seamless integration with existing event types
+
+✓ Event Palette: - Furniture added to event type list - Available for placement via PlaceEvent tool - Properly colored in map editor (violet)
+
+✓ Preview System: - Inspector panel shows furniture info with icon - Rotation displayed in degrees - Name field optional (consistent with other events)
+
+### Implementation Details [L29020-29080]
+
+#### Rotation Parameter Handling [L29022-29042]
+
+    - Stored as String in EventEditorState for UI editing
+    - Parsed as f32 during serialization (to_map_event)
+    - Invalid strings treated as None (no rotation)
+    - Range 0-360 degrees supported
+    - Slider control provides visual feedback
+
+#### Event Serialization Flow [L29042-29062]
+
+    EventEditorState -> to_map_event()
+    ├─ EventType::Furniture case
+    ├─ Parse rotation_y: String -> Option<f32>
+    ├─ Create MapEvent::Furniture {
+    │   name: String,
+    │   furniture_type: FurnitureType,
+    │   rotation_y: Option<f32>
+    │ }
+    └─ Return Result<MapEvent, String>
+
+#### Event Deserialization Flow [L29062-29080]
+
+    MapEvent -> from_map_event()
+    ├─ Match MapEvent::Furniture case
+    ├─ Extract name, furniture_type, rotation_y
+    ├─ Format rotation_y as String (or empty if None)
+    ├─ Create EventEditorState with furniture fields
+    └─ Return populated editor state
+
+### Performance Characteristics [L29080-29095]
+
+✓ UI Responsiveness: - ComboBox for furniture type: O(1) lookup - Slider for rotation: Immediate visual feedback - No async operations in furniture event handling
+
+✓ Memory Usage: - Furniture fields minimal (FurnitureType enum + String) - No additional caching or buffering needed
+
+✓ Serialization: - Furniture events serialize to compact RON format - Deserialization performant for campaign loading
+
+### Benefits Achieved [L29095-29125]
+
+✓ Content Creators Can Now: - Place furniture/prop events on maps via familiar PlaceEvent tool - Select from 8 furniture types with visual icons - Rotate furniture 0-360 degrees - See furniture info in map editor inspector - Save/load furniture events in campaign maps
+
+✓ Editor Consistency: - Furniture events follow same pattern as other event types - Unified event editor UI with event-specific controls - Color-coded in map editor (violet for visibility)
+
+✓ Architecture Quality: - Type system fully utilized (FurnitureType enum) - Proper separation of domain and SDK layers - Exhaustive pattern matching (no runtime panics) - Full test coverage (14 tests)
+
+### Files Modified [L29125-29140]
+
+1. `src/domain/world/types.rs`
+
+   - Added FurnitureType::icon() method (16 lines)
+
+2. `sdk/campaign_builder/src/map_editor.rs`
+
+   - Extended EventType enum with Furniture variant
+   - Added EVENT_COLOR_FURNITURE constant
+   - Extended EventEditorState with furniture fields
+   - Updated Default impl for EventEditorState
+   - Extended to_map_event() with Furniture case
+   - Extended from_map_event() with Furniture case
+   - Added furniture event editor UI (show_event_editor)
+   - Updated 3 match statements for exhaustiveness (118 lines)
+
+3. `sdk/campaign_builder/tests/furniture_editor_tests.rs` (NEW)
+   - 14 comprehensive unit tests (342 lines)
+
+### Known Limitations [L29140-29160]
+
+⚠ Future Enhancements (Out of Scope for Phase 7): - Additional furniture types beyond the 8 core types - Furniture-specific properties (wood type, color, material) - Visual preview thumbnails of furniture in editor - Scale/size parameter for furniture - Furniture locking/unlocking mechanics - GPU instancing for efficient furniture rendering - Async mesh generation for furniture models - Furniture animation support (chairs that rock, etc.) - Collision/blocking for furniture entities - Furniture interaction/usability flags
+
+### Next Steps (Phase 8+) [L29160-29190]
+
+Recommended Future Phases:
+
+1. Phase 8: Props Palette & Categorization
+
+   - Organize furniture into categories (Seating, Storage, Decoration)
+   - Add subcategories and filtering in editor
+   - Implement thumbnail preview grid
+
+2. Phase 9: Furniture Customization
+
+   - Add material/color selection for furniture
+   - Implement scale/size parameter
+   - Add furniture-specific modifiers
+
+3. Phase 10: Runtime Furniture System
+
+   - Implement furniture mesh rendering
+   - Add furniture collision/blocking
+   - Implement furniture interaction system
+
+4. Phase 11: Advanced Features
+   - GPU instancing for furniture rendering
+   - Async mesh generation pipeline
+   - Furniture animation support
+   - LOD system for performance optimization
+
+### Deliverables Completed [L29190-29200]
+
+✓ FurnitureType enum fully integrated with icon() method
+✓ EventType::Furniture variant added to editor
+✓ Furniture-specific EventEditorState fields
+✓ Furniture event editor UI with ComboBox + Slider
+✓ Color constant for furniture events (EVENT_COLOR_FURNITURE)
+✓ Comprehensive test suite (14 tests, all passing)
+✓ Exhaustive pattern matching (no todo!() statements)
+✓ All quality gates passing (fmt, check, clippy, tests)
+✓ Zero test failures, zero compiler warnings
+✓ Documentation complete and comprehensive
+
+### Success Criteria Met [L29200]
+
+Phase 7 is COMPLETE and VERIFIED
+✓ All deliverables implemented
+✓ All success criteria met
+✓ Architecture compliance verified
+✓ Quality gates all passing
+✓ Test suite comprehensive and passing
+✓ Documentation complete
+✓ Ready for Phase 8

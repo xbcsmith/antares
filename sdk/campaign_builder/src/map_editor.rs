@@ -45,7 +45,7 @@ use antares::domain::items::types::Item;
 use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
 use antares::domain::world::{
-    LayeredSprite, Map, MapEvent, SpriteLayer, SpriteReference, TerrainType, Tile,
+    FurnitureType, LayeredSprite, Map, MapEvent, SpriteLayer, SpriteReference, TerrainType, Tile,
     TileVisualMetadata, WallType,
 };
 use antares::sdk::tool_config::DisplayConfig;
@@ -79,6 +79,9 @@ const EVENT_COLOR_RECRUITABLE: Color32 = Color32::from_rgb(255, 179, 71);
 
 /// Teal for Enter Inn events - rgb(120, 200, 160)
 const EVENT_COLOR_ENTER_INN: Color32 = Color32::from_rgb(120, 200, 160);
+
+/// Violet for Furniture events - rgb(198, 120, 221) / #c678dd
+const EVENT_COLOR_FURNITURE: Color32 = Color32::from_rgb(198, 120, 221);
 
 // ===== Editor Mode =====
 
@@ -1400,6 +1403,9 @@ pub struct EventEditorState {
     pub recruitable_dialogue_id: String,
     // Inn fields
     pub innkeeper_id_input_buffer: String,
+    // Furniture fields
+    pub furniture_type: FurnitureType,
+    pub furniture_rotation_y: String,
 
     // Autocomplete input buffers
     pub trap_effect_input_buffer: String,
@@ -1432,6 +1438,8 @@ impl Default for EventEditorState {
             recruit_character_id: String::new(),
             recruitable_dialogue_id: String::new(),
             innkeeper_id_input_buffer: String::new(),
+            furniture_type: FurnitureType::Throne,
+            furniture_rotation_y: String::from("0"),
             trap_effect_input_buffer: String::new(),
             teleport_map_input_buffer: String::new(),
             npc_id_input_buffer: String::new(),
@@ -1450,6 +1458,7 @@ pub enum EventType {
     NpcDialogue,
     RecruitableCharacter,
     EnterInn,
+    Furniture,
 }
 
 impl Default for EventType {
@@ -1469,6 +1478,7 @@ impl EventType {
             EventType::NpcDialogue => "NPC Dialogue",
             EventType::RecruitableCharacter => "Recruitable Character",
             EventType::EnterInn => "Enter Inn",
+            EventType::Furniture => "Furniture",
         }
     }
 
@@ -1482,6 +1492,7 @@ impl EventType {
             EventType::NpcDialogue => "💬",
             EventType::RecruitableCharacter => "🤝",
             EventType::EnterInn => "🏨",
+            EventType::Furniture => "🪑",
         }
     }
 
@@ -1509,6 +1520,7 @@ impl EventType {
             EventType::NpcDialogue => EVENT_COLOR_NPC_DIALOGUE,
             EventType::RecruitableCharacter => EVENT_COLOR_RECRUITABLE,
             EventType::EnterInn => EVENT_COLOR_ENTER_INN,
+            EventType::Furniture => EVENT_COLOR_FURNITURE,
         }
     }
 
@@ -1522,6 +1534,7 @@ impl EventType {
             EventType::NpcDialogue,
             EventType::RecruitableCharacter,
             EventType::EnterInn,
+            EventType::Furniture,
         ]
     }
 }
@@ -1654,6 +1667,18 @@ impl EventEditorState {
                     innkeeper_id,
                 })
             }
+            EventType::Furniture => {
+                let rotation_y = if self.furniture_rotation_y.is_empty() {
+                    None
+                } else {
+                    self.furniture_rotation_y.parse::<f32>().ok()
+                };
+                Ok(MapEvent::Furniture {
+                    name: self.name.clone(),
+                    furniture_type: self.furniture_type,
+                    rotation_y,
+                })
+            }
         }
     }
 
@@ -1777,6 +1802,16 @@ impl EventEditorState {
                 s.name = name.clone();
                 s.description = description.clone();
                 s.innkeeper_id_input_buffer = innkeeper_id.clone();
+            }
+            MapEvent::Furniture {
+                name,
+                furniture_type,
+                rotation_y,
+            } => {
+                s.event_type = EventType::Furniture;
+                s.name = name.clone();
+                s.furniture_type = *furniture_type;
+                s.furniture_rotation_y = rotation_y.map(|r| r.to_string()).unwrap_or_default();
             }
         }
         s
@@ -1963,6 +1998,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                                 EventType::RecruitableCharacter
                             }
                             MapEvent::EnterInn { .. } => EventType::EnterInn,
+                            MapEvent::Furniture { .. } => EventType::Furniture,
                         })
                     } else {
                         None
@@ -2163,6 +2199,7 @@ impl<'a> Widget for MapPreviewWidget<'a> {
                         MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
                         MapEvent::RecruitableCharacter { .. } => EventType::RecruitableCharacter,
                         MapEvent::EnterInn { .. } => EventType::EnterInn,
+                        MapEvent::Furniture { .. } => EventType::Furniture,
                     });
                     let has_npc_placement =
                         self.map.npc_placements.iter().any(|p| p.position == pos);
@@ -3333,6 +3370,20 @@ impl MapsEditorState {
                         } => {
                             ui.label(format!("Inn Entry: {} ({})", innkeeper_id, name));
                         }
+                        MapEvent::Furniture {
+                            furniture_type,
+                            rotation_y,
+                            ..
+                        } => {
+                            ui.label(format!(
+                                "Furniture: {} {} {}°",
+                                furniture_type.icon(),
+                                furniture_type.name(),
+                                rotation_y
+                                    .map(|r| r.to_string())
+                                    .unwrap_or_else(|| "0".to_string())
+                            ));
+                        }
                     }
 
                     ui.horizontal(|ui| {
@@ -3454,6 +3505,7 @@ impl MapsEditorState {
             MapEvent::EnterInn {
                 name, description, ..
             } => (name.clone(), description.clone()),
+            MapEvent::Furniture { name, .. } => (name.clone(), String::new()),
         }
     }
 
@@ -3796,6 +3848,58 @@ impl MapsEditorState {
                             editor.has_changes = true;
                         }
                     });
+                }
+                EventType::Furniture => {
+                    // Furniture type selection
+                    egui::ComboBox::from_id_salt("furniture_type_combo")
+                        .selected_text(event_editor.furniture_type.name())
+                        .show_ui(ui, |ui| {
+                            for furniture_type in FurnitureType::all() {
+                                if ui
+                                    .selectable_label(
+                                        event_editor.furniture_type == *furniture_type,
+                                        format!(
+                                            "{} {}",
+                                            furniture_type.icon(),
+                                            furniture_type.name()
+                                        ),
+                                    )
+                                    .clicked()
+                                {
+                                    event_editor.furniture_type = *furniture_type;
+                                    editor.has_changes = true;
+                                }
+                            }
+                        });
+
+                    // Rotation control (0-360 degrees)
+                    ui.horizontal(|ui| {
+                        ui.label("Rotation Y (degrees):");
+                        if ui
+                            .text_edit_singleline(&mut event_editor.furniture_rotation_y)
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    });
+
+                    // Show rotation slider for visual feedback
+                    if let Ok(rotation) = event_editor.furniture_rotation_y.parse::<f32>() {
+                        ui.horizontal(|ui| {
+                            let mut slider_value = rotation;
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut slider_value, 0.0..=360.0)
+                                        .text("°")
+                                        .step_by(1.0),
+                                )
+                                .changed()
+                            {
+                                event_editor.furniture_rotation_y = slider_value.to_string();
+                                editor.has_changes = true;
+                            }
+                        });
+                    }
                 }
             }
 

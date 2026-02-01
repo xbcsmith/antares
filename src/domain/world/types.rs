@@ -855,6 +855,20 @@ impl FurnitureType {
             FurnitureType::Chest => "Chest",
         }
     }
+
+    /// Returns an emoji icon representing the furniture type
+    pub fn icon(self) -> &'static str {
+        match self {
+            FurnitureType::Throne => "👑",
+            FurnitureType::Bench => "🪑",
+            FurnitureType::Table => "🪵",
+            FurnitureType::Chair => "💺",
+            FurnitureType::Torch => "🔥",
+            FurnitureType::Bookshelf => "📚",
+            FurnitureType::Barrel => "🛢️",
+            FurnitureType::Chest => "📦",
+        }
+    }
 }
 
 // ===== Architectural Structure Components =====
