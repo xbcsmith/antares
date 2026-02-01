@@ -806,6 +806,57 @@ impl Tile {
 ///
 /// Events are triggered when the party moves to specific tiles or interacts
 /// with the environment.
+/// Types of furniture and props that can be placed on maps
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub enum FurnitureType {
+    /// Ornate throne for rulers
+    Throne,
+    /// Simple bench seating
+    Bench,
+    /// Dining or working table
+    Table,
+    /// Single seat chair
+    Chair,
+    /// Mounted torch for light
+    Torch,
+    /// Storage bookshelf
+    Bookshelf,
+    /// Wooden barrel for storage
+    Barrel,
+    /// Lockable chest for treasure
+    Chest,
+}
+
+impl FurnitureType {
+    /// Returns all furniture type variants
+    pub fn all() -> &'static [FurnitureType] {
+        &[
+            FurnitureType::Throne,
+            FurnitureType::Bench,
+            FurnitureType::Table,
+            FurnitureType::Chair,
+            FurnitureType::Torch,
+            FurnitureType::Bookshelf,
+            FurnitureType::Barrel,
+            FurnitureType::Chest,
+        ]
+    }
+
+    /// Returns human-readable name for the furniture type
+    pub fn name(self) -> &'static str {
+        match self {
+            FurnitureType::Throne => "Throne",
+            FurnitureType::Bench => "Bench",
+            FurnitureType::Table => "Table",
+            FurnitureType::Chair => "Chair",
+            FurnitureType::Torch => "Torch",
+            FurnitureType::Bookshelf => "Bookshelf",
+            FurnitureType::Barrel => "Barrel",
+            FurnitureType::Chest => "Chest",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MapEvent {
     /// Random monster encounter
@@ -902,6 +953,17 @@ pub enum MapEvent {
         description: String,
         /// Innkeeper NPC identifier (must exist in NPC database with is_innkeeper=true)
         innkeeper_id: crate::domain::world::NpcId,
+    },
+    /// Furniture or prop placement event
+    Furniture {
+        /// Event name for editor display
+        #[serde(default)]
+        name: String,
+        /// Type of furniture to spawn
+        furniture_type: FurnitureType,
+        /// Optional Y-axis rotation in degrees (0-360)
+        #[serde(default)]
+        rotation_y: Option<f32>,
     },
 }
 
