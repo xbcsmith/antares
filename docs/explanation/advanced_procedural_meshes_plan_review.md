@@ -1,7 +1,7 @@
 # Advanced Procedural Meshes Implementation Plan - Comprehensive Review
 
-**Review Date**: 2025-01-XX  
-**Reviewer**: AI Agent (Planning Agent)  
+**Review Date**: 2025-01-XX
+**Reviewer**: AI Agent (Planning Agent)
 **Plan Under Review**: `advanced_procedural_meshes_implementation_plan.md`
 
 ## Executive Summary
@@ -24,9 +24,9 @@ The plan is well-structured and comprehensive, but requires critical fixes to me
 
 ### Issue 1: Missing Architecture Document Verification (SEVERITY: CRITICAL)
 
-**Location**: Throughout all phases  
-**Problem**: Plan does not mandate reading `docs/reference/architecture.md` before implementation  
-**Impact**: Violates AGENTS.md Step 2 - mandatory architecture consultation  
+**Location**: Throughout all phases
+**Problem**: Plan does not mandate reading `docs/reference/architecture.md` before implementation
+**Impact**: Violates AGENTS.md Step 2 - mandatory architecture consultation
 
 **Required Fix**:
 ```markdown
@@ -35,7 +35,7 @@ The plan is well-structured and comprehensive, but requires critical fixes to me
 1. **Read Architecture Document**:
    - File: `docs/reference/architecture.md`
    - Required Sections: 3.2 (Module Structure), 4 (Core Data Structures), 7 (Data Management)
-   
+
 2. **Verify No Conflicts**:
    - Check if `Branch`, `BranchGraph`, `TreeConfig` structs conflict with existing definitions
    - Verify module placement in `src/game/systems/procedural_meshes.rs` is architecturally sound
@@ -48,9 +48,9 @@ The plan is well-structured and comprehensive, but requires critical fixes to me
 
 ### Issue 2: Incomplete File Path Specifications (SEVERITY: CRITICAL)
 
-**Location**: Phases 1, 2, 3, 4  
-**Problem**: Many tasks specify "add to file" without full path or line number context  
-**Impact**: AI agents cannot determine exact insertion points  
+**Location**: Phases 1, 2, 3, 4
+**Problem**: Many tasks specify "add to file" without full path or line number context
+**Impact**: AI agents cannot determine exact insertion points
 
 **Example Violations**:
 - Phase 1.1: "Add new structs" - WHERE in the 637-line file?
@@ -77,9 +77,9 @@ Add new structs for branch-based tree generation:
 
 ### Issue 3: Missing SPDX Copyright Headers (SEVERITY: HIGH)
 
-**Location**: All code examples in plan  
-**Problem**: Code blocks lack mandatory SPDX headers per AGENTS.md Rule 1  
-**Impact**: Generated code will fail compliance checks  
+**Location**: All code examples in plan
+**Problem**: Code blocks lack mandatory SPDX headers per AGENTS.md Rule 1
+**Impact**: Generated code will fail compliance checks
 
 **Required Fix**: ALL Rust code examples MUST start with:
 ```rust
@@ -90,9 +90,9 @@ Add new structs for branch-based tree generation:
 
 ### Issue 4: Quality Gates Incomplete (SEVERITY: HIGH)
 
-**Location**: Phase 1.5, 2.4, 3.4, etc.  
-**Problem**: Testing sections don't enforce ALL four mandatory cargo commands  
-**Impact**: Incomplete validation, potential failures in CI/CD  
+**Location**: Phase 1.5, 2.4, 3.4, etc.
+**Problem**: Testing sections don't enforce ALL four mandatory cargo commands
+**Impact**: Incomplete validation, potential failures in CI/CD
 
 **Current State (Phase 1.5)**:
 ```markdown
@@ -122,9 +122,9 @@ cargo nextest run --all-features
 
 ### Issue 5: Ambiguous Data Structure Definitions (SEVERITY: HIGH)
 
-**Location**: Phase 1.1, 1.2  
-**Problem**: Structs defined in tables, but actual Rust code not provided  
-**Impact**: AI agents will guess implementations, causing inconsistency  
+**Location**: Phase 1.1, 1.2
+**Problem**: Structs defined in tables, but actual Rust code not provided
+**Impact**: AI agents will guess implementations, causing inconsistency
 
 **Example - Phase 1.1 Table**:
 ```markdown
@@ -137,7 +137,7 @@ cargo nextest run --all-features
 ```markdown
 #### 1.1 Branch Graph Data Structure
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Insert After**: Line 50 (after `ProceduralMeshCache` definition)
 
 ```rust
@@ -202,9 +202,9 @@ pub struct TerrainVisualConfig {
 
 ### Issue 6: TreeType Enum Missing (SEVERITY: HIGH)
 
-**Location**: Phase 1.2  
-**Problem**: Tree types referenced but enum definition not provided  
-**Impact**: AI agents cannot implement tree type system correctly  
+**Location**: Phase 1.2
+**Problem**: Tree types referenced but enum definition not provided
+**Impact**: AI agents cannot implement tree type system correctly
 
 **Referenced but Undefined**:
 - "6 tree type configurations implemented" (Phase 1.6 Deliverable)
@@ -214,7 +214,7 @@ pub struct TerrainVisualConfig {
 ```markdown
 #### 1.2 Tree Type Configurations
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Insert After**: `TerrainVisualConfig` struct definition
 
 ```rust
@@ -310,9 +310,9 @@ impl TreeType {
 
 ### Issue 7: Missing Type Definitions for Phase 2 (SEVERITY: HIGH)
 
-**Location**: Phase 2.2 (Grass Density Quality Settings)  
-**Problem**: `GrassQualitySettings` resource not tied to specific file or module  
-**Impact**: Unclear where to add this resource, potential integration failures  
+**Location**: Phase 2.2 (Grass Density Quality Settings)
+**Problem**: `GrassQualitySettings` resource not tied to specific file or module
+**Impact**: Unclear where to add this resource, potential integration failures
 
 **Current State**: Shows struct definition but not integration point
 
@@ -322,8 +322,8 @@ impl TreeType {
 
 **Step 1: Define Resource Type**
 
-**File**: `src/game/config.rs` (or create if doesn't exist)  
-**Insert After**: Existing game configuration structs  
+**File**: `src/game/config.rs` (or create if doesn't exist)
+**Insert After**: Existing game configuration structs
 
 ```rust
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
@@ -380,8 +380,8 @@ impl GrassDensity {
 
 **Step 2: Register Resource**
 
-**File**: `src/game/plugin.rs` (or main game initialization)  
-**Modify**: Add resource initialization in plugin setup  
+**File**: `src/game/plugin.rs` (or main game initialization)
+**Modify**: Add resource initialization in plugin setup
 
 ```rust
 // In GamePlugin::build() or similar
@@ -390,7 +390,7 @@ app.init_resource::<GrassQualitySettings>();
 
 **Step 3: Update spawn_grass Function**
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Function**: New function to add
 
 ```rust
@@ -427,9 +427,9 @@ pub fn spawn_grass(
 
 ### Issue 8: MapEvent Extension Lacks Domain Layer Specification (SEVERITY: HIGH)
 
-**Location**: Phase 3.3 (Event-Based Integration)  
-**Problem**: Shows "Proposed MapEvent Extension" but doesn't mandate checking architecture first  
-**Impact**: Risk of violating domain layer constraints, modifying core types without approval  
+**Location**: Phase 3.3 (Event-Based Integration)
+**Problem**: Shows "Proposed MapEvent Extension" but doesn't mandate checking architecture first
+**Impact**: Risk of violating domain layer constraints, modifying core types without approval
 
 **Current State**: Shows optional extension without verification steps
 
@@ -441,8 +441,8 @@ pub fn spawn_grass(
 
 **Step 1: Check Architecture Document**
 
-**File to Read**: `docs/reference/architecture.md`  
-**Section**: 4 (Core Data Structures) - check if `MapEvent` is defined as immutable core type  
+**File to Read**: `docs/reference/architecture.md`
+**Section**: 4 (Core Data Structures) - check if `MapEvent` is defined as immutable core type
 
 **Questions to Answer**:
 1. Is `MapEvent` in the domain layer? (YES = requires approval to modify)
@@ -451,8 +451,8 @@ pub fn spawn_grass(
 
 **Step 2A: IF MapEvent CAN Be Extended (User Approval Obtained)**
 
-**File**: `src/domain/world/types.rs`  
-**Modify**: `MapEvent` enum (around Line 810)  
+**File**: `src/domain/world/types.rs`
+**Modify**: `MapEvent` enum (around Line 810)
 **Action**: Add new variant
 
 ```rust
@@ -461,7 +461,7 @@ pub fn spawn_grass(
 
 pub enum MapEvent {
     // ... existing variants ...
-    
+
     /// Furniture or prop placement event
     Furniture {
         /// Event name for editor display
@@ -509,9 +509,9 @@ Use existing event types with naming conventions:
 
 ### Issue 9: Missing Function Signature Completeness (SEVERITY: MEDIUM)
 
-**Location**: Phase 3.2, 4.2  
-**Problem**: Function signatures incomplete - missing parameter types and return documentation  
-**Impact**: AI agents will guess parameter types, causing compilation errors  
+**Location**: Phase 3.2, 4.2
+**Problem**: Function signatures incomplete - missing parameter types and return documentation
+**Impact**: AI agents will guess parameter types, causing compilation errors
 
 **Current State (Phase 3.2)**:
 ```markdown
@@ -524,8 +524,8 @@ pub fn spawn_bench(commands, materials, meshes, position, map_id, config: BenchC
 ```markdown
 #### 3.2 Complete Function Signatures with Full Type Information
 
-**File**: `src/game/systems/procedural_meshes.rs`  
-**Insert After**: Existing `spawn_tree()` function  
+**File**: `src/game/systems/procedural_meshes.rs`
+**Insert After**: Existing `spawn_tree()` function
 
 ```rust
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
@@ -605,9 +605,9 @@ impl Default for BenchConfig {
 
 ### Issue 10: Phase 5 Cache Update Conflicts with Existing Structure (SEVERITY: MEDIUM)
 
-**Location**: Phase 5.4 (Cache Expansion)  
-**Problem**: Proposes adding `HashMap` fields but current cache uses `Option<Handle<Mesh>>`  
-**Impact**: Breaking change to existing cache structure, unclear migration path  
+**Location**: Phase 5.4 (Cache Expansion)
+**Problem**: Proposes adding `HashMap` fields but current cache uses `Option<Handle<Mesh>>`
+**Impact**: Breaking change to existing cache structure, unclear migration path
 
 **Current Cache Structure** (from grep results):
 ```rust
@@ -635,8 +635,8 @@ pub struct ProceduralMeshCache {
 ```markdown
 #### 5.4 Cache Expansion with Backward Compatibility
 
-**File**: `src/game/systems/procedural_meshes.rs`  
-**Current Location**: Lines 40-50 (ProceduralMeshCache struct)  
+**File**: `src/game/systems/procedural_meshes.rs`
+**Current Location**: Lines 40-50 (ProceduralMeshCache struct)
 
 **Step 1: Extend Cache Structure (Additive Changes Only)**
 
@@ -662,7 +662,7 @@ pub struct ProceduralMeshCache {
     sign_post: Option<Handle<Mesh>>,
     /// Cached cuboid mesh handle for sign boards
     sign_board: Option<Handle<Mesh>>,
-    
+
     // NEW FIELDS - ADVANCED PROCEDURAL MESHES
     /// Cached tree meshes by type and scale (key: TreeType, value: mesh handle)
     tree_meshes: HashMap<TreeType, Handle<Mesh>>,
@@ -690,7 +690,7 @@ impl ProceduralMeshCache {
             .or_insert_with(|| meshes.add(creator()))
             .clone()
     }
-    
+
     /// Gets or creates a furniture mesh for the specified type
     pub fn get_or_create_furniture_mesh<F>(
         &mut self,
@@ -724,16 +724,16 @@ impl ProceduralMeshCache {
 
 ### Issue 11: Missing StructureType Definition (SEVERITY: MEDIUM)
 
-**Location**: Phase 4, Phase 5.4  
-**Problem**: `StructureType` referenced but never defined  
-**Impact**: Compilation errors when implementing cache expansion  
+**Location**: Phase 4, Phase 5.4
+**Problem**: `StructureType` referenced but never defined
+**Impact**: Compilation errors when implementing cache expansion
 
 **Required Fix**:
 ```markdown
 #### 4.1 Modular Structure Components - Complete Type Definition
 
-**File**: `src/game/systems/procedural_meshes.rs`  
-**Insert After**: `FurnitureType` enum  
+**File**: `src/game/systems/procedural_meshes.rs`
+**Insert After**: `FurnitureType` enum
 
 ```rust
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
@@ -811,9 +811,9 @@ impl Default for ArchConfig {
 
 ### Issue 12: SDK Phase Missing File Context (SEVERITY: MEDIUM)
 
-**Location**: Phase 6.1, 6.2, 7.1, 7.2  
-**Problem**: References to `map_editor.rs` but no line numbers or context for modifications  
-**Impact**: AI agents cannot locate insertion points in 4000+ line file  
+**Location**: Phase 6.1, 6.2, 7.1, 7.2
+**Problem**: References to `map_editor.rs` but no line numbers or context for modifications
+**Impact**: AI agents cannot locate insertion points in 4000+ line file
 
 **Current State**: "Add new presets" without specifying where
 
@@ -821,44 +821,44 @@ impl Default for ArchConfig {
 ```markdown
 #### 6.1 Extended Visual Presets
 
-**File**: `sdk/campaign_builder/src/map_editor.rs`  
-**Current VisualPreset Location**: Lines 303-313 (enum definition)  
-**Current VisualPreset::all() Location**: Lines 351-383 (all variants method)  
+**File**: `sdk/campaign_builder/src/map_editor.rs`
+**Current VisualPreset Location**: Lines 303-313 (enum definition)
+**Current VisualPreset::all() Location**: Lines 351-383 (all variants method)
 
 **Modification 1: Extend VisualPreset Enum**
 
-**Action**: Add new variants to existing enum at Line 313 (before closing brace)  
+**Action**: Add new variants to existing enum at Line 313 (before closing brace)
 **Insert**:
 
 ```rust
     // ... existing variants (Default through DiagonalWall) ...
-    
+
     // Tree variants (NEW)
     ShortTree,
     MediumTree,
     TallTree,
     DeadTree,
-    
+
     // Shrub variants (NEW)
     SmallShrub,
     LargeShrub,
     FloweringShrub,
-    
+
     // Grass variants (NEW)
     ShortGrass,
     TallGrass,
     DriedGrass,
-    
+
     // Mountain variants (NEW)
     LowPeak,
     HighPeak,
     JaggedPeak,
-    
+
     // Swamp variants (NEW)
     ShallowSwamp,
     DeepSwamp,
     MurkySwamp,
-    
+
     // Lava variants (NEW)
     LavaPool,
     LavaFlow,
@@ -868,15 +868,15 @@ impl Default for ArchConfig {
 
 **Modification 2: Update VisualPreset::all() Method**
 
-**Location**: Lines 351-383  
-**Action**: Add new variants to array at Line 363 (before closing bracket)  
+**Location**: Lines 351-383
+**Action**: Add new variants to array at Line 363 (before closing bracket)
 
 ```rust
     pub fn all() -> &'static [VisualPreset] {
         &[
             // ... existing 13 variants ...
             VisualPreset::DiagonalWall,
-            
+
             // NEW VARIANTS
             VisualPreset::ShortTree,
             VisualPreset::MediumTree,
@@ -903,13 +903,13 @@ impl Default for ArchConfig {
 
 **Modification 3: Update VisualPreset::name() Method**
 
-**Location**: Lines 332-350 (impl VisualPreset)  
-**Action**: Add match arms for new variants in `name()` method  
+**Location**: Lines 332-350 (impl VisualPreset)
+**Action**: Add match arms for new variants in `name()` method
 
 **Modification 4: Update VisualPreset::to_metadata() Method**
 
-**Location**: Lines 385-427  
-**Action**: Add match arms for new variants with specific TileVisualMetadata values  
+**Location**: Lines 385-427
+**Action**: Add match arms for new variants with specific TileVisualMetadata values
 
 **Example for Tree Variants**:
 
@@ -917,7 +917,7 @@ impl Default for ArchConfig {
     pub fn to_metadata(&self) -> TileVisualMetadata {
         match self {
             // ... existing matches ...
-            
+
             VisualPreset::ShortTree => TileVisualMetadata {
                 height: Some(1.0),
                 scale: Some(0.7),
@@ -942,7 +942,7 @@ impl Default for ArchConfig {
                 color_tint: Some((0.3, 0.25, 0.2)), // Brown/gray
                 ..Default::default()
             },
-            
+
             // Add similar matches for all 18 new variants
         }
     }
@@ -953,9 +953,9 @@ impl Default for ArchConfig {
 
 ### Issue 13: Test Naming Conventions Incomplete (SEVERITY: LOW)
 
-**Location**: All testing sections  
-**Problem**: Some test names don't follow `test_{function}_{condition}_{expected}` pattern  
-**Impact**: Reduced test clarity, harder debugging  
+**Location**: All testing sections
+**Problem**: Some test names don't follow `test_{function}_{condition}_{expected}` pattern
+**Impact**: Reduced test clarity, harder debugging
 
 **Examples of Non-Compliant Names**:
 - `test_branch_graph_creation` → Should be `test_branch_graph_new_creates_valid_structure`
@@ -966,11 +966,11 @@ impl Default for ArchConfig {
 
 ### Issue 14: Missing Deliverable Checkboxes Format (SEVERITY: LOW)
 
-**Location**: All deliverable sections  
-**Problem**: Checkboxes use `- [ ]` instead of `- []` (space should be inside)  
-**Impact**: Minor markdown rendering inconsistency  
+**Location**: All deliverable sections
+**Problem**: Checkboxes use `- [ ]` instead of `- []` (space should be inside)
+**Impact**: Minor markdown rendering inconsistency
 
-**Current**: `- [ ] Deliverable`  
+**Current**: `- [ ] Deliverable`
 **Required**: `- [] Deliverable` (per PLAN.md template)
 
 ---
@@ -979,14 +979,14 @@ impl Default for ArchConfig {
 
 ### Improvement 1: Add Phase Dependencies
 
-**Location**: Between phases  
-**Recommendation**: Add explicit dependency declarations  
+**Location**: Between phases
+**Recommendation**: Add explicit dependency declarations
 
 **Example**:
 ```markdown
 ### Phase 2: Vegetation Systems (Shrubs & Grass)
 
-**DEPENDENCIES**: 
+**DEPENDENCIES**:
 - Phase 1 MUST be complete (requires `TreeConfig`, `BranchGraph` infrastructure)
 - All Phase 1 quality gates MUST pass
 - Phase 1 tests MUST achieve >80% coverage
@@ -996,8 +996,8 @@ impl Default for ArchConfig {
 
 ### Improvement 2: Add Integration Testing Strategy
 
-**Location**: After Phase 4  
-**Recommendation**: Add comprehensive integration test phase  
+**Location**: After Phase 4
+**Recommendation**: Add comprehensive integration test phase
 
 ```markdown
 ### Phase 4.5: Integration Testing (All Procedural Meshes)
@@ -1020,8 +1020,8 @@ impl Default for ArchConfig {
 
 ### Improvement 3: Add Visual Regression Testing
 
-**Location**: Phase 5 or separate phase  
-**Recommendation**: Add screenshot comparison tests  
+**Location**: Phase 5 or separate phase
+**Recommendation**: Add screenshot comparison tests
 
 ```markdown
 ### Phase 5.8: Visual Regression Testing
@@ -1041,10 +1041,10 @@ impl Default for ArchConfig {
 
 ### Improvement 4: Add Performance Benchmarks Baseline
 
-**Location**: Phase 5.5  
-**Recommendation**: Define specific performance targets  
+**Location**: Phase 5.5
+**Recommendation**: Define specific performance targets
 
-**Current**: "No regressions" (vague)  
+**Current**: "No regressions" (vague)
 **Improved**:
 
 ```markdown
@@ -1067,8 +1067,8 @@ impl Default for ArchConfig {
 
 ### Improvement 5: Add Rollback Strategy
 
-**Location**: End of each phase  
-**Recommendation**: Define rollback procedure if phase fails  
+**Location**: End of each phase
+**Recommendation**: Define rollback procedure if phase fails
 
 ```markdown
 #### 1.8 Rollback Procedure (If Phase 1 Fails)
@@ -1091,8 +1091,8 @@ impl Default for ArchConfig {
 
 ### Improvement 6: Add Example Usage Section
 
-**Location**: After each major feature phase  
-**Recommendation**: Provide concrete usage examples  
+**Location**: After each major feature phase
+**Recommendation**: Provide concrete usage examples
 
 ```markdown
 #### 1.9 Example Usage (How to Use New Tree System)
@@ -1133,15 +1133,15 @@ let tree_entity = spawn_tree(
 
 ### Improvement 7: Add Troubleshooting Guide
 
-**Location**: After Verification Plan  
-**Recommendation**: Add common issues and solutions  
+**Location**: After Verification Plan
+**Recommendation**: Add common issues and solutions
 
 ```markdown
 ## Troubleshooting Guide
 
 ### Issue: Trees render as pink cubes
 
-**Cause**: Mesh generation failed, Bevy showing default error mesh  
+**Cause**: Mesh generation failed, Bevy showing default error mesh
 **Solution**:
 1. Check console for error messages
 2. Verify `generate_branch_mesh()` returns valid mesh with vertices
@@ -1150,7 +1150,7 @@ let tree_entity = spawn_tree(
 
 ### Issue: Performance drops below 30 FPS with grass
 
-**Cause**: Grass density too high for hardware  
+**Cause**: Grass density too high for hardware
 **Solution**:
 1. Lower grass quality: `config.grass_density = GrassDensity::Low;`
 2. Reduce grass tile count in map
@@ -1159,7 +1159,7 @@ let tree_entity = spawn_tree(
 
 ### Issue: Compilation error "TreeType not found"
 
-**Cause**: TreeType enum not yet defined or import missing  
+**Cause**: TreeType enum not yet defined or import missing
 **Solution**:
 1. Verify Phase 1.2 completed
 2. Check `use` statements at top of file
@@ -1168,7 +1168,7 @@ let tree_entity = spawn_tree(
 
 ### Issue: Tests fail with "expected 4 branches, got 0"
 
-**Cause**: Branch graph generation logic incorrect  
+**Cause**: Branch graph generation logic incorrect
 **Solution**:
 1. Debug `add_branch()` function with println statements
 2. Verify recursion depth > 0
@@ -1178,15 +1178,15 @@ let tree_entity = spawn_tree(
 
 ### Improvement 8: Add Data Migration Plan
 
-**Location**: Before Phase 1  
-**Recommendation**: Document impact on existing campaign data  
+**Location**: Before Phase 1
+**Recommendation**: Document impact on existing campaign data
 
 ```markdown
 ## Data Migration & Backward Compatibility
 
 ### Existing Campaign Files
 
-**Impact**: LOW - Additive changes only  
+**Impact**: LOW - Additive changes only
 **Action Required**: NONE (existing campaigns work unchanged)
 
 **Rationale**:
@@ -1225,8 +1225,8 @@ Tile {
 
 ### Improvement 9: Add Dependency Version Pinning
 
-**Location**: Dependencies section  
-**Recommendation**: Pin exact versions for reproducibility  
+**Location**: Dependencies section
+**Recommendation**: Pin exact versions for reproducibility
 
 **Current**:
 ```markdown
@@ -1265,8 +1265,8 @@ criterion = "0.5"  # For benchmarking
 
 ### Improvement 10: Add Success Metrics Dashboard
 
-**Location**: End of plan  
-**Recommendation**: Add measurable success criteria  
+**Location**: End of plan
+**Recommendation**: Add measurable success criteria
 
 ```markdown
 ## Success Metrics Dashboard
@@ -1484,8 +1484,8 @@ criterion = "0.5"  # For benchmarking
 
 #### 1.1 Branch Graph Data Structure
 
-**File**: `src/game/systems/procedural_meshes.rs`  
-**Insert After**: Line 50 (after `ProceduralMeshCache` struct closing brace)  
+**File**: `src/game/systems/procedural_meshes.rs`
+**Insert After**: Line 50 (after `ProceduralMeshCache` struct closing brace)
 **Insert Before**: Line 52 (before `impl Default for ProceduralMeshCache`)
 
 **Add Complete Type Definitions**:
@@ -1505,18 +1505,18 @@ use bevy::render::primitives::Aabb;
 pub struct Branch {
     /// Starting point of the branch in 3D space (world coordinates)
     pub start: Vec3,
-    
+
     /// Ending point of the branch in 3D space (world coordinates)
     pub end: Vec3,
-    
+
     /// Radius at the branch start in world units (thicker at trunk)
     /// Valid range: 0.05 - 0.5
     pub start_radius: f32,
-    
+
     /// Radius at the branch end in world units (tapers to point)
     /// Valid range: 0.01 - 0.3 (must be <= start_radius)
     pub end_radius: f32,
-    
+
     /// Indices of child branches in the parent BranchGraph.branches Vec
     /// Empty for leaf branches (endpoints)
     pub children: Vec<usize>,
@@ -1536,7 +1536,7 @@ pub struct Branch {
 pub struct BranchGraph {
     /// All branches in the tree (index 0 is root/trunk)
     pub branches: Vec<Branch>,
-    
+
     /// Bounding box for the entire tree structure (for culling)
     pub bounds: Aabb,
 }
@@ -1549,7 +1549,7 @@ impl BranchGraph {
             bounds: Aabb::default(),
         }
     }
-    
+
     /// Adds a branch to the graph and returns its index
     ///
     /// # Arguments
@@ -1564,7 +1564,7 @@ impl BranchGraph {
         self.branches.push(branch);
         index
     }
-    
+
     /// Calculates and updates the bounding box for all branches
     ///
     /// Should be called after all branches are added.
@@ -1573,15 +1573,15 @@ impl BranchGraph {
             self.bounds = Aabb::default();
             return;
         }
-        
+
         let mut min = Vec3::splat(f32::MAX);
         let mut max = Vec3::splat(f32::MIN);
-        
+
         for branch in &self.branches {
             min = min.min(branch.start).min(branch.end);
             max = max.max(branch.start).max(branch.end);
         }
-        
+
         self.bounds = Aabb::from_min_max(min, max);
     }
 }
@@ -1601,27 +1601,27 @@ pub struct TreeConfig {
     /// Valid range: 0.1 - 0.5
     /// Default: 0.3
     pub trunk_radius: f32,
-    
+
     /// Total height of the tree from ground to top in world units
     /// Valid range: 2.0 - 6.0
     /// Default: 3.5
     pub height: f32,
-    
+
     /// Range for branch angle deviation from parent (min_degrees, max_degrees)
     /// Valid range: (10.0, 90.0)
     /// Default: (30.0, 60.0)
     pub branch_angle_range: (f32, f32),
-    
+
     /// Maximum recursion depth for branch generation
     /// Valid range: 1 - 5 (higher = more detailed but slower)
     /// Default: 3
     pub depth: u32,
-    
+
     /// Density of foliage spheres at branch endpoints
     /// Valid range: 0.0 - 1.0 (0.0 = no foliage, 1.0 = maximum density)
     /// Default: 0.7
     pub foliage_density: f32,
-    
+
     /// Color of foliage as RGB tuple
     /// Valid range: (0.0-1.0, 0.0-1.0, 0.0-1.0)
     /// Default: (0.2, 0.6, 0.2) - green
@@ -1651,16 +1651,16 @@ pub struct TerrainVisualConfig {
     /// Valid range: 0.5 - 2.0
     /// Default: 1.0
     pub scale: f32,
-    
+
     /// Height multiplier for tree height
     /// Valid range: 0.5 - 2.0
     /// Default: 1.0
     pub height_multiplier: f32,
-    
+
     /// Optional color tint applied to foliage
     /// If Some, multiplies foliage_color in TreeConfig
     pub color_tint: Option<Color>,
-    
+
     /// Rotation around Y-axis in degrees
     /// Valid range: 0.0 - 360.0
     /// Default: 0.0
@@ -1699,7 +1699,7 @@ impl From<&TileVisualMetadata> for TerrainVisualConfig {
 
 #### 1.2 Tree Type Configurations
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Insert After**: `TerrainVisualConfig` implementation (from 1.1)
 
 **Add Complete Enum and Implementation**:
@@ -1716,23 +1716,23 @@ pub enum TreeType {
     /// Thick trunk, wide spread branches, dense spherical foliage
     /// Use for: Default forests, temperate biomes
     Oak,
-    
+
     /// Tall trunk, conical shape, short upward-angled branches
     /// Use for: Mountain biomes, cold regions
     Pine,
-    
+
     /// Thin trunk, graceful drooping branches, sparse foliage
     /// Use for: Decorative areas, elegant scenes
     Birch,
-    
+
     /// Thick curved trunk, long drooping branches, curtain-like foliage
     /// Use for: Water areas, swamps, mystical forests
     Willow,
-    
+
     /// Dark twisted branches, no foliage, decay appearance
     /// Use for: Haunted areas, decay zones, dead forests
     Dead,
-    
+
     /// Multi-stem low profile, bushy appearance
     /// Use for: Undergrowth, small vegetation
     Shrub,
@@ -1821,7 +1821,7 @@ impl TreeType {
             TreeType::Shrub => "Shrub",
         }
     }
-    
+
     /// Returns all tree types for iteration
     pub fn all() -> &'static [TreeType] {
         &[
