@@ -8,7 +8,11 @@
 use crate::application::GameState;
 use bevy::prelude::*;
 
+pub mod grass_quality_settings;
 pub mod sprite_assets;
+
+// Re-export commonly used types
+pub use grass_quality_settings::{GrassDensity, GrassQualitySettings};
 
 /// Global game state resource wrapper
 #[derive(Resource)]
