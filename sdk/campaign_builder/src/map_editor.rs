@@ -45,8 +45,9 @@ use antares::domain::items::types::Item;
 use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
 use antares::domain::world::{
-    FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType, LayeredSprite, Map,
-    MapEvent, SpriteLayer, SpriteReference, TerrainType, Tile, TileVisualMetadata, WallType,
+    FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType,
+    LayeredSprite, Map, MapEvent, SpriteLayer, SpriteReference, TerrainType, Tile,
+    TileVisualMetadata, WallType,
 };
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -1411,6 +1412,9 @@ pub struct EventEditorState {
     pub furniture_lit: bool,
     pub furniture_locked: bool,
     pub furniture_blocking: bool,
+    // Color tint fields for furniture customization
+    pub furniture_use_color_tint: bool,
+    pub furniture_color_tint: [f32; 3],
 
     // Autocomplete input buffers
     pub trap_effect_input_buffer: String,
@@ -1450,6 +1454,8 @@ impl Default for EventEditorState {
             furniture_lit: false,
             furniture_locked: false,
             furniture_blocking: false,
+            furniture_use_color_tint: false,
+            furniture_color_tint: [1.0, 1.0, 1.0],
             trap_effect_input_buffer: String::new(),
             teleport_map_input_buffer: String::new(),
             npc_id_input_buffer: String::new(),
@@ -1683,6 +1689,11 @@ impl EventEditorState {
                 } else {
                     self.furniture_rotation_y.parse::<f32>().ok()
                 };
+                let color_tint = if self.furniture_use_color_tint {
+                    Some(self.furniture_color_tint)
+                } else {
+                    None
+                };
                 Ok(MapEvent::Furniture {
                     name: self.name.clone(),
                     furniture_type: self.furniture_type,
@@ -1694,6 +1705,7 @@ impl EventEditorState {
                         locked: self.furniture_locked,
                         blocking: self.furniture_blocking,
                     },
+                    color_tint,
                 })
             }
         }
@@ -1827,6 +1839,7 @@ impl EventEditorState {
                 scale,
                 material,
                 flags,
+                color_tint,
             } => {
                 s.event_type = EventType::Furniture;
                 s.name = name.clone();
@@ -1837,6 +1850,10 @@ impl EventEditorState {
                 s.furniture_lit = flags.lit;
                 s.furniture_locked = flags.locked;
                 s.furniture_blocking = flags.blocking;
+                if let Some(tint) = color_tint {
+                    s.furniture_use_color_tint = true;
+                    s.furniture_color_tint = *tint;
+                }
             }
         }
         s
@@ -3947,6 +3964,102 @@ impl MapsEditorState {
                                     .clicked()
                                 {
                                     event_editor.furniture_material = *material;
+                                    editor.has_changes = true;
+                                }
+                            }
+                        });
+
+                    // Color tint customization
+                    ui.separator();
+                    if ui
+                        .checkbox(
+                            &mut event_editor.furniture_use_color_tint,
+                            "Custom Color Tint",
+                        )
+                        .changed()
+                    {
+                        editor.has_changes = true;
+                    }
+
+                    if event_editor.furniture_use_color_tint {
+                        ui.horizontal(|ui| {
+                            ui.label("Color:");
+
+                            // RGB sliders
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label("R:");
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut event_editor.furniture_color_tint[0],
+                                                0.0..=1.0,
+                                            )
+                                            .step_by(0.01),
+                                        )
+                                        .changed()
+                                    {
+                                        editor.has_changes = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("G:");
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut event_editor.furniture_color_tint[1],
+                                                0.0..=1.0,
+                                            )
+                                            .step_by(0.01),
+                                        )
+                                        .changed()
+                                    {
+                                        editor.has_changes = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("B:");
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut event_editor.furniture_color_tint[2],
+                                                0.0..=1.0,
+                                            )
+                                            .step_by(0.01),
+                                        )
+                                        .changed()
+                                    {
+                                        editor.has_changes = true;
+                                    }
+                                });
+                            });
+
+                            // Color preview
+                            let color = egui::Color32::from_rgb(
+                                (event_editor.furniture_color_tint[0] * 255.0) as u8,
+                                (event_editor.furniture_color_tint[1] * 255.0) as u8,
+                                (event_editor.furniture_color_tint[2] * 255.0) as u8,
+                            );
+                            ui.colored_label(color, "██ Preview");
+                        });
+                    }
+
+                    // Appearance presets dropdown
+                    ui.separator();
+                    ui.label("Appearance Presets:");
+                    egui::ComboBox::from_id_salt("furniture_preset_combo")
+                        .selected_text("Select Preset...")
+                        .show_ui(ui, |ui| {
+                            for preset in event_editor.furniture_type.default_presets() {
+                                if ui.selectable_label(false, preset.name).clicked() {
+                                    event_editor.furniture_material = preset.material;
+                                    event_editor.furniture_scale = preset.scale;
+                                    if let Some(tint) = preset.color_tint {
+                                        event_editor.furniture_use_color_tint = true;
+                                        event_editor.furniture_color_tint = tint;
+                                    } else {
+                                        event_editor.furniture_use_color_tint = false;
+                                    }
                                     editor.has_changes = true;
                                 }
                             }

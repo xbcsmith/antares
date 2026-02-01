@@ -412,6 +412,7 @@ fn handle_events(
                 scale: _,
                 material: _,
                 flags: _,
+                color_tint: _,
             } => {
                 let msg = format!("Furniture placed: {}", name);
                 println!("{}", msg);

@@ -147,7 +147,7 @@ Added furniture property fields to `EventEditorState`:
 ```rust
 pub struct EventEditorState {
     // ... existing fields ...
-    
+
     // Furniture properties
     pub furniture_type: FurnitureType,
     pub furniture_rotation_y: String,

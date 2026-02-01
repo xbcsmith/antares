@@ -839,6 +839,86 @@ impl FurnitureMaterial {
             FurnitureMaterial::Gold => "Gold",
         }
     }
+
+    /// Returns base color in RGB format (0.0-1.0 range) for PBR rendering
+    ///
+    /// # Returns
+    ///
+    /// `[f32; 3]` representing RGB color values
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::FurnitureMaterial;
+    ///
+    /// let wood_color = FurnitureMaterial::Wood.base_color();
+    /// assert_eq!(wood_color, [0.6, 0.4, 0.2]); // Brown
+    ///
+    /// let gold_color = FurnitureMaterial::Gold.base_color();
+    /// assert_eq!(gold_color, [1.0, 0.84, 0.0]); // Gold
+    /// ```
+    pub fn base_color(self) -> [f32; 3] {
+        match self {
+            FurnitureMaterial::Wood => [0.6, 0.4, 0.2],  // Brown
+            FurnitureMaterial::Stone => [0.5, 0.5, 0.5], // Gray
+            FurnitureMaterial::Metal => [0.7, 0.7, 0.8], // Silver
+            FurnitureMaterial::Gold => [1.0, 0.84, 0.0], // Gold
+        }
+    }
+
+    /// Returns metallic property (0.0-1.0) for PBR rendering
+    ///
+    /// Indicates how metallic the material surface is:
+    /// - 0.0: Non-metallic (plastic, wood, stone)
+    /// - 1.0: Fully metallic (polished metal, gold)
+    ///
+    /// # Returns
+    ///
+    /// Metallic value between 0.0 (non-metallic) and 1.0 (fully metallic)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::FurnitureMaterial;
+    ///
+    /// assert_eq!(FurnitureMaterial::Wood.metallic(), 0.0);
+    /// assert_eq!(FurnitureMaterial::Gold.metallic(), 1.0);
+    /// ```
+    pub fn metallic(self) -> f32 {
+        match self {
+            FurnitureMaterial::Wood => 0.0,
+            FurnitureMaterial::Stone => 0.1,
+            FurnitureMaterial::Metal => 0.9,
+            FurnitureMaterial::Gold => 1.0,
+        }
+    }
+
+    /// Returns roughness property (0.0-1.0) for PBR rendering
+    ///
+    /// Indicates how rough the material surface is:
+    /// - 0.0: Smooth, mirror-like surface
+    /// - 1.0: Rough, matte surface
+    ///
+    /// # Returns
+    ///
+    /// Roughness value between 0.0 (smooth) and 1.0 (rough)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::FurnitureMaterial;
+    ///
+    /// assert_eq!(FurnitureMaterial::Gold.roughness(), 0.2); // Shiny
+    /// assert_eq!(FurnitureMaterial::Stone.roughness(), 0.9); // Dull
+    /// ```
+    pub fn roughness(self) -> f32 {
+        match self {
+            FurnitureMaterial::Wood => 0.8,
+            FurnitureMaterial::Stone => 0.9,
+            FurnitureMaterial::Metal => 0.3,
+            FurnitureMaterial::Gold => 0.2,
+        }
+    }
 }
 
 /// Furniture-specific state flags
@@ -875,6 +955,21 @@ impl FurnitureFlags {
         self.blocking = blocking;
         self
     }
+}
+
+/// Furniture appearance customization preset
+///
+/// Presets allow quick application of common material, scale, and color combinations.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FurnitureAppearancePreset {
+    /// Human-readable name for this preset
+    pub name: &'static str,
+    /// Material variant to apply
+    pub material: FurnitureMaterial,
+    /// Scale multiplier to apply
+    pub scale: f32,
+    /// Optional color tint (RGB, 0.0-1.0)
+    pub color_tint: Option<[f32; 3]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -951,6 +1046,67 @@ impl FurnitureType {
             }
             FurnitureType::Torch => FurnitureCategory::Lighting,
             FurnitureType::Table => FurnitureCategory::Utility,
+        }
+    }
+
+    /// Returns default appearance presets for this furniture type
+    ///
+    /// Each furniture type has one or more predefined appearance configurations
+    /// combining material, scale, and color tint settings.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{FurnitureType, FurnitureMaterial};
+    ///
+    /// let throne_presets = FurnitureType::Throne.default_presets();
+    /// assert!(throne_presets.len() >= 3); // Wooden, Stone, Golden thrones
+    ///
+    /// let torch_presets = FurnitureType::Torch.default_presets();
+    /// assert!(torch_presets.len() >= 2); // Wooden torch, Metal sconce
+    /// ```
+    pub fn default_presets(self) -> Vec<FurnitureAppearancePreset> {
+        match self {
+            FurnitureType::Throne => vec![
+                FurnitureAppearancePreset {
+                    name: "Wooden Throne",
+                    material: FurnitureMaterial::Wood,
+                    scale: 1.2,
+                    color_tint: None,
+                },
+                FurnitureAppearancePreset {
+                    name: "Stone Throne",
+                    material: FurnitureMaterial::Stone,
+                    scale: 1.3,
+                    color_tint: None,
+                },
+                FurnitureAppearancePreset {
+                    name: "Golden Throne",
+                    material: FurnitureMaterial::Gold,
+                    scale: 1.5,
+                    color_tint: None,
+                },
+            ],
+            FurnitureType::Torch => vec![
+                FurnitureAppearancePreset {
+                    name: "Wooden Torch",
+                    material: FurnitureMaterial::Wood,
+                    scale: 1.0,
+                    color_tint: Some([1.0, 0.6, 0.2]), // Orange flame
+                },
+                FurnitureAppearancePreset {
+                    name: "Metal Sconce",
+                    material: FurnitureMaterial::Metal,
+                    scale: 0.8,
+                    color_tint: Some([0.6, 0.8, 1.0]), // Blue flame
+                },
+            ],
+            _ => vec![FurnitureAppearancePreset {
+                name: "Default",
+                material: FurnitureMaterial::Wood,
+                scale: 1.0,
+                color_tint: None,
+            }],
         }
     }
 }
@@ -1448,6 +1604,9 @@ pub enum MapEvent {
         /// Furniture-specific flags
         #[serde(default)]
         flags: FurnitureFlags,
+        /// Optional color tint for customization (RGB, 0.0-1.0 range)
+        #[serde(default)]
+        color_tint: Option<[f32; 3]>,
     },
 }
 
