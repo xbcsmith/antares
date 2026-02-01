@@ -116,13 +116,13 @@ Add to the `tests` module at the end of [map.rs](file:///home/bsmith/go/src/gith
 fn test_tile_positions_are_centered() {
     // Verify the TILE_CENTER_OFFSET constant is 0.5
     assert_eq!(TILE_CENTER_OFFSET, 0.5);
-    
+
     // Verify centered position calculation
     let tile_x = 5;
     let tile_y = 10;
     let centered_x = tile_x as f32 + TILE_CENTER_OFFSET;
     let centered_z = tile_y as f32 + TILE_CENTER_OFFSET;
-    
+
     assert_eq!(centered_x, 5.5);
     assert_eq!(centered_z, 10.5);
 }
@@ -242,12 +242,12 @@ Add to the `tests` module at the end of [procedural_meshes.rs](file:///home/bsmi
 #[test]
 fn test_procedural_mesh_centering_offset() {
     assert_eq!(TILE_CENTER_OFFSET, 0.5);
-    
+
     // Verify offset produces centered coordinates
     let pos = types::Position { x: 3, y: 7 };
     let centered_x = pos.x as f32 + TILE_CENTER_OFFSET;
     let centered_z = pos.y as f32 + TILE_CENTER_OFFSET;
-    
+
     assert_eq!(centered_x, 3.5);
     assert_eq!(centered_z, 7.5);
 }

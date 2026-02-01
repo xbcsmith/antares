@@ -98,6 +98,10 @@ const PORTAL_COLOR: Color = Color::srgb(0.53, 0.29, 0.87); // Purple
 const SIGN_POST_COLOR: Color = Color::srgb(0.4, 0.3, 0.2); // Dark brown
 const SIGN_BOARD_COLOR: Color = Color::srgb(0.59, 0.44, 0.27); // Tan
 
+// Tile centering offset
+/// Offset to center procedural meshes within their tile (matches camera centering)
+const TILE_CENTER_OFFSET: f32 = 0.5;
+
 // ==================== Public Functions ====================
 
 /// Spawns a procedural tree mesh with trunk and foliage
@@ -180,7 +184,11 @@ pub fn spawn_tree(
     // Spawn parent tree entity
     let parent = commands
         .spawn((
-            Transform::from_xyz(position.x as f32, 0.0, position.y as f32),
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                0.0,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            ),
             GlobalTransform::default(),
             Visibility::default(),
             MapEntity(map_id),
@@ -290,8 +298,12 @@ pub fn spawn_portal(
 
     // Spawn parent portal entity with optional rotation
     let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
-    let transform = Transform::from_xyz(position.x as f32, PORTAL_Y_POSITION, position.y as f32)
-        .with_rotation(Quat::from_rotation_y(rotation_radians));
+    let transform = Transform::from_xyz(
+        position.x as f32 + TILE_CENTER_OFFSET,
+        PORTAL_Y_POSITION,
+        position.y as f32 + TILE_CENTER_OFFSET,
+    )
+    .with_rotation(Quat::from_rotation_y(rotation_radians));
 
     let parent = commands
         .spawn((
@@ -426,8 +438,12 @@ pub fn spawn_sign(
 
     // Spawn parent sign entity with optional rotation
     let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
-    let transform = Transform::from_xyz(position.x as f32, 0.0, position.y as f32)
-        .with_rotation(Quat::from_rotation_y(rotation_radians));
+    let transform = Transform::from_xyz(
+        position.x as f32 + TILE_CENTER_OFFSET,
+        0.0,
+        position.y as f32 + TILE_CENTER_OFFSET,
+    )
+    .with_rotation(Quat::from_rotation_y(rotation_radians));
 
     let parent = commands
         .spawn((
@@ -509,7 +525,21 @@ mod tests {
         let _ = SIGN_BOARD_WIDTH;
         let _ = SIGN_BOARD_HEIGHT;
         let _ = SIGN_BOARD_DEPTH;
+        let _ = SIGN_BOARD_Y_OFFSET;
         // Compile will verify constants exist with correct values
+    }
+
+    #[test]
+    fn test_procedural_mesh_centering_offset() {
+        assert_eq!(TILE_CENTER_OFFSET, 0.5);
+
+        // Verify offset produces centered coordinates
+        let pos = types::Position { x: 3, y: 7 };
+        let centered_x = pos.x as f32 + TILE_CENTER_OFFSET;
+        let centered_z = pos.y as f32 + TILE_CENTER_OFFSET;
+
+        assert_eq!(centered_x, 3.5);
+        assert_eq!(centered_z, 7.5);
     }
 
     // ==================== Mesh Caching Tests ====================

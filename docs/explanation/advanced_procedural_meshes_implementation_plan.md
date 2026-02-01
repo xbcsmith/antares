@@ -91,8 +91,8 @@ Extend the existing procedural mesh system to generate detailed, organic-looking
 
 #### 1.1 Branch Graph Data Structure
 
-**File**: `src/game/systems/procedural_meshes.rs`  
-**Insert After**: Line 50 (after `ProceduralMeshCache` struct closing brace)  
+**File**: `src/game/systems/procedural_meshes.rs`
+**Insert After**: Line 50 (after `ProceduralMeshCache` struct closing brace)
 **Insert Before**: Line 52 (before `impl Default for ProceduralMeshCache`)
 
 **Add Complete Type Definitions**:
@@ -299,7 +299,7 @@ impl From<&TileVisualMetadata> for TerrainVisualConfig {
 
 #### 1.2 Tree Type Configurations
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Insert After**: `TerrainVisualConfig` implementation (from 1.1)
 
 **Add Complete Enum and Implementation**:
@@ -455,7 +455,7 @@ impl TreeType {
 
 #### 1.3 Branch Mesh Generation
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Insert After**: `TreeType` implementation (from 1.2)
 
 **Add Function**:
@@ -523,7 +523,7 @@ pub fn generate_branch_mesh(graph: &BranchGraph, config: &TreeConfig) -> Mesh {
 
 **Modification 1: Update `spawn_tree()` Function Signature**
 
-**Location**: Line 143-153 (current function signature)  
+**Location**: Line 143-153 (current function signature)
 **Change**: Add `visual_metadata` parameter and `tree_type` parameter
 
 ```rust
@@ -564,7 +564,7 @@ pub fn spawn_tree(
 
 **Modification 2: Extend `ProceduralMeshCache` Structure**
 
-**Location**: Lines 40-50 (ProceduralMeshCache struct)  
+**Location**: Lines 40-50 (ProceduralMeshCache struct)
 **Change**: Add new HashMap fields for advanced meshes
 
 ```rust
@@ -598,8 +598,8 @@ pub struct ProceduralMeshCache {
 
 **Modification 3: Update Forest Tile Spawning**
 
-**File**: `src/game/systems/map.rs`  
-**Location**: Where forest tiles spawn trees (search for "spawn_tree" calls)  
+**File**: `src/game/systems/map.rs`
+**Location**: Where forest tiles spawn trees (search for "spawn_tree" calls)
 **Change**: Pass `TileVisualMetadata` from tile to control tree variant
 
 ```rust
@@ -625,7 +625,7 @@ if tile.terrain == TerrainType::Forest {
 
 **Unit Tests** (add to existing test module in `src/game/systems/procedural_meshes.rs`):
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Location**: Bottom of file (in `#[cfg(test)] mod tests` section)
 
 ```rust
@@ -778,7 +778,7 @@ Update this checklist as deliverables are completed:
 
 #### 2.1 Shrub Generation
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Insert After**: `spawn_tree()` function
 
 Implement multi-stem shrub using branch graph with no central trunk:
@@ -858,7 +858,7 @@ pub fn spawn_shrub(
 
 **Step 1: Define Resource Type**
 
-**File**: `src/game/config.rs` (or create if doesn't exist)  
+**File**: `src/game/config.rs` (or create if doesn't exist)
 **Insert After**: Existing game configuration structs
 
 ```rust
@@ -916,7 +916,7 @@ impl GrassDensity {
 
 **Step 2: Register Resource**
 
-**File**: `src/game/plugin.rs` (or main game initialization file)  
+**File**: `src/game/plugin.rs` (or main game initialization file)
 **Modify**: Add resource initialization in plugin setup
 
 ```rust
@@ -929,7 +929,7 @@ app.init_resource::<GrassQualitySettings>();
 
 **Step 3: Add spawn_grass Function**
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Insert After**: `spawn_shrub()` function
 
 ```rust
@@ -1086,8 +1086,8 @@ pub fn spawn_torch(commands, materials, meshes, position, map_id, config: TorchC
 
 **Step 1: Check Architecture Document**
 
-**File to Read**: `docs/reference/architecture.md`  
-**Section**: 4 (Core Data Structures) - check if `MapEvent` is defined as immutable core type  
+**File to Read**: `docs/reference/architecture.md`
+**Section**: 4 (Core Data Structures) - check if `MapEvent` is defined as immutable core type
 **Location**: `src/domain/world/types.rs` Line 810 (MapEvent enum)
 
 **Questions to Answer**:
@@ -1098,8 +1098,8 @@ pub fn spawn_torch(commands, materials, meshes, position, map_id, config: TorchC
 
 **Step 2A: IF MapEvent CAN Be Extended (User Approval Obtained)**
 
-**File**: `src/domain/world/types.rs`  
-**Modify**: `MapEvent` enum (around Line 810)  
+**File**: `src/domain/world/types.rs`
+**Modify**: `MapEvent` enum (around Line 810)
 **Action**: Add new variant
 
 ```rust
@@ -1155,8 +1155,8 @@ Use existing event types with naming conventions:
 
 **Step 3: Event Handler Integration**
 
-**File**: `src/game/systems/map.rs`  
-**Function**: `spawn_map_event()` or similar event handling function  
+**File**: `src/game/systems/map.rs`
+**Function**: `spawn_map_event()` or similar event handling function
 **Modify**: Add pattern matching for furniture events
 
 ```rust
@@ -1214,7 +1214,7 @@ match event {
 
 #### 4.1 Modular Structure Components
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Insert After**: Furniture spawn functions
 
 **Add Complete Type Definitions**:
@@ -1304,7 +1304,7 @@ Implement building blocks for procedural structures:
 
 #### 4.2 Integration Points
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Insert After**: Structure type definitions
 
 **Add Complete Function Signatures**:
@@ -1429,7 +1429,7 @@ let task = AsyncComputeTaskPool::get().spawn(async move {
 
 #### 5.4 Cache Expansion
 
-**File**: `src/game/systems/procedural_meshes.rs`  
+**File**: `src/game/systems/procedural_meshes.rs`
 **Current Location**: Lines 40-50 (ProceduralMeshCache struct)
 
 **Modification: Extend Cache Structure (Already Done in Phase 1.4)**
