@@ -3453,6 +3453,9 @@ pub fn autocomplete_portrait_selector(
                 changed = true;
             }
         }
+
+        // Persist buffer back into egui memory so it survives frames.
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
     changed

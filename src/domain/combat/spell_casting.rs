@@ -577,13 +577,28 @@ mod tests {
         let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
         cs.add_player(create_test_sorcerer(5, 10));
 
-        // Apply "silence" condition to the caster using content DB helpers
-        let content = ContentDatabase::new();
+        // Build a content DB and register the `silence` condition so apply-by-id succeeds
+        let mut content = ContentDatabase::new();
+        let cond_def = crate::domain::conditions::ConditionDefinition {
+            id: "silence".to_string(),
+            name: "Silence".to_string(),
+            description: "Silences target".to_string(),
+            effects: vec![crate::domain::conditions::ConditionEffect::StatusEffect(
+                "silenced".to_string(),
+            )],
+            default_duration: crate::domain::conditions::ConditionDuration::Rounds(2),
+            icon_id: None,
+        };
+        content.conditions.add_condition(cond_def);
+
         if let Some(Combatant::Player(pc)) = cs.get_combatant_mut(&CombatantId::Player(0)) {
-            let _ = crate::domain::combat::engine::apply_condition_to_character_by_id(
-                pc.as_mut(),
-                "silence",
-                &content,
+            assert!(
+                crate::domain::combat::engine::apply_condition_to_character_by_id(
+                    pc.as_mut(),
+                    "silence",
+                    &content,
+                )
+                .is_ok()
             );
         } else {
             panic!("Caster not found");
