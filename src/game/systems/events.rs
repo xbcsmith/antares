@@ -409,6 +409,9 @@ fn handle_events(
                 name,
                 furniture_type,
                 rotation_y,
+                scale: _,
+                material: _,
+                flags: _,
             } => {
                 let msg = format!("Furniture placed: {}", name);
                 println!("{}", msg);

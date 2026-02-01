@@ -800,13 +800,83 @@ impl Tile {
     }
 }
 
-// ===== Map Event System =====
+// ===== Furniture Types =====
 
-/// Map event types
+/// Material types for furniture rendering
 ///
-/// Events are triggered when the party moves to specific tiles or interacts
-/// with the environment.
-/// Types of furniture and props that can be placed on maps
+/// Each material has different visual properties (PBR parameters) that affect
+/// how the furniture appears in the game world.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub enum FurnitureMaterial {
+    /// Wood material (default)
+    #[default]
+    Wood,
+    /// Stone material
+    Stone,
+    /// Metal material
+    Metal,
+    /// Gold material
+    Gold,
+}
+
+impl FurnitureMaterial {
+    /// Returns all material variants
+    pub fn all() -> &'static [FurnitureMaterial] {
+        &[
+            FurnitureMaterial::Wood,
+            FurnitureMaterial::Stone,
+            FurnitureMaterial::Metal,
+            FurnitureMaterial::Gold,
+        ]
+    }
+
+    /// Returns human-readable name for the material
+    pub fn name(self) -> &'static str {
+        match self {
+            FurnitureMaterial::Wood => "Wood",
+            FurnitureMaterial::Stone => "Stone",
+            FurnitureMaterial::Metal => "Metal",
+            FurnitureMaterial::Gold => "Gold",
+        }
+    }
+}
+
+/// Furniture-specific state flags
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FurnitureFlags {
+    /// Torch is lit (emissive)
+    pub lit: bool,
+    /// Chest is locked
+    pub locked: bool,
+    /// Furniture blocks movement
+    pub blocking: bool,
+}
+
+impl FurnitureFlags {
+    /// Creates a new FurnitureFlags with all flags set to false
+    pub fn new() -> Self {
+        FurnitureFlags::default()
+    }
+
+    /// Sets the lit flag and returns self for chaining
+    pub fn with_lit(mut self, lit: bool) -> Self {
+        self.lit = lit;
+        self
+    }
+
+    /// Sets the locked flag and returns self for chaining
+    pub fn with_locked(mut self, locked: bool) -> Self {
+        self.locked = locked;
+        self
+    }
+
+    /// Sets the blocking flag and returns self for chaining
+    pub fn with_blocking(mut self, blocking: bool) -> Self {
+        self.blocking = blocking;
+        self
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum FurnitureType {
     /// Ornate throne for rulers
@@ -868,6 +938,59 @@ impl FurnitureType {
             FurnitureType::Barrel => "🛢️",
             FurnitureType::Chest => "📦",
         }
+    }
+
+    /// Returns the category for this furniture type
+    pub fn category(self) -> FurnitureCategory {
+        match self {
+            FurnitureType::Throne | FurnitureType::Bench | FurnitureType::Chair => {
+                FurnitureCategory::Seating
+            }
+            FurnitureType::Chest | FurnitureType::Barrel | FurnitureType::Bookshelf => {
+                FurnitureCategory::Storage
+            }
+            FurnitureType::Torch => FurnitureCategory::Lighting,
+            FurnitureType::Table => FurnitureCategory::Utility,
+        }
+    }
+}
+
+/// Furniture categories for palette organization
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub enum FurnitureCategory {
+    /// Seating furniture (Throne, Bench, Chair)
+    Seating,
+    /// Storage furniture (Chest, Barrel, Bookshelf)
+    Storage,
+    /// Decorative furniture (Statue, Fountain, Altar)
+    Decoration,
+    /// Lighting furniture (Torch)
+    Lighting,
+    /// Utility furniture (Table, Crate)
+    Utility,
+}
+
+impl FurnitureCategory {
+    /// Returns human-readable name for the category
+    pub fn name(self) -> &'static str {
+        match self {
+            FurnitureCategory::Seating => "Seating",
+            FurnitureCategory::Storage => "Storage",
+            FurnitureCategory::Decoration => "Decoration",
+            FurnitureCategory::Lighting => "Lighting",
+            FurnitureCategory::Utility => "Utility",
+        }
+    }
+
+    /// Returns all category variants
+    pub fn all() -> &'static [FurnitureCategory] {
+        &[
+            FurnitureCategory::Seating,
+            FurnitureCategory::Storage,
+            FurnitureCategory::Decoration,
+            FurnitureCategory::Lighting,
+            FurnitureCategory::Utility,
+        ]
     }
 }
 
@@ -1202,6 +1325,13 @@ impl Default for AsyncMeshConfig {
     }
 }
 
+// ===== Map Event System =====
+
+/// Map events are special occurrences that can happen at specific tile locations.
+///
+/// Events are triggered when the party moves to a tile containing an event,
+/// or when the party explicitly interacts with the environment. Each event type
+/// has specific properties and effects on gameplay.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MapEvent {
     /// Random monster encounter
@@ -1309,7 +1439,21 @@ pub enum MapEvent {
         /// Optional Y-axis rotation in degrees (0-360)
         #[serde(default)]
         rotation_y: Option<f32>,
+        /// Scale multiplier (0.5-2.0, default 1.0)
+        #[serde(default = "default_furniture_scale")]
+        scale: f32,
+        /// Material variant (Wood, Stone, Metal, Gold)
+        #[serde(default)]
+        material: FurnitureMaterial,
+        /// Furniture-specific flags
+        #[serde(default)]
+        flags: FurnitureFlags,
     },
+}
+
+/// Default scale for furniture events (1.0x)
+fn default_furniture_scale() -> f32 {
+    1.0
 }
 
 /// Default dialogue ID for recruitment events when none specified

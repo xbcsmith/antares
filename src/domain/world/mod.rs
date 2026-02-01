@@ -30,8 +30,8 @@ pub use movement::{check_tile_blocked, move_party, MovementError};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};
 pub use types::{
     ArchConfig, AsyncMeshConfig, AsyncMeshTaskId, ColumnConfig, ColumnStyle, DetailLevel,
-    DoorFrameConfig, EncounterTable, FurnitureType, InstanceData, LayeredSprite, Map, MapEvent,
-    RailingConfig, ResolvedNpc, SpriteAnimation, SpriteLayer, SpriteMaterialProperties,
-    SpriteReference, SpriteSelectionRule, StructureType, TerrainType, Tile, TileVisualMetadata,
-    WallSegmentConfig, WallType, World,
+    DoorFrameConfig, EncounterTable, FurnitureCategory, FurnitureFlags, FurnitureMaterial,
+    FurnitureType, InstanceData, LayeredSprite, Map, MapEvent, RailingConfig, ResolvedNpc,
+    SpriteAnimation, SpriteLayer, SpriteMaterialProperties, SpriteReference, SpriteSelectionRule,
+    StructureType, TerrainType, Tile, TileVisualMetadata, WallSegmentConfig, WallType, World,
 };

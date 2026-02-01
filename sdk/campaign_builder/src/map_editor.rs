@@ -45,8 +45,8 @@ use antares::domain::items::types::Item;
 use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
 use antares::domain::world::{
-    FurnitureType, LayeredSprite, Map, MapEvent, SpriteLayer, SpriteReference, TerrainType, Tile,
-    TileVisualMetadata, WallType,
+    FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType, LayeredSprite, Map,
+    MapEvent, SpriteLayer, SpriteReference, TerrainType, Tile, TileVisualMetadata, WallType,
 };
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -1406,6 +1406,11 @@ pub struct EventEditorState {
     // Furniture fields
     pub furniture_type: FurnitureType,
     pub furniture_rotation_y: String,
+    pub furniture_scale: f32,
+    pub furniture_material: FurnitureMaterial,
+    pub furniture_lit: bool,
+    pub furniture_locked: bool,
+    pub furniture_blocking: bool,
 
     // Autocomplete input buffers
     pub trap_effect_input_buffer: String,
@@ -1440,6 +1445,11 @@ impl Default for EventEditorState {
             innkeeper_id_input_buffer: String::new(),
             furniture_type: FurnitureType::Throne,
             furniture_rotation_y: String::from("0"),
+            furniture_scale: 1.0,
+            furniture_material: FurnitureMaterial::default(),
+            furniture_lit: false,
+            furniture_locked: false,
+            furniture_blocking: false,
             trap_effect_input_buffer: String::new(),
             teleport_map_input_buffer: String::new(),
             npc_id_input_buffer: String::new(),
@@ -1677,6 +1687,13 @@ impl EventEditorState {
                     name: self.name.clone(),
                     furniture_type: self.furniture_type,
                     rotation_y,
+                    scale: self.furniture_scale,
+                    material: self.furniture_material,
+                    flags: antares::domain::world::FurnitureFlags {
+                        lit: self.furniture_lit,
+                        locked: self.furniture_locked,
+                        blocking: self.furniture_blocking,
+                    },
                 })
             }
         }
@@ -1807,11 +1824,19 @@ impl EventEditorState {
                 name,
                 furniture_type,
                 rotation_y,
+                scale,
+                material,
+                flags,
             } => {
                 s.event_type = EventType::Furniture;
                 s.name = name.clone();
                 s.furniture_type = *furniture_type;
                 s.furniture_rotation_y = rotation_y.map(|r| r.to_string()).unwrap_or_default();
+                s.furniture_scale = *scale;
+                s.furniture_material = *material;
+                s.furniture_lit = flags.lit;
+                s.furniture_locked = flags.locked;
+                s.furniture_blocking = flags.blocking;
             }
         }
         s
@@ -3373,16 +3398,30 @@ impl MapsEditorState {
                         MapEvent::Furniture {
                             furniture_type,
                             rotation_y,
+                            scale,
+                            material,
+                            flags,
                             ..
                         } => {
                             ui.label(format!(
-                                "Furniture: {} {} {}°",
+                                "Furniture: {} {} {}° scale={} material={}",
                                 furniture_type.icon(),
                                 furniture_type.name(),
                                 rotation_y
                                     .map(|r| r.to_string())
-                                    .unwrap_or_else(|| "0".to_string())
+                                    .unwrap_or_else(|| "0".to_string()),
+                                scale,
+                                material.name()
                             ));
+                            if flags.lit {
+                                ui.label("  🔥 Lit");
+                            }
+                            if flags.locked {
+                                ui.label("  🔒 Locked");
+                            }
+                            if flags.blocking {
+                                ui.label("  ⛔ Blocks movement");
+                            }
                         }
                     }
 
@@ -3872,16 +3911,73 @@ impl MapsEditorState {
                             }
                         });
 
-                    // Rotation control (0-360 degrees)
-                    ui.horizontal(|ui| {
-                        ui.label("Rotation Y (degrees):");
+                    // Rotation input
+                    ui.label("Rotation Y (degrees):");
+                    if ui
+                        .text_edit_singleline(&mut event_editor.furniture_rotation_y)
+                        .changed()
+                    {
+                        editor.has_changes = true;
+                    }
+
+                    // Scale slider
+                    ui.label("Scale:");
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut event_editor.furniture_scale, 0.5..=2.0)
+                                .text("x")
+                                .step_by(0.1),
+                        )
+                        .changed()
+                    {
+                        editor.has_changes = true;
+                    }
+
+                    // Material selection
+                    ui.label("Material:");
+                    egui::ComboBox::from_id_salt("furniture_material_combo")
+                        .selected_text(event_editor.furniture_material.name())
+                        .show_ui(ui, |ui| {
+                            for material in FurnitureMaterial::all() {
+                                if ui
+                                    .selectable_label(
+                                        event_editor.furniture_material == *material,
+                                        material.name(),
+                                    )
+                                    .clicked()
+                                {
+                                    event_editor.furniture_material = *material;
+                                    editor.has_changes = true;
+                                }
+                            }
+                        });
+
+                    // Furniture-specific flags
+                    if event_editor.furniture_type == FurnitureType::Torch {
                         if ui
-                            .text_edit_singleline(&mut event_editor.furniture_rotation_y)
+                            .checkbox(&mut event_editor.furniture_lit, "Lit (emissive)")
                             .changed()
                         {
                             editor.has_changes = true;
                         }
-                    });
+                    }
+
+                    if event_editor.furniture_type == FurnitureType::Chest {
+                        if ui
+                            .checkbox(&mut event_editor.furniture_locked, "Locked")
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    }
+
+                    // Blocking flag applies to all furniture
+                    if ui
+                        .checkbox(&mut event_editor.furniture_blocking, "Blocks movement")
+                        .changed()
+                    {
+                        editor.has_changes = true;
+                    }
 
                     // Show rotation slider for visual feedback
                     if let Ok(rotation) = event_editor.furniture_rotation_y.parse::<f32>() {
