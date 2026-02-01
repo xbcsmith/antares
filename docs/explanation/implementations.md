@@ -27440,3 +27440,197 @@ cargo fmt --all
 ### Date Completed
 
 2025-01-28
+
+## Phase 2: Procedural Mesh Centering - COMPLETED
+
+### Summary
+
+Completed centering of procedural mesh objects (trees, portals, signs) to align with camera viewpoint. All procedural mesh parent transforms now include the TILE_CENTER_OFFSET (0.5) to match camera centering behavior and ensure visual consistency with map rendering.
+
+### Changes Made
+
+#### 2.1 Procedural Meshes System (`src/game/systems/procedural_meshes.rs`)
+
+**TILE_CENTER_OFFSET constant** (already added in Phase 1, confirmed at line 101):
+
+```rust
+/// Offset to center procedural meshes within their tile (matches camera centering)
+const TILE_CENTER_OFFSET: f32 = 0.5;
+```
+
+**Updated 3 procedural mesh parent transforms**:
+
+- `spawn_tree` function (line 183):
+
+  - Before: `Transform::from_xyz(position.x as f32, 0.0, position.y as f32)`
+  - After: `Transform::from_xyz(position.x as f32 + TILE_CENTER_OFFSET, 0.0, position.y as f32 + TILE_CENTER_OFFSET)`
+
+- `spawn_portal` function (line 293):
+
+  - Before: `let transform = Transform::from_xyz(position.x as f32, PORTAL_Y_POSITION, position.y as f32)`
+  - After: `let transform = Transform::from_xyz(position.x as f32 + TILE_CENTER_OFFSET, PORTAL_Y_POSITION, position.y as f32 + TILE_CENTER_OFFSET)`
+
+- `spawn_sign` function (line 429):
+  - Before: `let transform = Transform::from_xyz(position.x as f32, 0.0, position.y as f32)`
+  - After: `let transform = Transform::from_xyz(position.x as f32 + TILE_CENTER_OFFSET, 0.0, position.y as f32 + TILE_CENTER_OFFSET)`
+
+**Added unit test** `test_procedural_mesh_centering_offset` (line 533):
+
+- Verifies TILE_CENTER_OFFSET constant is 0.5
+- Verifies offset produces centered coordinates
+- Tests Position {x: 3, y: 7} → (3.5, 7.5)
+
+### Architecture Compliance
+
+- ✅ **Module Placement**: Changes in `game/systems/procedural_meshes.rs` (Section 3.2)
+- ✅ **Constants**: `TILE_CENTER_OFFSET` used consistently (already extracted in Phase 1)
+- ✅ **Type Usage**: Used types::Position for tests
+- ✅ **No Structural Changes**: Only parent transform positions updated
+- ✅ **Self-Contained**: Procedural meshes are independent functions; no integration work required
+
+### Validation Results
+
+**Compilation**: ✅ PASSED
+
+```
+cargo check --all-targets --all-features
+→ Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+```
+
+**Linting**: ✅ PASSED
+
+```
+cargo clippy --all-targets --all-features -- -D warnings
+→ Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+```
+
+**Unit Tests**: ✅ PASSED
+
+```
+cargo test procedural_meshes::tests::test_procedural_mesh_centering_offset
+→ test game::systems::procedural_meshes::tests::test_procedural_mesh_centering_offset ... ok
+
+cargo nextest run procedural_meshes::tests
+→ Summary: 13 tests run: 13 passed
+```
+
+**Full Test Suite**: ✅ ALL PASSED
+
+```
+cargo nextest run --all-features
+→ Summary: 1642 tests run: 1642 passed, 8 skipped
+```
+
+**Code Formatting**: ✅ PASSED
+
+```
+cargo fmt --all
+→ (no output = all files formatted correctly)
+```
+
+### Testing
+
+**Unit Tests**:
+
+- `test_procedural_mesh_centering_offset` in `procedural_meshes::tests` module
+- All 13 procedural mesh tests passing
+
+**Tests Verify**:
+
+1. Constant is correctly defined (0.5)
+2. Position calculations are correct (e.g., 3.0 + 0.5 = 3.5)
+3. No regressions in existing procedural mesh tests
+
+### Files Modified
+
+| File                                    | Changes                                                                   | Lines                  |
+| --------------------------------------- | ------------------------------------------------------------------------- | ---------------------- |
+| `src/game/systems/procedural_meshes.rs` | Updated 3 transforms (tree, portal, sign), constant confirmed at line 101 | 183, 293, 429, 533-545 |
+
+### Deliverables Completed
+
+- ✅ TILE_CENTER_OFFSET constant defined in procedural_meshes.rs (line 101)
+- ✅ `spawn_tree` parent transform updated (line 183)
+- ✅ `spawn_portal` parent transform updated (line 293)
+- ✅ `spawn_sign` parent transform updated (line 429)
+- ✅ Unit test added: `test_procedural_mesh_centering_offset` (line 533)
+- ✅ All 4 quality gates passing (fmt, check, clippy, nextest)
+- ✅ Full test suite passing (1642 tests)
+
+### Success Criteria Met
+
+**Automated Validation**: ✅ ALL PASSED
+
+- `cargo fmt --all` → Success
+- `cargo check --all-targets --all-features` → Success
+- `cargo clippy --all-targets --all-features -- -D warnings` → Success (0 warnings)
+- `cargo nextest run --all-features` → Success (1642/1642 tests passed)
+
+**Manual Validation** (Ready for Testing):
+
+1. Run game: `cargo run`
+2. Navigate to a map with signs
+3. Verify signs appear centered in their tiles
+4. Navigate to a portal/teleport marker
+5. Verify portal appears centered in tile
+6. Navigate to a forest tile with trees
+7. Verify trees appear centered in tiles
+8. Compare with camera position - all objects should align with camera center
+
+### Implementation Details
+
+**Procedural Mesh Centering**:
+
+- Tree parent entity now spawns at `position + 0.5` on x and z axes
+- Portal frame now spawns at `position + 0.5` on x and z axes
+- Sign post now spawns at `position + 0.5` on x and z axes
+- Y-positions unchanged (trees at 0.0, portals at PORTAL_Y_POSITION, signs at 0.0)
+
+**Why This Works**:
+
+- Camera is positioned at tile center (party_pos + 0.5)
+- Procedural meshes spawn at tile corners by default (integer coordinates)
+- Adding TILE_CENTER_OFFSET aligns procedural meshes with camera center
+- All environmental objects now visually align
+
+**Constants Advantage**:
+
+- Both `map.rs` and `procedural_meshes.rs` define identical constant
+- Easy to identify all centering logic
+- Single value (0.5) to modify if camera centering changes
+
+### Related Files
+
+- `src/game/systems/map.rs` - Terrain and wall centering (Phase 1)
+- `src/game/systems/camera.rs` - Camera positioning (context only, not modified)
+
+### Benefits Achieved
+
+- ✅ **Visual Alignment**: All procedural meshes now appear centered within tiles
+- ✅ **Consistency**: Matches camera centering and Phase 1 map rendering updates
+- ✅ **Environmental Objects**: Trees, signs, and portals render at correct positions
+- ✅ **Code Quality**: Uses named constant for clarity
+- ✅ **Comprehensive Testing**: New unit test verifies offset calculations
+- ✅ **No Regressions**: All 1642 tests passing
+
+### Architecture Compliance
+
+**Verified Against `docs/reference/architecture.md`**:
+
+- ✅ Section 3.2: Changes in correct module (`game/systems/procedural_meshes.rs`)
+- ✅ Section 4: No core data structures modified
+- ✅ Section 3.1: Maintains separation of concerns (rendering logic only)
+- ✅ Constants Extracted: Uses TILE_CENTER_OFFSET constant
+- ✅ Type Aliases: Used types::Position for tests
+- ✅ No Circular Dependencies: Self-contained within procedural meshes module
+
+### Notes
+
+- Phase 2 completes the viewport centering fix for all map-related rendering
+- Procedural meshes (trees, portals, signs) are now visually aligned with camera
+- The centering offset (0.5) is consistent across all systems
+- Phase 1 and Phase 2 together ensure complete viewport centering alignment
+
+### Date Completed
+
+2025-01-28
