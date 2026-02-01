@@ -162,6 +162,8 @@ All checks were run locally after implementation:
 
 Implemented complete sprite rendering pipeline for tile and actor sprites using native Bevy PBR with billboard system. Delivers 3D sprite support with camera-facing billboards, animation system, event markers, and hybrid rendering (mesh + sprite).
 
+Runtime asset resolution updated to prefer campaign-local sprite assets under `<campaign>/assets/sprites` first; if a requested sheet is missing the engine will fall back to the placeholder sheet `assets/sprites/placeholders/npc_placeholder.png` and emit a warning to make the fallback explicit.
+
 ### Components Implemented
 
 1. **Billboard System** (`src/game/components/billboard.rs`, `src/game/systems/billboard.rs`)
@@ -305,6 +307,37 @@ Implemented complete sprite rendering pipeline for tile and actor sprites using 
 - Phase 4: Sprite Asset Creation Guide (create placeholder assets)
 - Phase 5: Campaign Builder SDK Integration (sprite editor UI)
 - Phase 6: Advanced Features (optional - sprite layering, procedural selection)
+
+### SDK: Map Editor - NPC Removal (Small) - COMPLETED
+
+**Completion Date**: 2026-01-31
+**Duration**: ~1 hour
+
+A small usability fix for the Campaign Builder's Map Editor: added a "Remove NPC" button to the Inspector panel that removes the NPC placement on the currently selected tile. The removal action is recorded on the editor's undo stack so it can be undone/redone.
+
+Files Modified
+
+- `sdk/campaign_builder/src/map_editor.rs` — Added the Remove NPC button to the inspector UI and unit tests:
+  - `test_remove_npc_placement_removes_and_undo_restores`
+  - `test_remove_npc_placement_out_of_range_noop`
+
+Behavior & Notes
+
+- Clicking "Remove NPC" removes the placement and pushes an `NpcPlacementRemoved` action onto the undo stack.
+- `undo()` restores the placement at the original index; `redo()` re-applies the removal.
+- The change follows existing editor patterns and is intentionally minimal to reduce risk.
+
+Testing & Quality Gates
+
+- `cargo fmt --all` → OK
+- `cargo check --all-targets --all-features` → OK
+- `cargo clippy --all-targets --all-features -- -D warnings` → OK
+- `cargo nextest run --all-features` → OK (new tests pass)
+
+Future Improvements
+
+- Add an optional confirmation dialog to avoid accidental removals (UX).
+- Add an integration test that exercises the inspector UI's Remove button via an egui test harness.
 
 ## Phase 4: Monster AI System - COMPLETED
 

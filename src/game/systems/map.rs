@@ -168,6 +168,20 @@ fn register_sprite_sheets_system(mut sprite_assets: ResMut<SpriteAssets>) {
         }
         Err(e) => {
             warn!("Failed to load sprite registry: {}", e);
+            warn!("Registering built-in placeholder sprite sheets as fallback.");
+
+            // Minimal placeholder sheet configuration so the engine has a safe
+            // visual fallback even when the registry cannot be parsed.
+            let placeholder_config = crate::game::resources::sprite_assets::SpriteSheetConfig {
+                texture_path: "sprites/placeholders/npc_placeholder.png".to_string(),
+                tile_size: (32.0, 48.0),
+                columns: 1,
+                rows: 1,
+                sprites: vec![(0, "npc_placeholder".to_string())],
+            };
+            sprite_assets.register_config("placeholders".to_string(), placeholder_config);
+
+            info!("Registered fallback placeholder sprite sheet: placeholders");
         }
     }
 }
