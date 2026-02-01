@@ -8,6 +8,7 @@
 //!
 //! Character rendering (NPCs, Monsters, Recruitables) uses the sprite system.
 
+use super::advanced_trees::TreeType;
 use super::map::{MapEntity, TileCoord};
 use crate::domain::types;
 use crate::domain::world::TileVisualMetadata;
@@ -15,6 +16,7 @@ use crate::game::components::Billboard;
 use bevy::color::LinearRgba;
 use bevy::prelude::*;
 use rand::Rng;
+use std::collections::HashMap;
 
 // ==================== Mesh Caching ====================
 
@@ -46,6 +48,8 @@ pub struct ProceduralMeshCache {
     tree_trunk: Option<Handle<Mesh>>,
     /// Cached foliage mesh handle for trees
     tree_foliage: Option<Handle<Mesh>>,
+    /// Cached mesh handles for advanced tree types by TreeType variant
+    tree_meshes: HashMap<TreeType, Handle<Mesh>>,
     /// Cached horizontal bar mesh handle for portals (top/bottom)
     portal_frame_horizontal: Option<Handle<Mesh>>,
     /// Cached vertical bar mesh handle for portals (left/right)
@@ -95,12 +99,42 @@ pub struct ProceduralMeshCache {
     structure_railing_bar: Option<Handle<Mesh>>,
 }
 
+impl ProceduralMeshCache {
+    /// Gets or creates a mesh handle for a specific tree type
+    ///
+    /// # Arguments
+    ///
+    /// * `tree_type` - The type of tree to get/create mesh for
+    /// * `meshes` - Mesh asset storage
+    ///
+    /// # Returns
+    ///
+    /// Mesh handle for the tree type (either cached or newly created)
+    pub fn get_or_create_tree_mesh(
+        &mut self,
+        tree_type: TreeType,
+        meshes: &mut ResMut<Assets<Mesh>>,
+    ) -> Handle<Mesh> {
+        if let Some(handle) = self.tree_meshes.get(&tree_type) {
+            handle.clone()
+        } else {
+            let config = tree_type.config();
+            let graph = super::advanced_trees::BranchGraph::new();
+            let mesh = super::advanced_trees::generate_branch_mesh(&graph, &config);
+            let handle = meshes.add(mesh);
+            self.tree_meshes.insert(tree_type, handle.clone());
+            handle
+        }
+    }
+}
+
 impl Default for ProceduralMeshCache {
     /// Creates a new empty cache with no cached meshes
     fn default() -> Self {
         Self {
             tree_trunk: None,
             tree_foliage: None,
+            tree_meshes: HashMap::new(),
             portal_frame_horizontal: None,
             portal_frame_vertical: None,
             sign_post: None,
@@ -539,6 +573,8 @@ const TILE_CENTER_OFFSET: f32 = 0.5;
 /// * `meshes` - Mesh asset storage
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
+/// * `visual_metadata` - Optional per-tile visual customization (scale, height, color tint, rotation)
+/// * `tree_type` - Optional tree type for advanced generation (defaults to simple trunk/foliage if None)
 /// * `cache` - Mutable reference to mesh cache for reuse
 ///
 /// # Returns
@@ -550,6 +586,7 @@ const TILE_CENTER_OFFSET: f32 = 0.5;
 /// ```text
 /// use antares::game::systems::procedural_meshes;
 /// use antares::domain::types::{MapId, Position};
+/// use antares::game::systems::advanced_trees::TreeType;
 ///
 /// // Inside a Bevy system:
 /// let mut cache = ProceduralMeshCache::default();
@@ -559,17 +596,35 @@ const TILE_CENTER_OFFSET: f32 = 0.5;
 ///     &mut meshes,
 ///     Position { x: 5, y: 10 },
 ///     MapId::new(1),
+///     None,  // No visual metadata
+///     Some(TreeType::Oak),  // Specific tree type
 ///     &mut cache,
 /// );
 /// ```
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_tree(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     position: types::Position,
     map_id: types::MapId,
+    visual_metadata: Option<&TileVisualMetadata>,
+    tree_type: Option<super::advanced_trees::TreeType>,
     cache: &mut ProceduralMeshCache,
 ) -> Entity {
+    // Determine visual configuration from optional metadata
+    let visual_config = visual_metadata
+        .map(super::advanced_trees::TerrainVisualConfig::from)
+        .unwrap_or_default();
+
+    // For Phase 1, use simple trunk/foliage rendering
+    // If tree_type is specified, use it for better visual variety (future enhancement)
+    // For now, just apply visual configuration to standard tree
+    let _ = tree_type; // Visual type selection will be used in future phases
+
+    // Apply scale from visual config
+    let scaled_trunk_height = TREE_TRUNK_HEIGHT * visual_config.height_multiplier;
+
     // Get or create trunk mesh from cache
     let trunk_mesh = cache.tree_trunk.clone().unwrap_or_else(|| {
         let handle = meshes.add(Cylinder {
@@ -579,8 +634,25 @@ pub fn spawn_tree(
         cache.tree_trunk = Some(handle.clone());
         handle
     });
+
+    // Apply color tint if present, otherwise use default
+    let trunk_color = visual_config
+        .color_tint
+        .map(|tint| {
+            // Multiply trunk color by tint
+            let trunk_rgba = TREE_TRUNK_COLOR.to_linear();
+            let tint_rgba = tint.to_linear();
+            Color::linear_rgba(
+                (trunk_rgba.red * tint_rgba.red).min(1.0),
+                (trunk_rgba.green * tint_rgba.green).min(1.0),
+                (trunk_rgba.blue * tint_rgba.blue).min(1.0),
+                trunk_rgba.alpha,
+            )
+        })
+        .unwrap_or(TREE_TRUNK_COLOR);
+
     let trunk_material = materials.add(StandardMaterial {
-        base_color: TREE_TRUNK_COLOR,
+        base_color: trunk_color,
         perceptual_roughness: 0.9,
         ..default()
     });
@@ -593,20 +665,38 @@ pub fn spawn_tree(
         cache.tree_foliage = Some(handle.clone());
         handle
     });
+
+    // Apply color tint to foliage if present
+    let foliage_color = visual_config
+        .color_tint
+        .map(|tint| {
+            // Multiply foliage color by tint
+            let foliage_rgba = TREE_FOLIAGE_COLOR.to_linear();
+            let tint_rgba = tint.to_linear();
+            Color::linear_rgba(
+                (foliage_rgba.red * tint_rgba.red).min(1.0),
+                (foliage_rgba.green * tint_rgba.green).min(1.0),
+                (foliage_rgba.blue * tint_rgba.blue).min(1.0),
+                foliage_rgba.alpha,
+            )
+        })
+        .unwrap_or(TREE_FOLIAGE_COLOR);
+
     let foliage_material = materials.add(StandardMaterial {
-        base_color: TREE_FOLIAGE_COLOR,
+        base_color: foliage_color,
         perceptual_roughness: 0.8,
         ..default()
     });
 
-    // Spawn parent tree entity
+    // Spawn parent tree entity with optional rotation
     let parent = commands
         .spawn((
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
                 0.0,
                 position.y as f32 + TILE_CENTER_OFFSET,
-            ),
+            )
+            .with_rotation(Quat::from_rotation_y(visual_config.rotation_y.to_radians())),
             GlobalTransform::default(),
             Visibility::default(),
             MapEntity(map_id),
@@ -614,24 +704,29 @@ pub fn spawn_tree(
         ))
         .id();
 
-    // Spawn trunk child at center of trunk height
+    // Spawn trunk child at center of trunk height (scaled)
     let trunk = commands
         .spawn((
             Mesh3d(trunk_mesh),
             MeshMaterial3d(trunk_material),
-            Transform::from_xyz(0.0, TREE_TRUNK_HEIGHT / 2.0, 0.0),
+            Transform::from_xyz(0.0, scaled_trunk_height / 2.0, 0.0).with_scale(Vec3::new(
+                visual_config.scale,
+                visual_config.height_multiplier,
+                visual_config.scale,
+            )),
             GlobalTransform::default(),
             Visibility::default(),
         ))
         .id();
     commands.entity(parent).add_child(trunk);
 
-    // Spawn foliage child positioned at trunk top
+    // Spawn foliage child positioned at trunk top (scaled)
     let foliage = commands
         .spawn((
             Mesh3d(foliage_mesh),
             MeshMaterial3d(foliage_material),
-            Transform::from_xyz(0.0, TREE_FOLIAGE_Y_OFFSET, 0.0),
+            Transform::from_xyz(0.0, scaled_trunk_height + TREE_FOLIAGE_Y_OFFSET, 0.0)
+                .with_scale(Vec3::splat(visual_config.scale)),
             GlobalTransform::default(),
             Visibility::default(),
         ))

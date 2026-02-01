@@ -9,6 +9,7 @@ use crate::game::resources::sprite_assets::SpriteAssets;
 use crate::game::resources::GlobalState;
 use crate::game::systems::actor::spawn_actor_sprite;
 use crate::game::systems::procedural_meshes;
+use rand::Rng;
 
 const DEFAULT_NPC_SPRITE_PATH: &str = "sprites/placeholders/npc_placeholder.png";
 use bevy::prelude::*;
@@ -114,6 +115,7 @@ impl Plugin for MapRenderingPlugin {
         // Bevy's system validation at startup. Also register the sprite sheet
         // registry on startup so metadata is available before map spawn runs.
         app.init_resource::<SpriteAssets>()
+            .init_resource::<crate::game::resources::GrassQualitySettings>()
             .add_systems(
                 Startup,
                 // Ensure registration happens before the map spawn system runs
@@ -133,6 +135,7 @@ fn spawn_map_system(
     asset_server: Res<AssetServer>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
+    quality_settings: Res<crate::game::resources::GrassQualitySettings>,
     mut cache: Local<super::procedural_meshes::ProceduralMeshCache>,
 ) {
     spawn_map(
@@ -143,6 +146,7 @@ fn spawn_map_system(
         asset_server,
         global_state,
         content,
+        quality_settings,
         &mut cache,
     );
 }
@@ -202,6 +206,7 @@ fn handle_door_opened(
     asset_server: Res<AssetServer>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
+    quality_settings: Res<crate::game::resources::GrassQualitySettings>,
 ) {
     // Only refresh if a door was actually opened
     if door_messages.read().count() == 0 {
@@ -225,6 +230,7 @@ fn handle_door_opened(
         asset_server,
         global_state,
         content,
+        quality_settings,
         &mut procedural_cache,
     );
 }
@@ -295,6 +301,7 @@ fn spawn_map_markers(
     asset_server: Res<AssetServer>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
+    quality_settings: Res<crate::game::resources::GrassQualitySettings>,
     query_existing: Query<(Entity, &MapEntity)>,
     mut last_map: Local<Option<types::MapId>>,
 ) {
@@ -354,6 +361,7 @@ fn spawn_map_markers(
             asset_server,
             global_state,
             content,
+            quality_settings,
             &mut procedural_cache,
         );
     } else {
@@ -405,6 +413,7 @@ fn spawn_map(
     asset_server: Res<AssetServer>,
     global_state: Res<crate::game::resources::GlobalState>,
     content: Res<crate::application::resources::GameContent>,
+    quality_settings: Res<crate::game::resources::GrassQualitySettings>,
     procedural_cache: &mut super::procedural_meshes::ProceduralMeshCache,
 ) {
     debug!("spawn_map system called");
@@ -557,6 +566,35 @@ fn spawn_map(
                                 &mut meshes,
                                 pos,
                                 map.id,
+                                Some(&tile.visual),
+                                None, // Use default tree type for now
+                                procedural_cache,
+                            );
+
+                            // Optionally spawn 0-2 shrubs alongside the tree for variety
+                            let mut rng = rand::rng();
+                            if rng.random_range(0..10) < 4 {
+                                // 40% chance
+                                procedural_meshes::spawn_shrub(
+                                    &mut commands,
+                                    &mut materials,
+                                    &mut meshes,
+                                    pos,
+                                    map.id,
+                                    Some(&tile.visual),
+                                    procedural_cache,
+                                );
+                            }
+
+                            // Spawn grass vegetation as ground cover
+                            procedural_meshes::spawn_grass(
+                                &mut commands,
+                                &mut materials,
+                                &mut meshes,
+                                pos,
+                                map.id,
+                                Some(&tile.visual),
+                                &quality_settings,
                                 procedural_cache,
                             );
                         }
@@ -575,6 +613,18 @@ fn spawn_map(
                                 MapEntity(map.id),
                                 TileCoord(pos),
                             ));
+
+                            // Spawn grass vegetation blades using quality settings
+                            procedural_meshes::spawn_grass(
+                                &mut commands,
+                                &mut materials,
+                                &mut meshes,
+                                pos,
+                                map.id,
+                                Some(&tile.visual),
+                                &quality_settings,
+                                procedural_cache,
+                            );
                         }
                         _ => {
                             // Spawn regular floor for Ground, Stone, etc.

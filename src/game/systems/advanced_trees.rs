@@ -34,6 +34,7 @@
 //! graph.update_bounds();
 //! ```
 
+use crate::domain::world::TileVisualMetadata;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -218,6 +219,35 @@ impl Default for TerrainVisualConfig {
             height_multiplier: 1.0,
             color_tint: None,
             rotation_y: 0.0,
+        }
+    }
+}
+
+impl From<&TileVisualMetadata> for TerrainVisualConfig {
+    /// Converts domain-layer TileVisualMetadata to application-layer TerrainVisualConfig
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::advanced_trees::TerrainVisualConfig;
+    /// use antares::domain::world::TileVisualMetadata;
+    ///
+    /// let meta = TileVisualMetadata {
+    ///     scale: Some(1.5),
+    ///     height: Some(4.0),
+    ///     color_tint: Some((0.8, 0.6, 0.4)),
+    ///     rotation_y: Some(45.0),
+    /// };
+    /// let config = TerrainVisualConfig::from(&meta);
+    /// assert_eq!(config.scale, 1.5);
+    /// assert_eq!(config.height_multiplier, 2.0); // 4.0 / 2.0
+    /// ```
+    fn from(meta: &TileVisualMetadata) -> Self {
+        Self {
+            scale: meta.scale.unwrap_or(1.0),
+            height_multiplier: meta.height.unwrap_or(2.0) / 2.0,
+            color_tint: meta.color_tint.map(|(r, g, b)| Color::srgb(r, g, b)),
+            rotation_y: meta.rotation_y.unwrap_or(0.0),
         }
     }
 }
