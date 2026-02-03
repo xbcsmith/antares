@@ -233,10 +233,16 @@ impl From<&TileVisualMetadata> for TerrainVisualConfig {
     /// use antares::domain::world::TileVisualMetadata;
     ///
     /// let meta = TileVisualMetadata {
-    ///     scale: Some(1.5),
     ///     height: Some(4.0),
+    ///     width_x: Some(1.0),
+    ///     width_z: Some(1.0),
     ///     color_tint: Some((0.8, 0.6, 0.4)),
+    ///     scale: Some(1.5),
+    ///     y_offset: None,
     ///     rotation_y: Some(45.0),
+    ///     sprite: None,
+    ///     sprite_layers: vec![],
+    ///     sprite_rule: None,
     /// };
     /// let config = TerrainVisualConfig::from(&meta);
     /// assert_eq!(config.scale, 1.5);

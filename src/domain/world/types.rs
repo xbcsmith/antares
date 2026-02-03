@@ -1705,6 +1705,7 @@ impl ResolvedNpc {
     ///     name: "City Guard".to_string(),
     ///     description: "A vigilant guard".to_string(),
     ///     portrait_id: "guard.png".to_string(),
+    ///     sprite: None,
     ///     dialogue_id: Some(10),
     ///     quest_ids: vec![],
     ///     faction: Some("City Watch".to_string()),

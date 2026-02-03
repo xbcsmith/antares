@@ -11,7 +11,6 @@
 //! - Preset application logic
 //! - Color range validation
 
-use antares::domain::types::Position;
 use antares::domain::world::{
     FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType,
     MapEvent,

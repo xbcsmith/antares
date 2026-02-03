@@ -5,6 +5,21 @@
 **Duration**: ~3 hours (implementation + integration tests)
 **Reference**: See [advanced_procedural_meshes_implementation_plan.md](advanced_procedural_meshes_implementation_plan.md)
 
+### Recent Fixes (2026-02-03)
+
+- Map-event validation: Added a missing match arm to validate `MapEvent::Furniture` in the map-data validation test so furniture events are checked for a non-empty `name`.
+- Doctest fixes: Corrected several documentation examples that failed to compile after the `Furniture` change:
+  - `src/domain/combat/monster.rs` — added `use antares::domain::combat::AiBehavior;` to the example so `AiBehavior::Random` resolves.
+  - `src/domain/world/npc.rs` — added `sprite: None` to struct examples so `NpcDefinition` examples compile.
+  - `src/domain/world/types.rs` — added `sprite: None` in the `ResolvedNpc::from_placement_and_definition` example.
+  - `src/game/systems/actor.rs` — added `material_properties: None` to `SpriteReference` examples used in the `spawn_actor_sprite` docs.
+  - `sdk/campaign_builder/tests/map_data_validation.rs` — added `MapEvent::Furniture { name, .. }` arm asserting `!name.trim().is_empty()`.
+- Verification: All formatting and quality checks were run and verified:
+  - `cargo fmt --all`
+  - `cargo check --all-targets --all-features`
+  - `cargo clippy --all-targets --all-features -- -D warnings`
+  - Doctests and the relevant unit/integration tests were re-run and now pass.
+
 ### Summary
 
 Phase 1 establishes the core branch graph algorithm and tree type configuration system that all organic objects will use. This phase implements the foundational data structures and generation functions needed for sophisticated tree rendering with multiple distinct tree types.

@@ -320,6 +320,7 @@ mod furniture_properties_tests {
                 locked: false,
                 blocking: false,
             },
+            color_tint: None,
         };
 
         // Verify serialization through editor state
@@ -371,6 +372,7 @@ mod furniture_properties_tests {
                 locked: true,
                 blocking: false,
             },
+            color_tint: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(5, 5), &event);
@@ -425,6 +427,7 @@ mod furniture_properties_tests {
                 locked: false,
                 blocking: true,
             },
+            color_tint: None,
         };
 
         // Convert to editor state
@@ -449,6 +452,7 @@ mod furniture_properties_tests {
                 scale,
                 material,
                 flags,
+                ..
             } => {
                 assert_eq!(name, "Test Throne");
                 assert_eq!(furniture_type, FurnitureType::Throne);

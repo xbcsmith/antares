@@ -51,7 +51,7 @@ cargo install nextest
 - `.ron` extension for ALL game data files (NOT .json, NOT .yaml)
 - `lowercase_with_underscores.md` for doc filenames (EXCEPT README.md)
 
-**WRONG:** Creating .json or .yaml data files  
+**WRONG:** Creating .json or .yaml data files
 **RIGHT:** Using .ron format per architecture.md Section 7.1
 
 ### Step 4: Verify No Unsaved Changes
@@ -130,8 +130,8 @@ git status  # Should show clean working directory
 
 ### Phase 1: Terrain-Specific Inspector Controls
 
-**Dependencies**: None  
-**Estimated Effort**: 3-4 days  
+**Dependencies**: None
+**Estimated Effort**: 3-4 days
 **Files Modified**: `sdk/campaign_builder/src/map_editor.rs`
 
 #### PREREQUISITE: Architecture Verification
@@ -154,7 +154,7 @@ git status  # Should show clean working directory
 
 **Location**: `sdk/campaign_builder/src/map_editor.rs`
 
-**Search for**: `struct VisualMetadataEditor {`  
+**Search for**: `struct VisualMetadataEditor {`
 **Insert after**: Closing brace of VisualMetadataEditor impl block
 
 **New Struct**:
@@ -231,7 +231,7 @@ grep -r "id: u32" sdk/campaign_builder/src/map_editor.rs
 
 **Location**: `sdk/campaign_builder/src/map_editor.rs`
 
-**Search for**: `fn show_visual_metadata_editor(`  
+**Search for**: `fn show_visual_metadata_editor(`
 **Insert after**: Closing brace of `show_visual_metadata_editor()` function
 
 **Documentation Requirements (MANDATORY):**
@@ -548,8 +548,8 @@ mod tests {
 
 ### Phase 2: Preset Categorization System
 
-**Dependencies**: None (runs in parallel with Phase 1)  
-**Estimated Effort**: 2 days  
+**Dependencies**: None (runs in parallel with Phase 1)
+**Estimated Effort**: 2 days
 **Files Modified**: `sdk/campaign_builder/src/map_editor.rs`
 
 #### PREREQUISITE: Architecture Verification
@@ -572,7 +572,7 @@ mod tests {
 
 **Location**: `sdk/campaign_builder/src/map_editor.rs`
 
-**Search for**: `enum VisualPreset {`  
+**Search for**: `enum VisualPreset {`
 **Insert after**: Closing brace of VisualPreset enum definition
 
 **New Enum with Documentation:**
@@ -657,7 +657,7 @@ impl PresetCategory {
 
 **Location**: `sdk/campaign_builder/src/map_editor.rs`
 
-**Search for**: `impl VisualPreset {`  
+**Search for**: `impl VisualPreset {`
 **Insert inside**: Add these methods to the existing impl block
 
 **Documentation Requirements (MANDATORY):**
@@ -842,13 +842,13 @@ cargo test --doc
 
 **Location**: `sdk/campaign_builder/src/map_editor.rs`
 
-**Search for**: `fn show_visual_metadata_editor(`  
+**Search for**: `fn show_visual_metadata_editor(`
 **Insert after**: Closing brace of `show_visual_metadata_editor()` function
 
 **Step 1: Add Field to MapEditorState**
 
-**Search for**: `pub struct MapEditorState {`  
-**Find field**: `visual_editor: VisualMetadataEditor,`  
+**Search for**: `pub struct MapEditorState {`
+**Find field**: `visual_editor: VisualMetadataEditor,`
 **Insert after**:
 
 ```rust
@@ -986,8 +986,8 @@ fn update_preset_category_for_tile(editor: &mut MapEditorState, tile: &Tile) {
 
 **Step 4: Integration with Inspector Panel**
 
-**Search for**: `fn show_visual_metadata_editor(`  
-**Find**: Existing preset combo box code (single dropdown with all presets)  
+**Search for**: `fn show_visual_metadata_editor(`
+**Find**: Existing preset combo box code (single dropdown with all presets)
 **Replace with**: Call to `show_preset_palette(ui, editor, pos)`
 
 **Before terrain-specific controls section, add:**
@@ -1152,8 +1152,8 @@ fn test_visual_preset_icon_non_empty_for_all() {
 
 ### Phase 3: Campaign Configuration UI
 
-**Dependencies**: None  
-**Estimated Effort**: 1 day  
+**Dependencies**: None
+**Estimated Effort**: 1 day
 **Files Modified**: `sdk/campaign_builder/src/config_editor.rs`, `src/sdk/campaign_loader.rs`
 
 #### PREREQUISITE: Architecture Verification
@@ -1176,8 +1176,8 @@ fn test_visual_preset_icon_non_empty_for_all() {
 
 **Location**: `src/sdk/campaign_loader.rs`
 
-**Search for**: `pub struct CampaignConfig {`  
-**Find field**: `pub allow_multiclassing: bool,`  
+**Search for**: `pub struct CampaignConfig {`
+**Find field**: `pub allow_multiclassing: bool,`
 **Insert after**: The `allow_multiclassing` field
 
 **New Field with Documentation:**
@@ -1402,8 +1402,8 @@ grep "grass_density:" data/campaigns/test_campaign.ron
 
 ### Phase 4: Testing and Documentation
 
-**Dependencies**: Phases 1-3 complete  
-**Estimated Effort**: 2-3 days  
+**Dependencies**: Phases 1-3 complete
+**Estimated Effort**: 2-3 days
 **Files Modified**: Multiple test files, new documentation files
 
 #### PREREQUISITE: Architecture Verification
@@ -2429,12 +2429,12 @@ All 4 open questions resolved with implementation guidance:
 
 ### Coverage Metrics
 
-**Before Review**: ~60% AI-ready  
+**Before Review**: ~60% AI-ready
 **After Review**: ~95% AI-ready
 
 **Lines Added**: ~515 lines of clarifications, requirements, examples, and architecture documentation
-**Critical Issues Fixed**: 7  
-**Moderate Issues Fixed**: 12  
+**Critical Issues Fixed**: 7
+**Moderate Issues Fixed**: 12
 **AI-Optimization Improvements**: 17
 
 ### Validation Status
@@ -2449,7 +2449,7 @@ All 4 open questions resolved with implementation guidance:
 
 ---
 
-**Plan Status**: Ready for AI Agent Implementation  
-**Open Questions**: All resolved (see Appendix C: Design Decisions)  
-**Review Status**: Complete - All critical and moderate fixes applied  
+**Plan Status**: Ready for AI Agent Implementation
+**Open Questions**: All resolved (see Appendix C: Design Decisions)
+**Review Status**: Complete - All critical and moderate fixes applied
 **Next Action**: Begin Phase 1 implementation following "BEFORE YOU START" checklist

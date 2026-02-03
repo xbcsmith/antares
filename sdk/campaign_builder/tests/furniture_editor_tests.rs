@@ -13,7 +13,7 @@
 #[cfg(test)]
 mod furniture_editor_tests {
     use antares::domain::types::Position;
-    use antares::domain::world::{FurnitureType, MapEvent};
+    use antares::domain::world::{FurnitureFlags, FurnitureMaterial, FurnitureType, MapEvent};
     use campaign_builder::map_editor::{EventEditorState, EventType};
 
     /// Test that all FurnitureType variants are present
@@ -99,6 +99,7 @@ mod furniture_editor_tests {
                 name,
                 furniture_type,
                 rotation_y,
+                ..
             } => {
                 assert_eq!(name, "Ornate Throne");
                 assert_eq!(furniture_type, FurnitureType::Throne);
@@ -115,6 +116,10 @@ mod furniture_editor_tests {
             name: "Simple Bench".to_string(),
             furniture_type: FurnitureType::Bench,
             rotation_y: Some(90.0),
+            scale: 1.0,
+            material: FurnitureMaterial::Wood,
+            flags: FurnitureFlags::new(),
+            color_tint: None,
         };
 
         let position = Position::new(5, 7);
@@ -134,6 +139,10 @@ mod furniture_editor_tests {
             name: "Simple Chair".to_string(),
             furniture_type: FurnitureType::Chair,
             rotation_y: None,
+            scale: 1.0,
+            material: FurnitureMaterial::Wood,
+            flags: FurnitureFlags::new(),
+            color_tint: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(0, 0), &event);
@@ -223,6 +232,10 @@ mod furniture_editor_tests {
                 name: "Test Furniture".to_string(),
                 furniture_type: FurnitureType::Throne,
                 rotation_y: Some(45.0),
+                scale: 1.0,
+                material: FurnitureMaterial::Wood,
+                flags: FurnitureFlags::new(),
+                color_tint: None,
             };
 
             let editor = EventEditorState::from_map_event(pos, &event);
@@ -239,6 +252,10 @@ mod furniture_editor_tests {
             name: "Old Bench".to_string(),
             furniture_type: FurnitureType::Bench,
             rotation_y: Some(0.0),
+            scale: 1.0,
+            material: FurnitureMaterial::Wood,
+            flags: FurnitureFlags::new(),
+            color_tint: None,
         };
 
         // Load into editor
@@ -262,6 +279,7 @@ mod furniture_editor_tests {
                 name,
                 furniture_type,
                 rotation_y,
+                ..
             } => {
                 assert_eq!(name, "New Bench");
                 assert_eq!(furniture_type, FurnitureType::Chair);

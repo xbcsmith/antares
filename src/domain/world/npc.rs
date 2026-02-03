@@ -22,12 +22,14 @@
 //!     name: "Elder Theron".to_string(),
 //!     description: "The wise village elder".to_string(),
 //!     portrait_id: "elder".to_string(),
+//!     sprite: None,
 //!     dialogue_id: Some(1),
 //!     quest_ids: vec![1, 2],
 //!     faction: Some("Village Council".to_string()),
 //!     is_merchant: false,
 //!     is_innkeeper: false,
 //! };
+//! ```
 //!
 //! // Place the NPC on a map
 //! let placement = NpcPlacement {
@@ -66,6 +68,7 @@ pub type NpcId = String;
 ///     name: "Tom the Merchant".to_string(),
 ///     description: "A friendly traveling merchant".to_string(),
 ///     portrait_id: "assets/portraits/merchant.png".to_string(),
+///     sprite: None,
 ///     dialogue_id: Some(5),
 ///     quest_ids: vec![],
 ///     faction: Some("Merchants Guild".to_string()),
