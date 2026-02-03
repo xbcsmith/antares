@@ -46,8 +46,8 @@ use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
 use antares::domain::world::{
     FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType,
-    LayeredSprite, Map, MapEvent, SpriteLayer, SpriteReference, TerrainType, Tile,
-    TileVisualMetadata, WallType,
+    GrassDensity, LayeredSprite, Map, MapEvent, RockVariant, SpriteLayer, SpriteReference,
+    TerrainType, Tile, TileVisualMetadata, TreeType, WallType, WaterFlowDirection,
 };
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -918,6 +918,106 @@ impl VisualMetadataEditor {
     }
 }
 
+// ===== Terrain Editor State =====
+
+/// Terrain-specific editor state for inspector panel
+///
+/// Mirrors TileVisualMetadata terrain fields for UI binding.
+/// Used to provide context-sensitive controls in the inspector based on
+/// the selected tile's terrain type.
+#[derive(Debug, Clone)]
+pub struct TerrainEditorState {
+    /// Grass density selection (for Grassland/Plains tiles)
+    pub grass_density: GrassDensity,
+
+    /// Tree type selection (for Forest tiles)
+    pub tree_type: TreeType,
+
+    /// Rock variant selection (for Mountain/Hill tiles)
+    pub rock_variant: RockVariant,
+
+    /// Water flow direction (for Water/River tiles)
+    pub water_flow_direction: WaterFlowDirection,
+
+    /// Foliage density slider value (0.0 to 2.0)
+    pub foliage_density: f32,
+
+    /// Snow coverage slider value (0.0 to 1.0)
+    pub snow_coverage: f32,
+}
+
+impl Default for TerrainEditorState {
+    fn default() -> Self {
+        Self {
+            grass_density: GrassDensity::Medium,
+            tree_type: TreeType::Oak,
+            rock_variant: RockVariant::Smooth,
+            water_flow_direction: WaterFlowDirection::Still,
+            foliage_density: 1.0,
+            snow_coverage: 0.0,
+        }
+    }
+}
+
+impl TerrainEditorState {
+    /// Load state from TileVisualMetadata
+    ///
+    /// Synchronizes the editor state with the values stored in a tile's
+    /// visual metadata, using default values for any missing fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - The TileVisualMetadata to load from
+    ///
+    /// # Returns
+    ///
+    /// A new TerrainEditorState with values from the metadata or defaults
+    pub fn from_metadata(metadata: &TileVisualMetadata) -> Self {
+        Self {
+            grass_density: metadata.grass_density(),
+            tree_type: metadata.tree_type(),
+            rock_variant: metadata.rock_variant(),
+            water_flow_direction: metadata.water_flow_direction(),
+            foliage_density: metadata.foliage_density(),
+            snow_coverage: metadata.snow_coverage(),
+        }
+    }
+
+    /// Apply state to TileVisualMetadata
+    ///
+    /// Writes all terrain-specific fields from the editor state into the
+    /// provided metadata. This includes all optional fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - Mutable reference to TileVisualMetadata to update
+    pub fn apply_to_metadata(&self, metadata: &mut TileVisualMetadata) {
+        metadata.grass_density = Some(self.grass_density);
+        metadata.tree_type = Some(self.tree_type);
+        metadata.rock_variant = Some(self.rock_variant);
+        metadata.water_flow_direction = Some(self.water_flow_direction);
+        metadata.foliage_density = Some(self.foliage_density);
+        metadata.snow_coverage = Some(self.snow_coverage);
+    }
+
+    /// Clear terrain-specific fields from metadata
+    ///
+    /// Sets all terrain-specific fields in the metadata to None,
+    /// effectively removing any terrain-specific customization.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - Mutable reference to TileVisualMetadata to clear
+    pub fn clear_metadata(metadata: &mut TileVisualMetadata) {
+        metadata.grass_density = None;
+        metadata.tree_type = None;
+        metadata.rock_variant = None;
+        metadata.water_flow_direction = None;
+        metadata.foliage_density = None;
+        metadata.snow_coverage = None;
+    }
+}
+
 // ===== Map Editor State (per-map editing state) =====
 
 /// Map editor state (pure logic, no UI)
@@ -958,6 +1058,8 @@ pub struct MapEditorState {
     pub show_metadata_editor: bool,
     /// Visual metadata editor state
     pub visual_editor: VisualMetadataEditor,
+    /// Terrain-specific editor state for inspector panel
+    pub terrain_editor_state: TerrainEditorState,
     /// Multi-tile selection for bulk editing
     pub selected_tiles: Vec<Position>,
     /// Selection mode (single vs multi)
@@ -992,6 +1094,7 @@ impl MapEditorState {
             npc_placement_editor: None,
             show_metadata_editor: false,
             visual_editor: VisualMetadataEditor::default(),
+            terrain_editor_state: TerrainEditorState::default(),
             selected_tiles: Vec::new(),
             multi_select_mode: false,
         }
@@ -2130,6 +2233,16 @@ impl<'a> Widget for MapGridWidget<'a> {
                     }
 
                     self.state.selected_position = Some(pos);
+
+                    // Synchronize terrain editor state with selected tile
+                    if let Some(metadata_map) = self.state.metadata.tile_visual_metadata.as_ref() {
+                        if let Some(metadata) = metadata_map.get(&pos) {
+                            self.state.terrain_editor_state =
+                                TerrainEditorState::from_metadata(metadata);
+                        } else {
+                            self.state.terrain_editor_state = TerrainEditorState::default();
+                        }
+                    }
 
                     // Apply current tool
                     match self.state.current_tool {
@@ -3486,6 +3599,39 @@ impl MapsEditorState {
 
                 Self::show_visual_metadata_editor(ui, editor, pos);
             });
+
+            // Terrain-specific controls
+            ui.separator();
+            ui.group(|ui| {
+                if let Some(tile) = editor.map.get_tile(pos) {
+                    let terrain_type = tile.terrain;
+
+                    if Self::show_terrain_specific_controls(
+                        ui,
+                        terrain_type,
+                        &mut editor.terrain_editor_state,
+                    ) {
+                        // Apply changes to selected tile's visual metadata
+                        if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
+                            let metadata = metadata_map
+                                .entry(pos)
+                                .or_insert_with(TileVisualMetadata::default);
+                            editor.terrain_editor_state.apply_to_metadata(metadata);
+                        }
+                    }
+
+                    ui.separator();
+
+                    if ui.button("🗑️ Clear Terrain Properties").clicked() {
+                        if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
+                            if let Some(metadata) = metadata_map.get_mut(&pos) {
+                                TerrainEditorState::clear_metadata(metadata);
+                            }
+                        }
+                        editor.terrain_editor_state = TerrainEditorState::default();
+                    }
+                }
+            });
         } else {
             ui.label("No tile selected");
         }
@@ -4566,6 +4712,228 @@ impl MapsEditorState {
         if editor.multi_select_mode {
             ui.label("💡 Click tiles to add/remove from selection");
         }
+    }
+
+    /// Show terrain-specific inspector controls based on selected tile's terrain type
+    ///
+    /// Displays context-sensitive controls that vary by terrain type:
+    /// - Grassland/Plains: grass_density dropdown, foliage_density slider
+    /// - Forest: tree_type dropdown, foliage_density slider, snow_coverage slider
+    /// - Mountain/Hill: rock_variant dropdown, snow_coverage slider
+    /// - Water/Swamp: water_flow_direction dropdown
+    /// - Desert/Snow: snow_coverage slider only
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - egui UI context
+    /// * `terrain_type` - The TerrainType of the selected tile
+    /// * `state` - Mutable reference to TerrainEditorState
+    ///
+    /// # Returns
+    ///
+    /// `true` if any control was modified, `false` otherwise
+    fn show_terrain_specific_controls(
+        ui: &mut egui::Ui,
+        terrain_type: TerrainType,
+        state: &mut TerrainEditorState,
+    ) -> bool {
+        let mut changed = false;
+
+        ui.heading("Terrain-Specific Settings");
+        ui.separator();
+
+        match terrain_type {
+            TerrainType::Grassland | TerrainType::Plains => {
+                // Grass density dropdown
+                ui.label("Grass Density:");
+                let mut density_index = match state.grass_density {
+                    GrassDensity::None => 0,
+                    GrassDensity::Low => 1,
+                    GrassDensity::Medium => 2,
+                    GrassDensity::High => 3,
+                    GrassDensity::VeryHigh => 4,
+                };
+
+                let old_index = density_index;
+                egui::ComboBox::from_id_source("grass_density")
+                    .selected_text(format!("{:?}", state.grass_density))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut density_index, 0, "None");
+                        ui.selectable_value(&mut density_index, 1, "Low");
+                        ui.selectable_value(&mut density_index, 2, "Medium");
+                        ui.selectable_value(&mut density_index, 3, "High");
+                        ui.selectable_value(&mut density_index, 4, "VeryHigh");
+                    });
+
+                if old_index != density_index {
+                    changed = true;
+                    state.grass_density = match density_index {
+                        0 => GrassDensity::None,
+                        1 => GrassDensity::Low,
+                        2 => GrassDensity::Medium,
+                        3 => GrassDensity::High,
+                        4 => GrassDensity::VeryHigh,
+                        _ => GrassDensity::Medium,
+                    };
+                }
+
+                ui.label("Foliage Density:");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.foliage_density, 0.0..=2.0)
+                            .text("density")
+                            .step_by(0.1),
+                    )
+                    .changed();
+            }
+
+            TerrainType::Forest => {
+                // Tree type dropdown
+                ui.label("Tree Type:");
+                let mut tree_index = match state.tree_type {
+                    TreeType::Oak => 0,
+                    TreeType::Pine => 1,
+                    TreeType::Dead => 2,
+                    TreeType::Palm => 3,
+                    TreeType::Willow => 4,
+                };
+
+                let old_index = tree_index;
+                egui::ComboBox::from_id_source("tree_type")
+                    .selected_text(format!("{:?}", state.tree_type))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut tree_index, 0, "Oak");
+                        ui.selectable_value(&mut tree_index, 1, "Pine");
+                        ui.selectable_value(&mut tree_index, 2, "Dead");
+                        ui.selectable_value(&mut tree_index, 3, "Palm");
+                        ui.selectable_value(&mut tree_index, 4, "Willow");
+                    });
+
+                if old_index != tree_index {
+                    changed = true;
+                    state.tree_type = match tree_index {
+                        0 => TreeType::Oak,
+                        1 => TreeType::Pine,
+                        2 => TreeType::Dead,
+                        3 => TreeType::Palm,
+                        4 => TreeType::Willow,
+                        _ => TreeType::Oak,
+                    };
+                }
+
+                ui.label("Foliage Density:");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.foliage_density, 0.0..=2.0)
+                            .text("density")
+                            .step_by(0.1),
+                    )
+                    .changed();
+
+                ui.label("Snow Coverage:");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.snow_coverage, 0.0..=1.0)
+                            .text("coverage")
+                            .step_by(0.05),
+                    )
+                    .changed();
+            }
+
+            TerrainType::Mountain | TerrainType::Hill => {
+                // Rock variant dropdown
+                ui.label("Rock Variant:");
+                let mut rock_index = match state.rock_variant {
+                    RockVariant::Smooth => 0,
+                    RockVariant::Jagged => 1,
+                    RockVariant::Layered => 2,
+                    RockVariant::Crystal => 3,
+                };
+
+                let old_index = rock_index;
+                egui::ComboBox::from_id_source("rock_variant")
+                    .selected_text(format!("{:?}", state.rock_variant))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut rock_index, 0, "Smooth");
+                        ui.selectable_value(&mut rock_index, 1, "Jagged");
+                        ui.selectable_value(&mut rock_index, 2, "Layered");
+                        ui.selectable_value(&mut rock_index, 3, "Crystal");
+                    });
+
+                if old_index != rock_index {
+                    changed = true;
+                    state.rock_variant = match rock_index {
+                        0 => RockVariant::Smooth,
+                        1 => RockVariant::Jagged,
+                        2 => RockVariant::Layered,
+                        3 => RockVariant::Crystal,
+                        _ => RockVariant::Smooth,
+                    };
+                }
+
+                ui.label("Snow Coverage:");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.snow_coverage, 0.0..=1.0)
+                            .text("coverage")
+                            .step_by(0.05),
+                    )
+                    .changed();
+            }
+
+            TerrainType::Water | TerrainType::Swamp => {
+                // Water flow direction dropdown
+                ui.label("Water Flow Direction:");
+                let mut flow_index = match state.water_flow_direction {
+                    WaterFlowDirection::Still => 0,
+                    WaterFlowDirection::North => 1,
+                    WaterFlowDirection::South => 2,
+                    WaterFlowDirection::East => 3,
+                    WaterFlowDirection::West => 4,
+                };
+
+                let old_index = flow_index;
+                egui::ComboBox::from_id_source("water_flow")
+                    .selected_text(format!("{:?}", state.water_flow_direction))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut flow_index, 0, "Still");
+                        ui.selectable_value(&mut flow_index, 1, "North");
+                        ui.selectable_value(&mut flow_index, 2, "South");
+                        ui.selectable_value(&mut flow_index, 3, "East");
+                        ui.selectable_value(&mut flow_index, 4, "West");
+                    });
+
+                if old_index != flow_index {
+                    changed = true;
+                    state.water_flow_direction = match flow_index {
+                        0 => WaterFlowDirection::Still,
+                        1 => WaterFlowDirection::North,
+                        2 => WaterFlowDirection::South,
+                        3 => WaterFlowDirection::East,
+                        4 => WaterFlowDirection::West,
+                        _ => WaterFlowDirection::Still,
+                    };
+                }
+            }
+
+            TerrainType::Snow | TerrainType::Desert => {
+                // Snow coverage slider only
+                ui.label("Snow Coverage:");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.snow_coverage, 0.0..=1.0)
+                            .text("coverage")
+                            .step_by(0.05),
+                    )
+                    .changed();
+            }
+
+            _ => {
+                ui.label("No terrain-specific controls for this terrain type.");
+            }
+        }
+
+        changed
     }
 
     fn show_import_dialog_window(
