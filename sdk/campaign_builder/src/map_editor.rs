@@ -302,6 +302,45 @@ pub struct MapConnection {
 
 // ===== Visual Metadata Presets =====
 
+/// Categories for organizing visual presets in UI
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresetCategory {
+    /// All presets (no filter)
+    All,
+    /// Wall-related presets (ShortWall, TallWall, ThinWall, etc.)
+    Walls,
+    /// Nature presets (SmallTree, LargeTree, Bush, Boulder, etc.)
+    Nature,
+    /// Water/liquid presets (ShallowWater, DeepWater, Lava, etc.)
+    Water,
+    /// Structure presets (Pillar, Altar, Statue, etc.)
+    Structures,
+}
+
+impl PresetCategory {
+    /// Get all categories for UI iteration
+    pub const fn all() -> &'static [PresetCategory] {
+        &[
+            PresetCategory::All,
+            PresetCategory::Walls,
+            PresetCategory::Nature,
+            PresetCategory::Water,
+            PresetCategory::Structures,
+        ]
+    }
+
+    /// Get display name for UI
+    pub const fn display_name(&self) -> &'static str {
+        match self {
+            PresetCategory::All => "All",
+            PresetCategory::Walls => "Walls",
+            PresetCategory::Nature => "Nature",
+            PresetCategory::Water => "Water",
+            PresetCategory::Structures => "Structures",
+        }
+    }
+}
+
 /// Predefined visual metadata presets for common use cases
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VisualPreset {
@@ -423,7 +462,101 @@ impl VisualPreset {
         }
     }
 
+    /// Get the category for this preset
+    pub const fn category(&self) -> PresetCategory {
+        match self {
+            VisualPreset::Default => PresetCategory::All,
+            VisualPreset::ShortWall => PresetCategory::Walls,
+            VisualPreset::TallWall => PresetCategory::Walls,
+            VisualPreset::ThinWall => PresetCategory::Walls,
+            VisualPreset::DiagonalWall => PresetCategory::Walls,
+            VisualPreset::SmallTree => PresetCategory::Nature,
+            VisualPreset::LargeTree => PresetCategory::Nature,
+            VisualPreset::ShortTree => PresetCategory::Nature,
+            VisualPreset::MediumTree => PresetCategory::Nature,
+            VisualPreset::TallTree => PresetCategory::Nature,
+            VisualPreset::DeadTree => PresetCategory::Nature,
+            VisualPreset::SmallShrub => PresetCategory::Nature,
+            VisualPreset::LargeShrub => PresetCategory::Nature,
+            VisualPreset::FloweringShrub => PresetCategory::Nature,
+            VisualPreset::ShortGrass => PresetCategory::Nature,
+            VisualPreset::TallGrass => PresetCategory::Nature,
+            VisualPreset::DriedGrass => PresetCategory::Nature,
+            VisualPreset::LowMountain => PresetCategory::Nature,
+            VisualPreset::HighMountain => PresetCategory::Nature,
+            VisualPreset::LowPeak => PresetCategory::Nature,
+            VisualPreset::HighPeak => PresetCategory::Nature,
+            VisualPreset::JaggedPeak => PresetCategory::Nature,
+            VisualPreset::ShallowSwamp => PresetCategory::Water,
+            VisualPreset::DeepSwamp => PresetCategory::Water,
+            VisualPreset::MurkySwamp => PresetCategory::Water,
+            VisualPreset::LavaPool => PresetCategory::Water,
+            VisualPreset::LavaFlow => PresetCategory::Water,
+            VisualPreset::VolcanicVent => PresetCategory::Water,
+            VisualPreset::Sunken => PresetCategory::Structures,
+            VisualPreset::Raised => PresetCategory::Structures,
+            VisualPreset::Rotated45 => PresetCategory::Structures,
+            VisualPreset::Rotated90 => PresetCategory::Structures,
+        }
+    }
+
+    /// Filter presets by category
+    pub fn by_category(category: PresetCategory) -> Vec<VisualPreset> {
+        if category == PresetCategory::All {
+            Self::all_presets()
+        } else {
+            Self::all_presets()
+                .into_iter()
+                .filter(|preset| preset.category() == category)
+                .collect()
+        }
+    }
+
     /// Returns all available presets for iteration
+    pub fn all_presets() -> Vec<VisualPreset> {
+        vec![
+            VisualPreset::Default,
+            VisualPreset::ShortWall,
+            VisualPreset::TallWall,
+            VisualPreset::ThinWall,
+            VisualPreset::SmallTree,
+            VisualPreset::LargeTree,
+            VisualPreset::LowMountain,
+            VisualPreset::HighMountain,
+            VisualPreset::Sunken,
+            VisualPreset::Raised,
+            VisualPreset::Rotated45,
+            VisualPreset::Rotated90,
+            VisualPreset::DiagonalWall,
+            // Phase 6 trees
+            VisualPreset::ShortTree,
+            VisualPreset::MediumTree,
+            VisualPreset::TallTree,
+            VisualPreset::DeadTree,
+            // Phase 6 shrubs
+            VisualPreset::SmallShrub,
+            VisualPreset::LargeShrub,
+            VisualPreset::FloweringShrub,
+            // Phase 6 grass
+            VisualPreset::ShortGrass,
+            VisualPreset::TallGrass,
+            VisualPreset::DriedGrass,
+            // Phase 6 mountains
+            VisualPreset::LowPeak,
+            VisualPreset::HighPeak,
+            VisualPreset::JaggedPeak,
+            // Phase 6 swamp
+            VisualPreset::ShallowSwamp,
+            VisualPreset::DeepSwamp,
+            VisualPreset::MurkySwamp,
+            // Phase 6 lava
+            VisualPreset::LavaPool,
+            VisualPreset::LavaFlow,
+            VisualPreset::VolcanicVent,
+        ]
+    }
+
+    /// Returns all available presets for iteration (legacy method name)
     pub fn all() -> &'static [VisualPreset] {
         &[
             VisualPreset::Default,
@@ -1060,6 +1193,8 @@ pub struct MapEditorState {
     pub visual_editor: VisualMetadataEditor,
     /// Terrain-specific editor state for inspector panel
     pub terrain_editor_state: TerrainEditorState,
+    /// Current preset category filter
+    pub preset_category_filter: PresetCategory,
     /// Multi-tile selection for bulk editing
     pub selected_tiles: Vec<Position>,
     /// Selection mode (single vs multi)
@@ -1095,6 +1230,7 @@ impl MapEditorState {
             show_metadata_editor: false,
             visual_editor: VisualMetadataEditor::default(),
             terrain_editor_state: TerrainEditorState::default(),
+            preset_category_filter: PresetCategory::All,
             selected_tiles: Vec::new(),
             multi_select_mode: false,
         }
@@ -3632,6 +3768,21 @@ impl MapsEditorState {
                     }
                 }
             });
+
+            // Visual preset palette
+            ui.separator();
+            ui.group(|ui| {
+                if let Some(selected_preset) = Self::show_preset_palette(ui, editor) {
+                    // Apply selected preset to currently selected tile
+                    if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
+                        let metadata = metadata_map
+                            .entry(pos)
+                            .or_insert_with(TileVisualMetadata::default);
+                        *metadata = selected_preset.to_metadata();
+                        editor.has_changes = true;
+                    }
+                }
+            });
         } else {
             ui.label("No tile selected");
         }
@@ -4936,6 +5087,63 @@ impl MapsEditorState {
         changed
     }
 
+    /// Show visual preset palette with category filtering
+    ///
+    /// Displays a grid of preset buttons organized by category with filter tabs
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - egui UI context
+    /// * `state` - Mutable reference to MapEditorState
+    ///
+    /// # Returns
+    ///
+    /// `Option<VisualPreset>` if a preset was clicked, None otherwise
+    fn show_preset_palette(ui: &mut egui::Ui, state: &mut MapEditorState) -> Option<VisualPreset> {
+        let mut selected_preset = None;
+
+        ui.heading("Visual Presets");
+
+        // Category filter tabs
+        ui.horizontal(|ui| {
+            for category in PresetCategory::all() {
+                if ui
+                    .selectable_label(
+                        state.preset_category_filter == *category,
+                        category.display_name(),
+                    )
+                    .clicked()
+                {
+                    state.preset_category_filter = *category;
+                }
+            }
+        });
+
+        ui.separator();
+
+        // Preset grid (3 columns)
+        let presets = VisualPreset::by_category(state.preset_category_filter);
+
+        egui::Grid::new("preset_palette_grid")
+            .num_columns(3)
+            .spacing([8.0, 8.0])
+            .show(ui, |ui| {
+                for (idx, preset) in presets.iter().enumerate() {
+                    if ui.button(preset.name()).clicked() {
+                        selected_preset = Some(*preset);
+                    }
+
+                    // New row every 3 presets
+                    if (idx + 1) % 3 == 0 {
+                        ui.end_row();
+                    }
+                }
+            });
+
+        selected_preset
+    }
+
+    /// Show visual metadata editor
     fn show_import_dialog_window(
         &mut self,
         ctx: &egui::Context,
@@ -6792,5 +7000,321 @@ mod tests {
             EventType::Trap
         );
         assert_eq!(state.event_editor.as_ref().unwrap().trap_damage, 10);
+    }
+
+    // ===== Preset Categorization Tests =====
+
+    #[test]
+    fn test_preset_category_all_contains_five_categories() {
+        let categories = PresetCategory::all();
+        assert_eq!(categories.len(), 5);
+        assert!(categories.contains(&PresetCategory::All));
+        assert!(categories.contains(&PresetCategory::Walls));
+        assert!(categories.contains(&PresetCategory::Nature));
+        assert!(categories.contains(&PresetCategory::Water));
+        assert!(categories.contains(&PresetCategory::Structures));
+    }
+
+    #[test]
+    fn test_preset_category_display_names() {
+        assert_eq!(PresetCategory::All.display_name(), "All");
+        assert_eq!(PresetCategory::Walls.display_name(), "Walls");
+        assert_eq!(PresetCategory::Nature.display_name(), "Nature");
+        assert_eq!(PresetCategory::Water.display_name(), "Water");
+        assert_eq!(PresetCategory::Structures.display_name(), "Structures");
+    }
+
+    #[test]
+    fn test_preset_category_filter_walls() {
+        let walls = VisualPreset::by_category(PresetCategory::Walls);
+        assert!(!walls.is_empty());
+        assert!(walls.contains(&VisualPreset::ShortWall));
+        assert!(walls.contains(&VisualPreset::TallWall));
+        assert!(walls.contains(&VisualPreset::ThinWall));
+        assert!(walls.contains(&VisualPreset::DiagonalWall));
+        // Nature should not be in walls
+        assert!(!walls.contains(&VisualPreset::SmallTree));
+        assert!(!walls.contains(&VisualPreset::LargeTree));
+    }
+
+    #[test]
+    fn test_preset_category_filter_nature() {
+        let nature = VisualPreset::by_category(PresetCategory::Nature);
+        assert!(!nature.is_empty());
+        // Trees
+        assert!(nature.contains(&VisualPreset::SmallTree));
+        assert!(nature.contains(&VisualPreset::LargeTree));
+        assert!(nature.contains(&VisualPreset::ShortTree));
+        assert!(nature.contains(&VisualPreset::MediumTree));
+        assert!(nature.contains(&VisualPreset::TallTree));
+        assert!(nature.contains(&VisualPreset::DeadTree));
+        // Shrubs
+        assert!(nature.contains(&VisualPreset::SmallShrub));
+        assert!(nature.contains(&VisualPreset::LargeShrub));
+        assert!(nature.contains(&VisualPreset::FloweringShrub));
+        // Grass
+        assert!(nature.contains(&VisualPreset::ShortGrass));
+        assert!(nature.contains(&VisualPreset::TallGrass));
+        assert!(nature.contains(&VisualPreset::DriedGrass));
+        // Mountains
+        assert!(nature.contains(&VisualPreset::LowMountain));
+        assert!(nature.contains(&VisualPreset::HighMountain));
+        assert!(nature.contains(&VisualPreset::LowPeak));
+        assert!(nature.contains(&VisualPreset::HighPeak));
+        assert!(nature.contains(&VisualPreset::JaggedPeak));
+        // Walls should not be in nature
+        assert!(!nature.contains(&VisualPreset::ShortWall));
+    }
+
+    #[test]
+    fn test_preset_category_filter_water() {
+        let water = VisualPreset::by_category(PresetCategory::Water);
+        assert!(!water.is_empty());
+        assert!(water.contains(&VisualPreset::ShallowSwamp));
+        assert!(water.contains(&VisualPreset::DeepSwamp));
+        assert!(water.contains(&VisualPreset::MurkySwamp));
+        assert!(water.contains(&VisualPreset::LavaPool));
+        assert!(water.contains(&VisualPreset::LavaFlow));
+        assert!(water.contains(&VisualPreset::VolcanicVent));
+        // Nature should not be in water
+        assert!(!water.contains(&VisualPreset::SmallTree));
+    }
+
+    #[test]
+    fn test_preset_category_filter_structures() {
+        let structures = VisualPreset::by_category(PresetCategory::Structures);
+        assert!(!structures.is_empty());
+        assert!(structures.contains(&VisualPreset::Sunken));
+        assert!(structures.contains(&VisualPreset::Raised));
+        assert!(structures.contains(&VisualPreset::Rotated45));
+        assert!(structures.contains(&VisualPreset::Rotated90));
+        // Walls should not be in structures
+        assert!(!structures.contains(&VisualPreset::ShortWall));
+    }
+
+    #[test]
+    fn test_preset_category_filter_all_includes_all_presets() {
+        let all = VisualPreset::by_category(PresetCategory::All);
+        let expected_count = VisualPreset::all_presets().len();
+        assert_eq!(all.len(), expected_count);
+        // Verify all presets from all_presets are included
+        for preset in VisualPreset::all_presets() {
+            assert!(
+                all.contains(&preset),
+                "Preset {:?} should be in All category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_preset_category_filter_all_equals_all_presets() {
+        let all_filtered = VisualPreset::by_category(PresetCategory::All);
+        let all_presets = VisualPreset::all_presets();
+        assert_eq!(all_filtered.len(), all_presets.len());
+        for (filtered, expected) in all_filtered.iter().zip(all_presets.iter()) {
+            assert_eq!(filtered, expected);
+        }
+    }
+
+    #[test]
+    fn test_each_preset_has_valid_category() {
+        for preset in VisualPreset::all_presets() {
+            let category = preset.category();
+            // Ensure category is not invalid
+            assert_ne!(
+                category,
+                PresetCategory::All,
+                "Preset {:?} should not have All category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_preset_default_has_all_category() {
+        assert_eq!(VisualPreset::Default.category(), PresetCategory::All);
+    }
+
+    #[test]
+    fn test_map_editor_state_initializes_with_all_preset_filter() {
+        let map = Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
+        let state = MapEditorState::new(map);
+        assert_eq!(state.preset_category_filter, PresetCategory::All);
+    }
+
+    #[test]
+    fn test_map_editor_state_preset_filter_can_change() {
+        let map = Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
+        let mut state = MapEditorState::new(map);
+
+        // Test changing filter
+        state.preset_category_filter = PresetCategory::Walls;
+        assert_eq!(state.preset_category_filter, PresetCategory::Walls);
+
+        state.preset_category_filter = PresetCategory::Nature;
+        assert_eq!(state.preset_category_filter, PresetCategory::Nature);
+
+        state.preset_category_filter = PresetCategory::Water;
+        assert_eq!(state.preset_category_filter, PresetCategory::Water);
+
+        state.preset_category_filter = PresetCategory::Structures;
+        assert_eq!(state.preset_category_filter, PresetCategory::Structures);
+
+        // Reset to All
+        state.preset_category_filter = PresetCategory::All;
+        assert_eq!(state.preset_category_filter, PresetCategory::All);
+    }
+
+    #[test]
+    fn test_visual_preset_to_metadata_short_wall() {
+        let metadata = VisualPreset::ShortWall.to_metadata();
+        assert_eq!(metadata.height, Some(1.5));
+    }
+
+    #[test]
+    fn test_visual_preset_to_metadata_tall_wall() {
+        let metadata = VisualPreset::TallWall.to_metadata();
+        assert_eq!(metadata.height, Some(3.5));
+    }
+
+    #[test]
+    fn test_visual_preset_to_metadata_small_tree() {
+        let metadata = VisualPreset::SmallTree.to_metadata();
+        assert_eq!(metadata.height, Some(2.0));
+        assert_eq!(metadata.scale, Some(0.5));
+        assert_eq!(metadata.color_tint, Some((0.6, 0.9, 0.6)));
+    }
+
+    #[test]
+    fn test_visual_preset_to_metadata_lava_pool() {
+        let metadata = VisualPreset::LavaPool.to_metadata();
+        assert_eq!(metadata.height, Some(0.2));
+        assert_eq!(metadata.scale, Some(1.0));
+    }
+
+    #[test]
+    fn test_visual_preset_to_metadata_default_is_empty() {
+        let metadata = VisualPreset::Default.to_metadata();
+        // Default should be all None
+        assert_eq!(metadata.height, None);
+        assert_eq!(metadata.width_x, None);
+        assert_eq!(metadata.width_z, None);
+    }
+
+    #[test]
+    fn test_preset_category_equality() {
+        assert_eq!(PresetCategory::Walls, PresetCategory::Walls);
+        assert_ne!(PresetCategory::Walls, PresetCategory::Nature);
+        assert_ne!(PresetCategory::All, PresetCategory::Water);
+    }
+
+    #[test]
+    fn test_preset_category_copy_trait() {
+        let cat1 = PresetCategory::Nature;
+        let cat2 = cat1; // Copy should work
+        assert_eq!(cat1, cat2);
+    }
+
+    #[test]
+    fn test_wall_presets_are_only_in_walls_category() {
+        let wall_presets = vec![
+            VisualPreset::ShortWall,
+            VisualPreset::TallWall,
+            VisualPreset::ThinWall,
+            VisualPreset::DiagonalWall,
+        ];
+
+        for preset in wall_presets {
+            assert_eq!(
+                preset.category(),
+                PresetCategory::Walls,
+                "Preset {:?} should be in Walls category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_structure_presets_are_only_in_structures_category() {
+        let structure_presets = vec![
+            VisualPreset::Sunken,
+            VisualPreset::Raised,
+            VisualPreset::Rotated45,
+            VisualPreset::Rotated90,
+        ];
+
+        for preset in structure_presets {
+            assert_eq!(
+                preset.category(),
+                PresetCategory::Structures,
+                "Preset {:?} should be in Structures category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_tree_presets_are_in_nature_category() {
+        let tree_presets = vec![
+            VisualPreset::SmallTree,
+            VisualPreset::LargeTree,
+            VisualPreset::ShortTree,
+            VisualPreset::MediumTree,
+            VisualPreset::TallTree,
+            VisualPreset::DeadTree,
+        ];
+
+        for preset in tree_presets {
+            assert_eq!(
+                preset.category(),
+                PresetCategory::Nature,
+                "Preset {:?} should be in Nature category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_swamp_and_lava_presets_are_in_water_category() {
+        let water_presets = vec![
+            VisualPreset::ShallowSwamp,
+            VisualPreset::DeepSwamp,
+            VisualPreset::MurkySwamp,
+            VisualPreset::LavaPool,
+            VisualPreset::LavaFlow,
+            VisualPreset::VolcanicVent,
+        ];
+
+        for preset in water_presets {
+            assert_eq!(
+                preset.category(),
+                PresetCategory::Water,
+                "Preset {:?} should be in Water category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_no_duplicate_presets_in_all_presets() {
+        let all_presets = VisualPreset::all_presets();
+        let mut seen = std::collections::HashSet::new();
+
+        for preset in all_presets {
+            assert!(seen.insert(preset), "Duplicate preset found: {:?}", preset);
+        }
+    }
+
+    #[test]
+    fn test_preset_category_filter_consistency_across_calls() {
+        // Verify that filtering the same category multiple times returns consistent results
+        let walls_1 = VisualPreset::by_category(PresetCategory::Walls);
+        let walls_2 = VisualPreset::by_category(PresetCategory::Walls);
+        assert_eq!(walls_1, walls_2);
+
+        let nature_1 = VisualPreset::by_category(PresetCategory::Nature);
+        let nature_2 = VisualPreset::by_category(PresetCategory::Nature);
+        assert_eq!(nature_1, nature_2);
     }
 }
