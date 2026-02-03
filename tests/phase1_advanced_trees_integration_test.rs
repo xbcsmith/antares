@@ -117,6 +117,12 @@ fn test_terrain_visual_config_from_metadata() {
         sprite: None,
         sprite_layers: vec![],
         sprite_rule: None,
+        grass_density: None,
+        tree_type: None,
+        rock_variant: None,
+        water_flow_direction: None,
+        foliage_density: None,
+        snow_coverage: None,
     };
 
     let config = TerrainVisualConfig::from(&meta);
@@ -140,6 +146,12 @@ fn test_terrain_visual_config_defaults() {
         sprite: None,
         sprite_layers: vec![],
         sprite_rule: None,
+        grass_density: None,
+        tree_type: None,
+        rock_variant: None,
+        water_flow_direction: None,
+        foliage_density: None,
+        snow_coverage: None,
     };
 
     let config = TerrainVisualConfig::from(&meta);
@@ -279,6 +291,12 @@ fn test_terrain_visual_config_scale_application() {
         sprite: None,
         sprite_layers: vec![],
         sprite_rule: None,
+        grass_density: None,
+        tree_type: None,
+        rock_variant: None,
+        water_flow_direction: None,
+        foliage_density: None,
+        snow_coverage: None,
     };
 
     let meta_large = TileVisualMetadata {
@@ -292,6 +310,12 @@ fn test_terrain_visual_config_scale_application() {
         sprite: None,
         sprite_layers: vec![],
         sprite_rule: None,
+        grass_density: None,
+        tree_type: None,
+        rock_variant: None,
+        water_flow_direction: None,
+        foliage_density: None,
+        snow_coverage: None,
     };
 
     let small_config = TerrainVisualConfig::from(&meta_small);
@@ -316,6 +340,12 @@ fn test_terrain_visual_config_height_multiplier() {
         sprite: None,
         sprite_layers: vec![],
         sprite_rule: None,
+        grass_density: None,
+        tree_type: None,
+        rock_variant: None,
+        water_flow_direction: None,
+        foliage_density: None,
+        snow_coverage: None,
     };
 
     let meta2 = TileVisualMetadata {
@@ -329,6 +359,12 @@ fn test_terrain_visual_config_height_multiplier() {
         sprite: None,
         sprite_layers: vec![],
         sprite_rule: None,
+        grass_density: None,
+        tree_type: None,
+        rock_variant: None,
+        water_flow_direction: None,
+        foliage_density: None,
+        snow_coverage: None,
     };
 
     let config1 = TerrainVisualConfig::from(&meta1);

@@ -52,6 +52,70 @@ pub enum TerrainType {
     Mountain,
 }
 
+// ===== Terrain-Specific Features =====
+
+/// Grass density levels for terrain visualization
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum GrassDensity {
+    /// No grass blades (bare dirt)
+    None,
+    /// 10-20 blades per tile
+    Low,
+    /// 40-60 blades per tile
+    #[default]
+    Medium,
+    /// 80-120 blades per tile
+    High,
+    /// 150+ blades per tile
+    VeryHigh,
+}
+
+/// Tree visual variants for forest tiles
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TreeType {
+    /// Deciduous tree (broad leaves)
+    #[default]
+    Oak,
+    /// Coniferous tree (needle leaves)
+    Pine,
+    /// Dead/bare tree
+    Dead,
+    /// Palm tree
+    Palm,
+    /// Willow tree
+    Willow,
+}
+
+/// Rock visual variants for mountain/hill tiles
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RockVariant {
+    /// Smooth rounded boulders
+    #[default]
+    Smooth,
+    /// Jagged sharp rocks
+    Jagged,
+    /// Layered sedimentary
+    Layered,
+    /// Crystalline formation
+    Crystal,
+}
+
+/// Water flow direction for river/stream tiles
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum WaterFlowDirection {
+    /// Still water (no flow)
+    #[default]
+    Still,
+    /// Flowing north
+    North,
+    /// Flowing south
+    South,
+    /// Flowing east
+    East,
+    /// Flowing west
+    West,
+}
+
 // ===== Sprite System =====
 
 /// Reference to a sprite in a sprite sheet (texture atlas)
@@ -338,6 +402,30 @@ pub struct TileVisualMetadata {
     /// Useful for random variation or autotiling
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sprite_rule: Option<SpriteSelectionRule>,
+
+    /// Grass density for grassland/plains tiles (default: Medium)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grass_density: Option<GrassDensity>,
+
+    /// Tree type for forest tiles (default: Oak)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree_type: Option<TreeType>,
+
+    /// Rock variant for mountain/hill tiles (default: Smooth)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rock_variant: Option<RockVariant>,
+
+    /// Water flow direction for water tiles (default: Still)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub water_flow_direction: Option<WaterFlowDirection>,
+
+    /// Foliage density multiplier (0.0 to 2.0, default: 1.0)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foliage_density: Option<f32>,
+
+    /// Snow coverage percentage (0.0 to 1.0, default: 0.0)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snow_coverage: Option<f32>,
 }
 
 impl TileVisualMetadata {
@@ -396,6 +484,114 @@ impl TileVisualMetadata {
     /// ```
     pub fn effective_width_z(&self) -> f32 {
         self.width_z.unwrap_or(1.0)
+    }
+
+    /// Get grass density with fallback to default
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, GrassDensity};
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.grass_density(), GrassDensity::Medium);
+    /// ```
+    pub fn grass_density(&self) -> GrassDensity {
+        self.grass_density.unwrap_or_default()
+    }
+
+    /// Get tree type with fallback to default
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, TreeType};
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.tree_type(), TreeType::Oak);
+    /// ```
+    pub fn tree_type(&self) -> TreeType {
+        self.tree_type.unwrap_or_default()
+    }
+
+    /// Get rock variant with fallback to default
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, RockVariant};
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.rock_variant(), RockVariant::Smooth);
+    /// ```
+    pub fn rock_variant(&self) -> RockVariant {
+        self.rock_variant.unwrap_or_default()
+    }
+
+    /// Get water flow direction with fallback to default
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, WaterFlowDirection};
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.water_flow_direction(), WaterFlowDirection::Still);
+    /// ```
+    pub fn water_flow_direction(&self) -> WaterFlowDirection {
+        self.water_flow_direction.unwrap_or_default()
+    }
+
+    /// Get foliage density with fallback to 1.0
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::TileVisualMetadata;
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.foliage_density(), 1.0);
+    /// ```
+    pub fn foliage_density(&self) -> f32 {
+        self.foliage_density.unwrap_or(1.0)
+    }
+
+    /// Get snow coverage with fallback to 0.0
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::TileVisualMetadata;
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.snow_coverage(), 0.0);
+    /// ```
+    pub fn snow_coverage(&self) -> f32 {
+        self.snow_coverage.unwrap_or(0.0)
+    }
+
+    /// Check if metadata has any terrain-specific overrides
+    ///
+    /// Returns true if any of the terrain-specific fields are set (Some).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, GrassDensity};
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// assert!(!metadata.has_terrain_overrides());
+    ///
+    /// metadata.grass_density = Some(GrassDensity::High);
+    /// assert!(metadata.has_terrain_overrides());
+    /// ```
+    pub fn has_terrain_overrides(&self) -> bool {
+        self.grass_density.is_some()
+            || self.tree_type.is_some()
+            || self.rock_variant.is_some()
+            || self.water_flow_direction.is_some()
+            || self.foliage_density.is_some()
+            || self.snow_coverage.is_some()
     }
 
     /// Get effective scale (defaults to 1.0)
@@ -3607,5 +3803,237 @@ mod tests {
         assert_eq!(deserialized.alpha, props.alpha);
         assert_eq!(deserialized.metallic, props.metallic);
         assert_eq!(deserialized.roughness, props.roughness);
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_grass_density_serialization() {
+        let mut meta = TileVisualMetadata::default();
+        meta.grass_density = Some(GrassDensity::High);
+
+        let ron = ron::to_string(&meta).unwrap();
+        assert!(ron.contains("grass_density"));
+        assert!(ron.contains("High"));
+
+        let deserialized: TileVisualMetadata = ron::from_str(&ron).unwrap();
+        assert_eq!(deserialized.grass_density, Some(GrassDensity::High));
+    }
+
+    #[test]
+    fn test_grass_density_default_not_serialized() {
+        let meta = TileVisualMetadata::default();
+        let ron = ron::to_string(&meta).unwrap();
+        assert!(!ron.contains("grass_density"));
+    }
+
+    #[test]
+    fn test_tree_type_accessor_defaults_to_oak() {
+        let meta = TileVisualMetadata::default();
+        assert_eq!(meta.tree_type(), TreeType::Oak);
+    }
+
+    #[test]
+    fn test_has_terrain_overrides_returns_false_for_default() {
+        let meta = TileVisualMetadata::default();
+        assert!(!meta.has_terrain_overrides());
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_has_terrain_overrides_returns_true_when_set() {
+        let mut meta = TileVisualMetadata::default();
+        meta.grass_density = Some(GrassDensity::Low);
+        assert!(meta.has_terrain_overrides());
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_foliage_density_clamps_in_valid_range() {
+        let mut meta = TileVisualMetadata::default();
+        meta.foliage_density = Some(1.5);
+        assert_eq!(meta.foliage_density(), 1.5);
+    }
+
+    #[test]
+    fn test_water_flow_direction_default_is_still() {
+        let meta = TileVisualMetadata::default();
+        assert_eq!(meta.water_flow_direction(), WaterFlowDirection::Still);
+    }
+
+    #[test]
+    fn test_grass_density_default_is_medium() {
+        assert_eq!(GrassDensity::default(), GrassDensity::Medium);
+    }
+
+    #[test]
+    fn test_tree_type_default_is_oak() {
+        assert_eq!(TreeType::default(), TreeType::Oak);
+    }
+
+    #[test]
+    fn test_rock_variant_default_is_smooth() {
+        assert_eq!(RockVariant::default(), RockVariant::Smooth);
+    }
+
+    #[test]
+    fn test_water_flow_default_is_still() {
+        assert_eq!(WaterFlowDirection::default(), WaterFlowDirection::Still);
+    }
+
+    #[test]
+    fn test_grass_density_serializes_to_ron() {
+        let density = GrassDensity::High;
+        let ron = ron::to_string(&density).unwrap();
+        assert_eq!(ron.trim(), "High");
+
+        let deserialized: GrassDensity = ron::from_str(&ron).unwrap();
+        assert_eq!(deserialized, GrassDensity::High);
+    }
+
+    #[test]
+    fn test_tree_type_deserializes_from_ron() {
+        let ron_str = "Pine";
+        let tree: TreeType = ron::from_str(ron_str).unwrap();
+        assert_eq!(tree, TreeType::Pine);
+    }
+
+    #[test]
+    fn test_rock_variant_round_trip_serialization() {
+        let original = RockVariant::Crystal;
+        let ron_str = ron::to_string(&original).unwrap();
+        let deserialized: RockVariant = ron::from_str(&ron_str).unwrap();
+        assert_eq!(deserialized, original);
+    }
+
+    #[test]
+    fn test_water_flow_all_variants_serialize() {
+        let variants = vec![
+            WaterFlowDirection::Still,
+            WaterFlowDirection::North,
+            WaterFlowDirection::South,
+            WaterFlowDirection::East,
+            WaterFlowDirection::West,
+        ];
+
+        for variant in variants {
+            let ron = ron::to_string(&variant).unwrap();
+            let deserialized: WaterFlowDirection = ron::from_str(&ron).unwrap();
+            assert_eq!(deserialized, variant);
+        }
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_metadata_with_grass_density_serializes() {
+        let mut meta = TileVisualMetadata::default();
+        meta.height = Some(2.0);
+        meta.grass_density = Some(GrassDensity::Medium);
+
+        let ron = ron::to_string(&meta).unwrap();
+        let deserialized: TileVisualMetadata = ron::from_str(&ron).unwrap();
+
+        assert_eq!(deserialized.height, meta.height);
+        assert_eq!(deserialized.grass_density, meta.grass_density);
+    }
+
+    #[test]
+    fn test_metadata_without_terrain_fields_is_minimal() {
+        let meta = TileVisualMetadata::default();
+        let ron = ron::to_string(&meta).unwrap();
+
+        // Default metadata should have minimal serialization
+        assert!(!ron.contains("grass_density"));
+        assert!(!ron.contains("tree_type"));
+        assert!(!ron.contains("rock_variant"));
+        assert!(!ron.contains("water_flow_direction"));
+        assert!(!ron.contains("foliage_density"));
+        assert!(!ron.contains("snow_coverage"));
+    }
+
+    #[test]
+    fn test_metadata_accessors_return_defaults() {
+        let meta = TileVisualMetadata::default();
+
+        assert_eq!(meta.grass_density(), GrassDensity::Medium);
+        assert_eq!(meta.tree_type(), TreeType::Oak);
+        assert_eq!(meta.rock_variant(), RockVariant::Smooth);
+        assert_eq!(meta.water_flow_direction(), WaterFlowDirection::Still);
+        assert_eq!(meta.foliage_density(), 1.0);
+        assert_eq!(meta.snow_coverage(), 0.0);
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_has_terrain_overrides_detects_grass_density() {
+        let mut meta = TileVisualMetadata::default();
+        assert!(!meta.has_terrain_overrides());
+
+        meta.grass_density = Some(GrassDensity::Medium);
+        assert!(meta.has_terrain_overrides());
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_has_terrain_overrides_detects_tree_type() {
+        let mut meta = TileVisualMetadata::default();
+        meta.tree_type = Some(TreeType::Pine);
+        assert!(meta.has_terrain_overrides());
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_has_terrain_overrides_detects_all_fields() {
+        let mut meta = TileVisualMetadata::default();
+
+        meta.grass_density = Some(GrassDensity::High);
+        assert!(meta.has_terrain_overrides());
+
+        meta.grass_density = None;
+        meta.rock_variant = Some(RockVariant::Jagged);
+        assert!(meta.has_terrain_overrides());
+
+        meta.rock_variant = None;
+        meta.foliage_density = Some(1.5);
+        assert!(meta.has_terrain_overrides());
+
+        meta.foliage_density = None;
+        meta.snow_coverage = Some(0.5);
+        assert!(meta.has_terrain_overrides());
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_foliage_density_bounds() {
+        let mut meta = TileVisualMetadata::default();
+
+        // Test minimum
+        meta.foliage_density = Some(0.0);
+        assert_eq!(meta.foliage_density(), 0.0);
+
+        // Test maximum
+        meta.foliage_density = Some(2.0);
+        assert_eq!(meta.foliage_density(), 2.0);
+
+        // Test intermediate
+        meta.foliage_density = Some(1.5);
+        assert_eq!(meta.foliage_density(), 1.5);
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_snow_coverage_bounds() {
+        let mut meta = TileVisualMetadata::default();
+
+        // Test minimum
+        meta.snow_coverage = Some(0.0);
+        assert_eq!(meta.snow_coverage(), 0.0);
+
+        // Test maximum
+        meta.snow_coverage = Some(1.0);
+        assert_eq!(meta.snow_coverage(), 1.0);
+
+        // Test intermediate
+        meta.snow_coverage = Some(0.5);
+        assert_eq!(meta.snow_coverage(), 0.5);
     }
 }

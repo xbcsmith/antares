@@ -6008,16 +6008,12 @@
     ],
     events: {
         (
-            x: 19,
-            y: 7,
-        ): Teleport(
-            name: "Portal to Dark Forrest",
-            description: "A portal that transports the party to Dark Forrest (map 4) at (10,19).",
-            destination: (
-                x: 10,
-                y: 19,
-            ),
-            map_id: 4,
+            x: 15,
+            y: 4,
+        ): Sign(
+            name: "General Store Sign",
+            description: "A sign advertising the general store where adventurers can buy and sell goods.",
+            text: "General Store - Buy and sell items for your adventures.",
         ),
         (
             x: 18,
@@ -6026,6 +6022,14 @@
             name: "Forest Direction Sign",
             description: "A directional sign pointing to the nearby forest.",
             text: "To the Forrest",
+        ),
+        (
+            x: 10,
+            y: 10,
+        ): Sign(
+            name: "Temple Sign",
+            description: "A notice describing the Temple of Healing and the services it provides.",
+            text: "Temple of Healing - The priests can restore your health.",
         ),
         (
             x: 4,
@@ -6048,20 +6052,16 @@
             map_id: 6,
         ),
         (
-            x: 10,
-            y: 10,
-        ): Sign(
-            name: "Temple Sign",
-            description: "A notice describing the Temple of Healing and the services it provides.",
-            text: "Temple of Healing - The priests can restore your health.",
-        ),
-        (
-            x: 15,
-            y: 4,
-        ): Sign(
-            name: "General Store Sign",
-            description: "A sign advertising the general store where adventurers can buy and sell goods.",
-            text: "General Store - Buy and sell items for your adventures.",
+            x: 19,
+            y: 7,
+        ): Teleport(
+            name: "Portal to Dark Forrest",
+            description: "A portal that transports the party to Dark Forrest (map 4) at (10,19).",
+            destination: (
+                x: 10,
+                y: 19,
+            ),
+            map_id: 4,
         ),
     },
     allow_random_encounters: true,

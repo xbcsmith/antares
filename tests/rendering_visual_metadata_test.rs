@@ -347,6 +347,12 @@ fn test_visual_metadata_serialization_roundtrip() {
         sprite: None,
         sprite_layers: vec![],
         sprite_rule: None,
+        grass_density: None,
+        tree_type: None,
+        rock_variant: None,
+        water_flow_direction: None,
+        foliage_density: None,
+        snow_coverage: None,
     };
 
     // Serialize to RON
