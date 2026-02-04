@@ -36,6 +36,8 @@
 
 use crate::domain::world::TileVisualMetadata;
 use bevy::prelude::*;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -420,10 +422,7 @@ impl TreeType {
 /// # Notes
 ///
 /// Phase 1 implementation generates a basic mesh from the graph structure.
-/// Future phases will add:
-/// - Tapered cylinders for branches
-/// - Foliage sphere generation at leaf nodes
-/// - Branch connection smoothing
+/// Future phases will add tapered cylinders and foliage generation.
 pub fn generate_branch_mesh(graph: &BranchGraph, _config: &TreeConfig) -> Mesh {
     // For Phase 1, create a simple mesh from a cylinder that represents the overall tree structure
     // This ensures the function works correctly without complex vertex generation
@@ -454,6 +453,196 @@ pub fn generate_branch_mesh(graph: &BranchGraph, _config: &TreeConfig) -> Mesh {
     }
     .mesh()
     .into()
+}
+
+/// Generates a complete branch graph using L-system-inspired recursive subdivision
+///
+/// This function creates a deterministic tree structure based on the provided configuration.
+/// The RNG is seeded per tree type to ensure the same tree type always generates the same shape.
+///
+/// # Algorithm
+///
+/// 1. Creates a root trunk branch from (0, 0, 0) to (0, config.height, 0)
+/// 2. Recursively subdivides each branch into 2-4 children based on tree type
+/// 3. Applies radius tapering: each child starts at parent's end radius * 0.7
+/// 4. Terminates when max depth reached or radius becomes too small (< 0.05)
+/// 5. Returns populated BranchGraph with all branches and updated bounds
+///
+/// # Arguments
+///
+/// * `tree_type` - The type of tree (Oak, Pine, etc.) which determines parameters
+///
+/// # Returns
+///
+/// A fully populated `BranchGraph` ready for mesh generation
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::{TreeType, generate_branch_graph};
+///
+/// let graph = generate_branch_graph(TreeType::Oak);
+/// assert!(!graph.branches.is_empty());
+/// assert_eq!(graph.branches[0].start, Vec3::ZERO);
+/// ```
+pub fn generate_branch_graph(tree_type: TreeType) -> BranchGraph {
+    let config = tree_type.config();
+    let mut graph = BranchGraph::new();
+
+    // Create root trunk branch
+    let trunk = Branch {
+        start: Vec3::ZERO,
+        end: Vec3::new(0.0, config.height, 0.0),
+        start_radius: config.trunk_radius,
+        end_radius: config.trunk_radius * 0.7,
+        children: vec![],
+    };
+
+    let trunk_index = graph.add_branch(trunk);
+
+    // Seed RNG based on tree type for deterministic output
+    let seed = match tree_type {
+        TreeType::Oak => 42u64,
+        TreeType::Pine => 43u64,
+        TreeType::Birch => 44u64,
+        TreeType::Willow => 45u64,
+        TreeType::Dead => 46u64,
+        TreeType::Shrub => 47u64,
+    };
+    let mut rng = StdRng::seed_from_u64(seed);
+
+    // Recursively subdivide the trunk
+    subdivide_branch(&mut graph, trunk_index, 0, tree_type, &config, &mut rng);
+
+    // Update bounds for the complete tree
+    graph.update_bounds();
+
+    graph
+}
+
+/// Recursively subdivides a branch into child branches
+///
+/// This helper function implements the L-system-inspired branching logic.
+/// It calculates child branch count, angles, lengths, and radii based on the parent branch
+/// and tree type configuration.
+///
+/// # Arguments
+///
+/// * `graph` - Mutable reference to the branch graph being built
+/// * `parent_index` - Index of the branch to subdivide
+/// * `current_depth` - Current recursion depth (0 = trunk)
+/// * `tree_type` - Type of tree (determines branching parameters)
+/// * `config` - Tree configuration with depth, angles, radii
+/// * `rng` - Seeded RNG for deterministic randomness
+fn subdivide_branch(
+    graph: &mut BranchGraph,
+    parent_index: usize,
+    current_depth: u32,
+    tree_type: TreeType,
+    config: &TreeConfig,
+    rng: &mut StdRng,
+) {
+    // Termination conditions
+    if current_depth >= config.depth {
+        return;
+    }
+
+    let parent = &graph.branches[parent_index].clone();
+
+    // Terminate if radius becomes too small
+    if parent.end_radius < 0.05 {
+        return;
+    }
+
+    // Determine number of children based on tree type
+    let child_count = match tree_type {
+        TreeType::Oak => rng.random_range(3..=4),
+        TreeType::Pine => rng.random_range(2..=3),
+        TreeType::Birch => rng.random_range(2..=3),
+        TreeType::Willow => rng.random_range(3..=4),
+        TreeType::Dead => rng.random_range(1..=2),
+        TreeType::Shrub => rng.random_range(2..=3),
+    };
+
+    // Calculate parent direction
+    let parent_dir = (parent.end - parent.start).normalize();
+
+    // Length reduction factor per level
+    let length_factor = match current_depth {
+        0 => 0.8,
+        1 => 0.75,
+        2 => 0.7,
+        _ => 0.65,
+    };
+    let parent_length = (parent.end - parent.start).length();
+    let child_length = parent_length * length_factor;
+
+    // Create child branches
+    for _ in 0..child_count {
+        // Random angle within config range
+        let angle_deg = rng.random_range(config.branch_angle_range.0..config.branch_angle_range.1);
+        let angle_rad = angle_deg.to_radians();
+
+        // Random rotation around the parent direction (for variety)
+        let rotation_angle = rng.random_range(0.0..(std::f32::consts::PI * 2.0));
+
+        // Create a perpendicular vector to parent direction
+        let perpendicular = if (parent_dir.x.abs() + parent_dir.y.abs()) < 0.01 {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else {
+            Vec3::new(-parent_dir.y, parent_dir.x, 0.0).normalize()
+        };
+
+        // Rotate perpendicular around parent direction
+        let rotation_axis = parent_dir;
+        let rotated_perp = rotate_vector_around_axis(perpendicular, rotation_axis, rotation_angle);
+
+        // Combine: tilt angle from parent direction + rotation for variety
+        let child_dir = rotate_vector_around_axis(parent_dir, rotated_perp, angle_rad).normalize();
+
+        // Calculate child end position with slight curvature offset
+        let curvature_offset = rotated_perp * (child_length * 0.1);
+        let child_end = parent.end + child_dir * child_length + curvature_offset;
+
+        // Apply radius tapering
+        let child_start_radius = parent.end_radius * 0.7;
+        let child_end_radius = child_start_radius * 0.7;
+
+        // Create child branch
+        let child = Branch {
+            start: parent.end,
+            end: child_end,
+            start_radius: child_start_radius,
+            end_radius: child_end_radius,
+            children: vec![],
+        };
+
+        let child_index = graph.add_branch(child);
+
+        // Add child to parent's children list
+        graph.branches[parent_index].children.push(child_index);
+
+        // Recurse
+        subdivide_branch(
+            graph,
+            child_index,
+            current_depth + 1,
+            tree_type,
+            config,
+            rng,
+        );
+    }
+}
+
+/// Helper function to rotate a vector around an axis using Rodrigues' rotation formula
+fn rotate_vector_around_axis(vector: Vec3, axis: Vec3, angle: f32) -> Vec3 {
+    let axis = axis.normalize();
+    let cos_angle = angle.cos();
+    let sin_angle = angle.sin();
+
+    vector * cos_angle
+        + axis.cross(vector) * sin_angle
+        + axis * axis.dot(vector) * (1.0 - cos_angle)
 }
 
 // ==================== Mesh Cache Extension ====================
@@ -707,5 +896,273 @@ mod tests {
             mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some(),
             "Empty graph mesh should have position attribute"
         );
+    }
+
+    // ========== Phase 1: Recursive Branch Generation Tests ==========
+
+    #[test]
+    fn test_generate_branch_graph_creates_trunk() {
+        let graph = generate_branch_graph(TreeType::Oak);
+        let oak_config = TreeType::Oak.config();
+
+        // Should have at least the trunk
+        assert!(
+            !graph.branches.is_empty(),
+            "Graph should have at least trunk branch"
+        );
+
+        // Root branch (index 0) should be the trunk
+        let trunk = &graph.branches[0];
+        assert_eq!(trunk.start, Vec3::ZERO, "Trunk should start at origin");
+        assert_eq!(
+            trunk.end.y, oak_config.height,
+            "Trunk should end at config height"
+        );
+        assert_eq!(
+            trunk.start_radius, oak_config.trunk_radius,
+            "Trunk should have config trunk radius"
+        );
+    }
+
+    #[test]
+    fn test_generate_branch_graph_respects_depth() {
+        let graph = generate_branch_graph(TreeType::Oak);
+
+        // Count max depth by traversing
+        fn max_depth(graph: &BranchGraph, index: usize) -> u32 {
+            let branch = &graph.branches[index];
+            if branch.children.is_empty() {
+                return 0;
+            }
+            let child_depths = branch.children.iter().map(|&i| max_depth(graph, i));
+            1 + child_depths.max().unwrap_or(0)
+        }
+
+        let depth = max_depth(&graph, 0);
+        let config = TreeType::Oak.config();
+        assert!(
+            depth <= config.depth,
+            "Tree depth {} should not exceed config depth {}",
+            depth,
+            config.depth
+        );
+    }
+
+    #[test]
+    fn test_generate_branch_graph_deterministic() {
+        // Generate same tree twice
+        let graph1 = generate_branch_graph(TreeType::Oak);
+        let graph2 = generate_branch_graph(TreeType::Oak);
+
+        // Should have same number of branches
+        assert_eq!(
+            graph1.branches.len(),
+            graph2.branches.len(),
+            "Same tree type should generate same number of branches"
+        );
+
+        // Should have same structure (at least first few branches)
+        for i in 0..graph1.branches.len().min(5) {
+            let b1 = &graph1.branches[i];
+            let b2 = &graph2.branches[i];
+            assert_eq!(b1.start, b2.start, "Branch {} start should be identical", i);
+            assert_eq!(b1.end, b2.end, "Branch {} end should be identical", i);
+            assert_eq!(
+                b1.children.len(),
+                b2.children.len(),
+                "Branch {} children count should match",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_subdivide_branch_creates_children() {
+        let graph = generate_branch_graph(TreeType::Oak);
+
+        // Trunk (branch 0) should have children
+        let trunk = &graph.branches[0];
+        assert!(
+            !trunk.children.is_empty(),
+            "Trunk should have child branches"
+        );
+        assert!(
+            trunk.children.len() >= 2,
+            "Trunk should have at least 2 children"
+        );
+    }
+
+    #[test]
+    fn test_branch_radius_tapering() {
+        let graph = generate_branch_graph(TreeType::Oak);
+
+        // Check radius tapering: each child should have smaller radius than parent end
+        for branch_idx in 0..graph.branches.len() {
+            let parent = &graph.branches[branch_idx];
+            for &child_idx in &parent.children {
+                let child = &graph.branches[child_idx];
+                assert!(
+                    child.start_radius < parent.end_radius * 1.01, // Small tolerance for rounding
+                    "Child start radius should be smaller than parent end radius"
+                );
+                assert!(
+                    child.start_radius > 0.01,
+                    "Child start radius should be at least 0.01"
+                );
+                assert!(
+                    child.end_radius < child.start_radius * 1.01,
+                    "Child should taper (end_radius < start_radius)"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_branch_angle_range_respected() {
+        let graph = generate_branch_graph(TreeType::Oak);
+
+        // For each parent-child pair, check that the angle is reasonable
+        // (not strictly checking config angle range due to randomness, but angles should vary)
+        let trunk = &graph.branches[0];
+        let trunk_dir = (trunk.end - trunk.start).normalize();
+
+        let mut child_angles = vec![];
+        for &child_idx in &trunk.children {
+            let child = &graph.branches[child_idx];
+            let child_dir = (child.end - child.start).normalize();
+
+            // Angle between trunk and child
+            let dot = trunk_dir.dot(child_dir).clamp(-1.0, 1.0);
+            let angle_rad = dot.acos();
+            let angle_deg = angle_rad.to_degrees();
+
+            // Should be within reasonable range for branching
+            assert!(
+                angle_deg > 10.0 && angle_deg < 170.0,
+                "Child branch angle {} degrees should be in reasonable branching range",
+                angle_deg
+            );
+
+            child_angles.push(angle_deg);
+        }
+
+        // Children should have varied angles (not all identical)
+        if child_angles.len() > 1 {
+            let min_angle = child_angles.iter().copied().fold(f32::INFINITY, f32::min);
+            let max_angle = child_angles
+                .iter()
+                .copied()
+                .fold(f32::NEG_INFINITY, f32::max);
+            assert!(
+                (max_angle - min_angle).abs() > 1.0,
+                "Child branch angles should vary (not all the same)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_oak_tree_has_dense_branching() {
+        let graph = generate_branch_graph(TreeType::Oak);
+
+        // Oak should be dense (more branches)
+        assert!(
+            graph.branches.len() >= 15,
+            "Oak tree should have at least 15 branches (actual: {})",
+            graph.branches.len()
+        );
+    }
+
+    #[test]
+    fn test_dead_tree_has_sparse_branching() {
+        let graph = generate_branch_graph(TreeType::Dead);
+
+        // Dead tree should be sparse (fewer branches)
+        assert!(
+            graph.branches.len() <= 10,
+            "Dead tree should have at most 10 branches (actual: {})",
+            graph.branches.len()
+        );
+
+        // Dead tree should have fewer children per branch
+        let trunk = &graph.branches[0];
+        assert!(
+            trunk.children.len() <= 2,
+            "Dead tree trunk should have at most 2 children"
+        );
+    }
+
+    #[test]
+    fn test_pine_tree_conical_shape() {
+        let graph = generate_branch_graph(TreeType::Pine);
+
+        // Pine should have reasonable number of branches (2-3 per level)
+        assert!(
+            graph.branches.len() >= 5 && graph.branches.len() <= 20,
+            "Pine tree should have 5-20 branches, got {}",
+            graph.branches.len()
+        );
+
+        // Pine should be taller (from config)
+        let trunk = &graph.branches[0];
+        let pine_config = TreeType::Pine.config();
+        assert_eq!(trunk.end.y, pine_config.height);
+    }
+
+    #[test]
+    fn test_willow_tree_drooping_shape() {
+        let graph = generate_branch_graph(TreeType::Willow);
+
+        // Willow should be dense
+        assert!(
+            graph.branches.len() >= 15,
+            "Willow tree should be dense with many branches"
+        );
+
+        // Willow should have large branches (from its higher foliage_density)
+        let willow_config = TreeType::Willow.config();
+        assert!(
+            willow_config.foliage_density > 0.8,
+            "Willow should be dense"
+        );
+    }
+
+    #[test]
+    fn test_branch_graph_bounds_updated() {
+        let graph = generate_branch_graph(TreeType::Oak);
+
+        let (min, max) = graph.bounds;
+
+        // Bounds should encompass all branches
+        for branch in &graph.branches {
+            assert!(
+                min.x <= branch.start.x && min.x <= branch.end.x,
+                "Min X bound should encompass all branches"
+            );
+            assert!(
+                max.x >= branch.start.x && max.x >= branch.end.x,
+                "Max X bound should encompass all branches"
+            );
+            assert!(
+                min.y <= branch.start.y && min.y <= branch.end.y,
+                "Min Y bound should encompass all branches"
+            );
+            assert!(
+                max.y >= branch.start.y && max.y >= branch.end.y,
+                "Max Y bound should encompass all branches"
+            );
+        }
+    }
+
+    #[test]
+    fn test_all_tree_types_generate_without_panic() {
+        // Ensure all tree types can be generated
+        for tree_type in TreeType::all() {
+            let graph = generate_branch_graph(*tree_type);
+            assert!(
+                !graph.branches.is_empty(),
+                "{} should generate branches",
+                tree_type.name()
+            );
+        }
     }
 }

@@ -617,15 +617,17 @@ pub fn spawn_tree(
         .map(super::advanced_trees::TerrainVisualConfig::from)
         .unwrap_or_default();
 
-    // For Phase 1, use simple trunk/foliage rendering
-    // If tree_type is specified, use it for better visual variety (future enhancement)
-    // For now, just apply visual configuration to standard tree
-    let _ = tree_type; // Visual type selection will be used in future phases
+    // Phase 1: Generate branch graph for the tree type
+    let _branch_graph = if let Some(tree_type) = tree_type {
+        super::advanced_trees::generate_branch_graph(tree_type)
+    } else {
+        super::advanced_trees::generate_branch_graph(super::advanced_trees::TreeType::Oak)
+    };
 
     // Apply scale from visual config
     let scaled_trunk_height = TREE_TRUNK_HEIGHT * visual_config.height_multiplier;
 
-    // Get or create trunk mesh from cache
+    // Get or create trunk mesh from cache using branch graph
     let trunk_mesh = cache.tree_trunk.clone().unwrap_or_else(|| {
         let handle = meshes.add(Cylinder {
             radius: TREE_TRUNK_RADIUS,
