@@ -270,6 +270,8 @@ pub struct MapMetadata {
     pub music_track: String,
     /// Random encounter rate (0-100)
     pub encounter_rate: u8,
+    /// Per-tile visual metadata overrides
+    pub tile_visual_metadata: Option<std::collections::HashMap<Position, TileVisualMetadata>>,
 }
 
 impl Default for MapMetadata {
@@ -283,6 +285,7 @@ impl Default for MapMetadata {
             light_level: 100,
             music_track: String::new(),
             encounter_rate: 10,
+            tile_visual_metadata: None,
         }
     }
 }
@@ -342,7 +345,7 @@ impl PresetCategory {
 }
 
 /// Predefined visual metadata presets for common use cases
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VisualPreset {
     /// Default (all None)
     Default,
@@ -1042,6 +1045,12 @@ impl VisualMetadataEditor {
                 Vec::new()
             },
             sprite_rule: None,
+            grass_density: None,
+            tree_type: None,
+            rock_variant: None,
+            water_flow_direction: None,
+            foliage_density: None,
+            snow_coverage: None,
         }
     }
 
@@ -4894,7 +4903,7 @@ impl MapsEditorState {
         ui.separator();
 
         match terrain_type {
-            TerrainType::Grassland | TerrainType::Plains => {
+            TerrainType::Grass => {
                 // Grass density dropdown
                 ui.label("Grass Density:");
                 let mut density_index = match state.grass_density {
@@ -4906,7 +4915,7 @@ impl MapsEditorState {
                 };
 
                 let old_index = density_index;
-                egui::ComboBox::from_id_source("grass_density")
+                egui::ComboBox::from_id_salt("grass_density_box")
                     .selected_text(format!("{:?}", state.grass_density))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut density_index, 0, "None");
@@ -4950,7 +4959,7 @@ impl MapsEditorState {
                 };
 
                 let old_index = tree_index;
-                egui::ComboBox::from_id_source("tree_type")
+                egui::ComboBox::from_id_salt("tree_type_box")
                     .selected_text(format!("{:?}", state.tree_type))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut tree_index, 0, "Oak");
@@ -4991,7 +5000,7 @@ impl MapsEditorState {
                     .changed();
             }
 
-            TerrainType::Mountain | TerrainType::Hill => {
+            TerrainType::Mountain => {
                 // Rock variant dropdown
                 ui.label("Rock Variant:");
                 let mut rock_index = match state.rock_variant {
@@ -5002,7 +5011,7 @@ impl MapsEditorState {
                 };
 
                 let old_index = rock_index;
-                egui::ComboBox::from_id_source("rock_variant")
+                egui::ComboBox::from_id_salt("rock_variant_box")
                     .selected_text(format!("{:?}", state.rock_variant))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut rock_index, 0, "Smooth");
@@ -5044,7 +5053,7 @@ impl MapsEditorState {
                 };
 
                 let old_index = flow_index;
-                egui::ComboBox::from_id_source("water_flow")
+                egui::ComboBox::from_id_salt("water_flow_box")
                     .selected_text(format!("{:?}", state.water_flow_direction))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut flow_index, 0, "Still");
@@ -5065,18 +5074,6 @@ impl MapsEditorState {
                         _ => WaterFlowDirection::Still,
                     };
                 }
-            }
-
-            TerrainType::Snow | TerrainType::Desert => {
-                // Snow coverage slider only
-                ui.label("Snow Coverage:");
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut state.snow_coverage, 0.0..=1.0)
-                            .text("coverage")
-                            .step_by(0.05),
-                    )
-                    .changed();
             }
 
             _ => {

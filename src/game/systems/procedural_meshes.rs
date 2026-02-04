@@ -396,7 +396,7 @@ impl ProceduralMeshCache {
 const TREE_TRUNK_RADIUS: f32 = 0.15;
 const TREE_TRUNK_HEIGHT: f32 = 2.0;
 const TREE_FOLIAGE_RADIUS: f32 = 0.6;
-const TREE_FOLIAGE_Y_OFFSET: f32 = 2.0;
+const TREE_FOLIAGE_Y_OFFSET: f32 = 0.0;
 
 // Event marker dimensions
 // Portal dimensions - rectangular frame standing vertically
@@ -426,7 +426,7 @@ const SHRUB_STEM_ANGLE_MAX: f32 = 45.0; // degrees
 const GRASS_BLADE_WIDTH: f32 = 0.15;
 const GRASS_BLADE_HEIGHT_BASE: f32 = 0.4; // Base height (scaled by visual_metadata.height)
 const GRASS_BLADE_DEPTH: f32 = 0.02;
-const GRASS_BLADE_Y_OFFSET: f32 = 0.2; // Position above ground
+const GRASS_BLADE_Y_OFFSET: f32 = 0.0; // Position at ground level
 
 // Furniture dimensions - Bench
 const BENCH_LENGTH: f32 = 1.2;

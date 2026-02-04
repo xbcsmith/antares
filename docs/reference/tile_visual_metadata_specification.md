@@ -10,7 +10,7 @@ Technical reference for the `TileVisualMetadata` struct and terrain-specific fie
 
 **Serialization Format**: RON (Rusty Object Notation)
 
-**Usage Context**: 
+**Usage Context**:
 - Stored in `Tile.visual` field for each map tile
 - Loaded from map data files (`.ron` format)
 - Edited via Campaign Builder GUI

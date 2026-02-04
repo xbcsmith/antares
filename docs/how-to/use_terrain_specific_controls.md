@@ -226,7 +226,7 @@ To reset terrain-specific settings to their default values:
 
 ### Q: The terrain controls don't appear for my selected tile
 
-**A**: 
+**A**:
 
 - Verify a tile is actually selected (should be highlighted in the grid)
 - Check that the terrain type matches the expected controls
