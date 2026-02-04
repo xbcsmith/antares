@@ -622,6 +622,38 @@ pub fn generate_branch_mesh(graph: &BranchGraph, _config: &TreeConfig) -> Mesh {
     merge_branch_meshes(branch_meshes)
 }
 
+/// Identifies all leaf (endpoint) branches in a branch graph
+///
+/// Leaf branches are those with no children. These represent the natural endpoints
+/// where foliage clusters should be placed.
+///
+/// # Arguments
+///
+/// * `graph` - The branch graph to search
+///
+/// # Returns
+///
+/// A Vec of branch indices that are leaf nodes (endpoints)
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::{TreeType, generate_branch_graph, get_leaf_branches};
+///
+/// let graph = generate_branch_graph(TreeType::Oak);
+/// let leaf_indices = get_leaf_branches(&graph);
+/// assert!(!leaf_indices.is_empty()); // Oak trees have foliage
+/// ```
+pub fn get_leaf_branches(graph: &BranchGraph) -> Vec<usize> {
+    graph
+        .branches
+        .iter()
+        .enumerate()
+        .filter(|(_, branch)| branch.children.is_empty())
+        .map(|(idx, _)| idx)
+        .collect()
+}
+
 /// Generates a complete branch graph using L-system-inspired recursive subdivision
 ///
 /// This function creates a deterministic tree structure based on the provided configuration.
@@ -1627,5 +1659,175 @@ mod tests {
             "Mesh generation took {}ms (should be < 100ms)",
             duration.as_millis()
         );
+    }
+
+    // ==================== Phase 3: Foliage Distribution Tests ====================
+
+    #[test]
+    fn test_get_leaf_branches_finds_endpoints() {
+        // Generate a tree and verify leaf detection
+        let graph = generate_branch_graph(TreeType::Oak);
+        let leaf_indices = get_leaf_branches(&graph);
+
+        // Oak trees should have leaf branches (endpoints)
+        assert!(
+            !leaf_indices.is_empty(),
+            "Oak tree should have leaf branches"
+        );
+
+        // All returned indices should reference branches with no children
+        for &idx in &leaf_indices {
+            assert!(
+                idx < graph.branches.len(),
+                "Leaf index {} out of bounds",
+                idx
+            );
+            assert!(
+                graph.branches[idx].children.is_empty(),
+                "Branch {} should have no children",
+                idx
+            );
+        }
+    }
+
+    #[test]
+    fn test_get_leaf_branches_empty_graph() {
+        // Empty graph should return empty vector
+        let graph = BranchGraph::new();
+        let leaf_indices = get_leaf_branches(&graph);
+        assert!(leaf_indices.is_empty(), "Empty graph should have no leaves");
+    }
+
+    #[test]
+    fn test_get_leaf_branches_single_branch() {
+        // Single trunk branch should be a leaf
+        let mut graph = BranchGraph::new();
+        graph.add_branch(Branch {
+            start: Vec3::ZERO,
+            end: Vec3::new(0.0, 1.0, 0.0),
+            start_radius: 0.2,
+            end_radius: 0.15,
+            children: vec![],
+        });
+
+        let leaf_indices = get_leaf_branches(&graph);
+        assert_eq!(leaf_indices.len(), 1, "Single branch should be a leaf");
+        assert_eq!(leaf_indices[0], 0, "Trunk should be at index 0");
+    }
+
+    #[test]
+    fn test_get_leaf_branches_with_children() {
+        // Parent branch with children should not be a leaf
+        let mut graph = BranchGraph::new();
+
+        // Add parent branch
+        let parent_idx = graph.add_branch(Branch {
+            start: Vec3::ZERO,
+            end: Vec3::new(0.0, 1.0, 0.0),
+            start_radius: 0.2,
+            end_radius: 0.15,
+            children: vec![1, 2],
+        });
+
+        // Add child branches
+        graph.add_branch(Branch {
+            start: Vec3::new(0.0, 1.0, 0.0),
+            end: Vec3::new(-0.5, 1.5, 0.0),
+            start_radius: 0.15,
+            end_radius: 0.1,
+            children: vec![],
+        });
+
+        graph.add_branch(Branch {
+            start: Vec3::new(0.0, 1.0, 0.0),
+            end: Vec3::new(0.5, 1.5, 0.0),
+            start_radius: 0.15,
+            end_radius: 0.1,
+            children: vec![],
+        });
+
+        let leaf_indices = get_leaf_branches(&graph);
+
+        // Should find only the two child branches as leaves
+        assert_eq!(leaf_indices.len(), 2, "Should have exactly 2 leaf branches");
+
+        // Parent should not be in leaf list
+        assert!(
+            !leaf_indices.contains(&parent_idx),
+            "Parent branch should not be a leaf"
+        );
+
+        // Children should be leaves
+        assert!(leaf_indices.contains(&1), "Child 1 should be a leaf");
+        assert!(leaf_indices.contains(&2), "Child 2 should be a leaf");
+    }
+
+    #[test]
+    fn test_foliage_density_zero_produces_no_spheres() {
+        // TreeType::Dead has foliage_density = 0.0
+        let config = TreeType::Dead.config();
+        let cluster_size = (config.foliage_density * 5.0) as usize;
+        assert_eq!(
+            cluster_size, 0,
+            "Zero foliage density should produce 0 sphere clusters"
+        );
+    }
+
+    #[test]
+    fn test_foliage_density_max_produces_five_spheres() {
+        // Max foliage density (1.0) should produce 5 spheres
+        let max_density = 1.0;
+        let cluster_size = (max_density * 5.0) as usize;
+        assert_eq!(
+            cluster_size, 5,
+            "Max density (1.0) should produce 5 spheres"
+        );
+    }
+
+    #[test]
+    fn test_oak_tree_foliage_density() {
+        // Oak should have dense foliage (0.8)
+        let config = TreeType::Oak.config();
+        let cluster_size = (config.foliage_density * 5.0) as usize;
+        assert!(
+            (3..=5).contains(&cluster_size),
+            "Oak should have 3-5 foliage spheres per leaf"
+        );
+    }
+
+    #[test]
+    fn test_pine_tree_foliage_density() {
+        // Pine should have moderate foliage (0.5)
+        let config = TreeType::Pine.config();
+        let cluster_size = (config.foliage_density * 5.0) as usize;
+        assert!(
+            (2..=3).contains(&cluster_size),
+            "Pine should have 2-3 foliage spheres per leaf"
+        );
+    }
+
+    #[test]
+    fn test_get_leaf_branches_all_tree_types() {
+        // All tree types should have leaf branches
+        for tree_type in [
+            TreeType::Oak,
+            TreeType::Pine,
+            TreeType::Birch,
+            TreeType::Willow,
+            TreeType::Shrub,
+        ] {
+            let graph = generate_branch_graph(tree_type);
+            let leaf_indices = get_leaf_branches(&graph);
+
+            // These tree types should have foliage (non-zero density)
+            let config = tree_type.config();
+            if config.foliage_density > 0.0 {
+                assert!(
+                    !leaf_indices.is_empty(),
+                    "{} should have leaf branches",
+                    tree_type.name()
+                );
+            }
+        }
     }
 }

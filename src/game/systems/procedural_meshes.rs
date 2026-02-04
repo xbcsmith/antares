@@ -396,7 +396,6 @@ impl ProceduralMeshCache {
 const TREE_TRUNK_RADIUS: f32 = 0.15;
 const TREE_TRUNK_HEIGHT: f32 = 2.0;
 const TREE_FOLIAGE_RADIUS: f32 = 0.6;
-const TREE_FOLIAGE_Y_OFFSET: f32 = 0.0;
 
 // Event marker dimensions
 // Portal dimensions - rectangular frame standing vertically
@@ -601,6 +600,109 @@ const TILE_CENTER_OFFSET: f32 = 0.5;
 ///     &mut cache,
 /// );
 /// ```
+/// Spawns foliage clusters at leaf branch endpoints
+///
+/// This function distributes sphere-based foliage at the natural endpoints of tree branches.
+/// Each leaf branch gets a cluster of foliage spheres whose size and count depend on the
+/// foliage_density parameter from the tree configuration.
+///
+/// # Algorithm
+///
+/// 1. Identifies all leaf branches (endpoints with no children)
+/// 2. For each leaf, calculates cluster size: `(foliage_density * 5.0) as usize`
+/// 3. Spawns foliage spheres positioned at branch endpoint + random offset
+/// 4. Uses seeded RNG for deterministic placement (same seed = same foliage)
+/// 5. Sphere radius scales with branch.end_radius (proportional foliage)
+///
+/// # Arguments
+///
+/// * `commands` - Bevy commands for spawning entities
+/// * `materials` - Asset storage for materials
+/// * `meshes` - Asset storage for meshes
+/// * `graph` - The generated branch graph from the tree
+/// * `config` - Tree configuration with foliage_density parameter
+/// * `foliage_color` - Base color for foliage spheres
+/// * `parent_entity` - Parent entity to attach foliage to
+/// * `cache` - Procedural mesh cache (contains tree_foliage mesh)
+#[allow(clippy::too_many_arguments)]
+fn spawn_foliage_clusters(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    graph: &super::advanced_trees::BranchGraph,
+    config: &super::advanced_trees::TreeConfig,
+    foliage_color: Color,
+    parent_entity: Entity,
+    cache: &mut ProceduralMeshCache,
+) {
+    // Identify leaf branches (endpoints)
+    let leaf_indices = super::advanced_trees::get_leaf_branches(graph);
+
+    // Calculate cluster size from foliage density
+    let cluster_size = (config.foliage_density * 5.0) as usize;
+
+    // If no foliage requested, return early
+    if cluster_size == 0 || leaf_indices.is_empty() {
+        return;
+    }
+
+    // Create foliage material
+    let foliage_material = materials.add(StandardMaterial {
+        base_color: foliage_color,
+        perceptual_roughness: 0.7,
+        ..default()
+    });
+
+    // Get or create foliage mesh from cache
+    let foliage_mesh = cache.tree_foliage.clone().unwrap_or_else(|| {
+        let handle = meshes.add(Sphere {
+            radius: TREE_FOLIAGE_RADIUS,
+        });
+        cache.tree_foliage = Some(handle.clone());
+        handle
+    });
+
+    // Seeded RNG for deterministic foliage placement
+    use rand::Rng;
+    use rand::SeedableRng;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(42); // Fixed seed for consistency
+
+    // Spawn foliage at each leaf branch
+    for &leaf_idx in &leaf_indices {
+        let branch = &graph.branches[leaf_idx];
+
+        // Spawn multiple foliage spheres in a cluster
+        for _sphere_idx in 0..cluster_size {
+            // Random offset from branch endpoint (within radius 0.2-0.5)
+            let offset_radius = rng.random_range(0.2..=0.5);
+            let angle = rng.random_range(0.0..std::f32::consts::TAU);
+
+            let offset_x = offset_radius * angle.cos();
+            let offset_z = offset_radius * angle.sin();
+            let offset_y = rng.random_range(-0.1..0.1);
+
+            // Sphere radius scales with branch end radius (0.3-0.6)
+            let sphere_radius = (branch.end_radius * 1.5).clamp(0.3, 0.6);
+
+            // Position in parent's local space
+            let position = branch.end + Vec3::new(offset_x, offset_y, offset_z);
+
+            // Spawn foliage sphere
+            let foliage = commands
+                .spawn((
+                    Mesh3d(foliage_mesh.clone()),
+                    MeshMaterial3d(foliage_material.clone()),
+                    Transform::from_translation(position).with_scale(Vec3::splat(sphere_radius)),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                ))
+                .id();
+
+            commands.entity(parent_entity).add_child(foliage);
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_tree(
     commands: &mut Commands,
@@ -618,11 +720,8 @@ pub fn spawn_tree(
         .unwrap_or_default();
 
     // Phase 1: Generate branch graph for the tree type
-    let _branch_graph = if let Some(tree_type) = tree_type {
-        super::advanced_trees::generate_branch_graph(tree_type)
-    } else {
-        super::advanced_trees::generate_branch_graph(super::advanced_trees::TreeType::Oak)
-    };
+    let tree_type_resolved = tree_type.unwrap_or(super::advanced_trees::TreeType::Oak);
+    let branch_graph = super::advanced_trees::generate_branch_graph(tree_type_resolved);
 
     // Apply scale from visual config
     let scaled_trunk_height = TREE_TRUNK_HEIGHT * visual_config.height_multiplier;
@@ -659,15 +758,6 @@ pub fn spawn_tree(
         ..default()
     });
 
-    // Get or create foliage mesh from cache
-    let foliage_mesh = cache.tree_foliage.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Sphere {
-            radius: TREE_FOLIAGE_RADIUS,
-        });
-        cache.tree_foliage = Some(handle.clone());
-        handle
-    });
-
     // Apply color tint to foliage if present
     let foliage_color = visual_config
         .color_tint
@@ -683,12 +773,6 @@ pub fn spawn_tree(
             )
         })
         .unwrap_or(TREE_FOLIAGE_COLOR);
-
-    let foliage_material = materials.add(StandardMaterial {
-        base_color: foliage_color,
-        perceptual_roughness: 0.8,
-        ..default()
-    });
 
     // Spawn parent tree entity with optional rotation
     let parent = commands
@@ -722,18 +806,17 @@ pub fn spawn_tree(
         .id();
     commands.entity(parent).add_child(trunk);
 
-    // Spawn foliage child positioned at trunk top (scaled)
-    let foliage = commands
-        .spawn((
-            Mesh3d(foliage_mesh),
-            MeshMaterial3d(foliage_material),
-            Transform::from_xyz(0.0, scaled_trunk_height + TREE_FOLIAGE_Y_OFFSET, 0.0)
-                .with_scale(Vec3::splat(visual_config.scale)),
-            GlobalTransform::default(),
-            Visibility::default(),
-        ))
-        .id();
-    commands.entity(parent).add_child(foliage);
+    // Phase 3: Spawn foliage clusters at leaf branch endpoints
+    spawn_foliage_clusters(
+        commands,
+        materials,
+        meshes,
+        &branch_graph,
+        &tree_type_resolved.config(),
+        foliage_color,
+        parent,
+        cache,
+    );
 
     parent
 }
