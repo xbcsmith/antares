@@ -44,7 +44,7 @@ cargo run --bin update_tutorial_maps
 
 #### Map 1: Town Square
 - **Location**: `campaigns/tutorial/data/maps/map_1.ron`
-- **Updates**: 
+- **Updates**:
   - Grass area (5,5) to (15,15): Medium grass density, green color tint (0.3, 0.7, 0.3)
   - Corner Forest tiles: Oak trees with scale 0.8, foliage density 1.0
 - **Purpose**: Demonstrate grass clustering and decorative trees in urban setting
