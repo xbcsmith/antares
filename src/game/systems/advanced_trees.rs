@@ -245,6 +245,7 @@ impl From<&TileVisualMetadata> for TerrainVisualConfig {
     ///     sprite: None,
     ///     sprite_layers: vec![],
     ///     sprite_rule: None,
+    ///     ..Default::default()
     /// };
     /// let config = TerrainVisualConfig::from(&meta);
     /// assert_eq!(config.scale, 1.5);
@@ -679,6 +680,7 @@ pub fn get_leaf_branches(graph: &BranchGraph) -> Vec<usize> {
 ///
 /// ```
 /// use antares::game::systems::advanced_trees::{TreeType, generate_branch_graph};
+/// use bevy::prelude::Vec3;
 ///
 /// let graph = generate_branch_graph(TreeType::Oak);
 /// assert!(!graph.branches.is_empty());

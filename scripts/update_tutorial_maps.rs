@@ -1,32 +1,41 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+//! Phase 5: Tutorial Campaign Visual Metadata Updates
+//!
+//! Updates tutorial campaign maps with visual metadata for trees, grass, and terrain.
+//! Creates backup files before modification and applies area-based visual configurations.
+
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 enum TerrainType {
     Ground,
+    Grass,
+    Water,
+    Lava,
+    Swamp,
+    Stone,
+    Dirt,
     Forest,
     Mountain,
-    Water,
-    Swamp,
-    Desert,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 enum WallType {
+    #[serde(rename = "None")]
     None,
     Normal,
     Door,
     Torch,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 enum GrassDensity {
     None,
@@ -36,7 +45,7 @@ enum GrassDensity {
     VeryHigh,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 enum TreeType {
     Oak,
@@ -46,7 +55,7 @@ enum TreeType {
     Willow,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 enum RockVariant {
     Smooth,
@@ -55,7 +64,7 @@ enum RockVariant {
     Crystal,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 enum WaterFlowDirection {
     Still,
@@ -68,13 +77,26 @@ enum WaterFlowDirection {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 struct TileVisualMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
     height: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     width_x: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     width_z: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     color_tint: Option<(f32, f32, f32)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     scale: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     y_offset: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     rotation_y: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sprite: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    sprite_layers: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sprite_rule: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     grass_density: Option<GrassDensity>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,7 +121,6 @@ struct Tile {
     visited: bool,
     x: i32,
     y: i32,
-    event_trigger: Option<String>,
     #[serde(default)]
     visual: TileVisualMetadata,
 }
@@ -112,132 +133,238 @@ struct Map {
     name: String,
     description: String,
     tiles: Vec<Tile>,
-    events: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    events: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    encounter_table: Option<serde_json::Value>,
+    #[serde(default)]
+    allow_random_encounters: Option<bool>,
     #[serde(default)]
     npc_placements: Vec<serde_json::Value>,
 }
 
-fn update_starter_town_metadata(tiles: &mut [Tile]) {
-    // Add wall height variations
-    // Town outer walls - tall fortifications
+/// Updates forest area with specified tree type and visual metadata
+///
+/// # Arguments
+///
+/// * `tiles` - Mutable reference to tile array
+/// * `area` - Tuple of (min_x, min_y, max_x, max_y) bounds
+/// * `tree_type` - TreeType to apply to forest tiles
+/// * `foliage_density` - Foliage density multiplier (0.0 to 2.0)
+/// * `color_tint` - Optional color tint (R, G, B) as values 0.0-1.0
+fn update_forest_area_metadata(
+    tiles: &mut [Tile],
+    area: (i32, i32, i32, i32),
+    tree_type: TreeType,
+    foliage_density: f32,
+    color_tint: Option<(f32, f32, f32)>,
+) {
+    let (min_x, min_y, max_x, max_y) = area;
+
     for tile in tiles {
-        if tile.x == 0 || tile.x == 19 || tile.y == 0 || tile.y == 14 {
-            if tile.wall_type != WallType::None {
-                tile.visual.height = Some(3.5);
-                tile.visual.color_tint = Some((0.7, 0.7, 0.7));
-            }
-        }
-        // Interior divider walls
-        if (tile.x == 10 || tile.x == 11) && (5..=6).contains(&tile.y) {
-            if tile.wall_type != WallType::None {
-                tile.visual.height = Some(1.5);
-            }
-        }
-        // Decorative pillars at entrance
-        if (tile.x == 9 || tile.x == 10) && tile.y == 0 {
-            if tile.wall_type != WallType::None {
-                tile.visual.height = Some(4.0);
-                tile.visual.scale = Some(0.3);
-                tile.visual.color_tint = Some((0.8, 0.8, 0.8));
+        if tile.x >= min_x && tile.x <= max_x && tile.y >= min_y && tile.y <= max_y {
+            if matches!(tile.terrain, TerrainType::Forest) {
+                tile.visual.tree_type = Some(tree_type);
+                tile.visual.foliage_density = Some(foliage_density);
+                if let Some(tint) = color_tint {
+                    tile.visual.color_tint = Some(tint);
+                }
+                // Add rotation variation for natural placement (0 to 360 degrees)
+                let rotation = ((tile.x + tile.y) as f32 * 13.7) % 360.0;
+                tile.visual.rotation_y = Some(rotation);
             }
         }
     }
 }
 
-fn update_forest_area_metadata(tiles: &mut [Tile]) {
-    // Add tree types and grass density variations
+/// Updates grass area with specified grass density and visual metadata
+///
+/// # Arguments
+///
+/// * `tiles` - Mutable reference to tile array
+/// * `area` - Tuple of (min_x, min_y, max_x, max_y) bounds
+/// * `grass_density` - GrassDensity level
+/// * `color_tint` - Optional color tint (R, G, B) as values 0.0-1.0
+fn update_grass_area_metadata(
+    tiles: &mut [Tile],
+    area: (i32, i32, i32, i32),
+    grass_density: GrassDensity,
+    color_tint: Option<(f32, f32, f32)>,
+) {
+    let (min_x, min_y, max_x, max_y) = area;
+
     for tile in tiles {
-        // Dense oak forest (north section)
-        if (5..=7).contains(&tile.x) && (2..=4).contains(&tile.y) {
-            if matches!(tile.terrain, TerrainType::Forest) {
+        if tile.x >= min_x && tile.x <= max_x && tile.y >= min_y && tile.y <= max_y {
+            if matches!(tile.terrain, TerrainType::Grass | TerrainType::Ground) {
+                tile.visual.grass_density = Some(grass_density);
+                if let Some(tint) = color_tint {
+                    tile.visual.color_tint = Some(tint);
+                }
+                // Add scale variation for natural look (0.8 to 1.2)
+                let scale = 0.8
+                    + ((tile.x.wrapping_mul(7) ^ tile.y.wrapping_mul(11)) as f32 % 41.0) / 100.0;
+                tile.visual.scale = Some(scale);
+            }
+        }
+    }
+}
+
+/// Apply visual configurations to map 1 (Town Square with grass courtyard)
+fn apply_map1_configuration(map: &mut Map) {
+    println!("  Configuring Map 1 (Town Square)...");
+
+    // Grass tiles in courtyard area with Medium density
+    update_grass_area_metadata(
+        &mut map.tiles,
+        (5, 5, 15, 15),
+        GrassDensity::Medium,
+        Some((0.3, 0.7, 0.3)),
+    );
+
+    // Decorative trees at corners
+    for tile in &mut map.tiles {
+        if matches!(tile.terrain, TerrainType::Forest) {
+            if (tile.x == 2 || tile.x == 18) && (tile.y == 2 || tile.y == 18) {
                 tile.visual.tree_type = Some(TreeType::Oak);
-                tile.visual.foliage_density = Some(1.8);
-                tile.visual.color_tint = Some((0.2, 0.6, 0.2));
-            }
-        }
-        // Pine grove (east section)
-        if (15..=17).contains(&tile.x) && (8..=10).contains(&tile.y) {
-            if matches!(tile.terrain, TerrainType::Forest) {
-                tile.visual.tree_type = Some(TreeType::Pine);
-                tile.visual.foliage_density = Some(1.2);
-                tile.visual.color_tint = Some((0.1, 0.5, 0.15));
-            }
-        }
-        // Dead trees near dungeon entrance
-        if (10..=12).contains(&tile.x) && (18..=19).contains(&tile.y) {
-            if matches!(tile.terrain, TerrainType::Forest) {
-                tile.visual.tree_type = Some(TreeType::Dead);
-                tile.visual.color_tint = Some((0.4, 0.3, 0.2));
-            }
-        }
-        // Grassland with varying density
-        if tile.y == 10 {
-            if matches!(tile.terrain, TerrainType::Ground | TerrainType::Forest) {
-                match tile.x {
-                    2 => tile.visual.grass_density = Some(GrassDensity::Low),
-                    3 => tile.visual.grass_density = Some(GrassDensity::Medium),
-                    4 => tile.visual.grass_density = Some(GrassDensity::High),
-                    5 => tile.visual.grass_density = Some(GrassDensity::VeryHigh),
-                    _ => {}
-                }
+                tile.visual.scale = Some(0.8);
+                tile.visual.foliage_density = Some(1.0);
             }
         }
     }
 }
 
-fn update_starter_dungeon_metadata(tiles: &mut [Tile]) {
-    // Add rock variants and water flow
-    for tile in tiles {
-        // Jagged cave walls
-        if (1..=3).contains(&tile.x) && (1..=3).contains(&tile.y) {
-            if matches!(tile.terrain, TerrainType::Mountain) || tile.wall_type != WallType::None {
-                tile.visual.rock_variant = Some(RockVariant::Jagged);
-                tile.visual.color_tint = Some((0.5, 0.45, 0.4));
-            }
+/// Apply visual configurations to map 2 (Forest Path with Oak and Pine variations)
+fn apply_map2_configuration(map: &mut Map) {
+    println!("  Configuring Map 2 (Forest Path)...");
+
+    // Oak forest section
+    update_forest_area_metadata(
+        &mut map.tiles,
+        (0, 0, 10, 20),
+        TreeType::Oak,
+        1.8,
+        Some((0.2, 0.6, 0.2)),
+    );
+
+    // Pine forest section
+    update_forest_area_metadata(
+        &mut map.tiles,
+        (10, 0, 20, 20),
+        TreeType::Pine,
+        1.2,
+        Some((0.1, 0.5, 0.15)),
+    );
+}
+
+/// Apply visual configurations to map 3 (Mountain Trail with sparse trees)
+fn apply_map3_configuration(map: &mut Map) {
+    println!("  Configuring Map 3 (Mountain Trail)...");
+
+    // Sparse Pine trees across the map
+    update_forest_area_metadata(&mut map.tiles, (0, 0, 20, 20), TreeType::Pine, 0.8, None);
+}
+
+/// Apply visual configurations to map 4 (Swamp with dead trees)
+fn apply_map4_configuration(map: &mut Map) {
+    println!("  Configuring Map 4 (Swamp)...");
+
+    // Dead trees with zero foliage
+    update_forest_area_metadata(
+        &mut map.tiles,
+        (0, 0, 20, 20),
+        TreeType::Dead,
+        0.0,
+        Some((0.4, 0.3, 0.2)),
+    );
+
+    // Also handle swamp terrain
+    for tile in &mut map.tiles {
+        if matches!(tile.terrain, TerrainType::Swamp) {
+            tile.visual.color_tint = Some((0.35, 0.45, 0.3));
         }
-        // Crystal formations in treasure room
-        if (15..=16).contains(&tile.x) && (15..=16).contains(&tile.y) {
-            if matches!(tile.terrain, TerrainType::Mountain) {
-                tile.visual.rock_variant = Some(RockVariant::Crystal);
-                tile.visual.color_tint = Some((0.5, 0.5, 1.0));
-            }
-        }
-        // Layered sedimentary rocks
-        if (8..=9).contains(&tile.x) && (8..=9).contains(&tile.y) {
-            if matches!(tile.terrain, TerrainType::Mountain) {
-                tile.visual.rock_variant = Some(RockVariant::Layered);
-                tile.visual.color_tint = Some((0.6, 0.55, 0.5));
-            }
-        }
-        // Underground river with flow direction
-        if tile.y == 5 {
-            if matches!(tile.terrain, TerrainType::Water) {
-                match tile.x {
-                    10..=12 => tile.visual.water_flow_direction = Some(WaterFlowDirection::East),
-                    13..=14 => tile.visual.water_flow_direction = Some(WaterFlowDirection::South),
-                    _ => tile.visual.water_flow_direction = Some(WaterFlowDirection::Still),
-                }
-                tile.visual.color_tint = Some((0.3, 0.4, 0.6));
-            }
-        }
-        // Dungeon water pools
-        if (tile.x >= 6 && tile.x <= 8) && (tile.y >= 12 && tile.y <= 14) {
-            if matches!(tile.terrain, TerrainType::Water) {
-                tile.visual.water_flow_direction = Some(WaterFlowDirection::Still);
-                tile.visual.color_tint = Some((0.2, 0.3, 0.5));
+    }
+}
+
+/// Apply visual configurations to map 5 (Dense Forest with varied types)
+fn apply_map5_configuration(map: &mut Map) {
+    println!("  Configuring Map 5 (Dense Forest)...");
+
+    // Oak forest (60% of tiles) - north and west sections
+    update_forest_area_metadata(
+        &mut map.tiles,
+        (0, 0, 12, 12),
+        TreeType::Oak,
+        1.5,
+        Some((0.25, 0.65, 0.25)),
+    );
+
+    // Willow forest (30% of tiles) - east section
+    update_forest_area_metadata(
+        &mut map.tiles,
+        (13, 0, 20, 20),
+        TreeType::Willow,
+        1.3,
+        Some((0.3, 0.55, 0.35)),
+    );
+
+    // Pine trees (10% scattered) - south section
+    update_forest_area_metadata(
+        &mut map.tiles,
+        (0, 13, 12, 20),
+        TreeType::Pine,
+        1.4,
+        Some((0.2, 0.6, 0.25)),
+    );
+
+    // Apply scale and rotation variation for natural placement
+    for tile in &mut map.tiles {
+        if matches!(tile.terrain, TerrainType::Forest) {
+            if tile.visual.tree_type.is_some() {
+                // Randomized scale: 0.9 to 1.3
+                let scale = 0.9
+                    + ((tile.x.wrapping_mul(19) ^ tile.y.wrapping_mul(23)) as f32 % 40.0) / 100.0;
+                tile.visual.scale = Some(scale);
+
+                // Randomized rotation: 0 to 360 degrees
+                let rotation = ((tile.x.wrapping_mul(17) ^ tile.y.wrapping_mul(29)) as f32 % 360.0);
+                tile.visual.rotation_y = Some(rotation);
             }
         }
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n=== Phase 5: Tutorial Campaign Visual Metadata Updates ===\n");
+
     let maps = vec![
-        ("data/maps/starter_town.ron", "Map 1: Town Square"),
-        ("data/maps/forest_area.ron", "Map 2: Forest Entrance"),
-        ("data/maps/starter_dungeon.ron", "Map 3: Dungeon Level 1"),
+        (
+            "campaigns/tutorial/data/maps/map_1.ron",
+            "Map 1: Town Square",
+            apply_map1_configuration,
+        ),
+        (
+            "campaigns/tutorial/data/maps/map_2.ron",
+            "Map 2: Forest Path",
+            apply_map2_configuration,
+        ),
+        (
+            "campaigns/tutorial/data/maps/map_3.ron",
+            "Map 3: Mountain Trail",
+            apply_map3_configuration,
+        ),
+        (
+            "campaigns/tutorial/data/maps/map_4.ron",
+            "Map 4: Swamp",
+            apply_map4_configuration,
+        ),
+        (
+            "campaigns/tutorial/data/maps/map_5.ron",
+            "Map 5: Dense Forest",
+            apply_map5_configuration,
+        ),
     ];
 
-    for (map_path, description) in maps {
+    for (map_path, description, apply_config) in maps {
         if !Path::new(map_path).exists() {
             eprintln!("Warning: {} not found at {}", description, map_path);
             continue;
@@ -245,33 +372,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("Processing {}...", description);
 
-        // Read map file
+        // Create backup file
+        let backup_path = format!("{}.bak", map_path);
         let content = fs::read_to_string(map_path)?;
+        fs::write(&backup_path, &content)?;
+        println!("  ✓ Backup created: {}", backup_path);
 
-        // Parse with ron
+        // Parse map
         let mut map: Map = ron::from_str(&content)?;
 
-        // Apply terrain-specific updates
-        match map.id {
-            1 => update_starter_town_metadata(&mut map.tiles),
-            2 => update_forest_area_metadata(&mut map.tiles),
-            3 => update_starter_dungeon_metadata(&mut map.tiles),
-            _ => println!("  Skipping unknown map ID: {}", map.id),
-        }
+        // Apply configuration
+        apply_config(&mut map);
 
         // Serialize back with ron
         let pretty_config = ron::ser::PrettyConfig::default()
-            .with_depth_limit(2)
-            .with_separate_tuple_members(true)
-            .with_enumerate_arrays(true);
+            .with_depth_limit(4)
+            .with_separate_tuple_members(true);
 
         let serialized = ron::ser::to_string_pretty(&map, pretty_config)?;
 
         // Write back
         fs::write(map_path, serialized)?;
-        println!("  ✓ Successfully updated {}", map_path);
+        println!("  ✓ Successfully updated {}\n", map_path);
     }
 
-    println!("\nAll tutorial maps updated successfully!");
+    println!("=== Summary ===");
+    println!("✓ Map 1: Town Square - Grass courtyard with Medium density configured");
+    println!("✓ Map 2: Forest Path - Oak and Pine forest sections configured");
+    println!("✓ Map 3: Mountain Trail - Sparse Pine trees configured");
+    println!("✓ Map 4: Swamp - Dead trees with zero foliage configured");
+    println!("✓ Map 5: Dense Forest - Varied tree types (Oak/Willow/Pine) with randomization");
+    println!("\n✓ All tutorial maps updated successfully!");
+    println!("✓ Backup files created for all maps (*.ron.bak)\n");
+
     Ok(())
 }

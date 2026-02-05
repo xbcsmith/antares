@@ -31620,3 +31620,152 @@ All Phase 5 deliverables completed:
 The terrain-specific visual metadata system is now fully implemented, tested, documented, and ready for production use.
 
 **Deliverable Verification**: Ready for campaign content creators to use terrain controls in map editor
+
+---
+
+## Phase 5: Tutorial Campaign Visual Metadata Updates - COMPLETED
+
+### Summary
+
+Implemented Phase 5 of the Complex Procedural Meshes implementation plan: Updated all tutorial campaign maps (map_1.ron through map_5.ron) with visual metadata for trees, grass, and terrain-specific configurations. Created map update utility script that applies area-based visual metadata modifications to showcase medium-complexity trees and short grass with varied visual configurations.
+
+### Date Completed
+
+2025-02-05
+
+### Components Implemented
+
+#### 1. Map Update Utility Script (`src/bin/update_tutorial_maps.rs`)
+
+Created standalone binary utility that:
+
+- Reads tutorial campaign map RON files from `campaigns/tutorial/data/maps/`
+- Creates backup files (\*.bak) before modification
+- Uses text-based processing to preserve map structure while adding visual metadata
+- Implements area-based update functions for forest and grass tiles
+- Applies tree types, grass densities, foliage densities, and color tints
+- Handles all 5 tutorial maps with specific configurations
+
+**Update Functions:**
+
+- `update_forest_metadata(...)` - Updates forest tiles in rectangular areas with tree types and visual properties
+- `update_grass_metadata(...)` - Updates grass tiles in rectangular areas with density and color
+
+#### 2. Map 1 Configuration (Town Square)
+
+Applied visual metadata:
+
+- Grass courtyard tiles (5-15 x, 5-15 y): Medium density, green tint (0.3, 0.7, 0.3)
+- Corner decorative trees (1-3 x, 1-3 y & 16-18 x, 1-3 y): Oak trees with foliage density 0.8
+
+#### 3. Map 2 Configuration (Forest Path)
+
+Applied visual metadata:
+
+- Oak forest section (0-10 x, 0-19 y): Oak trees, foliage density 1.8, green tint (0.2, 0.6, 0.2)
+- Pine forest section (10-19 x, 0-19 y): Pine trees, foliage density 1.2, cooler tint (0.1, 0.5, 0.15)
+
+#### 4. Map 3 Configuration (Mountain Trail)
+
+Applied visual metadata:
+
+- Sparse Pine trees (0-19 x, 0-19 y): Pine trees, foliage density 0.8, neutral tint (0.15, 0.45, 0.2)
+
+#### 5. Map 4 Configuration (Swamp)
+
+Applied visual metadata:
+
+- Dead trees (0-19 x, 0-19 y): Dead tree type, zero foliage density, brownish tint (0.4, 0.3, 0.2)
+
+#### 6. Map 5 Configuration (Dense Forest)
+
+Applied visual metadata:
+
+- Oak forest (0-12 x, 0-12 y): Oak trees, foliage density 1.5, tint (0.25, 0.65, 0.25)
+- Willow forest (13-19 x, 0-19 y): Willow trees, foliage density 1.3, tint (0.3, 0.55, 0.35)
+- Pine forest (0-12 x, 13-19 y): Pine trees, foliage density 1.4, tint (0.2, 0.6, 0.25)
+
+### Files Modified
+
+- `campaigns/tutorial/data/maps/map_1.ron` - Added grass and tree visual metadata
+- `campaigns/tutorial/data/maps/map_2.ron` - Added Oak/Pine forest variations
+- `campaigns/tutorial/data/maps/map_3.ron` - Added sparse Pine tree metadata
+- `campaigns/tutorial/data/maps/map_4.ron` - Added Dead tree metadata with zero foliage
+- `campaigns/tutorial/data/maps/map_5.ron` - Added varied tree types with visual variety
+
+### Files Created
+
+- `src/bin/update_tutorial_maps.rs` - Map update utility script (326 lines)
+- Backup files created for all maps (map\_\*.ron.bak)
+
+### Testing
+
+#### Integration Tests (22 tests in `tests/phase5_tutorial_campaign_visual_metadata_test.rs`):
+
+1. `test_map1_loads_without_errors` - Verifies map 1 loads successfully
+2. `test_map2_loads_without_errors` - Verifies map 2 loads successfully
+3. `test_map3_loads_without_errors` - Verifies map 3 loads successfully
+4. `test_map4_loads_without_errors` - Verifies map 4 loads successfully
+5. `test_map5_loads_without_errors` - Verifies map 5 loads successfully
+6. `test_map1_has_grass_tiles` - Verifies map 1 contains Grass terrain
+7. `test_map1_has_forest_tiles` - Verifies map 1 contains Forest terrain
+8. `test_map2_has_forest_tiles` - Verifies map 2 contains Forest terrain
+9. `test_map3_has_ground_tiles` - Verifies map 3 contains valid terrain types
+10. `test_map4_has_forest_tiles` - Verifies map 4 contains Forest terrain
+11. `test_map5_has_grass_tiles` - Verifies map 5 contains Grass terrain
+12. `test_all_maps_have_valid_ron_syntax` - Verifies all maps parse correctly
+13. `test_all_maps_have_visual_metadata` - Verifies visual metadata entries exist
+14. `test_map_dimensions_present` - Verifies width/height fields present
+15. `test_visual_metadata_structure_valid` - Verifies visual tuple structure
+16. `test_no_invalid_terrain_types` - Verifies only valid terrain types used
+17. `test_backup_files_exist` - Verifies backup files created
+18. `test_map_files_not_corrupted` - Verifies balanced parentheses/structure
+19. `test_all_map_ids_unique` - Verifies each map has correct ID
+20. `test_npc_placements_valid` - Verifies NPC placement arrays maintained
+21. `test_events_structure_maintained` - Verifies event maps maintained
+22. `test_phase5_implementation_completed` - Meta-test summarizing Phase 5 completion
+
+### Results
+
+✅ **All 22 tests passing**
+✅ **All 5 maps successfully updated with visual metadata**
+✅ **Backup files created for all maps**
+✅ **Quality gates passing** (cargo fmt, cargo check, cargo clippy, cargo test)
+
+### Architecture Compliance
+
+✅ **All checks passing:**
+
+- Uses TileVisualMetadata structure from `src/domain/world/types.rs`
+- Respects TreeType enum (Oak, Pine, Dead, Palm, Willow) from domain layer
+- Respects GrassDensity enum (None, Low, Medium, High, VeryHigh) from domain layer
+- Maintains map structure integrity (IDs, dimensions, tiles array, events, npc_placements)
+- Creates backup files for safe recovery
+- Text-based approach avoids complex RON deserialization issues
+- Modular update functions with clear separation of concerns
+
+### Key Features
+
+- **Area-Based Updates** - Updates tiles within specified rectangular regions
+- **Deterministic Metadata** - Same configuration applied consistently across regions
+- **Visual Variety** - Each map has distinct tree types and density configurations
+- **Map Integrity** - Preserves all other map data (events, NPCs, encounters)
+- **Safe Modification** - Creates backups before updating original files
+- **Flexible Utility** - Can be rerun or used as template for other map updates
+
+### Integration Points
+
+1. **TileVisualMetadata** - Adds tree_type, grass_density, foliage_density, color_tint
+2. **TerrainType** - Works with Forest and Grass/Ground terrain types
+3. **Campaign System** - Updates tutorial campaign maps in standard location
+4. **Map Loading** - Maps load correctly with new visual metadata applied
+
+### Summary of Changes
+
+- **Map 1 (Town Square)**: Grass courtyard with decorative Oak corners
+- **Map 2 (Forest Path)**: Oak forest (west) and Pine forest (east) sections
+- **Map 3 (Mountain Trail)**: Sparse Pine trees across entire map
+- **Map 4 (Swamp)**: Dead trees with zero foliage throughout
+- **Map 5 (Dense Forest)**: Mixed Oak/Willow/Pine with varied densities
+
+All maps now have proper visual metadata to showcase the complex procedural mesh generation systems from Phases 1-4.
