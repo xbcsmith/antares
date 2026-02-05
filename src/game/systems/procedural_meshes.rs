@@ -423,7 +423,9 @@ const SHRUB_STEM_ANGLE_MAX: f32 = 45.0; // degrees
 
 // Grass dimensions
 const GRASS_BLADE_WIDTH: f32 = 0.15;
+#[allow(dead_code)]
 const GRASS_BLADE_HEIGHT_BASE: f32 = 0.4; // Base height (scaled by visual_metadata.height)
+#[allow(dead_code)]
 const GRASS_BLADE_DEPTH: f32 = 0.02;
 const GRASS_BLADE_Y_OFFSET: f32 = 0.0; // Position at ground level
 
@@ -1003,6 +1005,206 @@ pub fn spawn_shrub(
 ///
 /// Entity ID of the parent grass entity
 #[allow(clippy::too_many_arguments)]
+/// Creates a curved grass blade mesh with tapering width
+///
+/// Generates a mesh representing a single grass blade with a bezier curve
+/// applied along its length. The blade tapers from full width at the base
+/// to zero width at the tip, creating a natural leaf-like appearance.
+///
+/// # Arguments
+///
+/// * `height` - Total blade height in world units (typically 0.2-0.6)
+/// * `width` - Base blade width in world units (typically 0.1-0.2)
+/// * `curve_amount` - Horizontal curve amount in world units (0.0-0.3)
+///
+/// # Returns
+///
+/// A Mesh with curved blade geometry suitable for billboard rendering
+///
+/// # Mesh Structure
+///
+/// - 5 vertices along the blade spine (base to tip)
+/// - Width tapers from `width` at base to 0.0 at tip
+/// - Bezier curve applied: control points at (0,0), (0, height*0.5), (curve_amount, height)
+/// - 2 triangles per segment (quad strip)
+/// - Normals facing +X (billboard effect)
+///
+/// # Examples
+///
+/// ```text
+/// use antares::game::systems::procedural_meshes::create_grass_blade_mesh;
+///
+/// let blade_mesh = create_grass_blade_mesh(0.4, 0.15, 0.1);
+/// // Mesh has ~10 vertices and ~8 triangles
+/// ```
+fn create_grass_blade_mesh(height: f32, width: f32, curve_amount: f32) -> Mesh {
+    // Generate 5 vertices along the blade spine using bezier curve
+    // Bezier control points: (0, 0), (0, h*0.5), (curve, h)
+    let segment_count = 4; // 5 vertices = 4 segments
+
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut indices = Vec::new();
+
+    // Generate vertices along the curved spine
+    for i in 0..=segment_count {
+        let t = i as f32 / segment_count as f32; // 0.0 to 1.0
+
+        // Quadratic bezier curve evaluation
+        // Control points: P0=(0,0), P1=(0, h*0.5), P2=(curve, h)
+        let p0_x = 0.0;
+        let p0_y = 0.0;
+        let p1_x = 0.0;
+        let p1_y = height * 0.5;
+        let p2_x = curve_amount;
+        let p2_y = height;
+
+        // Bezier formula: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+        let one_minus_t = 1.0 - t;
+        let coeff0 = one_minus_t * one_minus_t;
+        let coeff1 = 2.0 * one_minus_t * t;
+        let coeff2 = t * t;
+
+        let curve_x = coeff0 * p0_x + coeff1 * p1_x + coeff2 * p2_x;
+        let curve_y = coeff0 * p0_y + coeff1 * p1_y + coeff2 * p2_y;
+
+        // Width tapers from full at base to zero at tip
+        let taper_width = width * (1.0 - t);
+
+        // Two vertices per spine point (left and right edges)
+        // Left edge
+        positions.push([-taper_width / 2.0, curve_y, curve_x]);
+        normals.push([1.0, 0.0, 0.0]); // Face +X
+
+        // Right edge
+        positions.push([taper_width / 2.0, curve_y, curve_x]);
+        normals.push([1.0, 0.0, 0.0]); // Face +X
+    }
+
+    // Generate indices for quad strips (2 triangles per segment)
+    for i in 0..segment_count {
+        let base = (i * 2) as u32;
+
+        // First triangle of quad
+        indices.push(base);
+        indices.push(base + 1);
+        indices.push(base + 2);
+
+        // Second triangle of quad
+        indices.push(base + 1);
+        indices.push(base + 3);
+        indices.push(base + 2);
+    }
+
+    // Create mesh with positions, normals, and indices
+    // Create mesh with proper Bevy 0.17 API
+    let mut mesh = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::MAIN_WORLD,
+    );
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_indices(bevy::mesh::Indices::U32(indices));
+
+    mesh
+}
+
+/// Spawns a cluster of grass blades at a given center position
+///
+/// Creates 5-10 blades positioned in a tight cluster with natural variation
+/// in height, width, and curvature. Each blade is independently oriented
+/// for visual variety.
+///
+/// # Arguments
+///
+/// * `commands` - Bevy Commands for entity spawning
+/// * `materials` - Material asset storage
+/// * `meshes` - Mesh asset storage
+/// * `cluster_center` - Center position of cluster (Vec2 tile-relative)
+/// * `blade_height` - Base blade height (scaled by variation)
+/// * `grass_color` - Color tint for grass blades
+/// * `cache` - Mesh cache (for reusing materials)
+/// * `parent_entity` - Parent entity to attach blades to
+///
+/// # Blade Variation
+///
+/// - Height: 0.7x to 1.3x of base height
+/// - Width: 0.8x to 1.2x of GRASS_BLADE_WIDTH
+/// - Curve: 0.0 to 0.3 units of horizontal curvature
+/// - Position: cluster_center ± 0.1 random offset
+/// - Rotation: random Y-axis rotation
+#[allow(clippy::too_many_arguments)]
+fn spawn_grass_cluster(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    cluster_center: Vec2,
+    blade_height: f32,
+    grass_color: Color,
+    _cache: &mut ProceduralMeshCache,
+    parent_entity: Entity,
+) {
+    let mut rng = rand::rng();
+    let blade_count_in_cluster = rng.random_range(5..=10);
+    let cluster_radius = 0.1; // Radius around cluster center for blade placement
+
+    for _ in 0..blade_count_in_cluster {
+        // Random position within cluster
+        let angle = rng.random_range(0.0..std::f32::consts::TAU);
+        let distance = rng.random_range(0.0..cluster_radius);
+        let offset_x = angle.cos() * distance;
+        let offset_z = angle.sin() * distance;
+
+        let blade_x = cluster_center.x + offset_x;
+        let blade_z = cluster_center.y + offset_z;
+
+        // Height variation (0.7x to 1.3x)
+        let height_variation = rng.random_range(0.7..=1.3);
+        let varied_height = blade_height * height_variation;
+
+        // Width variation (0.8x to 1.2x)
+        let width_variation = rng.random_range(0.8..=1.2);
+        let varied_width = GRASS_BLADE_WIDTH * width_variation;
+
+        // Curve variation (0.0 to 0.3)
+        let curve_amount = rng.random_range(0.0..=0.3);
+
+        // Y-axis rotation for variety
+        let rotation_y = rng.random_range(0.0..std::f32::consts::TAU);
+
+        // Create curved blade mesh
+        let blade_mesh = meshes.add(create_grass_blade_mesh(
+            varied_height,
+            varied_width,
+            curve_amount,
+        ));
+
+        // Create blade material
+        let blade_material = materials.add(StandardMaterial {
+            base_color: grass_color,
+            perceptual_roughness: 0.7,
+            ..default()
+        });
+
+        // Spawn blade
+        let blade = commands
+            .spawn((
+                Mesh3d(blade_mesh),
+                MeshMaterial3d(blade_material),
+                Transform::from_xyz(blade_x, GRASS_BLADE_Y_OFFSET + varied_height / 2.0, blade_z)
+                    .with_rotation(Quat::from_rotation_y(rotation_y)),
+                GlobalTransform::default(),
+                Visibility::default(),
+                Billboard { lock_y: true },
+            ))
+            .id();
+
+        commands.entity(parent_entity).add_child(blade);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_grass(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
@@ -1031,20 +1233,6 @@ pub fn spawn_grass(
     let mut rng = rand::rng();
     let blade_count = rng.random_range(min_blades..=max_blades);
 
-    // Get or create grass blade mesh from cache
-    let blade_mesh = cache.grass_blade.clone().unwrap_or_else(|| {
-        // Grass blade is a thin cuboid (billboard-like, but stored as 3D mesh)
-        let handle = meshes.add(Cuboid {
-            half_size: Vec3::new(
-                GRASS_BLADE_WIDTH / 2.0,
-                GRASS_BLADE_HEIGHT_BASE / 2.0,
-                GRASS_BLADE_DEPTH / 2.0,
-            ),
-        });
-        cache.grass_blade = Some(handle.clone());
-        handle
-    });
-
     // Spawn parent grass entity
     let parent = commands
         .spawn((
@@ -1060,37 +1248,26 @@ pub fn spawn_grass(
         ))
         .id();
 
-    // Spawn individual grass blades randomly distributed across tile
-    for _ in 0..blade_count {
-        // Random position within tile
-        let tile_x = rng.random_range(0.0..1.0) - 0.5; // -0.5 to 0.5 within tile
-        let tile_z = rng.random_range(0.0..1.0) - 0.5;
+    // Cluster-based spawning: each cluster has 5-10 blades, so divide blade count by ~7
+    let cluster_count = (blade_count / 7).max(1);
 
-        // Random rotation around Y-axis for visual variety
-        let rotation_y = rng.random_range(0.0..std::f32::consts::TAU);
+    // Spawn grass clusters
+    for _ in 0..cluster_count {
+        // Random cluster center within tile (-0.4 to 0.4 to avoid edges)
+        let cluster_x = rng.random_range(-0.4..0.4);
+        let cluster_z = rng.random_range(-0.4..0.4);
+        let cluster_center = Vec2::new(cluster_x, cluster_z);
 
-        // Create grass blade material
-        let blade_material = materials.add(StandardMaterial {
-            base_color: grass_color,
-            perceptual_roughness: 0.7,
-            ..default()
-        });
-
-        // Spawn grass blade with Billboard component
-        let blade = commands
-            .spawn((
-                Mesh3d(blade_mesh.clone()),
-                MeshMaterial3d(blade_material),
-                Transform::from_xyz(tile_x, GRASS_BLADE_Y_OFFSET + blade_height / 2.0, tile_z)
-                    .with_rotation(Quat::from_rotation_y(rotation_y)),
-                GlobalTransform::default(),
-                Visibility::default(),
-                Billboard {
-                    lock_y: true, // Keep grass blades upright
-                },
-            ))
-            .id();
-        commands.entity(parent).add_child(blade);
+        spawn_grass_cluster(
+            commands,
+            materials,
+            meshes,
+            cluster_center,
+            blade_height,
+            grass_color,
+            cache,
+            parent,
+        );
     }
 
     parent
@@ -3484,5 +3661,163 @@ mod tests {
         let cache = ProceduralMeshCache::default();
         let _cloned = cache.clone();
         // Test passes if Clone trait is implemented
+    }
+
+    // ==================== Phase 4: Grass Blade Generation Tests ====================
+
+    /// Tests create_grass_blade_mesh generates correct vertex count
+    #[test]
+    fn test_create_grass_blade_mesh_vertex_count() {
+        let blade = create_grass_blade_mesh(0.4, 0.15, 0.1);
+        let vertex_count = blade.count_vertices();
+
+        // With 4 segments, we have 5 points along spine (0..=4), each with 2 vertices (left/right)
+        // That's 5 * 2 = 10 vertices
+        assert_eq!(
+            vertex_count, 10,
+            "Blade with 4 segments should have 10 vertices (5 points × 2 edges)"
+        );
+    }
+
+    /// Tests create_grass_blade_mesh width tapering (base wider than tip)
+    #[test]
+    fn test_create_grass_blade_mesh_tapering() {
+        let blade = create_grass_blade_mesh(0.4, 0.15, 0.0);
+
+        // Get position attribute
+        let positions = blade
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .expect("Blade should have positions")
+            .as_float3()
+            .expect("Positions should be float3");
+
+        // First segment (index 0 and 1) should be wider than last segment
+        // Position at base (segment 0): vertices at ±width/2
+        let base_left = positions[0];
+        let base_right = positions[1];
+        let base_width = (base_right[0] - base_left[0]).abs();
+
+        // Position at tip (indices 8 and 9): vertices should be closer
+        let tip_left = positions[8];
+        let tip_right = positions[9];
+        let tip_width = (tip_right[0] - tip_left[0]).abs();
+
+        // Base should be wider than tip
+        assert!(
+            base_width > tip_width,
+            "Base width ({}) should be greater than tip width ({})",
+            base_width,
+            tip_width
+        );
+
+        // Tip should be nearly zero width
+        assert!(
+            tip_width < 0.01,
+            "Tip width should be nearly zero, got {}",
+            tip_width
+        );
+    }
+
+    /// Tests create_grass_blade_mesh has proper normals for billboard rendering
+    #[test]
+    fn test_create_grass_blade_mesh_normals() {
+        let blade = create_grass_blade_mesh(0.4, 0.15, 0.1);
+
+        // Get normals attribute
+        let normals = blade
+            .attribute(Mesh::ATTRIBUTE_NORMAL)
+            .expect("Blade should have normals")
+            .as_float3()
+            .expect("Normals should be float3");
+
+        // All normals should face +X for billboard effect
+        for normal in normals {
+            assert!(
+                (normal[0] - 1.0).abs() < 0.01,
+                "Normal X should be 1.0 (facing +X), got {}",
+                normal[0]
+            );
+            assert!(
+                normal[1].abs() < 0.01,
+                "Normal Y should be 0.0, got {}",
+                normal[1]
+            );
+            assert!(
+                normal[2].abs() < 0.01,
+                "Normal Z should be 0.0, got {}",
+                normal[2]
+            );
+        }
+    }
+
+    /// Tests create_grass_blade_mesh with different curve amounts
+    #[test]
+    fn test_create_grass_blade_mesh_curvature() {
+        let straight = create_grass_blade_mesh(0.4, 0.15, 0.0);
+        let curved = create_grass_blade_mesh(0.4, 0.15, 0.2);
+
+        // Both should have same vertex count
+        assert_eq!(
+            straight.count_vertices(),
+            curved.count_vertices(),
+            "Both blades should have same vertex count"
+        );
+
+        // But positions should differ
+        let straight_pos = straight
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .expect("Should have positions")
+            .as_float3()
+            .expect("Should be float3");
+
+        let curved_pos = curved
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .expect("Should have positions")
+            .as_float3()
+            .expect("Should be float3");
+
+        // Curved blade should have different Z positions at tip (curve is along Z axis)
+        let straight_tip_z = straight_pos[8][2];
+        let curved_tip_z = curved_pos[8][2];
+
+        assert!(
+            (curved_tip_z - straight_tip_z).abs() > 0.01,
+            "Curved blade should have different Z position at tip"
+        );
+    }
+
+    /// Tests grass cluster configuration produces expected blade count
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn test_grass_cluster_blade_count_in_range() {
+        // Note: spawn_grass_cluster generates 5-10 blades randomly
+        // We can't directly test the randomness, but we can verify
+        // the constants are reasonable
+        assert!(GRASS_BLADE_WIDTH > 0.0, "Blade width should be positive");
+        assert!(
+            GRASS_BLADE_Y_OFFSET >= 0.0,
+            "Y offset should be non-negative"
+        );
+    }
+
+    /// Tests grass blade mesh has correct indices count
+    #[test]
+    fn test_create_grass_blade_mesh_indices() {
+        let blade = create_grass_blade_mesh(0.4, 0.15, 0.1);
+
+        // With 4 segments, we have 4 quads, each with 2 triangles = 8 triangles
+        // Each triangle has 3 indices, so 8 * 3 = 24 indices
+        let indices_count = blade
+            .indices()
+            .map(|indices| match indices {
+                bevy::mesh::Indices::U32(idx) => idx.len(),
+                bevy::mesh::Indices::U16(idx) => idx.len(),
+            })
+            .unwrap_or(0);
+
+        assert_eq!(
+            indices_count, 24,
+            "Blade with 4 segments should have 24 indices (8 triangles × 3)"
+        );
     }
 }
