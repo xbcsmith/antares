@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for Phase 4: Complex Grass Blade Generation
+//! Integration tests for Complex Grass Blade Generation
 //!
 //! Tests verify that:
 //! - Curved grass blades are generated with proper geometry

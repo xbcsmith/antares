@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 6: Campaign Builder SDK - Terrain Visual Configuration Tests
+//! Campaign Builder SDK - Terrain Visual Configuration Tests
 //!
 //! This test module verifies the extended visual preset system for advanced
 //! procedural terrain objects including trees, shrubs, grass, mountains, swamp, and lava.
 
 #[cfg(test)]
-mod phase_6_visual_presets {
+mod visual_presets {
     use campaign_builder::map_editor::VisualPreset;
 
     // ==================== Tree Preset Tests ====================
@@ -338,8 +338,8 @@ mod phase_6_visual_presets {
     fn test_terrain_preset_all_variants_present() {
         let presets = VisualPreset::all();
 
-        // Count new Phase 6 presets
-        let phase_6_names = vec![
+        // Count new presets
+        let expected_preset_names = vec![
             "Short Tree",
             "Medium Tree",
             "Tall Tree",
@@ -366,8 +366,8 @@ mod phase_6_visual_presets {
             // All presets should have a valid name
             assert!(!name.is_empty(), "Preset should have a non-empty name");
 
-            // All Phase 6 presets should be present
-            if phase_6_names.contains(&name) {
+            // All presets should be present
+            if expected_preset_names.contains(&name) {
                 // Verify it's in the list
                 assert!(true);
             }
@@ -455,7 +455,7 @@ mod phase_6_visual_presets {
     }
 
     #[test]
-    fn test_phase_6_trees_have_green_tints() {
+    fn test_trees_have_green_tints() {
         let tree_presets = vec![
             VisualPreset::ShortTree,
             VisualPreset::MediumTree,
@@ -481,7 +481,7 @@ mod phase_6_visual_presets {
     }
 
     #[test]
-    fn test_phase_6_shrubs_all_have_colors() {
+    fn test_shrubs_all_have_colors() {
         let shrub_presets = vec![
             VisualPreset::SmallShrub,
             VisualPreset::LargeShrub,
@@ -504,7 +504,7 @@ mod phase_6_visual_presets {
     }
 
     #[test]
-    fn test_phase_6_lava_presets_have_hot_colors() {
+    fn test_lava_presets_have_hot_colors() {
         let lava_presets = vec![
             VisualPreset::LavaPool,
             VisualPreset::LavaFlow,
@@ -526,7 +526,7 @@ mod phase_6_visual_presets {
     }
 
     #[test]
-    fn test_phase_6_swamp_presets_have_water_tints() {
+    fn test_swamp_presets_have_water_tints() {
         let swamp_presets = vec![
             VisualPreset::ShallowSwamp,
             VisualPreset::DeepSwamp,

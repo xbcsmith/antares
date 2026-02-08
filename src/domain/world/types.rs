@@ -84,6 +84,10 @@ pub enum TreeType {
     Palm,
     /// Willow tree
     Willow,
+    /// Birch tree
+    Birch,
+    /// Shrub/Bush formation
+    Shrub,
 }
 
 /// Rock visual variants for mountain/hill tiles
@@ -1967,6 +1971,7 @@ pub struct Map {
     /// 2D grid of tiles (row-major order: y * width + x)
     pub tiles: Vec<Tile>,
     /// Events at specific positions
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub events: HashMap<Position, MapEvent>,
 
     /// Optional random encounter table for this map

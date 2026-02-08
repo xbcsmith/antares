@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for Phase 3: Foliage Distribution System
+//! Integration tests for Foliage Distribution System
 //!
 //! Tests verify that foliage clusters are spawned correctly at branch endpoints
 //! based on tree type and foliage_density configuration.

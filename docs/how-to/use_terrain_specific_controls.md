@@ -261,13 +261,22 @@ To reset terrain-specific settings to their default values:
 
 **A**:
 
-- Currently, most controls apply to a single selected tile
-- For bulk operations, select and configure tiles individually
-- Consider creating presets for commonly-used configurations
+- **Yes!** You can select multiple tiles using **Shift+Click** or the **Select Tool**
+- The inspector panel will show "N tiles selected"
+- Changes made to controls will queue up for all selected tiles
+- Click **"Apply"** to update all selected tiles at once
+
+### Q: Why do the controls reset after I click Apply?
+
+**A**:
+
+- This is intentional behavior to prevent accidental edits
+- After successfully applying changes to the map, the editor controls reset to defaults
+- Your selected tiles remain selected so you can verify the changes
+- To make further edits, simply adjust the controls again and click Apply
 
 ## See Also
 
 - [Map Editor Reference](../reference/map_editor_reference.md)
 - [TileVisualMetadata Specification](../reference/tile_visual_metadata_specification.md)
-- [Campaign Builder Guide](../how-to/campaign_builder_guide.md)
 - Tutorial map examples: `campaigns/tutorial/data/maps/`

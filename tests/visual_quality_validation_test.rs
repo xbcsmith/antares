@@ -35,11 +35,11 @@ mod visual_quality_validation_tests {
         const MIN_BRANCH_DEPTH: usize = 3;
         const MAX_BRANCH_DEPTH: usize = 5;
 
-        assert!(
+        const _: () = assert!(
             MIN_BRANCH_DEPTH >= 2,
             "Should support recursive subdivision"
         );
-        assert!(MAX_BRANCH_DEPTH <= 10, "Should avoid excessive recursion");
+        const _: () = assert!(MAX_BRANCH_DEPTH <= 10, "Should avoid excessive recursion");
     }
 
     /// Verifies foliage cluster count specification
@@ -48,8 +48,8 @@ mod visual_quality_validation_tests {
         const MIN_FOLIAGE_CLUSTERS: usize = 5;
         const MAX_FOLIAGE_CLUSTERS: usize = 20;
 
-        assert!(MIN_FOLIAGE_CLUSTERS > 0, "Should spawn at least 5 clusters");
-        assert!(MAX_FOLIAGE_CLUSTERS < 50, "Should not exceed 20 clusters");
+        const _: () = assert!(MIN_FOLIAGE_CLUSTERS > 0, "Should spawn at least 5 clusters");
+        const _: () = assert!(MAX_FOLIAGE_CLUSTERS < 50, "Should not exceed 20 clusters");
     }
 
     // ============================================================================
@@ -59,7 +59,7 @@ mod visual_quality_validation_tests {
     /// Verifies all five tree types are defined
     #[test]
     fn test_all_tree_types_exist() {
-        let tree_types = vec![
+        let tree_types = [
             TreeType::Oak,
             TreeType::Pine,
             TreeType::Dead,
@@ -85,7 +85,7 @@ mod visual_quality_validation_tests {
 
         // Oak specs: dense foliage 1.8x, warm green (0.25, 0.65, 0.25)
         const OAK_FOLIAGE_DENSITY: f32 = 1.8;
-        assert!(OAK_FOLIAGE_DENSITY > 1.5, "Oak should have dense foliage");
+        const _: () = assert!(OAK_FOLIAGE_DENSITY > 1.5, "Oak should have dense foliage");
     }
 
     /// Verifies Pine tree specification
@@ -97,7 +97,7 @@ mod visual_quality_validation_tests {
         // Pine specs: moderate foliage 1.2x, cool green (0.1, 0.5, 0.15)
         const PINE_FOLIAGE_DENSITY: f32 = 1.2;
         const OAK_FOLIAGE_DENSITY: f32 = 1.8;
-        assert!(PINE_FOLIAGE_DENSITY < OAK_FOLIAGE_DENSITY);
+        const _: () = assert!(PINE_FOLIAGE_DENSITY < OAK_FOLIAGE_DENSITY);
     }
 
     /// Verifies Dead tree specification
@@ -124,7 +124,7 @@ mod visual_quality_validation_tests {
 
         // Willow specs: moderate foliage 1.3x, yellow-green (0.3, 0.55, 0.35)
         const WILLOW_FOLIAGE_DENSITY: f32 = 1.3;
-        assert!(WILLOW_FOLIAGE_DENSITY > 1.0 && WILLOW_FOLIAGE_DENSITY < 1.5);
+        const _: () = assert!(WILLOW_FOLIAGE_DENSITY > 1.0 && WILLOW_FOLIAGE_DENSITY < 1.5);
     }
 
     /// Verifies Palm tree specification
@@ -135,7 +135,7 @@ mod visual_quality_validation_tests {
 
         // Palm specs: simple structure, single trunk
         const PALM_FOLIAGE_DENSITY: f32 = 1.0;
-        assert!(PALM_FOLIAGE_DENSITY > 0.5);
+        const _: () = assert!(PALM_FOLIAGE_DENSITY > 0.5);
     }
 
     // ============================================================================
@@ -145,7 +145,7 @@ mod visual_quality_validation_tests {
     /// Verifies all four grass density levels exist
     #[test]
     fn test_grass_density_levels_exist() {
-        let densities = vec![
+        let densities = [
             GrassDensity::Low,
             GrassDensity::Medium,
             GrassDensity::High,
@@ -180,9 +180,9 @@ mod visual_quality_validation_tests {
         const VERYHIGH_BLADES_MIN: usize = 25;
 
         // Verify monotonic increase
-        assert!(LOW_BLADES_MAX <= MEDIUM_BLADES_MIN, "Low <= Medium");
-        assert!(MEDIUM_BLADES_MAX <= HIGH_BLADES_MIN, "Medium <= High");
-        assert!(HIGH_BLADES_MAX <= VERYHIGH_BLADES_MIN, "High <= VeryHigh");
+        const _: () = assert!(LOW_BLADES_MAX <= MEDIUM_BLADES_MIN, "Low <= Medium");
+        const _: () = assert!(MEDIUM_BLADES_MAX <= HIGH_BLADES_MIN, "Medium <= High");
+        const _: () = assert!(HIGH_BLADES_MAX <= VERYHIGH_BLADES_MIN, "High <= VeryHigh");
     }
 
     /// Verifies grass blade geometry specifications
@@ -193,10 +193,10 @@ mod visual_quality_validation_tests {
         const BLADE_WIDTH_MIN: f32 = 0.05;
         const BLADE_WIDTH_MAX: f32 = 0.25;
 
-        assert!(BLADE_HEIGHT_MIN > 0.0);
-        assert!(BLADE_HEIGHT_MAX > BLADE_HEIGHT_MIN * 2.0);
-        assert!(BLADE_WIDTH_MIN > 0.0);
-        assert!(BLADE_WIDTH_MAX > BLADE_WIDTH_MIN);
+        const _: () = assert!(BLADE_HEIGHT_MIN > 0.0);
+        const _: () = assert!(BLADE_HEIGHT_MAX > BLADE_HEIGHT_MIN * 2.0);
+        const _: () = assert!(BLADE_WIDTH_MIN > 0.0);
+        const _: () = assert!(BLADE_WIDTH_MAX > BLADE_WIDTH_MIN);
 
         // Verify natural proportions - height should be much greater than width
         let aspect_ratio_min = BLADE_HEIGHT_MIN / BLADE_WIDTH_MAX;
@@ -223,9 +223,9 @@ mod visual_quality_validation_tests {
         ];
 
         for (r, g, b) in example_tints {
-            assert!(r >= COLOR_MIN && r <= COLOR_MAX);
-            assert!(g >= COLOR_MIN && g <= COLOR_MAX);
-            assert!(b >= COLOR_MIN && b <= COLOR_MAX);
+            assert!((COLOR_MIN..=COLOR_MAX).contains(&r));
+            assert!((COLOR_MIN..=COLOR_MAX).contains(&g));
+            assert!((COLOR_MIN..=COLOR_MAX).contains(&b));
         }
     }
 
@@ -238,7 +238,7 @@ mod visual_quality_validation_tests {
         let scales = vec![0.6_f32, 0.8, 1.0, 1.2, 1.4];
 
         for scale in scales {
-            assert!(scale >= SCALE_MIN && scale <= SCALE_MAX);
+            assert!((SCALE_MIN..=SCALE_MAX).contains(&scale));
         }
 
         // Verify meaningful variation
@@ -255,7 +255,7 @@ mod visual_quality_validation_tests {
         let rotations: Vec<f32> = vec![0.0, 45.0, 90.0, 180.0, 270.0, 360.0];
 
         for rotation in rotations {
-            assert!(rotation >= ROTATION_MIN && rotation <= ROTATION_MAX);
+            assert!((ROTATION_MIN..=ROTATION_MAX).contains(&rotation));
             assert!(rotation.is_finite());
         }
     }
@@ -268,8 +268,8 @@ mod visual_quality_validation_tests {
     #[test]
     fn test_mesh_generation_performance_target() {
         const GENERATION_TIME_MS: u128 = 50;
-        assert!(GENERATION_TIME_MS >= 40, "Target should be achievable");
-        assert!(
+        const _: () = assert!(GENERATION_TIME_MS >= 40, "Target should be achievable");
+        const _: () = assert!(
             GENERATION_TIME_MS <= 100,
             "Target should not be too lenient"
         );
@@ -279,16 +279,16 @@ mod visual_quality_validation_tests {
     #[test]
     fn test_foliage_spawning_performance_target() {
         const FOLIAGE_TIME_MS: u128 = 10;
-        assert!(FOLIAGE_TIME_MS > 0);
-        assert!(FOLIAGE_TIME_MS < 20);
+        const _: () = assert!(FOLIAGE_TIME_MS > 0);
+        const _: () = assert!(FOLIAGE_TIME_MS < 20);
     }
 
     /// Verifies grass generation performance target
     #[test]
     fn test_grass_generation_performance_target() {
         const GRASS_TIME_MS: u128 = 5;
-        assert!(GRASS_TIME_MS > 0);
-        assert!(GRASS_TIME_MS < 10);
+        const _: () = assert!(GRASS_TIME_MS > 0);
+        const _: () = assert!(GRASS_TIME_MS < 10);
     }
 
     /// Verifies frame rate target
@@ -297,7 +297,7 @@ mod visual_quality_validation_tests {
         const TARGET_FPS: f32 = 30.0;
         const FRAME_TIME_MS: f32 = 1000.0 / TARGET_FPS;
 
-        assert!(FRAME_TIME_MS <= 33.5, "Frame time ~33ms at 30 FPS");
+        const _: () = assert!(FRAME_TIME_MS <= 33.5, "Frame time ~33ms at 30 FPS");
     }
 
     /// Verifies memory usage target
@@ -306,8 +306,8 @@ mod visual_quality_validation_tests {
         const MESH_CACHE_MB_PER_TREE: f32 = 4.0;
         const TOTAL_MAP_MB: f32 = 50.0;
 
-        assert!(MESH_CACHE_MB_PER_TREE < 10.0, "Per-tree memory reasonable");
-        assert!(TOTAL_MAP_MB < 100.0, "Per-map memory reasonable");
+        const _: () = assert!(MESH_CACHE_MB_PER_TREE < 10.0, "Per-tree memory reasonable");
+        const _: () = assert!(TOTAL_MAP_MB < 100.0, "Per-map memory reasonable");
     }
 
     // ============================================================================
@@ -321,11 +321,11 @@ mod visual_quality_validation_tests {
         const MAP_HEIGHT: usize = 20;
         const GRASS_REGION_SIZE: usize = 10;
 
-        assert!(
+        const _: () = assert!(
             MAP_WIDTH >= 20 && MAP_HEIGHT >= 20,
             "Map size should be 20x20"
         );
-        assert!(GRASS_REGION_SIZE > 4, "Grass region should be visible");
+        const _: () = assert!(GRASS_REGION_SIZE > 4, "Grass region should be visible");
     }
 
     /// Verifies Map 2 content specification
@@ -337,7 +337,7 @@ mod visual_quality_validation_tests {
         const PINE_REGION_WIDTH: usize = 10;
 
         assert_eq!(OAK_REGION_WIDTH + PINE_REGION_WIDTH, MAP_WIDTH);
-        assert!(MAP_HEIGHT >= 19);
+        const _: () = assert!(MAP_HEIGHT >= 19);
     }
 
     /// Verifies Map 3 content specification
@@ -347,8 +347,8 @@ mod visual_quality_validation_tests {
         const MAP_HEIGHT: usize = 20;
         const TREE_DENSITY: f32 = 0.5;
 
-        assert!(MAP_WIDTH >= 20 && MAP_HEIGHT >= 20);
-        assert!(TREE_DENSITY > 0.0 && TREE_DENSITY < 1.0);
+        const _: () = assert!(MAP_WIDTH >= 20 && MAP_HEIGHT >= 20);
+        const _: () = assert!(TREE_DENSITY > 0.0 && TREE_DENSITY < 1.0);
     }
 
     /// Verifies Map 4 (Dead tree) content specification
@@ -358,7 +358,7 @@ mod visual_quality_validation_tests {
         const MAP_HEIGHT: usize = 20;
 
         // All trees should be dead type
-        assert!(MAP_WIDTH >= 20 && MAP_HEIGHT >= 20);
+        const _: () = assert!(MAP_WIDTH >= 20 && MAP_HEIGHT >= 20);
     }
 
     /// Verifies Map 5 content specification
@@ -368,7 +368,7 @@ mod visual_quality_validation_tests {
         const MAP_HEIGHT: usize = 20;
 
         // Should have mixed tree types
-        assert!(MAP_WIDTH >= 20 && MAP_HEIGHT >= 20);
+        const _: () = assert!(MAP_WIDTH >= 20 && MAP_HEIGHT >= 20);
     }
 
     // ============================================================================
@@ -378,7 +378,7 @@ mod visual_quality_validation_tests {
     /// Verifies all tree types can coexist
     #[test]
     fn test_all_tree_types_coexist() {
-        let tree_types = vec![
+        let tree_types = [
             TreeType::Oak,
             TreeType::Pine,
             TreeType::Dead,
@@ -395,7 +395,7 @@ mod visual_quality_validation_tests {
     /// Verifies all grass densities can coexist
     #[test]
     fn test_all_grass_densities_coexist() {
-        let densities = vec![
+        let densities = [
             GrassDensity::Low,
             GrassDensity::Medium,
             GrassDensity::High,
@@ -409,13 +409,13 @@ mod visual_quality_validation_tests {
     }
 
     // ============================================================================
-    // PHASE 6 COMPLETION TESTS
+    // COMPLETION TESTS
     // ============================================================================
 
     /// Verifies visual quality validation suite is complete
     #[test]
     fn test_visual_quality_validation_complete() {
-        let test_categories = vec![
+        let test_categories = [
             "Mesh Complexity",
             "Tree Specifications",
             "Grass Densities",
@@ -423,16 +423,16 @@ mod visual_quality_validation_tests {
             "Performance",
             "Tutorial Maps",
             "Coexistence",
-            "Phase 6 Status",
+            "Status",
         ];
 
         assert_eq!(test_categories.len(), 8, "All test categories present");
         assert!(test_categories.iter().all(|cat| !cat.is_empty()));
     }
 
-    /// Final verification: Phase 6 requirements met
+    /// Final verification: requirements met
     #[test]
-    fn test_phase_6_requirements_complete() {
+    fn test_requirements_complete() {
         const DOC_UPDATE: bool = true; // 6.1 ✅
         const VISUAL_QUALITY_DOC: bool = true; // 6.2 ✅
         const ARCH_UPDATE: bool = true; // 6.3 ✅
@@ -440,11 +440,11 @@ mod visual_quality_validation_tests {
         const QA_CHECKLIST: bool = true; // 6.5 ✅
         const SUCCESS_CRITERIA: bool = true; // 6.6 ✅
 
-        assert!(DOC_UPDATE, "Implementation documentation updated");
-        assert!(VISUAL_QUALITY_DOC, "Visual quality guide created");
-        assert!(ARCH_UPDATE, "Architecture documentation updated");
-        assert!(VALIDATION_TESTS, "Validation tests implemented");
-        assert!(QA_CHECKLIST, "Manual QA checklist documented");
-        assert!(SUCCESS_CRITERIA, "All success criteria met");
+        const _: () = assert!(DOC_UPDATE, "Implementation documentation updated");
+        const _: () = assert!(VISUAL_QUALITY_DOC, "Visual quality guide created");
+        const _: () = assert!(ARCH_UPDATE, "Architecture documentation updated");
+        const _: () = assert!(VALIDATION_TESTS, "Validation tests implemented");
+        const _: () = assert!(QA_CHECKLIST, "Manual QA checklist documented");
+        const _: () = assert!(SUCCESS_CRITERIA, "All success criteria met");
     }
 }

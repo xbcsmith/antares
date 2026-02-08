@@ -26,6 +26,15 @@
 use crate::game::components::billboard::Billboard;
 use bevy::prelude::*;
 
+/// Plugin that manages billboard entities (always face camera)
+pub struct BillboardPlugin;
+
+impl Plugin for BillboardPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, update_billboards);
+    }
+}
+
 /// System that updates billboard entities to face the camera
 ///
 /// # Behavior

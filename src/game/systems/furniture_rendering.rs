@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 10: Runtime Furniture Rendering System
+//! Runtime Furniture Rendering System
 //!
 //! This module handles spawning furniture with:
 //! - Material properties (PBR: metallic, roughness, base color)
@@ -20,7 +20,7 @@ use crate::game::systems::procedural_meshes::{
     ChairConfig, ChestConfig, ProceduralMeshCache, TableConfig, ThroneConfig, TorchConfig,
 };
 
-/// Enhanced furniture spawning with Phase 10 material and interaction support
+/// Enhanced furniture spawning with material and interaction support
 ///
 /// This function wraps the procedural mesh spawning functions and adds:
 /// - Material property application (metallic, roughness)
@@ -49,7 +49,7 @@ use crate::game::systems::procedural_meshes::{
 ///
 /// Entity ID of spawned furniture entity
 #[allow(clippy::too_many_arguments)]
-pub fn spawn_furniture_with_phase10_rendering(
+pub fn spawn_furniture_with_rendering(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,

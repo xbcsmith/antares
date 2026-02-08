@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for Phase 10: Runtime Furniture Rendering System
+//! Integration tests for Runtime Furniture Rendering System
 //!
 //! Tests cover:
 //! - Furniture spawning with proper components
@@ -13,7 +13,7 @@
 //! - All furniture types render correctly
 
 #[cfg(test)]
-mod phase10_furniture_rendering {
+mod furniture_rendering {
     use antares::domain::types::Position;
     use antares::domain::world::{FurnitureFlags, FurnitureMaterial, FurnitureType};
     use antares::game::components::{FurnitureEntity, InteractionType};

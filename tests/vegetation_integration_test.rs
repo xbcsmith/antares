@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 2: Vegetation Systems (Shrubs & Grass) Integration Tests
+//! Vegetation Systems (Shrubs & Grass) Integration Tests
 //!
 //! Tests for shrub and grass procedural generation, quality settings,
 //! and integration with the terrain spawning system.
 
 #[cfg(test)]
-mod phase2_vegetation_tests {
+mod vegetation_tests {
     use antares::game::resources::{GrassDensity, GrassQualitySettings};
 
     // ==================== GrassQualitySettings Tests ====================

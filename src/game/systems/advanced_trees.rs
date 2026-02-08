@@ -529,47 +529,119 @@ fn create_tapered_cylinder(
     (positions, normals, indices)
 }
 
-/// Type alias for branch mesh data: (positions, normals, indices)
-type BranchMeshData = (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>);
-
-/// Merges multiple branch meshes into a single Mesh
-///
-/// For Phase 2, we return a simple approximation mesh using a Cylinder
-/// primitive. Full mesh merging with proper vertex/index buffers will be
-/// implemented in a later phase when we optimize the mesh structure.
+/// Generates a UV sphere mesh data
 ///
 /// # Arguments
 ///
-/// * `branch_meshes` - Vector of (positions, normals, indices) tuples
+/// * `center` - Center position of the sphere
+/// * `radius` - Radius of the sphere
+/// * `segments` - Number of vertical segments (longitude)
+/// * `rings` - Number of horizontal rings (latitude)
+///
+/// # Returns
+///
+/// Tuple of (positions, normals, indices)
+fn create_sphere(
+    center: Vec3,
+    radius: f32,
+    segments: u32,
+    rings: u32,
+) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>) {
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut indices = Vec::new();
+
+    for r in 0..=rings {
+        let v = r as f32 / rings as f32;
+        let phi = v * std::f32::consts::PI; // 0 to PI
+
+        for s in 0..=segments {
+            let u = s as f32 / segments as f32;
+            let theta = u * std::f32::consts::TAU; // 0 to 2PI
+
+            let x = radius * phi.sin() * theta.cos();
+            let y = radius * phi.cos();
+            let z = radius * phi.sin() * theta.sin();
+
+            let pos = Vec3::new(x, y, z);
+            let normal = pos.normalize();
+
+            positions.push([(pos + center).x, (pos + center).y, (pos + center).z]);
+            normals.push([normal.x, normal.y, normal.z]);
+        }
+    }
+
+    for r in 0..rings {
+        for s in 0..segments {
+            let first = (r * (segments + 1)) + s;
+            let second = first + segments + 1;
+
+            indices.push(first);
+            indices.push(second);
+            indices.push(first + 1);
+
+            indices.push(second);
+            indices.push(second + 1);
+            indices.push(first + 1);
+        }
+    }
+
+    (positions, normals, indices)
+}
+
+/// Type alias for branch mesh data: (positions, normals, colors, indices)
+type BranchMeshData = (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 4]>, Vec<u32>);
+
+/// Merges multiple branch meshes into a single Mesh
+///
+/// Combines the geometry of all branches into a single efficient mesh structure.
+///
+/// # Arguments
+///
+/// * `branch_meshes` - Vector of (positions, normals, colors, indices) tuples
 ///
 /// # Returns
 ///
 /// A Bevy Mesh representing the combined branches
 fn merge_branch_meshes(branch_meshes: Vec<BranchMeshData>) -> Mesh {
     if branch_meshes.is_empty() {
-        // Return a simple default cylinder mesh if no branches
-        return Cylinder {
-            radius: 0.1,
-            half_height: 0.5,
+        return Mesh::from(Cuboid::new(0.1, 0.1, 0.1));
+    }
+
+    // Calculate total capacity needed
+    let total_verts: usize = branch_meshes.iter().map(|(p, _, _, _)| p.len()).sum();
+    let total_indices: usize = branch_meshes.iter().map(|(_, _, _, i)| i.len()).sum();
+
+    let mut all_positions = Vec::with_capacity(total_verts);
+    let mut all_normals = Vec::with_capacity(total_verts);
+    let mut all_colors = Vec::with_capacity(total_verts);
+    let mut all_indices = Vec::with_capacity(total_indices);
+
+    let mut current_index_offset = 0u32;
+
+    for (positions, normals, colors, indices) in branch_meshes {
+        // Offset indices for this segment
+        for index in indices {
+            all_indices.push(index + current_index_offset);
         }
-        .into();
+
+        current_index_offset += positions.len() as u32;
+        all_positions.extend(positions);
+        all_normals.extend(normals);
+        all_colors.extend(colors);
     }
 
-    // For Phase 2: Create an approximation mesh that represents all branches
-    // Calculate total vertices across all meshes
-    let total_vertices: usize = branch_meshes.iter().map(|(pos, _, _)| pos.len()).sum();
+    let mut mesh = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    );
 
-    // Use a simple heuristic: create a cylinder whose dimensions scale with total vertex count
-    // This ensures larger/more complex tree structures get larger representing meshes
-    // More sophisticated merging can be done in future phases
-    let approx_radius = (total_vertices as f32 / 16.0).sqrt().min(0.5) * 0.2;
-    let approx_height = (total_vertices as f32 / 16.0).sqrt().min(5.0) * 0.5;
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, all_positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, all_normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, all_colors);
+    mesh.insert_indices(bevy::mesh::Indices::U32(all_indices));
 
-    Cylinder {
-        radius: approx_radius.max(0.05),
-        half_height: (approx_height.max(0.5)) / 2.0,
-    }
-    .into()
+    mesh
 }
 
 /// A Bevy `Mesh` representing the tree structure using tapered cylinders
@@ -585,7 +657,7 @@ fn merge_branch_meshes(branch_meshes: Vec<BranchMeshData>) -> Mesh {
 /// # Returns
 ///
 /// A Bevy Mesh with positions, normals, and indices for all branches
-pub fn generate_branch_mesh(graph: &BranchGraph, _config: &TreeConfig) -> Mesh {
+pub fn generate_branch_mesh(graph: &BranchGraph, config: &TreeConfig) -> Mesh {
     if graph.branches.is_empty() {
         return Mesh::from(Cuboid::new(0.1, 0.1, 0.1));
     }
@@ -617,7 +689,62 @@ pub fn generate_branch_mesh(graph: &BranchGraph, _config: &TreeConfig) -> Mesh {
             segments,
         );
 
-        branch_meshes.push((positions, normals, indices));
+        // Generate vertex colors (Bark Brown gradient based on Y height)
+        // Darker at bottom, lighter at top
+        let colors: Vec<[f32; 4]> = positions
+            .iter()
+            .map(|pos| {
+                let height = pos[1]; // Y coordinate
+                                     // Simple gradient: 0.2 at bottom to 0.5 at top
+                let brightness = (0.2 + (height * 0.1)).clamp(0.2, 0.6);
+                // Brown color [R, G, B, A]
+                [0.4 * brightness, 0.25 * brightness, 0.15 * brightness, 1.0]
+            })
+            .collect();
+
+        branch_meshes.push((positions, normals, colors, indices));
+    }
+
+    // Generate foliage spheres at leaf endpoints based on density
+    if config.foliage_density > 0.0 {
+        let leaf_indices = get_leaf_branches(graph);
+        let foliage_color = [
+            config.foliage_color.0,
+            config.foliage_color.1,
+            config.foliage_color.2,
+            1.0,
+        ];
+
+        for leaf_idx in leaf_indices {
+            // Apply foliage probability (using index as seed) per leaf to match density
+            // Or just spawn on all leaves if density > 0.5?
+            // "Density of foliage spheres" usually means probability per leaf, or size/number.
+            // Let's assume probability: if density is 0.7, 70% of leaves get a sphere.
+
+            // Deterministic pseudo-random check based on leaf index
+            let pseudo_rand = ((leaf_idx * 17) % 100) as f32 / 100.0;
+            if pseudo_rand > config.foliage_density {
+                continue;
+            }
+
+            let leaf_branch = &graph.branches[leaf_idx];
+
+            // Foliage sphere radius proportional to branch end radius, but clamped
+            let radius = (leaf_branch.end_radius * 4.0).clamp(0.4, 0.8);
+
+            // Generate sphere
+            let (positions, normals, indices) = create_sphere(
+                leaf_branch.end,
+                radius,
+                8, // Segments (low poly to save verts)
+                6, // Rings
+            );
+
+            // Foliage color
+            let colors = vec![foliage_color; positions.len()];
+
+            branch_meshes.push((positions, normals, colors, indices));
+        }
     }
 
     merge_branch_meshes(branch_meshes)
@@ -690,17 +817,6 @@ pub fn generate_branch_graph(tree_type: TreeType) -> BranchGraph {
     let config = tree_type.config();
     let mut graph = BranchGraph::new();
 
-    // Create root trunk branch
-    let trunk = Branch {
-        start: Vec3::ZERO,
-        end: Vec3::new(0.0, config.height, 0.0),
-        start_radius: config.trunk_radius,
-        end_radius: config.trunk_radius * 0.7,
-        children: vec![],
-    };
-
-    let trunk_index = graph.add_branch(trunk);
-
     // Seed RNG based on tree type for deterministic output
     let seed = match tree_type {
         TreeType::Oak => 42u64,
@@ -712,8 +828,71 @@ pub fn generate_branch_graph(tree_type: TreeType) -> BranchGraph {
     };
     let mut rng = StdRng::seed_from_u64(seed);
 
-    // Recursively subdivide the trunk
-    subdivide_branch(&mut graph, trunk_index, 0, tree_type, &config, &mut rng);
+    if tree_type == TreeType::Shrub {
+        // Create invisible dummy root to maintain "index 0 is root" invariant
+        let dummy_root = Branch {
+            start: Vec3::ZERO,
+            end: Vec3::ZERO,
+            start_radius: 0.0,
+            end_radius: 0.0,
+            children: vec![],
+        };
+        let root_index = graph.add_branch(dummy_root);
+
+        // Generate 3-7 stems
+        let stem_count = rng.random_range(3..=7);
+        let angle_step = std::f32::consts::TAU / stem_count as f32;
+
+        for i in 0..stem_count {
+            let angle = (i as f32 * angle_step) + rng.random_range(-0.2_f32..0.2_f32);
+            let lean = rng.random_range(0.3_f32..0.6_f32); // Lean outward (radians)
+
+            // Vary height slightly
+            let height = config.height * rng.random_range(0.8_f32..1.2_f32);
+
+            // Correct calculation:
+            // x = height * sin(lean) * cos(angle)
+            // y = height * cos(lean)
+            // z = height * sin(lean) * sin(angle)
+
+            let sin_lean = lean.sin();
+            let cos_lean = lean.cos();
+
+            let end_pos = Vec3::new(
+                height * sin_lean * angle.cos(),
+                height * cos_lean,
+                height * sin_lean * angle.sin(),
+            );
+
+            let stem = Branch {
+                start: Vec3::ZERO, // Or slightly offset: Vec3::new(rng... * 0.1, 0.0, ...)
+                end: end_pos,
+                start_radius: config.trunk_radius,
+                end_radius: config.trunk_radius * 0.5,
+                children: vec![],
+            };
+
+            let stem_index = graph.add_branch(stem);
+            graph.branches[root_index].children.push(stem_index);
+
+            // Recursively subdivide stems (start at depth 1 since stem is depth 0 equivalent)
+            subdivide_branch(&mut graph, stem_index, 1, tree_type, &config, &mut rng);
+        }
+    } else {
+        // Standard tree generation with single trunk
+        let trunk = Branch {
+            start: Vec3::ZERO,
+            end: Vec3::new(0.0, config.height, 0.0),
+            start_radius: config.trunk_radius,
+            end_radius: config.trunk_radius * 0.7,
+            children: vec![],
+        };
+
+        let trunk_index = graph.add_branch(trunk);
+
+        // Recursively subdivide the trunk
+        subdivide_branch(&mut graph, trunk_index, 0, tree_type, &config, &mut rng);
+    }
 
     // Update bounds for the complete tree
     graph.update_bounds();
@@ -1480,7 +1659,12 @@ mod tests {
         let (positions, normals, indices) =
             create_tapered_cylinder(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), 0.2, 0.1, 8);
 
-        let merged = merge_branch_meshes(vec![(positions.clone(), normals.clone(), indices)]);
+        let merged = merge_branch_meshes(vec![(
+            positions.clone(),
+            normals.clone(),
+            vec![[0.4, 0.3, 0.2, 1.0]; positions.len()],
+            indices,
+        )]);
 
         // Merged mesh should have position and normal attributes
         assert!(
@@ -1505,7 +1689,12 @@ mod tests {
             8,
         );
 
-        let merged = merge_branch_meshes(vec![mesh1.clone(), mesh2.clone()]);
+        let len1 = mesh1.0.len();
+        let len2 = mesh2.0.len();
+        let merged = merge_branch_meshes(vec![
+            (mesh1.0, mesh1.1, vec![[0.4, 0.3, 0.2, 1.0]; len1], mesh1.2),
+            (mesh2.0, mesh2.1, vec![[0.4, 0.3, 0.2, 1.0]; len2], mesh2.2),
+        ]);
 
         // Verify merged mesh has attributes
         assert!(
@@ -1522,7 +1711,13 @@ mod tests {
     fn test_merge_branch_meshes_preserves_normals() {
         let mesh1 = create_tapered_cylinder(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), 0.2, 0.1, 8);
 
-        let merged = merge_branch_meshes(vec![mesh1.clone()]);
+        let len = mesh1.0.len();
+        let merged = merge_branch_meshes(vec![(
+            mesh1.0,
+            mesh1.1,
+            vec![[0.4, 0.3, 0.2, 1.0]; len],
+            mesh1.2,
+        )]);
 
         // Verify normals are preserved
         assert!(
@@ -1536,7 +1731,16 @@ mod tests {
         let (pos1, norm1, idx1) =
             create_tapered_cylinder(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), 0.2, 0.1, 8);
 
-        let merged = merge_branch_meshes(vec![(pos1.clone(), norm1.clone(), idx1.clone()); 2]);
+        let len = pos1.len();
+        let merged = merge_branch_meshes(vec![
+            (
+                pos1.clone(),
+                norm1.clone(),
+                vec![[0.4, 0.3, 0.2, 1.0]; len],
+                idx1.clone(),
+            );
+            2
+        ]);
 
         // Verify mesh has indices
         assert!(

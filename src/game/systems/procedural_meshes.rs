@@ -8,9 +8,10 @@
 //!
 //! Character rendering (NPCs, Monsters, Recruitables) uses the sprite system.
 
-use super::advanced_trees::TreeType;
+use super::advanced_trees::{TerrainVisualConfig, TreeType};
 use super::map::{MapEntity, TileCoord};
 use crate::domain::types;
+use crate::domain::world;
 use crate::domain::world::TileVisualMetadata;
 use crate::game::components::Billboard;
 use bevy::color::LinearRgba;
@@ -119,7 +120,7 @@ impl ProceduralMeshCache {
             handle.clone()
         } else {
             let config = tree_type.config();
-            let graph = super::advanced_trees::BranchGraph::new();
+            let graph = super::advanced_trees::generate_branch_graph(tree_type);
             let mesh = super::advanced_trees::generate_branch_mesh(&graph, &config);
             let handle = meshes.add(mesh);
             self.tree_meshes.insert(tree_type, handle.clone());
@@ -393,16 +394,14 @@ impl ProceduralMeshCache {
 // ==================== Constants ====================
 
 // Tree dimensions (world units, 1 unit ≈ 10 feet)
-const TREE_TRUNK_RADIUS: f32 = 0.15;
-const TREE_TRUNK_HEIGHT: f32 = 2.0;
 const TREE_FOLIAGE_RADIUS: f32 = 0.6;
 
 // Event marker dimensions
 // Portal dimensions - rectangular frame standing vertically
-const PORTAL_FRAME_WIDTH: f32 = 0.8; // Width of the portal opening
+const PORTAL_FRAME_WIDTH: f32 = 1.0; // Width of the portal opening (full tile)
 const PORTAL_FRAME_HEIGHT: f32 = 1.8; // Height of the portal opening (taller, human-sized)
 const PORTAL_FRAME_THICKNESS: f32 = 0.08; // Thickness of frame bars
-const PORTAL_FRAME_DEPTH: f32 = 0.08; // Depth of frame bars
+const PORTAL_FRAME_DEPTH: f32 = 0.04; // Depth of frame bars (thinner)
 const PORTAL_Y_POSITION: f32 = 0.9; // Bottom of frame at ground level (frame center)
 const _PORTAL_ROTATION_SPEED: f32 = 1.0; // radians/sec
 
@@ -412,14 +411,6 @@ const SIGN_BOARD_WIDTH: f32 = 0.6;
 const SIGN_BOARD_HEIGHT: f32 = 0.3;
 const SIGN_BOARD_DEPTH: f32 = 0.05;
 const SIGN_BOARD_Y_OFFSET: f32 = 1.5; // Eye height (approx 5 feet)
-
-// Shrub dimensions
-const SHRUB_STEM_RADIUS: f32 = 0.08;
-const SHRUB_STEM_HEIGHT_BASE: f32 = 0.5; // Base height (scaled by visual_metadata.height)
-const SHRUB_STEM_COUNT_MIN: u32 = 3;
-const SHRUB_STEM_COUNT_MAX: u32 = 7;
-const SHRUB_STEM_ANGLE_MIN: f32 = 20.0; // degrees
-const SHRUB_STEM_ANGLE_MAX: f32 = 45.0; // degrees
 
 // Grass dimensions
 const GRASS_BLADE_WIDTH: f32 = 0.15;
@@ -725,37 +716,27 @@ pub fn spawn_tree(
     let tree_type_resolved = tree_type.unwrap_or(super::advanced_trees::TreeType::Oak);
     let branch_graph = super::advanced_trees::generate_branch_graph(tree_type_resolved);
 
-    // Apply scale from visual config
-    let scaled_trunk_height = TREE_TRUNK_HEIGHT * visual_config.height_multiplier;
-
-    // Get or create trunk mesh from cache using branch graph
-    let trunk_mesh = cache.tree_trunk.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cylinder {
-            radius: TREE_TRUNK_RADIUS,
-            half_height: TREE_TRUNK_HEIGHT / 2.0,
-        });
-        cache.tree_trunk = Some(handle.clone());
-        handle
-    });
+    // Get or create advanced tree mesh from cache
+    let tree_mesh = cache.get_or_create_tree_mesh(tree_type_resolved, meshes);
 
     // Apply color tint if present, otherwise use default
-    let trunk_color = visual_config
+    // Note: Vertex colors handle the bark gradient, but we can modulate with material color
+    let bark_color = visual_config
         .color_tint
         .map(|tint| {
-            // Multiply trunk color by tint
-            let trunk_rgba = TREE_TRUNK_COLOR.to_linear();
+            let base_rgba = TREE_TRUNK_COLOR.to_linear();
             let tint_rgba = tint.to_linear();
             Color::linear_rgba(
-                (trunk_rgba.red * tint_rgba.red).min(1.0),
-                (trunk_rgba.green * tint_rgba.green).min(1.0),
-                (trunk_rgba.blue * tint_rgba.blue).min(1.0),
-                trunk_rgba.alpha,
+                (base_rgba.red * tint_rgba.red).min(1.0),
+                (base_rgba.green * tint_rgba.green).min(1.0),
+                (base_rgba.blue * tint_rgba.blue).min(1.0),
+                base_rgba.alpha,
             )
         })
         .unwrap_or(TREE_TRUNK_COLOR);
 
-    let trunk_material = materials.add(StandardMaterial {
-        base_color: trunk_color,
+    let tree_material = materials.add(StandardMaterial {
+        base_color: bark_color,
         perceptual_roughness: 0.9,
         ..default()
     });
@@ -792,12 +773,12 @@ pub fn spawn_tree(
         ))
         .id();
 
-    // Spawn trunk child at center of trunk height (scaled)
-    let trunk = commands
+    // Spawn tree mesh child at origin (branch graph is based at 0,0,0)
+    let tree_structure = commands
         .spawn((
-            Mesh3d(trunk_mesh),
-            MeshMaterial3d(trunk_material),
-            Transform::from_xyz(0.0, scaled_trunk_height / 2.0, 0.0).with_scale(Vec3::new(
+            Mesh3d(tree_mesh),
+            MeshMaterial3d(tree_material),
+            Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(
                 visual_config.scale,
                 visual_config.height_multiplier,
                 visual_config.scale,
@@ -806,7 +787,7 @@ pub fn spawn_tree(
             Visibility::default(),
         ))
         .id();
-    commands.entity(parent).add_child(trunk);
+    commands.entity(parent).add_child(tree_structure);
 
     // Phase 3: Spawn foliage clusters at leaf branch endpoints
     spawn_foliage_clusters(
@@ -823,18 +804,14 @@ pub fn spawn_tree(
     parent
 }
 
-/// Spawns a procedurally generated multi-stem shrub
+/// Spawns a procedurally generated shrub
 ///
-/// Shrubs use a multi-stem branch approach with no central trunk, creating
-/// a natural bush-like appearance. Multiple stems radiate outward from ground
-/// level at configurable angles.
-///
-/// Stem count is randomly determined between 3-7, with stem height and
-/// foliage density customizable via terrain visual metadata.
+/// Uses the advanced tree generation system (TreeType::Shrub) which generates
+/// a multi-stem mesh with vertex coloring.
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy Commands for entity spawning
+/// * `commands` - ECS command buffer
 /// * `materials` - Material asset storage
 /// * `meshes` - Mesh asset storage
 /// * `position` - Tile position in world coordinates
@@ -844,7 +821,7 @@ pub fn spawn_tree(
 ///
 /// # Returns
 ///
-/// Entity ID of the parent shrub entity
+/// Entity ID of the shrub entity
 pub fn spawn_shrub(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
@@ -854,134 +831,42 @@ pub fn spawn_shrub(
     visual_metadata: Option<&TileVisualMetadata>,
     cache: &mut ProceduralMeshCache,
 ) -> Entity {
-    // Determine stem count (3-7) randomly
+    let shrub_mesh = cache.get_or_create_tree_mesh(TreeType::Shrub, meshes);
+
+    // Get visual configuration
+    let meta = TerrainVisualConfig::from(visual_metadata.unwrap_or(&TileVisualMetadata::default()));
+    let height_scale = meta.height_multiplier;
+    let width_scale = meta.scale;
+
+    // Random Y-rotation
     let mut rng = rand::rng();
-    let stem_count = rng.random_range(SHRUB_STEM_COUNT_MIN..=SHRUB_STEM_COUNT_MAX);
+    let rotation = Quat::from_rotation_y(rng.random_range(0.0..std::f32::consts::TAU));
 
-    // Get effective height from visual metadata (default 0.6)
-    let height_scale = visual_metadata
-        .and_then(|m| m.height)
-        .unwrap_or(0.6)
-        .clamp(0.4, 0.8);
-
-    // Get foliage density from scale (default 1.0)
-    let foliage_scale = visual_metadata
-        .and_then(|m| m.scale)
-        .unwrap_or(1.0)
-        .clamp(0.5, 1.5);
-
-    // Get color tint (default green)
-    let color_tint = visual_metadata
-        .and_then(|m| m.color_tint)
-        .unwrap_or((0.3, 0.65, 0.2));
-
-    // Apply color tint to stem and foliage colors
-    let stem_color = Color::srgb(
-        0.25 * color_tint.0,
-        0.45 * color_tint.1,
-        0.15 * color_tint.2,
-    );
-    let foliage_color = Color::srgb(
-        0.35 * color_tint.0,
-        0.65 * color_tint.1,
-        0.25 * color_tint.2,
-    );
-
-    // Get or create stem mesh from cache
-    let stem_mesh = cache.shrub_stem.clone().unwrap_or_else(|| {
-        let handle = meshes.add(Cylinder {
-            radius: SHRUB_STEM_RADIUS,
-            half_height: (SHRUB_STEM_HEIGHT_BASE * height_scale) / 2.0,
-        });
-        cache.shrub_stem = Some(handle.clone());
-        handle
+    // Create material that supports vertex colors (or just standard PBR)
+    // The advanced tree mesh has vertex colors baked in.
+    let material = materials.add(StandardMaterial {
+        base_color: Color::WHITE, // Vertex colors multiply with this
+        perceptual_roughness: 0.9,
+        ..default()
     });
 
-    // Spawn parent shrub entity
-    let parent = commands
+    commands
         .spawn((
+            Mesh3d(shrub_mesh),
+            MeshMaterial3d(material),
             Transform::from_xyz(
                 position.x as f32 + TILE_CENTER_OFFSET,
                 0.0,
                 position.y as f32 + TILE_CENTER_OFFSET,
-            ),
+            )
+            .with_scale(Vec3::new(width_scale, height_scale, width_scale))
+            .with_rotation(rotation),
             GlobalTransform::default(),
             Visibility::default(),
             MapEntity(map_id),
             TileCoord(position),
         ))
-        .id();
-
-    // Spawn stems radiating outward
-    for i in 0..stem_count {
-        // Distribute stems evenly around the vertical axis
-        let angle_horizontal = (i as f32 / stem_count as f32) * std::f32::consts::TAU;
-
-        // Stem leans outward at a random angle
-        let lean_angle_deg = rng.random_range(SHRUB_STEM_ANGLE_MIN..=SHRUB_STEM_ANGLE_MAX);
-        let lean_angle_rad = lean_angle_deg.to_radians();
-
-        // Calculate stem end position (leaning outward)
-        let stem_height = SHRUB_STEM_HEIGHT_BASE * height_scale;
-        let radial_distance = SHRUB_STEM_RADIUS * 3.0 * foliage_scale;
-
-        let stem_end_x = radial_distance * angle_horizontal.cos() * lean_angle_rad.sin();
-        let stem_end_y = stem_height * lean_angle_rad.cos();
-        let stem_end_z = radial_distance * angle_horizontal.sin() * lean_angle_rad.sin();
-
-        // Stem starting position (slightly offset from center)
-        let stem_start_x = (SHRUB_STEM_RADIUS * 0.5) * angle_horizontal.cos();
-        let _stem_start_y = 0.0;
-        let stem_start_z = (SHRUB_STEM_RADIUS * 0.5) * angle_horizontal.sin();
-
-        // Stem mid-point (for mesh positioning)
-        let stem_mid_x = (stem_start_x + stem_end_x) / 2.0;
-        let stem_mid_y = stem_height / 2.0;
-        let stem_mid_z = (stem_start_z + stem_end_z) / 2.0;
-
-        // Create stem material
-        let stem_material = materials.add(StandardMaterial {
-            base_color: stem_color,
-            perceptual_roughness: 0.85,
-            ..default()
-        });
-
-        // Spawn stem
-        let stem = commands
-            .spawn((
-                Mesh3d(stem_mesh.clone()),
-                MeshMaterial3d(stem_material),
-                Transform::from_xyz(stem_mid_x, stem_mid_y, stem_mid_z),
-                GlobalTransform::default(),
-                Visibility::default(),
-            ))
-            .id();
-        commands.entity(parent).add_child(stem);
-
-        // Spawn foliage sphere at stem tip
-        let foliage_radius = (TREE_FOLIAGE_RADIUS * 0.6) * foliage_scale;
-        let foliage_mesh = meshes.add(Sphere {
-            radius: foliage_radius,
-        });
-        let foliage_material = materials.add(StandardMaterial {
-            base_color: foliage_color,
-            perceptual_roughness: 0.8,
-            ..default()
-        });
-
-        let foliage = commands
-            .spawn((
-                Mesh3d(foliage_mesh),
-                MeshMaterial3d(foliage_material),
-                Transform::from_xyz(stem_end_x, stem_end_y, stem_end_z),
-                GlobalTransform::default(),
-                Visibility::default(),
-            ))
-            .id();
-        commands.entity(parent).add_child(foliage);
-    }
-
-    parent
+        .id()
 }
 
 /// Spawns grass blades on a grass terrain tile
@@ -1074,11 +959,11 @@ fn create_grass_blade_mesh(height: f32, width: f32, curve_amount: f32) -> Mesh {
         // Two vertices per spine point (left and right edges)
         // Left edge
         positions.push([-taper_width / 2.0, curve_y, curve_x]);
-        normals.push([1.0, 0.0, 0.0]); // Face +X
+        normals.push([0.0, 0.0, 1.0]); // Face +Z (camera facing for billboard)
 
         // Right edge
         positions.push([taper_width / 2.0, curve_y, curve_x]);
-        normals.push([1.0, 0.0, 0.0]); // Face +X
+        normals.push([0.0, 0.0, 1.0]); // Face +Z
     }
 
     // Generate indices for quad strips (2 triangles per segment)
@@ -1192,11 +1077,11 @@ fn spawn_grass_cluster(
             .spawn((
                 Mesh3d(blade_mesh),
                 MeshMaterial3d(blade_material),
-                Transform::from_xyz(blade_x, GRASS_BLADE_Y_OFFSET + varied_height / 2.0, blade_z)
+                Transform::from_xyz(blade_x, GRASS_BLADE_Y_OFFSET, blade_z)
                     .with_rotation(Quat::from_rotation_y(rotation_y)),
                 GlobalTransform::default(),
                 Visibility::default(),
-                Billboard { lock_y: true },
+                Billboard::default(), // Make blades face camera
             ))
             .id();
 
@@ -1228,10 +1113,43 @@ pub fn spawn_grass(
 
     let grass_color = Color::srgb(0.3 * color_tint.0, 0.65 * color_tint.1, 0.2 * color_tint.2);
 
-    // Determine blade count based on quality settings
-    let (min_blades, max_blades) = quality_settings.density.blade_count_range();
+    // Determine blade count based on metadata or quality settings
+    let (min_blades, max_blades) =
+        if let Some(meta_density) = visual_metadata.and_then(|m| m.grass_density) {
+            match meta_density {
+                world::GrassDensity::None => (0, 0),
+                world::GrassDensity::Low => (2, 4),
+                world::GrassDensity::Medium => (6, 10),
+                world::GrassDensity::High => (12, 20),
+                world::GrassDensity::VeryHigh => (25, 40),
+            }
+        } else {
+            quality_settings.density.blade_count_range()
+        };
+
     let mut rng = rand::rng();
-    let blade_count = rng.random_range(min_blades..=max_blades);
+    let blade_count = if max_blades > 0 {
+        rng.random_range(min_blades..=max_blades)
+    } else {
+        0
+    };
+
+    if blade_count == 0 {
+        // Still return a parent entity but with no blades if density is zero
+        return commands
+            .spawn((
+                Transform::from_xyz(
+                    position.x as f32 + TILE_CENTER_OFFSET,
+                    0.0,
+                    position.y as f32 + TILE_CENTER_OFFSET,
+                ),
+                GlobalTransform::default(),
+                Visibility::default(),
+                MapEntity(map_id),
+                TileCoord(position),
+            ))
+            .id();
+    }
 
     // Spawn parent grass entity
     let parent = commands
@@ -2894,8 +2812,6 @@ mod tests {
     fn test_tree_constants_valid() {
         // Constants should be positive and follow size relationships
         // These checks serve as documentation of design invariants
-        let _ = TREE_TRUNK_RADIUS;
-        let _ = TREE_TRUNK_HEIGHT;
         let _ = TREE_FOLIAGE_RADIUS;
         // Compile will verify constants exist with correct values
     }
@@ -2971,18 +2887,6 @@ mod tests {
         // After initialization, cache should remain empty until set
         // This test documents the cache's purpose: to store handles
         assert!(cache.tree_foliage.is_none());
-    }
-
-    /// Tests that tree mesh dimensions are suitable for caching
-    #[test]
-    fn test_tree_trunk_dimensions_consistent() {
-        // Tree trunk dimensions should be consistent for all spawns
-        // allowing the mesh to be reused without quality loss.
-        // These constants are verified at compile time through their usage in
-        // Cylinder { radius, half_height } which requires valid f32 values.
-        let _ = TREE_TRUNK_RADIUS;
-        let _ = TREE_TRUNK_HEIGHT;
-        // Test passes if constants compile with valid values
     }
 
     /// Tests that tree foliage dimensions are suitable for caching
@@ -3064,21 +2968,6 @@ mod tests {
 
     // ==================== Phase 2: Shrub & Grass Tests ====================
 
-    /// Tests that shrub constants are properly defined
-    /// (Compile-time verification via const definitions)
-    #[test]
-    fn test_shrub_constants_valid() {
-        // Constants are verified at compile time by their usage
-        // This test documents the design invariants
-        let _ = SHRUB_STEM_RADIUS;
-        let _ = SHRUB_STEM_HEIGHT_BASE;
-        let _ = SHRUB_STEM_COUNT_MIN;
-        let _ = SHRUB_STEM_COUNT_MAX;
-        let _ = SHRUB_STEM_ANGLE_MIN;
-        let _ = SHRUB_STEM_ANGLE_MAX;
-        // Test passes if constants compile with valid values
-    }
-
     /// Tests that grass constants are properly defined
     /// (Compile-time verification via const definitions)
     #[test]
@@ -3128,28 +3017,6 @@ mod tests {
         let (min, max) = settings.density.blade_count_range();
         assert!(min > 0, "Min blade count must be positive");
         assert!(max >= min, "Max blade count must be >= min");
-    }
-
-    /// Tests shrub stem count matches documented range
-    /// (Compile-time verification via const assertions)
-    #[test]
-    fn test_shrub_stem_count_within_range() {
-        // Values are const and verified at compile time
-        // This test documents the design invariant
-        let _ = SHRUB_STEM_COUNT_MIN;
-        let _ = SHRUB_STEM_COUNT_MAX;
-        // Test passes if constants compile with expected values
-    }
-
-    /// Tests shrub stem angle range is valid
-    /// (Compile-time verification via const assertions)
-    #[test]
-    fn test_shrub_stem_angle_range_valid() {
-        // Values are const and verified at compile time
-        // This test documents the design invariant
-        let _ = SHRUB_STEM_ANGLE_MIN;
-        let _ = SHRUB_STEM_ANGLE_MAX;
-        // Test passes if constants compile with expected values
     }
 
     // ==================== Furniture Configuration Tests ====================
@@ -3730,11 +3597,11 @@ mod tests {
             .as_float3()
             .expect("Normals should be float3");
 
-        // All normals should face +X for billboard effect
+        // All normals should face +Z for billboard effect
         for normal in normals {
             assert!(
-                (normal[0] - 1.0).abs() < 0.01,
-                "Normal X should be 1.0 (facing +X), got {}",
+                normal[0].abs() < 0.01,
+                "Normal X should be 0.0, got {}",
                 normal[0]
             );
             assert!(
@@ -3743,8 +3610,8 @@ mod tests {
                 normal[1]
             );
             assert!(
-                normal[2].abs() < 0.01,
-                "Normal Z should be 0.0, got {}",
+                (normal[2] - 1.0).abs() < 0.01,
+                "Normal Z should be 1.0 (facing +Z), got {}",
                 normal[2]
             );
         }
@@ -3820,4 +3687,283 @@ mod tests {
             "Blade with 4 segments should have 24 indices (8 triangles × 3)"
         );
     }
+}
+
+/// Spawns a furniture item based on type with custom properties
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_furniture(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    furniture_type: world::FurnitureType,
+    rotation_y: Option<f32>,
+    scale: f32,
+    material_type: world::FurnitureMaterial,
+    flags: &world::FurnitureFlags,
+    color_tint: Option<[f32; 3]>,
+    cache: &mut ProceduralMeshCache,
+) -> Entity {
+    use crate::domain::world::FurnitureType;
+
+    // Apply material properties based on material_type from domain model
+    let rgb = material_type.base_color();
+    let base_color = Color::srgb(rgb[0], rgb[1], rgb[2]);
+
+    // Apply color tint if provided
+    let final_color = if let Some(tint) = color_tint {
+        Color::srgb(
+            base_color.to_srgba().red * tint[0],
+            base_color.to_srgba().green * tint[1],
+            base_color.to_srgba().blue * tint[2],
+        )
+    } else {
+        base_color
+    };
+
+    match furniture_type {
+        FurnitureType::Bench => {
+            let mut config = BenchConfig::default();
+            config.color_override = Some(final_color);
+            config.length *= scale;
+            spawn_bench(
+                commands, materials, meshes, position, map_id, config, cache, rotation_y,
+            )
+        }
+        FurnitureType::Table => {
+            let mut config = TableConfig::default();
+            config.color_override = Some(final_color);
+            config.width *= scale;
+            config.depth *= scale;
+            spawn_table(
+                commands, materials, meshes, position, map_id, config, cache, rotation_y,
+            )
+        }
+        FurnitureType::Chair => {
+            let mut config = ChairConfig::default();
+            config.color_override = Some(final_color);
+            spawn_chair(
+                commands, materials, meshes, position, map_id, config, cache, rotation_y,
+            )
+        }
+        FurnitureType::Throne => {
+            let mut config = ThroneConfig::default();
+            config.color_override = Some(final_color);
+            spawn_throne(
+                commands, materials, meshes, position, map_id, config, cache, rotation_y,
+            )
+        }
+        FurnitureType::Torch => {
+            let mut config = TorchConfig::default();
+            config.lit = flags.lit;
+            spawn_torch(
+                commands, materials, meshes, position, map_id, config, cache, rotation_y,
+            )
+        }
+        FurnitureType::Chest => {
+            let mut config = ChestConfig::default();
+            config.color_override = Some(final_color);
+            config.locked = flags.locked;
+            config.size_multiplier = scale;
+            spawn_chest(
+                commands, materials, meshes, position, map_id, config, cache, rotation_y,
+            )
+        }
+        FurnitureType::Barrel => {
+            let mut config = BarrelConfig::default();
+            config.color_override = Some(final_color);
+            config.height *= scale;
+            config.radius *= scale;
+            spawn_barrel(
+                commands, materials, meshes, position, map_id, config, cache, rotation_y,
+            )
+        }
+        FurnitureType::Bookshelf => {
+            let mut config = BookshelfConfig::default();
+            config.color_override = Some(final_color);
+            config.height *= scale;
+            spawn_bookshelf(
+                commands, materials, meshes, position, map_id, config, cache, rotation_y,
+            )
+        }
+    }
+}
+
+/// Configuration for barrel furniture
+#[derive(Clone, Debug)]
+pub struct BarrelConfig {
+    /// Height of the barrel
+    pub height: f32,
+    /// Radius of the barrel
+    pub radius: f32,
+    /// Color override (None = default wood)
+    pub color_override: Option<Color>,
+}
+
+impl Default for BarrelConfig {
+    fn default() -> Self {
+        Self {
+            height: 1.0,
+            radius: 0.4,
+            color_override: None,
+        }
+    }
+}
+
+/// Spawns a barrel
+pub fn spawn_barrel(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: BarrelConfig,
+    _cache: &mut ProceduralMeshCache, // Unused for now unless we cache barrel parts
+    rotation_y: Option<f32>,
+) -> Entity {
+    let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
+
+    let mesh = meshes.add(Cylinder::new(config.radius, config.height));
+
+    let material = materials.add(StandardMaterial {
+        base_color: config.color_override.unwrap_or(Color::srgb(0.5, 0.35, 0.2)),
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+
+    commands
+        .spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                config.height / 2.0,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            )
+            .with_rotation(Quat::from_rotation_y(rotation_radians)),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Barrel"),
+        ))
+        .id()
+}
+
+/// Configuration for bookshelf furniture
+#[derive(Clone, Debug)]
+pub struct BookshelfConfig {
+    /// Height of the bookshelf
+    pub height: f32,
+    /// Width of the bookshelf
+    pub width: f32,
+    /// Depth of the bookshelf
+    pub depth: f32,
+    /// Color override (None = default wood)
+    pub color_override: Option<Color>,
+}
+
+impl Default for BookshelfConfig {
+    fn default() -> Self {
+        Self {
+            height: 1.8,
+            width: 0.9,
+            depth: 0.3,
+            color_override: None,
+        }
+    }
+}
+
+/// Spawns a bookshelf using multiple cuboids
+pub fn spawn_bookshelf(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    position: types::Position,
+    map_id: types::MapId,
+    config: BookshelfConfig,
+    _cache: &mut ProceduralMeshCache,
+    rotation_y: Option<f32>,
+) -> Entity {
+    let rotation_radians = rotation_y.unwrap_or(0.0).to_radians();
+
+    let back_mesh = meshes.add(Cuboid::new(config.width, config.height, 0.05));
+    let side_mesh = meshes.add(Cuboid::new(0.05, config.height, config.depth));
+    let shelf_mesh = meshes.add(Cuboid::new(config.width - 0.1, 0.05, config.depth - 0.05));
+
+    let material = materials.add(StandardMaterial {
+        base_color: config.color_override.unwrap_or(Color::srgb(0.4, 0.25, 0.1)),
+        perceptual_roughness: 0.9,
+        ..default()
+    });
+
+    let parent = commands
+        .spawn((
+            Transform::from_xyz(
+                position.x as f32 + TILE_CENTER_OFFSET,
+                0.0,
+                position.y as f32 + TILE_CENTER_OFFSET,
+            )
+            .with_rotation(Quat::from_rotation_y(rotation_radians)),
+            GlobalTransform::default(),
+            Visibility::default(),
+            MapEntity(map_id),
+            TileCoord(position),
+            Name::new("Bookshelf"),
+        ))
+        .id();
+
+    // Back panel
+    let back = commands
+        .spawn((
+            Mesh3d(back_mesh),
+            MeshMaterial3d(material.clone()),
+            Transform::from_xyz(0.0, config.height / 2.0, -config.depth / 2.0 + 0.025),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(back);
+
+    // Side panels
+    let side_l = commands
+        .spawn((
+            Mesh3d(side_mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::from_xyz(-config.width / 2.0 + 0.025, config.height / 2.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(side_l);
+
+    let side_r = commands
+        .spawn((
+            Mesh3d(side_mesh),
+            MeshMaterial3d(material.clone()),
+            Transform::from_xyz(config.width / 2.0 - 0.025, config.height / 2.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(parent).add_child(side_r);
+
+    // Shelves
+    let shelf_count = 4;
+    for i in 0..=shelf_count {
+        let h = (i as f32 / shelf_count as f32) * config.height;
+        let shelf = commands
+            .spawn((
+                Mesh3d(shelf_mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(0.0, h.clamp(0.025, config.height - 0.025), 0.0),
+                GlobalTransform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        commands.entity(parent).add_child(shelf);
+    }
+
+    parent
 }

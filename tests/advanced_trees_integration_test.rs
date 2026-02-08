@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 1: Advanced Tree Generation System - Integration Tests
+//! Advanced Tree Generation System - Integration Tests
 //!
 //! Tests the complete tree spawning workflow including:
 //! - Tree type variations (Oak, Pine, Birch, Willow, Dead, Shrub)

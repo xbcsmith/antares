@@ -543,8 +543,10 @@ fn spawn_map(
                                 TileCoord(pos),
                             ));
                         }
-                        world::TerrainType::Forest => {
-                            // Render grass floor first
+                        world::TerrainType::Forest | world::TerrainType::Grass => {
+                            let is_forest = tile.terrain == world::TerrainType::Forest;
+
+                            // Render grass floor
                             commands.spawn((
                                 Mesh3d(floor_mesh.clone()),
                                 MeshMaterial3d(grass_material.clone()),
@@ -559,62 +561,89 @@ fn spawn_map(
                                 TileCoord(pos),
                             ));
 
-                            // Spawn procedural tree with trunk and foliage
-                            procedural_meshes::spawn_tree(
-                                &mut commands,
-                                &mut materials,
-                                &mut meshes,
-                                pos,
-                                map.id,
-                                Some(&tile.visual),
-                                None, // Use default tree type for now
-                                procedural_cache,
-                            );
+                            // Spawn tree/shrub if specified in metadata, or default for Forest
+                            let tree_type = tile.visual.tree_type;
+                            if let Some(t) = tree_type {
+                                // Explicitly map domain TreeType to rendered TreeType to resolve ambiguity
+                                let rendered_t = match t {
+                                    crate::domain::world::TreeType::Oak => {
+                                        crate::game::systems::advanced_trees::TreeType::Oak
+                                    }
+                                    crate::domain::world::TreeType::Pine => {
+                                        crate::game::systems::advanced_trees::TreeType::Pine
+                                    }
+                                    crate::domain::world::TreeType::Birch => {
+                                        crate::game::systems::advanced_trees::TreeType::Birch
+                                    }
+                                    crate::domain::world::TreeType::Willow => {
+                                        crate::game::systems::advanced_trees::TreeType::Willow
+                                    }
+                                    crate::domain::world::TreeType::Dead => {
+                                        crate::game::systems::advanced_trees::TreeType::Dead
+                                    }
+                                    crate::domain::world::TreeType::Shrub => {
+                                        crate::game::systems::advanced_trees::TreeType::Shrub
+                                    }
+                                    crate::domain::world::TreeType::Palm => {
+                                        crate::game::systems::advanced_trees::TreeType::Oak
+                                    } // Fallback for Palm
+                                };
 
-                            // Optionally spawn 0-2 shrubs alongside the tree for variety
-                            let mut rng = rand::rng();
-                            if rng.random_range(0..10) < 4 {
-                                // 40% chance
-                                procedural_meshes::spawn_shrub(
+                                if rendered_t
+                                    == crate::game::systems::advanced_trees::TreeType::Shrub
+                                {
+                                    procedural_meshes::spawn_shrub(
+                                        &mut commands,
+                                        &mut materials,
+                                        &mut meshes,
+                                        pos,
+                                        map.id,
+                                        Some(&tile.visual),
+                                        procedural_cache,
+                                    );
+                                } else {
+                                    procedural_meshes::spawn_tree(
+                                        &mut commands,
+                                        &mut materials,
+                                        &mut meshes,
+                                        pos,
+                                        map.id,
+                                        Some(&tile.visual),
+                                        Some(rendered_t),
+                                        procedural_cache,
+                                    );
+                                }
+                            } else if is_forest {
+                                // Default tree for Forest terrain with no explicit tree type
+                                procedural_meshes::spawn_tree(
                                     &mut commands,
                                     &mut materials,
                                     &mut meshes,
                                     pos,
                                     map.id,
                                     Some(&tile.visual),
+                                    None, // Use default tree type
                                     procedural_cache,
                                 );
                             }
 
-                            // Spawn grass vegetation as ground cover
-                            procedural_meshes::spawn_grass(
-                                &mut commands,
-                                &mut materials,
-                                &mut meshes,
-                                pos,
-                                map.id,
-                                Some(&tile.visual),
-                                &quality_settings,
-                                procedural_cache,
-                            );
-                        }
-                        world::TerrainType::Grass => {
-                            // Grass floor
-                            commands.spawn((
-                                Mesh3d(floor_mesh.clone()),
-                                MeshMaterial3d(grass_material.clone()),
-                                Transform::from_xyz(
-                                    x as f32 + TILE_CENTER_OFFSET,
-                                    0.0,
-                                    y as f32 + TILE_CENTER_OFFSET,
-                                ),
-                                GlobalTransform::default(),
-                                Visibility::default(),
-                                MapEntity(map.id),
-                                TileCoord(pos),
-                            ));
+                            // Extra shrubs for variety in forest
+                            if is_forest {
+                                let mut rng = rand::rng();
+                                if rng.random_range(0..10) < 4 {
+                                    procedural_meshes::spawn_shrub(
+                                        &mut commands,
+                                        &mut materials,
+                                        &mut meshes,
+                                        pos,
+                                        map.id,
+                                        Some(&tile.visual),
+                                        procedural_cache,
+                                    );
+                                }
+                            }
 
-                            // Spawn grass vegetation blades using quality settings
+                            // Always spawn grass ground cover for these terrains
                             procedural_meshes::spawn_grass(
                                 &mut commands,
                                 &mut materials,
@@ -899,6 +928,30 @@ fn spawn_map(
                         map.id,
                         procedural_cache,
                         rotation_y,
+                    );
+                }
+                world::MapEvent::Furniture {
+                    furniture_type,
+                    rotation_y,
+                    scale,
+                    material,
+                    flags,
+                    color_tint,
+                    ..
+                } => {
+                    procedural_meshes::spawn_furniture(
+                        &mut commands,
+                        &mut materials,
+                        &mut meshes,
+                        *position,
+                        map.id,
+                        *furniture_type,
+                        *rotation_y,
+                        *scale,
+                        *material,
+                        flags,
+                        *color_tint,
+                        procedural_cache,
                     );
                 }
                 // RecruitableCharacter rendering handled by sprite system

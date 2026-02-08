@@ -14,7 +14,7 @@ pub mod dialogue_choices;
 pub mod dialogue_validation;
 pub mod dialogue_visuals;
 pub mod events;
-pub mod furniture_rendering_phase10;
+pub mod furniture_rendering;
 pub mod hud;
 pub mod inn_ui;
 pub mod input;

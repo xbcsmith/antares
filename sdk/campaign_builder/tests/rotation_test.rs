@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 5: Rotation Support Tests
+//! Rotation Support Tests
 //!
 //! Tests for rotation_y field in TileVisualMetadata and Campaign Builder integration.
 

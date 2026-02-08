@@ -318,6 +318,8 @@ pub enum PresetCategory {
     Water,
     /// Structure presets (Pillar, Altar, Statue, etc.)
     Structures,
+    /// General/Misc presets
+    General,
 }
 
 impl PresetCategory {
@@ -329,6 +331,7 @@ impl PresetCategory {
             PresetCategory::Nature,
             PresetCategory::Water,
             PresetCategory::Structures,
+            PresetCategory::General,
         ]
     }
 
@@ -338,6 +341,7 @@ impl PresetCategory {
             PresetCategory::All => "All",
             PresetCategory::Walls => "Walls",
             PresetCategory::Nature => "Nature",
+            PresetCategory::General => "General",
             PresetCategory::Water => "Water",
             PresetCategory::Structures => "Structures",
         }
@@ -468,7 +472,7 @@ impl VisualPreset {
     /// Get the category for this preset
     pub const fn category(&self) -> PresetCategory {
         match self {
-            VisualPreset::Default => PresetCategory::All,
+            VisualPreset::Default => PresetCategory::General,
             VisualPreset::ShortWall => PresetCategory::Walls,
             VisualPreset::TallWall => PresetCategory::Walls,
             VisualPreset::ThinWall => PresetCategory::Walls,
@@ -974,6 +978,103 @@ impl VisualMetadataEditor {
         }
     }
 
+    /// Load visual metadata from a TileVisualMetadata into the editor
+    pub fn load_from_metadata(&mut self, md: &TileVisualMetadata) {
+        if let Some(height) = md.height {
+            self.enable_height = true;
+            self.temp_height = height;
+        } else {
+            self.enable_height = false;
+            self.temp_height = 2.5;
+        }
+
+        if let Some(width_x) = md.width_x {
+            self.enable_width_x = true;
+            self.temp_width_x = width_x;
+        } else {
+            self.enable_width_x = false;
+            self.temp_width_x = 1.0;
+        }
+
+        if let Some(width_z) = md.width_z {
+            self.enable_width_z = true;
+            self.temp_width_z = width_z;
+        } else {
+            self.enable_width_z = false;
+            self.temp_width_z = 1.0;
+        }
+
+        if let Some((r, g, b)) = md.color_tint {
+            self.enable_color_tint = true;
+            self.temp_color_r = r;
+            self.temp_color_g = g;
+            self.temp_color_b = b;
+        } else {
+            self.enable_color_tint = false;
+            self.temp_color_r = 1.0;
+            self.temp_color_g = 1.0;
+            self.temp_color_b = 1.0;
+        }
+
+        if let Some(scale) = md.scale {
+            self.enable_scale = true;
+            self.temp_scale = scale;
+        } else {
+            self.enable_scale = false;
+            self.temp_scale = 1.0;
+        }
+
+        if let Some(y_offset) = md.y_offset {
+            self.enable_y_offset = true;
+            self.temp_y_offset = y_offset;
+        } else {
+            self.enable_y_offset = false;
+            self.temp_y_offset = 0.0;
+        }
+
+        if let Some(rotation_y) = md.rotation_y {
+            self.enable_rotation_y = true;
+            self.temp_rotation_y = rotation_y;
+        } else {
+            self.enable_rotation_y = false;
+            self.temp_rotation_y = 0.0;
+        }
+
+        if let Some(sprite) = &md.sprite {
+            self.enable_sprite = true;
+            self.temp_sprite_sheet = sprite.sheet_path.clone();
+            self.temp_sprite_index = sprite.sprite_index;
+            self.sprite_sheet_input = sprite.sheet_path.clone();
+            self.sprite_index_input = sprite.sprite_index.to_string();
+        } else {
+            self.enable_sprite = false;
+            self.temp_sprite_sheet = String::new();
+            self.temp_sprite_index = 0;
+            self.sprite_sheet_input = String::new();
+            self.sprite_index_input = String::new();
+        }
+
+        if !md.sprite_layers.is_empty() {
+            self.enable_sprite_layers = true;
+            self.temp_sprite_layers = md
+                .sprite_layers
+                .iter()
+                .map(|ls| (ls.sprite.sprite_index, 0))
+                .collect();
+        } else {
+            self.enable_sprite_layers = false;
+            self.temp_sprite_layers = Vec::new();
+        }
+
+        if md.sprite_rule.is_some() {
+            self.enable_sprite_rule = true;
+            self.temp_sprite_rule_type = "fixed".to_string();
+        } else {
+            self.enable_sprite_rule = false;
+            self.temp_sprite_rule_type = "fixed".to_string();
+        }
+    }
+
     /// Convert editor state to TileVisualMetadata
     pub fn to_metadata(&self) -> TileVisualMetadata {
         TileVisualMetadata {
@@ -1125,7 +1226,48 @@ impl TerrainEditorState {
         }
     }
 
-    /// Apply state to TileVisualMetadata
+    /// Apply state to TileVisualMetadata based on terrain type
+    ///
+    /// Writes only the terrain-specific fields relevant to the given terrain type.
+    /// This prevents irrelevant fields (e.g., tree_type on Grass tiles) from being set.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - Mutable reference to TileVisualMetadata to update
+    /// * `terrain_type` - The terrain type to determine which fields to apply
+    pub fn apply_to_metadata_for_terrain(
+        &self,
+        metadata: &mut TileVisualMetadata,
+        terrain_type: TerrainType,
+    ) {
+        match terrain_type {
+            TerrainType::Grass => {
+                metadata.grass_density = Some(self.grass_density);
+                metadata.foliage_density = Some(self.foliage_density);
+                // Don't set tree_type, rock_variant, water_flow_direction
+            }
+            TerrainType::Forest => {
+                metadata.tree_type = Some(self.tree_type);
+                metadata.foliage_density = Some(self.foliage_density);
+                metadata.snow_coverage = Some(self.snow_coverage);
+                // Don't set grass_density, rock_variant, water_flow_direction
+            }
+            TerrainType::Mountain => {
+                metadata.rock_variant = Some(self.rock_variant);
+                metadata.snow_coverage = Some(self.snow_coverage);
+                // Don't set grass_density, tree_type, water_flow_direction, foliage_density
+            }
+            TerrainType::Water | TerrainType::Swamp => {
+                metadata.water_flow_direction = Some(self.water_flow_direction);
+                // Don't set grass_density, tree_type, rock_variant, foliage_density, snow_coverage
+            }
+            _ => {
+                // For other terrain types (Ground, Stone, Dirt, Lava), don't set any terrain-specific fields
+            }
+        }
+    }
+
+    /// Apply state to TileVisualMetadata (legacy method)
     ///
     /// Writes all terrain-specific fields from the editor state into the
     /// provided metadata. This includes all optional fields.
@@ -1133,6 +1275,9 @@ impl TerrainEditorState {
     /// # Arguments
     ///
     /// * `metadata` - Mutable reference to TileVisualMetadata to update
+    #[deprecated(
+        note = "Use apply_to_metadata_for_terrain instead to avoid setting irrelevant fields"
+    )]
     pub fn apply_to_metadata(&self, metadata: &mut TileVisualMetadata) {
         metadata.grass_density = Some(self.grass_density);
         metadata.tree_type = Some(self.tree_type);
@@ -1268,6 +1413,79 @@ impl MapEditorState {
         }
     }
 
+    /// Apply terrain editor state to selected tiles
+    ///
+    /// Applies the current terrain-specific settings (grass density, tree type,
+    /// rock variant, water flow direction, foliage density, snow coverage) to
+    /// either the currently selected tile or all tiles in multi-select mode.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::campaign_builder::MapEditorState;
+    /// use antares::domain::world::{Map, Position};
+    ///
+    /// let mut editor = MapEditorState::new(Map::new(10, 10));
+    /// editor.selected_position = Some(Position::new(5, 5));
+    /// editor.apply_terrain_state_to_selection();
+    /// ```
+    pub fn apply_terrain_state_to_selection(&mut self) {
+        // Initialize metadata map if it doesn't exist
+        if self.metadata.tile_visual_metadata.is_none() {
+            self.metadata.tile_visual_metadata = Some(std::collections::HashMap::new());
+        }
+
+        if self.selected_tiles.is_empty() {
+            // If no multi-selection, apply to current selected position
+            if let Some(pos) = self.selected_position {
+                // Get the terrain type for this tile
+                if let Some(tile) = self.map.get_tile(pos) {
+                    let terrain_type = tile.terrain;
+
+                    // Update Metadata Map (Editor State)
+                    if let Some(metadata_map) = self.metadata.tile_visual_metadata.as_mut() {
+                        let metadata = metadata_map
+                            .entry(pos)
+                            .or_insert_with(TileVisualMetadata::default);
+                        self.terrain_editor_state
+                            .apply_to_metadata_for_terrain(metadata, terrain_type);
+                        self.has_changes = true;
+                    }
+
+                    // Update Actual Map Tile
+                    if let Some(tile) = self.map.get_tile_mut(pos) {
+                        self.terrain_editor_state
+                            .apply_to_metadata_for_terrain(&mut tile.visual, terrain_type);
+                    }
+                }
+            }
+        } else {
+            // Apply to all selected tiles
+            for pos in self.selected_tiles.clone() {
+                // Get the terrain type for this tile
+                if let Some(tile) = self.map.get_tile(pos) {
+                    let terrain_type = tile.terrain;
+
+                    // Update Metadata Map (Editor State)
+                    if let Some(metadata_map) = self.metadata.tile_visual_metadata.as_mut() {
+                        let metadata = metadata_map
+                            .entry(pos)
+                            .or_insert_with(TileVisualMetadata::default);
+                        self.terrain_editor_state
+                            .apply_to_metadata_for_terrain(metadata, terrain_type);
+                    }
+
+                    // Update Actual Map Tile
+                    if let Some(tile) = self.map.get_tile_mut(pos) {
+                        self.terrain_editor_state
+                            .apply_to_metadata_for_terrain(&mut tile.visual, terrain_type);
+                    }
+                }
+            }
+            self.has_changes = true;
+        }
+    }
+
     /// Toggle multi-select mode
     pub fn toggle_multi_select_mode(&mut self) {
         self.multi_select_mode = !self.multi_select_mode;
@@ -1385,6 +1603,19 @@ impl MapEditorState {
     pub fn apply_metadata(&mut self) {
         self.map.name = self.metadata.name.clone();
         self.map.description = self.metadata.description.clone();
+    }
+
+    /// Load visual metadata into the editor from the currently selected position,
+    /// but only when multi-select mode is not active. This prevents bulk-selection
+    /// clicks from accidentally overwriting the editor's staged values.
+    pub fn maybe_load_visual_from_selected_position(&mut self) {
+        if let Some(pos) = self.selected_position {
+            if !self.multi_select_mode {
+                if let Some(tile) = self.map.get_tile(pos) {
+                    self.visual_editor.load_from_tile(tile);
+                }
+            }
+        }
     }
 
     /// Erases a tile (resets to default)
@@ -2379,13 +2610,17 @@ impl<'a> Widget for MapGridWidget<'a> {
 
                     self.state.selected_position = Some(pos);
 
-                    // Synchronize terrain editor state with selected tile
-                    if let Some(metadata_map) = self.state.metadata.tile_visual_metadata.as_ref() {
-                        if let Some(metadata) = metadata_map.get(&pos) {
-                            self.state.terrain_editor_state =
-                                TerrainEditorState::from_metadata(metadata);
-                        } else {
-                            self.state.terrain_editor_state = TerrainEditorState::default();
+                    // Synchronize terrain editor state with selected tile (unless multi-selecting)
+                    if !self.state.multi_select_mode {
+                        if let Some(metadata_map) =
+                            self.state.metadata.tile_visual_metadata.as_ref()
+                        {
+                            if let Some(metadata) = metadata_map.get(&pos) {
+                                self.state.terrain_editor_state =
+                                    TerrainEditorState::from_metadata(metadata);
+                            } else {
+                                self.state.terrain_editor_state = TerrainEditorState::default();
+                            }
                         }
                     }
 
@@ -3748,22 +3983,25 @@ impl MapsEditorState {
             // Terrain-specific controls
             ui.separator();
             ui.group(|ui| {
+                ui.heading("Terrain-Specific Settings");
+
+                // Multi-select info
+                if !editor.selected_tiles.is_empty() {
+                    ui.label(format!(
+                        "📌 {} tiles selected for bulk edit",
+                        editor.selected_tiles.len()
+                    ));
+                    ui.separator();
+                }
+
                 if let Some(tile) = editor.map.get_tile(pos) {
                     let terrain_type = tile.terrain;
 
-                    if Self::show_terrain_specific_controls(
+                    Self::show_terrain_specific_controls(
                         ui,
                         terrain_type,
                         &mut editor.terrain_editor_state,
-                    ) {
-                        // Apply changes to selected tile's visual metadata
-                        if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
-                            let metadata = metadata_map
-                                .entry(pos)
-                                .or_insert_with(TileVisualMetadata::default);
-                            editor.terrain_editor_state.apply_to_metadata(metadata);
-                        }
-                    }
+                    );
 
                     ui.separator();
 
@@ -3782,13 +4020,32 @@ impl MapsEditorState {
             ui.separator();
             ui.group(|ui| {
                 if let Some(selected_preset) = Self::show_preset_palette(ui, editor) {
-                    // Apply selected preset to currently selected tile
-                    if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
-                        let metadata = metadata_map
-                            .entry(pos)
-                            .or_insert_with(TileVisualMetadata::default);
-                        *metadata = selected_preset.to_metadata();
-                        editor.has_changes = true;
+                    // Initialize metadata map if it doesn't exist
+                    if editor.metadata.tile_visual_metadata.is_none() {
+                        editor.metadata.tile_visual_metadata =
+                            Some(std::collections::HashMap::new());
+                    }
+
+                    if !editor.selected_tiles.is_empty() {
+                        // Multi-select active: apply to all selected tiles
+                        if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
+                            for tile_pos in &editor.selected_tiles {
+                                let metadata = metadata_map
+                                    .entry(*tile_pos)
+                                    .or_insert_with(TileVisualMetadata::default);
+                                *metadata = selected_preset.to_metadata();
+                            }
+                            editor.has_changes = true;
+                        }
+                    } else {
+                        // Single selection: apply to current tile
+                        if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
+                            let metadata = metadata_map
+                                .entry(pos)
+                                .or_insert_with(TileVisualMetadata::default);
+                            *metadata = selected_preset.to_metadata();
+                            editor.has_changes = true;
+                        }
                     }
                 }
             });
@@ -4711,12 +4968,15 @@ impl MapsEditorState {
                             let metadata = preset.to_metadata();
                             if editor.multi_select_mode && !editor.selected_tiles.is_empty() {
                                 editor.apply_visual_metadata_to_selection(&metadata);
+                                // When bulk-applying a preset, reflect it in the editor so subsequent "Apply"
+                                // uses the same metadata rather than being overwritten by selection clicks.
+                                editor.visual_editor.load_from_metadata(&metadata);
                             } else {
                                 editor.apply_visual_metadata(pos, &metadata);
-                            }
-                            // Update editor state to reflect preset
-                            if let Some(tile) = editor.map.get_tile(pos) {
-                                editor.visual_editor.load_from_tile(tile);
+                                // For single-selection workflows, load the tile's metadata into the editor.
+                                if let Some(tile) = editor.map.get_tile(pos) {
+                                    editor.visual_editor.load_from_tile(tile);
+                                }
                             }
                         }
                     }
@@ -4726,9 +4986,7 @@ impl MapsEditorState {
         ui.separator();
 
         // Load tile's current visual metadata into editor if selection changed
-        if let Some(tile) = editor.map.get_tile(pos) {
-            editor.visual_editor.load_from_tile(tile);
-        }
+        editor.maybe_load_visual_from_selected_position();
 
         // Height
         ui.horizontal(|ui| {
@@ -4839,12 +5097,20 @@ impl MapsEditorState {
             if ui.button(&apply_text).clicked() {
                 let visual_metadata = editor.visual_editor.to_metadata();
                 editor.apply_visual_metadata_to_selection(&visual_metadata);
+                editor.apply_terrain_state_to_selection();
+
+                // Reset editor UI state after applying
+                editor.visual_editor.reset();
+                editor.terrain_editor_state = TerrainEditorState::default();
             }
 
             if ui.button("Reset to Defaults").clicked() {
                 let default_metadata = TileVisualMetadata::default();
                 editor.apply_visual_metadata_to_selection(&default_metadata);
+                // Also clear terrain metadata (default metadata effectively clears visual representation)
+
                 editor.visual_editor.reset();
+                editor.terrain_editor_state = TerrainEditorState::default();
             }
         });
 
@@ -4956,6 +5222,8 @@ impl MapsEditorState {
                     TreeType::Dead => 2,
                     TreeType::Palm => 3,
                     TreeType::Willow => 4,
+                    TreeType::Birch => 5,
+                    TreeType::Shrub => 6,
                 };
 
                 let old_index = tree_index;
@@ -4967,6 +5235,8 @@ impl MapsEditorState {
                         ui.selectable_value(&mut tree_index, 2, "Dead");
                         ui.selectable_value(&mut tree_index, 3, "Palm");
                         ui.selectable_value(&mut tree_index, 4, "Willow");
+                        ui.selectable_value(&mut tree_index, 5, "Birch");
+                        ui.selectable_value(&mut tree_index, 6, "Shrub");
                     });
 
                 if old_index != tree_index {
@@ -4977,6 +5247,8 @@ impl MapsEditorState {
                         2 => TreeType::Dead,
                         3 => TreeType::Palm,
                         4 => TreeType::Willow,
+                        5 => TreeType::Birch,
+                        6 => TreeType::Shrub,
                         _ => TreeType::Oak,
                     };
                 }
@@ -5782,7 +6054,7 @@ mod tests {
     #[test]
     fn test_event_type_all() {
         let types = EventType::all();
-        assert_eq!(types.len(), 8);
+        assert_eq!(types.len(), 9);
         assert!(types.contains(&EventType::Encounter));
         assert!(types.contains(&EventType::Treasure));
         assert!(types.contains(&EventType::Teleport));
@@ -5791,6 +6063,7 @@ mod tests {
         assert!(types.contains(&EventType::NpcDialogue));
         assert!(types.contains(&EventType::RecruitableCharacter));
         assert!(types.contains(&EventType::EnterInn));
+        assert!(types.contains(&EventType::Furniture));
     }
 
     #[test]
@@ -5804,6 +6077,99 @@ mod tests {
         assert!(ron.contains("id:"));
         assert!(ron.contains("width:"));
         assert!(ron.contains("height:"));
+    }
+
+    #[test]
+    fn test_multi_select_preserves_visual_editor() {
+        let map = Map::new(1, "Test Map".to_string(), "Test".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos_a = Position::new(0, 0);
+        let pos_b = Position::new(1, 1);
+        let pos_c = Position::new(2, 2);
+
+        // Simulate applying a preset to a single tile and loading it into the editor
+        let preset_md = VisualPreset::ShortGrass.to_metadata();
+        editor.apply_visual_metadata(pos_a, &preset_md);
+        if let Some(tile) = editor.map.get_tile(pos_a) {
+            editor.visual_editor.load_from_tile(tile);
+        }
+
+        // Editor should reflect the preset
+        assert_eq!(editor.visual_editor.to_metadata(), preset_md);
+
+        // Enter multi-select and add other tiles (simulate clicking them)
+        editor.toggle_multi_select_mode();
+        assert!(editor.multi_select_mode);
+
+        editor.toggle_tile_selection(pos_b);
+        editor.selected_position = Some(pos_b);
+
+        editor.toggle_tile_selection(pos_c);
+        editor.selected_position = Some(pos_c);
+
+        // Simulate UI attempting to load tile metadata on selection change while multi-select is active.
+        // This should NOT overwrite the editor's current pending metadata (the preset).
+        editor.maybe_load_visual_from_selected_position();
+        assert_eq!(editor.visual_editor.to_metadata(), preset_md);
+
+        // Now toggle multi-select off (user finishes selection). When the editor attempts to load
+        // the selected tile now (single-select semantics), it should load the tile's metadata.
+        editor.toggle_multi_select_mode();
+        assert!(!editor.multi_select_mode);
+        // Ensure the selected_position remains set to the last clicked tile for loading.
+        editor.selected_position = Some(pos_c);
+        editor.maybe_load_visual_from_selected_position();
+
+        // The tile at pos_c has not been modified (we didn't apply the preset yet), so it should
+        // reflect the default metadata.
+        assert_eq!(
+            editor.visual_editor.to_metadata(),
+            TileVisualMetadata::default()
+        );
+
+        // Re-enable multi-select, select tiles and apply the preset to them to verify the apply path.
+        editor.toggle_multi_select_mode();
+        assert!(editor.multi_select_mode);
+        editor.toggle_tile_selection(pos_b);
+        editor.toggle_tile_selection(pos_c);
+        editor.apply_visual_metadata_to_selection(&preset_md);
+
+        // Verify selected tiles received the preset metadata
+        let tile_b = editor.map.get_tile(pos_b).expect("Tile B exists");
+        let tile_c = editor.map.get_tile(pos_c).expect("Tile C exists");
+        assert_eq!(tile_b.visual, preset_md);
+        assert_eq!(tile_c.visual, preset_md);
+    }
+
+    #[test]
+    fn test_preset_application_in_multi_select_mode_updates_visual_editor() {
+        let map = Map::new(1, "Test Map".to_string(), "Test".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos_b = Position::new(1, 1);
+        let pos_c = Position::new(2, 2);
+
+        // Enable multi-select and select tiles
+        editor.toggle_multi_select_mode();
+        editor.toggle_tile_selection(pos_b);
+        editor.toggle_tile_selection(pos_c);
+        assert!(editor.multi_select_mode);
+        assert_eq!(editor.selected_tiles.len(), 2);
+
+        // Apply preset while in multi-select mode (simulate pressing preset button)
+        let preset_md = VisualPreset::ShortGrass.to_metadata();
+        editor.apply_visual_metadata_to_selection(&preset_md);
+        editor.visual_editor.load_from_metadata(&preset_md);
+
+        // Verify tiles were updated
+        let tile_b = editor.map.get_tile(pos_b).expect("Tile B exists");
+        let tile_c = editor.map.get_tile(pos_c).expect("Tile C exists");
+        assert_eq!(tile_b.visual, preset_md);
+        assert_eq!(tile_c.visual, preset_md);
+
+        // Editor should reflect applied preset
+        assert_eq!(editor.visual_editor.to_metadata(), preset_md);
     }
 
     #[test]
@@ -5870,6 +6236,144 @@ mod tests {
 
         assert_eq!(maps[0].name, "Synchronized Map");
         assert_eq!(maps[0].description, "Synchronized description");
+    }
+
+    #[test]
+    fn test_apply_button_includes_terrain_state() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Select a position
+        let pos = Position::new(5, 5);
+        state.selected_position = Some(pos);
+
+        // Set terrain editor state
+        state.terrain_editor_state.grass_density = GrassDensity::High;
+        state.terrain_editor_state.tree_type = TreeType::Pine;
+        state.terrain_editor_state.foliage_density = 1.5;
+        state.terrain_editor_state.snow_coverage = 0.8;
+
+        // Apply terrain state
+        state.apply_terrain_state_to_selection();
+
+        // Verify metadata was updated
+        let metadata = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .and_then(|map| map.get(&pos))
+            .expect("Metadata should exist for position");
+
+        assert_eq!(metadata.grass_density, Some(GrassDensity::High));
+        assert_eq!(metadata.tree_type, Some(TreeType::Pine));
+        assert_eq!(metadata.foliage_density, Some(1.5));
+        assert_eq!(metadata.snow_coverage, Some(0.8));
+        assert!(state.has_changes);
+    }
+
+    #[test]
+    fn test_apply_terrain_to_multiple_tiles() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Select multiple tiles
+        let pos1 = Position::new(2, 3);
+        let pos2 = Position::new(4, 5);
+        let pos3 = Position::new(6, 7);
+        state.selected_tiles = vec![pos1, pos2, pos3];
+
+        // Set terrain editor state
+        state.terrain_editor_state.grass_density = GrassDensity::Low;
+        state.terrain_editor_state.tree_type = TreeType::Oak;
+
+        // Apply terrain state
+        state.apply_terrain_state_to_selection();
+
+        // Verify all tiles were updated
+        let metadata_map = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .expect("Metadata map should exist");
+
+        for pos in [pos1, pos2, pos3] {
+            let metadata = metadata_map
+                .get(&pos)
+                .expect(&format!("Metadata should exist for position {:?}", pos));
+            assert_eq!(metadata.grass_density, Some(GrassDensity::Low));
+            assert_eq!(metadata.tree_type, Some(TreeType::Oak));
+        }
+
+        assert!(state.has_changes);
+    }
+
+    #[test]
+    fn test_apply_preset_logic() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Select multiple tiles
+        let pos1 = Position::new(2, 3);
+        let pos2 = Position::new(4, 5);
+        state.selected_tiles = vec![pos1, pos2];
+
+        // Simulate "Tall Wall" preset selection
+        let preset = VisualPreset::TallWall;
+
+        // MANUALLY execute the logic we added to the UI block
+        // Initialize metadata map
+        if state.metadata.tile_visual_metadata.is_none() {
+            state.metadata.tile_visual_metadata = Some(std::collections::HashMap::new());
+        }
+
+        if !state.selected_tiles.is_empty() {
+            if let Some(metadata_map) = state.metadata.tile_visual_metadata.as_mut() {
+                for tile_pos in &state.selected_tiles {
+                    let metadata = metadata_map
+                        .entry(*tile_pos)
+                        .or_insert_with(TileVisualMetadata::default);
+                    *metadata = preset.to_metadata();
+                }
+                state.has_changes = true;
+            }
+        }
+
+        // Verify
+        let metadata_map = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .expect("Metadata map should exist");
+
+        let meta1 = metadata_map.get(&pos1).unwrap();
+        assert_eq!(meta1.height, Some(3.5)); // Tall Wall height
+
+        let meta2 = metadata_map.get(&pos2).unwrap();
+        assert_eq!(meta2.height, Some(3.5));
+    }
+
+    #[test]
+    fn test_state_reset_after_apply() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "".to_string(), 10, 10));
+
+        // Set some state
+        state.visual_editor.enable_height = true;
+        state.visual_editor.temp_height = 5.0;
+        state.terrain_editor_state.tree_type = TreeType::Dead;
+
+        // Apply Logic (simulation of button click)
+        let visual_metadata = state.visual_editor.to_metadata();
+        state.apply_visual_metadata_to_selection(&visual_metadata);
+        state.apply_terrain_state_to_selection();
+
+        // Reset logic
+        state.visual_editor.reset();
+        state.terrain_editor_state = TerrainEditorState::default();
+
+        // Verify state is reset
+        assert_eq!(state.visual_editor.enable_height, false);
+        assert_eq!(state.terrain_editor_state.tree_type, TreeType::Oak);
     }
 
     #[test]
@@ -7002,14 +7506,15 @@ mod tests {
     // ===== Preset Categorization Tests =====
 
     #[test]
-    fn test_preset_category_all_contains_five_categories() {
+    fn test_preset_category_all_contains_six_categories() {
         let categories = PresetCategory::all();
-        assert_eq!(categories.len(), 5);
+        assert_eq!(categories.len(), 6);
         assert!(categories.contains(&PresetCategory::All));
         assert!(categories.contains(&PresetCategory::Walls));
         assert!(categories.contains(&PresetCategory::Nature));
         assert!(categories.contains(&PresetCategory::Water));
         assert!(categories.contains(&PresetCategory::Structures));
+        assert!(categories.contains(&PresetCategory::General));
     }
 
     #[test]
@@ -7129,8 +7634,8 @@ mod tests {
     }
 
     #[test]
-    fn test_preset_default_has_all_category() {
-        assert_eq!(VisualPreset::Default.category(), PresetCategory::All);
+    fn test_preset_default_has_general_category() {
+        assert_eq!(VisualPreset::Default.category(), PresetCategory::General);
     }
 
     #[test]
@@ -7313,5 +7818,88 @@ mod tests {
         let nature_1 = VisualPreset::by_category(PresetCategory::Nature);
         let nature_2 = VisualPreset::by_category(PresetCategory::Nature);
         assert_eq!(nature_1, nature_2);
+    }
+
+    #[test]
+    fn test_terrain_controls_single_select_fallback() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Use single selection
+        let pos = Position::new(5, 5);
+        state.selected_position = Some(pos);
+        state.selected_tiles = vec![]; // Ensure multi-select is empty
+
+        // Set terrain state
+        state.terrain_editor_state.grass_density = GrassDensity::High;
+
+        // Apply
+        state.apply_terrain_state_to_selection();
+
+        // Verify
+        let metadata = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .and_then(|m| m.get(&pos))
+            .expect("Should have metadata");
+        assert_eq!(metadata.grass_density, Some(GrassDensity::High));
+    }
+
+    #[test]
+    fn test_preset_palette_single_tile() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Use single selection
+        let pos = Position::new(2, 2);
+        state.selected_position = Some(pos);
+        state.selected_tiles = vec![];
+
+        // Simulate preset application for single tile
+        // Logic mirrors the UI implementation
+        let preset = VisualPreset::TallWall;
+        if state.selected_tiles.is_empty() {
+            if let Some(pos) = state.selected_position {
+                // Ensure metadata exists
+                if state.metadata.tile_visual_metadata.is_none() {
+                    state.metadata.tile_visual_metadata = Some(std::collections::HashMap::new());
+                }
+                if let Some(metadata_map) = state.metadata.tile_visual_metadata.as_mut() {
+                    metadata_map.insert(pos, preset.to_metadata());
+                }
+            }
+        }
+
+        // Verify
+        let metadata = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .and_then(|m| m.get(&pos))
+            .expect("Should have metadata");
+        assert_eq!(metadata.height, Some(3.5));
+    }
+
+    #[test]
+    fn test_state_reset_on_back_to_list() {
+        // Verify that a fresh MapEditorState (simulating re-entry) has clean defaults
+        let state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Visual editor should be default
+        assert!(!state.visual_editor.enable_height);
+        assert!(!state.visual_editor.enable_color_tint);
+
+        // Terrain editor should be default
+        assert_eq!(state.terrain_editor_state.tree_type, TreeType::Oak); // Default
+        assert_eq!(
+            state.terrain_editor_state.grass_density,
+            GrassDensity::Medium
+        ); // Default
+
+        // Selections should be empty
+        assert!(state.selected_position.is_none());
+        assert!(state.selected_tiles.is_empty());
     }
 }

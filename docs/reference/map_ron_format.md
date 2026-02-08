@@ -435,6 +435,47 @@ Maps must satisfy these constraints to be valid:
 )
 ```
 
+### Tile Visual Metadata
+
+Each tile can optionally include a `visual` field to override its default appearance.
+
+**Structure**:
+
+```ron
+visual: (
+    // Basic transforms
+    height: Some(3.5),           // Override default height
+    width_x: Some(1.0),          // X-axis width multiplier
+    width_z: Some(1.0),          // Z-axis width multiplier
+    scale: Some(1.2),            // Overall scale multiplier
+    y_offset: Some(0.1),         // Vertical offset from ground
+    rotation_y: Some(45.0),      // Rotation in degrees
+    color_tint: Some((1.0, 0.5, 0.5)), // RGB color tint
+
+    // Terrain-specific overrides
+    grass_density: Some(High),   // For Grass tiles: None, Low, Medium, High, VeryHigh
+    tree_type: Some(Pine),       // For Forest tiles: Oak, Pine, Dead, Palm, Willow
+    rock_variant: Some(Jagged),  // For Mountain tiles: Smooth, Jagged, Layered, Crystal
+    water_flow_direction: Some(South), // For Water tiles: Still, North, South, East, West
+    foliage_density: Some(1.5),  // Foliage density multiplier (0.0 - 2.0)
+    snow_coverage: Some(0.8),    // Snow coverage (0.0 - 1.0)
+
+    // Sprite options
+    sprite: Some((
+        sheet_path: "sprites/walls.png",
+        sprite_index: 5,
+        animation: None,
+    )),
+),
+```
+
+**Common Use Cases**:
+
+- **Visual Variety**: Using `grass_density` and `tree_type` to create diverse landscapes.
+- **Atmosphere**: Using `color_tint` to create mood lighting (e.g., green for swamps).
+- **Custom Heights**: Setting `height` for visual emphasis on certain walls or cliffs.
+- **Snowy Biomes**: Using `snow_coverage` on forest or mountain tiles.
+
 ## Example: Minimal Valid Map
 
 ```ron

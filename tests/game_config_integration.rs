@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for Phase 1: Core Configuration Infrastructure
+//! Core Configuration Infrastructure Integration Tests
 //!
 //! These tests verify that campaigns can load config.ron files and
 //! that the GameConfig system integrates properly with campaign loading.
@@ -246,7 +246,7 @@ fn test_campaign_config_validation_passes_for_valid_custom_config() {
     assert!(campaign.game_config.validate().is_ok());
 }
 
-/// Phase 6: Tutorial Campaign Configuration Tests
+/// Tutorial Campaign Configuration Tests
 
 #[test]
 fn test_tutorial_campaign_loads_config() {

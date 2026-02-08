@@ -377,7 +377,15 @@ impl MapDatabase {
             let path = entry.path();
 
             if path.is_file() && path.extension().is_some_and(|ext| ext == "ron") {
-                let contents = std::fs::read_to_string(&path)?;
+                // Read file contents, but be tolerant of read errors and continue on failure
+                let contents = match std::fs::read_to_string(&path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Warning: failed to read map file {}: {}", path.display(), e);
+                        // Skip unreadable map files instead of failing the whole load
+                        continue;
+                    }
+                };
 
                 // Try to load as Map (Engine/SDK format) first
                 if let Ok(map) = ron::from_str::<Map>(&contents) {
@@ -385,11 +393,22 @@ impl MapDatabase {
                     continue;
                 }
 
-                // Fallback to MapBlueprint
-                let blueprint: MapBlueprint =
-                    ron::from_str(&contents).map_err(|e| DatabaseError::RonError(e.code))?;
-                let map: Map = blueprint.into();
-                maps.insert(map.id, map);
+                // Fallback to MapBlueprint; if parsing fails, log and skip the file
+                match ron::from_str::<MapBlueprint>(&contents) {
+                    Ok(blueprint) => {
+                        let map: Map = blueprint.into();
+                        maps.insert(map.id, map);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: failed to parse map file {}: {}. Skipping this map.",
+                            path.display(),
+                            e
+                        );
+                        // Do not treat a single bad map as fatal for campaign loading
+                        continue;
+                    }
+                }
             }
         }
 

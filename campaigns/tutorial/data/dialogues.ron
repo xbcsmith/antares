@@ -4,6 +4,15 @@
         name: "Arcturus Story",
         root_node: 1,
         nodes: {
+            2: (
+                id: 2,
+                text: "Hello There! Come and sit and talk a while.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
             1: (
                 id: 1,
                 text: "I am the Great Arcturus!",
@@ -27,15 +36,6 @@
                 conditions: [],
                 actions: [],
                 is_terminal: false,
-            ),
-            2: (
-                id: 2,
-                text: "Hello There! Come and sit and talk a while.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
             ),
         },
         speaker_name: Some("Arcturus"),
@@ -86,18 +86,18 @@
                 actions: [],
                 is_terminal: false,
             ),
-            2: (
-                id: 2,
-                text: "Excellent! I\'m ready to join your adventure.",
+            3: (
+                id: 3,
+                text: "I\'ll head to the inn right away. See you there!",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
                 actions: [],
                 is_terminal: true,
             ),
-            3: (
-                id: 3,
-                text: "I\'ll head to the inn right away. See you there!",
+            2: (
+                id: 2,
+                text: "Excellent! I\'m ready to join your adventure.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -114,9 +114,9 @@
         name: "Apprentice Zara Recruitment",
         root_node: 1,
         nodes: {
-            3: (
-                id: 3,
-                text: "I\'ll head to the inn right away. See you there!",
+            2: (
+                id: 2,
+                text: "Excellent! I\'m ready to join your adventure.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -162,9 +162,9 @@
                 actions: [],
                 is_terminal: false,
             ),
-            2: (
-                id: 2,
-                text: "Excellent! I\'m ready to join your adventure.",
+            3: (
+                id: 3,
+                text: "I\'ll head to the inn right away. See you there!",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -181,18 +181,18 @@
         name: "Whisper Recruitment ",
         root_node: 1,
         nodes: {
-            3: (
-                id: 3,
-                text: "I\'ll head to the inn right away. See you there!",
+            2: (
+                id: 2,
+                text: "Excellent! I\'m ready to join your adventure.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
                 actions: [],
                 is_terminal: true,
             ),
-            2: (
-                id: 2,
-                text: "Excellent! I\'m ready to join your adventure.",
+            3: (
+                id: 3,
+                text: "I\'ll head to the inn right away. See you there!",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -248,6 +248,15 @@
         name: "Arcturus Brother Story",
         root_node: 1,
         nodes: {
+            2: (
+                id: 2,
+                text: "Thank you very much. I look forward to your return.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
             1: (
                 id: 1,
                 text: "Hello There! I am the brother of the Great Wizard Arcturus. I have a favor to  ask of you. Find my Bar that I lost in the area and return it to me. ",
@@ -281,15 +290,6 @@
                 actions: [],
                 is_terminal: true,
             ),
-            2: (
-                id: 2,
-                text: "Thank you very much. I look forward to your return.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
-            ),
         },
         speaker_name: Some("Arcturus Brother"),
         repeatable: false,
@@ -300,38 +300,36 @@
         name: "Village Elder Town Square Greeting",
         root_node: 1,
         nodes: {
-            2: (
-                id: 2,
-                text: "Our village has stood for generations, though darker times have befallen us of late. Strange creatures stir in the wilderness, and travelers speak of growing dangers. But we endure, as we always have.",
+            1: (
+                id: 1,
+                text: "Welcome, travelers. I am the elder of this village, keeper of its history and guardian of its people. What brings you to our humble town?",
                 speaker_override: None,
                 choices: [
                     (
-                        text: "What kind of dangers?",
-                        target_node: Some(4),
+                        text: "Tell me about the village.",
+                        target_node: Some(2),
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
                     ),
                     (
-                        text: "I see. Tell me something else.",
-                        target_node: Some(1),
+                        text: "Do you have any work for us?",
+                        target_node: Some(3),
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                    ),
+                    (
+                        text: "Farewell, elder.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
-            ),
-            5: (
-                id: 5,
-                text: "Blessings upon you, brave ones. May your blades strike true and your courage never falter. Return when the deed is done.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
             ),
             3: (
                 id: 3,
@@ -374,31 +372,33 @@
                 actions: [],
                 is_terminal: false,
             ),
-            1: (
-                id: 1,
-                text: "Welcome, travelers. I am the elder of this village, keeper of its history and guardian of its people. What brings you to our humble town?",
+            5: (
+                id: 5,
+                text: "Blessings upon you, brave ones. May your blades strike true and your courage never falter. Return when the deed is done.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+            2: (
+                id: 2,
+                text: "Our village has stood for generations, though darker times have befallen us of late. Strange creatures stir in the wilderness, and travelers speak of growing dangers. But we endure, as we always have.",
                 speaker_override: None,
                 choices: [
                     (
-                        text: "Tell me about the village.",
-                        target_node: Some(2),
+                        text: "What kind of dangers?",
+                        target_node: Some(4),
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
                     ),
                     (
-                        text: "Do you have any work for us?",
-                        target_node: Some(3),
+                        text: "I see. Tell me something else.",
+                        target_node: Some(1),
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
-                    ),
-                    (
-                        text: "Farewell, elder.",
-                        target_node: None,
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: true,
                     ),
                 ],
                 conditions: [],
@@ -415,6 +415,23 @@
         name: "Innkeeper Town Square Greeting",
         root_node: 1,
         nodes: {
+            4: (
+                id: 4,
+                text: "That I have! Why, just last month a group came through claiming they\'d seen a dragon. A DRAGON! Can you believe it? I told them that was just the ale talking.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Ha! Good story.",
+                        target_node: Some(1),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
             2: (
                 id: 2,
                 text: "Been running this place for fifteen years now. My father ran it before me, and his father before him. We\'ve housed everyone from simple farmers to legendary heroes. Well, maybe not legendary yet, but who\'s counting?",
@@ -438,19 +455,6 @@
                 conditions: [],
                 actions: [],
                 is_terminal: false,
-            ),
-            6: (
-                id: 6,
-                text: "Of course! Let me help you manage your party.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [
-                    OpenInnManagement(
-                        innkeeper_id: "tutorial_innkeeper_town",
-                    ),
-                ],
-                is_terminal: true,
             ),
             1: (
                 id: 1,
@@ -490,6 +494,19 @@
                 actions: [],
                 is_terminal: false,
             ),
+            6: (
+                id: 6,
+                text: "Of course! Let me help you manage your party.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    OpenInnManagement(
+                        innkeeper_id: "tutorial_innkeeper_town",
+                    ),
+                ],
+                is_terminal: true,
+            ),
             3: (
                 id: 3,
                 text: "Oh, plenty of travelers coming through with wild tales. Some wizard\'s been recruiting folks for something or other. And there\'s talk of trouble up in the mountain pass. But then again, there\'s always talk, isn\'t there?",
@@ -497,23 +514,6 @@
                 choices: [
                     (
                         text: "Interesting. What else?",
-                        target_node: Some(1),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                ],
-                conditions: [],
-                actions: [],
-                is_terminal: false,
-            ),
-            4: (
-                id: 4,
-                text: "That I have! Why, just last month a group came through claiming they\'d seen a dragon. A DRAGON! Can you believe it? I told them that was just the ale talking.",
-                speaker_override: None,
-                choices: [
-                    (
-                        text: "Ha! Good story.",
                         target_node: Some(1),
                         conditions: [],
                         actions: [],
@@ -534,6 +534,37 @@
         name: "Merchant Town Square Greeting",
         root_node: 1,
         nodes: {
+            1: (
+                id: 1,
+                text: "Greetings, traveler! You\'ve got the look of someone who needs quality goods. Lucky for you, I\'ve got the finest wares from here to the capital!",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "What are you selling?",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "Where do you travel?",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "Not interested.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
             2: (
                 id: 2,
                 text: "Potions, weapons, armor, tools - if you need it, I\'ve probably got it! Or I can get it. The Merchants Guild has connections everywhere, you see.",
@@ -548,23 +579,6 @@
                     ),
                     (
                         text: "Tell me something else.",
-                        target_node: Some(1),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                ],
-                conditions: [],
-                actions: [],
-                is_terminal: false,
-            ),
-            5: (
-                id: 5,
-                text: "It can be! That\'s why I always travel with guards, or hire adventurers when I can. Speaking of which, if you\'re ever interested in escort work, the guild always needs capable warriors.",
-                speaker_override: None,
-                choices: [
-                    (
-                        text: "I\'ll keep that in mind.",
                         target_node: Some(1),
                         conditions: [],
                         actions: [],
@@ -599,37 +613,6 @@
                 actions: [],
                 is_terminal: false,
             ),
-            1: (
-                id: 1,
-                text: "Greetings, traveler! You\'ve got the look of someone who needs quality goods. Lucky for you, I\'ve got the finest wares from here to the capital!",
-                speaker_override: None,
-                choices: [
-                    (
-                        text: "What are you selling?",
-                        target_node: Some(2),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                    (
-                        text: "Where do you travel?",
-                        target_node: Some(3),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                    (
-                        text: "Not interested.",
-                        target_node: None,
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: true,
-                    ),
-                ],
-                conditions: [],
-                actions: [],
-                is_terminal: false,
-            ),
             4: (
                 id: 4,
                 text: "Oh yes! We merchants stick together. Information flows as freely as gold among guild members. It\'s how we stay ahead of trouble... and ahead of the competition!",
@@ -637,6 +620,23 @@
                 choices: [
                     (
                         text: "Smart business.",
+                        target_node: Some(1),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
+            5: (
+                id: 5,
+                text: "It can be! That\'s why I always travel with guards, or hire adventurers when I can. Speaking of which, if you\'re ever interested in escort work, the guild always needs capable warriors.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "I\'ll keep that in mind.",
                         target_node: Some(1),
                         conditions: [],
                         actions: [],
@@ -657,56 +657,6 @@
         name: "High Priestess Greeting",
         root_node: 1,
         nodes: {
-            2: (
-                id: 2,
-                text: "This temple has stood as a beacon of hope for centuries. We tend to the sick, comfort the weary, and protect the innocent. In these troubled times, our purpose has never been more vital.",
-                speaker_override: None,
-                choices: [
-                    (
-                        text: "Troubled times?",
-                        target_node: Some(4),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                    (
-                        text: "Tell me more.",
-                        target_node: Some(1),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                ],
-                conditions: [],
-                actions: [],
-                is_terminal: false,
-            ),
-            4: (
-                id: 4,
-                text: "Dark forces stir in forgotten places. The balance between light and shadow grows precarious. We must all do our part to preserve what is good in this world.",
-                speaker_override: None,
-                choices: [
-                    (
-                        text: "I understand.",
-                        target_node: Some(1),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                ],
-                conditions: [],
-                actions: [],
-                is_terminal: false,
-            ),
-            5: (
-                id: 5,
-                text: "Go with my blessing, brave one. May your journey be safe and your purpose true.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
-            ),
             3: (
                 id: 3,
                 text: "The path before you is shrouded in shadow, but light always finds a way through darkness. Trust in your companions, stay true to your values, and remember - even the smallest act of kindness can change the world.",
@@ -721,6 +671,30 @@
                     ),
                     (
                         text: "What else can you tell me?",
+                        target_node: Some(1),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
+            2: (
+                id: 2,
+                text: "This temple has stood as a beacon of hope for centuries. We tend to the sick, comfort the weary, and protect the innocent. In these troubled times, our purpose has never been more vital.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Troubled times?",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "Tell me more.",
                         target_node: Some(1),
                         conditions: [],
                         actions: [],
@@ -762,6 +736,32 @@
                 actions: [],
                 is_terminal: false,
             ),
+            5: (
+                id: 5,
+                text: "Go with my blessing, brave one. May your journey be safe and your purpose true.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+            4: (
+                id: 4,
+                text: "Dark forces stir in forgotten places. The balance between light and shadow grows precarious. We must all do our part to preserve what is good in this world.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "I understand.",
+                        target_node: Some(1),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
         },
         speaker_name: Some("High Priestess"),
         repeatable: true,
@@ -772,6 +772,24 @@
         name: "Lost Ranger Quest",
         root_node: 1,
         nodes: {
+            4: (
+                id: 4,
+                text: "I... I understand. Perhaps the Rangers Guild will send someone. I just hope I can find my way back to civilization first.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+            3: (
+                id: 3,
+                text: "You will? By the wild, thank you! The bow has a carved eagle on the grip - you can\'t miss it. Please, be careful. Those bandits are dangerous, but that bow means everything to me.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
             2: (
                 id: 2,
                 text: "North of here, near the old mill ruins. There were at least six of them - too many for me alone, especially without my bow. They\'re probably still camped there, dividing up their spoils.",
@@ -795,15 +813,6 @@
                 conditions: [],
                 actions: [],
                 is_terminal: false,
-            ),
-            4: (
-                id: 4,
-                text: "I... I understand. Perhaps the Rangers Guild will send someone. I just hope I can find my way back to civilization first.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
             ),
             1: (
                 id: 1,
@@ -836,15 +845,6 @@
                 actions: [],
                 is_terminal: false,
             ),
-            3: (
-                id: 3,
-                text: "You will? By the wild, thank you! The bow has a carved eagle on the grip - you can\'t miss it. Please, be careful. Those bandits are dangerous, but that bow means everything to me.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
-            ),
         },
         speaker_name: Some("Lost Ranger"),
         repeatable: false,
@@ -855,14 +855,28 @@
         name: "Village Elder Mountain Pass - Lich Quest",
         root_node: 1,
         nodes: {
-            3: (
-                id: 3,
-                text: "Bless you, heroes. Journey to the Harrow Downs and find the Lich\'s tomb. Destroy the creature before it regains its full strength. The fate of all who live in these lands depends on your success.",
+            1: (
+                id: 1,
+                text: "You have the look of seasoned adventurers. Good, for I have a grave matter that requires such courage. The Harrow Downs... an ancient evil has awakened there.",
                 speaker_override: None,
                 choices: [
                     (
-                        text: "We won\'t fail.",
-                        target_node: Some(5),
+                        text: "What kind of evil?",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "We\'re ready to help.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "This sounds too dangerous.",
+                        target_node: Some(6),
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
@@ -871,24 +885,6 @@
                 conditions: [],
                 actions: [],
                 is_terminal: false,
-            ),
-            6: (
-                id: 6,
-                text: "I understand your caution. Few would willingly face such a foe. If you change your mind, I will be here. But know that time grows short.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
-            ),
-            5: (
-                id: 5,
-                text: "May the old gods watch over you. Return to me when the deed is done, and you shall be rewarded as befits such heroism.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
             ),
             4: (
                 id: 4,
@@ -914,28 +910,14 @@
                 actions: [],
                 is_terminal: false,
             ),
-            1: (
-                id: 1,
-                text: "You have the look of seasoned adventurers. Good, for I have a grave matter that requires such courage. The Harrow Downs... an ancient evil has awakened there.",
+            3: (
+                id: 3,
+                text: "Bless you, heroes. Journey to the Harrow Downs and find the Lich\'s tomb. Destroy the creature before it regains its full strength. The fate of all who live in these lands depends on your success.",
                 speaker_override: None,
                 choices: [
                     (
-                        text: "What kind of evil?",
-                        target_node: Some(2),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                    (
-                        text: "We\'re ready to help.",
-                        target_node: Some(3),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                    (
-                        text: "This sounds too dangerous.",
-                        target_node: Some(6),
+                        text: "We won\'t fail.",
+                        target_node: Some(5),
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
@@ -969,6 +951,24 @@
                 actions: [],
                 is_terminal: false,
             ),
+            5: (
+                id: 5,
+                text: "May the old gods watch over you. Return to me when the deed is done, and you shall be rewarded as befits such heroism.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+            6: (
+                id: 6,
+                text: "I understand your caution. Few would willingly face such a foe. If you change your mind, I will be here. But know that time grows short.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
         },
         speaker_name: Some("Village Elder"),
         repeatable: false,
@@ -979,17 +979,54 @@
         name: "Innkeeper Mountain Pass Greeting",
         root_node: 1,
         nodes: {
-            6: (
-                id: 6,
-                text: "Of course! Let me help you manage your party.",
+            4: (
+                id: 4,
+                text: "Aye, they have. But the inn endures! Been in my family for four generations, and it\'ll take more than a few walking corpses to close our doors. Though I wouldn\'t say no to someone dealing with the problem...",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "We might be able to help.",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                    ),
+                    (
+                        text: "Stay strong, friend.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
+            3: (
+                id: 3,
+                text: "This pass has been a trade route for generations. In better times, you\'d see caravans and merchants daily. Now? Just the occasional brave soul and, well, those of you who look like you can handle yourselves.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Sounds like things have changed.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
+            5: (
+                id: 5,
+                text: "Ha! That\'s the spirit! You take care of whatever\'s lurking in the Harrow Downs, and your next stay is on the house. How\'s that for motivation?",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
-                actions: [
-                    OpenInnManagement(
-                        innkeeper_id: "tutorial_innkeeper_town2",
-                    ),
-                ],
+                actions: [],
                 is_terminal: true,
             ),
             2: (
@@ -1016,29 +1053,18 @@
                 actions: [],
                 is_terminal: false,
             ),
-            4: (
-                id: 4,
-                text: "Aye, they have. But the inn endures! Been in my family for four generations, and it\'ll take more than a few walking corpses to close our doors. Though I wouldn\'t say no to someone dealing with the problem...",
+            6: (
+                id: 6,
+                text: "Of course! Let me help you manage your party.",
                 speaker_override: None,
-                choices: [
-                    (
-                        text: "We might be able to help.",
-                        target_node: Some(5),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: true,
-                    ),
-                    (
-                        text: "Stay strong, friend.",
-                        target_node: None,
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: true,
+                choices: [],
+                conditions: [],
+                actions: [
+                    OpenInnManagement(
+                        innkeeper_id: "tutorial_innkeeper_town2",
                     ),
                 ],
-                conditions: [],
-                actions: [],
-                is_terminal: false,
+                is_terminal: true,
             ),
             1: (
                 id: 1,
@@ -1078,32 +1104,6 @@
                 actions: [],
                 is_terminal: false,
             ),
-            5: (
-                id: 5,
-                text: "Ha! That\'s the spirit! You take care of whatever\'s lurking in the Harrow Downs, and your next stay is on the house. How\'s that for motivation?",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
-            ),
-            3: (
-                id: 3,
-                text: "This pass has been a trade route for generations. In better times, you\'d see caravans and merchants daily. Now? Just the occasional brave soul and, well, those of you who look like you can handle yourselves.",
-                speaker_override: None,
-                choices: [
-                    (
-                        text: "Sounds like things have changed.",
-                        target_node: Some(4),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                ],
-                conditions: [],
-                actions: [],
-                is_terminal: false,
-            ),
         },
         speaker_name: Some("Innkeeper"),
         repeatable: true,
@@ -1114,6 +1114,23 @@
         name: "Merchant Mountain Pass Greeting",
         root_node: 1,
         nodes: {
+            3: (
+                id: 3,
+                text: "Oh, you know - enchanted rings, blessed amulets, the occasional cursed item I haven\'t identified yet. Just kidding about that last one! Mostly. But seriously, I do have some genuine magical items if you\'ve got the coin.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Impressive stock.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
             2: (
                 id: 2,
                 text: "The undead, friend. This pass used to be a merchant\'s dream - steady traffic, good prices. Now? Most traders won\'t come near it. But me? I see opportunity where others see danger. Plus, I charge hazard fees.",
@@ -1129,23 +1146,6 @@
                     (
                         text: "Tell me about something else.",
                         target_node: Some(1),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                ],
-                conditions: [],
-                actions: [],
-                is_terminal: false,
-            ),
-            3: (
-                id: 3,
-                text: "Oh, you know - enchanted rings, blessed amulets, the occasional cursed item I haven\'t identified yet. Just kidding about that last one! Mostly. But seriously, I do have some genuine magical items if you\'ve got the coin.",
-                speaker_override: None,
-                choices: [
-                    (
-                        text: "Impressive stock.",
-                        target_node: Some(4),
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
@@ -1213,24 +1213,31 @@
         name: "High Priest Mountain Pass Greeting",
         root_node: 1,
         nodes: {
-            4: (
-                id: 4,
-                text: "The source must be eliminated. Destroy the Lich and its phylactery, and the undead plague will end. But such a task requires heroes of great courage and strength. The temple will provide what blessings we can.",
+            1: (
+                id: 1,
+                text: "Greetings, travelers. I am the High Priest of this temple. In these dark times, we stand as a bastion against the forces of undeath that plague these lands. How may I serve you?",
                 speaker_override: None,
                 choices: [
                     (
-                        text: "We may be those heroes.",
-                        target_node: Some(6),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: true,
-                    ),
-                    (
-                        text: "Tell me something else.",
-                        target_node: Some(1),
+                        text: "Tell me about the undead.",
+                        target_node: Some(2),
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                    ),
+                    (
+                        text: "How does the temple help?",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "Blessings, priest.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
                     ),
                 ],
                 conditions: [],
@@ -1278,6 +1285,39 @@
                 actions: [],
                 is_terminal: false,
             ),
+            6: (
+                id: 6,
+                text: "Then may the divine powers grant you strength and wisdom. Return to us victorious, and the temple will celebrate your deeds for generations to come.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+            4: (
+                id: 4,
+                text: "The source must be eliminated. Destroy the Lich and its phylactery, and the undead plague will end. But such a task requires heroes of great courage and strength. The temple will provide what blessings we can.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "We may be those heroes.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                    ),
+                    (
+                        text: "Tell me something else.",
+                        target_node: Some(1),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
             5: (
                 id: 5,
                 text: "Thank you, friend. We do what we must in service of the light. Should you venture into the darkness, know that our prayers go with you.",
@@ -1295,46 +1335,6 @@
                 actions: [],
                 is_terminal: false,
             ),
-            1: (
-                id: 1,
-                text: "Greetings, travelers. I am the High Priest of this temple. In these dark times, we stand as a bastion against the forces of undeath that plague these lands. How may I serve you?",
-                speaker_override: None,
-                choices: [
-                    (
-                        text: "Tell me about the undead.",
-                        target_node: Some(2),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                    (
-                        text: "How does the temple help?",
-                        target_node: Some(3),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                    (
-                        text: "Blessings, priest.",
-                        target_node: None,
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: true,
-                    ),
-                ],
-                conditions: [],
-                actions: [],
-                is_terminal: false,
-            ),
-            6: (
-                id: 6,
-                text: "Then may the divine powers grant you strength and wisdom. Return to us victorious, and the temple will celebrate your deeds for generations to come.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
-            ),
         },
         speaker_name: Some("High Priest"),
         repeatable: true,
@@ -1345,20 +1345,36 @@
         name: "Dying Goblin Encounter",
         root_node: 1,
         nodes: {
-            4: (
-                id: 4,
-                text: "Shiny... Chief\'s favorite shiny thing... Wanted it... so pretty... Now dying for it... Stupid... so stupid...",
+            6: (
+                id: 6,
+                text: "Thank you... stranger... May you... succeed where I... failed... *cough* ...tell them... Gruk... was here...",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+            1: (
+                id: 1,
+                text: "Please... help... They left me to die... Stole chief\'s treasure... tribe turned on me... dying...",
                 speaker_override: None,
                 choices: [
                     (
-                        text: "I\'ll avenge you.",
-                        target_node: Some(6),
+                        text: "What happened to you?",
+                        target_node: Some(2),
                         conditions: [],
                         actions: [],
-                        ends_dialogue: true,
+                        ends_dialogue: false,
                     ),
                     (
-                        text: "Rest now.",
+                        text: "How can I help?",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "I\'m sorry, there\'s nothing I can do.",
                         target_node: Some(5),
                         conditions: [],
                         actions: [],
@@ -1368,6 +1384,15 @@
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+            ),
+            5: (
+                id: 5,
+                text: "So cold... so alone... This is how goblin dies... forgotten...",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
             ),
             3: (
                 id: 3,
@@ -1417,27 +1442,20 @@
                 actions: [],
                 is_terminal: false,
             ),
-            1: (
-                id: 1,
-                text: "Please... help... They left me to die... Stole chief\'s treasure... tribe turned on me... dying...",
+            4: (
+                id: 4,
+                text: "Shiny... Chief\'s favorite shiny thing... Wanted it... so pretty... Now dying for it... Stupid... so stupid...",
                 speaker_override: None,
                 choices: [
                     (
-                        text: "What happened to you?",
-                        target_node: Some(2),
+                        text: "I\'ll avenge you.",
+                        target_node: Some(6),
                         conditions: [],
                         actions: [],
-                        ends_dialogue: false,
+                        ends_dialogue: true,
                     ),
                     (
-                        text: "How can I help?",
-                        target_node: Some(3),
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: false,
-                    ),
-                    (
-                        text: "I\'m sorry, there\'s nothing I can do.",
+                        text: "Rest now.",
                         target_node: Some(5),
                         conditions: [],
                         actions: [],
@@ -1447,24 +1465,6 @@
                 conditions: [],
                 actions: [],
                 is_terminal: false,
-            ),
-            5: (
-                id: 5,
-                text: "So cold... so alone... This is how goblin dies... forgotten...",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
-            ),
-            6: (
-                id: 6,
-                text: "Thank you... stranger... May you... succeed where I... failed... *cough* ...tell them... Gruk... was here...",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [],
-                is_terminal: true,
             ),
         },
         speaker_name: Some("Dying Goblin"),
@@ -1476,6 +1476,19 @@
         name: "Default Innkeeper Greeting",
         root_node: 1,
         nodes: {
+            2: (
+                id: 2,
+                text: "Certainly! Let me help you organize your party.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    TriggerEvent(
+                        event_name: "open_inn_party_management",
+                    ),
+                ],
+                is_terminal: true,
+            ),
             1: (
                 id: 1,
                 text: "Welcome to my establishment! What can I do for you?",
@@ -1499,19 +1512,6 @@
                 conditions: [],
                 actions: [],
                 is_terminal: false,
-            ),
-            2: (
-                id: 2,
-                text: "Certainly! Let me help you organize your party.",
-                speaker_override: None,
-                choices: [],
-                conditions: [],
-                actions: [
-                    TriggerEvent(
-                        event_name: "open_inn_party_management",
-                    ),
-                ],
-                is_terminal: true,
             ),
         },
         speaker_name: Some("Innkeeper"),
