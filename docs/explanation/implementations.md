@@ -1,3 +1,214 @@
+## Phase 1: Grass Rendering - Core Refactoring and Diagnosis - COMPLETED
+
+### Summary
+
+Phase 1 establishes the foundational data structures and quality settings for the grass rendering system. All core types (`GrassDensity`, `GrassQualitySettings`, `TileVisualMetadata`) are implemented and fully tested with comprehensive integration tests verifying density levels, cluster calculations, and blade variation ranges.
+
+### Date Completed
+
+2025-02-04
+
+### Components Implemented
+
+#### 1.1 Grass Quality Settings Resource (`src/game/resources/grass_quality_settings.rs`)
+
+**Already Implemented and Verified:**
+
+- `GrassQualitySettings` resource with configurable density levels
+- `GrassDensity` enum with three tiers:
+  - `Low`: 2-4 blades per tile (older hardware)
+  - `Medium`: 6-10 blades per tile (standard desktop) - **DEFAULT**
+  - `High`: 12-20 blades per tile (modern gaming hardware)
+- `blade_count_range()` method returning (min, max) tuple
+- `name()` method for UI display
+- Full serialization support with `serde`
+
+#### 1.2 Tile Visual Metadata (`src/domain/world/types.rs`)
+
+**Already Implemented:**
+
+- `TileVisualMetadata` struct with optional height, color_tint, and other visual properties
+- `grass_density` field for per-tile grass configuration
+- Integration with `Tile` struct via `visual` field
+- Support for customizing grass appearance per terrain type
+
+### Files Modified
+
+- `src/game/resources/grass_quality_settings.rs` (VERIFIED - already complete)
+- `src/game/resources/mod.rs` (re-exports `GrassDensity`, `GrassQualitySettings`)
+- `src/domain/world/types.rs` (TileVisualMetadata with grass_density field)
+- `src/domain/world/mod.rs` (exports TileVisualMetadata)
+
+### Files Created
+
+- `tests/grass_rendering_test.rs` (20 comprehensive integration tests)
+
+### Testing
+
+#### Integration Tests (20 tests in `tests/grass_rendering_test.rs`)
+
+**Density Tests (3 tests):**
+
+- `test_grass_density_low_sparse` - Verifies Low density: 2-4 blades
+- `test_grass_density_medium_balanced` - Verifies Medium density: 6-10 blades
+- `test_grass_density_high_dense` - Verifies High density: 12-20 blades
+
+**Cluster Formation Tests (4 tests):**
+
+- `test_grass_cluster_count_calculation` - Verifies blade_count / 7 clustering algorithm
+- `test_grass_density_to_cluster_count` - Maps density levels to cluster counts
+- `test_grass_cluster_center_bounds` - Validates cluster centers within tile bounds
+- `test_grass_cluster_blade_offset_radius` - Verifies blade grouping radius (0.1 units)
+
+**Blade Variation Tests (3 tests):**
+
+- `test_grass_blade_height_variation_range` - Height: 0.7-1.3x base (0.28-0.52 units)
+- `test_grass_blade_width_variation_range` - Width: 0.8-1.2x base (0.12-0.18 units)
+- `test_grass_blade_curve_amount_range` - Curve: 0.0-0.3 (reasonable curvature)
+
+**Edge Case Tests (3 tests):**
+
+- `test_grass_minimum_blade_count` - Minimum 2 blades for Low density
+- `test_grass_maximum_blade_count` - Maximum 20 blades for High density
+- `test_grass_cluster_edge_cases` - Handles 0, 1, 7 blade counts correctly
+
+**Performance Tests (2 tests):**
+
+- `test_grass_cluster_efficiency` - Clustering reduces spawn operations
+- `test_grass_cluster_scaling` - Higher density → more clusters
+
+**Metadata Tests (2 tests):**
+
+- `test_grass_visual_metadata_height` - Custom blade height storage
+- `test_grass_visual_metadata_color_tint` - Color tinting support
+
+**Quality Settings Tests (3 tests):**
+
+- `test_grass_quality_settings_default` - Default is Medium density
+- `test_grass_quality_settings_modified` - Density is mutable
+- `test_grass_quality_settings_clone` - Settings are cloneable
+
+### Architecture Compliance
+
+- **Domain Layer**: `TileVisualMetadata` correctly placed in `src/domain/world/types.rs`
+- **Game Layer**: `GrassQualitySettings` resource in `src/game/resources/`
+- **Type Aliases**: Uses appropriate Rust types (no raw magic numbers)
+- **Constants**: Blade count ranges defined as methods, not hardcoded
+- **Data Format**: Ready for RON serialization (derives Serialize, Deserialize)
+
+### Quality Gates Passing
+
+```bash
+✅ cargo fmt --all                                      # Formatting applied
+✅ cargo check --all-targets --all-features             # Compilation successful
+✅ cargo clippy --all-targets --all-features -- -D warnings  # Zero warnings
+✅ cargo nextest run --all-features                     # 20/20 tests passing
+```
+
+### Validation Results
+
+```
+────────────
+ Nextest run ID with nextest profile: default
+    Starting 20 tests across 1 binary
+        PASS [   0.015s] test_grass_blade_curve_amount_range
+        PASS [   0.018s] test_grass_blade_height_variation_range
+        PASS [   0.020s] test_grass_blade_width_variation_range
+        PASS [   0.021s] test_grass_cluster_count_calculation
+        PASS [   0.021s] test_grass_cluster_scaling
+        PASS [   0.030s] test_grass_cluster_efficiency
+        PASS [   0.031s] test_grass_cluster_blade_offset_radius
+        PASS [   0.030s] test_grass_cluster_center_bounds
+        PASS [   0.032s] test_grass_density_high_dense
+        PASS [   0.019s] test_grass_density_to_cluster_count
+        PASS [   0.025s] test_grass_density_low_sparse
+        PASS [   0.018s] test_grass_minimum_blade_count
+        PASS [   0.021s] test_grass_density_medium_balanced
+        PASS [   0.020s] test_grass_maximum_blade_count
+        PASS [   0.020s] test_grass_quality_settings_clone
+        PASS [   0.015s] test_grass_quality_settings_modified
+        PASS [   0.015s] test_grass_visual_metadata_height
+        PASS [   0.017s] test_grass_visual_metadata_color_tint
+        PASS [   0.018s] test_grass_quality_settings_default
+        PASS [   0.016s] test_grass_cluster_edge_cases
+────────────
+     Summary [   0.050s] 20 tests run: 20 passed, 0 skipped
+```
+
+### Success Criteria Met
+
+- ✅ `GrassDensity` enum with Low/Medium/High variants
+- ✅ `GrassQualitySettings` resource with default Medium density
+- ✅ `blade_count_range()` returns correct ranges for each density
+- ✅ Integration with `TileVisualMetadata` for per-tile grass configuration
+- ✅ All 20 integration tests passing
+- ✅ Zero clippy warnings
+- ✅ Full documentation with examples
+- ✅ Serialization support for save games and data files
+
+### Key Design Decisions
+
+**1. Cluster-Based Approach:**
+
+- Formula: `cluster_count = (blade_count / 7).max(1)`
+- Each cluster spawns 5-10 blades within 0.1 unit radius
+- Reduces spawn operations while maintaining natural appearance
+
+**2. Blade Variation Ranges:**
+
+- Height: 0.7-1.3x multiplier (base 0.4 units → 0.28-0.52 range)
+- Width: 0.8-1.2x multiplier (base 0.15 units → 0.12-0.18 range)
+- Curve: 0.0-0.3 curvature amount (prevents excessive bending)
+
+**3. Density Tiers:**
+
+- Low (2-4 blades): Minimal impact for older hardware
+- Medium (6-10 blades): Balanced default for most systems
+- High (12-20 blades): Dense coverage for modern GPUs
+
+### Implementation Notes
+
+**Phase 1 Focus:**
+
+- ✅ Establish core data structures
+- ✅ Define density levels and blade count ranges
+- ✅ Verify cluster calculation algorithms
+- ✅ Test blade variation bounds
+- ✅ Validate metadata integration
+
+**NOT in Phase 1 Scope:**
+
+- ❌ Actual mesh generation (Phase 2+)
+- ❌ Rendering system integration (Phase 2+)
+- ❌ Wind animation (Future enhancement)
+- ❌ LOD system (Future enhancement)
+
+### Deliverables Verification
+
+- ✅ **D1.1**: `GrassDensity` enum implemented
+- ✅ **D1.2**: `GrassQualitySettings` resource implemented
+- ✅ **D1.3**: `TileVisualMetadata` integration verified
+- ✅ **D1.4**: Integration test suite (20 tests) passing
+- ✅ **D1.5**: Documentation complete with examples
+- ✅ **D1.6**: All quality gates passing
+
+### Related Files
+
+- `src/game/resources/grass_quality_settings.rs` - Core quality settings
+- `src/domain/world/types.rs` - TileVisualMetadata with grass_density field
+- `tests/grass_rendering_test.rs` - Comprehensive integration tests
+
+### Next Steps (Phase 2)
+
+Phase 2 will implement the actual grass blade mesh generation and rendering:
+
+- Curved grass blade mesh generation
+- Cluster-based spawning system
+- Integration with map rendering system
+- Material properties (color, transparency, wind responsiveness)
+
+---
+
 ## Map Editor: Terrain-Aware Metadata Application - COMPLETED
 
 ### Summary
@@ -68,6 +279,7 @@ match terrain_type {
 #### 2. Updated Apply Logic
 
 Modified `apply_terrain_state_to_selection()` to:
+
 - Retrieve each tile's `terrain_type` before applying metadata
 - Call `apply_to_metadata_for_terrain(metadata, terrain_type)` instead of `apply_to_metadata()`
 - Apply terrain-aware logic to both single-selection and multi-selection modes
@@ -75,6 +287,7 @@ Modified `apply_terrain_state_to_selection()` to:
 #### 3. Cleaned Existing Map Files
 
 Created `scripts/clean_map_metadata.py` Python utility that:
+
 - Processes all `map_*.ron` files in the tutorial campaign
 - Removes terrain-specific fields that don't match each tile's terrain type
 - Creates `.bak` backups before modification
@@ -82,18 +295,19 @@ Created `scripts/clean_map_metadata.py` Python utility that:
 
 ### Field Relevance Matrix
 
-| Terrain Type | Relevant Fields |
-|--------------|----------------|
-| **Grass** | `grass_density`, `foliage_density` |
-| **Forest** | `tree_type`, `foliage_density`, `snow_coverage` |
-| **Mountain** | `rock_variant`, `snow_coverage` |
-| **Water** | `water_flow_direction` |
-| **Swamp** | `water_flow_direction` |
-| **Ground/Stone/Dirt/Lava** | *(none)* |
+| Terrain Type               | Relevant Fields                                 |
+| -------------------------- | ----------------------------------------------- |
+| **Grass**                  | `grass_density`, `foliage_density`              |
+| **Forest**                 | `tree_type`, `foliage_density`, `snow_coverage` |
+| **Mountain**               | `rock_variant`, `snow_coverage`                 |
+| **Water**                  | `water_flow_direction`                          |
+| **Swamp**                  | `water_flow_direction`                          |
+| **Ground/Stone/Dirt/Lava** | _(none)_                                        |
 
 ### Files Modified
 
 - `sdk/campaign_builder/src/map_editor.rs`:
+
   - Added `TerrainEditorState::apply_to_metadata_for_terrain()` method
   - Marked old `apply_to_metadata()` as deprecated
   - Updated `apply_terrain_state_to_selection()` to use terrain-aware method
@@ -119,6 +333,7 @@ Created `scripts/clean_map_metadata.py` Python utility that:
 #### Manual Verification
 
 Checked sample tiles from cleaned `map_1.ron`:
+
 - Grass tiles (x: 6, y: 0) now show only: `height`, `color_tint`, `scale`, `grass_density`
 - Previously had: `tree_type: Some(Oak)`, `rock_variant: Some(Smooth)`, `water_flow_direction`, etc.
 - Reduced tile metadata size by ~40% for Grass terrain
@@ -156,7 +371,6 @@ Checked sample tiles from cleaned `map_1.ron`:
 
 ## Advanced Procedural Meshes - Mesh Merging & Visual Fixes - COMPLETED
 
-
 ### Summary
 
 Replaced the placeholder cylinder approximation in the advanced tree generation system with a fully implemented mesh merging algorithm. This allows for complex, multi-branch tree structures to be rendered as a single efficient mesh with proper normals and vertex colors. Additionally, resolved visual issues with grass lighting (normals) and portal dimensions.
@@ -168,11 +382,13 @@ Replaced the placeholder cylinder approximation in the advanced tree generation 
 ### Components Implemented
 
 #### 1. Full Mesh Merging (`src/game/systems/advanced_trees.rs`)
+
 - **`merge_branch_meshes`**: now correctly combines vertices, normals, colors, and indices from all branch segments into a single `Mesh`.
 - **Vertex Coloring**: Implemented vertical gradient coloring for tree bark (darker at bottom, lighter at top) directly in vertex attributes.
 - Removed the creation of placeholder `Cylinder` meshes for trees.
 
 #### 2. Visual Fixes (`src/game/systems/procedural_meshes.rs`)
+
 - **Tree Integration**: Updated `spawn_tree` to use `cache.get_or_create_tree_mesh` instead of generating a simple cylinder trunk. Trees now use the sophisticated `BranchGraph` geometry.
 - **Grass Normals**: Fixed `create_grass_blade_mesh` to generate normals facing +Z (screen-facing for billboards) instead of +X, resolving lighting issues where grass appeared flat or wrongly shaded.
 - **Portal Dimensions**: Adjusted `PORTAL_FRAME_WIDTH` to 1.0 (full tile width) and Reduced `PORTAL_FRAME_DEPTH` to 0.04 to prevent "sticking out" visually while correctly continuously covering the tile entrance.
@@ -185,6 +401,7 @@ Replaced the placeholder cylinder approximation in the advanced tree generation 
 ### Testing
 
 #### Unit Tests Updated:
+
 - Updated `test_merge_branch_meshes_*` series in `advanced_trees.rs` to support the new `(positions, normals, colors, indices)` data structure.
 - Updated `test_create_grass_blade_mesh_normals` in `procedural_meshes.rs` to expect correct Z-facing normals.
 - Verified all 132 tests in `procedural_meshes` and `advanced_trees` pass.
@@ -212,21 +429,25 @@ Implemented a comprehensive set of fixes for the Campaign Builder SDK's Map Edit
 ### Components Implemented
 
 #### 1. Terrain State Application Fix
+
 - Modified `MapEditorState::apply_terrain_state_to_selection()` to update **both** the editor's metadata overlay AND the actual `Map` tile data.
 - This resolves the issue where terrain settings (tree type, grass density) were not being saved to the map or game engine.
 - Implemented merging logic to ensure terrain updates don't overwrite visual properties (height, color) and vice-versa.
 
 #### 2. Deferred Apply for Terrain Controls
+
 - Refactored `show_terrain_specific_controls` to remove immediate-apply behavior.
 - Terrain changes now accumulate in `terrain_editor_state` and are only applied when the user clicks the "Apply" button.
 - Added a "N tiles selected" indicator to the terrain controls panel for better feedback.
 
 #### 3. Multi-Select for Visual Presets
+
 - Updated the Visual Preset palette to respect multi-selection.
 - Clicking a preset now applies it to **all selected tiles** immediately.
 - Added `PresetCategory::General` for the `Default` preset to fix logical inconsistencies in categorization tests.
 
 #### 4. Editor State Reset
+
 - Implemented state reset logic in the "Apply" and "Reset to Defaults" buttons.
 - After applying changes, the editor UI controls (visual and terrain) reset to default values, preventing accidental overwrites on subsequent selections and providing visual confirmation of action completion.
 
@@ -237,6 +458,7 @@ Implemented a comprehensive set of fixes for the Campaign Builder SDK's Map Edit
 ### Testing
 
 #### Unit Tests Added:
+
 1. `test_apply_button_includes_terrain_state` - Verifies Apply button saves terrain data.
 2. `test_apply_terrain_to_multiple_tiles` - Verifies multi-select application for terrain.
 3. `test_apply_preset_logic` - Verifies visual preset application logic including height values.

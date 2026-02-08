@@ -3724,16 +3724,20 @@ pub fn spawn_furniture(
 
     match furniture_type {
         FurnitureType::Bench => {
-            let mut config = BenchConfig::default();
-            config.color_override = Some(final_color);
+            let mut config = BenchConfig {
+                color_override: Some(final_color),
+                ..Default::default()
+            };
             config.length *= scale;
             spawn_bench(
                 commands, materials, meshes, position, map_id, config, cache, rotation_y,
             )
         }
         FurnitureType::Table => {
-            let mut config = TableConfig::default();
-            config.color_override = Some(final_color);
+            let mut config = TableConfig {
+                color_override: Some(final_color),
+                ..Default::default()
+            };
             config.width *= scale;
             config.depth *= scale;
             spawn_table(
@@ -3741,38 +3745,47 @@ pub fn spawn_furniture(
             )
         }
         FurnitureType::Chair => {
-            let mut config = ChairConfig::default();
-            config.color_override = Some(final_color);
+            let config = ChairConfig {
+                color_override: Some(final_color),
+                ..Default::default()
+            };
             spawn_chair(
                 commands, materials, meshes, position, map_id, config, cache, rotation_y,
             )
         }
         FurnitureType::Throne => {
-            let mut config = ThroneConfig::default();
-            config.color_override = Some(final_color);
+            let config = ThroneConfig {
+                color_override: Some(final_color),
+                ..Default::default()
+            };
             spawn_throne(
                 commands, materials, meshes, position, map_id, config, cache, rotation_y,
             )
         }
         FurnitureType::Torch => {
-            let mut config = TorchConfig::default();
-            config.lit = flags.lit;
+            let config = TorchConfig {
+                lit: flags.lit,
+                ..Default::default()
+            };
             spawn_torch(
                 commands, materials, meshes, position, map_id, config, cache, rotation_y,
             )
         }
         FurnitureType::Chest => {
-            let mut config = ChestConfig::default();
-            config.color_override = Some(final_color);
-            config.locked = flags.locked;
-            config.size_multiplier = scale;
+            let config = ChestConfig {
+                color_override: Some(final_color),
+                locked: flags.locked,
+                size_multiplier: scale,
+            };
             spawn_chest(
                 commands, materials, meshes, position, map_id, config, cache, rotation_y,
             )
         }
         FurnitureType::Barrel => {
-            let mut config = BarrelConfig::default();
-            config.color_override = Some(final_color);
+            let mut config = BarrelConfig {
+                color_override: Some(final_color),
+                ..Default::default()
+            };
             config.height *= scale;
             config.radius *= scale;
             spawn_barrel(
@@ -3780,8 +3793,10 @@ pub fn spawn_furniture(
             )
         }
         FurnitureType::Bookshelf => {
-            let mut config = BookshelfConfig::default();
-            config.color_override = Some(final_color);
+            let mut config = BookshelfConfig {
+                color_override: Some(final_color),
+                ..Default::default()
+            };
             config.height *= scale;
             spawn_bookshelf(
                 commands, materials, meshes, position, map_id, config, cache, rotation_y,
@@ -3812,6 +3827,7 @@ impl Default for BarrelConfig {
 }
 
 /// Spawns a barrel
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_barrel(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
@@ -3876,6 +3892,7 @@ impl Default for BookshelfConfig {
 }
 
 /// Spawns a bookshelf using multiple cuboids
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_bookshelf(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
