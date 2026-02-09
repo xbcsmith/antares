@@ -9,16 +9,18 @@
 //! - Blade variation (height, width, curve) is within expected ranges
 //! - Cluster-based approach produces natural grass patches
 
-use antares::domain::world::TileVisualMetadata;
-use antares::game::resources::{GrassDensity, GrassQualitySettings};
+use antares::domain::world::{GrassDensity, TileVisualMetadata};
+use antares::game::resources::{GrassPerformanceLevel, GrassQualitySettings};
 
 // Helper test utilities
 fn create_test_tile_visual_metadata() -> TileVisualMetadata {
     TileVisualMetadata::default()
 }
 
-fn create_test_grass_quality_settings(density: GrassDensity) -> GrassQualitySettings {
-    GrassQualitySettings { density }
+fn create_test_grass_quality_settings(
+    performance_level: GrassPerformanceLevel,
+) -> GrassQualitySettings {
+    GrassQualitySettings { performance_level }
 }
 
 // ==================== Density Tests ====================
@@ -26,37 +28,37 @@ fn create_test_grass_quality_settings(density: GrassDensity) -> GrassQualitySett
 /// Tests that Low density produces sparse grass
 #[test]
 fn test_grass_density_low_sparse() {
-    let settings = create_test_grass_quality_settings(GrassDensity::Low);
-    let (min, max) = settings.density.blade_count_range();
+    let settings = create_test_grass_quality_settings(GrassPerformanceLevel::Medium);
+    let (min, max) = settings.blade_count_range_for_content(GrassDensity::Low);
 
-    // Low: 2-4 blades per tile
-    assert_eq!(min, 2, "Low density minimum should be 2");
-    assert_eq!(max, 4, "Low density maximum should be 4");
-    assert!(max <= 4, "Low density should not exceed 4 blades");
+    // Low content density: 10-20 blades per tile at 1.0x performance
+    assert_eq!(min, 10, "Low density minimum should be 10");
+    assert_eq!(max, 20, "Low density maximum should be 20");
+    assert!(max <= 20, "Low density should not exceed 20 blades");
 }
 
 /// Tests that Medium density produces balanced grass
 #[test]
 fn test_grass_density_medium_balanced() {
-    let settings = create_test_grass_quality_settings(GrassDensity::Medium);
-    let (min, max) = settings.density.blade_count_range();
+    let settings = create_test_grass_quality_settings(GrassPerformanceLevel::Medium);
+    let (min, max) = settings.blade_count_range_for_content(GrassDensity::Medium);
 
-    // Medium: 6-10 blades per tile
-    assert_eq!(min, 6, "Medium density minimum should be 6");
-    assert_eq!(max, 10, "Medium density maximum should be 10");
+    // Medium content density: 40-60 blades per tile at 1.0x performance
+    assert_eq!(min, 40, "Medium density minimum should be 40");
+    assert_eq!(max, 60, "Medium density maximum should be 60");
     assert!(min < max, "Min should be less than max");
 }
 
 /// Tests that High density produces dense grass
 #[test]
 fn test_grass_density_high_dense() {
-    let settings = create_test_grass_quality_settings(GrassDensity::High);
-    let (min, max) = settings.density.blade_count_range();
+    let settings = create_test_grass_quality_settings(GrassPerformanceLevel::Medium);
+    let (min, max) = settings.blade_count_range_for_content(GrassDensity::High);
 
-    // High: 12-20 blades per tile
-    assert_eq!(min, 12, "High density minimum should be 12");
-    assert_eq!(max, 20, "High density maximum should be 20");
-    assert!(max > 10, "High density should exceed 10 blades");
+    // High content density: 80-120 blades per tile at 1.0x performance
+    assert_eq!(min, 80, "High density minimum should be 80");
+    assert_eq!(max, 120, "High density maximum should be 120");
+    assert!(max > 60, "High density should exceed 60 blades");
 }
 
 // ==================== Cluster Formation Tests ====================
@@ -89,19 +91,22 @@ fn test_grass_cluster_count_calculation() {
 #[test]
 fn test_grass_density_to_cluster_count() {
     // Verify blade count ranges match density levels
-    let low_settings = create_test_grass_quality_settings(GrassDensity::Low);
-    let (low_min, low_max) = low_settings.density.blade_count_range();
+    let low_settings = create_test_grass_quality_settings(GrassPerformanceLevel::Medium);
+    let (low_min, low_max) = low_settings.blade_count_range_for_content(GrassDensity::Low);
 
-    // Low density: 2-4 blades → 1 cluster
+    // Low density: 10-20 blades → 1-2 clusters
     let low_clusters_min = (low_min / 7).max(1);
     let low_clusters_max = (low_max / 7).max(1);
     assert_eq!(low_clusters_min, 1, "Low min should produce 1 cluster");
-    assert_eq!(low_clusters_max, 1, "Low max should produce 1 cluster");
+    assert!(
+        low_clusters_max >= 1,
+        "Low max should produce at least 1 cluster"
+    );
 
-    let high_settings = create_test_grass_quality_settings(GrassDensity::High);
-    let (high_min, high_max) = high_settings.density.blade_count_range();
+    let high_settings = create_test_grass_quality_settings(GrassPerformanceLevel::Medium);
+    let (high_min, high_max) = high_settings.blade_count_range_for_content(GrassDensity::High);
 
-    // High density: 12-20 blades → 2-3 clusters
+    // High density: 80-120 blades → 11-17 clusters
     let high_clusters_min = (high_min / 7).max(1);
     let high_clusters_max = (high_max / 7).max(1);
     assert!(
@@ -109,8 +114,8 @@ fn test_grass_density_to_cluster_count() {
         "High min should produce at least 1 cluster"
     );
     assert!(
-        high_clusters_max >= 2,
-        "High max should produce at least 2 clusters"
+        high_clusters_max >= 10,
+        "High max should produce at least 10 clusters"
     );
 }
 
@@ -238,9 +243,9 @@ fn test_grass_visual_metadata_color_tint() {
 fn test_grass_quality_settings_default() {
     let settings = GrassQualitySettings::default();
     assert_eq!(
-        settings.density,
-        GrassDensity::Medium,
-        "Default should be Medium density"
+        settings.performance_level,
+        GrassPerformanceLevel::Medium,
+        "Default should be Medium performance level"
     );
 }
 
@@ -248,13 +253,13 @@ fn test_grass_quality_settings_default() {
 #[test]
 fn test_grass_quality_settings_modified() {
     let settings = GrassQualitySettings {
-        density: GrassDensity::High,
+        performance_level: GrassPerformanceLevel::High,
     };
 
     assert_eq!(
-        settings.density,
-        GrassDensity::High,
-        "Density should be modifiable"
+        settings.performance_level,
+        GrassPerformanceLevel::High,
+        "Performance level should be modifiable"
     );
 }
 
@@ -262,13 +267,13 @@ fn test_grass_quality_settings_modified() {
 #[test]
 fn test_grass_quality_settings_clone() {
     let original = GrassQualitySettings {
-        density: GrassDensity::Low,
+        performance_level: GrassPerformanceLevel::Low,
     };
     let cloned = original.clone();
 
     assert_eq!(
-        original.density, cloned.density,
-        "Cloned settings should have same density"
+        original.performance_level, cloned.performance_level,
+        "Cloned settings should have same performance level"
     );
 }
 
@@ -277,21 +282,20 @@ fn test_grass_quality_settings_clone() {
 /// Tests very low blade count (minimum 2)
 #[test]
 fn test_grass_minimum_blade_count() {
-    let settings = create_test_grass_quality_settings(GrassDensity::Low);
-    let (min, _max) = settings.density.blade_count_range();
+    let settings = create_test_grass_quality_settings(GrassPerformanceLevel::Low);
+    let (min, _max) = settings.blade_count_range_for_content(GrassDensity::Low);
 
     assert!(min > 0, "Should always have at least some grass");
-    assert_eq!(min, 2, "Minimum should be 2 for sparse coverage");
+    assert!(min <= 5, "Low performance should reduce blade counts");
 }
 
 /// Tests very high blade count (maximum 20)
 #[test]
 fn test_grass_maximum_blade_count() {
-    let settings = create_test_grass_quality_settings(GrassDensity::High);
-    let (_min, max) = settings.density.blade_count_range();
+    let settings = create_test_grass_quality_settings(GrassPerformanceLevel::High);
+    let (_min, max) = settings.blade_count_range_for_content(GrassDensity::High);
 
-    assert!(max <= 20, "Should not exceed 20 blades per tile");
-    assert!(max > 10, "High density should be > 10");
+    assert!(max >= 80, "High performance should allow dense grass");
 }
 
 /// Tests cluster count with edge case blade counts
@@ -334,13 +338,13 @@ fn test_grass_cluster_efficiency() {
 /// Tests cluster count scaling with density
 #[test]
 fn test_grass_cluster_scaling() {
-    let low = create_test_grass_quality_settings(GrassDensity::Low);
-    let medium = create_test_grass_quality_settings(GrassDensity::Medium);
-    let high = create_test_grass_quality_settings(GrassDensity::High);
+    let low = create_test_grass_quality_settings(GrassPerformanceLevel::Low);
+    let medium = create_test_grass_quality_settings(GrassPerformanceLevel::Medium);
+    let high = create_test_grass_quality_settings(GrassPerformanceLevel::High);
 
-    let (_low_min, low_max) = low.density.blade_count_range();
-    let (_med_min, med_max) = medium.density.blade_count_range();
-    let (_high_min, high_max) = high.density.blade_count_range();
+    let (_low_min, low_max) = low.blade_count_range_for_content(GrassDensity::High);
+    let (_med_min, med_max) = medium.blade_count_range_for_content(GrassDensity::High);
+    let (_high_min, high_max) = high.blade_count_range_for_content(GrassDensity::High);
 
     let low_clusters = (low_max / 7).max(1);
     let med_clusters = (med_max / 7).max(1);

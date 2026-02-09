@@ -1,3 +1,61 @@
+## Phase 1: Grass Rendering - Core Refactor and Diagnosis - COMPLETED
+
+### Summary
+
+Completed the Phase 1 refactor by consolidating grass rendering into `advanced_grass.rs`, clarifying performance versus content density semantics, and adding diagnostic logging to trace grass spawning. Diagnosed the primary rendering failure as custom meshes being created with render-world extraction disabled and updated mesh creation to use `RenderAssetUsages::all()` so grass meshes reach the renderer.
+
+### Date Completed
+
+2026-02-09
+
+### Components Implemented
+
+#### 1. Grass Module Refactor (`src/game/systems/advanced_grass.rs`)
+
+- Grass mesh creation, cluster spawning, culling, LOD, and tests are centralized in `advanced_grass.rs`.
+- `procedural_meshes.rs` no longer contains grass logic and now documents the module boundary.
+
+#### 2. Performance vs Content Density Clarification
+
+- Game-side performance setting is `GrassPerformanceLevel` in `src/game/resources/grass_quality_settings.rs`.
+- Content density remains `domain::world::GrassDensity` for map data.
+- Conversion logic uses content density and performance multiplier to produce final blade ranges.
+
+#### 3. SDK UI Update (`sdk/campaign_builder/src/config_editor.rs`)
+
+- Config editor now displays grass performance level instead of content density.
+- UI explicitly describes the performance multiplier and that final blades depend on per-tile content density.
+
+#### 4. Diagnostic Logging (`src/game/systems/advanced_grass.rs`)
+
+- `spawn_grass` logs tile position, density inputs, and cluster counts at debug level.
+
+#### 5. Root Cause Identified and Fixed
+
+- Root cause: grass blade meshes were created with `RenderAssetUsages::MAIN_WORLD`, preventing render-world extraction in Bevy 0.17, so meshes never reached the renderer.
+- Fix: use `RenderAssetUsages::all()` for grass blade meshes, chunk meshes, and test meshes.
+
+### Quality Requirements
+
+- Billboard approach validated for Phase 1-3 quality: correct mesh shape, UVs, normals, and color variation are sufficient for initial release without custom shaders.
+
+### Files Modified
+
+- `src/game/systems/advanced_grass.rs`
+- `sdk/campaign_builder/src/config_editor.rs`
+- `docs/explanation/implementations.md`
+
+### Testing
+
+- Not run (not requested).
+
+### Deliverables Verification
+
+- Grass code extracted into `advanced_grass.rs` and removed from `procedural_meshes.rs`.
+- Performance level naming clarified and conversion logic implemented.
+- Diagnostic logging added to grass spawning.
+- Rendering failure root cause documented and fixed.
+
 ## Phase 2: Grass Rendering - Fix Basic Rendering + Essential Performance - COMPLETED
 
 ### Summary

@@ -1,169 +1,202 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Grass density quality settings for performance tuning
+//! Grass performance settings and content-density conversion
 //!
-//! This module provides configurable grass blade density levels to support
-//! a range of hardware capabilities, from older integrated graphics to
-//! modern gaming systems.
+//! This module separates **content density** (domain-level grass density on tiles)
+//! from **performance level** (render-time quality settings). The conversion is:
 //!
-//! # Architecture
-//!
-//! The `GrassQualitySettings` resource is initialized with a default density
-//! level (Medium) and can be modified at runtime to adapt to frame rate or
-//! user preferences.
-//!
-//! # Examples
-//!
-//! ```text
-//! use antares::game::resources::grass_quality_settings::{GrassQualitySettings, GrassDensity};
-//!
-//! let settings = GrassQualitySettings::default();
-//! assert_eq!(settings.density, GrassDensity::Medium);
-//!
-//! let (min, max) = settings.density.blade_count_range();
-//! println!("Grass blades per tile: {}-{}", min, max);
-//! ```
+//! `content_density_range × performance_multiplier = blade_count_range`
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::domain::world::GrassDensity;
+
 // ==================== Resource ====================
 
-/// Resource controlling grass blade density for performance tuning
+/// Resource controlling grass performance level for rendering
 ///
-/// Grass density is configurable to support a range of hardware capabilities.
-/// The density setting determines how many grass blade billboards are spawned
-/// per grass terrain tile, directly affecting visual quality and performance.
+/// This setting scales domain-level grass density into an actual blade count
+/// range used at render time.
 ///
 /// # Fields
 ///
-/// * `density` - Current grass density level (Low, Medium, or High)
+/// * `performance_level` - Current performance setting (Low/Medium/High)
 ///
 /// # Examples
 ///
-/// ```text
-/// use antares::game::resources::grass_quality_settings::{GrassQualitySettings, GrassDensity};
+/// ```rust
+/// use antares::game::resources::grass_quality_settings::{
+///     GrassPerformanceLevel, GrassQualitySettings,
+/// };
 ///
-/// let mut settings = GrassQualitySettings::default();
-/// assert_eq!(settings.density, GrassDensity::Medium);
-///
-/// // Change to high density for better visuals
-/// settings.density = GrassDensity::High;
-/// let (min, max) = settings.density.blade_count_range();
-/// assert_eq!((min, max), (12, 20));
+/// let settings = GrassQualitySettings::default();
+/// assert_eq!(settings.performance_level, GrassPerformanceLevel::Medium);
 /// ```
 #[derive(Resource, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrassQualitySettings {
-    /// Current grass blade density level
-    pub density: GrassDensity,
+    /// Current grass performance level
+    pub performance_level: GrassPerformanceLevel,
 }
 
 impl Default for GrassQualitySettings {
-    /// Creates default grass quality settings with Medium density
+    /// Creates default grass quality settings with Medium performance
     ///
-    /// Medium density (6-10 blades per tile) provides a balanced visual
-    /// quality suitable for standard desktop hardware.
+    /// Medium performance maintains a 1.0x multiplier on content density.
     fn default() -> Self {
         Self {
-            density: GrassDensity::Medium,
+            performance_level: GrassPerformanceLevel::Medium,
         }
     }
 }
 
-// ==================== Density Enum ====================
+impl GrassQualitySettings {
+    /// Computes the blade-count range for the given content density
+    ///
+    /// Applies the current performance multiplier to the domain-level density.
+    ///
+    /// # Arguments
+    ///
+    /// * `content_density` - Domain grass density from tile metadata
+    ///
+    /// # Returns
+    ///
+    /// Tuple `(min, max)` for blades per tile after scaling.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use antares::domain::world::GrassDensity;
+    /// use antares::game::resources::grass_quality_settings::{
+    ///     GrassPerformanceLevel, GrassQualitySettings,
+    /// };
+    ///
+    /// let settings = GrassQualitySettings {
+    ///     performance_level: GrassPerformanceLevel::Low,
+    /// };
+    ///
+    /// let (min, max) = settings.blade_count_range_for_content(GrassDensity::High);
+    /// assert!(min <= max);
+    /// assert!(max > 0);
+    /// ```
+    pub fn blade_count_range_for_content(&self, content_density: GrassDensity) -> (u32, u32) {
+        self.performance_level
+            .apply_to_content_density(content_density)
+    }
+}
 
-/// Grass blade density levels
+// ==================== Performance Level Enum ====================
+
+/// Grass performance levels for rendering
 ///
-/// Controls how many grass blade billboards spawn per terrain tile.
-/// Each level targets a specific hardware capability tier:
-///
-/// | Level  | Blades/Tile | Target Hardware                     |
-/// |--------|-------------|-------------------------------------|
-/// | Low    | 2-4         | Older hardware, integrated graphics |
-/// | Medium | 6-10        | Standard desktop                    |
-/// | High   | 12-20       | Modern gaming hardware              |
-///
-/// # Examples
-///
-/// ```text
-/// use antares::game::resources::grass_quality_settings::GrassDensity;
-///
-/// let low = GrassDensity::Low;
-/// let (min, max) = low.blade_count_range();
-/// assert_eq!((min, max), (2, 4));
-/// assert_eq!(low.name(), "Low (2-4 blades)");
-/// ```
+/// Performance settings scale the content density configured in map data.
+/// These are **not** the same as the domain `GrassDensity` enum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GrassDensity {
-    /// 2-4 blades per tile (older hardware, integrated graphics)
-    ///
-    /// Minimum grass coverage for systems with limited GPU memory
-    /// or older integrated graphics. Visual quality is reduced but
-    /// frame rate remains stable on older hardware.
+pub enum GrassPerformanceLevel {
+    /// Low performance setting: 0.25x content density
     Low,
-
-    /// 6-10 blades per tile (standard desktop)
-    ///
-    /// Balanced default providing adequate grass coverage without
-    /// significant performance impact on typical modern systems.
-    /// Recommended for most use cases.
+    /// Medium performance setting: 1.0x content density
     Medium,
-
-    /// 12-20 blades per tile (modern gaming hardware)
-    ///
-    /// Dense grass coverage for maximum visual fidelity on modern
-    /// gaming GPUs. Requires sufficient GPU memory and bandwidth.
+    /// High performance setting: 1.5x content density
     High,
 }
 
-impl GrassDensity {
-    /// Returns the range of grass blades to spawn per tile
-    ///
-    /// # Returns
-    ///
-    /// A tuple `(min, max)` representing the range of grass blades
-    /// that should be spawned for this density setting.
+impl GrassPerformanceLevel {
+    /// Returns the multiplier applied to content density
     ///
     /// # Examples
     ///
-    /// ```text
-    /// use antares::game::resources::grass_quality_settings::GrassDensity;
+    /// ```rust
+    /// use antares::game::resources::grass_quality_settings::GrassPerformanceLevel;
     ///
-    /// assert_eq!(GrassDensity::Low.blade_count_range(), (2, 4));
-    /// assert_eq!(GrassDensity::Medium.blade_count_range(), (6, 10));
-    /// assert_eq!(GrassDensity::High.blade_count_range(), (12, 20));
+    /// assert_eq!(GrassPerformanceLevel::Low.multiplier(), 0.25);
+    /// assert_eq!(GrassPerformanceLevel::Medium.multiplier(), 1.0);
+    /// assert_eq!(GrassPerformanceLevel::High.multiplier(), 1.5);
     /// ```
-    pub fn blade_count_range(&self) -> (u32, u32) {
+    pub fn multiplier(self) -> f32 {
         match self {
-            Self::Low => (2, 4),
-            Self::Medium => (6, 10),
-            Self::High => (12, 20),
+            Self::Low => 0.25,
+            Self::Medium => 1.0,
+            Self::High => 1.5,
         }
     }
 
-    /// Returns display name for UI and debugging
+    /// Applies performance scaling to a domain-level content density
+    ///
+    /// # Arguments
+    ///
+    /// * `content_density` - Domain grass density from tile metadata
     ///
     /// # Returns
     ///
-    /// A human-readable string describing this density level and
-    /// its blade count range.
+    /// Tuple `(min, max)` of scaled blade counts. If content density is `None`,
+    /// returns `(0, 0)`.
     ///
     /// # Examples
     ///
-    /// ```text
-    /// use antares::game::resources::grass_quality_settings::GrassDensity;
+    /// ```rust
+    /// use antares::domain::world::GrassDensity;
+    /// use antares::game::resources::grass_quality_settings::GrassPerformanceLevel;
     ///
-    /// assert_eq!(GrassDensity::Low.name(), "Low (2-4 blades)");
-    /// assert_eq!(GrassDensity::Medium.name(), "Medium (6-10 blades)");
-    /// assert_eq!(GrassDensity::High.name(), "High (12-20 blades)");
+    /// let (min, max) = GrassPerformanceLevel::Low.apply_to_content_density(GrassDensity::Medium);
+    /// assert!(min <= max);
+    /// assert!(max > 0);
     /// ```
-    pub fn name(&self) -> &str {
-        match self {
-            Self::Low => "Low (2-4 blades)",
-            Self::Medium => "Medium (6-10 blades)",
-            Self::High => "High (12-20 blades)",
+    pub fn apply_to_content_density(self, content_density: GrassDensity) -> (u32, u32) {
+        let (base_min, base_max) = base_density_range(content_density);
+        if base_min == 0 && base_max == 0 {
+            return (0, 0);
         }
+
+        let multiplier = self.multiplier();
+        let scaled_min = scale_blade_count(base_min, multiplier);
+        let scaled_max = scale_blade_count(base_max, multiplier);
+
+        let min = scaled_min.min(scaled_max);
+        let max = scaled_min.max(scaled_max);
+
+        (min, max)
+    }
+
+    /// Returns a display name for UI and debugging
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use antares::game::resources::grass_quality_settings::GrassPerformanceLevel;
+    ///
+    /// assert_eq!(GrassPerformanceLevel::Low.name(), "Low (0.25x)");
+    /// assert_eq!(GrassPerformanceLevel::Medium.name(), "Medium (1.0x)");
+    /// assert_eq!(GrassPerformanceLevel::High.name(), "High (1.5x)");
+    /// ```
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Low => "Low (0.25x)",
+            Self::Medium => "Medium (1.0x)",
+            Self::High => "High (1.5x)",
+        }
+    }
+}
+
+// ==================== Helpers ====================
+
+fn base_density_range(density: GrassDensity) -> (u32, u32) {
+    match density {
+        GrassDensity::None => (0, 0),
+        GrassDensity::Low => (10, 20),
+        GrassDensity::Medium => (40, 60),
+        GrassDensity::High => (80, 120),
+        GrassDensity::VeryHigh => (150, 200),
+    }
+}
+
+fn scale_blade_count(value: u32, multiplier: f32) -> u32 {
+    let scaled = (value as f32 * multiplier).round();
+    if value > 0 && scaled < 1.0 {
+        1
+    } else {
+        scaled as u32
     }
 }
 
@@ -174,59 +207,69 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_grass_quality_settings_default_is_medium() {
+    fn test_default_performance_level_is_medium() {
         let settings = GrassQualitySettings::default();
-        assert_eq!(settings.density, GrassDensity::Medium);
+        assert_eq!(settings.performance_level, GrassPerformanceLevel::Medium);
     }
 
     #[test]
-    fn test_grass_density_low_blade_count_range() {
-        let (min, max) = GrassDensity::Low.blade_count_range();
-        assert_eq!(min, 2);
-        assert_eq!(max, 4);
+    fn test_performance_level_multiplier_values() {
+        assert_eq!(GrassPerformanceLevel::Low.multiplier(), 0.25);
+        assert_eq!(GrassPerformanceLevel::Medium.multiplier(), 1.0);
+        assert_eq!(GrassPerformanceLevel::High.multiplier(), 1.5);
     }
 
     #[test]
-    fn test_grass_density_medium_blade_count_range() {
-        let (min, max) = GrassDensity::Medium.blade_count_range();
-        assert_eq!(min, 6);
-        assert_eq!(max, 10);
+    fn test_performance_level_names() {
+        assert_eq!(GrassPerformanceLevel::Low.name(), "Low (0.25x)");
+        assert_eq!(GrassPerformanceLevel::Medium.name(), "Medium (1.0x)");
+        assert_eq!(GrassPerformanceLevel::High.name(), "High (1.5x)");
     }
 
     #[test]
-    fn test_grass_density_high_blade_count_range() {
-        let (min, max) = GrassDensity::High.blade_count_range();
-        assert_eq!(min, 12);
-        assert_eq!(max, 20);
+    fn test_apply_to_content_density_none_returns_zero() {
+        let (min, max) = GrassPerformanceLevel::Medium.apply_to_content_density(GrassDensity::None);
+        assert_eq!((min, max), (0, 0));
     }
 
     #[test]
-    fn test_grass_density_low_name() {
-        assert_eq!(GrassDensity::Low.name(), "Low (2-4 blades)");
+    fn test_apply_to_content_density_scales_medium_density_low_performance() {
+        let (min, max) = GrassPerformanceLevel::Low.apply_to_content_density(GrassDensity::Medium);
+        assert!(min <= max);
+        assert!(min >= 1);
+        assert!(max >= min);
     }
 
     #[test]
-    fn test_grass_density_medium_name() {
-        assert_eq!(GrassDensity::Medium.name(), "Medium (6-10 blades)");
+    fn test_apply_to_content_density_scales_high_density_high_performance() {
+        let (min, max) = GrassPerformanceLevel::High.apply_to_content_density(GrassDensity::High);
+        assert!(min <= max);
+        assert!(min > 0);
+        assert!(max > min);
     }
 
     #[test]
-    fn test_grass_density_high_name() {
-        assert_eq!(GrassDensity::High.name(), "High (12-20 blades)");
-    }
-
-    #[test]
-    fn test_grass_quality_settings_clone() {
-        let settings = GrassQualitySettings::default();
-        let cloned = settings.clone();
-        assert_eq!(settings, cloned);
-    }
-
-    #[test]
-    fn test_grass_quality_settings_custom_density() {
+    fn test_blade_count_range_for_content_uses_performance_level() {
         let settings = GrassQualitySettings {
-            density: GrassDensity::High,
+            performance_level: GrassPerformanceLevel::Low,
         };
-        assert_eq!(settings.density, GrassDensity::High);
+        let (min, max) = settings.blade_count_range_for_content(GrassDensity::Low);
+        assert!(min <= max);
+        assert!(max > 0);
+    }
+
+    #[test]
+    fn test_scale_blade_count_rounds_and_clamps() {
+        assert_eq!(scale_blade_count(10, 0.25), 3);
+        assert_eq!(scale_blade_count(1, 0.1), 1);
+    }
+
+    #[test]
+    fn test_base_density_range_values() {
+        assert_eq!(base_density_range(GrassDensity::Low), (10, 20));
+        assert_eq!(base_density_range(GrassDensity::Medium), (40, 60));
+        assert_eq!(base_density_range(GrassDensity::High), (80, 120));
+        assert_eq!(base_density_range(GrassDensity::VeryHigh), (150, 200));
+        assert_eq!(base_density_range(GrassDensity::None), (0, 0));
     }
 }

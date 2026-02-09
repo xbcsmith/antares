@@ -1152,6 +1152,7 @@ impl VisualMetadataEditor {
             water_flow_direction: None,
             foliage_density: None,
             snow_coverage: None,
+            grass_blade_config: None,
         }
     }
 

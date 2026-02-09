@@ -24,7 +24,7 @@
 //! ```
 
 use crate::ui_helpers::{EditorToolbar, ToolbarAction};
-use antares::game::resources::grass_quality_settings::GrassDensity;
+use antares::game::resources::grass_quality_settings::GrassPerformanceLevel;
 use antares::sdk::game_config::{CameraMode, GameConfig, ShadowQuality};
 use eframe::egui;
 use std::path::PathBuf;
@@ -71,8 +71,8 @@ pub struct ConfigEditorState {
     /// Track last campaign directory to detect changes
     pub last_campaign_dir: Option<PathBuf>,
 
-    /// Phase 6: Grass quality settings
-    pub grass_density: GrassDensity,
+    /// Grass performance level setting
+    pub grass_performance_level: GrassPerformanceLevel,
 }
 
 impl Default for ConfigEditorState {
@@ -96,7 +96,7 @@ impl Default for ConfigEditorState {
             needs_initial_load: true,
             last_campaign_dir: None,
             graphics_quality_expanded: false,
-            grass_density: GrassDensity::Medium,
+            grass_performance_level: GrassPerformanceLevel::Medium,
         }
     }
 }
@@ -259,51 +259,58 @@ impl ConfigEditorState {
             });
     }
 
-    /// Show Phase 6 graphics quality settings (grass density, etc.)
+    /// Show grass performance settings
     fn show_graphics_quality_section(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
-        let section_open = ui.collapsing("🌱 Graphics Quality (Phase 6)", |ui| {
+        let section_open = ui.collapsing("Grass Performance", |ui| {
             ui.add_space(5.0);
 
-            // Grass Density Quality Setting
+            // Grass Performance Level Setting
             ui.horizontal(|ui| {
-                ui.label("Grass Density:");
-                let density_options = [GrassDensity::Low, GrassDensity::Medium, GrassDensity::High];
-                let density_names = [
-                    GrassDensity::Low.name(),
-                    GrassDensity::Medium.name(),
-                    GrassDensity::High.name(),
+                ui.label("Grass Performance:");
+                let level_options = [
+                    GrassPerformanceLevel::Low,
+                    GrassPerformanceLevel::Medium,
+                    GrassPerformanceLevel::High,
                 ];
-                let mut selected_index = density_options
+                let level_names = [
+                    GrassPerformanceLevel::Low.name(),
+                    GrassPerformanceLevel::Medium.name(),
+                    GrassPerformanceLevel::High.name(),
+                ];
+                let mut selected_index = level_options
                     .iter()
-                    .position(|&x| x == self.grass_density)
+                    .position(|&x| x == self.grass_performance_level)
                     .unwrap_or(1);
 
                 let original_index = selected_index;
-                egui::ComboBox::from_id_salt("grass_density")
-                    .selected_text(density_names[selected_index])
-                    .show_index(ui, &mut selected_index, density_names.len(), |i| {
-                        egui::WidgetText::from(density_names[i])
+                egui::ComboBox::from_id_salt("grass_performance_level")
+                    .selected_text(level_names[selected_index])
+                    .show_index(ui, &mut selected_index, level_names.len(), |i| {
+                        egui::WidgetText::from(level_names[i])
                     });
 
                 if selected_index != original_index {
-                    self.grass_density = density_options[selected_index];
+                    self.grass_performance_level = level_options[selected_index];
                     *unsaved_changes = true;
                 }
             });
 
-            ui.label("Grass blades per tile: ");
+            ui.label("Performance scaling:");
             ui.indent("grass_info", |ui| {
-                let (min, max) = self.grass_density.blade_count_range();
-                ui.label(format!("Range: {} - {} blades per tile", min, max));
-                match self.grass_density {
-                    GrassDensity::Low => {
-                        ui.label("Optimized for older hardware and integrated graphics");
+                ui.label(format!(
+                    "Multiplier: {:.2}x content density",
+                    self.grass_performance_level.multiplier()
+                ));
+                ui.label("Final blade counts depend on per-tile content density.");
+                match self.grass_performance_level {
+                    GrassPerformanceLevel::Low => {
+                        ui.label("Prioritizes performance on older hardware.");
                     }
-                    GrassDensity::Medium => {
-                        ui.label("Balanced default for standard desktop hardware");
+                    GrassPerformanceLevel::Medium => {
+                        ui.label("Balanced default for standard hardware.");
                     }
-                    GrassDensity::High => {
-                        ui.label("Maximum visual fidelity for modern gaming systems");
+                    GrassPerformanceLevel::High => {
+                        ui.label("Maximum fidelity for high-end hardware.");
                     }
                 }
             });

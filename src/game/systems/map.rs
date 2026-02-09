@@ -116,7 +116,7 @@ impl Plugin for MapRenderingPlugin {
         // registry on startup so metadata is available before map spawn runs.
         app.init_resource::<SpriteAssets>()
             .init_resource::<crate::game::resources::GrassQualitySettings>()
-            .init_resource::<super::procedural_meshes::GrassRenderConfig>() // Phase 2: Add grass render config
+            .init_resource::<super::advanced_grass::GrassRenderConfig>() // Phase 2: Add grass render config
             .add_systems(
                 Startup,
                 // Ensure registration happens before the map spawn system runs
@@ -126,8 +126,11 @@ impl Plugin for MapRenderingPlugin {
                 Update,
                 (
                     // Phase 2: Grass performance systems for culling and LOD
-                    super::procedural_meshes::grass_distance_culling_system,
-                    super::procedural_meshes::grass_lod_system,
+                    super::advanced_grass::grass_distance_culling_system,
+                    super::advanced_grass::grass_lod_system,
+                    // Phase 4: Advanced grass chunking + culling systems
+                    super::advanced_grass::build_grass_chunks_system,
+                    super::advanced_grass::grass_chunk_culling_system,
                 ),
             )
             .add_plugins(MapManagerPlugin);
@@ -653,7 +656,7 @@ fn spawn_map(
                             }
 
                             // Always spawn grass ground cover for these terrains
-                            procedural_meshes::spawn_grass(
+                            super::advanced_grass::spawn_grass(
                                 &mut commands,
                                 &mut materials,
                                 &mut meshes,
@@ -661,7 +664,6 @@ fn spawn_map(
                                 map.id,
                                 Some(&tile.visual),
                                 &quality_settings,
-                                procedural_cache,
                             );
                         }
                         _ => {

@@ -12,7 +12,7 @@ pub mod grass_quality_settings;
 pub mod sprite_assets;
 
 // Re-export commonly used types
-pub use grass_quality_settings::{GrassDensity, GrassQualitySettings};
+pub use grass_quality_settings::{GrassPerformanceLevel, GrassQualitySettings};
 
 /// Global game state resource wrapper
 #[derive(Resource)]
