@@ -116,10 +116,19 @@ impl Plugin for MapRenderingPlugin {
         // registry on startup so metadata is available before map spawn runs.
         app.init_resource::<SpriteAssets>()
             .init_resource::<crate::game::resources::GrassQualitySettings>()
+            .init_resource::<super::procedural_meshes::GrassRenderConfig>() // Phase 2: Add grass render config
             .add_systems(
                 Startup,
                 // Ensure registration happens before the map spawn system runs
                 (register_sprite_sheets_system, spawn_map_system),
+            )
+            .add_systems(
+                Update,
+                (
+                    // Phase 2: Grass performance systems for culling and LOD
+                    super::procedural_meshes::grass_distance_culling_system,
+                    super::procedural_meshes::grass_lod_system,
+                ),
             )
             .add_plugins(MapManagerPlugin);
     }
