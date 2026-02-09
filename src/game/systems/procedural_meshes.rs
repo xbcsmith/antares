@@ -509,6 +509,143 @@ impl Default for GrassRenderConfig {
     }
 }
 
+// ==================== Phase 3: Blade Configuration ====================
+
+/// Configuration for individual grass blade appearance (Phase 3)
+///
+/// Controls visual properties of spawned grass blades.
+/// Converted from domain-layer `GrassBladeConfig` with clamped values.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::BladeConfig;
+///
+/// let config = BladeConfig {
+///     length: 1.5,
+///     width: 0.8,
+///     tilt: 0.4,
+///     curve: 0.5,
+///     color_variation: 0.3,
+/// };
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct BladeConfig {
+    /// Blade length multiplier (clamped 0.5-2.0)
+    pub length: f32,
+    /// Blade width multiplier (clamped 0.5-2.0)
+    pub width: f32,
+    /// Blade tilt angle in radians (clamped 0.0-0.5)
+    pub tilt: f32,
+    /// Blade curvature amount (clamped 0.0-1.0)
+    pub curve: f32,
+    /// Color variation (clamped 0.0-1.0)
+    pub color_variation: f32,
+}
+
+impl Default for BladeConfig {
+    fn default() -> Self {
+        Self {
+            length: 1.0,
+            width: 1.0,
+            tilt: 0.3,
+            curve: 0.3,
+            color_variation: 0.2,
+        }
+    }
+}
+
+impl From<&world::GrassBladeConfig> for BladeConfig {
+    fn from(config: &world::GrassBladeConfig) -> Self {
+        Self {
+            length: config.length.clamp(0.5, 2.0),
+            width: config.width.clamp(0.5, 2.0),
+            tilt: config.tilt.clamp(0.0, 0.5),
+            curve: config.curve.clamp(0.0, 1.0),
+            color_variation: config.color_variation.clamp(0.0, 1.0),
+        }
+    }
+}
+
+/// Color scheme for grass blades with variation support (Phase 3)
+///
+/// Provides base and tip colors with random variation to create
+/// natural-looking grass.
+///
+/// # Examples
+///
+/// ```
+/// use bevy::color::Color;
+/// use antares::game::systems::procedural_meshes::GrassColorScheme;
+///
+/// let scheme = GrassColorScheme {
+///     base_color: Color::srgb(0.2, 0.5, 0.1),
+///     tip_color: Color::srgb(0.3, 0.7, 0.2),
+///     variation: 0.3,
+/// };
+///
+/// let mut rng = rand::rng();
+/// let blade_color = scheme.sample_blade_color(&mut rng);
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct GrassColorScheme {
+    /// Base color at blade bottom
+    pub base_color: Color,
+    /// Tip color at blade top
+    pub tip_color: Color,
+    /// Variation amount (0.0-1.0)
+    pub variation: f32,
+}
+
+impl GrassColorScheme {
+    /// Sample a random blade color with variation
+    ///
+    /// Blends base and tip colors with random variation based on the
+    /// configured variation amount.
+    ///
+    /// # Arguments
+    ///
+    /// * `rng` - Random number generator
+    ///
+    /// # Returns
+    ///
+    /// A color with applied variation
+    pub fn sample_blade_color(&self, rng: &mut impl rand::Rng) -> Color {
+        // Blend base and tip (for now use base, future: gradient)
+        let base_blend = 0.7; // 70% base, 30% tip
+        let blended = Color::srgb(
+            self.base_color.to_srgba().red * base_blend
+                + self.tip_color.to_srgba().red * (1.0 - base_blend),
+            self.base_color.to_srgba().green * base_blend
+                + self.tip_color.to_srgba().green * (1.0 - base_blend),
+            self.base_color.to_srgba().blue * base_blend
+                + self.tip_color.to_srgba().blue * (1.0 - base_blend),
+        );
+
+        // Apply variation
+        if self.variation > 0.0 {
+            let variation_amount = rng.random_range(-self.variation..self.variation);
+            Color::srgb(
+                (blended.to_srgba().red + variation_amount).clamp(0.0, 1.0),
+                (blended.to_srgba().green + variation_amount).clamp(0.0, 1.0),
+                (blended.to_srgba().blue + variation_amount).clamp(0.0, 1.0),
+            )
+        } else {
+            blended
+        }
+    }
+}
+
+impl Default for GrassColorScheme {
+    fn default() -> Self {
+        Self {
+            base_color: Color::srgb(0.2, 0.5, 0.1),
+            tip_color: Color::srgb(0.3, 0.7, 0.2),
+            variation: 0.2,
+        }
+    }
+}
+
 // Furniture dimensions - Bench
 const BENCH_LENGTH: f32 = 1.2;
 const BENCH_WIDTH: f32 = 0.4;
@@ -1120,7 +1257,8 @@ fn spawn_grass_cluster(
     meshes: &mut ResMut<Assets<Mesh>>,
     cluster_center: Vec2,
     blade_height: f32,
-    grass_color: Color,
+    blade_config: &BladeConfig,
+    color_scheme: &GrassColorScheme,
     _cache: &mut ProceduralMeshCache,
     parent_entity: Entity,
 ) {
@@ -1138,16 +1276,17 @@ fn spawn_grass_cluster(
         let blade_x = cluster_center.x + offset_x;
         let blade_z = cluster_center.y + offset_z;
 
-        // Height variation (0.7x to 1.3x)
+        // Phase 3: Apply blade config length multiplier with variation (0.7x to 1.3x)
         let height_variation = rng.random_range(0.7..=1.3);
-        let varied_height = blade_height * height_variation;
+        let varied_height = blade_height * blade_config.length * height_variation;
 
-        // Width variation (0.8x to 1.2x)
+        // Phase 3: Apply blade config width multiplier with variation (0.8x to 1.2x)
         let width_variation = rng.random_range(0.8..=1.2);
-        let varied_width = GRASS_BLADE_WIDTH * width_variation;
+        let varied_width = GRASS_BLADE_WIDTH * blade_config.width * width_variation;
 
-        // Curve variation (0.0 to 0.3)
-        let curve_amount = rng.random_range(0.0..=0.3);
+        // Phase 3: Apply blade config curve with variation
+        let curve_variation = rng.random_range(0.0..=1.0);
+        let curve_amount = blade_config.curve * curve_variation * 0.3;
 
         // Y-axis rotation for variety
         let rotation_y = rng.random_range(0.0..std::f32::consts::TAU);
@@ -1159,9 +1298,12 @@ fn spawn_grass_cluster(
             curve_amount,
         ));
 
+        // Phase 3: Sample blade color from color scheme with variation
+        let blade_color = color_scheme.sample_blade_color(&mut rng);
+
         // Phase 2: Create blade material with double-sided rendering
         let blade_material = materials.add(StandardMaterial {
-            base_color: grass_color,
+            base_color: blade_color, // Phase 3: Use varied color
             perceptual_roughness: 0.7,
             double_sided: true, // Phase 2: Render both sides
             cull_mode: None,    // Phase 2: Don't cull backfaces
@@ -1200,18 +1342,31 @@ pub fn spawn_grass(
     quality_settings: &crate::game::resources::GrassQualitySettings,
     cache: &mut ProceduralMeshCache,
 ) -> Entity {
+    // Phase 3: Get blade configuration from visual metadata
+    let blade_config = visual_metadata
+        .and_then(|m| m.grass_blade_config.as_ref())
+        .map(BladeConfig::from)
+        .unwrap_or_default();
+
     // Get blade height from visual metadata (default 0.4)
     let blade_height = visual_metadata
         .and_then(|m| m.height)
         .unwrap_or(0.4)
         .clamp(0.2, 0.6);
 
-    // Get color tint from visual metadata (default grass green)
+    // Phase 3: Create color scheme from visual metadata with variation
     let color_tint = visual_metadata
         .and_then(|m| m.color_tint)
         .unwrap_or((0.3, 0.65, 0.2));
 
-    let grass_color = Color::srgb(0.3 * color_tint.0, 0.65 * color_tint.1, 0.2 * color_tint.2);
+    let base_color = Color::srgb(0.2 * color_tint.0, 0.5 * color_tint.1, 0.1 * color_tint.2);
+    let tip_color = Color::srgb(0.3 * color_tint.0, 0.7 * color_tint.1, 0.2 * color_tint.2);
+
+    let color_scheme = GrassColorScheme {
+        base_color,
+        tip_color,
+        variation: blade_config.color_variation,
+    };
 
     // Determine blade count based on metadata or quality settings
     let (min_blades, max_blades) =
@@ -1283,7 +1438,8 @@ pub fn spawn_grass(
             meshes,
             cluster_center,
             blade_height,
-            grass_color,
+            &blade_config,
+            &color_scheme,
             cache,
             parent,
         );
@@ -4146,6 +4302,357 @@ mod tests {
         let children_component = cluster_entity.get::<Children>().unwrap();
         assert!(children_component.contains(&blade_even));
         assert!(children_component.contains(&blade_odd));
+    }
+
+    // ==================== Phase 3: Blade Configuration Tests ====================
+
+    /// Tests BladeConfig default values (Phase 3)
+    #[test]
+    fn test_blade_config_default() {
+        let config = BladeConfig::default();
+        assert_eq!(config.length, 1.0, "Default length multiplier");
+        assert_eq!(config.width, 1.0, "Default width multiplier");
+        assert_eq!(config.tilt, 0.3, "Default tilt angle");
+        assert_eq!(config.curve, 0.3, "Default curve amount");
+        assert_eq!(config.color_variation, 0.2, "Default color variation");
+    }
+
+    /// Tests BladeConfig conversion from domain GrassBladeConfig (Phase 3)
+    #[test]
+    fn test_blade_config_from_grass_blade_config() {
+        let domain_config = world::GrassBladeConfig {
+            length: 1.5,
+            width: 0.8,
+            tilt: 0.4,
+            curve: 0.5,
+            color_variation: 0.3,
+        };
+
+        let blade_config = BladeConfig::from(&domain_config);
+        assert_eq!(blade_config.length, 1.5);
+        assert_eq!(blade_config.width, 0.8);
+        assert_eq!(blade_config.tilt, 0.4);
+        assert_eq!(blade_config.curve, 0.5);
+        assert_eq!(blade_config.color_variation, 0.3);
+    }
+
+    /// Tests BladeConfig clamping of length values (Phase 3)
+    #[test]
+    fn test_blade_config_clamping_length() {
+        let config_too_low = world::GrassBladeConfig {
+            length: 0.1, // Below 0.5 minimum
+            width: 1.0,
+            tilt: 0.3,
+            curve: 0.3,
+            color_variation: 0.2,
+        };
+        let blade_config = BladeConfig::from(&config_too_low);
+        assert_eq!(blade_config.length, 0.5, "Length clamped to minimum");
+
+        let config_too_high = world::GrassBladeConfig {
+            length: 5.0, // Above 2.0 maximum
+            width: 1.0,
+            tilt: 0.3,
+            curve: 0.3,
+            color_variation: 0.2,
+        };
+        let blade_config = BladeConfig::from(&config_too_high);
+        assert_eq!(blade_config.length, 2.0, "Length clamped to maximum");
+    }
+
+    /// Tests BladeConfig clamping of width values (Phase 3)
+    #[test]
+    fn test_blade_config_clamping_width() {
+        let config_too_low = world::GrassBladeConfig {
+            length: 1.0,
+            width: 0.1, // Below 0.5 minimum
+            tilt: 0.3,
+            curve: 0.3,
+            color_variation: 0.2,
+        };
+        let blade_config = BladeConfig::from(&config_too_low);
+        assert_eq!(blade_config.width, 0.5, "Width clamped to minimum");
+
+        let config_too_high = world::GrassBladeConfig {
+            length: 1.0,
+            width: 3.0, // Above 2.0 maximum
+            tilt: 0.3,
+            curve: 0.3,
+            color_variation: 0.2,
+        };
+        let blade_config = BladeConfig::from(&config_too_high);
+        assert_eq!(blade_config.width, 2.0, "Width clamped to maximum");
+    }
+
+    /// Tests BladeConfig clamping of tilt values (Phase 3)
+    #[test]
+    fn test_blade_config_clamping_tilt() {
+        let config_negative = world::GrassBladeConfig {
+            length: 1.0,
+            width: 1.0,
+            tilt: -0.5, // Below 0.0 minimum
+            curve: 0.3,
+            color_variation: 0.2,
+        };
+        let blade_config = BladeConfig::from(&config_negative);
+        assert_eq!(blade_config.tilt, 0.0, "Tilt clamped to minimum");
+
+        let config_too_high = world::GrassBladeConfig {
+            length: 1.0,
+            width: 1.0,
+            tilt: 1.0, // Above 0.5 maximum
+            curve: 0.3,
+            color_variation: 0.2,
+        };
+        let blade_config = BladeConfig::from(&config_too_high);
+        assert_eq!(blade_config.tilt, 0.5, "Tilt clamped to maximum");
+    }
+
+    /// Tests BladeConfig clamping of curve values (Phase 3)
+    #[test]
+    fn test_blade_config_clamping_curve() {
+        let config_negative = world::GrassBladeConfig {
+            length: 1.0,
+            width: 1.0,
+            tilt: 0.3,
+            curve: -0.5, // Below 0.0 minimum
+            color_variation: 0.2,
+        };
+        let blade_config = BladeConfig::from(&config_negative);
+        assert_eq!(blade_config.curve, 0.0, "Curve clamped to minimum");
+
+        let config_too_high = world::GrassBladeConfig {
+            length: 1.0,
+            width: 1.0,
+            tilt: 0.3,
+            curve: 2.0, // Above 1.0 maximum
+            color_variation: 0.2,
+        };
+        let blade_config = BladeConfig::from(&config_too_high);
+        assert_eq!(blade_config.curve, 1.0, "Curve clamped to maximum");
+    }
+
+    /// Tests BladeConfig clamping of color_variation values (Phase 3)
+    #[test]
+    fn test_blade_config_clamping_color_variation() {
+        let config_negative = world::GrassBladeConfig {
+            length: 1.0,
+            width: 1.0,
+            tilt: 0.3,
+            curve: 0.3,
+            color_variation: -0.5, // Below 0.0 minimum
+        };
+        let blade_config = BladeConfig::from(&config_negative);
+        assert_eq!(
+            blade_config.color_variation, 0.0,
+            "Color variation clamped to minimum"
+        );
+
+        let config_too_high = world::GrassBladeConfig {
+            length: 1.0,
+            width: 1.0,
+            tilt: 0.3,
+            curve: 0.3,
+            color_variation: 2.0, // Above 1.0 maximum
+        };
+        let blade_config = BladeConfig::from(&config_too_high);
+        assert_eq!(
+            blade_config.color_variation, 1.0,
+            "Color variation clamped to maximum"
+        );
+    }
+
+    /// Tests GrassColorScheme default values (Phase 3)
+    #[test]
+    fn test_grass_color_scheme_default() {
+        let scheme = GrassColorScheme::default();
+        assert_eq!(
+            scheme.base_color.to_srgba().red,
+            0.2,
+            "Default base color red"
+        );
+        assert_eq!(
+            scheme.base_color.to_srgba().green,
+            0.5,
+            "Default base color green"
+        );
+        assert_eq!(
+            scheme.base_color.to_srgba().blue,
+            0.1,
+            "Default base color blue"
+        );
+        assert_eq!(scheme.variation, 0.2, "Default variation amount");
+    }
+
+    /// Tests GrassColorScheme sample_blade_color without variation (Phase 3)
+    #[test]
+    fn test_grass_color_scheme_sample_no_variation() {
+        let scheme = GrassColorScheme {
+            base_color: Color::srgb(0.2, 0.5, 0.1),
+            tip_color: Color::srgb(0.3, 0.7, 0.2),
+            variation: 0.0, // No variation
+        };
+
+        let mut rng = rand::rng();
+        let color1 = scheme.sample_blade_color(&mut rng);
+        let color2 = scheme.sample_blade_color(&mut rng);
+
+        // With zero variation, colors should be identical (blended base+tip)
+        assert_eq!(
+            color1.to_srgba().red,
+            color2.to_srgba().red,
+            "No variation: colors should match"
+        );
+        assert_eq!(
+            color1.to_srgba().green,
+            color2.to_srgba().green,
+            "No variation: colors should match"
+        );
+        assert_eq!(
+            color1.to_srgba().blue,
+            color2.to_srgba().blue,
+            "No variation: colors should match"
+        );
+    }
+
+    /// Tests GrassColorScheme sample_blade_color with variation (Phase 3)
+    #[test]
+    fn test_grass_color_scheme_sample_with_variation() {
+        let scheme = GrassColorScheme {
+            base_color: Color::srgb(0.2, 0.5, 0.1),
+            tip_color: Color::srgb(0.3, 0.7, 0.2),
+            variation: 0.3, // 30% variation
+        };
+
+        let mut rng = rand::rng();
+        let color = scheme.sample_blade_color(&mut rng);
+
+        // Color should be within valid RGB range
+        assert!(
+            color.to_srgba().red >= 0.0 && color.to_srgba().red <= 1.0,
+            "Red channel in valid range"
+        );
+        assert!(
+            color.to_srgba().green >= 0.0 && color.to_srgba().green <= 1.0,
+            "Green channel in valid range"
+        );
+        assert!(
+            color.to_srgba().blue >= 0.0 && color.to_srgba().blue <= 1.0,
+            "Blue channel in valid range"
+        );
+    }
+
+    /// Tests GrassColorScheme produces different colors with variation (Phase 3)
+    #[test]
+    fn test_grass_color_scheme_variation_produces_different_colors() {
+        let scheme = GrassColorScheme {
+            base_color: Color::srgb(0.2, 0.5, 0.1),
+            tip_color: Color::srgb(0.3, 0.7, 0.2),
+            variation: 0.5, // High variation
+        };
+
+        let mut rng = rand::rng();
+        let mut colors_differ = false;
+
+        // Sample multiple times and check if we get different colors
+        let first_color = scheme.sample_blade_color(&mut rng);
+        for _ in 0..10 {
+            let color = scheme.sample_blade_color(&mut rng);
+            if (color.to_srgba().red - first_color.to_srgba().red).abs() > 0.01 {
+                colors_differ = true;
+                break;
+            }
+        }
+
+        assert!(
+            colors_differ,
+            "With high variation, should produce different colors"
+        );
+    }
+
+    /// Tests domain GrassBladeConfig default values (Phase 3)
+    #[test]
+    fn test_domain_grass_blade_config_default() {
+        let config = world::GrassBladeConfig::default();
+        assert_eq!(config.length, 1.0, "Default length");
+        assert_eq!(config.width, 1.0, "Default width");
+        assert_eq!(config.tilt, 0.3, "Default tilt");
+        assert_eq!(config.curve, 0.3, "Default curve");
+        assert_eq!(config.color_variation, 0.2, "Default color_variation");
+    }
+
+    /// Tests domain GrassBladeConfig serialization (Phase 3)
+    #[test]
+    fn test_domain_grass_blade_config_serialization() {
+        let config = world::GrassBladeConfig {
+            length: 1.5,
+            width: 0.8,
+            tilt: 0.4,
+            curve: 0.5,
+            color_variation: 0.3,
+        };
+
+        // Serialize to RON
+        let ron_string = ron::to_string(&config).expect("Should serialize to RON");
+
+        // Deserialize back
+        let deserialized: world::GrassBladeConfig =
+            ron::from_str(&ron_string).expect("Should deserialize from RON");
+
+        assert_eq!(deserialized.length, config.length);
+        assert_eq!(deserialized.width, config.width);
+        assert_eq!(deserialized.tilt, config.tilt);
+        assert_eq!(deserialized.curve, config.curve);
+        assert_eq!(deserialized.color_variation, config.color_variation);
+    }
+
+    /// Tests TileVisualMetadata with grass_blade_config field (Phase 3)
+    #[test]
+    fn test_tile_visual_metadata_with_grass_blade_config() {
+        let blade_config = world::GrassBladeConfig {
+            length: 1.2,
+            width: 0.9,
+            tilt: 0.35,
+            curve: 0.4,
+            color_variation: 0.25,
+        };
+
+        let metadata = TileVisualMetadata {
+            grass_blade_config: Some(blade_config),
+            ..Default::default()
+        };
+
+        assert!(metadata.grass_blade_config.is_some());
+        let config = metadata.grass_blade_config.unwrap();
+        assert_eq!(config.length, 1.2);
+        assert_eq!(config.width, 0.9);
+    }
+
+    /// Tests TileVisualMetadata grass_blade_config serialization (Phase 3)
+    #[test]
+    fn test_tile_visual_metadata_grass_blade_config_serialization() {
+        let metadata = TileVisualMetadata {
+            grass_blade_config: Some(world::GrassBladeConfig {
+                length: 1.5,
+                width: 0.8,
+                tilt: 0.4,
+                curve: 0.5,
+                color_variation: 0.3,
+            }),
+            ..Default::default()
+        };
+
+        // Serialize to RON
+        let ron_string = ron::to_string(&metadata).expect("Should serialize to RON");
+
+        // Deserialize back
+        let deserialized: TileVisualMetadata =
+            ron::from_str(&ron_string).expect("Should deserialize from RON");
+
+        assert!(deserialized.grass_blade_config.is_some());
+        let config = deserialized.grass_blade_config.unwrap();
+        assert_eq!(config.length, 1.5);
+        assert_eq!(config.width, 0.8);
     }
 }
 

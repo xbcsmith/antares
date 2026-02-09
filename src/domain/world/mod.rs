@@ -31,8 +31,8 @@ pub use npc::{NpcDefinition, NpcId, NpcPlacement};
 pub use types::{
     ArchConfig, AsyncMeshConfig, AsyncMeshTaskId, ColumnConfig, ColumnStyle, DetailLevel,
     DoorFrameConfig, EncounterTable, FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags,
-    FurnitureMaterial, FurnitureType, GrassDensity, InstanceData, LayeredSprite, Map, MapEvent,
-    RailingConfig, ResolvedNpc, RockVariant, SpriteAnimation, SpriteLayer,
+    FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, InstanceData, LayeredSprite,
+    Map, MapEvent, RailingConfig, ResolvedNpc, RockVariant, SpriteAnimation, SpriteLayer,
     SpriteMaterialProperties, SpriteReference, SpriteSelectionRule, StructureType, TerrainType,
     Tile, TileVisualMetadata, TreeType, WallSegmentConfig, WallType, WaterFlowDirection, World,
 };

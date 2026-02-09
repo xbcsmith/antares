@@ -347,6 +347,59 @@ pub enum SpriteSelectionRule {
     },
 }
 
+/// Configuration for individual grass blade appearance (Phase 3)
+///
+/// Controls the visual properties of grass blades spawned on a tile.
+/// All multipliers are clamped to safe ranges during conversion.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::GrassBladeConfig;
+///
+/// let tall_grass = GrassBladeConfig {
+///     length: 1.5,
+///     width: 0.8,
+///     tilt: 0.4,
+///     curve: 0.5,
+///     color_variation: 0.3,
+/// };
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GrassBladeConfig {
+    /// Blade length multiplier (0.5-2.0, default 1.0)
+    /// Applied to base blade height
+    pub length: f32,
+
+    /// Blade width multiplier (0.5-2.0, default 1.0)
+    /// Applied to base blade width
+    pub width: f32,
+
+    /// Blade tilt angle in radians (0.0-0.5, default 0.3)
+    /// Controls how much blades lean from vertical
+    pub tilt: f32,
+
+    /// Blade curvature amount (0.0-1.0, default 0.3)
+    /// Higher values create more curved blades
+    pub curve: f32,
+
+    /// Color variation (0.0-1.0, default 0.2)
+    /// 0.0 = uniform color, 1.0 = high variation
+    pub color_variation: f32,
+}
+
+impl Default for GrassBladeConfig {
+    fn default() -> Self {
+        Self {
+            length: 1.0,
+            width: 1.0,
+            tilt: 0.3,
+            curve: 0.3,
+            color_variation: 0.2,
+        }
+    }
+}
+
 /// Visual rendering properties for a tile
 ///
 /// All dimensions in world units (1 unit ≈ 10 feet).
@@ -430,6 +483,11 @@ pub struct TileVisualMetadata {
     /// Snow coverage percentage (0.0 to 1.0, default: 0.0)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snow_coverage: Option<f32>,
+
+    /// Grass blade configuration for customized appearance (Phase 3)
+    /// Controls blade dimensions, curvature, tilt, and color variation
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grass_blade_config: Option<GrassBladeConfig>,
 }
 
 impl TileVisualMetadata {

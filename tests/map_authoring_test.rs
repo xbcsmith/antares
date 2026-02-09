@@ -29,6 +29,7 @@ fn test_ron_round_trip_with_visual() {
         water_flow_direction: None,
         foliage_density: None,
         snow_coverage: None,
+        grass_blade_config: None,
     };
 
     // Serialize to RON
@@ -243,6 +244,7 @@ fn test_map_round_trip_preserves_visual() {
         water_flow_direction: None,
         foliage_density: None,
         snow_coverage: None,
+        grass_blade_config: None,
     };
 
     // Serialize to RON

@@ -123,6 +123,7 @@ fn test_terrain_visual_config_from_metadata() {
         water_flow_direction: None,
         foliage_density: None,
         snow_coverage: None,
+        grass_blade_config: None,
     };
 
     let config = TerrainVisualConfig::from(&meta);
@@ -152,6 +153,7 @@ fn test_terrain_visual_config_defaults() {
         water_flow_direction: None,
         foliage_density: None,
         snow_coverage: None,
+        grass_blade_config: None,
     };
 
     let config = TerrainVisualConfig::from(&meta);
@@ -297,6 +299,7 @@ fn test_terrain_visual_config_scale_application() {
         water_flow_direction: None,
         foliage_density: None,
         snow_coverage: None,
+        grass_blade_config: None,
     };
 
     let meta_large = TileVisualMetadata {
@@ -316,6 +319,7 @@ fn test_terrain_visual_config_scale_application() {
         water_flow_direction: None,
         foliage_density: None,
         snow_coverage: None,
+        grass_blade_config: None,
     };
 
     let small_config = TerrainVisualConfig::from(&meta_small);
@@ -346,6 +350,7 @@ fn test_terrain_visual_config_height_multiplier() {
         water_flow_direction: None,
         foliage_density: None,
         snow_coverage: None,
+        grass_blade_config: None,
     };
 
     let meta2 = TileVisualMetadata {
@@ -365,6 +370,7 @@ fn test_terrain_visual_config_height_multiplier() {
         water_flow_direction: None,
         foliage_density: None,
         snow_coverage: None,
+        grass_blade_config: None,
     };
 
     let config1 = TerrainVisualConfig::from(&meta1);
