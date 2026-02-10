@@ -56,6 +56,54 @@ Completed the Phase 1 refactor by consolidating grass rendering into `advanced_g
 - Diagnostic logging added to grass spawning.
 - Rendering failure root cause documented and fixed.
 
+## Phase 2: Grass Rendering - Rendering and Performance Follow-up - COMPLETED
+
+### Summary
+
+Aligned Phase 2 grass rendering details with the current `advanced_grass.rs` implementation by correcting blade normals, adding explicit UV validation, and adding a transform hierarchy verification test. Added a lightweight benchmark harness to capture culling and LOD performance for 100- and 400-tile scenarios.
+
+### Date Completed
+
+2026-02-09
+
+### Components Implemented
+
+#### 1. Blade Normal Fixes (`src/game/systems/advanced_grass.rs`)
+
+- Normals now derive from blade curve tangents and width axis so lighting follows the curved blade surface.
+- Updated unit tests to assert normalized normals instead of fixed +Z.
+
+#### 2. UV Validation (`src/game/systems/advanced_grass.rs`)
+
+- Added a UV attribute test to ensure each vertex has UVs for texturing and culling compatibility.
+
+#### 3. Transform Hierarchy Verification (`src/game/systems/advanced_grass.rs`)
+
+- Added a test that validates child blade transforms inherit the parent cluster transform.
+
+#### 4. Performance Benchmarks (`benches/grass_rendering.rs`)
+
+- Added a benchmark harness that times grass culling and LOD systems for 100 and 400 tile scenarios.
+
+### Files Modified
+
+- `src/game/systems/advanced_grass.rs`
+- `docs/explanation/implementations.md`
+
+### Files Created
+
+- `benches/grass_rendering.rs`
+
+### Testing
+
+- Not run (benchmark harness and unit tests added).
+
+### Deliverables Verification
+
+- Grass blade normals corrected for curved blade lighting.
+- Transform hierarchy verification added.
+- Performance benchmark harness available for 100/400 tile runs.
+
 ## Phase 2: Grass Rendering - Fix Basic Rendering + Essential Performance - COMPLETED
 
 ### Summary

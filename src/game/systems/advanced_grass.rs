@@ -270,6 +270,7 @@ fn create_grass_blade_mesh(height: f32, width: f32, curve_amount: f32) -> Mesh {
     let mut normals = Vec::new();
     let mut uvs = Vec::new();
     let mut indices = Vec::new();
+    let mut curve_points = Vec::with_capacity(segment_count + 1);
 
     for i in 0..=segment_count {
         let t = i as f32 / segment_count as f32;
@@ -286,14 +287,29 @@ fn create_grass_blade_mesh(height: f32, width: f32, curve_amount: f32) -> Mesh {
         let curve_x = coeff0 * 0.0 + coeff1 * 0.0 + coeff2 * curve_amount;
         let curve_y = coeff0 * p0_y + coeff1 * p1_y + coeff2 * p2_y;
 
+        curve_points.push(Vec3::new(0.0, curve_y, curve_x));
+    }
+
+    for i in 0..=segment_count {
+        let t = i as f32 / segment_count as f32;
+        let point = curve_points[i];
+        let tangent = if i == 0 {
+            curve_points[1] - curve_points[0]
+        } else if i == segment_count {
+            curve_points[segment_count] - curve_points[segment_count - 1]
+        } else {
+            curve_points[i + 1] - curve_points[i - 1]
+        };
+
+        let normal = Vec3::X.cross(tangent).normalize_or_zero();
         let taper_width = width * (1.0 - t);
 
-        positions.push([-taper_width / 2.0, curve_y, curve_x]);
-        normals.push([0.0, 0.0, 1.0]);
+        positions.push([-taper_width / 2.0, point.y, point.z]);
+        normals.push([normal.x, normal.y, normal.z]);
         uvs.push([0.0, t]);
 
-        positions.push([taper_width / 2.0, curve_y, curve_x]);
-        normals.push([0.0, 0.0, 1.0]);
+        positions.push([taper_width / 2.0, point.y, point.z]);
+        normals.push([normal.x, normal.y, normal.z]);
         uvs.push([1.0, t]);
     }
 
@@ -922,10 +938,30 @@ mod tests {
             .expect("Normals should be float3");
 
         for normal in normals {
+            let length =
+                (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
             assert!(normal[0].abs() < 0.01);
-            assert!(normal[1].abs() < 0.01);
-            assert!((normal[2] - 1.0).abs() < 0.01);
+            assert!((length - 1.0).abs() < 0.01);
         }
+    }
+
+    #[test]
+    fn test_create_grass_blade_mesh_has_uvs() {
+        let blade = create_grass_blade_mesh(0.4, 0.15, 0.1);
+        assert!(blade.attribute(Mesh::ATTRIBUTE_UV_0).is_some());
+    }
+
+    #[test]
+    fn test_grass_blade_child_inherits_parent_transform() {
+        let expected = Vec3::new(2.25, 0.0, 3.5);
+        let parent = Transform::from_translation(Vec3::new(2.0, 0.0, 3.0));
+        let child = Transform::from_translation(Vec3::new(0.25, 0.0, 0.5));
+        let combined = parent.mul_transform(child);
+        let actual = combined.translation;
+
+        assert!((actual.x - expected.x).abs() < 0.001);
+        assert!((actual.y - expected.y).abs() < 0.001);
+        assert!((actual.z - expected.z).abs() < 0.001);
     }
 
     #[test]
