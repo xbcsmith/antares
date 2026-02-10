@@ -128,6 +128,13 @@
                 rotation_y: None,
                 sprite: None,
                 grass_density: Some(Medium),
+                grass_blade_config: Some((
+                    length: 1.2,
+                    width: 0.8,
+                    tilt: 0.4,
+                    curve: 0.5,
+                    color_variation: 0.3,
+                )),
             ),
         ),
         (
@@ -149,6 +156,13 @@
                 rotation_y: None,
                 sprite: None,
                 grass_density: Some(Medium),
+                grass_blade_config: Some((
+                    length: 0.7,
+                    width: 1.2,
+                    tilt: 0.1,
+                    curve: 0.2,
+                    color_variation: 0.1,
+                )),
             ),
         ),
         (
@@ -170,6 +184,13 @@
                 rotation_y: None,
                 sprite: None,
                 grass_density: Some(Medium),
+                grass_blade_config: Some((
+                    length: 1.8,
+                    width: 1.0,
+                    tilt: 0.5,
+                    curve: 0.8,
+                    color_variation: 0.4,
+                )),
             ),
         ),
         (

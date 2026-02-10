@@ -46,8 +46,8 @@ use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
 use antares::domain::world::{
     FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType,
-    GrassDensity, LayeredSprite, Map, MapEvent, RockVariant, SpriteLayer, SpriteReference,
-    TerrainType, Tile, TileVisualMetadata, TreeType, WallType, WaterFlowDirection,
+    GrassBladeConfig, GrassDensity, LayeredSprite, Map, MapEvent, RockVariant, SpriteLayer,
+    SpriteReference, TerrainType, Tile, TileVisualMetadata, TreeType, WallType, WaterFlowDirection,
 };
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -1174,6 +1174,12 @@ pub struct TerrainEditorState {
     /// Grass density selection (for Grassland/Plains tiles)
     pub grass_density: GrassDensity,
 
+    /// Optional grass blade configuration (for Grass tiles)
+    pub grass_blade_config_enabled: bool,
+
+    /// Grass blade appearance settings
+    pub grass_blade_config: GrassBladeConfig,
+
     /// Tree type selection (for Forest tiles)
     pub tree_type: TreeType,
 
@@ -1194,6 +1200,8 @@ impl Default for TerrainEditorState {
     fn default() -> Self {
         Self {
             grass_density: GrassDensity::Medium,
+            grass_blade_config_enabled: false,
+            grass_blade_config: GrassBladeConfig::default(),
             tree_type: TreeType::Oak,
             rock_variant: RockVariant::Smooth,
             water_flow_direction: WaterFlowDirection::Still,
@@ -1217,8 +1225,15 @@ impl TerrainEditorState {
     ///
     /// A new TerrainEditorState with values from the metadata or defaults
     pub fn from_metadata(metadata: &TileVisualMetadata) -> Self {
+        let grass_blade_config_enabled = metadata.grass_blade_config.is_some();
+        let grass_blade_config = metadata
+            .grass_blade_config
+            .unwrap_or_else(GrassBladeConfig::default);
+
         Self {
             grass_density: metadata.grass_density(),
+            grass_blade_config_enabled,
+            grass_blade_config,
             tree_type: metadata.tree_type(),
             rock_variant: metadata.rock_variant(),
             water_flow_direction: metadata.water_flow_direction(),
@@ -1245,24 +1260,33 @@ impl TerrainEditorState {
             TerrainType::Grass => {
                 metadata.grass_density = Some(self.grass_density);
                 metadata.foliage_density = Some(self.foliage_density);
+                metadata.grass_blade_config = if self.grass_blade_config_enabled {
+                    Some(self.grass_blade_config)
+                } else {
+                    None
+                };
                 // Don't set tree_type, rock_variant, water_flow_direction
             }
             TerrainType::Forest => {
                 metadata.tree_type = Some(self.tree_type);
                 metadata.foliage_density = Some(self.foliage_density);
                 metadata.snow_coverage = Some(self.snow_coverage);
+                metadata.grass_blade_config = None;
                 // Don't set grass_density, rock_variant, water_flow_direction
             }
             TerrainType::Mountain => {
                 metadata.rock_variant = Some(self.rock_variant);
                 metadata.snow_coverage = Some(self.snow_coverage);
+                metadata.grass_blade_config = None;
                 // Don't set grass_density, tree_type, water_flow_direction, foliage_density
             }
             TerrainType::Water | TerrainType::Swamp => {
                 metadata.water_flow_direction = Some(self.water_flow_direction);
+                metadata.grass_blade_config = None;
                 // Don't set grass_density, tree_type, rock_variant, foliage_density, snow_coverage
             }
             _ => {
+                metadata.grass_blade_config = None;
                 // For other terrain types (Ground, Stone, Dirt, Lava), don't set any terrain-specific fields
             }
         }
@@ -1286,6 +1310,11 @@ impl TerrainEditorState {
         metadata.water_flow_direction = Some(self.water_flow_direction);
         metadata.foliage_density = Some(self.foliage_density);
         metadata.snow_coverage = Some(self.snow_coverage);
+        metadata.grass_blade_config = if self.grass_blade_config_enabled {
+            Some(self.grass_blade_config)
+        } else {
+            None
+        };
     }
 
     /// Clear terrain-specific fields from metadata
@@ -1303,6 +1332,7 @@ impl TerrainEditorState {
         metadata.water_flow_direction = None;
         metadata.foliage_density = None;
         metadata.snow_coverage = None;
+        metadata.grass_blade_config = None;
     }
 }
 
@@ -5212,6 +5242,64 @@ impl MapsEditorState {
                             .step_by(0.1),
                     )
                     .changed();
+
+                ui.separator();
+                changed |= ui
+                    .checkbox(
+                        &mut state.grass_blade_config_enabled,
+                        "Custom Grass Blade Config",
+                    )
+                    .changed();
+
+                if state.grass_blade_config_enabled {
+                    ui.label("Blade Length:");
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut state.grass_blade_config.length, 0.5..=2.0)
+                                .text("x")
+                                .step_by(0.05),
+                        )
+                        .changed();
+
+                    ui.label("Blade Width:");
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut state.grass_blade_config.width, 0.5..=2.0)
+                                .text("x")
+                                .step_by(0.05),
+                        )
+                        .changed();
+
+                    ui.label("Blade Tilt (radians):");
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut state.grass_blade_config.tilt, 0.0..=0.5)
+                                .text("rad")
+                                .step_by(0.01),
+                        )
+                        .changed();
+
+                    ui.label("Blade Curve:");
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut state.grass_blade_config.curve, 0.0..=1.0)
+                                .text("curve")
+                                .step_by(0.05),
+                        )
+                        .changed();
+
+                    ui.label("Color Variation:");
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(
+                                &mut state.grass_blade_config.color_variation,
+                                0.0..=1.0,
+                            )
+                            .text("variation")
+                            .step_by(0.05),
+                        )
+                        .changed();
+                }
             }
 
             TerrainType::Forest => {
@@ -6253,6 +6341,14 @@ mod tests {
         state.terrain_editor_state.tree_type = TreeType::Pine;
         state.terrain_editor_state.foliage_density = 1.5;
         state.terrain_editor_state.snow_coverage = 0.8;
+        state.terrain_editor_state.grass_blade_config_enabled = true;
+        state.terrain_editor_state.grass_blade_config = GrassBladeConfig {
+            length: 1.4,
+            width: 0.9,
+            tilt: 0.4,
+            curve: 0.5,
+            color_variation: 0.3,
+        };
 
         // Apply terrain state
         state.apply_terrain_state_to_selection();
@@ -6269,6 +6365,16 @@ mod tests {
         assert_eq!(metadata.tree_type, Some(TreeType::Pine));
         assert_eq!(metadata.foliage_density, Some(1.5));
         assert_eq!(metadata.snow_coverage, Some(0.8));
+        assert_eq!(
+            metadata.grass_blade_config,
+            Some(GrassBladeConfig {
+                length: 1.4,
+                width: 0.9,
+                tilt: 0.4,
+                curve: 0.5,
+                color_variation: 0.3,
+            })
+        );
         assert!(state.has_changes);
     }
 

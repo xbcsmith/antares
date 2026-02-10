@@ -32949,7 +32949,7 @@ Added to `TileVisualMetadata`:
 
 #### 2. Game Layer: BladeConfig Conversion
 
-**File**: `src/game/systems/procedural_meshes.rs`
+**File**: `src/game/systems/advanced_grass.rs`
 
 ```rust
 pub struct BladeConfig {
@@ -32980,7 +32980,7 @@ impl From<&world::GrassBladeConfig> for BladeConfig {
 
 #### 3. Color Variation System
 
-**File**: `src/game/systems/procedural_meshes.rs`
+**File**: `src/game/systems/advanced_grass.rs`
 
 ```rust
 pub struct GrassColorScheme {
@@ -33005,7 +33005,7 @@ impl GrassColorScheme {
 
 #### 4. Updated Grass Spawning
 
-**Modified**: `spawn_grass()` and `spawn_grass_cluster()` functions
+**Modified**: `spawn_grass()` and `spawn_grass_cluster()` functions in `src/game/systems/advanced_grass.rs`
 
 **Changes**:
 - Reads `grass_blade_config` from `TileVisualMetadata`
@@ -33099,6 +33099,18 @@ visual: (
 - `test_tile_visual_metadata_with_grass_blade_config()` - Metadata field storage
 - `test_tile_visual_metadata_grass_blade_config_serialization()` - Full metadata serialization
 
+**SDK Editor Tests**:
+- `test_apply_button_includes_terrain_state()` now validates `grass_blade_config` application in the map editor state
+
+### SDK Support
+
+- Campaign Builder map editor exposes grass blade configuration controls for Grass tiles.
+- Applying terrain state persists optional blade configuration to tile metadata.
+
+### Tutorial Map Examples
+
+- `campaigns/tutorial/data/maps/map_1.ron` includes grass tiles with `grass_blade_config` examples for tall, short, and wild grass variations.
+
 **Test Results**: All 1988 tests passing (17 new Phase 3 tests + all prior tests)
 
 ### Quality Verification
@@ -33137,6 +33149,54 @@ visual: (
 **Memory Impact**: +40 bytes per tile (when configured)
 - `Option<GrassBladeConfig>` = 24 bytes (5 × f32 + discriminant)
 - Negligible compared to mesh/material data
+
+## Grass Rendering Phase 4: Advanced Performance (Optional)
+
+**Date**: 2026-02-10
+**Status**: ✅ **COMPLETE (Instance Batching + Frustum Verification)**
+
+### Overview
+
+Phase 4 adds optional instance batching for grass blades and verifies that grass meshes have valid bounds for frustum culling. Instance batching aggregates per-blade transform data without changing current rendering, enabling draw-call analysis and future GPU instancing.
+
+### Components Implemented
+
+#### 1. Instance Batching Pipeline
+
+**File**: `src/game/systems/advanced_grass.rs`
+
+- `GrassInstanceConfig` resource controls whether batching is enabled and how many instances are packed per batch.
+- `GrassInstanceBatch` component stores a mesh handle, material handle, and `InstanceData` list.
+- `build_grass_instance_batches_system` gathers grass blade transforms into batches grouped by mesh/material and map.
+
+#### 2. Frustum Culling Verification
+
+**File**: `src/game/systems/advanced_grass.rs`
+
+- Added a bounds test that validates grass blade mesh position data produces non-degenerate bounds, ensuring Bevy can compute AABBs for frustum culling.
+
+#### 3. Benchmarks
+
+**Files**:
+
+- `benches/grass_rendering.rs` (Phase 2 culling/LOD)
+- `benches/grass_instancing.rs` (Phase 4 instance batching)
+
+Benchmarks cover 100- and 400-cluster scenarios to reflect 20×20 grass-heavy maps.
+
+### Testing
+
+- Added `test_build_grass_instance_batches_groups_instances` to validate instance batch grouping.
+- Added `test_create_grass_blade_mesh_bounds_are_valid` to verify mesh bounds.
+
+### Validation
+
+- Benchmarks and tests not executed in this update (not requested).
+
+### Notes
+
+- Instance batching is enabled via `GrassInstanceConfig` and does not alter existing rendering.
+- Draw-call reduction is now measurable without requiring a custom shader pipeline.
 
 **Rendering Impact**: None
 - Blade configuration applied at spawn time

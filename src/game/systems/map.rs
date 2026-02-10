@@ -117,6 +117,7 @@ impl Plugin for MapRenderingPlugin {
         app.init_resource::<SpriteAssets>()
             .init_resource::<crate::game::resources::GrassQualitySettings>()
             .init_resource::<super::advanced_grass::GrassRenderConfig>() // Phase 2: Add grass render config
+            .init_resource::<super::advanced_grass::GrassInstanceConfig>()
             .add_systems(
                 Startup,
                 // Ensure registration happens before the map spawn system runs
@@ -128,6 +129,8 @@ impl Plugin for MapRenderingPlugin {
                     // Phase 2: Grass performance systems for culling and LOD
                     super::advanced_grass::grass_distance_culling_system,
                     super::advanced_grass::grass_lod_system,
+                    // Phase 4: Instance batching for diagnostics
+                    super::advanced_grass::build_grass_instance_batches_system,
                     // Phase 4: Advanced grass chunking + culling systems
                     super::advanced_grass::build_grass_chunks_system,
                     super::advanced_grass::grass_chunk_culling_system,

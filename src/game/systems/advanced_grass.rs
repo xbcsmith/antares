@@ -133,6 +133,68 @@ impl Default for GrassRenderConfig {
     }
 }
 
+// ==================== Phase 4: Instance Batching ====================
+
+/// Resource controlling grass instance batching behavior
+///
+/// When enabled, the system will aggregate per-blade instance data into
+/// batches for future GPU instancing pipelines while keeping existing
+/// blade meshes rendered.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::advanced_grass::GrassInstanceConfig;
+///
+/// let config = GrassInstanceConfig::default();
+/// assert!(!config.enabled);
+/// ```
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct GrassInstanceConfig {
+    /// Whether instance batching is enabled
+    pub enabled: bool,
+    /// Maximum instances per batch entity
+    pub max_instances_per_batch: usize,
+}
+
+impl Default for GrassInstanceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_instances_per_batch: 1024,
+        }
+    }
+}
+
+/// Component storing instance data for a batched grass mesh
+///
+/// Instance batches are used for performance diagnostics and future GPU
+/// instancing pipelines. The existing blade meshes remain rendered until
+/// a GPU instancing pipeline is introduced.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::advanced_grass::GrassInstanceBatch;
+/// use antares::domain::world::InstanceData;
+/// use bevy::prelude::{Handle, Mesh, StandardMaterial};
+///
+/// let batch = GrassInstanceBatch {
+///     mesh: Handle::<Mesh>::default(),
+///     material: Handle::<StandardMaterial>::default(),
+///     instances: vec![InstanceData::new([0.0, 0.0, 0.0])],
+/// };
+/// ```
+#[derive(Component, Clone, Debug)]
+pub struct GrassInstanceBatch {
+    /// Mesh handle shared by all instances
+    pub mesh: Handle<Mesh>,
+    /// Material handle shared by all instances
+    pub material: Handle<StandardMaterial>,
+    /// Per-instance transform data
+    pub instances: Vec<world::InstanceData>,
+}
+
 // ==================== Phase 3: Blade Configuration ====================
 
 /// Configuration for individual grass blade appearance
@@ -373,6 +435,16 @@ fn spawn_grass_cluster(
         let curve_amount = blade_config.curve * curve_variation * 0.3;
 
         let rotation_y = rng.random_range(0.0..std::f32::consts::TAU);
+        let lean_angle = rng.random_range(0.0..std::f32::consts::TAU);
+        let lean_dir = Vec3::new(lean_angle.cos(), 0.0, lean_angle.sin());
+        let tilt_axis = Vec3::new(-lean_dir.z, 0.0, lean_dir.x).normalize_or_zero();
+        let tilt_amount = rng.random_range(0.0..=blade_config.tilt);
+        let tilt_rotation = if tilt_axis == Vec3::ZERO {
+            Quat::IDENTITY
+        } else {
+            Quat::from_axis_angle(tilt_axis, tilt_amount)
+        };
+        let final_rotation = Quat::from_rotation_y(rotation_y) * tilt_rotation;
 
         let blade_mesh = meshes.add(create_grass_blade_mesh(
             varied_height,
@@ -396,7 +468,7 @@ fn spawn_grass_cluster(
                 Mesh3d(blade_mesh.clone()),
                 MeshMaterial3d(blade_material.clone()),
                 Transform::from_xyz(blade_x, GRASS_BLADE_Y_OFFSET, blade_z)
-                    .with_rotation(Quat::from_rotation_y(rotation_y)),
+                    .with_rotation(final_rotation),
                 GlobalTransform::default(),
                 Visibility::default(),
                 Billboard::default(),
@@ -660,6 +732,112 @@ pub fn grass_lod_system(
     }
 }
 
+#[derive(Hash, PartialEq, Eq)]
+struct InstanceBatchKey {
+    mesh: bevy::asset::AssetId<Mesh>,
+    material: bevy::asset::AssetId<StandardMaterial>,
+    map_id: types::MapId,
+}
+
+struct InstanceBatchEntry {
+    mesh: Handle<Mesh>,
+    material: Handle<StandardMaterial>,
+    instances: Vec<world::InstanceData>,
+}
+
+/// Build instance batches from existing grass blades
+///
+/// This system aggregates per-blade instance data into batch components to
+/// support performance diagnostics and future GPU instancing pipelines.
+///
+/// # Examples
+///
+/// ```rust
+/// use bevy::prelude::*;
+/// use antares::game::systems::advanced_grass::{
+///     build_grass_instance_batches_system, GrassInstanceConfig,
+/// };
+///
+/// fn setup_app(app: &mut App) {
+///     app.insert_resource(GrassInstanceConfig::default())
+///        .add_systems(Update, build_grass_instance_batches_system);
+/// }
+/// ```
+pub fn build_grass_instance_batches_system(
+    mut commands: Commands,
+    cluster_query: Query<(&Children, &GlobalTransform, &MapEntity), With<GrassCluster>>,
+    blade_query: Query<(&Transform, Option<&GlobalTransform>, &GrassBladeInstance)>,
+    mut existing_batches: Query<Entity, With<GrassInstanceBatch>>,
+    config: Res<GrassInstanceConfig>,
+) {
+    if !config.enabled {
+        return;
+    }
+
+    for ent in existing_batches.iter_mut() {
+        commands.entity(ent).despawn();
+    }
+
+    let mut buckets: HashMap<InstanceBatchKey, InstanceBatchEntry> = HashMap::new();
+
+    for (children, cluster_global, map_entity) in cluster_query.iter() {
+        for child in children.iter() {
+            if let Ok((child_local, child_global_opt, blade_inst)) = blade_query.get(child) {
+                let world_transform = if let Some(child_global) = child_global_opt {
+                    if child_global.translation() == Vec3::ZERO
+                        && child_local.translation != Vec3::ZERO
+                    {
+                        cluster_global.mul_transform(*child_local)
+                    } else {
+                        *child_global
+                    }
+                } else {
+                    cluster_global.mul_transform(*child_local)
+                };
+
+                let (scale, rotation, translation) =
+                    world_transform.to_scale_rotation_translation();
+                let (yaw, _, _) = rotation.to_euler(EulerRot::YXZ);
+                let uniform_scale = (scale.x + scale.y + scale.z) / 3.0;
+
+                let instance = world::InstanceData {
+                    position: [translation.x, translation.y, translation.z],
+                    scale: uniform_scale,
+                    rotation_y: yaw,
+                };
+
+                let key = InstanceBatchKey {
+                    mesh: blade_inst.mesh.id(),
+                    material: blade_inst.material.id(),
+                    map_id: map_entity.0,
+                };
+
+                let entry = buckets.entry(key).or_insert_with(|| InstanceBatchEntry {
+                    mesh: blade_inst.mesh.clone(),
+                    material: blade_inst.material.clone(),
+                    instances: Vec::new(),
+                });
+                entry.instances.push(instance);
+            }
+        }
+    }
+
+    let max_instances = config.max_instances_per_batch.max(1);
+    for (key, entry) in buckets.into_iter() {
+        for (batch_index, chunk) in entry.instances.chunks(max_instances).enumerate() {
+            commands.spawn((
+                GrassInstanceBatch {
+                    mesh: entry.mesh.clone(),
+                    material: entry.material.clone(),
+                    instances: chunk.to_vec(),
+                },
+                MapEntity(key.map_id),
+                Name::new(format!("GrassInstanceBatch_{}_{}", key.map_id, batch_index)),
+            ));
+        }
+    }
+}
+
 // ==================== Phase 4: Optional Chunking ====================
 
 /// Component that marks a merged grass chunk entity
@@ -891,6 +1069,19 @@ mod tests {
     use crate::domain::world::GrassDensity;
     use bevy::mesh::Mesh;
 
+    fn compute_bounds(positions: &[[f32; 3]]) -> (Vec3, Vec3) {
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+
+        for pos in positions {
+            let p = Vec3::new(pos[0], pos[1], pos[2]);
+            min = min.min(p);
+            max = max.max(p);
+        }
+
+        (min, max)
+    }
+
     #[test]
     fn test_blade_config_default_values() {
         let config = BladeConfig::default();
@@ -949,6 +1140,20 @@ mod tests {
     fn test_create_grass_blade_mesh_has_uvs() {
         let blade = create_grass_blade_mesh(0.4, 0.15, 0.1);
         assert!(blade.attribute(Mesh::ATTRIBUTE_UV_0).is_some());
+    }
+
+    #[test]
+    fn test_create_grass_blade_mesh_bounds_are_valid() {
+        let blade = create_grass_blade_mesh(0.4, 0.15, 0.1);
+        let positions = blade
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .expect("Blade should have positions")
+            .as_float3()
+            .expect("Positions should be float3");
+
+        let (min, max) = compute_bounds(positions);
+        assert!(max.y > min.y);
+        assert!(max.x > min.x);
     }
 
     #[test]
@@ -1184,6 +1389,79 @@ mod tests {
 
         let vis = app.world().get::<Visibility>(chunk).unwrap();
         assert!(matches!(vis, Visibility::Hidden));
+    }
+
+    #[test]
+    fn test_build_grass_instance_batches_groups_instances() {
+        let mut app = App::new();
+        app.insert_resource(GrassInstanceConfig {
+            enabled: true,
+            max_instances_per_batch: 2,
+        });
+        app.add_systems(Update, build_grass_instance_batches_system);
+
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        let mesh = {
+            let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
+            let mut test_mesh = Mesh::new(
+                bevy::mesh::PrimitiveTopology::TriangleList,
+                bevy::asset::RenderAssetUsages::all(),
+            );
+            test_mesh.insert_attribute(
+                Mesh::ATTRIBUTE_POSITION,
+                vec![[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.1, 0.0]],
+            );
+            test_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 3]);
+            test_mesh.insert_attribute(
+                Mesh::ATTRIBUTE_UV_0,
+                vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            );
+            test_mesh.insert_indices(bevy::mesh::Indices::U32(vec![0, 1, 2]));
+            meshes.add(test_mesh)
+        };
+
+        let material = {
+            let mut materials = app.world_mut().resource_mut::<Assets<StandardMaterial>>();
+            materials.add(StandardMaterial::default())
+        };
+
+        let cluster = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(Vec3::ZERO),
+                GlobalTransform::default(),
+                GrassCluster::default(),
+                MapEntity(1),
+            ))
+            .id();
+
+        for blade_index in 0..3 {
+            let blade = app
+                .world_mut()
+                .spawn((
+                    Transform::from_translation(Vec3::new(blade_index as f32, 0.0, 0.0)),
+                    GlobalTransform::default(),
+                    GrassBladeInstance {
+                        mesh: mesh.clone(),
+                        material: material.clone(),
+                    },
+                ))
+                .id();
+            app.world_mut().entity_mut(cluster).add_child(blade);
+        }
+
+        app.update();
+
+        let batches: Vec<_> = {
+            let world = app.world_mut();
+            world.query::<&GrassInstanceBatch>().iter(world).collect()
+        };
+
+        let total_instances: usize = batches.iter().map(|b| b.instances.len()).sum();
+        assert_eq!(total_instances, 3);
+        assert!(batches.len() >= 2);
     }
 
     #[test]
