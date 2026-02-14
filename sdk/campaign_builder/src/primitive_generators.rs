@@ -102,6 +102,10 @@ pub fn generate_cube(size: f32, color: [f32; 4]) -> MeshDefinition {
         normals: Some(normals),
         uvs: Some(uvs),
         color,
+        lod_levels: None,
+        lod_distances: None,
+        material: None,
+        texture_path: None,
     }
 }
 
@@ -179,6 +183,10 @@ pub fn generate_sphere(radius: f32, segments: u32, rings: u32, color: [f32; 4]) 
         normals: Some(normals),
         uvs: Some(uvs),
         color,
+        lod_levels: None,
+        lod_distances: None,
+        material: None,
+        texture_path: None,
     }
 }
 
@@ -311,6 +319,10 @@ pub fn generate_cylinder(
         normals: Some(normals),
         uvs: Some(uvs),
         color,
+        lod_levels: None,
+        lod_distances: None,
+        material: None,
+        texture_path: None,
     }
 }
 
@@ -407,6 +419,10 @@ pub fn generate_cone(radius: f32, height: f32, segments: u32, color: [f32; 4]) -
         normals: Some(normals),
         uvs: Some(uvs),
         color,
+        lod_levels: None,
+        lod_distances: None,
+        material: None,
+        texture_path: None,
     }
 }
 

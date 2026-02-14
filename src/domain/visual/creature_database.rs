@@ -393,6 +393,10 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
         };
 
         CreatureDefinition {
@@ -520,6 +524,10 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
         };
 
         let creature = CreatureDefinition {

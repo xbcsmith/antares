@@ -346,6 +346,10 @@ impl CreaturesEditorState {
                     normals: None,
                     uvs: None,
                     color: [1.0, 1.0, 1.0, 1.0],
+                    lod_levels: None,
+                    lod_distances: None,
+                    material: None,
+                    texture_path: None,
                 });
                 self.edit_buffer
                     .mesh_transforms

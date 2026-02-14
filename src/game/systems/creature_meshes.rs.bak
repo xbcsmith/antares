@@ -271,10 +271,6 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let bevy_mesh = mesh_definition_to_bevy(&mesh_def);
@@ -294,10 +290,6 @@ mod tests {
             normals: None, // Should auto-generate
             uvs: None,
             color: [1.0, 0.0, 0.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let bevy_mesh = mesh_definition_to_bevy(&mesh_def);
@@ -312,10 +304,6 @@ mod tests {
             normals: Some(vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]),
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let bevy_mesh = mesh_definition_to_bevy(&mesh_def);
@@ -330,10 +318,6 @@ mod tests {
             normals: None,
             uvs: Some(vec![[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]),
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let bevy_mesh = mesh_definition_to_bevy(&mesh_def);
@@ -348,10 +332,6 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 0.0, 0.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let bevy_mesh = mesh_definition_to_bevy(&mesh_def);

@@ -47,7 +47,10 @@
 //! };
 //! ```
 
+pub mod animation;
 pub mod creature_database;
+pub mod creature_variations;
+pub mod lod;
 pub mod mesh_validation;
 
 use serde::{Deserialize, Serialize};
@@ -112,6 +115,94 @@ pub struct MeshDefinition {
     /// Base color as [r, g, b, a] in range 0.0-1.0
     #[serde(default = "default_color")]
     pub color: [f32; 4],
+
+    /// Optional Level of Detail (LOD) levels
+    ///
+    /// Contains simplified versions of this mesh for rendering at different distances.
+    /// LOD0 is the full detail mesh (this mesh), LOD1 is simplified, etc.
+    #[serde(default)]
+    pub lod_levels: Option<Vec<MeshDefinition>>,
+
+    /// Optional distance thresholds for LOD switching
+    ///
+    /// Specifies camera distances at which to switch to each LOD level.
+    /// If Some, length must match lod_levels.len().
+    /// Example: [10.0, 25.0, 50.0] means switch to LOD1 at 10 units, LOD2 at 25, etc.
+    #[serde(default)]
+    pub lod_distances: Option<Vec<f32>>,
+
+    /// Optional material definition
+    #[serde(default)]
+    pub material: Option<MaterialDefinition>,
+
+    /// Optional texture path relative to campaign directory
+    ///
+    /// Example: "textures/dragon_scales.png"
+    #[serde(default)]
+    pub texture_path: Option<String>,
+}
+
+/// Material definition for physically-based rendering
+///
+/// Defines the visual properties of a mesh surface using PBR parameters.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::visual::{MaterialDefinition, AlphaMode};
+///
+/// // Shiny metallic material
+/// let metal = MaterialDefinition {
+///     base_color: [0.8, 0.8, 0.8, 1.0],
+///     metallic: 1.0,
+///     roughness: 0.2,
+///     emissive: None,
+///     alpha_mode: AlphaMode::Opaque,
+/// };
+///
+/// // Glowing emissive material
+/// let glowing = MaterialDefinition {
+///     base_color: [1.0, 1.0, 1.0, 1.0],
+///     metallic: 0.0,
+///     roughness: 0.9,
+///     emissive: Some([1.0, 0.5, 0.0]),
+///     alpha_mode: AlphaMode::Opaque,
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MaterialDefinition {
+    /// Base color as [r, g, b, a] in range 0.0-1.0
+    pub base_color: [f32; 4],
+
+    /// Metallic factor (0.0 = non-metal, 1.0 = metal)
+    #[serde(default)]
+    pub metallic: f32,
+
+    /// Roughness factor (0.0 = smooth/shiny, vy1.0 = rough/matte)
+    #[serde(default = "default_roughness")]
+    pub roughness: f32,
+
+    /// Optional emissive color as [r, g, b]
+    ///
+    /// Makes the material glow with the specified color.
+    #[serde(default)]
+    pub emissive: Option<[f32; 3]>,
+
+    /// Alpha blending mode
+    #[serde(default)]
+    pub alpha_mode: AlphaMode,
+}
+
+/// Alpha blending mode for materials
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum AlphaMode {
+    /// Fully opaque, no transparency
+    #[default]
+    Opaque,
+    /// Alpha blending based on alpha channel
+    Blend,
+    /// Alpha masking with cutoff threshold
+    Mask,
 }
 
 /// Transformation applied to a mesh within a creature
@@ -359,17 +450,25 @@ fn default_scale_f32() -> f32 {
     1.0
 }
 
+fn default_roughness() -> f32 {
+    0.5
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn create_test_triangle_mesh() -> MeshDefinition {
         MeshDefinition {
-            vertices: vec![[0.0, 1.0, 0.0], [-1.0, -1.0, 0.0], [1.0, -1.0, 0.0]],
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
             uvs: None,
-            color: [1.0, 0.0, 0.0, 1.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
         }
     }
 
@@ -378,7 +477,7 @@ mod tests {
         let mesh = create_test_triangle_mesh();
         assert_eq!(mesh.vertices.len(), 3);
         assert_eq!(mesh.indices.len(), 3);
-        assert_eq!(mesh.color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(mesh.color, [1.0, 1.0, 1.0, 1.0]);
     }
 
     #[test]

@@ -442,10 +442,6 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         }
     }
 
@@ -468,10 +464,6 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let result = validate_mesh_topology(&mesh);
@@ -490,10 +482,6 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let result = validate_mesh_topology(&mesh);
@@ -512,10 +500,6 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let result = validate_mesh_topology(&mesh);
@@ -539,10 +523,6 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let result = validate_mesh_topology(&mesh);
@@ -572,10 +552,6 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let result = validate_mesh_topology(&mesh);
@@ -594,10 +570,6 @@ mod tests {
             normals: None,
             uvs: Some(vec![[0.0, 0.0], [1.0, 0.0], [0.5, 1.5]]), // Last UV out of range
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let result = validate_mesh_topology(&mesh);
@@ -634,10 +606,6 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let creature = CreatureDefinition {
@@ -703,10 +671,6 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let count = count_isolated_vertices(&mesh);
@@ -782,10 +746,6 @@ mod tests {
             normals: None,
             uvs: None,
             color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
         };
 
         let count = count_non_manifold_edges(&mesh);
