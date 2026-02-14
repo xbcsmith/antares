@@ -1825,6 +1825,929 @@ Add 2D icon preview in map editor (before 3D mesh is rendered in game):
 
 ---
 
+### Phase 8: Props Palette & Categorization
+
+> [!NOTE]
+> This phase adds furniture property editing, categorization, and enhanced UI organization.
+
+#### 8.1 Furniture Properties Extension
+
+**File**: `src/domain/world/types.rs`
+
+Extend MapEvent::Furniture with additional properties:
+
+```rust
+pub enum MapEvent {
+    // ... existing variants ...
+    Furniture {
+        /// Event name for editor display
+        #[serde(default)]
+        name: String,
+        /// Type of furniture to spawn
+        furniture_type: FurnitureType,
+        /// Optional Y-axis rotation in degrees (0-360)
+        #[serde(default)]
+        rotation_y: Option<f32>,
+        /// Scale multiplier (0.5-2.0, default 1.0)
+        #[serde(default = "default_furniture_scale")]
+        scale: f32,
+        /// Material variant (Wood, Stone, Metal, Gold)
+        #[serde(default)]
+        material: FurnitureMaterial,
+        /// Furniture-specific flags
+        #[serde(default)]
+        flags: FurnitureFlags,
+    },
+}
+
+fn default_furniture_scale() -> f32 {
+    1.0
+}
+
+/// Material types for furniture
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub enum FurnitureMaterial {
+    Wood,
+    Stone,
+    Metal,
+    Gold,
+}
+
+impl Default for FurnitureMaterial {
+    fn default() -> Self {
+        FurnitureMaterial::Wood
+    }
+}
+
+/// Furniture-specific state flags
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FurnitureFlags {
+    /// Torch is lit (emissive)
+    pub lit: bool,
+    /// Chest is locked
+    pub locked: bool,
+    /// Furniture blocks movement
+    pub blocking: bool,
+}
+```
+
+#### 8.2 Furniture Categories
+
+**File**: `sdk/campaign_builder/src/map_editor.rs`
+
+Add furniture categorization system:
+
+```rust
+/// Furniture categories for palette organization
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FurnitureCategory {
+    Seating,     // Throne, Bench, Chair
+    Storage,     // Chest, Barrel, Bookshelf
+    Decoration,  // Statue, Fountain, Altar
+    Lighting,    // Torch
+    Utility,     // Table, Crate
+}
+
+impl FurnitureType {
+    pub fn category(&self) -> FurnitureCategory {
+        match self {
+            FurnitureType::Throne | FurnitureType::Bench | FurnitureType::Chair => {
+                FurnitureCategory::Seating
+            }
+            FurnitureType::Chest | FurnitureType::Barrel | FurnitureType::Bookshelf => {
+                FurnitureCategory::Storage
+            }
+            FurnitureType::Torch => FurnitureCategory::Lighting,
+            FurnitureType::Table => FurnitureCategory::Utility,
+        }
+    }
+}
+
+impl FurnitureCategory {
+    pub fn name(&self) -> &str {
+        match self {
+            FurnitureCategory::Seating => "Seating",
+            FurnitureCategory::Storage => "Storage",
+            FurnitureCategory::Decoration => "Decoration",
+            FurnitureCategory::Lighting => "Lighting",
+            FurnitureCategory::Utility => "Utility",
+        }
+    }
+
+    pub fn all() -> &'static [FurnitureCategory] {
+        &[
+            FurnitureCategory::Seating,
+            FurnitureCategory::Storage,
+            FurnitureCategory::Decoration,
+            FurnitureCategory::Lighting,
+            FurnitureCategory::Utility,
+        ]
+    }
+}
+```
+
+#### 8.3 Enhanced Property Editor UI
+
+**File**: `sdk/campaign_builder/src/map_editor.rs`
+
+Extend EventEditorState with new property fields:
+
+```rust
+pub struct EventEditorState {
+    // ... existing fields ...
+
+    // Furniture property fields
+    pub furniture_type: FurnitureType,
+    pub furniture_rotation_y: String,
+    pub furniture_scale: f32,
+    pub furniture_material: FurnitureMaterial,
+    pub furniture_lit: bool,
+    pub furniture_locked: bool,
+    pub furniture_blocking: bool,
+}
+```
+
+Add property editor UI controls:
+
+```rust
+// In show_event_editor() for EventType::Furniture:
+
+// Category filter
+egui::ComboBox::from_id_salt("furniture_category_filter")
+    .selected_text("All Categories")
+    .show_ui(ui, |ui| {
+        ui.selectable_label(true, "All Categories");
+        for category in FurnitureCategory::all() {
+            ui.selectable_label(false, category.name());
+        }
+    });
+
+// Furniture type selection (existing)
+// ...
+
+// Scale control
+ui.horizontal(|ui| {
+    ui.label("Scale:");
+    ui.add(
+        egui::Slider::new(&mut event_editor.furniture_scale, 0.5..=2.0)
+            .text("x")
+            .step_by(0.1)
+    );
+});
+
+// Material selection
+egui::ComboBox::from_id_salt("furniture_material_combo")
+    .selected_text(format!("{:?}", event_editor.furniture_material))
+    .show_ui(ui, |ui| {
+        for material in &[
+            FurnitureMaterial::Wood,
+            FurnitureMaterial::Stone,
+            FurnitureMaterial::Metal,
+            FurnitureMaterial::Gold,
+        ] {
+            ui.selectable_value(
+                &mut event_editor.furniture_material,
+                *material,
+                format!("{:?}", material)
+            );
+        }
+    });
+
+// Furniture-specific flags
+if event_editor.furniture_type == FurnitureType::Torch {
+    ui.checkbox(&mut event_editor.furniture_lit, "Lit (emissive)");
+}
+
+if event_editor.furniture_type == FurnitureType::Chest {
+    ui.checkbox(&mut event_editor.furniture_locked, "Locked");
+}
+
+ui.checkbox(&mut event_editor.furniture_blocking, "Blocks movement");
+```
+
+#### 8.4 Furniture Palette Panel
+
+**File**: `sdk/campaign_builder/src/map_editor.rs`
+
+Add categorized furniture palette:
+
+```rust
+/// Show furniture palette with categories
+fn show_furniture_palette(
+    ui: &mut egui::Ui,
+    selected_category: &mut Option<FurnitureCategory>,
+    selected_furniture: &mut Option<FurnitureType>,
+) {
+    ui.heading("Furniture Palette");
+
+    // Category tabs
+    ui.horizontal(|ui| {
+        if ui.selectable_label(selected_category.is_none(), "All").clicked() {
+            *selected_category = None;
+        }
+        for category in FurnitureCategory::all() {
+            if ui
+                .selectable_label(
+                    *selected_category == Some(*category),
+                    category.name(),
+                )
+                .clicked()
+            {
+                *selected_category = Some(*category);
+            }
+        }
+    });
+
+    ui.separator();
+
+    // Furniture grid (filtered by category)
+    egui::Grid::new("furniture_palette_grid")
+        .num_columns(3)
+        .spacing([8.0, 8.0])
+        .show(ui, |ui| {
+            for furniture_type in FurnitureType::all() {
+                // Filter by category
+                if let Some(cat) = selected_category {
+                    if furniture_type.category() != *cat {
+                        continue;
+                    }
+                }
+
+                let is_selected = *selected_furniture == Some(*furniture_type);
+                let button = egui::Button::new(format!(
+                    "{}\n{}",
+                    furniture_type.icon(),
+                    furniture_type.name()
+                ))
+                .selected(is_selected)
+                .min_size(egui::Vec2::new(60.0, 60.0));
+
+                if ui.add(button).clicked() {
+                    *selected_furniture = Some(*furniture_type);
+                }
+
+                // New row every 3 items
+                if (FurnitureType::all().iter().position(|f| f == furniture_type).unwrap() + 1) % 3 == 0 {
+                    ui.end_row();
+                }
+            }
+        });
+}
+```
+
+#### 8.5 Testing Requirements
+
+**Unit Tests** (`sdk/campaign_builder/tests/furniture_properties_tests.rs`):
+
+```rust
+#[test] fn test_furniture_material_enum_variants()
+#[test] fn test_furniture_flags_default()
+#[test] fn test_furniture_scale_range()
+#[test] fn test_furniture_category_assignment()
+#[test] fn test_furniture_palette_filtering()
+#[test] fn test_torch_lit_flag_serialization()
+#[test] fn test_chest_locked_flag_serialization()
+#[test] fn test_furniture_blocking_flag()
+```
+
+**Integration Tests**:
+
+```rust
+#[test] fn test_furniture_properties_roundtrip()
+#[test] fn test_category_filter_ui()
+#[test] fn test_palette_grid_rendering()
+```
+
+#### 8.6 Deliverables
+
+- [ ] FurnitureMaterial enum (Wood, Stone, Metal, Gold)
+- [ ] FurnitureFlags struct (lit, locked, blocking)
+- [ ] FurnitureCategory enum with categorization
+- [ ] Extended MapEvent::Furniture with new properties
+- [ ] Property editor UI controls (scale, material, flags)
+- [ ] Categorized furniture palette panel
+- [ ] Category filtering in palette
+- [ ] Unit tests for properties and categories
+- [ ] Integration tests for UI components
+
+#### 8.7 Success Criteria
+
+- All furniture types categorized correctly
+- Scale slider functional (0.5-2.0 range)
+- Material selection persists through save/load
+- Torch lit flag toggles correctly
+- Chest locked flag toggles correctly
+- Blocking flag functional for all furniture
+- Category filter works in palette
+- Furniture grid displays 3 columns
+- All properties serialize/deserialize correctly
+
+---
+
+### Phase 9: Furniture Customization & Material System
+
+> [!NOTE]
+> This phase adds visual customization, material variants, and color tinting for furniture.
+
+#### 9.1 Material Variant System
+
+**File**: `src/domain/world/types.rs`
+
+Extend FurnitureMaterial with visual properties:
+
+```rust
+impl FurnitureMaterial {
+    pub fn base_color(&self) -> [f32; 3] {
+        match self {
+            FurnitureMaterial::Wood => [0.6, 0.4, 0.2],   // Brown
+            FurnitureMaterial::Stone => [0.5, 0.5, 0.5],  // Gray
+            FurnitureMaterial::Metal => [0.7, 0.7, 0.8],  // Silver
+            FurnitureMaterial::Gold => [1.0, 0.84, 0.0],  // Gold
+        }
+    }
+
+    pub fn metallic(&self) -> f32 {
+        match self {
+            FurnitureMaterial::Wood => 0.0,
+            FurnitureMaterial::Stone => 0.1,
+            FurnitureMaterial::Metal => 0.9,
+            FurnitureMaterial::Gold => 1.0,
+        }
+    }
+
+    pub fn roughness(&self) -> f32 {
+        match self {
+            FurnitureMaterial::Wood => 0.8,
+            FurnitureMaterial::Stone => 0.9,
+            FurnitureMaterial::Metal => 0.3,
+            FurnitureMaterial::Gold => 0.2,
+        }
+    }
+}
+```
+
+#### 9.2 Color Tint System
+
+**File**: `src/domain/world/types.rs`
+
+Add color customization to furniture:
+
+```rust
+pub enum MapEvent {
+    // ... existing variants ...
+    Furniture {
+        // ... existing fields ...
+        /// Optional color tint (RGB, 0.0-1.0)
+        #[serde(default)]
+        color_tint: Option<[f32; 3]>,
+    },
+}
+```
+
+#### 9.3 Furniture Appearance Presets
+
+**File**: `sdk/campaign_builder/src/map_editor.rs`
+
+Add appearance presets for common configurations:
+
+```rust
+#[derive(Clone, Debug)]
+pub struct FurnitureAppearancePreset {
+    pub name: &'static str,
+    pub material: FurnitureMaterial,
+    pub scale: f32,
+    pub color_tint: Option<[f32; 3]>,
+}
+
+impl FurnitureType {
+    pub fn default_presets(&self) -> Vec<FurnitureAppearancePreset> {
+        match self {
+            FurnitureType::Throne => vec![
+                FurnitureAppearancePreset {
+                    name: "Wooden Throne",
+                    material: FurnitureMaterial::Wood,
+                    scale: 1.2,
+                    color_tint: None,
+                },
+                FurnitureAppearancePreset {
+                    name: "Stone Throne",
+                    material: FurnitureMaterial::Stone,
+                    scale: 1.3,
+                    color_tint: None,
+                },
+                FurnitureAppearancePreset {
+                    name: "Golden Throne",
+                    material: FurnitureMaterial::Gold,
+                    scale: 1.5,
+                    color_tint: None,
+                },
+            ],
+            FurnitureType::Torch => vec![
+                FurnitureAppearancePreset {
+                    name: "Wooden Torch",
+                    material: FurnitureMaterial::Wood,
+                    scale: 1.0,
+                    color_tint: Some([1.0, 0.6, 0.2]), // Orange flame
+                },
+                FurnitureAppearancePreset {
+                    name: "Metal Sconce",
+                    material: FurnitureMaterial::Metal,
+                    scale: 0.8,
+                    color_tint: Some([0.6, 0.8, 1.0]), // Blue flame
+                },
+            ],
+            _ => vec![FurnitureAppearancePreset {
+                name: "Default",
+                material: FurnitureMaterial::Wood,
+                scale: 1.0,
+                color_tint: None,
+            }],
+        }
+    }
+}
+```
+
+#### 9.4 Color Picker UI
+
+**File**: `sdk/campaign_builder/src/map_editor.rs`
+
+Add color customization controls:
+
+```rust
+// In show_event_editor() for EventType::Furniture:
+
+// Color tint toggle
+ui.checkbox(&mut event_editor.furniture_use_color_tint, "Custom Color");
+
+if event_editor.furniture_use_color_tint {
+    ui.horizontal(|ui| {
+        ui.label("Tint:");
+
+        // RGB sliders
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("R:");
+                ui.add(egui::Slider::new(&mut event_editor.furniture_color_tint[0], 0.0..=1.0));
+            });
+            ui.horizontal(|ui| {
+                ui.label("G:");
+                ui.add(egui::Slider::new(&mut event_editor.furniture_color_tint[1], 0.0..=1.0));
+            });
+            ui.horizontal(|ui| {
+                ui.label("B:");
+                ui.add(egui::Slider::new(&mut event_editor.furniture_color_tint[2], 0.0..=1.0));
+            });
+        });
+
+        // Color preview
+        let color = egui::Color32::from_rgb(
+            (event_editor.furniture_color_tint[0] * 255.0) as u8,
+            (event_editor.furniture_color_tint[1] * 255.0) as u8,
+            (event_editor.furniture_color_tint[2] * 255.0) as u8,
+        );
+        ui.colored_label(color, "██ Preview");
+    });
+}
+
+// Appearance presets dropdown
+ui.separator();
+ui.label("Appearance Presets:");
+egui::ComboBox::from_id_salt("furniture_preset_combo")
+    .selected_text("Select Preset...")
+    .show_ui(ui, |ui| {
+        for preset in event_editor.furniture_type.default_presets() {
+            if ui.selectable_label(false, preset.name).clicked() {
+                event_editor.furniture_material = preset.material;
+                event_editor.furniture_scale = preset.scale;
+                if let Some(tint) = preset.color_tint {
+                    event_editor.furniture_use_color_tint = true;
+                    event_editor.furniture_color_tint = tint;
+                }
+            }
+        }
+    });
+```
+
+#### 9.5 Testing Requirements
+
+**Unit Tests** (`sdk/campaign_builder/tests/furniture_customization_tests.rs`):
+
+```rust
+#[test] fn test_material_base_color()
+#[test] fn test_material_metallic_roughness()
+#[test] fn test_color_tint_serialization()
+#[test] fn test_appearance_presets_throne()
+#[test] fn test_appearance_presets_torch()
+#[test] fn test_color_tint_range_validation()
+#[test] fn test_preset_application()
+```
+
+#### 9.6 Deliverables
+
+- [ ] Material visual properties (color, metallic, roughness)
+- [ ] Color tint system for furniture
+- [ ] FurnitureAppearancePreset system
+- [ ] Color picker UI (RGB sliders)
+- [ ] Color preview widget
+- [ ] Appearance preset dropdown
+- [ ] Preset application logic
+- [ ] Unit tests for material properties
+- [ ] Integration tests for customization UI
+
+#### 9.7 Success Criteria
+
+- Material properties return correct values
+- Color tint serializes/deserializes correctly
+- Color picker updates preview in real-time
+- RGB sliders clamp to 0.0-1.0 range
+- Presets apply all properties correctly
+- Throne has 3+ appearance presets
+- Torch has 2+ appearance presets
+- Material affects visual appearance (when rendering implemented)
+
+---
+
+### Phase 10: Runtime Furniture Rendering System
+
+> [!NOTE]
+> This phase implements the actual 3D mesh rendering, collision, and interaction for furniture in the game engine.
+
+#### 10.1 Furniture Mesh Generation
+
+**File**: `src/game/systems/furniture_meshes.rs` (NEW)
+
+Create parametric mesh generators for each furniture type:
+
+```rust
+use bevy::prelude::*;
+use bevy::render::mesh::{Indices, PrimitiveTopology};
+use crate::domain::world::{FurnitureType, FurnitureMaterial};
+
+/// Generate mesh for furniture based on type and properties
+pub fn generate_furniture_mesh(
+    furniture_type: FurnitureType,
+    scale: f32,
+    material: FurnitureMaterial,
+) -> Mesh {
+    match furniture_type {
+        FurnitureType::Throne => generate_throne_mesh(scale),
+        FurnitureType::Bench => generate_bench_mesh(scale),
+        FurnitureType::Table => generate_table_mesh(scale),
+        FurnitureType::Chair => generate_chair_mesh(scale),
+        FurnitureType::Torch => generate_torch_mesh(scale),
+        FurnitureType::Bookshelf => generate_bookshelf_mesh(scale),
+        FurnitureType::Barrel => generate_barrel_mesh(scale),
+        FurnitureType::Chest => generate_chest_mesh(scale),
+    }
+}
+
+/// Generate throne mesh (ornate chair with tall back)
+fn generate_throne_mesh(scale: f32) -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, default());
+
+    // Seat (0.8 x 0.8 x 0.1)
+    let seat_vertices = generate_box_vertices(0.8 * scale, 0.1 * scale, 0.8 * scale);
+
+    // Back (0.8 x 1.5 x 0.1)
+    let back_vertices = generate_box_vertices(0.8 * scale, 1.5 * scale, 0.1 * scale);
+
+    // Armrests (2x: 0.1 x 0.5 x 0.6)
+    let armrest_vertices = generate_box_vertices(0.1 * scale, 0.5 * scale, 0.6 * scale);
+
+    // Legs (4x: 0.1 x 0.5 cylinders)
+    let leg_vertices = generate_cylinder_vertices(0.05 * scale, 0.5 * scale, 8);
+
+    // Combine all vertices with proper transforms
+    // ... vertex combination logic ...
+
+    mesh
+}
+
+/// Generate bench mesh (simple plank + legs)
+fn generate_bench_mesh(scale: f32) -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, default());
+
+    // Seat plank (1.5 x 0.1 x 0.4)
+    let seat_vertices = generate_box_vertices(1.5 * scale, 0.1 * scale, 0.4 * scale);
+
+    // Legs (4x: 0.1 x 0.4 cylinders)
+    let leg_vertices = generate_cylinder_vertices(0.05 * scale, 0.4 * scale, 8);
+
+    // ... vertex combination logic ...
+
+    mesh
+}
+
+/// Generate table mesh (flat top + 4 legs)
+fn generate_table_mesh(scale: f32) -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, default());
+
+    // Table top (1.2 x 0.05 x 0.8)
+    let top_vertices = generate_box_vertices(1.2 * scale, 0.05 * scale, 0.8 * scale);
+
+    // Legs (4x: 0.08 x 0.7 cylinders)
+    let leg_vertices = generate_cylinder_vertices(0.04 * scale, 0.7 * scale, 8);
+
+    // ... vertex combination logic ...
+
+    mesh
+}
+
+/// Generate chair mesh (seat + back + legs)
+fn generate_chair_mesh(scale: f32) -> Mesh {
+    // Similar to throne but smaller and simpler
+    // ...
+    Mesh::new(PrimitiveTopology::TriangleList, default())
+}
+
+/// Generate torch mesh (handle + flame)
+fn generate_torch_mesh(scale: f32) -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, default());
+
+    // Handle (0.05 x 0.8 cylinder)
+    let handle_vertices = generate_cylinder_vertices(0.025 * scale, 0.8 * scale, 8);
+
+    // Flame holder (0.1 x 0.1 x 0.1 box)
+    let holder_vertices = generate_box_vertices(0.1 * scale, 0.1 * scale, 0.1 * scale);
+
+    // Flame (cone, will be emissive)
+    let flame_vertices = generate_cone_vertices(0.08 * scale, 0.15 * scale, 6);
+
+    // ... vertex combination logic ...
+
+    mesh
+}
+
+// Helper functions
+fn generate_box_vertices(width: f32, height: f32, depth: f32) -> Vec<[f32; 3]> {
+    // ... box generation ...
+    vec![]
+}
+
+fn generate_cylinder_vertices(radius: f32, height: f32, segments: usize) -> Vec<[f32; 3]> {
+    // ... cylinder generation ...
+    vec![]
+}
+
+fn generate_cone_vertices(radius: f32, height: f32, segments: usize) -> Vec<[f32; 3]> {
+    // ... cone generation ...
+    vec![]
+}
+```
+
+#### 10.2 Furniture Spawning System
+
+**File**: `src/game/systems/furniture_meshes.rs`
+
+Add Bevy system to spawn furniture entities:
+
+```rust
+use bevy::prelude::*;
+use crate::domain::world::{MapEvent, FurnitureType, FurnitureMaterial};
+
+/// Marker component for furniture entities
+#[derive(Component)]
+pub struct FurnitureEntity {
+    pub furniture_type: FurnitureType,
+    pub blocking: bool,
+}
+
+/// Spawn furniture from MapEvent::Furniture
+pub fn spawn_furniture(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    event: &MapEvent,
+    position: Vec3,
+) -> Option<Entity> {
+    if let MapEvent::Furniture {
+        name,
+        furniture_type,
+        rotation_y,
+        scale,
+        material,
+        flags,
+        color_tint,
+    } = event
+    {
+        // Generate mesh
+        let mesh = generate_furniture_mesh(*furniture_type, *scale, *material);
+        let mesh_handle = meshes.add(mesh);
+
+        // Create material
+        let mut pbr_material = StandardMaterial {
+            base_color: Color::rgb(
+                material.base_color()[0],
+                material.base_color()[1],
+                material.base_color()[2],
+            ),
+            metallic: material.metallic(),
+            perceptual_roughness: material.roughness(),
+            ..default()
+        };
+
+        // Apply color tint if present
+        if let Some(tint) = color_tint {
+            pbr_material.base_color = Color::rgb(tint[0], tint[1], tint[2]);
+        }
+
+        // Make torch flame emissive if lit
+        if *furniture_type == FurnitureType::Torch && flags.lit {
+            pbr_material.emissive = LinearRgba::new(1.0, 0.6, 0.2, 1.0);
+        }
+
+        let material_handle = materials.add(pbr_material);
+
+        // Calculate rotation
+        let rotation = Quat::from_rotation_y(rotation_y.unwrap_or(0.0).to_radians());
+
+        // Spawn entity
+        let entity = commands
+            .spawn(PbrBundle {
+                mesh: mesh_handle,
+                material: material_handle,
+                transform: Transform::from_translation(position).with_rotation(rotation),
+                ..default()
+            })
+            .insert(FurnitureEntity {
+                furniture_type: *furniture_type,
+                blocking: flags.blocking,
+            })
+            .insert(Name::new(name.clone()))
+            .id();
+
+        Some(entity)
+    } else {
+        None
+    }
+}
+```
+
+#### 10.3 Collision & Blocking System
+
+**File**: `src/game/systems/furniture_collision.rs` (NEW)
+
+Add collision detection for blocking furniture:
+
+```rust
+use bevy::prelude::*;
+use crate::domain::types::Position;
+use crate::game::systems::furniture_meshes::FurnitureEntity;
+
+/// Check if furniture blocks movement to a position
+pub fn is_position_blocked_by_furniture(
+    position: Position,
+    furniture_query: &Query<(&Transform, &FurnitureEntity)>,
+) -> bool {
+    let target_pos = Vec3::new(position.x as f32, 0.0, position.y as f32);
+
+    for (transform, furniture) in furniture_query.iter() {
+        if !furniture.blocking {
+            continue;
+        }
+
+        let furniture_pos = transform.translation;
+        let distance = (target_pos - furniture_pos).length();
+
+        // Check if within blocking radius (0.5 units)
+        if distance < 0.5 {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// System to prevent player movement into blocking furniture
+pub fn furniture_collision_system(
+    mut player_query: Query<&mut Transform, With<PlayerController>>,
+    furniture_query: Query<(&Transform, &FurnitureEntity)>,
+) {
+    // ... collision resolution logic ...
+}
+```
+
+#### 10.4 Furniture Interaction System
+
+**File**: `src/game/systems/furniture_interaction.rs` (NEW)
+
+Add interaction handlers:
+
+```rust
+use bevy::prelude::*;
+
+/// Component for interactable furniture
+#[derive(Component)]
+pub struct Interactable {
+    pub interaction_type: InteractionType,
+    pub interaction_distance: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum InteractionType {
+    OpenChest,
+    SitOnChair,
+    LightTorch,
+    ReadBookshelf,
+}
+
+/// Handle furniture interactions
+pub fn furniture_interaction_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    player_query: Query<&Transform, With<PlayerController>>,
+    furniture_query: Query<(&Transform, &FurnitureEntity, &Interactable)>,
+    mut events: EventWriter<FurnitureInteractionEvent>,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyE) {
+        return;
+    }
+
+    let player_transform = player_query.single();
+    let player_pos = player_transform.translation;
+
+    // Find closest interactable furniture within range
+    let mut closest: Option<(f32, Entity, InteractionType)> = None;
+
+    for (entity, (transform, _furniture, interactable)) in furniture_query.iter().enumerate() {
+        let distance = (player_pos - transform.translation).length();
+
+        if distance <= interactable.interaction_distance {
+            if closest.is_none() || distance < closest.unwrap().0 {
+                closest = Some((distance, Entity::from_raw(entity as u32), interactable.interaction_type));
+            }
+        }
+    }
+
+    // Trigger interaction event
+    if let Some((_dist, entity, interaction_type)) = closest {
+        events.send(FurnitureInteractionEvent {
+            furniture_entity: entity,
+            interaction_type,
+        });
+    }
+}
+
+#[derive(Event)]
+pub struct FurnitureInteractionEvent {
+    pub furniture_entity: Entity,
+    pub interaction_type: InteractionType,
+}
+```
+
+#### 10.5 Testing Requirements
+
+**Unit Tests** (`src/game/systems/furniture_meshes.rs`):
+
+```rust
+#[test] fn test_generate_throne_mesh()
+#[test] fn test_generate_bench_mesh()
+#[test] fn test_generate_table_mesh()
+#[test] fn test_torch_emissive_when_lit()
+#[test] fn test_furniture_scale_applied()
+#[test] fn test_furniture_rotation_applied()
+```
+
+**Integration Tests** (`tests/furniture_rendering_tests.rs`):
+
+```rust
+#[test] fn test_spawn_furniture_creates_entity()
+#[test] fn test_furniture_collision_blocks_movement()
+#[test] fn test_furniture_interaction_triggers_event()
+#[test] fn test_chest_interaction_opens()
+```
+
+#### 10.6 Deliverables
+
+- [ ] Furniture mesh generation functions (8 furniture types)
+- [ ] Parametric mesh helpers (box, cylinder, cone)
+- [ ] Furniture spawning system
+- [ ] FurnitureEntity component
+- [ ] Collision detection system
+- [ ] Blocking movement implementation
+- [ ] Interaction system (open, sit, light, read)
+- [ ] FurnitureInteractionEvent handling
+- [ ] Material application with PBR properties
+- [ ] Emissive rendering for lit torches
+- [ ] Unit tests for mesh generation
+- [ ] Integration tests for spawning and collision
+
+#### 10.7 Success Criteria
+
+- All 8 furniture types generate valid meshes
+- Furniture spawns at correct world positions
+- Rotation applies correctly (Y-axis)
+- Scale multiplier affects mesh size
+- Material properties (metallic, roughness) applied
+- Lit torches emit light (emissive material)
+- Blocking furniture prevents movement
+- Chest interaction triggers open event
+- Torch interaction toggles lit state
+- Bookshelf interaction shows reading UI (placeholder)
+- No mesh generation errors in logs
+- Performance acceptable with 50+ furniture items
+
+---
+
 ## Verification Plan
 
 ### Automated Tests
@@ -1866,7 +2789,8 @@ Add 2D icon preview in map editor (before 3D mesh is rendered in game):
 
 ```toml
 [dependencies]
-bevy = "0.15.0"  # Exact version for reproducibility
+bevy = "0.17"  # Current project version (0.17 with default features)
+bevy_egui = "0.38"  # egui integration for Campaign Builder SDK
 rand = "0.8.5"   # Random number generation for variation
 serde = { version = "1.0", features = ["derive"] }  # Required for FurnitureType, TreeType serialization
 
@@ -1880,7 +2804,8 @@ criterion = "0.5"  # For benchmarking (Phase 5)
 
 **Version Compatibility Notes**:
 
-- Bevy 0.15.0 required for `Mesh::new` API and latest ECS features
+- Bevy 0.17 is the current project version with default features enabled
+- bevy_egui 0.38 required for Campaign Builder SDK UI (Phases 6-9)
 - Rand 0.8.5 required for `thread_rng()` thread safety
 - Noise crate optional but recommended for natural terrain variation
 - Serde required for serializing enums in MapEvent
@@ -1889,7 +2814,8 @@ criterion = "0.5"  # For benchmarking (Phase 5)
 
 | Crate       | Purpose                            | Version | Required |
 | ----------- | ---------------------------------- | ------- | -------- |
-| `bevy`      | Core ECS and rendering             | 0.15.0  | Yes      |
+| `bevy`      | Core ECS and rendering             | 0.17    | Yes      |
+| `bevy_egui` | egui UI integration                | 0.38    | Yes      |
 | `rand`      | Random number generation           | 0.8.5   | Yes      |
 | `serde`     | Serialization                      | 1.0     | Yes      |
 | `noise`     | Perlin noise for organic variation | 0.9.0   | Optional |
@@ -1947,3 +2873,34 @@ criterion = "0.5"  # For benchmarking (Phase 5)
 | Mountain     | Peak height                        | Rock cluster size         | Rock tint           |
 | Swamp        | Water surface level                | Tree decay level          | Water murk          |
 | Lava         | Pool depth                         | Ember intensity           | Glow color          |
+
+---
+
+## Phase Summary
+
+| Phase | Name                                | Status      | Focus                           |
+| ----- | ----------------------------------- | ----------- | ------------------------------- |
+| 1     | Advanced Tree Generation System     | ✅ Complete | Branch graphs, tree types       |
+| 2     | Vegetation Systems                  | Pending     | Shrubs, grass density           |
+| 3     | Furniture & Props Generation        | Pending     | Parametric furniture meshes     |
+| 4     | Structure & Architecture Components | Pending     | Columns, arches, walls          |
+| 5     | Performance & Polish                | Pending     | Instancing, LOD, async          |
+| 6     | Campaign Builder - Terrain Visuals  | ✅ Complete | Terrain visual configuration UI |
+| 7     | Campaign Builder - Furniture Editor | ✅ Complete | Furniture event editing UI      |
+| 8     | Props Palette & Categorization      | Pending     | Property editing, categories    |
+| 9     | Furniture Customization             | Pending     | Materials, colors, presets      |
+| 10    | Runtime Furniture Rendering         | Pending     | Mesh rendering, collision       |
+
+**Implementation Order**:
+
+- **Phases 1-5**: Core procedural mesh generation systems (runtime rendering)
+- **Phases 6-7**: Campaign Builder SDK editor support (completed)
+- **Phases 8-9**: Enhanced editor features (properties, customization)
+- **Phase 10**: Runtime integration (connects editor to game engine)
+
+**Dependencies**:
+
+- Phase 8 requires Phase 7 (extends furniture editor)
+- Phase 9 requires Phase 8 (adds material/color system)
+- Phase 10 requires Phase 3 (implements furniture mesh generation)
+- Phase 10 uses data from Phases 8-9 (properties, materials, colors)

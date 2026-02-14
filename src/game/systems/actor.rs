@@ -97,6 +97,7 @@ use bevy::prelude::*;
 ///         sheet_path: "sprites/npcs_town.png".to_string(),
 ///         sprite_index: 3,
 ///         animation: None,
+///         material_properties: None,
 ///     };
 ///     spawn_actor_sprite(
 ///         &mut commands,

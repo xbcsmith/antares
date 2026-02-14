@@ -36,6 +36,7 @@ Before starting, ensure you have:
 ### Recommended Tools
 
 **Professional (Most Powerful)**:
+
 - **Aseprite** - Purpose-built for sprite animation
   - Excellent for pixel art
   - Built-in grid and sprite sheet export
@@ -43,7 +44,9 @@ Before starting, ensure you have:
   - [aseprite.org](https://www.aseprite.org/)
 
 **Free & Open Source (Best Value)**:
+
 - **LibreSprite** - Fork of Aseprite, completely free
+
   - All core sprite features
   - Grid support for sprite sheets
   - Community-maintained
@@ -56,6 +59,7 @@ Before starting, ensure you have:
   - [krita.org](https://krita.org/)
 
 **General Purpose (Good Enough)**:
+
 - **GIMP** - Free general-purpose image editor
   - Grid overlay for alignment
   - Layer support
@@ -63,6 +67,7 @@ Before starting, ensure you have:
   - [gimp.org](https://www.gimp.org/)
 
 **Online (No Installation)**:
+
 - **Piskel** - Browser-based pixel art
   - Simple grid-based interface
   - Quick sprite creation
@@ -137,6 +142,7 @@ Example (NPC Sheet):
 **Decision**: What will you create?
 
 Options:
+
 - **Tile Sprites**: Walls, doors, terrain, decorations (128×256 or 128×128)
 - **Actor Sprites**: NPCs, monsters, recruitables (32×48 standard)
 - **Event Markers**: Signs, portals (32×64 or 128×128)
@@ -232,16 +238,19 @@ Transparency:  Full alpha support required (0-255 per pixel)
 ### Sprite Size Guidelines
 
 **Small Actors** (NPCs, Monsters, Recruitables):
+
 - Typical size: 32×48 pixels
 - Allows 4 sprites per row (128 pixels total width)
 - Good for dense NPC areas (towns, taverns)
 
 **Large Tiles** (Walls, Doors, Terrain):
+
 - Typical size: 128×128 or 128×256 pixels
 - Allows 4 sprites per row (512 pixels total width)
 - Creates immersive, detailed environments
 
 **Event Markers** (Signs, Portals):
+
 - Signs: 32×64 or 64×64 pixels
 - Portals: 128×128 pixels
 - Flexible grid sizes (2-4 columns)
@@ -249,21 +258,23 @@ Transparency:  Full alpha support required (0-255 per pixel)
 ### Minimum & Maximum Dimensions
 
 | Category | Min Size | Recommended | Max Size |
-|----------|----------|-------------|----------|
-| Actor | 16×16 | 32×48 | 64×96 |
-| Tile | 64×64 | 128×128 | 256×256 |
-| Marker | 32×32 | 64×64 | 128×128 |
+| -------- | -------- | ----------- | -------- |
+| Actor    | 16×16    | 32×48       | 64×96    |
+| Tile     | 64×64    | 128×128     | 256×256  |
+| Marker   | 32×32    | 64×64       | 128×128  |
 
 **Performance Note**: Larger sprites (256×256+) may impact performance. Use 128×128 as a practical limit.
 
 ### Transparency Best Practices
 
 **DO**:
+
 - Use full alpha channel for feathered edges
 - Pre-multiply alpha for cleaner anti-aliasing
 - Test sprites on different background colors
 
 **DON'T**:
+
 - Use thin halos or glows (they'll be visible against any background)
 - Leave anti-aliasing artifacts around edges
 - Mix opaque and transparent pixels randomly
@@ -325,13 +336,13 @@ Edit: `data/sprite_sheets.ron`
 
 ### Field Descriptions
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `texture_path` | String | Path relative to `assets/` directory |
-| `tile_size` | (f32, f32) | (width, height) in pixels of one sprite |
-| `columns` | u32 | Number of sprites per row |
-| `rows` | u32 | Number of rows total |
-| `sprites` | Vec<(u32, String)> | Sprite indices and names |
+| Field          | Type               | Description                             |
+| -------------- | ------------------ | --------------------------------------- |
+| `texture_path` | String             | Path relative to `assets/` directory    |
+| `tile_size`    | (f32, f32)         | (width, height) in pixels of one sprite |
+| `columns`      | u32                | Number of sprites per row               |
+| `rows`         | u32                | Number of rows total                    |
+| `sprites`      | Vec<(u32, String)> | Sprite indices and names                |
 
 ### Validation
 
@@ -456,13 +467,13 @@ cargo run -- --campaign my_campaign
 
 ### Common Issues & Fixes
 
-| Problem | Cause | Solution |
-|---------|-------|----------|
-| Sprite missing/pink | File not found | Verify `texture_path` in RON |
-| Sprite is stretched | Wrong `tile_size` | Match dimensions in RON to actual sprite size |
-| Sprite looks washed out | Wrong color space | Re-export as sRGB PNG |
-| Sprite has halos/glows | Alpha not pre-multiplied | Use "Color to Alpha" more carefully |
-| Black background instead of transparent | No alpha channel | Re-export as PNG-32 (RGBA) |
+| Problem                                 | Cause                    | Solution                                      |
+| --------------------------------------- | ------------------------ | --------------------------------------------- |
+| Sprite missing/pink                     | File not found           | Verify `texture_path` in RON                  |
+| Sprite is stretched                     | Wrong `tile_size`        | Match dimensions in RON to actual sprite size |
+| Sprite looks washed out                 | Wrong color space        | Re-export as sRGB PNG                         |
+| Sprite has halos/glows                  | Alpha not pre-multiplied | Use "Color to Alpha" more carefully           |
+| Black background instead of transparent | No alpha channel         | Re-export as PNG-32 (RGBA)                    |
 
 ---
 
@@ -471,12 +482,14 @@ cargo run -- --campaign my_campaign
 ### Style Consistency
 
 **Within a Sheet**:
+
 - Use consistent lighting direction
 - Match line weights and detail level
 - Maintain consistent color palette
 - Use same perspective and scale
 
 **Across Sheets**:
+
 - NPCs should be same scale relative to tiles
 - Color tones should be cohesive
 - Detail level should match overall aesthetic
@@ -526,6 +539,7 @@ assets/sprites/working/
 ```
 
 But DO commit:
+
 ```
 assets/sprites/*.png
 data/sprite_sheets.ron
@@ -662,11 +676,13 @@ Monsters Basic Sheet
 **Error**: Pink/magenta texture or missing sprite
 
 **Check**:
+
 1. File exists at `assets/sprites/your_file.png`
 2. Filename matches `texture_path` in `sprite_sheets.ron` (case-sensitive!)
 3. RON syntax is valid: `cargo check`
 
 **Fix**:
+
 ```bash
 # Verify file exists
 find assets/sprites -name "*.png" | grep your_file
@@ -680,10 +696,12 @@ cargo check --all-targets
 **Error**: Sprite looks distorted or stretched
 
 **Check**:
+
 1. `tile_size` in RON matches actual sprite pixel dimensions
 2. Canvas dimensions match: `width = tile_width × columns`
 
 **Fix**:
+
 ```
 If your sprite sheet is 128×96 pixels with 32×48 sprites:
   128 ÷ 4 columns = 32 ✓
@@ -695,10 +713,12 @@ If your sprite sheet is 128×96 pixels with 32×48 sprites:
 **Error**: Dark or colored edges around sprites
 
 **Check**:
+
 1. Transparency was properly set (no dark pixels under alpha)
 2. Pre-multiplied alpha setting
 
 **Fix**:
+
 - Re-export from source file
 - Use "Color to Alpha" with exact background color
 - Ensure selection border is clean (no partial pixels)
@@ -708,11 +728,13 @@ If your sprite sheet is 128×96 pixels with 32×48 sprites:
 **Error**: `cargo check` fails with RON parsing error
 
 **Common Issues**:
+
 - Missing commas between entries
 - Unmatched parentheses or brackets
 - Trailing comma in last entry (should be `[...,]` or `[...])
 
 **Fix**:
+
 ```ron
 // Wrong
 sprites: [

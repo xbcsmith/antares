@@ -509,6 +509,7 @@
             visited: false,
             x: 5,
             y: 2,
+            visual: (tree_type: Some(Oak), foliage_density: Some(1.8), color_tint: Some((0.2, 0.6, 0.2))),
             event_trigger: None,
         ),
         (
@@ -520,6 +521,7 @@
             visited: false,
             x: 6,
             y: 2,
+            visual: (tree_type: Some(Oak), foliage_density: Some(1.8), color_tint: Some((0.2, 0.6, 0.2))),
             event_trigger: None,
         ),
         (
@@ -531,6 +533,7 @@
             visited: false,
             x: 7,
             y: 2,
+            visual: (tree_type: Some(Oak), foliage_density: Some(1.8), color_tint: Some((0.2, 0.6, 0.2))),
             event_trigger: None,
         ),
         (
@@ -729,6 +732,7 @@
             visited: false,
             x: 5,
             y: 3,
+            visual: (tree_type: Some(Oak), foliage_density: Some(1.8), color_tint: Some((0.2, 0.6, 0.2))),
             event_trigger: None,
         ),
         (
@@ -740,6 +744,7 @@
             visited: false,
             x: 6,
             y: 3,
+            visual: (tree_type: Some(Oak), foliage_density: Some(1.8), color_tint: Some((0.2, 0.6, 0.2))),
             event_trigger: None,
         ),
         (
@@ -751,6 +756,7 @@
             visited: false,
             x: 7,
             y: 3,
+            visual: (tree_type: Some(Oak), foliage_density: Some(1.8), color_tint: Some((0.2, 0.6, 0.2))),
             event_trigger: None,
         ),
         (
@@ -949,6 +955,7 @@
             visited: false,
             x: 5,
             y: 4,
+            visual: (tree_type: Some(Oak), foliage_density: Some(1.8), color_tint: Some((0.2, 0.6, 0.2))),
             event_trigger: None,
         ),
         (
@@ -960,6 +967,7 @@
             visited: false,
             x: 6,
             y: 4,
+            visual: (tree_type: Some(Oak), foliage_density: Some(1.8), color_tint: Some((0.2, 0.6, 0.2))),
             event_trigger: None,
         ),
         (
@@ -971,6 +979,7 @@
             visited: false,
             x: 7,
             y: 4,
+            visual: (tree_type: Some(Oak), foliage_density: Some(1.8), color_tint: Some((0.2, 0.6, 0.2))),
             event_trigger: None,
         ),
         (
@@ -1939,6 +1948,7 @@
             visited: false,
             x: 15,
             y: 8,
+            visual: (tree_type: Some(Pine), foliage_density: Some(1.2), color_tint: Some((0.1, 0.5, 0.15))),
             event_trigger: None,
         ),
         (
@@ -1950,6 +1960,7 @@
             visited: false,
             x: 16,
             y: 8,
+            visual: (tree_type: Some(Pine), foliage_density: Some(1.2), color_tint: Some((0.1, 0.5, 0.15))),
             event_trigger: None,
         ),
         (
@@ -1961,6 +1972,7 @@
             visited: false,
             x: 17,
             y: 8,
+            visual: (tree_type: Some(Pine), foliage_density: Some(1.2), color_tint: Some((0.1, 0.5, 0.15))),
             event_trigger: None,
         ),
         (
@@ -2159,6 +2171,7 @@
             visited: false,
             x: 15,
             y: 9,
+            visual: (tree_type: Some(Pine), foliage_density: Some(1.2), color_tint: Some((0.1, 0.5, 0.15))),
             event_trigger: None,
         ),
         (
@@ -2170,6 +2183,7 @@
             visited: false,
             x: 16,
             y: 9,
+            visual: (tree_type: Some(Pine), foliage_density: Some(1.2), color_tint: Some((0.1, 0.5, 0.15))),
             event_trigger: None,
         ),
         (
@@ -2181,6 +2195,7 @@
             visited: false,
             x: 17,
             y: 9,
+            visual: (tree_type: Some(Pine), foliage_density: Some(1.2), color_tint: Some((0.1, 0.5, 0.15))),
             event_trigger: None,
         ),
         (
@@ -2236,6 +2251,7 @@
             visited: false,
             x: 2,
             y: 10,
+            visual: (grass_density: Some(Low)),
             event_trigger: None,
         ),
         (
@@ -2247,6 +2263,7 @@
             visited: false,
             x: 3,
             y: 10,
+            visual: (grass_density: Some(Medium)),
             event_trigger: None,
         ),
         (
@@ -2258,6 +2275,7 @@
             visited: false,
             x: 4,
             y: 10,
+            visual: (grass_density: Some(High)),
             event_trigger: None,
         ),
         (
@@ -2269,6 +2287,7 @@
             visited: false,
             x: 5,
             y: 10,
+            visual: (grass_density: Some(VeryHigh)),
             event_trigger: None,
         ),
         (
@@ -2379,6 +2398,7 @@
             visited: false,
             x: 15,
             y: 10,
+            visual: (tree_type: Some(Pine), foliage_density: Some(1.2), color_tint: Some((0.1, 0.5, 0.15))),
             event_trigger: None,
         ),
         (
@@ -2390,6 +2410,7 @@
             visited: false,
             x: 16,
             y: 10,
+            visual: (tree_type: Some(Pine), foliage_density: Some(1.2), color_tint: Some((0.1, 0.5, 0.15))),
             event_trigger: None,
         ),
         (
@@ -2401,6 +2422,7 @@
             visited: false,
             x: 17,
             y: 10,
+            visual: (tree_type: Some(Pine), foliage_density: Some(1.2), color_tint: Some((0.1, 0.5, 0.15))),
             event_trigger: None,
         ),
         (
@@ -4084,6 +4106,7 @@
             visited: false,
             x: 10,
             y: 18,
+            visual: (tree_type: Some(Dead), color_tint: Some((0.4, 0.3, 0.2))),
             event_trigger: None,
         ),
         (
@@ -4095,6 +4118,7 @@
             visited: false,
             x: 11,
             y: 18,
+            visual: (tree_type: Some(Dead), color_tint: Some((0.4, 0.3, 0.2))),
             event_trigger: None,
         ),
         (
@@ -4106,6 +4130,7 @@
             visited: false,
             x: 12,
             y: 18,
+            visual: (tree_type: Some(Dead), color_tint: Some((0.4, 0.3, 0.2))),
             event_trigger: None,
         ),
         (
@@ -4304,6 +4329,7 @@
             visited: false,
             x: 10,
             y: 19,
+            visual: (tree_type: Some(Dead), color_tint: Some((0.4, 0.3, 0.2))),
             event_trigger: None,
         ),
         (
@@ -4315,6 +4341,7 @@
             visited: false,
             x: 11,
             y: 19,
+            visual: (tree_type: Some(Dead), color_tint: Some((0.4, 0.3, 0.2))),
             event_trigger: None,
         ),
         (
@@ -4326,6 +4353,7 @@
             visited: false,
             x: 12,
             y: 19,
+            visual: (tree_type: Some(Dead), color_tint: Some((0.4, 0.3, 0.2))),
             event_trigger: None,
         ),
         (

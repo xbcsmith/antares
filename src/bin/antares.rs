@@ -135,6 +135,7 @@ fn main() {
     .add_plugins(EguiPlugin::default())
     .add_plugins(AntaresPlugin { campaign })
     .add_plugins(MapRenderingPlugin)
+    .add_plugins(antares::game::systems::billboard::BillboardPlugin)
     .add_plugins(CameraPlugin::new(camera_config))
     .add_plugins(HudPlugin)
     .add_plugins(antares::game::systems::input::InputPlugin::new(

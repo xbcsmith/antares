@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod actor;
+pub mod advanced_grass;
+pub mod advanced_trees;
 pub mod animation;
 pub mod audio;
 pub mod billboard;
@@ -13,6 +15,7 @@ pub mod dialogue_choices;
 pub mod dialogue_validation;
 pub mod dialogue_visuals;
 pub mod events;
+pub mod furniture_rendering;
 pub mod hud;
 pub mod inn_ui;
 pub mod input;

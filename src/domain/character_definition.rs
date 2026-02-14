@@ -3337,13 +3337,13 @@ mod tests {
         assert_eq!(character.spell_level.base, 0);
     }
 
-    // ===== Phase 2: Campaign Data Migration Tests =====
+    // ===== Campaign Data Migration Tests =====
     //
     // These tests verify that existing campaign data files load correctly
-    // with the AttributePair migration (Phase 1 backward compatibility).
+    // with the AttributePair migration (backward compatibility).
 
     #[test]
-    fn test_phase2_tutorial_campaign_loads() {
+    fn test_tutorial_campaign_loads() {
         // Verify tutorial campaign characters.ron loads with new AttributePair format
         let result = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron");
 
@@ -3378,7 +3378,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase2_tutorial_campaign_hp_override() {
+    fn test_tutorial_campaign_hp_override() {
         // Verify that tutorial campaign hp_base fields convert to hp_override correctly
         let db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
             .expect("Failed to load tutorial campaign");
@@ -3406,7 +3406,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase2_tutorial_campaign_stats_format() {
+    fn test_tutorial_campaign_stats_format() {
         // Verify that tutorial campaign base_stats (simple format) deserialize correctly
         let db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
             .expect("Failed to load tutorial campaign");
@@ -3436,7 +3436,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase2_core_campaign_loads() {
+    fn test_core_campaign_loads() {
         // Verify core data/characters.ron loads with new AttributePair format
         let result = CharacterDatabase::load_from_file("data/characters.ron");
 
@@ -3467,7 +3467,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase2_core_campaign_stats_format() {
+    fn test_core_campaign_stats_format() {
         // Verify that core campaign base_stats (simple format) deserialize correctly
         let db = CharacterDatabase::load_from_file("data/characters.ron")
             .expect("Failed to load core campaign");
@@ -3493,7 +3493,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase2_campaign_instantiation() {
+    fn test_campaign_instantiation() {
         // Verify that campaign characters can be instantiated successfully
         let char_db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
             .expect("Failed to load tutorial campaign");
@@ -3536,7 +3536,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase2_all_tutorial_characters_instantiate() {
+    fn test_all_tutorial_characters_instantiate() {
         // Verify ALL tutorial campaign characters can be instantiated
         let char_db = CharacterDatabase::load_from_file("campaigns/tutorial/data/characters.ron")
             .expect("Failed to load tutorial campaign");
@@ -3571,7 +3571,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase2_all_core_characters_instantiate() {
+    fn test_all_core_characters_instantiate() {
         // Verify ALL core campaign characters can be instantiated
         let char_db = CharacterDatabase::load_from_file("data/characters.ron")
             .expect("Failed to load core campaign");
@@ -3606,7 +3606,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase2_stats_roundtrip_preserves_format() {
+    fn test_stats_roundtrip_preserves_format() {
         // Verify that Stats can roundtrip through RON serialization
         // Both simple and full formats should work
 
@@ -3644,7 +3644,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase2_example_formats_file_loads() {
+    fn test_example_formats_file_loads() {
         // Verify the example character_definition_formats.ron file loads correctly
         // This file demonstrates all supported formats for content authors
         let result =

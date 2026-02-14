@@ -263,6 +263,7 @@ pub enum AiBehavior {
 /// use antares::domain::combat::monster::{Monster, MonsterCondition, MonsterResistances, LootTable};
 /// use antares::domain::character::{Stats, AttributePair, AttributePair16};
 /// use antares::domain::combat::types::Attack;
+/// use antares::domain::combat::AiBehavior;
 /// use antares::domain::types::DiceRoll;
 ///
 /// let goblin = Monster {

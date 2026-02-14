@@ -63,6 +63,11 @@ pub enum EventResult {
         /// Innkeeper NPC identifier (NpcId string)
         innkeeper_id: crate::domain::world::NpcId,
     },
+    /// Furniture or props event triggered
+    Furniture {
+        /// Type of furniture
+        furniture_type: crate::domain::world::FurnitureType,
+    },
 }
 
 /// Errors that can occur during event processing
@@ -218,6 +223,11 @@ pub fn trigger_event(world: &mut World, position: Position) -> Result<EventResul
             EventResult::EnterInn {
                 innkeeper_id: innkeeper_id.clone(),
             }
+        }
+
+        MapEvent::Furniture { furniture_type, .. } => {
+            // Furniture events are repeatable - don't remove
+            EventResult::Furniture { furniture_type }
         }
     };
 

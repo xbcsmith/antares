@@ -12,6 +12,7 @@
 pub mod billboard;
 pub mod combat;
 pub mod dialogue;
+pub mod furniture;
 pub mod menu;
 pub mod sprite;
 
@@ -24,5 +25,6 @@ pub use dialogue::{
     DIALOGUE_BUBBLE_WIDTH, DIALOGUE_CHOICE_COLOR, DIALOGUE_TEXT_COLOR, DIALOGUE_TEXT_SIZE,
     DIALOGUE_TYPEWRITER_SPEED,
 };
+pub use furniture::{FurnitureEntity, Interactable, InteractionType};
 pub use menu::*;
 pub use sprite::{ActorSprite, ActorType, AnimatedSprite, TileSprite};

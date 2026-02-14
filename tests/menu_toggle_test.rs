@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for menu toggle and keyboard navigation (Phase 3)
+//! Integration tests for menu toggle and keyboard navigation
 //!
 //! This test suite validates:
 //! - Menu toggle between game modes and Menu mode

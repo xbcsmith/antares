@@ -260,6 +260,14 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                             );
                         }
                     }
+                    MapEvent::Furniture { name, .. } => {
+                        assert!(
+                            !name.trim().is_empty(),
+                            "Furniture in map {} at {:?} has empty name",
+                            path.display(),
+                            pos
+                        );
+                    }
                 }
             }
 

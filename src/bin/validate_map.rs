@@ -266,6 +266,10 @@ fn print_map_summary(map: &Map) {
                 // Count inn entrances (could add separate counter if needed)
                 signs += 1
             }
+            MapEvent::Furniture { .. } => {
+                // Count furniture events (could add separate counter if needed)
+                signs += 1
+            }
         }
     }
 

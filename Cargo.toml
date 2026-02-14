@@ -58,5 +58,9 @@ path = "src/bin/item_editor.rs"
 name = "name_gen"
 path = "src/bin/name_gen.rs"
 
+[[bin]]
+name = "update_tutorial_maps"
+path = "src/bin/update_tutorial_maps.rs"
+
 [dev-dependencies]
 tempfile = "3.23"

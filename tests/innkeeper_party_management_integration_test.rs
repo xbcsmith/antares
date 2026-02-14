@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 4: Integration Testing and Bug Fixes for Innkeeper Party Management
+//! Integration Testing and Bug Fixes for Innkeeper Party Management
 //!
 //! Comprehensive end-to-end tests covering:
 //! - Complete inn workflow (enter inn → dialogue → party management → save/load)

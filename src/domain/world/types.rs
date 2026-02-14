@@ -52,6 +52,74 @@ pub enum TerrainType {
     Mountain,
 }
 
+// ===== Terrain-Specific Features =====
+
+/// Grass density levels for terrain visualization
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum GrassDensity {
+    /// No grass blades (bare dirt)
+    None,
+    /// 10-20 blades per tile
+    Low,
+    /// 40-60 blades per tile
+    #[default]
+    Medium,
+    /// 80-120 blades per tile
+    High,
+    /// 150+ blades per tile
+    VeryHigh,
+}
+
+/// Tree visual variants for forest tiles
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TreeType {
+    /// Deciduous tree (broad leaves)
+    #[default]
+    Oak,
+    /// Coniferous tree (needle leaves)
+    Pine,
+    /// Dead/bare tree
+    Dead,
+    /// Palm tree
+    Palm,
+    /// Willow tree
+    Willow,
+    /// Birch tree
+    Birch,
+    /// Shrub/Bush formation
+    Shrub,
+}
+
+/// Rock visual variants for mountain/hill tiles
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RockVariant {
+    /// Smooth rounded boulders
+    #[default]
+    Smooth,
+    /// Jagged sharp rocks
+    Jagged,
+    /// Layered sedimentary
+    Layered,
+    /// Crystalline formation
+    Crystal,
+}
+
+/// Water flow direction for river/stream tiles
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum WaterFlowDirection {
+    /// Still water (no flow)
+    #[default]
+    Still,
+    /// Flowing north
+    North,
+    /// Flowing south
+    South,
+    /// Flowing east
+    East,
+    /// Flowing west
+    West,
+}
+
 // ===== Sprite System =====
 
 /// Reference to a sprite in a sprite sheet (texture atlas)
@@ -279,6 +347,59 @@ pub enum SpriteSelectionRule {
     },
 }
 
+/// Configuration for individual grass blade appearance (Phase 3)
+///
+/// Controls the visual properties of grass blades spawned on a tile.
+/// All multipliers are clamped to safe ranges during conversion.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::GrassBladeConfig;
+///
+/// let tall_grass = GrassBladeConfig {
+///     length: 1.5,
+///     width: 0.8,
+///     tilt: 0.4,
+///     curve: 0.5,
+///     color_variation: 0.3,
+/// };
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GrassBladeConfig {
+    /// Blade length multiplier (0.5-2.0, default 1.0)
+    /// Applied to base blade height
+    pub length: f32,
+
+    /// Blade width multiplier (0.5-2.0, default 1.0)
+    /// Applied to base blade width
+    pub width: f32,
+
+    /// Blade tilt angle in radians (0.0-0.5, default 0.3)
+    /// Controls how much blades lean from vertical
+    pub tilt: f32,
+
+    /// Blade curvature amount (0.0-1.0, default 0.3)
+    /// Higher values create more curved blades
+    pub curve: f32,
+
+    /// Color variation (0.0-1.0, default 0.2)
+    /// 0.0 = uniform color, 1.0 = high variation
+    pub color_variation: f32,
+}
+
+impl Default for GrassBladeConfig {
+    fn default() -> Self {
+        Self {
+            length: 1.0,
+            width: 1.0,
+            tilt: 0.3,
+            curve: 0.3,
+            color_variation: 0.2,
+        }
+    }
+}
+
 /// Visual rendering properties for a tile
 ///
 /// All dimensions in world units (1 unit ≈ 10 feet).
@@ -338,6 +459,35 @@ pub struct TileVisualMetadata {
     /// Useful for random variation or autotiling
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sprite_rule: Option<SpriteSelectionRule>,
+
+    /// Grass density for grassland/plains tiles (default: Medium)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grass_density: Option<GrassDensity>,
+
+    /// Tree type for forest tiles (default: Oak)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree_type: Option<TreeType>,
+
+    /// Rock variant for mountain/hill tiles (default: Smooth)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rock_variant: Option<RockVariant>,
+
+    /// Water flow direction for water tiles (default: Still)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub water_flow_direction: Option<WaterFlowDirection>,
+
+    /// Foliage density multiplier (0.0 to 2.0, default: 1.0)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foliage_density: Option<f32>,
+
+    /// Snow coverage percentage (0.0 to 1.0, default: 0.0)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snow_coverage: Option<f32>,
+
+    /// Grass blade configuration for customized appearance (Phase 3)
+    /// Controls blade dimensions, curvature, tilt, and color variation
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grass_blade_config: Option<GrassBladeConfig>,
 }
 
 impl TileVisualMetadata {
@@ -396,6 +546,114 @@ impl TileVisualMetadata {
     /// ```
     pub fn effective_width_z(&self) -> f32 {
         self.width_z.unwrap_or(1.0)
+    }
+
+    /// Get grass density with fallback to default
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, GrassDensity};
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.grass_density(), GrassDensity::Medium);
+    /// ```
+    pub fn grass_density(&self) -> GrassDensity {
+        self.grass_density.unwrap_or_default()
+    }
+
+    /// Get tree type with fallback to default
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, TreeType};
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.tree_type(), TreeType::Oak);
+    /// ```
+    pub fn tree_type(&self) -> TreeType {
+        self.tree_type.unwrap_or_default()
+    }
+
+    /// Get rock variant with fallback to default
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, RockVariant};
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.rock_variant(), RockVariant::Smooth);
+    /// ```
+    pub fn rock_variant(&self) -> RockVariant {
+        self.rock_variant.unwrap_or_default()
+    }
+
+    /// Get water flow direction with fallback to default
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, WaterFlowDirection};
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.water_flow_direction(), WaterFlowDirection::Still);
+    /// ```
+    pub fn water_flow_direction(&self) -> WaterFlowDirection {
+        self.water_flow_direction.unwrap_or_default()
+    }
+
+    /// Get foliage density with fallback to 1.0
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::TileVisualMetadata;
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.foliage_density(), 1.0);
+    /// ```
+    pub fn foliage_density(&self) -> f32 {
+        self.foliage_density.unwrap_or(1.0)
+    }
+
+    /// Get snow coverage with fallback to 0.0
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::TileVisualMetadata;
+    ///
+    /// let metadata = TileVisualMetadata::default();
+    /// assert_eq!(metadata.snow_coverage(), 0.0);
+    /// ```
+    pub fn snow_coverage(&self) -> f32 {
+        self.snow_coverage.unwrap_or(0.0)
+    }
+
+    /// Check if metadata has any terrain-specific overrides
+    ///
+    /// Returns true if any of the terrain-specific fields are set (Some).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{TileVisualMetadata, GrassDensity};
+    ///
+    /// let mut metadata = TileVisualMetadata::default();
+    /// assert!(!metadata.has_terrain_overrides());
+    ///
+    /// metadata.grass_density = Some(GrassDensity::High);
+    /// assert!(metadata.has_terrain_overrides());
+    /// ```
+    pub fn has_terrain_overrides(&self) -> bool {
+        self.grass_density.is_some()
+            || self.tree_type.is_some()
+            || self.rock_variant.is_some()
+            || self.water_flow_direction.is_some()
+            || self.foliage_density.is_some()
+            || self.snow_coverage.is_some()
     }
 
     /// Get effective scale (defaults to 1.0)
@@ -800,12 +1058,694 @@ impl Tile {
     }
 }
 
+// ===== Furniture Types =====
+
+/// Material types for furniture rendering
+///
+/// Each material has different visual properties (PBR parameters) that affect
+/// how the furniture appears in the game world.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub enum FurnitureMaterial {
+    /// Wood material (default)
+    #[default]
+    Wood,
+    /// Stone material
+    Stone,
+    /// Metal material
+    Metal,
+    /// Gold material
+    Gold,
+}
+
+impl FurnitureMaterial {
+    /// Returns all material variants
+    pub fn all() -> &'static [FurnitureMaterial] {
+        &[
+            FurnitureMaterial::Wood,
+            FurnitureMaterial::Stone,
+            FurnitureMaterial::Metal,
+            FurnitureMaterial::Gold,
+        ]
+    }
+
+    /// Returns human-readable name for the material
+    pub fn name(self) -> &'static str {
+        match self {
+            FurnitureMaterial::Wood => "Wood",
+            FurnitureMaterial::Stone => "Stone",
+            FurnitureMaterial::Metal => "Metal",
+            FurnitureMaterial::Gold => "Gold",
+        }
+    }
+
+    /// Returns base color in RGB format (0.0-1.0 range) for PBR rendering
+    ///
+    /// # Returns
+    ///
+    /// `[f32; 3]` representing RGB color values
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::FurnitureMaterial;
+    ///
+    /// let wood_color = FurnitureMaterial::Wood.base_color();
+    /// assert_eq!(wood_color, [0.6, 0.4, 0.2]); // Brown
+    ///
+    /// let gold_color = FurnitureMaterial::Gold.base_color();
+    /// assert_eq!(gold_color, [1.0, 0.84, 0.0]); // Gold
+    /// ```
+    pub fn base_color(self) -> [f32; 3] {
+        match self {
+            FurnitureMaterial::Wood => [0.6, 0.4, 0.2],  // Brown
+            FurnitureMaterial::Stone => [0.5, 0.5, 0.5], // Gray
+            FurnitureMaterial::Metal => [0.7, 0.7, 0.8], // Silver
+            FurnitureMaterial::Gold => [1.0, 0.84, 0.0], // Gold
+        }
+    }
+
+    /// Returns metallic property (0.0-1.0) for PBR rendering
+    ///
+    /// Indicates how metallic the material surface is:
+    /// - 0.0: Non-metallic (plastic, wood, stone)
+    /// - 1.0: Fully metallic (polished metal, gold)
+    ///
+    /// # Returns
+    ///
+    /// Metallic value between 0.0 (non-metallic) and 1.0 (fully metallic)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::FurnitureMaterial;
+    ///
+    /// assert_eq!(FurnitureMaterial::Wood.metallic(), 0.0);
+    /// assert_eq!(FurnitureMaterial::Gold.metallic(), 1.0);
+    /// ```
+    pub fn metallic(self) -> f32 {
+        match self {
+            FurnitureMaterial::Wood => 0.0,
+            FurnitureMaterial::Stone => 0.1,
+            FurnitureMaterial::Metal => 0.9,
+            FurnitureMaterial::Gold => 1.0,
+        }
+    }
+
+    /// Returns roughness property (0.0-1.0) for PBR rendering
+    ///
+    /// Indicates how rough the material surface is:
+    /// - 0.0: Smooth, mirror-like surface
+    /// - 1.0: Rough, matte surface
+    ///
+    /// # Returns
+    ///
+    /// Roughness value between 0.0 (smooth) and 1.0 (rough)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::FurnitureMaterial;
+    ///
+    /// assert_eq!(FurnitureMaterial::Gold.roughness(), 0.2); // Shiny
+    /// assert_eq!(FurnitureMaterial::Stone.roughness(), 0.9); // Dull
+    /// ```
+    pub fn roughness(self) -> f32 {
+        match self {
+            FurnitureMaterial::Wood => 0.8,
+            FurnitureMaterial::Stone => 0.9,
+            FurnitureMaterial::Metal => 0.3,
+            FurnitureMaterial::Gold => 0.2,
+        }
+    }
+}
+
+/// Furniture-specific state flags
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FurnitureFlags {
+    /// Torch is lit (emissive)
+    pub lit: bool,
+    /// Chest is locked
+    pub locked: bool,
+    /// Furniture blocks movement
+    pub blocking: bool,
+}
+
+impl FurnitureFlags {
+    /// Creates a new FurnitureFlags with all flags set to false
+    pub fn new() -> Self {
+        FurnitureFlags::default()
+    }
+
+    /// Sets the lit flag and returns self for chaining
+    pub fn with_lit(mut self, lit: bool) -> Self {
+        self.lit = lit;
+        self
+    }
+
+    /// Sets the locked flag and returns self for chaining
+    pub fn with_locked(mut self, locked: bool) -> Self {
+        self.locked = locked;
+        self
+    }
+
+    /// Sets the blocking flag and returns self for chaining
+    pub fn with_blocking(mut self, blocking: bool) -> Self {
+        self.blocking = blocking;
+        self
+    }
+}
+
+/// Furniture appearance customization preset
+///
+/// Presets allow quick application of common material, scale, and color combinations.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FurnitureAppearancePreset {
+    /// Human-readable name for this preset
+    pub name: &'static str,
+    /// Material variant to apply
+    pub material: FurnitureMaterial,
+    /// Scale multiplier to apply
+    pub scale: f32,
+    /// Optional color tint (RGB, 0.0-1.0)
+    pub color_tint: Option<[f32; 3]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub enum FurnitureType {
+    /// Ornate throne for rulers
+    Throne,
+    /// Simple bench seating
+    Bench,
+    /// Dining or working table
+    Table,
+    /// Single seat chair
+    Chair,
+    /// Mounted torch for light
+    Torch,
+    /// Storage bookshelf
+    Bookshelf,
+    /// Wooden barrel for storage
+    Barrel,
+    /// Lockable chest for treasure
+    Chest,
+}
+
+impl FurnitureType {
+    /// Returns all furniture type variants
+    pub fn all() -> &'static [FurnitureType] {
+        &[
+            FurnitureType::Throne,
+            FurnitureType::Bench,
+            FurnitureType::Table,
+            FurnitureType::Chair,
+            FurnitureType::Torch,
+            FurnitureType::Bookshelf,
+            FurnitureType::Barrel,
+            FurnitureType::Chest,
+        ]
+    }
+
+    /// Returns human-readable name for the furniture type
+    pub fn name(self) -> &'static str {
+        match self {
+            FurnitureType::Throne => "Throne",
+            FurnitureType::Bench => "Bench",
+            FurnitureType::Table => "Table",
+            FurnitureType::Chair => "Chair",
+            FurnitureType::Torch => "Torch",
+            FurnitureType::Bookshelf => "Bookshelf",
+            FurnitureType::Barrel => "Barrel",
+            FurnitureType::Chest => "Chest",
+        }
+    }
+
+    /// Returns an emoji icon representing the furniture type
+    pub fn icon(self) -> &'static str {
+        match self {
+            FurnitureType::Throne => "👑",
+            FurnitureType::Bench => "🪑",
+            FurnitureType::Table => "🪵",
+            FurnitureType::Chair => "💺",
+            FurnitureType::Torch => "🔥",
+            FurnitureType::Bookshelf => "📚",
+            FurnitureType::Barrel => "🛢️",
+            FurnitureType::Chest => "📦",
+        }
+    }
+
+    /// Returns the category for this furniture type
+    pub fn category(self) -> FurnitureCategory {
+        match self {
+            FurnitureType::Throne | FurnitureType::Bench | FurnitureType::Chair => {
+                FurnitureCategory::Seating
+            }
+            FurnitureType::Chest | FurnitureType::Barrel | FurnitureType::Bookshelf => {
+                FurnitureCategory::Storage
+            }
+            FurnitureType::Torch => FurnitureCategory::Lighting,
+            FurnitureType::Table => FurnitureCategory::Utility,
+        }
+    }
+
+    /// Returns default appearance presets for this furniture type
+    ///
+    /// Each furniture type has one or more predefined appearance configurations
+    /// combining material, scale, and color tint settings.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::{FurnitureType, FurnitureMaterial};
+    ///
+    /// let throne_presets = FurnitureType::Throne.default_presets();
+    /// assert!(throne_presets.len() >= 3); // Wooden, Stone, Golden thrones
+    ///
+    /// let torch_presets = FurnitureType::Torch.default_presets();
+    /// assert!(torch_presets.len() >= 2); // Wooden torch, Metal sconce
+    /// ```
+    pub fn default_presets(self) -> Vec<FurnitureAppearancePreset> {
+        match self {
+            FurnitureType::Throne => vec![
+                FurnitureAppearancePreset {
+                    name: "Wooden Throne",
+                    material: FurnitureMaterial::Wood,
+                    scale: 1.2,
+                    color_tint: None,
+                },
+                FurnitureAppearancePreset {
+                    name: "Stone Throne",
+                    material: FurnitureMaterial::Stone,
+                    scale: 1.3,
+                    color_tint: None,
+                },
+                FurnitureAppearancePreset {
+                    name: "Golden Throne",
+                    material: FurnitureMaterial::Gold,
+                    scale: 1.5,
+                    color_tint: None,
+                },
+            ],
+            FurnitureType::Torch => vec![
+                FurnitureAppearancePreset {
+                    name: "Wooden Torch",
+                    material: FurnitureMaterial::Wood,
+                    scale: 1.0,
+                    color_tint: Some([1.0, 0.6, 0.2]), // Orange flame
+                },
+                FurnitureAppearancePreset {
+                    name: "Metal Sconce",
+                    material: FurnitureMaterial::Metal,
+                    scale: 0.8,
+                    color_tint: Some([0.6, 0.8, 1.0]), // Blue flame
+                },
+            ],
+            _ => vec![FurnitureAppearancePreset {
+                name: "Default",
+                material: FurnitureMaterial::Wood,
+                scale: 1.0,
+                color_tint: None,
+            }],
+        }
+    }
+}
+
+/// Furniture categories for palette organization
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub enum FurnitureCategory {
+    /// Seating furniture (Throne, Bench, Chair)
+    Seating,
+    /// Storage furniture (Chest, Barrel, Bookshelf)
+    Storage,
+    /// Decorative furniture (Statue, Fountain, Altar)
+    Decoration,
+    /// Lighting furniture (Torch)
+    Lighting,
+    /// Utility furniture (Table, Crate)
+    Utility,
+}
+
+impl FurnitureCategory {
+    /// Returns human-readable name for the category
+    pub fn name(self) -> &'static str {
+        match self {
+            FurnitureCategory::Seating => "Seating",
+            FurnitureCategory::Storage => "Storage",
+            FurnitureCategory::Decoration => "Decoration",
+            FurnitureCategory::Lighting => "Lighting",
+            FurnitureCategory::Utility => "Utility",
+        }
+    }
+
+    /// Returns all category variants
+    pub fn all() -> &'static [FurnitureCategory] {
+        &[
+            FurnitureCategory::Seating,
+            FurnitureCategory::Storage,
+            FurnitureCategory::Decoration,
+            FurnitureCategory::Lighting,
+            FurnitureCategory::Utility,
+        ]
+    }
+}
+
+// ===== Architectural Structure Components =====
+
+/// Types of architectural structure components for dungeons and areas
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum StructureType {
+    /// Vertical support column
+    Column,
+    /// Arched opening
+    Arch,
+    /// Wall segment
+    WallSegment,
+    /// Door frame
+    DoorFrame,
+    /// Safety railing
+    Railing,
+}
+
+impl StructureType {
+    /// Returns all structure type variants
+    pub fn all() -> &'static [StructureType] {
+        &[
+            StructureType::Column,
+            StructureType::Arch,
+            StructureType::WallSegment,
+            StructureType::DoorFrame,
+            StructureType::Railing,
+        ]
+    }
+
+    /// Returns human-readable name for the structure type
+    pub fn name(self) -> &'static str {
+        match self {
+            StructureType::Column => "Column",
+            StructureType::Arch => "Arch",
+            StructureType::WallSegment => "Wall Segment",
+            StructureType::DoorFrame => "Door Frame",
+            StructureType::Railing => "Railing",
+        }
+    }
+}
+
+/// Architectural styles for columns
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ColumnStyle {
+    /// Plain cylindrical column
+    Plain,
+    /// Classical Doric style with simple capital
+    Doric,
+    /// Classical Ionic style with scroll capital
+    Ionic,
+}
+
+impl ColumnStyle {
+    /// Returns all column style variants
+    pub fn all() -> &'static [ColumnStyle] {
+        &[ColumnStyle::Plain, ColumnStyle::Doric, ColumnStyle::Ionic]
+    }
+
+    /// Returns human-readable name for the column style
+    pub fn name(self) -> &'static str {
+        match self {
+            ColumnStyle::Plain => "Plain",
+            ColumnStyle::Doric => "Doric",
+            ColumnStyle::Ionic => "Ionic",
+        }
+    }
+}
+
+/// Configuration for column generation
+#[derive(Clone, Debug)]
+pub struct ColumnConfig {
+    /// Height of the column (default: 3.0)
+    pub height: f32,
+    /// Radius of the column shaft (default: 0.3)
+    pub radius: f32,
+    /// Architectural style
+    pub style: ColumnStyle,
+}
+
+impl Default for ColumnConfig {
+    fn default() -> Self {
+        Self {
+            height: 3.0,
+            radius: 0.3,
+            style: ColumnStyle::Plain,
+        }
+    }
+}
+
+/// Configuration for arch generation
+#[derive(Clone, Debug)]
+pub struct ArchConfig {
+    /// Width of the arch opening (default: 2.0)
+    pub width: f32,
+    /// Height to the top of the arch (default: 3.0)
+    pub height: f32,
+    /// Thickness of the arch structure (default: 0.3)
+    pub thickness: f32,
+}
+
+impl Default for ArchConfig {
+    fn default() -> Self {
+        Self {
+            width: 2.0,
+            height: 3.0,
+            thickness: 0.3,
+        }
+    }
+}
+
+/// Configuration for wall segment generation
+#[derive(Clone, Debug)]
+pub struct WallSegmentConfig {
+    /// Length of the wall segment (default: 2.0)
+    pub length: f32,
+    /// Height of the wall segment (default: 2.5)
+    pub height: f32,
+    /// Thickness of the wall (default: 0.2)
+    pub thickness: f32,
+    /// Whether the wall has a window opening
+    pub has_window: bool,
+}
+
+impl Default for WallSegmentConfig {
+    fn default() -> Self {
+        Self {
+            length: 2.0,
+            height: 2.5,
+            thickness: 0.2,
+            has_window: false,
+        }
+    }
+}
+
+/// Configuration for door frame generation
+#[derive(Clone, Debug)]
+pub struct DoorFrameConfig {
+    /// Width of the door opening (default: 1.0)
+    pub width: f32,
+    /// Height of the door opening (default: 2.5)
+    pub height: f32,
+    /// Thickness of the frame (default: 0.15)
+    pub frame_thickness: f32,
+}
+
+impl Default for DoorFrameConfig {
+    fn default() -> Self {
+        Self {
+            width: 1.0,
+            height: 2.5,
+            frame_thickness: 0.15,
+        }
+    }
+}
+
+/// Configuration for railing generation
+#[derive(Clone, Debug)]
+pub struct RailingConfig {
+    /// Length of the railing (default: 2.0)
+    pub length: f32,
+    /// Height of the railing (default: 1.0)
+    pub height: f32,
+    /// Radius of the posts (default: 0.08)
+    pub post_radius: f32,
+    /// Number of posts (default: 4)
+    pub post_count: usize,
+}
+
+impl Default for RailingConfig {
+    fn default() -> Self {
+        Self {
+            length: 2.0,
+            height: 1.0,
+            post_radius: 0.08,
+            post_count: 4,
+        }
+    }
+}
+
+// ===== Performance & Polish Types (Phase 5) =====
+
+/// Level of detail for procedurally generated objects
+///
+/// Distance-based visual simplification to improve performance on large maps.
+/// Objects fade between detail levels as the camera moves away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DetailLevel {
+    /// Full quality: complete branch graphs, all foliage, detailed geometry
+    /// Distance: < 10 tiles from camera
+    Full,
+    /// Simplified: fewer branches, clustered foliage, reduced vertices
+    /// Distance: 10-30 tiles from camera
+    Simplified,
+    /// Billboard: flat impostor sprite, no geometry
+    /// Distance: > 30 tiles from camera
+    Billboard,
+}
+
+impl DetailLevel {
+    /// Get the squared distance threshold for this detail level (in world units)
+    /// Used to avoid repeated sqrt calculations in distance checks
+    ///
+    /// # Returns
+    ///
+    /// Squared distance in world units (1 unit ≈ 10 feet, so 10 tiles ≈ 3.33 units)
+    pub fn distance_threshold_squared(self) -> f32 {
+        match self {
+            DetailLevel::Full => 100.0,       // 10 tiles squared
+            DetailLevel::Simplified => 900.0, // 30 tiles squared
+            DetailLevel::Billboard => f32::INFINITY,
+        }
+    }
+
+    /// Get the maximum distance for this detail level
+    pub fn max_distance(self) -> f32 {
+        match self {
+            DetailLevel::Full => 10.0,
+            DetailLevel::Simplified => 30.0,
+            DetailLevel::Billboard => f32::INFINITY,
+        }
+    }
+
+    /// Select the appropriate detail level for a given distance
+    ///
+    /// # Arguments
+    ///
+    /// * `distance` - Distance from camera to object in world units
+    ///
+    /// # Returns
+    ///
+    /// The recommended detail level for this distance
+    pub fn from_distance(distance: f32) -> Self {
+        if distance < 10.0 {
+            DetailLevel::Full
+        } else if distance < 30.0 {
+            DetailLevel::Simplified
+        } else {
+            DetailLevel::Billboard
+        }
+    }
+}
+
+/// Configuration for GPU mesh instancing
+///
+/// Stores transform data for multiple instances of the same mesh to be drawn
+/// in a single draw call, significantly reducing GPU overhead.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstanceData {
+    /// World position (x, y, z)
+    pub position: [f32; 3],
+    /// Scale (uniform)
+    pub scale: f32,
+    /// Rotation in radians around Y-axis
+    pub rotation_y: f32,
+}
+
+impl InstanceData {
+    /// Create a new instance at the specified position
+    ///
+    /// # Arguments
+    ///
+    /// * `position` - World coordinates [x, y, z]
+    ///
+    /// # Examples
+    ///
+    /// ```text
+    /// use antares::domain::world::types::InstanceData;
+    ///
+    /// let instance = InstanceData::new([1.0, 0.0, 2.0]);
+    /// assert_eq!(instance.position, [1.0, 0.0, 2.0]);
+    /// assert_eq!(instance.scale, 1.0);
+    /// assert_eq!(instance.rotation_y, 0.0);
+    /// ```
+    pub fn new(position: [f32; 3]) -> Self {
+        Self {
+            position,
+            scale: 1.0,
+            rotation_y: 0.0,
+        }
+    }
+
+    /// Set the scale
+    pub fn with_scale(mut self, scale: f32) -> Self {
+        self.scale = scale;
+        self
+    }
+
+    /// Set the rotation
+    pub fn with_rotation(mut self, rotation_y: f32) -> Self {
+        self.rotation_y = rotation_y;
+        self
+    }
+}
+
+/// Async mesh generation task identifier
+///
+/// Used to track background mesh generation tasks and retrieve their results
+/// without blocking the main game loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AsyncMeshTaskId(pub u64);
+
+impl AsyncMeshTaskId {
+    /// Create a new task ID from a raw u64
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+/// Configuration for async mesh generation
+///
+/// Controls how procedural meshes are generated on background threads
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AsyncMeshConfig {
+    /// Maximum number of concurrent mesh generation tasks
+    pub max_concurrent_tasks: usize,
+    /// Whether to prioritize closer objects
+    pub prioritize_by_distance: bool,
+    /// Timeout in milliseconds for mesh generation
+    pub generation_timeout_ms: u64,
+}
+
+impl Default for AsyncMeshConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent_tasks: 4,
+            prioritize_by_distance: true,
+            generation_timeout_ms: 5000,
+        }
+    }
+}
+
 // ===== Map Event System =====
 
-/// Map event types
+/// Map events are special occurrences that can happen at specific tile locations.
 ///
-/// Events are triggered when the party moves to specific tiles or interacts
-/// with the environment.
+/// Events are triggered when the party moves to a tile containing an event,
+/// or when the party explicitly interacts with the environment. Each event type
+/// has specific properties and effects on gameplay.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MapEvent {
     /// Random monster encounter
@@ -903,6 +1843,34 @@ pub enum MapEvent {
         /// Innkeeper NPC identifier (must exist in NPC database with is_innkeeper=true)
         innkeeper_id: crate::domain::world::NpcId,
     },
+    /// Furniture or prop placement event
+    Furniture {
+        /// Event name for editor display
+        #[serde(default)]
+        name: String,
+        /// Type of furniture to spawn
+        furniture_type: FurnitureType,
+        /// Optional Y-axis rotation in degrees (0-360)
+        #[serde(default)]
+        rotation_y: Option<f32>,
+        /// Scale multiplier (0.5-2.0, default 1.0)
+        #[serde(default = "default_furniture_scale")]
+        scale: f32,
+        /// Material variant (Wood, Stone, Metal, Gold)
+        #[serde(default)]
+        material: FurnitureMaterial,
+        /// Furniture-specific flags
+        #[serde(default)]
+        flags: FurnitureFlags,
+        /// Optional color tint for customization (RGB, 0.0-1.0 range)
+        #[serde(default)]
+        color_tint: Option<[f32; 3]>,
+    },
+}
+
+/// Default scale for furniture events (1.0x)
+fn default_furniture_scale() -> f32 {
+    1.0
 }
 
 /// Default dialogue ID for recruitment events when none specified
@@ -995,6 +1963,7 @@ impl ResolvedNpc {
     ///     name: "City Guard".to_string(),
     ///     description: "A vigilant guard".to_string(),
     ///     portrait_id: "guard.png".to_string(),
+    ///     sprite: None,
     ///     dialogue_id: Some(10),
     ///     quest_ids: vec![],
     ///     faction: Some("City Watch".to_string()),
@@ -1060,6 +2029,7 @@ pub struct Map {
     /// 2D grid of tiles (row-major order: y * width + x)
     pub tiles: Vec<Tile>,
     /// Events at specific positions
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub events: HashMap<Position, MapEvent>,
 
     /// Optional random encounter table for this map
@@ -2896,5 +3866,237 @@ mod tests {
         assert_eq!(deserialized.alpha, props.alpha);
         assert_eq!(deserialized.metallic, props.metallic);
         assert_eq!(deserialized.roughness, props.roughness);
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_grass_density_serialization() {
+        let mut meta = TileVisualMetadata::default();
+        meta.grass_density = Some(GrassDensity::High);
+
+        let ron = ron::to_string(&meta).unwrap();
+        assert!(ron.contains("grass_density"));
+        assert!(ron.contains("High"));
+
+        let deserialized: TileVisualMetadata = ron::from_str(&ron).unwrap();
+        assert_eq!(deserialized.grass_density, Some(GrassDensity::High));
+    }
+
+    #[test]
+    fn test_grass_density_default_not_serialized() {
+        let meta = TileVisualMetadata::default();
+        let ron = ron::to_string(&meta).unwrap();
+        assert!(!ron.contains("grass_density"));
+    }
+
+    #[test]
+    fn test_tree_type_accessor_defaults_to_oak() {
+        let meta = TileVisualMetadata::default();
+        assert_eq!(meta.tree_type(), TreeType::Oak);
+    }
+
+    #[test]
+    fn test_has_terrain_overrides_returns_false_for_default() {
+        let meta = TileVisualMetadata::default();
+        assert!(!meta.has_terrain_overrides());
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_has_terrain_overrides_returns_true_when_set() {
+        let mut meta = TileVisualMetadata::default();
+        meta.grass_density = Some(GrassDensity::Low);
+        assert!(meta.has_terrain_overrides());
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_foliage_density_clamps_in_valid_range() {
+        let mut meta = TileVisualMetadata::default();
+        meta.foliage_density = Some(1.5);
+        assert_eq!(meta.foliage_density(), 1.5);
+    }
+
+    #[test]
+    fn test_water_flow_direction_default_is_still() {
+        let meta = TileVisualMetadata::default();
+        assert_eq!(meta.water_flow_direction(), WaterFlowDirection::Still);
+    }
+
+    #[test]
+    fn test_grass_density_default_is_medium() {
+        assert_eq!(GrassDensity::default(), GrassDensity::Medium);
+    }
+
+    #[test]
+    fn test_tree_type_default_is_oak() {
+        assert_eq!(TreeType::default(), TreeType::Oak);
+    }
+
+    #[test]
+    fn test_rock_variant_default_is_smooth() {
+        assert_eq!(RockVariant::default(), RockVariant::Smooth);
+    }
+
+    #[test]
+    fn test_water_flow_default_is_still() {
+        assert_eq!(WaterFlowDirection::default(), WaterFlowDirection::Still);
+    }
+
+    #[test]
+    fn test_grass_density_serializes_to_ron() {
+        let density = GrassDensity::High;
+        let ron = ron::to_string(&density).unwrap();
+        assert_eq!(ron.trim(), "High");
+
+        let deserialized: GrassDensity = ron::from_str(&ron).unwrap();
+        assert_eq!(deserialized, GrassDensity::High);
+    }
+
+    #[test]
+    fn test_tree_type_deserializes_from_ron() {
+        let ron_str = "Pine";
+        let tree: TreeType = ron::from_str(ron_str).unwrap();
+        assert_eq!(tree, TreeType::Pine);
+    }
+
+    #[test]
+    fn test_rock_variant_round_trip_serialization() {
+        let original = RockVariant::Crystal;
+        let ron_str = ron::to_string(&original).unwrap();
+        let deserialized: RockVariant = ron::from_str(&ron_str).unwrap();
+        assert_eq!(deserialized, original);
+    }
+
+    #[test]
+    fn test_water_flow_all_variants_serialize() {
+        let variants = vec![
+            WaterFlowDirection::Still,
+            WaterFlowDirection::North,
+            WaterFlowDirection::South,
+            WaterFlowDirection::East,
+            WaterFlowDirection::West,
+        ];
+
+        for variant in variants {
+            let ron = ron::to_string(&variant).unwrap();
+            let deserialized: WaterFlowDirection = ron::from_str(&ron).unwrap();
+            assert_eq!(deserialized, variant);
+        }
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_metadata_with_grass_density_serializes() {
+        let mut meta = TileVisualMetadata::default();
+        meta.height = Some(2.0);
+        meta.grass_density = Some(GrassDensity::Medium);
+
+        let ron = ron::to_string(&meta).unwrap();
+        let deserialized: TileVisualMetadata = ron::from_str(&ron).unwrap();
+
+        assert_eq!(deserialized.height, meta.height);
+        assert_eq!(deserialized.grass_density, meta.grass_density);
+    }
+
+    #[test]
+    fn test_metadata_without_terrain_fields_is_minimal() {
+        let meta = TileVisualMetadata::default();
+        let ron = ron::to_string(&meta).unwrap();
+
+        // Default metadata should have minimal serialization
+        assert!(!ron.contains("grass_density"));
+        assert!(!ron.contains("tree_type"));
+        assert!(!ron.contains("rock_variant"));
+        assert!(!ron.contains("water_flow_direction"));
+        assert!(!ron.contains("foliage_density"));
+        assert!(!ron.contains("snow_coverage"));
+    }
+
+    #[test]
+    fn test_metadata_accessors_return_defaults() {
+        let meta = TileVisualMetadata::default();
+
+        assert_eq!(meta.grass_density(), GrassDensity::Medium);
+        assert_eq!(meta.tree_type(), TreeType::Oak);
+        assert_eq!(meta.rock_variant(), RockVariant::Smooth);
+        assert_eq!(meta.water_flow_direction(), WaterFlowDirection::Still);
+        assert_eq!(meta.foliage_density(), 1.0);
+        assert_eq!(meta.snow_coverage(), 0.0);
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_has_terrain_overrides_detects_grass_density() {
+        let mut meta = TileVisualMetadata::default();
+        assert!(!meta.has_terrain_overrides());
+
+        meta.grass_density = Some(GrassDensity::Medium);
+        assert!(meta.has_terrain_overrides());
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_has_terrain_overrides_detects_tree_type() {
+        let mut meta = TileVisualMetadata::default();
+        meta.tree_type = Some(TreeType::Pine);
+        assert!(meta.has_terrain_overrides());
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_has_terrain_overrides_detects_all_fields() {
+        let mut meta = TileVisualMetadata::default();
+
+        meta.grass_density = Some(GrassDensity::High);
+        assert!(meta.has_terrain_overrides());
+
+        meta.grass_density = None;
+        meta.rock_variant = Some(RockVariant::Jagged);
+        assert!(meta.has_terrain_overrides());
+
+        meta.rock_variant = None;
+        meta.foliage_density = Some(1.5);
+        assert!(meta.has_terrain_overrides());
+
+        meta.foliage_density = None;
+        meta.snow_coverage = Some(0.5);
+        assert!(meta.has_terrain_overrides());
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_foliage_density_bounds() {
+        let mut meta = TileVisualMetadata::default();
+
+        // Test minimum
+        meta.foliage_density = Some(0.0);
+        assert_eq!(meta.foliage_density(), 0.0);
+
+        // Test maximum
+        meta.foliage_density = Some(2.0);
+        assert_eq!(meta.foliage_density(), 2.0);
+
+        // Test intermediate
+        meta.foliage_density = Some(1.5);
+        assert_eq!(meta.foliage_density(), 1.5);
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn test_snow_coverage_bounds() {
+        let mut meta = TileVisualMetadata::default();
+
+        // Test minimum
+        meta.snow_coverage = Some(0.0);
+        assert_eq!(meta.snow_coverage(), 0.0);
+
+        // Test maximum
+        meta.snow_coverage = Some(1.0);
+        assert_eq!(meta.snow_coverage(), 1.0);
+
+        // Test intermediate
+        meta.snow_coverage = Some(0.5);
+        assert_eq!(meta.snow_coverage(), 0.5);
     }
 }

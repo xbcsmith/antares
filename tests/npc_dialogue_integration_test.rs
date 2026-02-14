@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for NPC dialogue system (Phase 5)
+//! Integration tests for NPC dialogue system
 //!
 //! Tests the integration of NPC entities with the dialogue system,
 //! verifying that dialogue bubbles correctly position themselves above NPCs

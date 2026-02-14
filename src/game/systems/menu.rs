@@ -12,6 +12,7 @@
 //! - Settings menu with volume sliders (Phase 6)
 //! - Proper cleanup when exiting menu mode
 
+use bevy::ecs::world::World;
 use bevy::prelude::*;
 use chrono::Local;
 
@@ -53,14 +54,18 @@ fn despawn_with_children(
     entity: Entity,
     children_query: &Query<&Children>,
 ) {
-    // First despawn all children recursively
+    // First despawn all children recursively with safety checks
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
             despawn_with_children(commands, child, children_query);
         }
     }
-    // Then despawn the entity itself
-    commands.entity(entity).despawn();
+    // Then despawn the entity itself with safe error handling
+    commands.queue(move |world: &mut World| {
+        if world.get_entity(entity).is_ok() {
+            world.despawn(entity);
+        }
+    });
 }
 
 /// Detect submenu transitions and despawn old menu UI

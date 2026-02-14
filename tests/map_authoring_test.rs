@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 3 Integration Tests: Map Authoring with Visual Metadata
+//! Map Authoring Integration Tests: Visual Metadata
 //!
 //! Tests RON serialization/deserialization, backward compatibility,
 //! and example map loading.
@@ -23,6 +23,13 @@ fn test_ron_round_trip_with_visual() {
         sprite: None,
         sprite_layers: vec![],
         sprite_rule: None,
+        grass_density: None,
+        tree_type: None,
+        rock_variant: None,
+        water_flow_direction: None,
+        foliage_density: None,
+        snow_coverage: None,
+        grass_blade_config: None,
     };
 
     // Serialize to RON
@@ -231,6 +238,13 @@ fn test_map_round_trip_preserves_visual() {
         y_offset: Some(0.3),
         rotation_y: None,
         sprite: None,
+        grass_density: None,
+        tree_type: None,
+        rock_variant: None,
+        water_flow_direction: None,
+        foliage_density: None,
+        snow_coverage: None,
+        grass_blade_config: None,
     };
 
     // Serialize to RON

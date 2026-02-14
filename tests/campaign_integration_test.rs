@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for Phase 14: Game Engine Campaign Integration
+//! Integration tests for Game Engine Campaign Integration
 //!
 //! These tests verify that the Antares game engine can correctly load
 //! and play custom campaigns created with the Campaign Builder.

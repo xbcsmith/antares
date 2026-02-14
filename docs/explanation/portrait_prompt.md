@@ -255,3 +255,5 @@ Dragon: A majestic dragon, majestic and wise, with scales shimmering in the ligh
 Lich: A skeletal lich, pale and malevolent, with a long white beard, bushy eyebrows, a pointed hat, and piercing intelligent eyes.
 
 Orc: A fierce orc warrior, with thick fur, sharp teeth, and a fierce expression.
+
+Skeleton: A skeletal warrior, with bones visible, long sword, and a fierce expression.

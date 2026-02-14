@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 4: Campaign Builder GUI Integration Tests
+//! Campaign Builder GUI Integration Tests
 //!
 //! Tests for the visual metadata preset system and bulk editing functionality
 //! added to the Campaign Builder map editor in Phase 4.

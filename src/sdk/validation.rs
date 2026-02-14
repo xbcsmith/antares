@@ -776,6 +776,9 @@ impl<'a> Validator<'a> {
                         }
                     }
                 }
+                crate::domain::world::MapEvent::Furniture { .. } => {
+                    // Furniture events are always valid - they spawn procedurally
+                }
             }
         }
 
