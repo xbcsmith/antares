@@ -14,6 +14,7 @@
             visited: false,
             x: 0,
             y: 0,
+            visual: (height: Some(3.5), color_tint: Some((0.7, 0.7, 0.7))),
             event_trigger: None,
         ),
         (
@@ -113,6 +114,7 @@
             visited: false,
             x: 9,
             y: 0,
+            visual: (height: Some(4.0), scale: Some(0.3), color_tint: Some((0.8, 0.8, 0.8))),
             event_trigger: None,
         ),
         (
@@ -124,6 +126,7 @@
             visited: false,
             x: 10,
             y: 0,
+            visual: (height: Some(4.0), scale: Some(0.3), color_tint: Some((0.8, 0.8, 0.8))),
             event_trigger: None,
         ),
         (
@@ -223,6 +226,7 @@
             visited: false,
             x: 19,
             y: 0,
+            visual: (height: Some(3.5), color_tint: Some((0.7, 0.7, 0.7))),
             event_trigger: None,
         ),
         (
@@ -1224,6 +1228,7 @@
             visited: false,
             x: 10,
             y: 5,
+            visual: (height: Some(1.5)),
             event_trigger: None,
         ),
         (
@@ -1235,6 +1240,7 @@
             visited: false,
             x: 11,
             y: 5,
+            visual: (height: Some(1.5)),
             event_trigger: None,
         ),
         (
@@ -1444,6 +1450,7 @@
             visited: false,
             x: 10,
             y: 6,
+            visual: (height: Some(1.5)),
             event_trigger: None,
         ),
         (
@@ -1455,6 +1462,7 @@
             visited: false,
             x: 11,
             y: 6,
+            visual: (height: Some(1.5)),
             event_trigger: None,
         ),
         (
@@ -3094,6 +3102,7 @@
             visited: false,
             x: 0,
             y: 14,
+            visual: (height: Some(3.5), color_tint: Some((0.7, 0.7, 0.7))),
             event_trigger: None,
         ),
         (
@@ -3303,6 +3312,7 @@
             visited: false,
             x: 19,
             y: 14,
+            visual: (height: Some(3.5), color_tint: Some((0.7, 0.7, 0.7))),
             event_trigger: None,
         ),
     ],

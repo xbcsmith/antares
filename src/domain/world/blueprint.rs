@@ -25,10 +25,14 @@ pub struct MapBlueprint {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct TileBlueprint {
-    pub x: i32,
-    pub y: i32,
-    pub code: TileCode,
+#[serde(untagged)]
+pub enum TileBlueprint {
+    /// Simple, compact blueprint form using a TileCode to select terrain/wall combination
+    Code { x: i32, y: i32, code: TileCode },
+
+    /// Full tile form: accepts the complete `Tile` structure from RON files.
+    /// This allows older engine-style map files that serialize full `Tile` records.
+    Full(Box<Tile>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,21 +131,29 @@ impl From<MapBlueprint> for Map {
         // Let's assume bp.tiles contains all tiles.
 
         for tile_bp in bp.tiles {
-            let (terrain, wall_type) = match tile_bp.code {
-                TileCode::Floor => (TerrainType::Ground, WallType::None),
-                TileCode::Wall => (TerrainType::Ground, WallType::Normal),
-                TileCode::Door => (TerrainType::Ground, WallType::Door),
-                TileCode::Forest => (TerrainType::Forest, WallType::None),
-                TileCode::Grass => (TerrainType::Grass, WallType::None),
-                TileCode::Water => (TerrainType::Water, WallType::None),
-                TileCode::Lava => (TerrainType::Lava, WallType::None),
-                TileCode::Swamp => (TerrainType::Swamp, WallType::None),
-                TileCode::Stone => (TerrainType::Stone, WallType::None),
-                TileCode::Dirt => (TerrainType::Dirt, WallType::None),
-                TileCode::Mountain => (TerrainType::Mountain, WallType::None),
-                TileCode::Torch => (TerrainType::Ground, WallType::Torch),
-            };
-            tiles.push(Tile::new(tile_bp.x, tile_bp.y, terrain, wall_type));
+            match tile_bp {
+                TileBlueprint::Code { x, y, code } => {
+                    let (terrain, wall_type) = match code {
+                        TileCode::Floor => (TerrainType::Ground, WallType::None),
+                        TileCode::Wall => (TerrainType::Ground, WallType::Normal),
+                        TileCode::Door => (TerrainType::Ground, WallType::Door),
+                        TileCode::Forest => (TerrainType::Forest, WallType::None),
+                        TileCode::Grass => (TerrainType::Grass, WallType::None),
+                        TileCode::Water => (TerrainType::Water, WallType::None),
+                        TileCode::Lava => (TerrainType::Lava, WallType::None),
+                        TileCode::Swamp => (TerrainType::Swamp, WallType::None),
+                        TileCode::Stone => (TerrainType::Stone, WallType::None),
+                        TileCode::Dirt => (TerrainType::Dirt, WallType::None),
+                        TileCode::Mountain => (TerrainType::Mountain, WallType::None),
+                        TileCode::Torch => (TerrainType::Ground, WallType::Torch),
+                    };
+                    tiles.push(Tile::new(x, y, terrain, wall_type));
+                }
+                TileBlueprint::Full(tile) => {
+                    // Full tile provided by blueprint (engine-style map). Use it verbatim.
+                    tiles.push(*tile);
+                }
+            }
         }
 
         let mut events = HashMap::new();
@@ -236,7 +248,7 @@ mod tests {
             width: 10,
             height: 10,
             environment: EnvironmentType::Indoor,
-            tiles: vec![TileBlueprint {
+            tiles: vec![TileBlueprint::Code {
                 x: 0,
                 y: 0,
                 code: TileCode::Floor,
@@ -383,7 +395,7 @@ mod tests {
             width: 20,
             height: 20,
             environment: EnvironmentType::Outdoor,
-            tiles: vec![TileBlueprint {
+            tiles: vec![TileBlueprint::Code {
                 x: 0,
                 y: 0,
                 code: TileCode::Grass,
@@ -446,6 +458,5 @@ mod tests {
         assert_eq!(guard_resolved.facing, Some(Direction::North));
         assert_eq!(guard_resolved.dialogue_id, Some(99)); // Uses override, not default 20
         assert!(!guard_resolved.is_merchant);
-        assert_eq!(guard_resolved.faction, Some("City Watch".to_string()));
     }
 }

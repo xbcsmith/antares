@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 9 Integration Tests
+//! Integration Tests
 //!
 //! Tests cross-tool integration, error formatting, caching, and performance.
 

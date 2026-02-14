@@ -5128,12 +5128,38 @@
     ],
     events: {
         (
-            x: 1,
-            y: 8,
-        ): Sign(
-            name: "Exit Sign",
-            description: "A sign marking the path back to town.",
-            text: "Exit to Town",
+            x: 14,
+            y: 14,
+        ): Encounter(
+            name: "Boss Lair",
+            description: "A concentrated group of powerful monsters guarding a key location.",
+            monster_group: [
+                3,
+                3,
+                3,
+            ],
+        ),
+        (
+            x: 13,
+            y: 2,
+        ): Treasure(
+            name: "Hidden Cache",
+            description: "A tucked-away cache of items and supplies.",
+            loot: [
+                11,
+                21,
+            ],
+        ),
+        (
+            x: 3,
+            y: 5,
+        ): Encounter(
+            name: "Monster Ambush",
+            description: "A group of monsters lying in wait to ambush unsuspecting travelers.",
+            monster_group: [
+                2,
+                1,
+            ],
         ),
         (
             x: 3,
@@ -5148,35 +5174,24 @@
         ),
         (
             x: 10,
+            y: 12,
+        ): Treasure(
+            name: "Worn Chest",
+            description: "A small chest containing assorted loot and coins.",
+            loot: [
+                12,
+                22,
+                31,
+            ],
+        ),
+        (
+            x: 10,
             y: 6,
         ): Trap(
             name: "Spike Trap",
             description: "A hidden spike trap that deals 5 points of damage when triggered.",
             damage: 5,
             effect: None,
-        ),
-        (
-            x: 3,
-            y: 5,
-        ): Encounter(
-            name: "Monster Ambush",
-            description: "A group of monsters lying in wait to ambush unsuspecting travelers.",
-            monster_group: [
-                2,
-                1,
-            ],
-        ),
-        (
-            x: 14,
-            y: 14,
-        ): Encounter(
-            name: "Boss Lair",
-            description: "A concentrated group of powerful monsters guarding a key location.",
-            monster_group: [
-                3,
-                3,
-                3,
-            ],
         ),
         (
             x: 5,
@@ -5187,29 +5202,6 @@
             monster_group: [
                 1,
                 3,
-            ],
-        ),
-        (
-            x: 0,
-            y: 7,
-        ): Teleport(
-            name: "Forest Portal",
-            description: "A portal that teleports the party to Dark Forrest (map 4) at (12,0).",
-            destination: (
-                x: 12,
-                y: 0,
-            ),
-            map_id: 4,
-        ),
-        (
-            x: 13,
-            y: 2,
-        ): Treasure(
-            name: "Hidden Cache",
-            description: "A tucked-away cache of items and supplies.",
-            loot: [
-                11,
-                21,
             ],
         ),
         (
@@ -5225,16 +5217,24 @@
             ],
         ),
         (
-            x: 10,
-            y: 12,
-        ): Treasure(
-            name: "Worn Chest",
-            description: "A small chest containing assorted loot and coins.",
-            loot: [
-                12,
-                22,
-                31,
-            ],
+            x: 1,
+            y: 8,
+        ): Sign(
+            name: "Exit Sign",
+            description: "A sign marking the path back to town.",
+            text: "Exit to Town",
+        ),
+        (
+            x: 0,
+            y: 7,
+        ): Teleport(
+            name: "Forest Portal",
+            description: "A portal that teleports the party to Dark Forrest (map 4) at (12,0).",
+            destination: (
+                x: 12,
+                y: 0,
+            ),
+            map_id: 4,
         ),
     },
     allow_random_encounters: true,

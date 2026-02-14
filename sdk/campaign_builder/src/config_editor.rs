@@ -24,6 +24,7 @@
 //! ```
 
 use crate::ui_helpers::{EditorToolbar, ToolbarAction};
+use antares::game::resources::grass_quality_settings::GrassPerformanceLevel;
 use antares::sdk::game_config::{CameraMode, GameConfig, ShadowQuality};
 use eframe::egui;
 use std::path::PathBuf;
@@ -45,6 +46,7 @@ pub struct ConfigEditorState {
     pub audio_expanded: bool,
     pub controls_expanded: bool,
     pub camera_expanded: bool,
+    pub graphics_quality_expanded: bool,
 
     /// Edit buffers for key bindings
     pub controls_move_forward_buffer: String,
@@ -68,6 +70,9 @@ pub struct ConfigEditorState {
 
     /// Track last campaign directory to detect changes
     pub last_campaign_dir: Option<PathBuf>,
+
+    /// Grass performance level setting
+    pub grass_performance_level: GrassPerformanceLevel,
 }
 
 impl Default for ConfigEditorState {
@@ -90,6 +95,8 @@ impl Default for ConfigEditorState {
             last_captured_key: None,
             needs_initial_load: true,
             last_campaign_dir: None,
+            graphics_quality_expanded: false,
+            grass_performance_level: GrassPerformanceLevel::Medium,
         }
     }
 }
@@ -242,12 +249,76 @@ impl ConfigEditorState {
             .show(ui, |ui| {
                 self.show_graphics_section(ui, unsaved_changes);
                 ui.add_space(5.0);
+                self.show_graphics_quality_section(ui, unsaved_changes);
+                ui.add_space(5.0);
                 self.show_audio_section(ui, unsaved_changes);
                 ui.add_space(5.0);
                 self.show_controls_section(ui, unsaved_changes);
                 ui.add_space(5.0);
                 self.show_camera_section(ui, unsaved_changes);
             });
+    }
+
+    /// Show grass performance settings
+    fn show_graphics_quality_section(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
+        let section_open = ui.collapsing("Grass Performance", |ui| {
+            ui.add_space(5.0);
+
+            // Grass Performance Level Setting
+            ui.horizontal(|ui| {
+                ui.label("Grass Performance:");
+                let level_options = [
+                    GrassPerformanceLevel::Low,
+                    GrassPerformanceLevel::Medium,
+                    GrassPerformanceLevel::High,
+                ];
+                let level_names = [
+                    GrassPerformanceLevel::Low.name(),
+                    GrassPerformanceLevel::Medium.name(),
+                    GrassPerformanceLevel::High.name(),
+                ];
+                let mut selected_index = level_options
+                    .iter()
+                    .position(|&x| x == self.grass_performance_level)
+                    .unwrap_or(1);
+
+                let original_index = selected_index;
+                egui::ComboBox::from_id_salt("grass_performance_level")
+                    .selected_text(level_names[selected_index])
+                    .show_index(ui, &mut selected_index, level_names.len(), |i| {
+                        egui::WidgetText::from(level_names[i])
+                    });
+
+                if selected_index != original_index {
+                    self.grass_performance_level = level_options[selected_index];
+                    *unsaved_changes = true;
+                }
+            });
+
+            ui.label("Performance scaling:");
+            ui.indent("grass_info", |ui| {
+                ui.label(format!(
+                    "Multiplier: {:.2}x content density",
+                    self.grass_performance_level.multiplier()
+                ));
+                ui.label("Final blade counts depend on per-tile content density.");
+                match self.grass_performance_level {
+                    GrassPerformanceLevel::Low => {
+                        ui.label("Prioritizes performance on older hardware.");
+                    }
+                    GrassPerformanceLevel::Medium => {
+                        ui.label("Balanced default for standard hardware.");
+                    }
+                    GrassPerformanceLevel::High => {
+                        ui.label("Maximum fidelity for high-end hardware.");
+                    }
+                }
+            });
+
+            ui.add_space(5.0);
+        });
+
+        self.graphics_quality_expanded = section_open.openness > 0.0;
     }
 
     /// Show the graphics configuration section

@@ -29,7 +29,10 @@ pub use events::{random_encounter, trigger_event, EventError, EventResult};
 pub use movement::{check_tile_blocked, move_party, MovementError};
 pub use npc::{NpcDefinition, NpcId, NpcPlacement};
 pub use types::{
-    EncounterTable, LayeredSprite, Map, MapEvent, ResolvedNpc, SpriteAnimation, SpriteLayer,
-    SpriteMaterialProperties, SpriteReference, SpriteSelectionRule, TerrainType, Tile,
-    TileVisualMetadata, WallType, World,
+    ArchConfig, AsyncMeshConfig, AsyncMeshTaskId, ColumnConfig, ColumnStyle, DetailLevel,
+    DoorFrameConfig, EncounterTable, FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags,
+    FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, InstanceData, LayeredSprite,
+    Map, MapEvent, RailingConfig, ResolvedNpc, RockVariant, SpriteAnimation, SpriteLayer,
+    SpriteMaterialProperties, SpriteReference, SpriteSelectionRule, StructureType, TerrainType,
+    Tile, TileVisualMetadata, TreeType, WallSegmentConfig, WallType, WaterFlowDirection, World,
 };

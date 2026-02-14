@@ -91,7 +91,7 @@ fn get_armor_proficiency(classification: ArmorClassification) -> Option<Proficie
     }
 }
 
-// ===== Phase 5 Task 5.1: Class Grants Proficiency =====
+// ===== Task 5.1: Class Grants Proficiency =====
 
 #[test]
 fn test_proficiency_union_class_grants() {
@@ -159,7 +159,7 @@ fn test_proficiency_union_class_grants_heavy_armor() {
     );
 }
 
-// ===== Phase 5 Task 5.2: Race Grants Proficiency =====
+// ===== Task 5.2: Race Grants Proficiency =====
 
 #[test]
 fn test_proficiency_union_race_grants() {

@@ -45,8 +45,9 @@ use antares::domain::items::types::Item;
 use antares::domain::types::{EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
 use antares::domain::world::{
-    LayeredSprite, Map, MapEvent, SpriteLayer, SpriteReference, TerrainType, Tile,
-    TileVisualMetadata, WallType,
+    FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType,
+    GrassBladeConfig, GrassDensity, LayeredSprite, Map, MapEvent, RockVariant, SpriteLayer,
+    SpriteReference, TerrainType, Tile, TileVisualMetadata, TreeType, WallType, WaterFlowDirection,
 };
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -79,6 +80,9 @@ const EVENT_COLOR_RECRUITABLE: Color32 = Color32::from_rgb(255, 179, 71);
 
 /// Teal for Enter Inn events - rgb(120, 200, 160)
 const EVENT_COLOR_ENTER_INN: Color32 = Color32::from_rgb(120, 200, 160);
+
+/// Violet for Furniture events - rgb(198, 120, 221) / #c678dd
+const EVENT_COLOR_FURNITURE: Color32 = Color32::from_rgb(198, 120, 221);
 
 // ===== Editor Mode =====
 
@@ -266,6 +270,8 @@ pub struct MapMetadata {
     pub music_track: String,
     /// Random encounter rate (0-100)
     pub encounter_rate: u8,
+    /// Per-tile visual metadata overrides
+    pub tile_visual_metadata: Option<std::collections::HashMap<Position, TileVisualMetadata>>,
 }
 
 impl Default for MapMetadata {
@@ -279,6 +285,7 @@ impl Default for MapMetadata {
             light_level: 100,
             music_track: String::new(),
             encounter_rate: 10,
+            tile_visual_metadata: None,
         }
     }
 }
@@ -298,8 +305,51 @@ pub struct MapConnection {
 
 // ===== Visual Metadata Presets =====
 
-/// Predefined visual metadata presets for common use cases
+/// Categories for organizing visual presets in UI
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresetCategory {
+    /// All presets (no filter)
+    All,
+    /// Wall-related presets (ShortWall, TallWall, ThinWall, etc.)
+    Walls,
+    /// Nature presets (SmallTree, LargeTree, Bush, Boulder, etc.)
+    Nature,
+    /// Water/liquid presets (ShallowWater, DeepWater, Lava, etc.)
+    Water,
+    /// Structure presets (Pillar, Altar, Statue, etc.)
+    Structures,
+    /// General/Misc presets
+    General,
+}
+
+impl PresetCategory {
+    /// Get all categories for UI iteration
+    pub const fn all() -> &'static [PresetCategory] {
+        &[
+            PresetCategory::All,
+            PresetCategory::Walls,
+            PresetCategory::Nature,
+            PresetCategory::Water,
+            PresetCategory::Structures,
+            PresetCategory::General,
+        ]
+    }
+
+    /// Get display name for UI
+    pub const fn display_name(&self) -> &'static str {
+        match self {
+            PresetCategory::All => "All",
+            PresetCategory::Walls => "Walls",
+            PresetCategory::Nature => "Nature",
+            PresetCategory::General => "General",
+            PresetCategory::Water => "Water",
+            PresetCategory::Structures => "Structures",
+        }
+    }
+}
+
+/// Predefined visual metadata presets for common use cases
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VisualPreset {
     /// Default (all None)
     Default,
@@ -327,6 +377,51 @@ pub enum VisualPreset {
     Rotated90,
     /// Diagonal wall (rotation_y=45.0, width_z=0.2)
     DiagonalWall,
+
+    // ===== Phase 6: Advanced Terrain Variants =====
+    /// Short tree (height=1.0, scale=0.6, medium green tint)
+    ShortTree,
+    /// Medium tree (height=2.0, scale=0.8, medium green tint)
+    MediumTree,
+    /// Tall tree (height=3.0, scale=1.2, medium green tint)
+    TallTree,
+    /// Dead tree (height=2.5, scale=0.7, brown/gray tint)
+    DeadTree,
+
+    /// Small shrub (height=0.4, scale=0.4, dark green tint)
+    SmallShrub,
+    /// Large shrub (height=0.8, scale=0.9, dark green tint)
+    LargeShrub,
+    /// Flowering shrub (height=0.6, scale=0.7, flower pink tint)
+    FloweringShrub,
+
+    /// Short grass (height=0.2, scale=0.8, light green tint)
+    ShortGrass,
+    /// Tall grass (height=0.4, scale=1.0, medium green tint)
+    TallGrass,
+    /// Dried grass (height=0.3, scale=0.9, brown/tan tint)
+    DriedGrass,
+
+    /// Low peak (height=1.5, rotation_y=0.0, light gray tint)
+    LowPeak,
+    /// High peak (height=3.0, rotation_y=0.0, medium gray tint)
+    HighPeak,
+    /// Jagged peak (height=5.0, rotation_y=15.0, dark gray tint)
+    JaggedPeak,
+
+    /// Shallow swamp (height=0.1, scale=1.2, murky blue-green tint)
+    ShallowSwamp,
+    /// Deep swamp (height=0.3, scale=1.1, dark murky tint)
+    DeepSwamp,
+    /// Murky swamp (height=0.5, scale=1.0, very dark swamp tint)
+    MurkySwamp,
+
+    /// Lava pool (height=0.2, scale=1.0, bright red-orange emissive)
+    LavaPool,
+    /// Lava flow (height=0.3, scale=1.1, bright orange emissive)
+    LavaFlow,
+    /// Volcanic vent (height=0.4, scale=0.8, intense yellow-orange emissive)
+    VolcanicVent,
 }
 
 impl VisualPreset {
@@ -346,10 +441,129 @@ impl VisualPreset {
             VisualPreset::Rotated45 => "Rotated 45°",
             VisualPreset::Rotated90 => "Rotated 90°",
             VisualPreset::DiagonalWall => "Diagonal Wall",
+            // Phase 6 trees
+            VisualPreset::ShortTree => "Short Tree",
+            VisualPreset::MediumTree => "Medium Tree",
+            VisualPreset::TallTree => "Tall Tree",
+            VisualPreset::DeadTree => "Dead Tree",
+            // Phase 6 shrubs
+            VisualPreset::SmallShrub => "Small Shrub",
+            VisualPreset::LargeShrub => "Large Shrub",
+            VisualPreset::FloweringShrub => "Flowering Shrub",
+            // Phase 6 grass
+            VisualPreset::ShortGrass => "Short Grass",
+            VisualPreset::TallGrass => "Tall Grass",
+            VisualPreset::DriedGrass => "Dried Grass",
+            // Phase 6 mountains
+            VisualPreset::LowPeak => "Low Peak",
+            VisualPreset::HighPeak => "High Peak",
+            VisualPreset::JaggedPeak => "Jagged Peak",
+            // Phase 6 swamp
+            VisualPreset::ShallowSwamp => "Shallow Swamp",
+            VisualPreset::DeepSwamp => "Deep Swamp",
+            VisualPreset::MurkySwamp => "Murky Swamp",
+            // Phase 6 lava
+            VisualPreset::LavaPool => "Lava Pool",
+            VisualPreset::LavaFlow => "Lava Flow",
+            VisualPreset::VolcanicVent => "Volcanic Vent",
+        }
+    }
+
+    /// Get the category for this preset
+    pub const fn category(&self) -> PresetCategory {
+        match self {
+            VisualPreset::Default => PresetCategory::General,
+            VisualPreset::ShortWall => PresetCategory::Walls,
+            VisualPreset::TallWall => PresetCategory::Walls,
+            VisualPreset::ThinWall => PresetCategory::Walls,
+            VisualPreset::DiagonalWall => PresetCategory::Walls,
+            VisualPreset::SmallTree => PresetCategory::Nature,
+            VisualPreset::LargeTree => PresetCategory::Nature,
+            VisualPreset::ShortTree => PresetCategory::Nature,
+            VisualPreset::MediumTree => PresetCategory::Nature,
+            VisualPreset::TallTree => PresetCategory::Nature,
+            VisualPreset::DeadTree => PresetCategory::Nature,
+            VisualPreset::SmallShrub => PresetCategory::Nature,
+            VisualPreset::LargeShrub => PresetCategory::Nature,
+            VisualPreset::FloweringShrub => PresetCategory::Nature,
+            VisualPreset::ShortGrass => PresetCategory::Nature,
+            VisualPreset::TallGrass => PresetCategory::Nature,
+            VisualPreset::DriedGrass => PresetCategory::Nature,
+            VisualPreset::LowMountain => PresetCategory::Nature,
+            VisualPreset::HighMountain => PresetCategory::Nature,
+            VisualPreset::LowPeak => PresetCategory::Nature,
+            VisualPreset::HighPeak => PresetCategory::Nature,
+            VisualPreset::JaggedPeak => PresetCategory::Nature,
+            VisualPreset::ShallowSwamp => PresetCategory::Water,
+            VisualPreset::DeepSwamp => PresetCategory::Water,
+            VisualPreset::MurkySwamp => PresetCategory::Water,
+            VisualPreset::LavaPool => PresetCategory::Water,
+            VisualPreset::LavaFlow => PresetCategory::Water,
+            VisualPreset::VolcanicVent => PresetCategory::Water,
+            VisualPreset::Sunken => PresetCategory::Structures,
+            VisualPreset::Raised => PresetCategory::Structures,
+            VisualPreset::Rotated45 => PresetCategory::Structures,
+            VisualPreset::Rotated90 => PresetCategory::Structures,
+        }
+    }
+
+    /// Filter presets by category
+    pub fn by_category(category: PresetCategory) -> Vec<VisualPreset> {
+        if category == PresetCategory::All {
+            Self::all_presets()
+        } else {
+            Self::all_presets()
+                .into_iter()
+                .filter(|preset| preset.category() == category)
+                .collect()
         }
     }
 
     /// Returns all available presets for iteration
+    pub fn all_presets() -> Vec<VisualPreset> {
+        vec![
+            VisualPreset::Default,
+            VisualPreset::ShortWall,
+            VisualPreset::TallWall,
+            VisualPreset::ThinWall,
+            VisualPreset::SmallTree,
+            VisualPreset::LargeTree,
+            VisualPreset::LowMountain,
+            VisualPreset::HighMountain,
+            VisualPreset::Sunken,
+            VisualPreset::Raised,
+            VisualPreset::Rotated45,
+            VisualPreset::Rotated90,
+            VisualPreset::DiagonalWall,
+            // Phase 6 trees
+            VisualPreset::ShortTree,
+            VisualPreset::MediumTree,
+            VisualPreset::TallTree,
+            VisualPreset::DeadTree,
+            // Phase 6 shrubs
+            VisualPreset::SmallShrub,
+            VisualPreset::LargeShrub,
+            VisualPreset::FloweringShrub,
+            // Phase 6 grass
+            VisualPreset::ShortGrass,
+            VisualPreset::TallGrass,
+            VisualPreset::DriedGrass,
+            // Phase 6 mountains
+            VisualPreset::LowPeak,
+            VisualPreset::HighPeak,
+            VisualPreset::JaggedPeak,
+            // Phase 6 swamp
+            VisualPreset::ShallowSwamp,
+            VisualPreset::DeepSwamp,
+            VisualPreset::MurkySwamp,
+            // Phase 6 lava
+            VisualPreset::LavaPool,
+            VisualPreset::LavaFlow,
+            VisualPreset::VolcanicVent,
+        ]
+    }
+
+    /// Returns all available presets for iteration (legacy method name)
     pub fn all() -> &'static [VisualPreset] {
         &[
             VisualPreset::Default,
@@ -365,6 +579,31 @@ impl VisualPreset {
             VisualPreset::Rotated45,
             VisualPreset::Rotated90,
             VisualPreset::DiagonalWall,
+            // Phase 6 trees
+            VisualPreset::ShortTree,
+            VisualPreset::MediumTree,
+            VisualPreset::TallTree,
+            VisualPreset::DeadTree,
+            // Phase 6 shrubs
+            VisualPreset::SmallShrub,
+            VisualPreset::LargeShrub,
+            VisualPreset::FloweringShrub,
+            // Phase 6 grass
+            VisualPreset::ShortGrass,
+            VisualPreset::TallGrass,
+            VisualPreset::DriedGrass,
+            // Phase 6 mountains
+            VisualPreset::LowPeak,
+            VisualPreset::HighPeak,
+            VisualPreset::JaggedPeak,
+            // Phase 6 swamp
+            VisualPreset::ShallowSwamp,
+            VisualPreset::DeepSwamp,
+            VisualPreset::MurkySwamp,
+            // Phase 6 lava
+            VisualPreset::LavaPool,
+            VisualPreset::LavaFlow,
+            VisualPreset::VolcanicVent,
         ]
     }
 
@@ -425,6 +664,126 @@ impl VisualPreset {
             VisualPreset::DiagonalWall => TileVisualMetadata {
                 rotation_y: Some(45.0),
                 width_z: Some(0.2),
+                ..Default::default()
+            },
+            // Phase 6: Tree variants
+            VisualPreset::ShortTree => TileVisualMetadata {
+                height: Some(1.0),
+                scale: Some(0.6),
+                color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                ..Default::default()
+            },
+            VisualPreset::MediumTree => TileVisualMetadata {
+                height: Some(2.0),
+                scale: Some(0.8),
+                color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                ..Default::default()
+            },
+            VisualPreset::TallTree => TileVisualMetadata {
+                height: Some(3.0),
+                scale: Some(1.2),
+                color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                ..Default::default()
+            },
+            VisualPreset::DeadTree => TileVisualMetadata {
+                height: Some(2.5),
+                scale: Some(0.7),
+                color_tint: Some((0.6, 0.5, 0.4)), // Brown/gray tint
+                ..Default::default()
+            },
+            // Phase 6: Shrub variants
+            VisualPreset::SmallShrub => TileVisualMetadata {
+                height: Some(0.4),
+                scale: Some(0.4),
+                color_tint: Some((0.3, 0.6, 0.3)), // Dark green tint
+                ..Default::default()
+            },
+            VisualPreset::LargeShrub => TileVisualMetadata {
+                height: Some(0.8),
+                scale: Some(0.9),
+                color_tint: Some((0.3, 0.6, 0.3)), // Dark green tint
+                ..Default::default()
+            },
+            VisualPreset::FloweringShrub => TileVisualMetadata {
+                height: Some(0.6),
+                scale: Some(0.7),
+                color_tint: Some((0.8, 0.5, 0.7)), // Flower pink tint
+                ..Default::default()
+            },
+            // Phase 6: Grass variants
+            VisualPreset::ShortGrass => TileVisualMetadata {
+                height: Some(0.2),
+                scale: Some(0.8),
+                color_tint: Some((0.6, 0.9, 0.6)), // Light green tint
+                ..Default::default()
+            },
+            VisualPreset::TallGrass => TileVisualMetadata {
+                height: Some(0.4),
+                scale: Some(1.0),
+                color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                ..Default::default()
+            },
+            VisualPreset::DriedGrass => TileVisualMetadata {
+                height: Some(0.3),
+                scale: Some(0.9),
+                color_tint: Some((0.7, 0.6, 0.4)), // Brown/tan tint
+                ..Default::default()
+            },
+            // Phase 6: Mountain variants
+            VisualPreset::LowPeak => TileVisualMetadata {
+                height: Some(1.5),
+                rotation_y: Some(0.0),
+                color_tint: Some((0.8, 0.8, 0.8)), // Light gray tint
+                ..Default::default()
+            },
+            VisualPreset::HighPeak => TileVisualMetadata {
+                height: Some(3.0),
+                rotation_y: Some(0.0),
+                color_tint: Some((0.7, 0.7, 0.7)), // Medium gray tint
+                ..Default::default()
+            },
+            VisualPreset::JaggedPeak => TileVisualMetadata {
+                height: Some(5.0),
+                rotation_y: Some(15.0),
+                color_tint: Some((0.5, 0.5, 0.5)), // Dark gray tint
+                ..Default::default()
+            },
+            // Phase 6: Swamp variants
+            VisualPreset::ShallowSwamp => TileVisualMetadata {
+                height: Some(0.1),
+                scale: Some(1.2),
+                color_tint: Some((0.3, 0.5, 0.4)), // Murky blue-green tint
+                ..Default::default()
+            },
+            VisualPreset::DeepSwamp => TileVisualMetadata {
+                height: Some(0.3),
+                scale: Some(1.1),
+                color_tint: Some((0.2, 0.3, 0.3)), // Dark murky tint
+                ..Default::default()
+            },
+            VisualPreset::MurkySwamp => TileVisualMetadata {
+                height: Some(0.5),
+                scale: Some(1.0),
+                color_tint: Some((0.15, 0.2, 0.2)), // Very dark swamp tint
+                ..Default::default()
+            },
+            // Phase 6: Lava variants
+            VisualPreset::LavaPool => TileVisualMetadata {
+                height: Some(0.2),
+                scale: Some(1.0),
+                color_tint: Some((1.0, 0.3, 0.0)), // Bright red-orange emissive
+                ..Default::default()
+            },
+            VisualPreset::LavaFlow => TileVisualMetadata {
+                height: Some(0.3),
+                scale: Some(1.1),
+                color_tint: Some((1.0, 0.5, 0.0)), // Bright orange emissive
+                ..Default::default()
+            },
+            VisualPreset::VolcanicVent => TileVisualMetadata {
+                height: Some(0.4),
+                scale: Some(0.8),
+                color_tint: Some((1.0, 0.8, 0.0)), // Intense yellow-orange emissive
                 ..Default::default()
             },
         }
@@ -619,6 +978,103 @@ impl VisualMetadataEditor {
         }
     }
 
+    /// Load visual metadata from a TileVisualMetadata into the editor
+    pub fn load_from_metadata(&mut self, md: &TileVisualMetadata) {
+        if let Some(height) = md.height {
+            self.enable_height = true;
+            self.temp_height = height;
+        } else {
+            self.enable_height = false;
+            self.temp_height = 2.5;
+        }
+
+        if let Some(width_x) = md.width_x {
+            self.enable_width_x = true;
+            self.temp_width_x = width_x;
+        } else {
+            self.enable_width_x = false;
+            self.temp_width_x = 1.0;
+        }
+
+        if let Some(width_z) = md.width_z {
+            self.enable_width_z = true;
+            self.temp_width_z = width_z;
+        } else {
+            self.enable_width_z = false;
+            self.temp_width_z = 1.0;
+        }
+
+        if let Some((r, g, b)) = md.color_tint {
+            self.enable_color_tint = true;
+            self.temp_color_r = r;
+            self.temp_color_g = g;
+            self.temp_color_b = b;
+        } else {
+            self.enable_color_tint = false;
+            self.temp_color_r = 1.0;
+            self.temp_color_g = 1.0;
+            self.temp_color_b = 1.0;
+        }
+
+        if let Some(scale) = md.scale {
+            self.enable_scale = true;
+            self.temp_scale = scale;
+        } else {
+            self.enable_scale = false;
+            self.temp_scale = 1.0;
+        }
+
+        if let Some(y_offset) = md.y_offset {
+            self.enable_y_offset = true;
+            self.temp_y_offset = y_offset;
+        } else {
+            self.enable_y_offset = false;
+            self.temp_y_offset = 0.0;
+        }
+
+        if let Some(rotation_y) = md.rotation_y {
+            self.enable_rotation_y = true;
+            self.temp_rotation_y = rotation_y;
+        } else {
+            self.enable_rotation_y = false;
+            self.temp_rotation_y = 0.0;
+        }
+
+        if let Some(sprite) = &md.sprite {
+            self.enable_sprite = true;
+            self.temp_sprite_sheet = sprite.sheet_path.clone();
+            self.temp_sprite_index = sprite.sprite_index;
+            self.sprite_sheet_input = sprite.sheet_path.clone();
+            self.sprite_index_input = sprite.sprite_index.to_string();
+        } else {
+            self.enable_sprite = false;
+            self.temp_sprite_sheet = String::new();
+            self.temp_sprite_index = 0;
+            self.sprite_sheet_input = String::new();
+            self.sprite_index_input = String::new();
+        }
+
+        if !md.sprite_layers.is_empty() {
+            self.enable_sprite_layers = true;
+            self.temp_sprite_layers = md
+                .sprite_layers
+                .iter()
+                .map(|ls| (ls.sprite.sprite_index, 0))
+                .collect();
+        } else {
+            self.enable_sprite_layers = false;
+            self.temp_sprite_layers = Vec::new();
+        }
+
+        if md.sprite_rule.is_some() {
+            self.enable_sprite_rule = true;
+            self.temp_sprite_rule_type = "fixed".to_string();
+        } else {
+            self.enable_sprite_rule = false;
+            self.temp_sprite_rule_type = "fixed".to_string();
+        }
+    }
+
     /// Convert editor state to TileVisualMetadata
     pub fn to_metadata(&self) -> TileVisualMetadata {
         TileVisualMetadata {
@@ -690,12 +1146,193 @@ impl VisualMetadataEditor {
                 Vec::new()
             },
             sprite_rule: None,
+            grass_density: None,
+            tree_type: None,
+            rock_variant: None,
+            water_flow_direction: None,
+            foliage_density: None,
+            snow_coverage: None,
+            grass_blade_config: None,
         }
     }
 
     /// Reset to default values
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+}
+
+// ===== Terrain Editor State =====
+
+/// Terrain-specific editor state for inspector panel
+///
+/// Mirrors TileVisualMetadata terrain fields for UI binding.
+/// Used to provide context-sensitive controls in the inspector based on
+/// the selected tile's terrain type.
+#[derive(Debug, Clone)]
+pub struct TerrainEditorState {
+    /// Grass density selection (for Grassland/Plains tiles)
+    pub grass_density: GrassDensity,
+
+    /// Optional grass blade configuration (for Grass tiles)
+    pub grass_blade_config_enabled: bool,
+
+    /// Grass blade appearance settings
+    pub grass_blade_config: GrassBladeConfig,
+
+    /// Tree type selection (for Forest tiles)
+    pub tree_type: TreeType,
+
+    /// Rock variant selection (for Mountain/Hill tiles)
+    pub rock_variant: RockVariant,
+
+    /// Water flow direction (for Water/River tiles)
+    pub water_flow_direction: WaterFlowDirection,
+
+    /// Foliage density slider value (0.0 to 2.0)
+    pub foliage_density: f32,
+
+    /// Snow coverage slider value (0.0 to 1.0)
+    pub snow_coverage: f32,
+}
+
+impl Default for TerrainEditorState {
+    fn default() -> Self {
+        Self {
+            grass_density: GrassDensity::Medium,
+            grass_blade_config_enabled: false,
+            grass_blade_config: GrassBladeConfig::default(),
+            tree_type: TreeType::Oak,
+            rock_variant: RockVariant::Smooth,
+            water_flow_direction: WaterFlowDirection::Still,
+            foliage_density: 1.0,
+            snow_coverage: 0.0,
+        }
+    }
+}
+
+impl TerrainEditorState {
+    /// Load state from TileVisualMetadata
+    ///
+    /// Synchronizes the editor state with the values stored in a tile's
+    /// visual metadata, using default values for any missing fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - The TileVisualMetadata to load from
+    ///
+    /// # Returns
+    ///
+    /// A new TerrainEditorState with values from the metadata or defaults
+    pub fn from_metadata(metadata: &TileVisualMetadata) -> Self {
+        let grass_blade_config_enabled = metadata.grass_blade_config.is_some();
+        let grass_blade_config = metadata
+            .grass_blade_config
+            .unwrap_or_else(GrassBladeConfig::default);
+
+        Self {
+            grass_density: metadata.grass_density(),
+            grass_blade_config_enabled,
+            grass_blade_config,
+            tree_type: metadata.tree_type(),
+            rock_variant: metadata.rock_variant(),
+            water_flow_direction: metadata.water_flow_direction(),
+            foliage_density: metadata.foliage_density(),
+            snow_coverage: metadata.snow_coverage(),
+        }
+    }
+
+    /// Apply state to TileVisualMetadata based on terrain type
+    ///
+    /// Writes only the terrain-specific fields relevant to the given terrain type.
+    /// This prevents irrelevant fields (e.g., tree_type on Grass tiles) from being set.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - Mutable reference to TileVisualMetadata to update
+    /// * `terrain_type` - The terrain type to determine which fields to apply
+    pub fn apply_to_metadata_for_terrain(
+        &self,
+        metadata: &mut TileVisualMetadata,
+        terrain_type: TerrainType,
+    ) {
+        match terrain_type {
+            TerrainType::Grass => {
+                metadata.grass_density = Some(self.grass_density);
+                metadata.foliage_density = Some(self.foliage_density);
+                metadata.grass_blade_config = if self.grass_blade_config_enabled {
+                    Some(self.grass_blade_config)
+                } else {
+                    None
+                };
+                // Don't set tree_type, rock_variant, water_flow_direction
+            }
+            TerrainType::Forest => {
+                metadata.tree_type = Some(self.tree_type);
+                metadata.foliage_density = Some(self.foliage_density);
+                metadata.snow_coverage = Some(self.snow_coverage);
+                metadata.grass_blade_config = None;
+                // Don't set grass_density, rock_variant, water_flow_direction
+            }
+            TerrainType::Mountain => {
+                metadata.rock_variant = Some(self.rock_variant);
+                metadata.snow_coverage = Some(self.snow_coverage);
+                metadata.grass_blade_config = None;
+                // Don't set grass_density, tree_type, water_flow_direction, foliage_density
+            }
+            TerrainType::Water | TerrainType::Swamp => {
+                metadata.water_flow_direction = Some(self.water_flow_direction);
+                metadata.grass_blade_config = None;
+                // Don't set grass_density, tree_type, rock_variant, foliage_density, snow_coverage
+            }
+            _ => {
+                metadata.grass_blade_config = None;
+                // For other terrain types (Ground, Stone, Dirt, Lava), don't set any terrain-specific fields
+            }
+        }
+    }
+
+    /// Apply state to TileVisualMetadata (legacy method)
+    ///
+    /// Writes all terrain-specific fields from the editor state into the
+    /// provided metadata. This includes all optional fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - Mutable reference to TileVisualMetadata to update
+    #[deprecated(
+        note = "Use apply_to_metadata_for_terrain instead to avoid setting irrelevant fields"
+    )]
+    pub fn apply_to_metadata(&self, metadata: &mut TileVisualMetadata) {
+        metadata.grass_density = Some(self.grass_density);
+        metadata.tree_type = Some(self.tree_type);
+        metadata.rock_variant = Some(self.rock_variant);
+        metadata.water_flow_direction = Some(self.water_flow_direction);
+        metadata.foliage_density = Some(self.foliage_density);
+        metadata.snow_coverage = Some(self.snow_coverage);
+        metadata.grass_blade_config = if self.grass_blade_config_enabled {
+            Some(self.grass_blade_config)
+        } else {
+            None
+        };
+    }
+
+    /// Clear terrain-specific fields from metadata
+    ///
+    /// Sets all terrain-specific fields in the metadata to None,
+    /// effectively removing any terrain-specific customization.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - Mutable reference to TileVisualMetadata to clear
+    pub fn clear_metadata(metadata: &mut TileVisualMetadata) {
+        metadata.grass_density = None;
+        metadata.tree_type = None;
+        metadata.rock_variant = None;
+        metadata.water_flow_direction = None;
+        metadata.foliage_density = None;
+        metadata.snow_coverage = None;
+        metadata.grass_blade_config = None;
     }
 }
 
@@ -739,6 +1376,10 @@ pub struct MapEditorState {
     pub show_metadata_editor: bool,
     /// Visual metadata editor state
     pub visual_editor: VisualMetadataEditor,
+    /// Terrain-specific editor state for inspector panel
+    pub terrain_editor_state: TerrainEditorState,
+    /// Current preset category filter
+    pub preset_category_filter: PresetCategory,
     /// Multi-tile selection for bulk editing
     pub selected_tiles: Vec<Position>,
     /// Selection mode (single vs multi)
@@ -773,6 +1414,8 @@ impl MapEditorState {
             npc_placement_editor: None,
             show_metadata_editor: false,
             visual_editor: VisualMetadataEditor::default(),
+            terrain_editor_state: TerrainEditorState::default(),
+            preset_category_filter: PresetCategory::All,
             selected_tiles: Vec::new(),
             multi_select_mode: false,
         }
@@ -798,6 +1441,79 @@ impl MapEditorState {
             for pos in self.selected_tiles.clone() {
                 self.apply_visual_metadata(pos, metadata);
             }
+        }
+    }
+
+    /// Apply terrain editor state to selected tiles
+    ///
+    /// Applies the current terrain-specific settings (grass density, tree type,
+    /// rock variant, water flow direction, foliage density, snow coverage) to
+    /// either the currently selected tile or all tiles in multi-select mode.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::campaign_builder::MapEditorState;
+    /// use antares::domain::world::{Map, Position};
+    ///
+    /// let mut editor = MapEditorState::new(Map::new(10, 10));
+    /// editor.selected_position = Some(Position::new(5, 5));
+    /// editor.apply_terrain_state_to_selection();
+    /// ```
+    pub fn apply_terrain_state_to_selection(&mut self) {
+        // Initialize metadata map if it doesn't exist
+        if self.metadata.tile_visual_metadata.is_none() {
+            self.metadata.tile_visual_metadata = Some(std::collections::HashMap::new());
+        }
+
+        if self.selected_tiles.is_empty() {
+            // If no multi-selection, apply to current selected position
+            if let Some(pos) = self.selected_position {
+                // Get the terrain type for this tile
+                if let Some(tile) = self.map.get_tile(pos) {
+                    let terrain_type = tile.terrain;
+
+                    // Update Metadata Map (Editor State)
+                    if let Some(metadata_map) = self.metadata.tile_visual_metadata.as_mut() {
+                        let metadata = metadata_map
+                            .entry(pos)
+                            .or_insert_with(TileVisualMetadata::default);
+                        self.terrain_editor_state
+                            .apply_to_metadata_for_terrain(metadata, terrain_type);
+                        self.has_changes = true;
+                    }
+
+                    // Update Actual Map Tile
+                    if let Some(tile) = self.map.get_tile_mut(pos) {
+                        self.terrain_editor_state
+                            .apply_to_metadata_for_terrain(&mut tile.visual, terrain_type);
+                    }
+                }
+            }
+        } else {
+            // Apply to all selected tiles
+            for pos in self.selected_tiles.clone() {
+                // Get the terrain type for this tile
+                if let Some(tile) = self.map.get_tile(pos) {
+                    let terrain_type = tile.terrain;
+
+                    // Update Metadata Map (Editor State)
+                    if let Some(metadata_map) = self.metadata.tile_visual_metadata.as_mut() {
+                        let metadata = metadata_map
+                            .entry(pos)
+                            .or_insert_with(TileVisualMetadata::default);
+                        self.terrain_editor_state
+                            .apply_to_metadata_for_terrain(metadata, terrain_type);
+                    }
+
+                    // Update Actual Map Tile
+                    if let Some(tile) = self.map.get_tile_mut(pos) {
+                        self.terrain_editor_state
+                            .apply_to_metadata_for_terrain(&mut tile.visual, terrain_type);
+                    }
+                }
+            }
+            self.has_changes = true;
         }
     }
 
@@ -918,6 +1634,19 @@ impl MapEditorState {
     pub fn apply_metadata(&mut self) {
         self.map.name = self.metadata.name.clone();
         self.map.description = self.metadata.description.clone();
+    }
+
+    /// Load visual metadata into the editor from the currently selected position,
+    /// but only when multi-select mode is not active. This prevents bulk-selection
+    /// clicks from accidentally overwriting the editor's staged values.
+    pub fn maybe_load_visual_from_selected_position(&mut self) {
+        if let Some(pos) = self.selected_position {
+            if !self.multi_select_mode {
+                if let Some(tile) = self.map.get_tile(pos) {
+                    self.visual_editor.load_from_tile(tile);
+                }
+            }
+        }
     }
 
     /// Erases a tile (resets to default)
@@ -1185,6 +1914,17 @@ pub struct EventEditorState {
     pub recruitable_dialogue_id: String,
     // Inn fields
     pub innkeeper_id_input_buffer: String,
+    // Furniture fields
+    pub furniture_type: FurnitureType,
+    pub furniture_rotation_y: String,
+    pub furniture_scale: f32,
+    pub furniture_material: FurnitureMaterial,
+    pub furniture_lit: bool,
+    pub furniture_locked: bool,
+    pub furniture_blocking: bool,
+    // Color tint fields for furniture customization
+    pub furniture_use_color_tint: bool,
+    pub furniture_color_tint: [f32; 3],
 
     // Autocomplete input buffers
     pub trap_effect_input_buffer: String,
@@ -1217,6 +1957,15 @@ impl Default for EventEditorState {
             recruit_character_id: String::new(),
             recruitable_dialogue_id: String::new(),
             innkeeper_id_input_buffer: String::new(),
+            furniture_type: FurnitureType::Throne,
+            furniture_rotation_y: String::from("0"),
+            furniture_scale: 1.0,
+            furniture_material: FurnitureMaterial::default(),
+            furniture_lit: false,
+            furniture_locked: false,
+            furniture_blocking: false,
+            furniture_use_color_tint: false,
+            furniture_color_tint: [1.0, 1.0, 1.0],
             trap_effect_input_buffer: String::new(),
             teleport_map_input_buffer: String::new(),
             npc_id_input_buffer: String::new(),
@@ -1235,6 +1984,7 @@ pub enum EventType {
     NpcDialogue,
     RecruitableCharacter,
     EnterInn,
+    Furniture,
 }
 
 impl Default for EventType {
@@ -1254,6 +2004,7 @@ impl EventType {
             EventType::NpcDialogue => "NPC Dialogue",
             EventType::RecruitableCharacter => "Recruitable Character",
             EventType::EnterInn => "Enter Inn",
+            EventType::Furniture => "Furniture",
         }
     }
 
@@ -1267,6 +2018,7 @@ impl EventType {
             EventType::NpcDialogue => "💬",
             EventType::RecruitableCharacter => "🤝",
             EventType::EnterInn => "🏨",
+            EventType::Furniture => "🪑",
         }
     }
 
@@ -1294,6 +2046,7 @@ impl EventType {
             EventType::NpcDialogue => EVENT_COLOR_NPC_DIALOGUE,
             EventType::RecruitableCharacter => EVENT_COLOR_RECRUITABLE,
             EventType::EnterInn => EVENT_COLOR_ENTER_INN,
+            EventType::Furniture => EVENT_COLOR_FURNITURE,
         }
     }
 
@@ -1307,6 +2060,7 @@ impl EventType {
             EventType::NpcDialogue,
             EventType::RecruitableCharacter,
             EventType::EnterInn,
+            EventType::Furniture,
         ]
     }
 }
@@ -1439,6 +2193,31 @@ impl EventEditorState {
                     innkeeper_id,
                 })
             }
+            EventType::Furniture => {
+                let rotation_y = if self.furniture_rotation_y.is_empty() {
+                    None
+                } else {
+                    self.furniture_rotation_y.parse::<f32>().ok()
+                };
+                let color_tint = if self.furniture_use_color_tint {
+                    Some(self.furniture_color_tint)
+                } else {
+                    None
+                };
+                Ok(MapEvent::Furniture {
+                    name: self.name.clone(),
+                    furniture_type: self.furniture_type,
+                    rotation_y,
+                    scale: self.furniture_scale,
+                    material: self.furniture_material,
+                    flags: antares::domain::world::FurnitureFlags {
+                        lit: self.furniture_lit,
+                        locked: self.furniture_locked,
+                        blocking: self.furniture_blocking,
+                    },
+                    color_tint,
+                })
+            }
         }
     }
 
@@ -1562,6 +2341,29 @@ impl EventEditorState {
                 s.name = name.clone();
                 s.description = description.clone();
                 s.innkeeper_id_input_buffer = innkeeper_id.clone();
+            }
+            MapEvent::Furniture {
+                name,
+                furniture_type,
+                rotation_y,
+                scale,
+                material,
+                flags,
+                color_tint,
+            } => {
+                s.event_type = EventType::Furniture;
+                s.name = name.clone();
+                s.furniture_type = *furniture_type;
+                s.furniture_rotation_y = rotation_y.map(|r| r.to_string()).unwrap_or_default();
+                s.furniture_scale = *scale;
+                s.furniture_material = *material;
+                s.furniture_lit = flags.lit;
+                s.furniture_locked = flags.locked;
+                s.furniture_blocking = flags.blocking;
+                if let Some(tint) = color_tint {
+                    s.furniture_use_color_tint = true;
+                    s.furniture_color_tint = *tint;
+                }
             }
         }
         s
@@ -1748,6 +2550,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                                 EventType::RecruitableCharacter
                             }
                             MapEvent::EnterInn { .. } => EventType::EnterInn,
+                            MapEvent::Furniture { .. } => EventType::Furniture,
                         })
                     } else {
                         None
@@ -1837,6 +2640,20 @@ impl<'a> Widget for MapGridWidget<'a> {
                     }
 
                     self.state.selected_position = Some(pos);
+
+                    // Synchronize terrain editor state with selected tile (unless multi-selecting)
+                    if !self.state.multi_select_mode {
+                        if let Some(metadata_map) =
+                            self.state.metadata.tile_visual_metadata.as_ref()
+                        {
+                            if let Some(metadata) = metadata_map.get(&pos) {
+                                self.state.terrain_editor_state =
+                                    TerrainEditorState::from_metadata(metadata);
+                            } else {
+                                self.state.terrain_editor_state = TerrainEditorState::default();
+                            }
+                        }
+                    }
 
                     // Apply current tool
                     match self.state.current_tool {
@@ -1948,6 +2765,7 @@ impl<'a> Widget for MapPreviewWidget<'a> {
                         MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
                         MapEvent::RecruitableCharacter { .. } => EventType::RecruitableCharacter,
                         MapEvent::EnterInn { .. } => EventType::EnterInn,
+                        MapEvent::Furniture { .. } => EventType::Furniture,
                     });
                     let has_npc_placement =
                         self.map.npc_placements.iter().any(|p| p.position == pos);
@@ -3118,6 +3936,34 @@ impl MapsEditorState {
                         } => {
                             ui.label(format!("Inn Entry: {} ({})", innkeeper_id, name));
                         }
+                        MapEvent::Furniture {
+                            furniture_type,
+                            rotation_y,
+                            scale,
+                            material,
+                            flags,
+                            ..
+                        } => {
+                            ui.label(format!(
+                                "Furniture: {} {} {}° scale={} material={}",
+                                furniture_type.icon(),
+                                furniture_type.name(),
+                                rotation_y
+                                    .map(|r| r.to_string())
+                                    .unwrap_or_else(|| "0".to_string()),
+                                scale,
+                                material.name()
+                            ));
+                            if flags.lit {
+                                ui.label("  🔥 Lit");
+                            }
+                            if flags.locked {
+                                ui.label("  🔒 Locked");
+                            }
+                            if flags.blocking {
+                                ui.label("  ⛔ Blocks movement");
+                            }
+                        }
                     }
 
                     ui.horizontal(|ui| {
@@ -3163,6 +4009,76 @@ impl MapsEditorState {
                 }
 
                 Self::show_visual_metadata_editor(ui, editor, pos);
+            });
+
+            // Terrain-specific controls
+            ui.separator();
+            ui.group(|ui| {
+                ui.heading("Terrain-Specific Settings");
+
+                // Multi-select info
+                if !editor.selected_tiles.is_empty() {
+                    ui.label(format!(
+                        "📌 {} tiles selected for bulk edit",
+                        editor.selected_tiles.len()
+                    ));
+                    ui.separator();
+                }
+
+                if let Some(tile) = editor.map.get_tile(pos) {
+                    let terrain_type = tile.terrain;
+
+                    Self::show_terrain_specific_controls(
+                        ui,
+                        terrain_type,
+                        &mut editor.terrain_editor_state,
+                    );
+
+                    ui.separator();
+
+                    if ui.button("🗑️ Clear Terrain Properties").clicked() {
+                        if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
+                            if let Some(metadata) = metadata_map.get_mut(&pos) {
+                                TerrainEditorState::clear_metadata(metadata);
+                            }
+                        }
+                        editor.terrain_editor_state = TerrainEditorState::default();
+                    }
+                }
+            });
+
+            // Visual preset palette
+            ui.separator();
+            ui.group(|ui| {
+                if let Some(selected_preset) = Self::show_preset_palette(ui, editor) {
+                    // Initialize metadata map if it doesn't exist
+                    if editor.metadata.tile_visual_metadata.is_none() {
+                        editor.metadata.tile_visual_metadata =
+                            Some(std::collections::HashMap::new());
+                    }
+
+                    if !editor.selected_tiles.is_empty() {
+                        // Multi-select active: apply to all selected tiles
+                        if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
+                            for tile_pos in &editor.selected_tiles {
+                                let metadata = metadata_map
+                                    .entry(*tile_pos)
+                                    .or_insert_with(TileVisualMetadata::default);
+                                *metadata = selected_preset.to_metadata();
+                            }
+                            editor.has_changes = true;
+                        }
+                    } else {
+                        // Single selection: apply to current tile
+                        if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
+                            let metadata = metadata_map
+                                .entry(pos)
+                                .or_insert_with(TileVisualMetadata::default);
+                            *metadata = selected_preset.to_metadata();
+                            editor.has_changes = true;
+                        }
+                    }
+                }
             });
         } else {
             ui.label("No tile selected");
@@ -3239,6 +4155,7 @@ impl MapsEditorState {
             MapEvent::EnterInn {
                 name, description, ..
             } => (name.clone(), description.clone()),
+            MapEvent::Furniture { name, .. } => (name.clone(), String::new()),
         }
     }
 
@@ -3582,6 +4499,211 @@ impl MapsEditorState {
                         }
                     });
                 }
+                EventType::Furniture => {
+                    // Furniture type selection
+                    egui::ComboBox::from_id_salt("furniture_type_combo")
+                        .selected_text(event_editor.furniture_type.name())
+                        .show_ui(ui, |ui| {
+                            for furniture_type in FurnitureType::all() {
+                                if ui
+                                    .selectable_label(
+                                        event_editor.furniture_type == *furniture_type,
+                                        format!(
+                                            "{} {}",
+                                            furniture_type.icon(),
+                                            furniture_type.name()
+                                        ),
+                                    )
+                                    .clicked()
+                                {
+                                    event_editor.furniture_type = *furniture_type;
+                                    editor.has_changes = true;
+                                }
+                            }
+                        });
+
+                    // Rotation input
+                    ui.label("Rotation Y (degrees):");
+                    if ui
+                        .text_edit_singleline(&mut event_editor.furniture_rotation_y)
+                        .changed()
+                    {
+                        editor.has_changes = true;
+                    }
+
+                    // Scale slider
+                    ui.label("Scale:");
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut event_editor.furniture_scale, 0.5..=2.0)
+                                .text("x")
+                                .step_by(0.1),
+                        )
+                        .changed()
+                    {
+                        editor.has_changes = true;
+                    }
+
+                    // Material selection
+                    ui.label("Material:");
+                    egui::ComboBox::from_id_salt("furniture_material_combo")
+                        .selected_text(event_editor.furniture_material.name())
+                        .show_ui(ui, |ui| {
+                            for material in FurnitureMaterial::all() {
+                                if ui
+                                    .selectable_label(
+                                        event_editor.furniture_material == *material,
+                                        material.name(),
+                                    )
+                                    .clicked()
+                                {
+                                    event_editor.furniture_material = *material;
+                                    editor.has_changes = true;
+                                }
+                            }
+                        });
+
+                    // Color tint customization
+                    ui.separator();
+                    if ui
+                        .checkbox(
+                            &mut event_editor.furniture_use_color_tint,
+                            "Custom Color Tint",
+                        )
+                        .changed()
+                    {
+                        editor.has_changes = true;
+                    }
+
+                    if event_editor.furniture_use_color_tint {
+                        ui.horizontal(|ui| {
+                            ui.label("Color:");
+
+                            // RGB sliders
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label("R:");
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut event_editor.furniture_color_tint[0],
+                                                0.0..=1.0,
+                                            )
+                                            .step_by(0.01),
+                                        )
+                                        .changed()
+                                    {
+                                        editor.has_changes = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("G:");
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut event_editor.furniture_color_tint[1],
+                                                0.0..=1.0,
+                                            )
+                                            .step_by(0.01),
+                                        )
+                                        .changed()
+                                    {
+                                        editor.has_changes = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("B:");
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut event_editor.furniture_color_tint[2],
+                                                0.0..=1.0,
+                                            )
+                                            .step_by(0.01),
+                                        )
+                                        .changed()
+                                    {
+                                        editor.has_changes = true;
+                                    }
+                                });
+                            });
+
+                            // Color preview
+                            let color = egui::Color32::from_rgb(
+                                (event_editor.furniture_color_tint[0] * 255.0) as u8,
+                                (event_editor.furniture_color_tint[1] * 255.0) as u8,
+                                (event_editor.furniture_color_tint[2] * 255.0) as u8,
+                            );
+                            ui.colored_label(color, "██ Preview");
+                        });
+                    }
+
+                    // Appearance presets dropdown
+                    ui.separator();
+                    ui.label("Appearance Presets:");
+                    egui::ComboBox::from_id_salt("furniture_preset_combo")
+                        .selected_text("Select Preset...")
+                        .show_ui(ui, |ui| {
+                            for preset in event_editor.furniture_type.default_presets() {
+                                if ui.selectable_label(false, preset.name).clicked() {
+                                    event_editor.furniture_material = preset.material;
+                                    event_editor.furniture_scale = preset.scale;
+                                    if let Some(tint) = preset.color_tint {
+                                        event_editor.furniture_use_color_tint = true;
+                                        event_editor.furniture_color_tint = tint;
+                                    } else {
+                                        event_editor.furniture_use_color_tint = false;
+                                    }
+                                    editor.has_changes = true;
+                                }
+                            }
+                        });
+
+                    // Furniture-specific flags
+                    if event_editor.furniture_type == FurnitureType::Torch {
+                        if ui
+                            .checkbox(&mut event_editor.furniture_lit, "Lit (emissive)")
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    }
+
+                    if event_editor.furniture_type == FurnitureType::Chest {
+                        if ui
+                            .checkbox(&mut event_editor.furniture_locked, "Locked")
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    }
+
+                    // Blocking flag applies to all furniture
+                    if ui
+                        .checkbox(&mut event_editor.furniture_blocking, "Blocks movement")
+                        .changed()
+                    {
+                        editor.has_changes = true;
+                    }
+
+                    // Show rotation slider for visual feedback
+                    if let Ok(rotation) = event_editor.furniture_rotation_y.parse::<f32>() {
+                        ui.horizontal(|ui| {
+                            let mut slider_value = rotation;
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut slider_value, 0.0..=360.0)
+                                        .text("°")
+                                        .step_by(1.0),
+                                )
+                                .changed()
+                            {
+                                event_editor.furniture_rotation_y = slider_value.to_string();
+                                editor.has_changes = true;
+                            }
+                        });
+                    }
+                }
             }
 
             ui.separator();
@@ -3877,12 +4999,15 @@ impl MapsEditorState {
                             let metadata = preset.to_metadata();
                             if editor.multi_select_mode && !editor.selected_tiles.is_empty() {
                                 editor.apply_visual_metadata_to_selection(&metadata);
+                                // When bulk-applying a preset, reflect it in the editor so subsequent "Apply"
+                                // uses the same metadata rather than being overwritten by selection clicks.
+                                editor.visual_editor.load_from_metadata(&metadata);
                             } else {
                                 editor.apply_visual_metadata(pos, &metadata);
-                            }
-                            // Update editor state to reflect preset
-                            if let Some(tile) = editor.map.get_tile(pos) {
-                                editor.visual_editor.load_from_tile(tile);
+                                // For single-selection workflows, load the tile's metadata into the editor.
+                                if let Some(tile) = editor.map.get_tile(pos) {
+                                    editor.visual_editor.load_from_tile(tile);
+                                }
                             }
                         }
                     }
@@ -3892,9 +5017,7 @@ impl MapsEditorState {
         ui.separator();
 
         // Load tile's current visual metadata into editor if selection changed
-        if let Some(tile) = editor.map.get_tile(pos) {
-            editor.visual_editor.load_from_tile(tile);
-        }
+        editor.maybe_load_visual_from_selected_position();
 
         // Height
         ui.horizontal(|ui| {
@@ -4005,12 +5128,20 @@ impl MapsEditorState {
             if ui.button(&apply_text).clicked() {
                 let visual_metadata = editor.visual_editor.to_metadata();
                 editor.apply_visual_metadata_to_selection(&visual_metadata);
+                editor.apply_terrain_state_to_selection();
+
+                // Reset editor UI state after applying
+                editor.visual_editor.reset();
+                editor.terrain_editor_state = TerrainEditorState::default();
             }
 
             if ui.button("Reset to Defaults").clicked() {
                 let default_metadata = TileVisualMetadata::default();
                 editor.apply_visual_metadata_to_selection(&default_metadata);
+                // Also clear terrain metadata (default metadata effectively clears visual representation)
+
                 editor.visual_editor.reset();
+                editor.terrain_editor_state = TerrainEditorState::default();
             }
         });
 
@@ -4040,6 +5171,337 @@ impl MapsEditorState {
         }
     }
 
+    /// Show terrain-specific inspector controls based on selected tile's terrain type
+    ///
+    /// Displays context-sensitive controls that vary by terrain type:
+    /// - Grassland/Plains: grass_density dropdown, foliage_density slider
+    /// - Forest: tree_type dropdown, foliage_density slider, snow_coverage slider
+    /// - Mountain/Hill: rock_variant dropdown, snow_coverage slider
+    /// - Water/Swamp: water_flow_direction dropdown
+    /// - Desert/Snow: snow_coverage slider only
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - egui UI context
+    /// * `terrain_type` - The TerrainType of the selected tile
+    /// * `state` - Mutable reference to TerrainEditorState
+    ///
+    /// # Returns
+    ///
+    /// `true` if any control was modified, `false` otherwise
+    fn show_terrain_specific_controls(
+        ui: &mut egui::Ui,
+        terrain_type: TerrainType,
+        state: &mut TerrainEditorState,
+    ) -> bool {
+        let mut changed = false;
+
+        ui.heading("Terrain-Specific Settings");
+        ui.separator();
+
+        match terrain_type {
+            TerrainType::Grass => {
+                // Grass density dropdown
+                ui.label("Grass Density:");
+                let mut density_index = match state.grass_density {
+                    GrassDensity::None => 0,
+                    GrassDensity::Low => 1,
+                    GrassDensity::Medium => 2,
+                    GrassDensity::High => 3,
+                    GrassDensity::VeryHigh => 4,
+                };
+
+                let old_index = density_index;
+                egui::ComboBox::from_id_salt("grass_density_box")
+                    .selected_text(format!("{:?}", state.grass_density))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut density_index, 0, "None");
+                        ui.selectable_value(&mut density_index, 1, "Low");
+                        ui.selectable_value(&mut density_index, 2, "Medium");
+                        ui.selectable_value(&mut density_index, 3, "High");
+                        ui.selectable_value(&mut density_index, 4, "VeryHigh");
+                    });
+
+                if old_index != density_index {
+                    changed = true;
+                    state.grass_density = match density_index {
+                        0 => GrassDensity::None,
+                        1 => GrassDensity::Low,
+                        2 => GrassDensity::Medium,
+                        3 => GrassDensity::High,
+                        4 => GrassDensity::VeryHigh,
+                        _ => GrassDensity::Medium,
+                    };
+                }
+
+                ui.label("Foliage Density:");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.foliage_density, 0.0..=2.0)
+                            .text("density")
+                            .step_by(0.1),
+                    )
+                    .changed();
+
+                ui.separator();
+                changed |= ui
+                    .checkbox(
+                        &mut state.grass_blade_config_enabled,
+                        "Custom Grass Blade Config",
+                    )
+                    .changed();
+
+                if state.grass_blade_config_enabled {
+                    ui.label("Blade Length:");
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut state.grass_blade_config.length, 0.5..=2.0)
+                                .text("x")
+                                .step_by(0.05),
+                        )
+                        .changed();
+
+                    ui.label("Blade Width:");
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut state.grass_blade_config.width, 0.5..=2.0)
+                                .text("x")
+                                .step_by(0.05),
+                        )
+                        .changed();
+
+                    ui.label("Blade Tilt (radians):");
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut state.grass_blade_config.tilt, 0.0..=0.5)
+                                .text("rad")
+                                .step_by(0.01),
+                        )
+                        .changed();
+
+                    ui.label("Blade Curve:");
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut state.grass_blade_config.curve, 0.0..=1.0)
+                                .text("curve")
+                                .step_by(0.05),
+                        )
+                        .changed();
+
+                    ui.label("Color Variation:");
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(
+                                &mut state.grass_blade_config.color_variation,
+                                0.0..=1.0,
+                            )
+                            .text("variation")
+                            .step_by(0.05),
+                        )
+                        .changed();
+                }
+            }
+
+            TerrainType::Forest => {
+                // Tree type dropdown
+                ui.label("Tree Type:");
+                let mut tree_index = match state.tree_type {
+                    TreeType::Oak => 0,
+                    TreeType::Pine => 1,
+                    TreeType::Dead => 2,
+                    TreeType::Palm => 3,
+                    TreeType::Willow => 4,
+                    TreeType::Birch => 5,
+                    TreeType::Shrub => 6,
+                };
+
+                let old_index = tree_index;
+                egui::ComboBox::from_id_salt("tree_type_box")
+                    .selected_text(format!("{:?}", state.tree_type))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut tree_index, 0, "Oak");
+                        ui.selectable_value(&mut tree_index, 1, "Pine");
+                        ui.selectable_value(&mut tree_index, 2, "Dead");
+                        ui.selectable_value(&mut tree_index, 3, "Palm");
+                        ui.selectable_value(&mut tree_index, 4, "Willow");
+                        ui.selectable_value(&mut tree_index, 5, "Birch");
+                        ui.selectable_value(&mut tree_index, 6, "Shrub");
+                    });
+
+                if old_index != tree_index {
+                    changed = true;
+                    state.tree_type = match tree_index {
+                        0 => TreeType::Oak,
+                        1 => TreeType::Pine,
+                        2 => TreeType::Dead,
+                        3 => TreeType::Palm,
+                        4 => TreeType::Willow,
+                        5 => TreeType::Birch,
+                        6 => TreeType::Shrub,
+                        _ => TreeType::Oak,
+                    };
+                }
+
+                ui.label("Foliage Density:");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.foliage_density, 0.0..=2.0)
+                            .text("density")
+                            .step_by(0.1),
+                    )
+                    .changed();
+
+                ui.label("Snow Coverage:");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.snow_coverage, 0.0..=1.0)
+                            .text("coverage")
+                            .step_by(0.05),
+                    )
+                    .changed();
+            }
+
+            TerrainType::Mountain => {
+                // Rock variant dropdown
+                ui.label("Rock Variant:");
+                let mut rock_index = match state.rock_variant {
+                    RockVariant::Smooth => 0,
+                    RockVariant::Jagged => 1,
+                    RockVariant::Layered => 2,
+                    RockVariant::Crystal => 3,
+                };
+
+                let old_index = rock_index;
+                egui::ComboBox::from_id_salt("rock_variant_box")
+                    .selected_text(format!("{:?}", state.rock_variant))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut rock_index, 0, "Smooth");
+                        ui.selectable_value(&mut rock_index, 1, "Jagged");
+                        ui.selectable_value(&mut rock_index, 2, "Layered");
+                        ui.selectable_value(&mut rock_index, 3, "Crystal");
+                    });
+
+                if old_index != rock_index {
+                    changed = true;
+                    state.rock_variant = match rock_index {
+                        0 => RockVariant::Smooth,
+                        1 => RockVariant::Jagged,
+                        2 => RockVariant::Layered,
+                        3 => RockVariant::Crystal,
+                        _ => RockVariant::Smooth,
+                    };
+                }
+
+                ui.label("Snow Coverage:");
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut state.snow_coverage, 0.0..=1.0)
+                            .text("coverage")
+                            .step_by(0.05),
+                    )
+                    .changed();
+            }
+
+            TerrainType::Water | TerrainType::Swamp => {
+                // Water flow direction dropdown
+                ui.label("Water Flow Direction:");
+                let mut flow_index = match state.water_flow_direction {
+                    WaterFlowDirection::Still => 0,
+                    WaterFlowDirection::North => 1,
+                    WaterFlowDirection::South => 2,
+                    WaterFlowDirection::East => 3,
+                    WaterFlowDirection::West => 4,
+                };
+
+                let old_index = flow_index;
+                egui::ComboBox::from_id_salt("water_flow_box")
+                    .selected_text(format!("{:?}", state.water_flow_direction))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut flow_index, 0, "Still");
+                        ui.selectable_value(&mut flow_index, 1, "North");
+                        ui.selectable_value(&mut flow_index, 2, "South");
+                        ui.selectable_value(&mut flow_index, 3, "East");
+                        ui.selectable_value(&mut flow_index, 4, "West");
+                    });
+
+                if old_index != flow_index {
+                    changed = true;
+                    state.water_flow_direction = match flow_index {
+                        0 => WaterFlowDirection::Still,
+                        1 => WaterFlowDirection::North,
+                        2 => WaterFlowDirection::South,
+                        3 => WaterFlowDirection::East,
+                        4 => WaterFlowDirection::West,
+                        _ => WaterFlowDirection::Still,
+                    };
+                }
+            }
+
+            _ => {
+                ui.label("No terrain-specific controls for this terrain type.");
+            }
+        }
+
+        changed
+    }
+
+    /// Show visual preset palette with category filtering
+    ///
+    /// Displays a grid of preset buttons organized by category with filter tabs
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - egui UI context
+    /// * `state` - Mutable reference to MapEditorState
+    ///
+    /// # Returns
+    ///
+    /// `Option<VisualPreset>` if a preset was clicked, None otherwise
+    fn show_preset_palette(ui: &mut egui::Ui, state: &mut MapEditorState) -> Option<VisualPreset> {
+        let mut selected_preset = None;
+
+        ui.heading("Visual Presets");
+
+        // Category filter tabs
+        ui.horizontal(|ui| {
+            for category in PresetCategory::all() {
+                if ui
+                    .selectable_label(
+                        state.preset_category_filter == *category,
+                        category.display_name(),
+                    )
+                    .clicked()
+                {
+                    state.preset_category_filter = *category;
+                }
+            }
+        });
+
+        ui.separator();
+
+        // Preset grid (3 columns)
+        let presets = VisualPreset::by_category(state.preset_category_filter);
+
+        egui::Grid::new("preset_palette_grid")
+            .num_columns(3)
+            .spacing([8.0, 8.0])
+            .show(ui, |ui| {
+                for (idx, preset) in presets.iter().enumerate() {
+                    if ui.button(preset.name()).clicked() {
+                        selected_preset = Some(*preset);
+                    }
+
+                    // New row every 3 presets
+                    if (idx + 1) % 3 == 0 {
+                        ui.end_row();
+                    }
+                }
+            });
+
+        selected_preset
+    }
+
+    /// Show visual metadata editor
     fn show_import_dialog_window(
         &mut self,
         ctx: &egui::Context,
@@ -4681,7 +6143,7 @@ mod tests {
     #[test]
     fn test_event_type_all() {
         let types = EventType::all();
-        assert_eq!(types.len(), 8);
+        assert_eq!(types.len(), 9);
         assert!(types.contains(&EventType::Encounter));
         assert!(types.contains(&EventType::Treasure));
         assert!(types.contains(&EventType::Teleport));
@@ -4690,6 +6152,7 @@ mod tests {
         assert!(types.contains(&EventType::NpcDialogue));
         assert!(types.contains(&EventType::RecruitableCharacter));
         assert!(types.contains(&EventType::EnterInn));
+        assert!(types.contains(&EventType::Furniture));
     }
 
     #[test]
@@ -4703,6 +6166,99 @@ mod tests {
         assert!(ron.contains("id:"));
         assert!(ron.contains("width:"));
         assert!(ron.contains("height:"));
+    }
+
+    #[test]
+    fn test_multi_select_preserves_visual_editor() {
+        let map = Map::new(1, "Test Map".to_string(), "Test".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos_a = Position::new(0, 0);
+        let pos_b = Position::new(1, 1);
+        let pos_c = Position::new(2, 2);
+
+        // Simulate applying a preset to a single tile and loading it into the editor
+        let preset_md = VisualPreset::ShortGrass.to_metadata();
+        editor.apply_visual_metadata(pos_a, &preset_md);
+        if let Some(tile) = editor.map.get_tile(pos_a) {
+            editor.visual_editor.load_from_tile(tile);
+        }
+
+        // Editor should reflect the preset
+        assert_eq!(editor.visual_editor.to_metadata(), preset_md);
+
+        // Enter multi-select and add other tiles (simulate clicking them)
+        editor.toggle_multi_select_mode();
+        assert!(editor.multi_select_mode);
+
+        editor.toggle_tile_selection(pos_b);
+        editor.selected_position = Some(pos_b);
+
+        editor.toggle_tile_selection(pos_c);
+        editor.selected_position = Some(pos_c);
+
+        // Simulate UI attempting to load tile metadata on selection change while multi-select is active.
+        // This should NOT overwrite the editor's current pending metadata (the preset).
+        editor.maybe_load_visual_from_selected_position();
+        assert_eq!(editor.visual_editor.to_metadata(), preset_md);
+
+        // Now toggle multi-select off (user finishes selection). When the editor attempts to load
+        // the selected tile now (single-select semantics), it should load the tile's metadata.
+        editor.toggle_multi_select_mode();
+        assert!(!editor.multi_select_mode);
+        // Ensure the selected_position remains set to the last clicked tile for loading.
+        editor.selected_position = Some(pos_c);
+        editor.maybe_load_visual_from_selected_position();
+
+        // The tile at pos_c has not been modified (we didn't apply the preset yet), so it should
+        // reflect the default metadata.
+        assert_eq!(
+            editor.visual_editor.to_metadata(),
+            TileVisualMetadata::default()
+        );
+
+        // Re-enable multi-select, select tiles and apply the preset to them to verify the apply path.
+        editor.toggle_multi_select_mode();
+        assert!(editor.multi_select_mode);
+        editor.toggle_tile_selection(pos_b);
+        editor.toggle_tile_selection(pos_c);
+        editor.apply_visual_metadata_to_selection(&preset_md);
+
+        // Verify selected tiles received the preset metadata
+        let tile_b = editor.map.get_tile(pos_b).expect("Tile B exists");
+        let tile_c = editor.map.get_tile(pos_c).expect("Tile C exists");
+        assert_eq!(tile_b.visual, preset_md);
+        assert_eq!(tile_c.visual, preset_md);
+    }
+
+    #[test]
+    fn test_preset_application_in_multi_select_mode_updates_visual_editor() {
+        let map = Map::new(1, "Test Map".to_string(), "Test".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos_b = Position::new(1, 1);
+        let pos_c = Position::new(2, 2);
+
+        // Enable multi-select and select tiles
+        editor.toggle_multi_select_mode();
+        editor.toggle_tile_selection(pos_b);
+        editor.toggle_tile_selection(pos_c);
+        assert!(editor.multi_select_mode);
+        assert_eq!(editor.selected_tiles.len(), 2);
+
+        // Apply preset while in multi-select mode (simulate pressing preset button)
+        let preset_md = VisualPreset::ShortGrass.to_metadata();
+        editor.apply_visual_metadata_to_selection(&preset_md);
+        editor.visual_editor.load_from_metadata(&preset_md);
+
+        // Verify tiles were updated
+        let tile_b = editor.map.get_tile(pos_b).expect("Tile B exists");
+        let tile_c = editor.map.get_tile(pos_c).expect("Tile C exists");
+        assert_eq!(tile_b.visual, preset_md);
+        assert_eq!(tile_c.visual, preset_md);
+
+        // Editor should reflect applied preset
+        assert_eq!(editor.visual_editor.to_metadata(), preset_md);
     }
 
     #[test]
@@ -4769,6 +6325,162 @@ mod tests {
 
         assert_eq!(maps[0].name, "Synchronized Map");
         assert_eq!(maps[0].description, "Synchronized description");
+    }
+
+    #[test]
+    fn test_apply_button_includes_terrain_state() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Select a position
+        let pos = Position::new(5, 5);
+        state.selected_position = Some(pos);
+
+        // Set terrain editor state
+        state.terrain_editor_state.grass_density = GrassDensity::High;
+        state.terrain_editor_state.tree_type = TreeType::Pine;
+        state.terrain_editor_state.foliage_density = 1.5;
+        state.terrain_editor_state.snow_coverage = 0.8;
+        state.terrain_editor_state.grass_blade_config_enabled = true;
+        state.terrain_editor_state.grass_blade_config = GrassBladeConfig {
+            length: 1.4,
+            width: 0.9,
+            tilt: 0.4,
+            curve: 0.5,
+            color_variation: 0.3,
+        };
+
+        // Apply terrain state
+        state.apply_terrain_state_to_selection();
+
+        // Verify metadata was updated
+        let metadata = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .and_then(|map| map.get(&pos))
+            .expect("Metadata should exist for position");
+
+        assert_eq!(metadata.grass_density, Some(GrassDensity::High));
+        assert_eq!(metadata.tree_type, Some(TreeType::Pine));
+        assert_eq!(metadata.foliage_density, Some(1.5));
+        assert_eq!(metadata.snow_coverage, Some(0.8));
+        assert_eq!(
+            metadata.grass_blade_config,
+            Some(GrassBladeConfig {
+                length: 1.4,
+                width: 0.9,
+                tilt: 0.4,
+                curve: 0.5,
+                color_variation: 0.3,
+            })
+        );
+        assert!(state.has_changes);
+    }
+
+    #[test]
+    fn test_apply_terrain_to_multiple_tiles() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Select multiple tiles
+        let pos1 = Position::new(2, 3);
+        let pos2 = Position::new(4, 5);
+        let pos3 = Position::new(6, 7);
+        state.selected_tiles = vec![pos1, pos2, pos3];
+
+        // Set terrain editor state
+        state.terrain_editor_state.grass_density = GrassDensity::Low;
+        state.terrain_editor_state.tree_type = TreeType::Oak;
+
+        // Apply terrain state
+        state.apply_terrain_state_to_selection();
+
+        // Verify all tiles were updated
+        let metadata_map = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .expect("Metadata map should exist");
+
+        for pos in [pos1, pos2, pos3] {
+            let metadata = metadata_map
+                .get(&pos)
+                .expect(&format!("Metadata should exist for position {:?}", pos));
+            assert_eq!(metadata.grass_density, Some(GrassDensity::Low));
+            assert_eq!(metadata.tree_type, Some(TreeType::Oak));
+        }
+
+        assert!(state.has_changes);
+    }
+
+    #[test]
+    fn test_apply_preset_logic() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Select multiple tiles
+        let pos1 = Position::new(2, 3);
+        let pos2 = Position::new(4, 5);
+        state.selected_tiles = vec![pos1, pos2];
+
+        // Simulate "Tall Wall" preset selection
+        let preset = VisualPreset::TallWall;
+
+        // MANUALLY execute the logic we added to the UI block
+        // Initialize metadata map
+        if state.metadata.tile_visual_metadata.is_none() {
+            state.metadata.tile_visual_metadata = Some(std::collections::HashMap::new());
+        }
+
+        if !state.selected_tiles.is_empty() {
+            if let Some(metadata_map) = state.metadata.tile_visual_metadata.as_mut() {
+                for tile_pos in &state.selected_tiles {
+                    let metadata = metadata_map
+                        .entry(*tile_pos)
+                        .or_insert_with(TileVisualMetadata::default);
+                    *metadata = preset.to_metadata();
+                }
+                state.has_changes = true;
+            }
+        }
+
+        // Verify
+        let metadata_map = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .expect("Metadata map should exist");
+
+        let meta1 = metadata_map.get(&pos1).unwrap();
+        assert_eq!(meta1.height, Some(3.5)); // Tall Wall height
+
+        let meta2 = metadata_map.get(&pos2).unwrap();
+        assert_eq!(meta2.height, Some(3.5));
+    }
+
+    #[test]
+    fn test_state_reset_after_apply() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "".to_string(), 10, 10));
+
+        // Set some state
+        state.visual_editor.enable_height = true;
+        state.visual_editor.temp_height = 5.0;
+        state.terrain_editor_state.tree_type = TreeType::Dead;
+
+        // Apply Logic (simulation of button click)
+        let visual_metadata = state.visual_editor.to_metadata();
+        state.apply_visual_metadata_to_selection(&visual_metadata);
+        state.apply_terrain_state_to_selection();
+
+        // Reset logic
+        state.visual_editor.reset();
+        state.terrain_editor_state = TerrainEditorState::default();
+
+        // Verify state is reset
+        assert_eq!(state.visual_editor.enable_height, false);
+        assert_eq!(state.terrain_editor_state.tree_type, TreeType::Oak);
     }
 
     #[test]
@@ -5896,5 +7608,405 @@ mod tests {
             EventType::Trap
         );
         assert_eq!(state.event_editor.as_ref().unwrap().trap_damage, 10);
+    }
+
+    // ===== Preset Categorization Tests =====
+
+    #[test]
+    fn test_preset_category_all_contains_six_categories() {
+        let categories = PresetCategory::all();
+        assert_eq!(categories.len(), 6);
+        assert!(categories.contains(&PresetCategory::All));
+        assert!(categories.contains(&PresetCategory::Walls));
+        assert!(categories.contains(&PresetCategory::Nature));
+        assert!(categories.contains(&PresetCategory::Water));
+        assert!(categories.contains(&PresetCategory::Structures));
+        assert!(categories.contains(&PresetCategory::General));
+    }
+
+    #[test]
+    fn test_preset_category_display_names() {
+        assert_eq!(PresetCategory::All.display_name(), "All");
+        assert_eq!(PresetCategory::Walls.display_name(), "Walls");
+        assert_eq!(PresetCategory::Nature.display_name(), "Nature");
+        assert_eq!(PresetCategory::Water.display_name(), "Water");
+        assert_eq!(PresetCategory::Structures.display_name(), "Structures");
+    }
+
+    #[test]
+    fn test_preset_category_filter_walls() {
+        let walls = VisualPreset::by_category(PresetCategory::Walls);
+        assert!(!walls.is_empty());
+        assert!(walls.contains(&VisualPreset::ShortWall));
+        assert!(walls.contains(&VisualPreset::TallWall));
+        assert!(walls.contains(&VisualPreset::ThinWall));
+        assert!(walls.contains(&VisualPreset::DiagonalWall));
+        // Nature should not be in walls
+        assert!(!walls.contains(&VisualPreset::SmallTree));
+        assert!(!walls.contains(&VisualPreset::LargeTree));
+    }
+
+    #[test]
+    fn test_preset_category_filter_nature() {
+        let nature = VisualPreset::by_category(PresetCategory::Nature);
+        assert!(!nature.is_empty());
+        // Trees
+        assert!(nature.contains(&VisualPreset::SmallTree));
+        assert!(nature.contains(&VisualPreset::LargeTree));
+        assert!(nature.contains(&VisualPreset::ShortTree));
+        assert!(nature.contains(&VisualPreset::MediumTree));
+        assert!(nature.contains(&VisualPreset::TallTree));
+        assert!(nature.contains(&VisualPreset::DeadTree));
+        // Shrubs
+        assert!(nature.contains(&VisualPreset::SmallShrub));
+        assert!(nature.contains(&VisualPreset::LargeShrub));
+        assert!(nature.contains(&VisualPreset::FloweringShrub));
+        // Grass
+        assert!(nature.contains(&VisualPreset::ShortGrass));
+        assert!(nature.contains(&VisualPreset::TallGrass));
+        assert!(nature.contains(&VisualPreset::DriedGrass));
+        // Mountains
+        assert!(nature.contains(&VisualPreset::LowMountain));
+        assert!(nature.contains(&VisualPreset::HighMountain));
+        assert!(nature.contains(&VisualPreset::LowPeak));
+        assert!(nature.contains(&VisualPreset::HighPeak));
+        assert!(nature.contains(&VisualPreset::JaggedPeak));
+        // Walls should not be in nature
+        assert!(!nature.contains(&VisualPreset::ShortWall));
+    }
+
+    #[test]
+    fn test_preset_category_filter_water() {
+        let water = VisualPreset::by_category(PresetCategory::Water);
+        assert!(!water.is_empty());
+        assert!(water.contains(&VisualPreset::ShallowSwamp));
+        assert!(water.contains(&VisualPreset::DeepSwamp));
+        assert!(water.contains(&VisualPreset::MurkySwamp));
+        assert!(water.contains(&VisualPreset::LavaPool));
+        assert!(water.contains(&VisualPreset::LavaFlow));
+        assert!(water.contains(&VisualPreset::VolcanicVent));
+        // Nature should not be in water
+        assert!(!water.contains(&VisualPreset::SmallTree));
+    }
+
+    #[test]
+    fn test_preset_category_filter_structures() {
+        let structures = VisualPreset::by_category(PresetCategory::Structures);
+        assert!(!structures.is_empty());
+        assert!(structures.contains(&VisualPreset::Sunken));
+        assert!(structures.contains(&VisualPreset::Raised));
+        assert!(structures.contains(&VisualPreset::Rotated45));
+        assert!(structures.contains(&VisualPreset::Rotated90));
+        // Walls should not be in structures
+        assert!(!structures.contains(&VisualPreset::ShortWall));
+    }
+
+    #[test]
+    fn test_preset_category_filter_all_includes_all_presets() {
+        let all = VisualPreset::by_category(PresetCategory::All);
+        let expected_count = VisualPreset::all_presets().len();
+        assert_eq!(all.len(), expected_count);
+        // Verify all presets from all_presets are included
+        for preset in VisualPreset::all_presets() {
+            assert!(
+                all.contains(&preset),
+                "Preset {:?} should be in All category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_preset_category_filter_all_equals_all_presets() {
+        let all_filtered = VisualPreset::by_category(PresetCategory::All);
+        let all_presets = VisualPreset::all_presets();
+        assert_eq!(all_filtered.len(), all_presets.len());
+        for (filtered, expected) in all_filtered.iter().zip(all_presets.iter()) {
+            assert_eq!(filtered, expected);
+        }
+    }
+
+    #[test]
+    fn test_each_preset_has_valid_category() {
+        for preset in VisualPreset::all_presets() {
+            let category = preset.category();
+            // Ensure category is not invalid
+            assert_ne!(
+                category,
+                PresetCategory::All,
+                "Preset {:?} should not have All category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_preset_default_has_general_category() {
+        assert_eq!(VisualPreset::Default.category(), PresetCategory::General);
+    }
+
+    #[test]
+    fn test_map_editor_state_initializes_with_all_preset_filter() {
+        let map = Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
+        let state = MapEditorState::new(map);
+        assert_eq!(state.preset_category_filter, PresetCategory::All);
+    }
+
+    #[test]
+    fn test_map_editor_state_preset_filter_can_change() {
+        let map = Map::new(1, "Test Map".to_string(), "Desc".to_string(), 10, 10);
+        let mut state = MapEditorState::new(map);
+
+        // Test changing filter
+        state.preset_category_filter = PresetCategory::Walls;
+        assert_eq!(state.preset_category_filter, PresetCategory::Walls);
+
+        state.preset_category_filter = PresetCategory::Nature;
+        assert_eq!(state.preset_category_filter, PresetCategory::Nature);
+
+        state.preset_category_filter = PresetCategory::Water;
+        assert_eq!(state.preset_category_filter, PresetCategory::Water);
+
+        state.preset_category_filter = PresetCategory::Structures;
+        assert_eq!(state.preset_category_filter, PresetCategory::Structures);
+
+        // Reset to All
+        state.preset_category_filter = PresetCategory::All;
+        assert_eq!(state.preset_category_filter, PresetCategory::All);
+    }
+
+    #[test]
+    fn test_visual_preset_to_metadata_short_wall() {
+        let metadata = VisualPreset::ShortWall.to_metadata();
+        assert_eq!(metadata.height, Some(1.5));
+    }
+
+    #[test]
+    fn test_visual_preset_to_metadata_tall_wall() {
+        let metadata = VisualPreset::TallWall.to_metadata();
+        assert_eq!(metadata.height, Some(3.5));
+    }
+
+    #[test]
+    fn test_visual_preset_to_metadata_small_tree() {
+        let metadata = VisualPreset::SmallTree.to_metadata();
+        assert_eq!(metadata.height, Some(2.0));
+        assert_eq!(metadata.scale, Some(0.5));
+        assert_eq!(metadata.color_tint, Some((0.6, 0.9, 0.6)));
+    }
+
+    #[test]
+    fn test_visual_preset_to_metadata_lava_pool() {
+        let metadata = VisualPreset::LavaPool.to_metadata();
+        assert_eq!(metadata.height, Some(0.2));
+        assert_eq!(metadata.scale, Some(1.0));
+    }
+
+    #[test]
+    fn test_visual_preset_to_metadata_default_is_empty() {
+        let metadata = VisualPreset::Default.to_metadata();
+        // Default should be all None
+        assert_eq!(metadata.height, None);
+        assert_eq!(metadata.width_x, None);
+        assert_eq!(metadata.width_z, None);
+    }
+
+    #[test]
+    fn test_preset_category_equality() {
+        assert_eq!(PresetCategory::Walls, PresetCategory::Walls);
+        assert_ne!(PresetCategory::Walls, PresetCategory::Nature);
+        assert_ne!(PresetCategory::All, PresetCategory::Water);
+    }
+
+    #[test]
+    fn test_preset_category_copy_trait() {
+        let cat1 = PresetCategory::Nature;
+        let cat2 = cat1; // Copy should work
+        assert_eq!(cat1, cat2);
+    }
+
+    #[test]
+    fn test_wall_presets_are_only_in_walls_category() {
+        let wall_presets = vec![
+            VisualPreset::ShortWall,
+            VisualPreset::TallWall,
+            VisualPreset::ThinWall,
+            VisualPreset::DiagonalWall,
+        ];
+
+        for preset in wall_presets {
+            assert_eq!(
+                preset.category(),
+                PresetCategory::Walls,
+                "Preset {:?} should be in Walls category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_structure_presets_are_only_in_structures_category() {
+        let structure_presets = vec![
+            VisualPreset::Sunken,
+            VisualPreset::Raised,
+            VisualPreset::Rotated45,
+            VisualPreset::Rotated90,
+        ];
+
+        for preset in structure_presets {
+            assert_eq!(
+                preset.category(),
+                PresetCategory::Structures,
+                "Preset {:?} should be in Structures category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_tree_presets_are_in_nature_category() {
+        let tree_presets = vec![
+            VisualPreset::SmallTree,
+            VisualPreset::LargeTree,
+            VisualPreset::ShortTree,
+            VisualPreset::MediumTree,
+            VisualPreset::TallTree,
+            VisualPreset::DeadTree,
+        ];
+
+        for preset in tree_presets {
+            assert_eq!(
+                preset.category(),
+                PresetCategory::Nature,
+                "Preset {:?} should be in Nature category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_swamp_and_lava_presets_are_in_water_category() {
+        let water_presets = vec![
+            VisualPreset::ShallowSwamp,
+            VisualPreset::DeepSwamp,
+            VisualPreset::MurkySwamp,
+            VisualPreset::LavaPool,
+            VisualPreset::LavaFlow,
+            VisualPreset::VolcanicVent,
+        ];
+
+        for preset in water_presets {
+            assert_eq!(
+                preset.category(),
+                PresetCategory::Water,
+                "Preset {:?} should be in Water category",
+                preset
+            );
+        }
+    }
+
+    #[test]
+    fn test_no_duplicate_presets_in_all_presets() {
+        let all_presets = VisualPreset::all_presets();
+        let mut seen = std::collections::HashSet::new();
+
+        for preset in all_presets {
+            assert!(seen.insert(preset), "Duplicate preset found: {:?}", preset);
+        }
+    }
+
+    #[test]
+    fn test_preset_category_filter_consistency_across_calls() {
+        // Verify that filtering the same category multiple times returns consistent results
+        let walls_1 = VisualPreset::by_category(PresetCategory::Walls);
+        let walls_2 = VisualPreset::by_category(PresetCategory::Walls);
+        assert_eq!(walls_1, walls_2);
+
+        let nature_1 = VisualPreset::by_category(PresetCategory::Nature);
+        let nature_2 = VisualPreset::by_category(PresetCategory::Nature);
+        assert_eq!(nature_1, nature_2);
+    }
+
+    #[test]
+    fn test_terrain_controls_single_select_fallback() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Use single selection
+        let pos = Position::new(5, 5);
+        state.selected_position = Some(pos);
+        state.selected_tiles = vec![]; // Ensure multi-select is empty
+
+        // Set terrain state
+        state.terrain_editor_state.grass_density = GrassDensity::High;
+
+        // Apply
+        state.apply_terrain_state_to_selection();
+
+        // Verify
+        let metadata = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .and_then(|m| m.get(&pos))
+            .expect("Should have metadata");
+        assert_eq!(metadata.grass_density, Some(GrassDensity::High));
+    }
+
+    #[test]
+    fn test_preset_palette_single_tile() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Use single selection
+        let pos = Position::new(2, 2);
+        state.selected_position = Some(pos);
+        state.selected_tiles = vec![];
+
+        // Simulate preset application for single tile
+        // Logic mirrors the UI implementation
+        let preset = VisualPreset::TallWall;
+        if state.selected_tiles.is_empty() {
+            if let Some(pos) = state.selected_position {
+                // Ensure metadata exists
+                if state.metadata.tile_visual_metadata.is_none() {
+                    state.metadata.tile_visual_metadata = Some(std::collections::HashMap::new());
+                }
+                if let Some(metadata_map) = state.metadata.tile_visual_metadata.as_mut() {
+                    metadata_map.insert(pos, preset.to_metadata());
+                }
+            }
+        }
+
+        // Verify
+        let metadata = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .and_then(|m| m.get(&pos))
+            .expect("Should have metadata");
+        assert_eq!(metadata.height, Some(3.5));
+    }
+
+    #[test]
+    fn test_state_reset_on_back_to_list() {
+        // Verify that a fresh MapEditorState (simulating re-entry) has clean defaults
+        let state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+
+        // Visual editor should be default
+        assert!(!state.visual_editor.enable_height);
+        assert!(!state.visual_editor.enable_color_tint);
+
+        // Terrain editor should be default
+        assert_eq!(state.terrain_editor_state.tree_type, TreeType::Oak); // Default
+        assert_eq!(
+            state.terrain_editor_state.grass_density,
+            GrassDensity::Medium
+        ); // Default
+
+        // Selections should be empty
+        assert!(state.selected_position.is_none());
+        assert!(state.selected_tiles.is_empty());
     }
 }

@@ -10,23 +10,24 @@ Document the campaign data structure, including all the RON files that make up a
 
 ## SDK
 
-### Dialogue Editor
+### Map Editor Multiselection
 
-Dialogue Editor List should list dialogues in order of dialogue id number.
+Campaign Builder --> Map Editor --> Select Map --> Edit
 
-Campaign Builder --> Dialogue Editor --> New
+The map editor multi select and apply does not update the map data. It should update the map data with the selected changes.
+If I select paint tile grass none, in Visual Properties select short grass from the dropdown, click multi select, select several tiles, and then click apply to tiles, save map, save campaign the map is not updated.
 
-The new dialogue editor does not autocomplete dialogue id numbers. It should suggest the next available id number when creating a new dialogue.
+✅ COMPLETED -
 
-Campaign Builder --> Dialogue Editor --> Edit
+### Terrain-Specific Settings and Visual Presets
 
-The edit dialogue editor does not autocomplete dialogue id numbers. It should suggest the next available id number when creating a new dialogue. Nodes should be listed in order of id number.
-Add Node does nothing. It should create a new node with the next available id number. Nodes should be listed in order of id number.
-Save Dialog button does nothing. It should save the dialogue to the campaign data.
+Campaign Builder --> Map Editor --> Select Map --> Edit
 
-Dialog Editor Node Editing needs a scroll bar.
+The Terrain-Specific Settings do nothing. The Terrain-Specific Settings should be applied when the user clicks the apply button for Visual Properties. The Terrain-Specific Settings should respect the multi-selection function as well.
 
-✅ COMPLETED
+Visual Properties and Terrain-Specific Settings should reset to defaults after the user clicks the apply button for Visual Properties and when the Back to list button is clicked.
+
+Visual Preset buttons do nothing. The Visual Preset button should immediately apply the selected visual preset to the selected tiles. Visual Presets needs a multi-select mode.
 
 ### Map Editor NPC
 
@@ -39,8 +40,6 @@ NPCs placed on the map are not editable. Selecting an NPC on the map does not br
 Campaign Builder --> Map Editor --> Select Map --> Edit
 
 NPCs placed on the map can not be removed. Add a remove NPC button that removes the selected NPC from the map.
-
-
 
 ### NPC Editor
 
@@ -110,9 +109,19 @@ Unable to create new nodes makes it impossible to create dialog trees.
 
 ## Game Engine
 
+### Clean up
+
+Analyze this codebase for refactoring opportunities:
+1. Find duplicate code patterns
+2. Identify unused exports and dead code
+3. Review error handling consistency
+4. Check for security vulnerabilities
+
+Compile the findings into a prioritized action plan with a phased approach.
+
 ### Advanced Procedural Meshes
 
-The procedural meshes are not complete. We need to implement advanced procedural meshes in the game engine so that we can create complex environments and objects in the game. We need to create more complicated trees, shrubs,  grass, signs, thrones, benches, tables, chairs, chests, torches, structures, and objects. Research procedural mesh generation in Bevy and implement advanced procedural meshes in the game engine. I would like to keep the feel of the game the same but with more detailed and complex objects.
+The procedural meshes are not complete. We need to implement advanced procedural meshes in the game engine so that we can create complex environments and objects in the game. We need to create more complicated trees, shrubs, grass, signs, thrones, benches, tables, chairs, chests, torches, structures, and objects. Research procedural mesh generation in Bevy and implement advanced procedural meshes in the game engine. I would like to keep the feel of the game the same but with more detailed and complex objects.
 
 Valoren has examples of procedural meshes. I do not want the blocky look of Valoren. But it has some good examples of procedural meshes.
 

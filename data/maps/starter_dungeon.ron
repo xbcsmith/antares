@@ -201,6 +201,7 @@
             visited: false,
             x: 1,
             y: 1,
+            visual: (rock_variant: Some(Jagged), color_tint: Some((0.5, 0.45, 0.4))),
             event_trigger: None,
         ),
         (
@@ -212,6 +213,7 @@
             visited: false,
             x: 2,
             y: 1,
+            visual: (rock_variant: Some(Jagged), color_tint: Some((0.5, 0.45, 0.4))),
             event_trigger: None,
         ),
         (
@@ -223,6 +225,7 @@
             visited: false,
             x: 3,
             y: 1,
+            visual: (rock_variant: Some(Jagged), color_tint: Some((0.5, 0.45, 0.4))),
             event_trigger: None,
         ),
         (
@@ -377,6 +380,7 @@
             visited: false,
             x: 1,
             y: 2,
+            visual: (rock_variant: Some(Jagged), color_tint: Some((0.5, 0.45, 0.4))),
             event_trigger: None,
         ),
         (
@@ -388,6 +392,7 @@
             visited: false,
             x: 2,
             y: 2,
+            visual: (rock_variant: Some(Jagged), color_tint: Some((0.5, 0.45, 0.4))),
             event_trigger: None,
         ),
         (
@@ -399,6 +404,7 @@
             visited: false,
             x: 3,
             y: 2,
+            visual: (rock_variant: Some(Jagged), color_tint: Some((0.5, 0.45, 0.4))),
             event_trigger: None,
         ),
         (
@@ -553,6 +559,7 @@
             visited: false,
             x: 1,
             y: 3,
+            visual: (rock_variant: Some(Jagged), color_tint: Some((0.5, 0.45, 0.4))),
             event_trigger: None,
         ),
         (
@@ -564,6 +571,7 @@
             visited: false,
             x: 2,
             y: 3,
+            visual: (rock_variant: Some(Jagged), color_tint: Some((0.5, 0.45, 0.4))),
             event_trigger: None,
         ),
         (
@@ -575,6 +583,7 @@
             visited: false,
             x: 3,
             y: 3,
+            visual: (rock_variant: Some(Jagged), color_tint: Some((0.5, 0.45, 0.4))),
             event_trigger: None,
         ),
         (
@@ -1004,6 +1013,7 @@
             visited: false,
             x: 10,
             y: 5,
+            visual: (water_flow_direction: Some(East), color_tint: Some((0.3, 0.4, 0.6))),
             event_trigger: None,
         ),
         (
@@ -1015,6 +1025,7 @@
             visited: false,
             x: 11,
             y: 5,
+            visual: (water_flow_direction: Some(East), color_tint: Some((0.3, 0.4, 0.6))),
             event_trigger: None,
         ),
         (
@@ -1026,6 +1037,7 @@
             visited: false,
             x: 12,
             y: 5,
+            visual: (water_flow_direction: Some(East), color_tint: Some((0.3, 0.4, 0.6))),
             event_trigger: None,
         ),
         (
@@ -1037,6 +1049,7 @@
             visited: false,
             x: 13,
             y: 5,
+            visual: (water_flow_direction: Some(South), color_tint: Some((0.3, 0.4, 0.6))),
             event_trigger: None,
         ),
         (
@@ -1048,6 +1061,7 @@
             visited: false,
             x: 14,
             y: 5,
+            visual: (water_flow_direction: Some(South), color_tint: Some((0.3, 0.4, 0.6))),
             event_trigger: None,
         ),
         (
@@ -1510,6 +1524,7 @@
             visited: false,
             x: 8,
             y: 8,
+            visual: (rock_variant: Some(Layered), color_tint: Some((0.6, 0.55, 0.5))),
             event_trigger: None,
         ),
         (
@@ -1521,6 +1536,7 @@
             visited: false,
             x: 9,
             y: 8,
+            visual: (rock_variant: Some(Layered), color_tint: Some((0.6, 0.55, 0.5))),
             event_trigger: None,
         ),
         (
@@ -1686,6 +1702,7 @@
             visited: false,
             x: 8,
             y: 9,
+            visual: (rock_variant: Some(Layered), color_tint: Some((0.6, 0.55, 0.5))),
             event_trigger: None,
         ),
         (
@@ -1697,6 +1714,7 @@
             visited: false,
             x: 9,
             y: 9,
+            visual: (rock_variant: Some(Layered), color_tint: Some((0.6, 0.55, 0.5))),
             event_trigger: None,
         ),
         (
@@ -2192,6 +2210,7 @@
             visited: false,
             x: 6,
             y: 12,
+            visual: (water_flow_direction: Some(Still), color_tint: Some((0.2, 0.3, 0.5))),
             event_trigger: None,
         ),
         (
@@ -2203,6 +2222,7 @@
             visited: false,
             x: 7,
             y: 12,
+            visual: (water_flow_direction: Some(Still), color_tint: Some((0.2, 0.3, 0.5))),
             event_trigger: None,
         ),
         (
@@ -2214,6 +2234,7 @@
             visited: false,
             x: 8,
             y: 12,
+            visual: (water_flow_direction: Some(Still), color_tint: Some((0.2, 0.3, 0.5))),
             event_trigger: None,
         ),
         (
@@ -2368,6 +2389,7 @@
             visited: false,
             x: 6,
             y: 13,
+            visual: (water_flow_direction: Some(Still), color_tint: Some((0.2, 0.3, 0.5))),
             event_trigger: None,
         ),
         (
@@ -2379,6 +2401,7 @@
             visited: false,
             x: 7,
             y: 13,
+            visual: (water_flow_direction: Some(Still), color_tint: Some((0.2, 0.3, 0.5))),
             event_trigger: None,
         ),
         (
@@ -2390,6 +2413,7 @@
             visited: false,
             x: 8,
             y: 13,
+            visual: (water_flow_direction: Some(Still), color_tint: Some((0.2, 0.3, 0.5))),
             event_trigger: None,
         ),
         (
@@ -2544,6 +2568,7 @@
             visited: false,
             x: 6,
             y: 14,
+            visual: (water_flow_direction: Some(Still), color_tint: Some((0.2, 0.3, 0.5))),
             event_trigger: None,
         ),
         (
@@ -2555,6 +2580,7 @@
             visited: false,
             x: 7,
             y: 14,
+            visual: (water_flow_direction: Some(Still), color_tint: Some((0.2, 0.3, 0.5))),
             event_trigger: None,
         ),
         (
@@ -2566,6 +2592,7 @@
             visited: false,
             x: 8,
             y: 14,
+            visual: (water_flow_direction: Some(Still), color_tint: Some((0.2, 0.3, 0.5))),
             event_trigger: None,
         ),
         (
@@ -2819,6 +2846,7 @@
             visited: false,
             x: 15,
             y: 15,
+            visual: (rock_variant: Some(Crystal), color_tint: Some((0.5, 0.5, 1.0))),
             event_trigger: None,
         ),
     ],

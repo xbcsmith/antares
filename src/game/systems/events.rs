@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::application::resources::GameContent;
-use crate::domain::world::MapEvent;
+use crate::domain::world::{FurnitureType, MapEvent};
 use crate::game::resources::GlobalState;
 use crate::game::systems::dialogue::{SimpleDialogue, StartDialogue};
 use crate::game::systems::map::{EventTrigger, MapChangeEvent, NpcMarker, TileCoord};
+use crate::game::systems::procedural_meshes::{
+    spawn_bench, spawn_chair, spawn_chest, spawn_table, spawn_throne, spawn_torch, BenchConfig,
+    ChairConfig, ChestConfig, ProceduralMeshCache, TableConfig, ThroneConfig, TorchConfig,
+};
 use bevy::prelude::*;
 
 pub struct EventPlugin;
@@ -85,6 +89,9 @@ fn handle_events(
     content: Res<GameContent>,
     mut game_log: Option<ResMut<crate::game::systems::ui::GameLog>>,
     mut global_state: ResMut<GlobalState>,
+    mut commands: Option<Commands>,
+    mut materials: Option<ResMut<Assets<StandardMaterial>>>,
+    mut meshes: Option<ResMut<Assets<Mesh>>>,
     npc_query: Query<(Entity, &NpcMarker, &TileCoord)>,
     // Fallback query to find a visual event/tile marker at the same TileCoord when an NPC marker is absent.
     // We exclude NpcMarker here to avoid duplicating NPC matches.
@@ -105,7 +112,11 @@ fn handle_events(
         ResMut<crate::game::systems::dialogue::PendingRecruitmentContext>,
     >,
 ) {
+    let mut furniture_cache = ProceduralMeshCache::default();
     for trigger in event_reader.read() {
+        // Only process furniture events if we have the necessary resources
+        let can_spawn_furniture = commands.is_some() && materials.is_some() && meshes.is_some();
+
         match &trigger.event {
             MapEvent::Teleport {
                 destination,
@@ -391,6 +402,139 @@ fn handle_events(
                     println!("{}", err);
                     if let Some(ref mut log) = game_log {
                         log.add(err);
+                    }
+                }
+            }
+            MapEvent::Furniture {
+                name,
+                furniture_type,
+                rotation_y,
+                scale: _,
+                material: _,
+                flags: _,
+                color_tint: _,
+            } => {
+                let msg = format!("Furniture placed: {}", name);
+                println!("{}", msg);
+                if let Some(ref mut log) = game_log {
+                    log.add(msg);
+                }
+
+                // Only spawn furniture if we have the necessary resources (full game context)
+                if can_spawn_furniture {
+                    let map_id = global_state.0.world.current_map;
+                    let commands = commands.as_mut().unwrap();
+                    let materials = materials.as_mut().unwrap();
+                    let meshes = meshes.as_mut().unwrap();
+
+                    match furniture_type {
+                        FurnitureType::Throne => {
+                            spawn_throne(
+                                commands,
+                                materials,
+                                meshes,
+                                trigger.position,
+                                map_id,
+                                ThroneConfig::default(),
+                                &mut furniture_cache,
+                                *rotation_y,
+                            );
+                        }
+                        FurnitureType::Bench => {
+                            spawn_bench(
+                                commands,
+                                materials,
+                                meshes,
+                                trigger.position,
+                                map_id,
+                                BenchConfig::default(),
+                                &mut furniture_cache,
+                                *rotation_y,
+                            );
+                        }
+                        FurnitureType::Table => {
+                            spawn_table(
+                                commands,
+                                materials,
+                                meshes,
+                                trigger.position,
+                                map_id,
+                                TableConfig::default(),
+                                &mut furniture_cache,
+                                *rotation_y,
+                            );
+                        }
+                        FurnitureType::Chair => {
+                            spawn_chair(
+                                commands,
+                                materials,
+                                meshes,
+                                trigger.position,
+                                map_id,
+                                ChairConfig::default(),
+                                &mut furniture_cache,
+                                *rotation_y,
+                            );
+                        }
+                        FurnitureType::Torch => {
+                            spawn_torch(
+                                commands,
+                                materials,
+                                meshes,
+                                trigger.position,
+                                map_id,
+                                TorchConfig::default(),
+                                &mut furniture_cache,
+                                *rotation_y,
+                            );
+                        }
+                        FurnitureType::Chest => {
+                            spawn_chest(
+                                commands,
+                                materials,
+                                meshes,
+                                trigger.position,
+                                map_id,
+                                ChestConfig::default(),
+                                &mut furniture_cache,
+                                *rotation_y,
+                            );
+                        }
+                        FurnitureType::Bookshelf => {
+                            // Bookshelf uses similar dimensions to a tall table
+                            spawn_table(
+                                commands,
+                                materials,
+                                meshes,
+                                trigger.position,
+                                map_id,
+                                TableConfig {
+                                    width: 0.8,
+                                    depth: 0.3,
+                                    height: 1.8,
+                                    color_override: Some(Color::srgb(0.35, 0.2, 0.1)),
+                                },
+                                &mut furniture_cache,
+                                *rotation_y,
+                            );
+                        }
+                        FurnitureType::Barrel => {
+                            // Barrel uses chest dimensions with slightly different proportions
+                            spawn_chest(
+                                commands,
+                                materials,
+                                meshes,
+                                trigger.position,
+                                map_id,
+                                ChestConfig {
+                                    locked: false,
+                                    size_multiplier: 0.9,
+                                    color_override: Some(Color::srgb(0.4, 0.25, 0.15)),
+                                },
+                                &mut furniture_cache,
+                                *rotation_y,
+                            );
+                        }
                     }
                 }
             }
