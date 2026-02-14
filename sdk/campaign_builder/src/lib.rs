@@ -28,6 +28,8 @@ pub mod characters_editor;
 pub mod classes_editor;
 pub mod conditions_editor;
 pub mod config_editor;
+pub mod creature_templates;
+pub mod creatures_editor;
 pub mod dialogue_editor;
 pub mod items_editor;
 pub mod logging;
@@ -35,6 +37,8 @@ pub mod map_editor;
 pub mod monsters_editor;
 pub mod npc_editor;
 pub mod packager;
+pub mod preview_renderer;
+pub mod primitive_generators;
 pub mod proficiencies_editor;
 pub mod quest_editor;
 pub mod races_editor;
@@ -168,6 +172,8 @@ pub struct CampaignMetadata {
     npcs_file: String,
     #[serde(default = "default_proficiencies_file")]
     proficiencies_file: String,
+    #[serde(default = "default_creatures_file")]
+    creatures_file: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -207,6 +213,10 @@ fn default_proficiencies_file() -> String {
     "data/proficiencies.ron".to_string()
 }
 
+fn default_creatures_file() -> String {
+    "data/creatures.ron".to_string()
+}
+
 impl Default for CampaignMetadata {
     fn default() -> Self {
         Self {
@@ -243,6 +253,7 @@ impl Default for CampaignMetadata {
             conditions_file: "data/conditions.ron".to_string(),
             npcs_file: "data/npcs.ron".to_string(),
             proficiencies_file: "data/proficiencies.ron".to_string(),
+            creatures_file: "data/creatures.ron".to_string(),
         }
     }
 }
@@ -256,6 +267,7 @@ enum EditorTab {
     Spells,
     Conditions,
     Monsters,
+    Creatures,
     Maps,
     Quests,
     Classes,
@@ -285,6 +297,7 @@ impl EditorTab {
             EditorTab::Spells => "Spells",
             EditorTab::Conditions => "Conditions",
             EditorTab::Monsters => "Monsters",
+            EditorTab::Creatures => "Creatures",
             EditorTab::Maps => "Maps",
             EditorTab::Quests => "Quests",
             EditorTab::Classes => "Classes",
@@ -425,6 +438,9 @@ struct CampaignBuilderApp {
     monsters: Vec<MonsterDefinition>,
     monsters_editor_state: MonstersEditorState,
 
+    creatures: Vec<antares::domain::visual::CreatureDefinition>,
+    creatures_editor_state: creatures_editor::CreaturesEditorState,
+
     conditions: Vec<ConditionDefinition>,
     conditions_editor_state: ConditionsEditorState,
 
@@ -541,6 +557,9 @@ impl Default for CampaignBuilderApp {
 
             monsters: Vec::new(),
             monsters_editor_state: MonstersEditorState::new(),
+
+            creatures: Vec::new(),
+            creatures_editor_state: creatures_editor::CreaturesEditorState::new(),
 
             conditions: Vec::new(),
             conditions_editor_state: ConditionsEditorState::new(),
@@ -1930,6 +1949,83 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load creatures from RON file
+    fn load_creatures(&mut self) {
+        let creatures_file = self.campaign.creatures_file.clone();
+        if let Some(ref dir) = self.campaign_dir {
+            let creatures_path = dir.join(&creatures_file);
+            if creatures_path.exists() {
+                match fs::read_to_string(&creatures_path) {
+                    Ok(contents) => {
+                        match ron::from_str::<Vec<antares::domain::visual::CreatureDefinition>>(
+                            &contents,
+                        ) {
+                            Ok(creatures) => {
+                                let count = creatures.len();
+                                self.creatures = creatures;
+
+                                // Mark data file as loaded in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager.mark_data_file_loaded(&creatures_file, count);
+                                }
+
+                                self.status_message =
+                                    format!("Loaded {} creatures", self.creatures.len());
+                            }
+                            Err(e) => {
+                                // Mark data file as error in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager.mark_data_file_error(&creatures_file, &e.to_string());
+                                }
+                                self.status_message = format!("Failed to parse creatures: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(&creatures_file, &e.to_string());
+                        }
+                        self.status_message = format!("Failed to read creatures file: {}", e);
+                        eprintln!("Failed to read creatures file {:?}: {}", creatures_path, e);
+                    }
+                }
+            } else {
+                eprintln!("Creatures file does not exist: {:?}", creatures_path);
+            }
+        } else {
+            eprintln!("No campaign directory set when trying to load creatures");
+        }
+    }
+
+    /// Save creatures to RON file
+    fn save_creatures(&mut self) -> Result<(), String> {
+        if let Some(ref dir) = self.campaign_dir {
+            let creatures_path = dir.join(&self.campaign.creatures_file);
+
+            // Create creatures directory if it doesn't exist
+            if let Some(parent) = creatures_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create creatures directory: {}", e))?;
+            }
+
+            let ron_config = ron::ser::PrettyConfig::new()
+                .struct_names(false)
+                .enumerate_arrays(false);
+
+            let contents = ron::ser::to_string_pretty(&self.creatures, ron_config)
+                .map_err(|e| format!("Failed to serialize creatures: {}", e))?;
+
+            fs::write(&creatures_path, contents)
+                .map_err(|e| format!("Failed to write creatures file: {}", e))?;
+
+            self.unsaved_changes = true;
+            Ok(())
+        } else {
+            Err("No campaign directory set".to_string())
+        }
+    }
+
     /// Load maps from the maps directory
     fn load_maps(&mut self) {
         self.maps.clear();
@@ -2428,6 +2524,9 @@ impl CampaignBuilderApp {
         self.monsters.clear();
         self.monsters_editor_state = MonstersEditorState::new();
 
+        self.creatures.clear();
+        self.creatures_editor_state = creatures_editor::CreaturesEditorState::new();
+
         self.conditions.clear();
         self.conditions_editor_state = ConditionsEditorState::new();
 
@@ -2501,6 +2600,10 @@ impl CampaignBuilderApp {
 
         if let Err(e) = self.save_monsters() {
             save_warnings.push(format!("Monsters: {}", e));
+        }
+
+        if let Err(e) = self.save_creatures() {
+            save_warnings.push(format!("Creatures: {}", e));
         }
 
         if let Err(e) = self.save_conditions() {
@@ -2644,6 +2747,7 @@ impl CampaignBuilderApp {
                     self.load_spells();
                     self.load_proficiencies();
                     self.load_monsters();
+                    self.load_creatures();
                     self.load_classes_from_campaign();
                     self.load_races_from_campaign();
                     self.load_characters_from_campaign();
@@ -3486,6 +3590,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Spells,
                     EditorTab::Conditions,
                     EditorTab::Monsters,
+                    EditorTab::Creatures,
                     EditorTab::Maps,
                     EditorTab::Quests,
                     EditorTab::Classes,
@@ -3591,6 +3696,17 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,
             ),
+            EditorTab::Creatures => {
+                if let Some(msg) = self.creatures_editor_state.show(
+                    ui,
+                    &mut self.creatures,
+                    &self.campaign_dir,
+                    &self.campaign.creatures_file,
+                    &mut self.unsaved_changes,
+                ) {
+                    self.status_message = msg;
+                }
+            }
             EditorTab::Maps => {
                 self.maps_editor_state.show(
                     ui,
