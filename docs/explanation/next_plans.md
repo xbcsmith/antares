@@ -109,6 +109,16 @@ Unable to create new nodes makes it impossible to create dialog trees.
 
 ## Game Engine
 
+### Clean up
+
+Analyze this codebase for refactoring opportunities:
+1. Find duplicate code patterns
+2. Identify unused exports and dead code
+3. Review error handling consistency
+4. Check for security vulnerabilities
+
+Compile the findings into a prioritized action plan with a phased approach.
+
 ### Advanced Procedural Meshes
 
 The procedural meshes are not complete. We need to implement advanced procedural meshes in the game engine so that we can create complex environments and objects in the game. We need to create more complicated trees, shrubs, grass, signs, thrones, benches, tables, chairs, chests, torches, structures, and objects. Research procedural mesh generation in Bevy and implement advanced procedural meshes in the game engine. I would like to keep the feel of the game the same but with more detailed and complex objects.

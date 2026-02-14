@@ -11,6 +11,7 @@
 //! These systems work with the dialogue components to create a clean screen-space UI
 //! using `bevy_ui` nodes instead of 3D meshes and billboards.
 
+use bevy::ecs::world::World;
 use bevy::prelude::*;
 
 use thiserror::Error;
@@ -195,8 +196,13 @@ pub fn cleanup_dialogue_bubble(
     // Only cleanup if no longer in Dialogue mode
     if !matches!(global_state.0.mode, GameMode::Dialogue(_)) {
         if let Some(panel_entity) = active_ui.bubble_entity {
-            // Despawn the UI panel root entity
-            commands.entity(panel_entity).despawn();
+            // Despawn the UI panel root entity with safe error handling
+            commands.queue(move |world: &mut World| {
+                if world.get_entity(panel_entity).is_ok() {
+                    // Despawn will automatically remove children in Bevy
+                    world.despawn(panel_entity);
+                }
+            });
             // Clear the resource
             active_ui.bubble_entity = None;
         }

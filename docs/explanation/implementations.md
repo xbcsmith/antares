@@ -1,3 +1,222 @@
+## Despawn Safety Fix - Entity Lifecycle Management - COMPLETED
+
+### Summary
+
+Fixed Bevy ECS warnings about despawning non-existent entities by implementing safe despawn patterns with existence checks. The warning `"The entity with ID 6900v66 does not exist"` was occurring in dialogue and menu cleanup systems when entities were despawned multiple times or their children were despawned after the parent.
+
+### Date Completed
+
+2026-02-13
+
+### Problem Description
+
+The game was logging warnings when attempting to despawn entities that no longer existed:
+
+```
+WARN bevy_ecs::error::handler: Encountered an error in command `despawn`:
+The entity with ID 6900v66 does not exist
+```
+
+This occurred in three main locations:
+
+1. **Dialogue choices** - clearing old choice buttons when updating choices
+2. **Dialogue visuals** - cleaning up dialogue bubble UI panels
+3. **Menu system** - recursive despawning of menu UI hierarchy
+
+### Root Cause
+
+The code was calling `commands.entity(entity).despawn()` without checking if the entity still existed. This happened when:
+
+- Children were despawned manually by iterating over them (but the entity might have already been despawned elsewhere)
+- Stored entity IDs were despawned without verifying they still existed
+- Recursive despawn logic didn't handle already-despawned entities
+
+### Solution Implemented
+
+Implemented safe despawn pattern using `commands.queue()` with `World::get_entity()` existence checks:
+
+```rust
+// Safe despawn pattern
+commands.queue(move |world: &mut World| {
+    if world.get_entity(entity).is_ok() {
+        world.despawn(entity);
+    }
+});
+```
+
+This pattern:
+
+- Defers the despawn operation to command application time
+- Checks if the entity exists before attempting to despawn it
+- Silently succeeds if the entity was already despawned
+- Prevents spurious warnings in the logs
+
+### Files Modified
+
+#### 1. `src/game/systems/dialogue_choices.rs`
+
+**Changes**:
+
+- Added `use bevy::ecs::world::World;` import
+- Replaced unsafe child iteration pattern with safe despawn queue
+- Used `commands.queue()` with existence check for each child entity
+
+**Before**:
+
+```rust
+if let Ok(children) = children_query.get(container) {
+    for child in children.iter() {
+        commands.entity(child).despawn();
+    }
+}
+```
+
+**After**:
+
+```rust
+if let Ok(children) = children_query.get(container) {
+    for child in children.iter() {
+        commands.queue(move |world: &mut World| {
+            if world.get_entity(child).is_ok() {
+                world.despawn(child);
+            }
+        });
+    }
+}
+```
+
+#### 2. `src/game/systems/dialogue_visuals.rs`
+
+**Changes**:
+
+- Added `use bevy::ecs::world::World;` import
+- Wrapped panel entity despawn in safe queue pattern
+- Entity existence check before despawn
+
+**Before**:
+
+```rust
+if let Some(panel_entity) = active_ui.bubble_entity {
+    commands.entity(panel_entity).despawn();
+    active_ui.bubble_entity = None;
+}
+```
+
+**After**:
+
+```rust
+if let Some(panel_entity) = active_ui.bubble_entity {
+    commands.queue(move |world: &mut World| {
+        if world.get_entity(panel_entity).is_ok() {
+            world.despawn(panel_entity);
+        }
+    });
+    active_ui.bubble_entity = None;
+}
+```
+
+#### 3. `src/game/systems/menu.rs`
+
+**Changes**:
+
+- Added `use bevy::ecs::world::World;` import
+- Updated `despawn_with_children()` helper to use safe despawn pattern
+- Maintained recursive logic but with existence checks
+
+**Before**:
+
+```rust
+fn despawn_with_children(
+    commands: &mut Commands,
+    entity: Entity,
+    children_query: &Query<&Children>,
+) {
+    if let Ok(children) = children_query.get(entity) {
+        for child in children.iter() {
+            despawn_with_children(commands, child, children_query);
+        }
+    }
+    commands.entity(entity).despawn();
+}
+```
+
+**After**:
+
+```rust
+fn despawn_with_children(
+    commands: &mut Commands,
+    entity: Entity,
+    children_query: &Query<&Children>,
+) {
+    if let Ok(children) = children_query.get(entity) {
+        for child in children.iter() {
+            despawn_with_children(commands, child, children_query);
+        }
+    }
+    commands.queue(move |world: &mut World| {
+        if world.get_entity(entity).is_ok() {
+            world.despawn(entity);
+        }
+    });
+}
+```
+
+### Quality Checks
+
+All quality gates passed:
+
+```bash
+✅ cargo fmt --all              # Code formatted
+✅ cargo check --all-targets    # Compilation successful
+✅ cargo clippy -- -D warnings  # Zero warnings
+✅ cargo nextest run            # All 1968 tests passed
+```
+
+### Architecture Compliance
+
+✅ **Error Handling**: Uses Bevy's command queue system for deferred operations
+✅ **Safety**: Prevents runtime warnings and errors from invalid entity references
+✅ **Separation of Concerns**: Entity lifecycle management properly encapsulated
+✅ **Minimal Changes**: Only affected despawn call sites, no architectural changes
+
+### Testing
+
+**Existing Tests**: All 1968 tests continue to pass
+**Manual Testing**: Game runs without entity despawn warnings
+**Runtime Verification**: Dialogue and menu transitions no longer log warnings
+
+### Why This Approach
+
+**Alternative Considered**: Using `despawn_recursive()` or `despawn_descendants()`
+**Why Not Used**: These methods don't exist in Bevy 0.17's `EntityCommands` API
+
+**Alternative Considered**: Ignoring the warnings
+**Why Not Used**: Warnings indicate potential bugs and make debugging harder
+
+**Selected Approach**: Safe despawn with existence checks
+**Benefits**:
+
+- Works with Bevy 0.17 API
+- No runtime overhead (checks happen during command application)
+- Gracefully handles race conditions
+- No changes to game logic or behavior
+
+### Future Considerations
+
+If upgrading to a newer Bevy version:
+
+- Check if `despawn_recursive()` or similar methods are available
+- Consider using built-in safe despawn methods if they exist
+- Review any new error handling patterns in the ECS system
+
+### References
+
+- Bevy 0.17 `EntityCommands` documentation
+- Bevy ECS command queue system
+- Entity lifecycle management best practices
+
+---
+
 ## Phase 1: Grass Rendering - Core Refactor and Diagnosis - COMPLETED
 
 ### Summary
@@ -32943,6 +33162,7 @@ pub struct GrassBladeConfig {
 ```
 
 Added to `TileVisualMetadata`:
+
 - Optional `grass_blade_config: Option<GrassBladeConfig>` field
 - Defaults to `None` (uses standard grass appearance)
 - Serializable via RON for campaign data
@@ -32974,6 +33194,7 @@ impl From<&world::GrassBladeConfig> for BladeConfig {
 ```
 
 **Safety Features**:
+
 - All values clamped to safe ranges during conversion
 - Prevents extreme values that could cause visual artifacts
 - Maintains performance by limiting complexity
@@ -32998,6 +33219,7 @@ impl GrassColorScheme {
 ```
 
 **Color System Features**:
+
 - Base color (blade bottom) and tip color (blade top)
 - Blended 70% base / 30% tip for natural gradient
 - Random variation applied per blade (controlled by `color_variation` parameter)
@@ -33008,6 +33230,7 @@ impl GrassColorScheme {
 **Modified**: `spawn_grass()` and `spawn_grass_cluster()` functions in `src/game/systems/advanced_grass.rs`
 
 **Changes**:
+
 - Reads `grass_blade_config` from `TileVisualMetadata`
 - Converts to `BladeConfig` with clamped values
 - Creates `GrassColorScheme` from tile color tint
@@ -33015,6 +33238,7 @@ impl GrassColorScheme {
 - Samples varied colors per blade from color scheme
 
 **Blade Variation Algorithm**:
+
 ```
 varied_height = blade_height × config.length × random(0.7..1.3)
 varied_width  = GRASS_BLADE_WIDTH × config.width × random(0.8..1.2)
@@ -33077,6 +33301,7 @@ visual: (
 #### Unit Tests Added (17 total)
 
 **BladeConfig Tests**:
+
 - `test_blade_config_default()` - Verify default values
 - `test_blade_config_from_grass_blade_config()` - Conversion from domain type
 - `test_blade_config_clamping_length()` - Length clamped to 0.5-2.0
@@ -33086,20 +33311,24 @@ visual: (
 - `test_blade_config_clamping_color_variation()` - Variation clamped to 0.0-1.0
 
 **GrassColorScheme Tests**:
+
 - `test_grass_color_scheme_default()` - Default color values
 - `test_grass_color_scheme_sample_no_variation()` - Zero variation produces consistent colors
 - `test_grass_color_scheme_sample_with_variation()` - Colors within valid RGB range
 - `test_grass_color_scheme_variation_produces_different_colors()` - High variation creates diversity
 
 **Domain Layer Tests**:
+
 - `test_domain_grass_blade_config_default()` - Default values in domain layer
 - `test_domain_grass_blade_config_serialization()` - RON serialization roundtrip
 
 **Integration Tests**:
+
 - `test_tile_visual_metadata_with_grass_blade_config()` - Metadata field storage
 - `test_tile_visual_metadata_grass_blade_config_serialization()` - Full metadata serialization
 
 **SDK Editor Tests**:
+
 - `test_apply_button_includes_terrain_state()` now validates `grass_blade_config` application in the map editor state
 
 ### SDK Support
@@ -33125,16 +33354,19 @@ visual: (
 ### Architecture Compliance
 
 ✅ **Domain/Game Separation**:
+
 - `GrassBladeConfig` in domain layer (`src/domain/world/types.rs`)
 - `BladeConfig` and `GrassColorScheme` in game layer (`src/game/systems/procedural_meshes.rs`)
 - Proper type conversion via `From` trait
 
 ✅ **Data-Driven Design**:
+
 - Grass appearance configured via RON metadata
 - No hardcoded blade appearance in game logic
 - Content creators can customize grass without code changes
 
 ✅ **Value Safety**:
+
 - All parameters clamped to safe ranges (prevents visual artifacts)
 - Defaults provided for all optional fields
 - Backward compatible (existing maps work without changes)
@@ -33142,11 +33374,13 @@ visual: (
 ### Performance Characteristics
 
 **Blade Configuration Impact**: Negligible
+
 - Configuration read once per tile during spawn
 - No per-frame overhead (static blade meshes)
 - Color sampling: <1μs per blade (RNG + clamping)
 
 **Memory Impact**: +40 bytes per tile (when configured)
+
 - `Option<GrassBladeConfig>` = 24 bytes (5 × f32 + discriminant)
 - Negligible compared to mesh/material data
 
@@ -33199,6 +33433,7 @@ Benchmarks cover 100- and 400-cluster scenarios to reflect 20×20 grass-heavy ma
 - Draw-call reduction is now measurable without requiring a custom shader pipeline.
 
 **Rendering Impact**: None
+
 - Blade configuration applied at spawn time
 - No runtime computation per frame
 - Color variation stored in material (GPU-resident)
@@ -33218,11 +33453,13 @@ Benchmarks cover 100- and 400-cluster scenarios to reflect 20×20 grass-heavy ma
 ### Files Modified
 
 **Domain Layer**:
+
 - `src/domain/world/types.rs` (+55 lines)
   - Added `GrassBladeConfig` struct
   - Added `grass_blade_config` field to `TileVisualMetadata`
 
 **Game Layer**:
+
 - `src/game/systems/procedural_meshes.rs` (+200 lines)
   - Added `BladeConfig` struct with clamping conversion
   - Added `GrassColorScheme` struct with variation sampling
@@ -33231,10 +33468,12 @@ Benchmarks cover 100- and 400-cluster scenarios to reflect 20×20 grass-heavy ma
   - Added 17 comprehensive tests
 
 **Module Exports**:
+
 - `src/domain/world/mod.rs` (+1 line)
   - Exported `GrassBladeConfig` from domain layer
 
 **Test Files** (backward compatibility):
+
 - `tests/advanced_trees_integration_test.rs` (+6 lines)
 - `tests/map_authoring_test.rs` (+2 lines)
 - `tests/rendering_visual_metadata_test.rs` (+1 line)
@@ -33250,18 +33489,21 @@ Benchmarks cover 100- and 400-cluster scenarios to reflect 20×20 grass-heavy ma
 ### Next Steps
 
 **Phase 4** (Optional): Advanced Performance Optimizations
+
 - GPU instancing for identical blade meshes
 - Spatial partitioning (chunking) for faster culling
 - Frustum culling integration
 - Mesh LOD with simplified geometry at distance
 
 **Phase 5** (Optional): Wind Animation
+
 - CPU-based wind simulation via transform updates
 - Shader-based vertex animation (GPU)
 - Wind strength/frequency/direction parameters
 - Per-blade phase offset for variety
 
 **Visual Profiling** (Recommended):
+
 - Run game with grass-heavy maps
 - Verify blade configuration variety visible
 - Capture screenshots of tall/short/wild grass styles

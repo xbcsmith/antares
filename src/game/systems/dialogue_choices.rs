@@ -12,6 +12,7 @@
 //! The choice system works with the dialogue state to present branching dialogue options
 //! to the player and handle their selection.
 
+use bevy::ecs::world::World;
 use bevy::prelude::*;
 
 use crate::application::GameMode;
@@ -69,9 +70,15 @@ pub fn spawn_choice_ui(
         };
 
         // Clear any existing children to ensure we don't append to old choices
+        // Manually despawn children with safety checks to avoid the entity-not-found error
         if let Ok(children) = children_query.get(container) {
             for child in children.iter() {
-                commands.entity(child).despawn();
+                // Queue despawn with proper error handling
+                commands.queue(move |world: &mut World| {
+                    if world.get_entity(child).is_ok() {
+                        world.despawn(child);
+                    }
+                });
             }
         }
 
