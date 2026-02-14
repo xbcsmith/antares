@@ -378,6 +378,296 @@ impl SpawnCreatureRequest {
     }
 }
 
+/// Component for tracking LOD (Level of Detail) state
+///
+/// This component manages automatic LOD switching based on camera distance.
+/// Each creature can have multiple LOD levels with progressively simpler meshes.
+///
+/// # Fields
+///
+/// * `current_level` - Current LOD level (0 = highest detail)
+/// * `mesh_handles` - Mesh handles for each LOD level
+/// * `distances` - Distance thresholds for switching LOD levels
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::components::creature::LodState;
+/// use bevy::prelude::*;
+///
+/// fn example_lod() {
+///     let lod_state = LodState {
+///         current_level: 0,
+///         mesh_handles: vec![],
+///         distances: vec![10.0, 25.0, 50.0],
+///     };
+///     assert_eq!(lod_state.current_level, 0);
+/// }
+/// ```
+#[derive(Component, Debug, Clone)]
+pub struct LodState {
+    /// Current active LOD level (0 = highest detail)
+    pub current_level: usize,
+
+    /// Mesh handles for each LOD level (LOD0, LOD1, LOD2, etc.)
+    pub mesh_handles: Vec<Handle<Mesh>>,
+
+    /// Distance thresholds for switching to each LOD level
+    ///
+    /// Example: [10.0, 25.0, 50.0] means:
+    /// - Distance < 10.0: Use LOD0 (highest detail)
+    /// - Distance 10.0-25.0: Use LOD1
+    /// - Distance 25.0-50.0: Use LOD2
+    /// - Distance > 50.0: Use LOD3 (or billboard/culled)
+    pub distances: Vec<f32>,
+}
+
+impl LodState {
+    /// Creates a new LOD state
+    ///
+    /// # Arguments
+    ///
+    /// * `mesh_handles` - Mesh handles for each LOD level
+    /// * `distances` - Distance thresholds for LOD switching
+    ///
+    /// # Returns
+    ///
+    /// `LodState` with current level set to 0 (highest detail)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::LodState;
+    /// use bevy::prelude::*;
+    ///
+    /// let lod = LodState::new(vec![], vec![10.0, 25.0]);
+    /// assert_eq!(lod.current_level, 0);
+    /// ```
+    pub fn new(mesh_handles: Vec<Handle<Mesh>>, distances: Vec<f32>) -> Self {
+        Self {
+            current_level: 0,
+            mesh_handles,
+            distances,
+        }
+    }
+
+    /// Determines the appropriate LOD level for a given distance
+    ///
+    /// # Arguments
+    ///
+    /// * `distance` - Distance from camera to creature
+    ///
+    /// # Returns
+    ///
+    /// LOD level to use (0 = highest detail)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::LodState;
+    /// use bevy::prelude::*;
+    ///
+    /// let lod = LodState::new(vec![], vec![10.0, 25.0, 50.0]);
+    /// assert_eq!(lod.level_for_distance(5.0), 0);
+    /// assert_eq!(lod.level_for_distance(15.0), 1);
+    /// assert_eq!(lod.level_for_distance(30.0), 2);
+    /// assert_eq!(lod.level_for_distance(60.0), 3);
+    /// ```
+    pub fn level_for_distance(&self, distance: f32) -> usize {
+        for (level, &threshold) in self.distances.iter().enumerate() {
+            if distance < threshold {
+                return level;
+            }
+        }
+        // Beyond all thresholds - use highest LOD level available
+        self.distances.len()
+    }
+}
+
+/// Component for creature keyframe animation playback
+///
+/// This component tracks the state of a currently playing animation,
+/// including playback time, speed, and looping behavior.
+///
+/// # Fields
+///
+/// * `definition` - The animation definition with keyframes
+/// * `current_time` - Current playback time in seconds
+/// * `playing` - Whether animation is currently playing
+/// * `speed` - Playback speed multiplier (1.0 = normal speed)
+/// * `looping` - Whether animation loops when finished
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::components::creature::CreatureAnimation;
+/// use antares::domain::visual::AnimationDefinition;
+///
+/// fn example_animation() {
+///     let anim_def = AnimationDefinition {
+///         name: "walk".to_string(),
+///         duration: 1.0,
+///         keyframes: vec![],
+///         looping: true,
+///     };
+///
+///     let anim = CreatureAnimation::new(anim_def);
+///     assert_eq!(anim.current_time, 0.0);
+///     assert_eq!(anim.playing, true);
+/// }
+/// ```
+#[derive(Component, Debug, Clone)]
+pub struct CreatureAnimation {
+    /// The animation definition with keyframes
+    pub definition: crate::domain::visual::animation::AnimationDefinition,
+
+    /// Current playback time in seconds
+    pub current_time: f32,
+
+    /// Whether animation is currently playing
+    pub playing: bool,
+
+    /// Playback speed multiplier (1.0 = normal, 2.0 = double speed, 0.5 = half speed)
+    pub speed: f32,
+
+    /// Whether animation loops when it reaches the end
+    pub looping: bool,
+}
+
+impl CreatureAnimation {
+    /// Creates a new animation in the playing state
+    ///
+    /// # Arguments
+    ///
+    /// * `definition` - The animation definition to play
+    ///
+    /// # Returns
+    ///
+    /// `CreatureAnimation` starting at time 0.0 with normal speed
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::CreatureAnimation;
+    /// use antares::domain::visual::AnimationDefinition;
+    ///
+    /// let def = AnimationDefinition {
+    ///     name: "idle".to_string(),
+    ///     duration: 2.0,
+    ///     keyframes: vec![],
+    ///     looping: true,
+    /// };
+    ///
+    /// let anim = CreatureAnimation::new(def);
+    /// assert!(anim.playing);
+    /// assert_eq!(anim.speed, 1.0);
+    /// ```
+    pub fn new(definition: crate::domain::visual::animation::AnimationDefinition) -> Self {
+        let looping = definition.looping;
+        Self {
+            definition,
+            current_time: 0.0,
+            playing: true,
+            speed: 1.0,
+            looping,
+        }
+    }
+
+    /// Advances animation time by delta seconds
+    ///
+    /// # Arguments
+    ///
+    /// * `delta_seconds` - Time to advance (will be multiplied by speed)
+    ///
+    /// # Returns
+    ///
+    /// `true` if animation finished (non-looping only), `false` otherwise
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::CreatureAnimation;
+    /// use antares::domain::visual::AnimationDefinition;
+    ///
+    /// let def = AnimationDefinition {
+    ///     name: "attack".to_string(),
+    ///     duration: 1.0,
+    ///     keyframes: vec![],
+    ///     looping: false,
+    /// };
+    ///
+    /// let mut anim = CreatureAnimation::new(def);
+    /// let finished = anim.advance(0.5);
+    /// assert!(!finished);
+    /// assert_eq!(anim.current_time, 0.5);
+    ///
+    /// let finished = anim.advance(0.6);
+    /// assert!(finished);
+    /// ```
+    pub fn advance(&mut self, delta_seconds: f32) -> bool {
+        if !self.playing {
+            return false;
+        }
+
+        self.current_time += delta_seconds * self.speed;
+
+        if self.current_time >= self.definition.duration {
+            if self.looping {
+                self.current_time %= self.definition.duration;
+                false
+            } else {
+                self.current_time = self.definition.duration;
+                self.playing = false;
+                true
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Resets animation to the beginning
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::CreatureAnimation;
+    /// use antares::domain::visual::AnimationDefinition;
+    ///
+    /// let def = AnimationDefinition {
+    ///     name: "jump".to_string(),
+    ///     duration: 0.5,
+    ///     keyframes: vec![],
+    ///     looping: false,
+    /// };
+    ///
+    /// let mut anim = CreatureAnimation::new(def);
+    /// anim.advance(0.3);
+    /// anim.reset();
+    /// assert_eq!(anim.current_time, 0.0);
+    /// assert!(anim.playing);
+    /// ```
+    pub fn reset(&mut self) {
+        self.current_time = 0.0;
+        self.playing = true;
+    }
+
+    /// Pauses animation playback
+    pub fn pause(&mut self) {
+        self.playing = false;
+    }
+
+    /// Resumes animation playback
+    pub fn resume(&mut self) {
+        self.playing = true;
+    }
+}
+
+/// Marker component indicating texture has been loaded for this creature
+///
+/// Prevents re-loading textures that have already been loaded.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct TextureLoaded;
+
 /// Placeholder component for future animation support
 ///
 /// This component will eventually track animation state for creatures
@@ -483,5 +773,173 @@ mod tests {
         let cloned = request;
         assert_eq!(cloned.creature_id, request.creature_id);
         assert_eq!(cloned.position, request.position);
+    }
+
+    #[test]
+    fn test_lod_state_new() {
+        let lod = LodState::new(vec![], vec![10.0, 25.0, 50.0]);
+        assert_eq!(lod.current_level, 0);
+        assert_eq!(lod.distances.len(), 3);
+    }
+
+    #[test]
+    fn test_lod_state_level_for_distance() {
+        let lod = LodState::new(vec![], vec![10.0, 25.0, 50.0]);
+
+        // Close range - LOD0
+        assert_eq!(lod.level_for_distance(5.0), 0);
+        assert_eq!(lod.level_for_distance(9.9), 0);
+
+        // Medium range - LOD1
+        assert_eq!(lod.level_for_distance(10.0), 1);
+        assert_eq!(lod.level_for_distance(15.0), 1);
+        assert_eq!(lod.level_for_distance(24.9), 1);
+
+        // Far range - LOD2
+        assert_eq!(lod.level_for_distance(25.0), 2);
+        assert_eq!(lod.level_for_distance(40.0), 2);
+        assert_eq!(lod.level_for_distance(49.9), 2);
+
+        // Very far range - LOD3
+        assert_eq!(lod.level_for_distance(50.0), 3);
+        assert_eq!(lod.level_for_distance(100.0), 3);
+    }
+
+    #[test]
+    fn test_lod_state_empty_distances() {
+        let lod = LodState::new(vec![], vec![]);
+        assert_eq!(lod.level_for_distance(0.0), 0);
+        assert_eq!(lod.level_for_distance(1000.0), 0);
+    }
+
+    #[test]
+    fn test_creature_animation_new() {
+        use crate::domain::visual::animation::AnimationDefinition;
+
+        let def = AnimationDefinition {
+            name: "walk".to_string(),
+            duration: 1.0,
+            keyframes: vec![],
+            looping: true,
+        };
+
+        let anim = CreatureAnimation::new(def);
+        assert_eq!(anim.current_time, 0.0);
+        assert!(anim.playing);
+        assert_eq!(anim.speed, 1.0);
+        assert!(anim.looping);
+    }
+
+    #[test]
+    fn test_creature_animation_advance() {
+        use crate::domain::visual::animation::AnimationDefinition;
+
+        let def = AnimationDefinition {
+            name: "idle".to_string(),
+            duration: 2.0,
+            keyframes: vec![],
+            looping: false,
+        };
+
+        let mut anim = CreatureAnimation::new(def);
+
+        // Advance partway
+        let finished = anim.advance(0.5);
+        assert!(!finished);
+        assert_eq!(anim.current_time, 0.5);
+
+        // Advance to end
+        let finished = anim.advance(1.5);
+        assert!(finished);
+        assert_eq!(anim.current_time, 2.0);
+        assert!(!anim.playing);
+    }
+
+    #[test]
+    fn test_creature_animation_looping() {
+        use crate::domain::visual::animation::AnimationDefinition;
+
+        let def = AnimationDefinition {
+            name: "run".to_string(),
+            duration: 1.0,
+            keyframes: vec![],
+            looping: true,
+        };
+
+        let mut anim = CreatureAnimation::new(def);
+
+        // Advance past duration
+        let finished = anim.advance(1.5);
+        assert!(!finished);
+        assert_eq!(anim.current_time, 0.5);
+        assert!(anim.playing);
+    }
+
+    #[test]
+    fn test_creature_animation_reset() {
+        use crate::domain::visual::animation::AnimationDefinition;
+
+        let def = AnimationDefinition {
+            name: "jump".to_string(),
+            duration: 0.5,
+            keyframes: vec![],
+            looping: false,
+        };
+
+        let mut anim = CreatureAnimation::new(def);
+        anim.advance(0.3);
+        anim.reset();
+
+        assert_eq!(anim.current_time, 0.0);
+        assert!(anim.playing);
+    }
+
+    #[test]
+    fn test_creature_animation_pause_resume() {
+        use crate::domain::visual::animation::AnimationDefinition;
+
+        let def = AnimationDefinition {
+            name: "attack".to_string(),
+            duration: 1.0,
+            keyframes: vec![],
+            looping: false,
+        };
+
+        let mut anim = CreatureAnimation::new(def);
+        anim.pause();
+        assert!(!anim.playing);
+
+        let finished = anim.advance(0.5);
+        assert!(!finished);
+        assert_eq!(anim.current_time, 0.0); // No advance when paused
+
+        anim.resume();
+        assert!(anim.playing);
+        anim.advance(0.5);
+        assert_eq!(anim.current_time, 0.5); // Advances when playing
+    }
+
+    #[test]
+    fn test_creature_animation_speed() {
+        use crate::domain::visual::animation::AnimationDefinition;
+
+        let def = AnimationDefinition {
+            name: "walk".to_string(),
+            duration: 1.0,
+            keyframes: vec![],
+            looping: false,
+        };
+
+        let mut anim = CreatureAnimation::new(def);
+        anim.speed = 2.0; // Double speed
+
+        anim.advance(0.5);
+        assert_eq!(anim.current_time, 1.0); // 0.5 * 2.0
+    }
+
+    #[test]
+    fn test_texture_loaded_default() {
+        let marker = TextureLoaded;
+        assert!(format!("{:?}", marker).contains("TextureLoaded"));
     }
 }

@@ -52,6 +52,7 @@ pub mod creature_database;
 pub mod creature_variations;
 pub mod lod;
 pub mod mesh_validation;
+pub mod template_metadata;
 
 use serde::{Deserialize, Serialize};
 

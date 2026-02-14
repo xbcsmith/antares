@@ -601,4 +601,161 @@ mod tests {
             CreatureDatabaseError::ValidationError(_, _)
         ));
     }
+
+    #[test]
+    fn test_template_files_exist() {
+        // Verify template files exist and are readable
+        let templates = [
+            include_str!("../../../data/creature_templates/humanoid.ron"),
+            include_str!("../../../data/creature_templates/quadruped.ron"),
+            include_str!("../../../data/creature_templates/dragon.ron"),
+            include_str!("../../../data/creature_templates/robot.ron"),
+            include_str!("../../../data/creature_templates/undead.ron"),
+            include_str!("../../../data/creature_templates/beast.ron"),
+        ];
+
+        for template_str in &templates {
+            assert!(!template_str.is_empty());
+            assert!(template_str.contains("CreatureDefinition"));
+        }
+    }
+
+    #[test]
+    fn test_template_metadata_files_exist() {
+        // Verify metadata files exist and are readable
+        let metadata_files = [
+            include_str!("../../../data/creature_templates/humanoid.meta.ron"),
+            include_str!("../../../data/creature_templates/quadruped.meta.ron"),
+            include_str!("../../../data/creature_templates/dragon.meta.ron"),
+            include_str!("../../../data/creature_templates/robot.meta.ron"),
+            include_str!("../../../data/creature_templates/undead.meta.ron"),
+            include_str!("../../../data/creature_templates/beast.meta.ron"),
+        ];
+
+        for metadata_str in &metadata_files {
+            assert!(!metadata_str.is_empty());
+            assert!(metadata_str.contains("TemplateMetadata"));
+        }
+    }
+
+    #[test]
+    fn test_template_ids_are_unique() {
+        // Verify each template has a unique ID by checking the content
+        let templates = [
+            (
+                "humanoid",
+                include_str!("../../../data/creature_templates/humanoid.ron"),
+            ),
+            (
+                "quadruped",
+                include_str!("../../../data/creature_templates/quadruped.ron"),
+            ),
+            (
+                "dragon",
+                include_str!("../../../data/creature_templates/dragon.ron"),
+            ),
+            (
+                "robot",
+                include_str!("../../../data/creature_templates/robot.ron"),
+            ),
+            (
+                "undead",
+                include_str!("../../../data/creature_templates/undead.ron"),
+            ),
+            (
+                "beast",
+                include_str!("../../../data/creature_templates/beast.ron"),
+            ),
+        ];
+
+        let expected_ids = [1000, 1001, 1002, 1003, 1004, 1005];
+
+        for ((name, template_str), expected_id) in templates.iter().zip(expected_ids.iter()) {
+            assert!(
+                template_str.contains(&format!("id: {}", expected_id)),
+                "{} template should have ID {}",
+                name,
+                expected_id
+            );
+        }
+    }
+
+    #[test]
+    fn test_template_structure_validity() {
+        // Verify templates have basic structural validity
+        let templates = [
+            (
+                "humanoid",
+                include_str!("../../../data/creature_templates/humanoid.ron"),
+            ),
+            (
+                "quadruped",
+                include_str!("../../../data/creature_templates/quadruped.ron"),
+            ),
+            (
+                "dragon",
+                include_str!("../../../data/creature_templates/dragon.ron"),
+            ),
+            (
+                "robot",
+                include_str!("../../../data/creature_templates/robot.ron"),
+            ),
+            (
+                "undead",
+                include_str!("../../../data/creature_templates/undead.ron"),
+            ),
+            (
+                "beast",
+                include_str!("../../../data/creature_templates/beast.ron"),
+            ),
+        ];
+
+        for (name, template_str) in &templates {
+            // Check for required fields
+            assert!(template_str.contains("id:"), "{} missing id field", name);
+            assert!(
+                template_str.contains("name:"),
+                "{} missing name field",
+                name
+            );
+            assert!(
+                template_str.contains("meshes:"),
+                "{} missing meshes field",
+                name
+            );
+            assert!(
+                template_str.contains("mesh_transforms:"),
+                "{} missing mesh_transforms field",
+                name
+            );
+            assert!(
+                template_str.contains("scale:"),
+                "{} missing scale field",
+                name
+            );
+
+            // Check for at least one mesh
+            assert!(
+                template_str.contains("MeshDefinition"),
+                "{} has no mesh definitions",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_example_creatures_exist() {
+        // Verify example creature files exist
+        let examples = [
+            include_str!("../../../data/creature_examples/goblin.ron"),
+            include_str!("../../../data/creature_examples/skeleton.ron"),
+            include_str!("../../../data/creature_examples/wolf.ron"),
+            include_str!("../../../data/creature_examples/dragon.ron"),
+        ];
+
+        for example_str in &examples {
+            assert!(!example_str.is_empty());
+            assert!(example_str.contains("CreatureDefinition"));
+        }
+    }
 }

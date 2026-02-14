@@ -21,6 +21,7 @@ pub mod furniture_rendering;
 pub mod hud;
 pub mod inn_ui;
 pub mod input;
+pub mod lod;
 pub mod map;
 pub mod menu;
 pub mod monster_rendering;

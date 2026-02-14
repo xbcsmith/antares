@@ -140,8 +140,15 @@ pub fn spawn_monster_with_visual(
         // Look up creature definition
         if let Some(creature_def) = creature_db.get_creature(visual_id) {
             // Spawn creature visual
-            let visual_entity =
-                spawn_creature(commands, creature_def, meshes, materials, position, None);
+            let visual_entity = spawn_creature(
+                commands,
+                creature_def,
+                meshes,
+                materials,
+                position,
+                None,
+                None,
+            );
 
             // Update CreatureVisual with correct ID
             commands.entity(visual_entity).insert(CreatureVisual {

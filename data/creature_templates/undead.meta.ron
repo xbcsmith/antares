@@ -1,0 +1,11 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+TemplateMetadata(
+    category: Undead,
+    tags: ["skeleton", "undead", "bones", "ghostly"],
+    difficulty: Intermediate,
+    author: "Antares Team",
+    description: "Skeletal undead template with skull head, exposed ribcage, and bone limbs. Perfect for creating skeletons, liches, and spectral creatures.",
+    thumbnail_path: None,
+)

@@ -37,9 +37,14 @@
 //! ```
 
 use crate::application::resources::GameContent;
+use crate::domain::visual::animation::AnimationDefinition;
 use crate::domain::visual::CreatureDefinition;
-use crate::game::components::creature::{CreatureVisual, MeshPart, SpawnCreatureRequest};
-use crate::game::systems::creature_meshes::{create_material_from_color, mesh_definition_to_bevy};
+use crate::game::components::creature::{
+    CreatureAnimation, CreatureVisual, LodState, MeshPart, SpawnCreatureRequest,
+};
+use crate::game::systems::creature_meshes::{
+    create_material_from_color, material_definition_to_bevy, mesh_definition_to_bevy,
+};
 use bevy::prelude::*;
 
 /// Spawns a creature visual from a definition
@@ -56,6 +61,7 @@ use bevy::prelude::*;
 /// * `materials` - Material asset storage
 /// * `position` - World position to spawn at
 /// * `scale_override` - Optional scale multiplier (overrides creature definition scale)
+/// * `animation` - Optional animation to play on spawn
 ///
 /// # Returns
 ///
@@ -104,52 +110,83 @@ pub fn spawn_creature(
     materials: &mut Assets<StandardMaterial>,
     position: Vec3,
     scale_override: Option<f32>,
+    animation: Option<AnimationDefinition>,
 ) -> Entity {
     // Determine effective scale
     let scale = scale_override.unwrap_or(creature_def.scale);
 
     // Create parent entity with CreatureVisual component
-    let parent = commands
-        .spawn((
-            CreatureVisual {
+    let mut parent_entity = commands.spawn((
+        CreatureVisual {
+            creature_id: 0, // Will be set by caller if needed
+            scale_override,
+        },
+        Transform::from_translation(position).with_scale(Vec3::splat(scale)),
+        GlobalTransform::default(),
+        Visibility::default(),
+        InheritedVisibility::default(),
+        ViewVisibility::default(),
+    ));
+
+    // Add animation component if animation is provided
+    if let Some(anim_def) = animation {
+        parent_entity.insert(CreatureAnimation::new(anim_def));
+    }
+
+    let parent = parent_entity.id();
+
+    // Spawn child entities for each mesh
+    for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
+        // Convert mesh definition to Bevy mesh (LOD0)
+        let bevy_mesh = mesh_definition_to_bevy(mesh_def);
+        let mesh_handle = meshes.add(bevy_mesh);
+
+        // Create material - use MaterialDefinition if provided, otherwise use color
+        let material = if let Some(ref material_def) = mesh_def.material {
+            material_definition_to_bevy(material_def)
+        } else {
+            create_material_from_color(mesh_def.color)
+        };
+        let material_handle = materials.add(material);
+
+        // Prepare LOD meshes if defined
+        let mut lod_mesh_handles = vec![mesh_handle.clone()]; // LOD0
+        let lod_distances = if let Some(ref lod_levels) = mesh_def.lod_levels {
+            // Generate meshes for each LOD level
+            for lod_mesh_def in lod_levels.iter() {
+                let lod_bevy_mesh = mesh_definition_to_bevy(lod_mesh_def);
+                let lod_handle = meshes.add(lod_bevy_mesh);
+                lod_mesh_handles.push(lod_handle);
+            }
+
+            // Get LOD distances if defined
+            mesh_def.lod_distances.clone()
+        } else {
+            None
+        };
+
+        // Spawn child entity
+        let mut child_entity = commands.spawn((
+            MeshPart {
                 creature_id: 0, // Will be set by caller if needed
-                scale_override,
+                mesh_index,
+                material_override: None,
             },
-            Transform::from_translation(position).with_scale(Vec3::splat(scale)),
+            Mesh3d(mesh_handle),
+            MeshMaterial3d(material_handle),
+            Transform::default(),
             GlobalTransform::default(),
             Visibility::default(),
             InheritedVisibility::default(),
             ViewVisibility::default(),
-        ))
-        .id();
+        ));
 
-    // Spawn child entities for each mesh
-    for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
-        // Convert mesh definition to Bevy mesh
-        let bevy_mesh = mesh_definition_to_bevy(mesh_def);
-        let mesh_handle = meshes.add(bevy_mesh);
+        // Add LOD component if LOD levels are defined
+        if let Some(distances) = lod_distances {
+            child_entity.insert(LodState::new(lod_mesh_handles, distances));
+        }
 
-        // Create material from mesh color
-        let material = create_material_from_color(mesh_def.color);
-        let material_handle = materials.add(material);
-
-        // Spawn child entity
-        let child = commands
-            .spawn((
-                MeshPart {
-                    creature_id: 0, // Will be set by caller if needed
-                    mesh_index,
-                    material_override: None,
-                },
-                Mesh3d(mesh_handle),
-                MeshMaterial3d(material_handle),
-                Transform::default(),
-                GlobalTransform::default(),
-                Visibility::default(),
-                InheritedVisibility::default(),
-                ViewVisibility::default(),
-            ))
-            .id();
+        let child = child_entity.id();
 
         commands.entity(parent).add_child(child);
     }
@@ -207,6 +244,7 @@ pub fn creature_spawning_system(
                 materials.as_mut(),
                 request.position,
                 request.scale_override,
+                None, // No animation on basic spawn
             );
 
             // Update the spawned creature's CreatureVisual component with correct ID
@@ -233,6 +271,7 @@ pub fn creature_spawning_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::visual::MeshDefinition;
 
     #[test]
     fn test_creature_visual_component_creation() {
@@ -255,6 +294,90 @@ mod tests {
         assert_eq!(request.creature_id, 5);
         assert_eq!(request.position, Vec3::new(1.0, 2.0, 3.0));
         assert_eq!(request.scale_override, None);
+    }
+
+    #[test]
+    fn test_spawn_creature_with_lod() {
+        // Create a simple creature definition with LOD levels
+        let lod1 = MeshDefinition {
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 0.0, 0.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+
+        let mesh_with_lod = MeshDefinition {
+            vertices: vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            normals: None,
+            uvs: None,
+            color: [1.0, 0.0, 0.0, 1.0],
+            lod_levels: Some(vec![lod1]),
+            lod_distances: Some(vec![10.0]),
+            material: None,
+            texture_path: None,
+        };
+
+        let creature_def = CreatureDefinition {
+            id: 1,
+            name: "Test LOD Creature".to_string(),
+            meshes: vec![mesh_with_lod],
+            mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+        };
+
+        // Verify creature definition is valid
+        assert!(creature_def.validate().is_ok());
+        assert_eq!(creature_def.meshes.len(), 1);
+        assert!(creature_def.meshes[0].lod_levels.is_some());
+    }
+
+    #[test]
+    fn test_spawn_creature_with_material() {
+        use crate::domain::visual::{AlphaMode, MaterialDefinition};
+
+        let material_def = MaterialDefinition {
+            base_color: [0.8, 0.8, 0.8, 1.0],
+            metallic: 1.0,
+            roughness: 0.2,
+            emissive: None,
+            alpha_mode: AlphaMode::Opaque,
+        };
+
+        let mesh_with_material = MeshDefinition {
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(material_def),
+            texture_path: None,
+        };
+
+        let creature_def = CreatureDefinition {
+            id: 2,
+            name: "Test Material Creature".to_string(),
+            meshes: vec![mesh_with_material],
+            mesh_transforms: vec![crate::domain::visual::MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+        };
+
+        assert!(creature_def.validate().is_ok());
+        assert!(creature_def.meshes[0].material.is_some());
     }
 
     // Integration tests with full Bevy app context are complex due to borrow checker
