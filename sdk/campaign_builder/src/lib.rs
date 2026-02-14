@@ -22,6 +22,7 @@
 #![allow(clippy::useless_conversion)]
 
 pub mod advanced_validation;
+pub mod animation_editor;
 pub mod asset_manager;
 pub mod campaign_editor;
 pub mod characters_editor;
@@ -33,8 +34,10 @@ pub mod creature_templates;
 pub mod creatures_editor;
 pub mod dialogue_editor;
 pub mod items_editor;
+pub mod lod_editor;
 pub mod logging;
 pub mod map_editor;
+pub mod material_editor;
 pub mod monsters_editor;
 pub mod npc_editor;
 pub mod packager;
@@ -44,12 +47,14 @@ pub mod proficiencies_editor;
 pub mod quest_editor;
 pub mod races_editor;
 pub mod spells_editor;
+pub mod template_browser;
 pub mod templates;
 pub mod test_play;
 pub mod test_utils;
 pub mod ui_helpers;
 pub mod undo_redo;
 pub mod validation;
+pub mod variation_editor;
 
 use antares::sdk::tool_config::ToolConfig;
 use logging::{category, LogLevel, Logger};

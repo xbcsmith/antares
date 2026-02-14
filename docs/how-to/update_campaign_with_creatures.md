@@ -128,9 +128,9 @@ Open your campaign's `campaign.ron` file and ensure it includes the creatures fi
     version: "1.0.0",
     author: "Your Name",
     description: "Campaign description",
-    
+
     // ... other fields
-    
+
     // Add this line if not present:
     creatures_file: "data/creatures.ron",
 )
@@ -150,7 +150,7 @@ In your `data/monsters.ron` file, link monsters to creature visuals using the `v
         id: 1,
         name: "Guard",
         // ... stats, attacks, etc.
-        
+
         // Link to creature visual ID 2001
         visual_id: Some(2001),
     ),
@@ -158,7 +158,7 @@ In your `data/monsters.ron` file, link monsters to creature visuals using the `v
         id: 2,
         name: "Dragon",
         // ... stats, attacks, etc.
-        
+
         // Link to creature visual ID 2002
         visual_id: Some(2002),
     ),
@@ -375,7 +375,7 @@ Add comments to your `creatures.ron` file:
         // Blue-armored humanoid guard
         // ...
     ),
-    
+
     // === DRAGONS (4000-4099) ===
     CreatureDefinition(
         id: 4001,
