@@ -11,6 +11,7 @@
 
 pub mod billboard;
 pub mod combat;
+pub mod creature;
 pub mod dialogue;
 pub mod furniture;
 pub mod menu;
@@ -19,6 +20,7 @@ pub mod sprite;
 // Re-export commonly used types
 pub use billboard::Billboard;
 pub use combat::{CombatHudRoot, CombatantMarker, TargetSelector, TurnIndicator};
+pub use creature::{CreatureAnimationState, CreatureVisual, MeshPart, SpawnCreatureRequest};
 pub use dialogue::{
     ActiveDialogueUI, DialogueBubble, DialogueBubbleEntity, DialogueTextEntity, TypewriterText,
     DIALOGUE_BACKGROUND_COLOR, DIALOGUE_BUBBLE_HEIGHT, DIALOGUE_BUBBLE_PADDING,

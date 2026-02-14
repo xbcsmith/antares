@@ -32,7 +32,7 @@ CreatureDefinition(
             ],
             color: Some([0.8, 0.15, 0.1, 1.0]), // Deep red
         ),
-        
+
         // Chest/underbelly (lighter color)
         MeshDefinition(
             name: "underbelly",
@@ -48,7 +48,7 @@ CreatureDefinition(
             indices: [0, 1, 3, 0, 3, 2],
             color: Some([0.9, 0.7, 0.4, 1.0]), // Golden underbelly
         ),
-        
+
         // Neck
         MeshDefinition(
             name: "neck",
@@ -70,7 +70,7 @@ CreatureDefinition(
             ],
             color: Some([0.75, 0.13, 0.08, 1.0]), // Darker red
         ),
-        
+
         // Head - elongated snout
         MeshDefinition(
             name: "head",
@@ -99,7 +99,7 @@ CreatureDefinition(
             ],
             color: Some([0.85, 0.2, 0.15, 1.0]), // Bright red
         ),
-        
+
         // Horns
         MeshDefinition(
             name: "left_horn",
@@ -121,7 +121,7 @@ CreatureDefinition(
             indices: [0, 1, 2],
             color: Some([0.3, 0.3, 0.3, 1.0]), // Dark gray
         ),
-        
+
         // Eyes (glowing)
         MeshDefinition(
             name: "left_eye",
@@ -159,7 +159,7 @@ CreatureDefinition(
             ],
             color: Some([1.0, 0.8, 0.0, 1.0]), // Golden yellow glow
         ),
-        
+
         // Legs (4 total)
         MeshDefinition(
             name: "front_left_leg",
@@ -233,7 +233,7 @@ CreatureDefinition(
             ],
             color: Some([0.7, 0.12, 0.08, 1.0]), // Dark red
         ),
-        
+
         // Claws (simplified)
         MeshDefinition(
             name: "front_left_claw",
@@ -255,7 +255,7 @@ CreatureDefinition(
             indices: [0, 1, 2],
             color: Some([0.2, 0.2, 0.2, 1.0]), // Dark claws
         ),
-        
+
         // Tail
         MeshDefinition(
             name: "tail_base",
@@ -303,7 +303,7 @@ CreatureDefinition(
             indices: [0, 1, 2],
             color: Some([0.65, 0.1, 0.05, 1.0]), // Very dark red
         ),
-        
+
         // Wings (massive)
         MeshDefinition(
             name: "left_wing",
@@ -342,7 +342,7 @@ CreatureDefinition(
             ],
             color: Some([0.6, 0.1, 0.08, 0.85]), // Semi-transparent dark red
         ),
-        
+
         // Spikes along spine
         MeshDefinition(
             name: "spine_spike_1",

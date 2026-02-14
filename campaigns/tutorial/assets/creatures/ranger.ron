@@ -43,7 +43,7 @@ CreatureDefinition(
             ],
             color: Some([0.3, 0.5, 0.2, 1.0]), // Forest green
         ),
-        
+
         // Torso
         MeshDefinition(
             name: "torso",
@@ -63,7 +63,7 @@ CreatureDefinition(
             ],
             color: Some([0.4, 0.6, 0.3, 1.0]), // Lighter green (leather armor)
         ),
-        
+
         // Arms
         MeshDefinition(
             name: "left_arm",
@@ -101,7 +101,7 @@ CreatureDefinition(
             ],
             color: Some([0.55, 0.45, 0.35, 1.0]), // Tan skin
         ),
-        
+
         // Head
         MeshDefinition(
             name: "head",
@@ -121,7 +121,7 @@ CreatureDefinition(
             ],
             color: Some([0.6, 0.5, 0.4, 1.0]), // Lighter skin tone
         ),
-        
+
         // Hood
         MeshDefinition(
             name: "hood",
@@ -140,7 +140,7 @@ CreatureDefinition(
             ],
             color: Some([0.25, 0.4, 0.15, 1.0]), // Dark green hood
         ),
-        
+
         // Bow (held in hand)
         MeshDefinition(
             name: "bow",
@@ -162,7 +162,7 @@ CreatureDefinition(
             ],
             color: Some([0.4, 0.25, 0.1, 1.0]), // Brown wood
         ),
-        
+
         // Quiver on back
         MeshDefinition(
             name: "quiver",

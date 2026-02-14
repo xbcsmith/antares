@@ -32,7 +32,7 @@ CreatureDefinition(
             ],
             color: Some([0.1, 0.05, 0.15, 1.0]), // Deep purple-black
         ),
-        
+
         // Upper robe/torso
         MeshDefinition(
             name: "robe_upper",
@@ -52,7 +52,7 @@ CreatureDefinition(
             ],
             color: Some([0.15, 0.08, 0.2, 1.0]), // Dark purple
         ),
-        
+
         // Ornate shoulder pads
         MeshDefinition(
             name: "left_shoulder",
@@ -90,7 +90,7 @@ CreatureDefinition(
             ],
             color: Some([0.7, 0.6, 0.2, 1.0]), // Tarnished gold
         ),
-        
+
         // Skeletal arms extending from robe
         MeshDefinition(
             name: "left_arm",
@@ -128,7 +128,7 @@ CreatureDefinition(
             ],
             color: Some([0.8, 0.8, 0.75, 1.0]), // Bone white
         ),
-        
+
         // Skull head
         MeshDefinition(
             name: "skull",
@@ -148,7 +148,7 @@ CreatureDefinition(
             ],
             color: Some([0.85, 0.85, 0.8, 1.0]), // Ancient bone
         ),
-        
+
         // Crown
         MeshDefinition(
             name: "crown_base",
@@ -168,7 +168,7 @@ CreatureDefinition(
             ],
             color: Some([0.8, 0.7, 0.3, 1.0]), // Tarnished gold
         ),
-        
+
         // Crown spikes
         MeshDefinition(
             name: "crown_spike_1",
@@ -200,7 +200,7 @@ CreatureDefinition(
             indices: [0, 1, 2],
             color: Some([0.9, 0.8, 0.4, 1.0]), // Bright gold
         ),
-        
+
         // Glowing eyes (intense)
         MeshDefinition(
             name: "left_eye",
@@ -238,7 +238,7 @@ CreatureDefinition(
             ],
             color: Some([1.0, 0.1, 0.1, 1.0]), // Intense red glow
         ),
-        
+
         // Staff of power (in right hand)
         MeshDefinition(
             name: "staff_shaft",
@@ -258,7 +258,7 @@ CreatureDefinition(
             ],
             color: Some([0.15, 0.1, 0.05, 1.0]), // Dark wood
         ),
-        
+
         // Staff orb (glowing)
         MeshDefinition(
             name: "staff_orb",
@@ -283,7 +283,7 @@ CreatureDefinition(
             ],
             color: Some([0.5, 0.1, 0.8, 1.0]), // Purple magical glow
         ),
-        
+
         // Mystical aura particles (floating triangles)
         MeshDefinition(
             name: "aura_particle_1",

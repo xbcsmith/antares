@@ -42,7 +42,7 @@ CreatureDefinition(
             ],
             color: Some([0.95, 0.95, 0.9, 1.0]), // Bone white
         ),
-        
+
         // Pelvis
         MeshDefinition(
             name: "pelvis",
@@ -62,7 +62,7 @@ CreatureDefinition(
             ],
             color: Some([0.9, 0.9, 0.85, 1.0]), // Slightly darker bone
         ),
-        
+
         // Spine
         MeshDefinition(
             name: "spine",
@@ -82,7 +82,7 @@ CreatureDefinition(
             ],
             color: Some([0.95, 0.95, 0.9, 1.0]), // Bone white
         ),
-        
+
         // Rib cage
         MeshDefinition(
             name: "ribcage",
@@ -102,7 +102,7 @@ CreatureDefinition(
             ],
             color: Some([0.88, 0.88, 0.83, 1.0]), // Slightly yellowed bone
         ),
-        
+
         // Arm bones
         MeshDefinition(
             name: "left_arm_bone",
@@ -140,7 +140,7 @@ CreatureDefinition(
             ],
             color: Some([0.95, 0.95, 0.9, 1.0]), // Bone white
         ),
-        
+
         // Skull
         MeshDefinition(
             name: "skull",
@@ -160,7 +160,7 @@ CreatureDefinition(
             ],
             color: Some([0.92, 0.92, 0.87, 1.0]), // Yellowed skull
         ),
-        
+
         // Eye sockets (glowing)
         MeshDefinition(
             name: "left_eye",
@@ -198,7 +198,7 @@ CreatureDefinition(
             ],
             color: Some([0.2, 1.0, 0.2, 1.0]), // Eerie green glow
         ),
-        
+
         // Rusty sword
         MeshDefinition(
             name: "sword",
@@ -219,7 +219,7 @@ CreatureDefinition(
             ],
             color: Some([0.6, 0.4, 0.3, 1.0]), // Rusty metal
         ),
-        
+
         // Tattered cape
         MeshDefinition(
             name: "cape",

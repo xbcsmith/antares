@@ -24,7 +24,7 @@ CreatureDefinition(
             ],
             color: Some([0.4, 0.35, 0.3, 1.0]), // Brown robe
         ),
-        
+
         // Torso with vest
         MeshDefinition(
             name: "torso",
@@ -44,7 +44,7 @@ CreatureDefinition(
             ],
             color: Some([0.35, 0.3, 0.25, 1.0]), // Darker brown
         ),
-        
+
         // Arms
         MeshDefinition(
             name: "left_arm",
@@ -82,7 +82,7 @@ CreatureDefinition(
             ],
             color: Some([0.4, 0.35, 0.3, 1.0]), // Brown sleeve
         ),
-        
+
         // Hands
         MeshDefinition(
             name: "left_hand",
@@ -120,7 +120,7 @@ CreatureDefinition(
             ],
             color: Some([0.65, 0.55, 0.45, 1.0]), // Aged skin
         ),
-        
+
         // Head
         MeshDefinition(
             name: "head",
@@ -140,7 +140,7 @@ CreatureDefinition(
             ],
             color: Some([0.7, 0.6, 0.5, 1.0]), // Weathered skin
         ),
-        
+
         // White beard
         MeshDefinition(
             name: "beard",
@@ -161,7 +161,7 @@ CreatureDefinition(
             ],
             color: Some([0.95, 0.95, 0.95, 1.0]), // White beard
         ),
-        
+
         // Walking stick
         MeshDefinition(
             name: "staff",
@@ -181,7 +181,7 @@ CreatureDefinition(
             ],
             color: Some([0.35, 0.25, 0.15, 1.0]), // Dark wood
         ),
-        
+
         // Staff top knob
         MeshDefinition(
             name: "staff_top",
