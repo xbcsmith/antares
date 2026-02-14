@@ -28,6 +28,7 @@ pub mod characters_editor;
 pub mod classes_editor;
 pub mod conditions_editor;
 pub mod config_editor;
+pub mod creature_assets;
 pub mod creature_templates;
 pub mod creatures_editor;
 pub mod dialogue_editor;

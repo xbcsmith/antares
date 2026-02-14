@@ -45,6 +45,7 @@
 pub mod cache;
 pub mod campaign_loader;
 pub mod campaign_packager;
+pub mod creature_validation;
 pub mod database;
 pub mod dialogue_editor;
 pub mod error_formatter;

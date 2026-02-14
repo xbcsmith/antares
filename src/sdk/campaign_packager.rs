@@ -531,6 +531,7 @@ mod tests {
                 quests: "data/quests.ron".to_string(),
                 dialogues: "data/dialogues.ron".to_string(),
                 characters: "data/characters.ron".to_string(),
+                creatures: "data/creatures.ron".to_string(),
             },
             assets: crate::sdk::campaign_loader::CampaignAssets {
                 tilesets: "assets/tilesets".to_string(),
@@ -587,6 +588,7 @@ mod tests {
                 quests: "data/quests.ron".to_string(),
                 dialogues: "data/dialogues.ron".to_string(),
                 characters: "data/characters.ron".to_string(),
+                creatures: "data/creatures.ron".to_string(),
             },
             assets: crate::sdk::campaign_loader::CampaignAssets {
                 tilesets: "assets/tilesets".to_string(),

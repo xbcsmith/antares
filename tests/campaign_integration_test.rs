@@ -50,6 +50,7 @@ fn create_test_campaign(id: &str, name: &str, version: &str) -> Campaign {
             quests: "data/quests.ron".to_string(),
             dialogues: "data/dialogues.ron".to_string(),
             characters: "data/characters.ron".to_string(),
+            creatures: "data/creatures.ron".to_string(),
         },
         assets: CampaignAssets {
             tilesets: "assets/tilesets".to_string(),
