@@ -1,0 +1,378 @@
+// Red Dragon - Fearsome flying boss creature
+CreatureDefinition(
+    name: "RedDragon",
+    scale: 2.5,
+    health: 500.0,
+    speed: 8.0,
+    meshes: [
+        // Body - main torso
+        MeshDefinition(
+            name: "body",
+            vertices: [
+                // Front (wider)
+                [-0.6, 0.0, 0.8], [0.6, 0.0, 0.8], [0.6, 0.8, 0.6], [-0.6, 0.8, 0.6],
+                // Back (narrower, elongated)
+                [-0.4, 0.0, -1.5], [0.4, 0.0, -1.5], [0.4, 0.5, -1.5], [-0.4, 0.5, -1.5],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                // Bottom
+                0, 5, 4, 0, 1, 5,
+                // Top
+                2, 3, 7, 2, 7, 6,
+                // Front face
+                0, 1, 2, 0, 2, 3,
+                // Back face
+                4, 5, 6, 4, 6, 7,
+                // Left side
+                0, 3, 7, 0, 7, 4,
+                // Right side
+                1, 5, 6, 1, 6, 2,
+            ],
+            color: Some([0.8, 0.15, 0.1, 1.0]), // Deep red
+        ),
+        
+        // Chest/underbelly (lighter color)
+        MeshDefinition(
+            name: "underbelly",
+            vertices: [
+                [-0.5, -0.05, 0.6], [0.5, -0.05, 0.6],
+                [-0.35, -0.05, -1.2], [0.35, -0.05, -1.2],
+            ],
+            normals: Some([
+                [0.0, -1.0, 0.0], [0.0, -1.0, 0.0],
+                [0.0, -1.0, 0.0], [0.0, -1.0, 0.0],
+            ]),
+            uvs: None,
+            indices: [0, 1, 3, 0, 3, 2],
+            color: Some([0.9, 0.7, 0.4, 1.0]), // Golden underbelly
+        ),
+        
+        // Neck
+        MeshDefinition(
+            name: "neck",
+            vertices: [
+                // Base (at body)
+                [-0.3, 0.8, 0.6], [0.3, 0.8, 0.6], [0.3, 0.8, 0.4], [-0.3, 0.8, 0.4],
+                // Top (before head)
+                [-0.25, 1.5, 1.2], [0.25, 1.5, 1.2], [0.25, 1.5, 1.0], [-0.25, 1.5, 1.0],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                0, 1, 2, 0, 2, 3,
+                0, 1, 5, 0, 5, 4,
+                1, 2, 6, 1, 6, 5,
+                2, 3, 7, 2, 7, 6,
+                3, 0, 4, 3, 4, 7,
+                4, 5, 6, 4, 6, 7,
+            ],
+            color: Some([0.75, 0.13, 0.08, 1.0]), // Darker red
+        ),
+        
+        // Head - elongated snout
+        MeshDefinition(
+            name: "head",
+            vertices: [
+                // Back of head
+                [-0.25, 1.5, 1.2], [0.25, 1.5, 1.2], [0.25, 1.8, 1.2], [-0.25, 1.8, 1.2],
+                [-0.25, 1.5, 1.0], [0.25, 1.5, 1.0], [0.25, 1.8, 1.0], [-0.25, 1.8, 1.0],
+                // Snout tip
+                [-0.1, 1.65, 1.8], [0.1, 1.65, 1.8], [0.1, 1.65, 1.7], [-0.1, 1.65, 1.7],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                // Back of head
+                0, 1, 2, 2, 3, 0,
+                1, 5, 6, 6, 2, 1,
+                7, 6, 5, 5, 4, 7,
+                4, 0, 3, 3, 7, 4,
+                // Connect to snout
+                0, 1, 9, 0, 9, 8,
+                1, 5, 10, 1, 10, 9,
+                5, 4, 11, 5, 11, 10,
+                4, 0, 8, 4, 8, 11,
+                // Snout tip
+                8, 9, 10, 8, 10, 11,
+            ],
+            color: Some([0.85, 0.2, 0.15, 1.0]), // Bright red
+        ),
+        
+        // Horns
+        MeshDefinition(
+            name: "left_horn",
+            vertices: [
+                [-0.2, 1.8, 1.15], [-0.15, 1.8, 1.15], [-0.175, 2.2, 1.2],
+            ],
+            normals: Some([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]]),
+            uvs: None,
+            indices: [0, 1, 2],
+            color: Some([0.3, 0.3, 0.3, 1.0]), // Dark gray
+        ),
+        MeshDefinition(
+            name: "right_horn",
+            vertices: [
+                [0.15, 1.8, 1.15], [0.2, 1.8, 1.15], [0.175, 2.2, 1.2],
+            ],
+            normals: Some([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]]),
+            uvs: None,
+            indices: [0, 1, 2],
+            color: Some([0.3, 0.3, 0.3, 1.0]), // Dark gray
+        ),
+        
+        // Eyes (glowing)
+        MeshDefinition(
+            name: "left_eye",
+            vertices: [
+                [-0.18, 1.7, 1.3], [-0.13, 1.7, 1.3], [-0.13, 1.75, 1.3], [-0.18, 1.75, 1.3],
+                [-0.18, 1.7, 1.25], [-0.13, 1.7, 1.25], [-0.13, 1.75, 1.25], [-0.18, 1.75, 1.25],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                1, 5, 6, 6, 2, 1,
+                7, 6, 5, 5, 4, 7,
+                4, 0, 3, 3, 7, 4,
+                4, 5, 1, 1, 0, 4,
+                3, 2, 6, 6, 7, 3,
+            ],
+            color: Some([1.0, 0.8, 0.0, 1.0]), // Golden yellow glow
+        ),
+        MeshDefinition(
+            name: "right_eye",
+            vertices: [
+                [0.13, 1.7, 1.3], [0.18, 1.7, 1.3], [0.18, 1.75, 1.3], [0.13, 1.75, 1.3],
+                [0.13, 1.7, 1.25], [0.18, 1.7, 1.25], [0.18, 1.75, 1.25], [0.13, 1.75, 1.25],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                1, 5, 6, 6, 2, 1,
+                7, 6, 5, 5, 4, 7,
+                4, 0, 3, 3, 7, 4,
+                4, 5, 1, 1, 0, 4,
+                3, 2, 6, 6, 7, 3,
+            ],
+            color: Some([1.0, 0.8, 0.0, 1.0]), // Golden yellow glow
+        ),
+        
+        // Legs (4 total)
+        MeshDefinition(
+            name: "front_left_leg",
+            vertices: [
+                [-0.5, 0.0, 0.5], [-0.35, 0.0, 0.5], [-0.35, 0.0, 0.35], [-0.5, 0.0, 0.35],
+                [-0.5, -0.8, 0.5], [-0.35, -0.8, 0.5], [-0.35, -0.8, 0.35], [-0.5, -0.8, 0.35],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                1, 5, 6, 6, 2, 1,
+                7, 6, 5, 5, 4, 7,
+                4, 0, 3, 3, 7, 4,
+                4, 5, 1, 1, 0, 4,
+                3, 2, 6, 6, 7, 3,
+            ],
+            color: Some([0.7, 0.12, 0.08, 1.0]), // Dark red
+        ),
+        MeshDefinition(
+            name: "front_right_leg",
+            vertices: [
+                [0.35, 0.0, 0.5], [0.5, 0.0, 0.5], [0.5, 0.0, 0.35], [0.35, 0.0, 0.35],
+                [0.35, -0.8, 0.5], [0.5, -0.8, 0.5], [0.5, -0.8, 0.35], [0.35, -0.8, 0.35],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                1, 5, 6, 6, 2, 1,
+                7, 6, 5, 5, 4, 7,
+                4, 0, 3, 3, 7, 4,
+                4, 5, 1, 1, 0, 4,
+                3, 2, 6, 6, 7, 3,
+            ],
+            color: Some([0.7, 0.12, 0.08, 1.0]), // Dark red
+        ),
+        MeshDefinition(
+            name: "back_left_leg",
+            vertices: [
+                [-0.35, 0.0, -1.0], [-0.2, 0.0, -1.0], [-0.2, 0.0, -1.15], [-0.35, 0.0, -1.15],
+                [-0.35, -0.9, -1.0], [-0.2, -0.9, -1.0], [-0.2, -0.9, -1.15], [-0.35, -0.9, -1.15],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                1, 5, 6, 6, 2, 1,
+                7, 6, 5, 5, 4, 7,
+                4, 0, 3, 3, 7, 4,
+                4, 5, 1, 1, 0, 4,
+                3, 2, 6, 6, 7, 3,
+            ],
+            color: Some([0.7, 0.12, 0.08, 1.0]), // Dark red
+        ),
+        MeshDefinition(
+            name: "back_right_leg",
+            vertices: [
+                [0.2, 0.0, -1.0], [0.35, 0.0, -1.0], [0.35, 0.0, -1.15], [0.2, 0.0, -1.15],
+                [0.2, -0.9, -1.0], [0.35, -0.9, -1.0], [0.35, -0.9, -1.15], [0.2, -0.9, -1.15],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                1, 5, 6, 6, 2, 1,
+                7, 6, 5, 5, 4, 7,
+                4, 0, 3, 3, 7, 4,
+                4, 5, 1, 1, 0, 4,
+                3, 2, 6, 6, 7, 3,
+            ],
+            color: Some([0.7, 0.12, 0.08, 1.0]), // Dark red
+        ),
+        
+        // Claws (simplified)
+        MeshDefinition(
+            name: "front_left_claw",
+            vertices: [
+                [-0.5, -0.8, 0.5], [-0.35, -0.8, 0.5], [-0.425, -1.0, 0.6],
+            ],
+            normals: Some([[0.0, -1.0, 0.2], [0.0, -1.0, 0.2], [0.0, -1.0, 0.2]]),
+            uvs: None,
+            indices: [0, 1, 2],
+            color: Some([0.2, 0.2, 0.2, 1.0]), // Dark claws
+        ),
+        MeshDefinition(
+            name: "front_right_claw",
+            vertices: [
+                [0.35, -0.8, 0.5], [0.5, -0.8, 0.5], [0.425, -1.0, 0.6],
+            ],
+            normals: Some([[0.0, -1.0, 0.2], [0.0, -1.0, 0.2], [0.0, -1.0, 0.2]]),
+            uvs: None,
+            indices: [0, 1, 2],
+            color: Some([0.2, 0.2, 0.2, 1.0]), // Dark claws
+        ),
+        
+        // Tail
+        MeshDefinition(
+            name: "tail_base",
+            vertices: [
+                [-0.3, 0.3, -1.5], [0.3, 0.3, -1.5], [0.3, 0.3, -2.2], [-0.3, 0.3, -2.2],
+                [-0.3, 0.0, -1.5], [0.3, 0.0, -1.5], [0.3, 0.0, -2.2], [-0.3, 0.0, -2.2],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                1, 5, 6, 6, 2, 1,
+                7, 6, 5, 5, 4, 7,
+                4, 0, 3, 3, 7, 4,
+                4, 5, 1, 1, 0, 4,
+                3, 2, 6, 6, 7, 3,
+            ],
+            color: Some([0.75, 0.13, 0.08, 1.0]), // Dark red
+        ),
+        MeshDefinition(
+            name: "tail_mid",
+            vertices: [
+                [-0.2, 0.2, -2.2], [0.2, 0.2, -2.2], [0.2, 0.2, -3.0], [-0.2, 0.2, -3.0],
+                [-0.2, 0.0, -2.2], [0.2, 0.0, -2.2], [0.2, 0.0, -3.0], [-0.2, 0.0, -3.0],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                1, 5, 6, 6, 2, 1,
+                7, 6, 5, 5, 4, 7,
+                4, 0, 3, 3, 7, 4,
+                4, 5, 1, 1, 0, 4,
+                3, 2, 6, 6, 7, 3,
+            ],
+            color: Some([0.7, 0.12, 0.08, 1.0]), // Darker red
+        ),
+        MeshDefinition(
+            name: "tail_tip",
+            vertices: [
+                [-0.1, 0.15, -3.0], [0.1, 0.15, -3.0], [0.0, 0.1, -3.5],
+            ],
+            normals: Some([[0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0]]),
+            uvs: None,
+            indices: [0, 1, 2],
+            color: Some([0.65, 0.1, 0.05, 1.0]), // Very dark red
+        ),
+        
+        // Wings (massive)
+        MeshDefinition(
+            name: "left_wing",
+            vertices: [
+                // Wing base (attached to body)
+                [-0.6, 0.6, 0.0], [-0.5, 0.6, 0.2], [-0.5, 0.4, 0.0],
+                // Wing membrane
+                [-2.5, 0.8, 0.5], [-2.5, 0.2, -0.5],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                // Wing membrane triangles
+                0, 1, 3,
+                0, 3, 4,
+                1, 2, 4,
+                2, 0, 4,
+            ],
+            color: Some([0.6, 0.1, 0.08, 0.85]), // Semi-transparent dark red
+        ),
+        MeshDefinition(
+            name: "right_wing",
+            vertices: [
+                // Wing base (attached to body)
+                [0.6, 0.6, 0.0], [0.5, 0.6, 0.2], [0.5, 0.4, 0.0],
+                // Wing membrane
+                [2.5, 0.8, 0.5], [2.5, 0.2, -0.5],
+            ],
+            normals: None,
+            uvs: None,
+            indices: [
+                0, 3, 1,
+                0, 4, 3,
+                1, 4, 2,
+                2, 4, 0,
+            ],
+            color: Some([0.6, 0.1, 0.08, 0.85]), // Semi-transparent dark red
+        ),
+        
+        // Spikes along spine
+        MeshDefinition(
+            name: "spine_spike_1",
+            vertices: [
+                [-0.15, 0.8, 0.3], [0.15, 0.8, 0.3], [0.0, 1.1, 0.2],
+            ],
+            normals: Some([[0.0, 1.0, -0.2], [0.0, 1.0, -0.2], [0.0, 1.0, -0.2]]),
+            uvs: None,
+            indices: [0, 1, 2],
+            color: Some([0.5, 0.08, 0.05, 1.0]), // Very dark red
+        ),
+        MeshDefinition(
+            name: "spine_spike_2",
+            vertices: [
+                [-0.15, 0.5, -0.3], [0.15, 0.5, -0.3], [0.0, 0.8, -0.4],
+            ],
+            normals: Some([[0.0, 1.0, -0.2], [0.0, 1.0, -0.2], [0.0, 1.0, -0.2]]),
+            uvs: None,
+            indices: [0, 1, 2],
+            color: Some([0.5, 0.08, 0.05, 1.0]), // Very dark red
+        ),
+        MeshDefinition(
+            name: "spine_spike_3",
+            vertices: [
+                [-0.12, 0.3, -0.9], [0.12, 0.3, -0.9], [0.0, 0.55, -1.0],
+            ],
+            normals: Some([[0.0, 1.0, -0.2], [0.0, 1.0, -0.2], [0.0, 1.0, -0.2]]),
+            uvs: None,
+            indices: [0, 1, 2],
+            color: Some([0.5, 0.08, 0.05, 1.0]), // Very dark red
+        ),
+    ],
+)
