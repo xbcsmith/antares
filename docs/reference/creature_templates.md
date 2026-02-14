@@ -37,8 +37,8 @@ Templates are organized by body type and theme:
 
 **File**: `data/creature_templates/humanoid.ron`
 
-**Category**: Humanoid  
-**Difficulty**: Beginner  
+**Category**: Humanoid
+**Difficulty**: Beginner
 **Author**: Antares Team
 
 #### Description
@@ -77,8 +77,8 @@ Basic humanoid template with torso, head, and arms. Perfect starting point for c
 
 **File**: `data/creature_templates/quadruped.ron`
 
-**Category**: Quadruped  
-**Difficulty**: Intermediate  
+**Category**: Quadruped
+**Difficulty**: Intermediate
 **Author**: Antares Team
 
 #### Description
@@ -121,8 +121,8 @@ Four-legged creature template with body, head, legs, and tail. Great for creatin
 
 **File**: `data/creature_templates/dragon.ron`
 
-**Category**: Dragon  
-**Difficulty**: Advanced  
+**Category**: Dragon
+**Difficulty**: Advanced
 **Author**: Antares Team
 
 #### Description
@@ -169,8 +169,8 @@ Majestic dragon template with elongated body, neck, head, wings, legs, and tail.
 
 **File**: `data/creature_templates/robot.ron`
 
-**Category**: Robot  
-**Difficulty**: Intermediate  
+**Category**: Robot
+**Difficulty**: Intermediate
 **Author**: Antares Team
 
 #### Description
@@ -214,8 +214,8 @@ Modular robot template with boxy chassis, cube head, antenna, and segmented limb
 
 **File**: `data/creature_templates/undead.ron`
 
-**Category**: Undead  
-**Difficulty**: Intermediate  
+**Category**: Undead
+**Difficulty**: Intermediate
 **Author**: Antares Team
 
 #### Description
@@ -259,8 +259,8 @@ Skeletal undead template with skull head, exposed ribcage, and bone limbs. Perfe
 
 **File**: `data/creature_templates/beast.ron`
 
-**Category**: Beast  
-**Difficulty**: Advanced  
+**Category**: Beast
+**Difficulty**: Advanced
 **Author**: Antares Team
 
 #### Description
@@ -320,7 +320,7 @@ Templates can be loaded in two ways:
 ```rust
 use antares::domain::visual::CreatureDefinition;
 
-let template: CreatureDefinition = 
+let template: CreatureDefinition =
     ron::from_str(include_str!("data/creature_templates/humanoid.ron"))?;
 ```
 

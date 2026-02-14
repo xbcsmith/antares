@@ -1,6 +1,6 @@
 # Phase 7: Game Engine Integration
 
-**Status**: COMPLETED  
+**Status**: COMPLETED
 **Date**: 2025-01-XX
 
 ## Overview
@@ -344,7 +344,7 @@ fn spawn_lod_creature(
         None,
         None,
     );
-    
+
     // LOD state automatically attached if creature_def has lod_levels
 }
 ```
@@ -385,7 +385,7 @@ fn apply_textured_material(
     materials: &mut Assets<StandardMaterial>,
 ) -> Handle<StandardMaterial> {
     let texture = load_texture(asset_server, "textures/dragon_scales.png");
-    
+
     let material_def = MaterialDefinition {
         base_color: [1.0, 1.0, 1.0, 1.0],
         metallic: 0.5,
@@ -393,7 +393,7 @@ fn apply_textured_material(
         emissive: Some([0.2, 0.1, 0.0]),
         alpha_mode: AlphaMode::Opaque,
     };
-    
+
     let material = create_material_with_texture(texture, Some(&material_def));
     materials.add(material)
 }

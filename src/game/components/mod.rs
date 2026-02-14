@@ -15,6 +15,7 @@ pub mod creature;
 pub mod dialogue;
 pub mod furniture;
 pub mod menu;
+pub mod performance;
 pub mod sprite;
 
 // Re-export commonly used types
@@ -29,4 +30,8 @@ pub use dialogue::{
 };
 pub use furniture::{FurnitureEntity, Interactable, InteractionType};
 pub use menu::*;
+pub use performance::{
+    DistanceCulling, InstanceData, InstancedCreature, LodState, MeshStreaming, PerformanceCategory,
+    PerformanceMarker,
+};
 pub use sprite::{ActorSprite, ActorType, AnimatedSprite, TileSprite};

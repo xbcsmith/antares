@@ -25,6 +25,7 @@ pub mod lod;
 pub mod map;
 pub mod menu;
 pub mod monster_rendering;
+pub mod performance;
 pub mod procedural_meshes;
 pub mod quest;
 pub mod recruitment_dialog;
