@@ -2500,6 +2500,165 @@ Implemented comprehensive performance optimization systems for procedural mesh r
   - `test_performance_optimization_end_to_end` - Complete optimization pipeline test
 - All tests pass with 100% success rate
 
+---
+
+## Tutorial Campaign Procedural Mesh Integration - Phase 2: Monster Visual Mapping
+
+**Date**: 2025-01-XX
+**Phase**: Tutorial Campaign Integration - Phase 2
+**Files Modified**:
+
+- `campaigns/tutorial/data/monsters.ron`
+
+**Summary**: Successfully mapped all 11 tutorial monsters to their corresponding creature visual definitions. This phase established the link between combat monster data and procedural mesh creatures for 3D rendering.
+
+**Changes**:
+
+1. **Updated Monster Definitions** (`campaigns/tutorial/data/monsters.ron`):
+   - Added `visual_id: Some(CreatureId)` to all tutorial monsters
+   - Mapped 11 monsters to 11 unique creature definitions
+   - All mappings validated against existing creature database
+
+**Monster-to-Creature Mappings**:
+
+| Monster ID | Monster Name   | Creature ID | Creature Name |
+| ---------- | -------------- | ----------- | ------------- |
+| 1          | Goblin         | 1           | Goblin        |
+| 2          | Kobold         | 3           | Kobold        |
+| 3          | Giant Rat      | 4           | GiantRat      |
+| 10         | Orc            | 7           | Orc           |
+| 11         | Skeleton       | 5           | Skeleton      |
+| 12         | Wolf           | 2           | Wolf          |
+| 20         | Ogre           | 8           | Ogre          |
+| 21         | Zombie         | 6           | Zombie        |
+| 22         | Fire Elemental | 9           | FireElemental |
+| 30         | Dragon         | 30          | Dragon        |
+| 31         | Lich           | 10          | Lich          |
+
+**Tests**:
+
+- Unit tests: 2 tests in `src/domain/combat/database.rs`
+  - `test_monster_visual_id_parsing` - Validates visual_id field parsing
+  - `test_load_tutorial_monsters_visual_ids` - Validates tutorial monster loading
+- Integration tests: 6 tests in `tests/tutorial_monster_creature_mapping.rs`
+  - `test_tutorial_monster_creature_mapping_complete` - Validates all 11 mappings
+  - `test_all_tutorial_monsters_have_visuals` - Ensures 100% coverage
+  - `test_no_broken_creature_references` - Validates reference integrity
+  - `test_creature_database_has_expected_creatures` - Database consistency
+  - `test_monster_visual_id_counts` - Coverage statistics
+  - `test_monster_creature_reuse` - Analyzes creature sharing patterns
+
+**Quality Validation**:
+
+- ✅ All code formatted (`cargo fmt`)
+- ✅ Zero compilation errors (`cargo check`)
+- ✅ Zero clippy warnings (`cargo clippy -- -D warnings`)
+- ✅ All tests passing (2325/2325 tests)
+
+**Documentation**:
+
+- `docs/explanation/phase2_monster_visual_mapping.md` - Implementation details
+- `docs/explanation/phase2_completion_summary.md` - Executive summary
+
+---
+
+## Tutorial Campaign Procedural Mesh Integration - Phase 3: NPC Procedural Mesh Integration
+
+**Date**: 2025-01-XX
+**Phase**: Tutorial Campaign Integration - Phase 3
+**Files Modified**:
+
+- `src/domain/world/npc.rs`
+- `campaigns/tutorial/data/npcs.ron`
+- `src/domain/world/blueprint.rs`
+- `src/domain/world/types.rs`
+- `src/game/systems/events.rs`
+- `src/sdk/database.rs`
+- `tests/tutorial_npc_creature_mapping.rs` (NEW)
+
+**Summary**: Integrated NPC definitions with the procedural mesh creature visual system. All 12 tutorial NPCs now reference creature mesh definitions for 3D rendering, enabling consistent visual representation across the game world.
+
+**Changes**:
+
+1. **Domain Layer Updates** (`src/domain/world/npc.rs`):
+
+   - Added `creature_id: Option<CreatureId>` field to `NpcDefinition` struct
+   - Implemented `with_creature_id()` builder method
+   - Maintained backward compatibility via `#[serde(default)]`
+   - Hybrid approach supports both creature-based and sprite-based visuals
+
+2. **NPC Data Updates** (`campaigns/tutorial/data/npcs.ron`):
+   - Updated all 12 tutorial NPCs with creature visual mappings
+   - Reused generic NPC creatures (Innkeeper, Merchant, VillageElder) across instances
+   - 12 NPCs mapped to 9 unique creatures (~25% memory efficiency gain)
+
+**NPC-to-Creature Mappings**:
+
+| NPC ID                           | NPC Name                    | Creature ID | Creature Name  |
+| -------------------------------- | --------------------------- | ----------- | -------------- |
+| tutorial_elder_village           | Village Elder Town Square   | 54          | VillageElder   |
+| tutorial_innkeeper_town          | InnKeeper Town Square       | 52          | Innkeeper      |
+| tutorial_merchant_town           | Merchant Town Square        | 53          | Merchant       |
+| tutorial_priestess_town          | High Priestess Town Square  | 56          | HighPriestess  |
+| tutorial_wizard_arcturus         | Arcturus                    | 58          | WizardArcturus |
+| tutorial_wizard_arcturus_brother | Arcturus Brother            | 64          | OldGareth      |
+| tutorial_ranger_lost             | Lost Ranger                 | 57          | Ranger         |
+| tutorial_elder_village2          | Village Elder Mountain Pass | 54          | VillageElder   |
+| tutorial_innkeeper_town2         | Innkeeper Mountain Pass     | 52          | Innkeeper      |
+| tutorial_merchant_town2          | Merchant Mountain Pass      | 53          | Merchant       |
+| tutorial_priest_town2            | High Priest Mountain Pass   | 55          | HighPriest     |
+| tutorial_goblin_dying            | Dying Goblin                | 12          | DyingGoblin    |
+
+3. **Test Updates**:
+   - Fixed 12 test NPC instances across 4 files to include `creature_id` field
+   - Ensures all tests compile and pass with updated struct
+
+**Tests**:
+
+- Unit tests: 5 new tests in `src/domain/world/npc.rs`
+  - `test_npc_definition_with_creature_id` - Builder pattern validation
+  - `test_npc_definition_creature_id_serialization` - RON serialization
+  - `test_npc_definition_deserializes_without_creature_id_defaults_none` - Backward compatibility
+  - `test_npc_definition_with_both_creature_and_sprite` - Hybrid system support
+  - `test_npc_definition_defaults_have_no_creature_id` - Default behavior
+- Integration tests: 9 tests in `tests/tutorial_npc_creature_mapping.rs` (NEW)
+  - `test_tutorial_npc_creature_mapping_complete` - Validates all 12 mappings
+  - `test_all_tutorial_npcs_have_creature_visuals` - 100% coverage check
+  - `test_no_broken_npc_creature_references` - Reference integrity
+  - `test_creature_database_has_expected_npc_creatures` - Database consistency
+  - `test_npc_definition_parses_with_creature_id` - RON parsing validation
+  - `test_npc_definition_backward_compatible_without_creature_id` - Legacy support
+  - `test_npc_creature_id_counts` - Coverage statistics (12/12 = 100%)
+  - `test_npc_creature_reuse` - Shared creature usage analysis
+  - `test_npc_hybrid_sprite_and_creature_support` - Dual system validation
+
+**Quality Validation**:
+
+- ✅ All code formatted (`cargo fmt`)
+- ✅ Zero compilation errors (`cargo check`)
+- ✅ Zero clippy warnings (`cargo clippy -- -D warnings`)
+- ✅ All tests passing (2339/2339 tests, 8 skipped)
+
+**Architecture Compliance**:
+
+- ✅ Used `CreatureId` type alias (not raw `u32`)
+- ✅ Applied `#[serde(default)]` for optional fields
+- ✅ Followed domain layer structure
+- ✅ RON format used for data files
+- ✅ No architectural deviations
+
+**Documentation**:
+
+- `docs/explanation/phase3_npc_procedural_mesh_integration.md` - Implementation report
+
+**Metrics**:
+
+- NPCs Updated: 12/12 (100%)
+- Creature Mappings: 12 NPCs → 9 unique creatures
+- Tests Added: 14 new tests (5 unit + 9 integration)
+- Test Pass Rate: 2339/2339 (100%)
+- Backward Compatibility: Maintained
+
 #### 9.9 Game Systems Integration
 
 **File**: `src/game/systems/performance.rs` (NEW)

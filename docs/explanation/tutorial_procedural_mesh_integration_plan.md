@@ -2,16 +2,47 @@
 
 ## Overview
 
-This plan outlines the integration of procedural mesh-based creature visuals into the tutorial campaign, replacing sprite placeholders with 3D procedural meshes. The implementation creates a creature database, maps monsters and NPCs to creature visuals, and ensures proper loading and rendering within the campaign.
+This plan outlines the integration of procedural mesh-based creature visuals into the tutorial campaign, replacing sprite placeholders with 3D procedural meshes. The implementation creates a lightweight creature registry that references individual mesh files, maps monsters and NPCs to creature visuals, and ensures proper loading and rendering within the campaign.
 
 **Scope**: Update tutorial campaign (`campaigns/tutorial/`) to use procedural mesh creatures from `assets/creatures/` directory.
 
 **Key Changes**:
 
-- Create centralized creature database with ID-based lookup
+- Create lightweight creature registry (`data/creatures.ron`) with file references instead of embedded mesh data
+- Add `CreatureReference` struct to domain layer for registry entries
+- Implement eager loading of creature meshes at campaign startup
 - Map 11 monster types to 32 available creature meshes
 - Update NPCs to use procedural meshes instead of sprites
 - Maintain backward compatibility with sprite fallback system
+
+**Architecture Decision**: Registry-Based Creature Loading
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ PREVIOUS APPROACH (Rejected)                                │
+│ - Single creatures.ron file with embedded MeshDefinition    │
+│ - File size: >1MB with all mesh data inline                 │
+│ - Hard to edit individual creatures                         │
+│ - Single point of failure for all creatures                 │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ NEW APPROACH (Implemented)                                   │
+│ - Lightweight creatures.ron registry with file references   │
+│ - File size: <5KB with only ID + name + filepath            │
+│ - Individual .ron files remain single source of truth       │
+│ - Easy to edit individual creatures independently           │
+│ - Eager loading at campaign startup (all files loaded once) │
+│ - Relative paths from campaign root for portability         │
+└─────────────────────────────────────────────────────────────┘
+
+Example Registry Entry:
+    CreatureReference(
+        id: 1,
+        name: "Goblin",
+        filepath: "assets/creatures/goblin.ron",
+    )
+```
 
 ## Current State Analysis
 
@@ -49,113 +80,98 @@ This plan outlines the integration of procedural mesh-based creature visuals int
 
 ### Identified Issues
 
-1. **No Creature Database**: Creature RON files exist but no centralized database file maps IDs to creature definitions
-2. **Unpopulated Visual IDs**: Monster definitions lack `visual_id` values linking to creatures
-3. **NPC Visual Mechanism**: NPCs use sprite system but need procedural mesh support
-4. **Campaign Loading Gap**: Campaign doesn't load creature database during initialization
-5. **Missing Visual Mappings**: No documentation of which monsters/NPCs map to which creature files
-6. **Incomplete Creature Coverage**: Some variations (skeleton_warrior, evil_lich, dying_goblin) need mapping strategy
+1. **No Creature Registry**: Individual creature RON files exist but no centralized registry file maps IDs to creature file paths
+2. **Bloated Embedded Data**: Previous approach embedded full MeshDefinition data in single file (>1MB), needs lightweight reference system
+3. **Unpopulated Visual IDs**: Monster definitions lack `visual_id` values linking to creatures
+4. **NPC Visual Mechanism**: NPCs use sprite system but need procedural mesh support
+5. **Campaign Loading Gap**: Campaign doesn't load creature registry during initialization
+6. **Missing Domain Type**: No `CreatureReference` struct to represent lightweight registry entries
+7. **Missing Visual Mappings**: No documentation of which monsters/NPCs map to which creature files
+8. **Incomplete Creature Coverage**: Some variations (skeleton_warrior, evil_lich, dying_goblin) need mapping strategy
 
 ## Implementation Phases
 
-### Phase 1: Domain Struct Updates and Creature File Correction
+### Phase 1: Creature Registry System Implementation
 
-**Objective**: Add missing `name` field to `MeshDefinition` struct, then fix all creature files to add required fields while preserving existing data.
+**Objective**: Create lightweight creature registry system with file references, add `CreatureReference` struct to domain layer, and establish eager loading pattern at campaign startup.
 
-#### 1.1 Add `name` Field to MeshDefinition Struct
+#### 1.1 Add `CreatureReference` Struct to Domain Layer
 
-**Files**:
+**File**: `src/domain/visual/mod.rs`
 
-- `src/domain/visual/mod.rs`
-- `sdk/campaign_builder/src/` (any files using MeshDefinition)
-
-**Current Issue**: `MeshDefinition` struct is missing the `name` field that exists in the procedural_mesh_implementation_plan.md examples and all existing creature files.
+**Current Issue**: No lightweight struct to represent creature registry entries that reference external mesh files.
 
 **Required Change**:
 
-Add optional `name` field to `MeshDefinition` struct:
+Add `CreatureReference` struct after `CreatureDefinition`:
 
-```rust
+````rust
+/// Lightweight creature registry entry
+///
+/// Used in campaign creature registries to reference external creature mesh files
+/// instead of embedding full MeshDefinition data inline.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::visual::CreatureReference;
+///
+/// let reference = CreatureReference {
+///     id: 1,
+///     name: "Goblin".to_string(),
+///     filepath: "assets/creatures/goblin.ron".to_string(),
+/// };
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MeshDefinition {
-    /// Optional name for the mesh (e.g., "left_leg", "head", "torso")
+pub struct CreatureReference {
+    /// Unique creature identifier matching the referenced creature file
+    pub id: CreatureId,
+
+    /// Display name for editor/debugging
+    pub name: String,
+
+    /// Relative path to creature definition file from campaign root
     ///
-    /// Used for debugging, editor display, and mesh identification.
-    #[serde(default)]
-    pub name: Option<String>,
-
-    /// Vertex positions as [x, y, z] coordinates
-    pub vertices: Vec<[f32; 3]>,
-
-    // ... rest of fields
+    /// Example: "assets/creatures/goblin.ron"
+    pub filepath: String,
 }
-```
+````
 
 **Rationale**:
 
-- All existing creature files have `name` field in MeshDefinition
-- Matches the design from procedural_mesh_implementation_plan.md Appendix
-- Optional field with `#[serde(default)]` maintains backward compatibility
-- Essential for debugging and visual editor mesh identification
+- Separates registry (lightweight references) from data (full mesh definitions)
+- Reduces `creatures.ron` file size from >1MB to a few KB
+- Enables individual creature file editing without touching massive database
+- Maintains single source of truth (individual `.ron` files)
+- Supports eager loading at campaign startup with file resolution
 
 **Testing**:
 
-- Verify existing creature files parse correctly after adding field
-- Test that meshes without name field still parse (backward compatibility)
-- Ensure name field displays in campaign builder editor
+- Verify `CreatureReference` compiles and implements required traits
+- Test RON serialization/deserialization of `Vec<CreatureReference>`
+- Ensure `id` field properly uses `CreatureId` type alias
 
-#### 1.2 Fix Individual Creature Files
+#### 1.2 Verify Individual Creature Files
 
 **Files**: All 32 files in `campaigns/tutorial/assets/creatures/*.ron`
 
-**Current Issues After 1.1**:
+**Current Status**: Individual creature files already exist with proper `CreatureDefinition` format including:
 
-- Missing `id` field (required by `CreatureDefinition`)
-- Missing `mesh_transforms` array (required - one per mesh)
-- Invalid `health` field (not in struct - belongs in game stats)
-- Invalid `speed` field (not in struct - belongs in game stats)
-- `name` field in `MeshDefinition` is now VALID (added in 1.1)
+- SPDX headers
+- `id` field
+- `name` field
+- `meshes` array with `MeshDefinition` entries
+- `mesh_transforms` array
+- `scale` field
+- `color_tint` field
 
-**Required Changes Per File**:
+**Verification Tasks**:
 
-1. **Add SPDX header** (following `data/creature_templates/dragon.ron` pattern):
-
-   ```ron
-   // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
-   // SPDX-License-Identifier: Apache-2.0
-   ```
-
-2. **Keep mesh names** (now valid after 1.1):
-
-   - `MeshDefinition(name: "left_leg", ...)` is now correct
-   - Name field is optional, used for editor/debugging
-
-3. **Add `id` field** to `CreatureDefinition` per assignment table below
-
-4. **Remove invalid fields**:
-
-   - Delete `health: 40.0` (move to monster stats if needed)
-   - Delete `speed: 6.5` (move to monster stats if needed)
-
-5. **Convert mesh name to comment-style** (optional, for consistency with templates):
-
-   - Change `MeshDefinition(name: "left_leg", ...)`
-   - To `MeshDefinition(name: Some("left_leg"), ...)`
-   - Or use comment format: `// Left leg\nMeshDefinition(name: None, ...)`
-
-**Note**: Since `name` is optional, both approaches are valid. Recommend keeping `name: Some("...")` for editor utility.
-
-6. **Add `mesh_transforms` array** with identity transforms for each mesh:
-   ```ron
-   mesh_transforms: [
-       MeshTransform(
-           translation: [0.0, 0.0, 0.0],
-           rotation: [0.0, 0.0, 0.0],
-           scale: [1.0, 1.0, 1.0],
-       ),
-       // ... one per mesh
-   ],
-   ```
+1. **Validate file integrity**: Ensure each file parses as valid `CreatureDefinition`
+2. **Verify ID uniqueness**: Confirm no duplicate IDs across all 32 files
+3. **Check required fields**: All files have `id`, `name`, `meshes`, `mesh_transforms`
+4. **Validate mesh counts**: Each file has matching `meshes.len() == mesh_transforms.len()`
+5. **Confirm SPDX headers**: All files include copyright and license information
 
 **ID Assignment Strategy**:
 
@@ -201,48 +217,105 @@ pub struct MeshDefinition {
 | template_elf_mage.ron      | 102         | Template | Elf mage base          |
 | template_dwarf_cleric.ron  | 103         | Template | Dwarf cleric base      |
 
-#### 1.3 Update Creature Examples
-
-**Files**: All files in `data/creature_examples/*.ron`
-
-**Objective**: Apply same format corrections to example creatures for consistency.
-
-**Action Items**:
-
-- Apply same corrections as 1.2 to all creature_examples files
-- Ensure SPDX headers present
-- Convert mesh names to comments
-- Add `mesh_transforms` arrays
-- Validate all examples parse correctly
-
-**Note**: These are reference examples, not campaign content, but should follow same format.
-
-#### 1.4 Create Creatures Database File
+#### 1.3 Create Creature Registry File
 
 **File**: `campaigns/tutorial/data/creatures.ron`
 
-**Structure**: Array format for batch loading by `CreatureDatabase`
+**Structure**: Array of `CreatureReference` entries pointing to individual files
 
 ```ron
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// Tutorial campaign creature database
-// Loads all creature visual definitions for monsters and NPCs
+// Tutorial Campaign Creature Registry
+// Lightweight registry mapping creature IDs to external mesh definition files
+// Individual creature files located in assets/creatures/ directory
+// Loaded eagerly at campaign startup for performance
 
 [
-    // Include references or inline definitions
-    // Option A: Inline all 32 creatures here
-    // Option B: Use include mechanism if RON supports it
+    // Monster Creatures (IDs 1-50)
+    CreatureReference(
+        id: 1,
+        name: "Goblin",
+        filepath: "assets/creatures/goblin.ron",
+    ),
+    CreatureReference(
+        id: 2,
+        name: "Kobold",
+        filepath: "assets/creatures/kobold.ron",
+    ),
+    CreatureReference(
+        id: 3,
+        name: "GiantRat",
+        filepath: "assets/creatures/giant_rat.ron",
+    ),
+    // ... all 32 creatures
 ]
 ```
 
-**Decision Point**:
+**Key Design Decisions**:
 
-- **Option A**: Copy all 32 corrected creatures inline (easier loading, single file)
-- **Option B**: Keep individual files, use loader to scan directory (easier editing)
+- **Registry-based**: References to files, not embedded data (reduces size from >1MB to ~2KB)
+- **Relative paths**: Paths relative to campaign root for portability
+- **Eager loading**: All creatures loaded at campaign startup (simpler than lazy loading)
+- **Single source of truth**: Individual `.ron` files remain authoritative
 
-**Recommendation**: Option A for Phase 1 (matches existing data pattern like `monsters.ron`)
+#### 1.4 Implement Creature Registry Loading
+
+**Files**:
+
+- `src/domain/visual/creature_database.rs`
+- `src/sdk/campaign_loader.rs`
+
+**Required Changes**:
+
+1. **Add registry loading method** to `CreatureDatabase`:
+
+```rust
+/// Loads creature registry and resolves all file references eagerly
+///
+/// # Arguments
+///
+/// * `registry_path` - Path to creatures.ron registry file
+/// * `campaign_root` - Campaign root directory for resolving relative paths
+///
+/// # Returns
+///
+/// Returns `CreatureDatabase` with all creatures loaded from individual files
+///
+/// # Errors
+///
+/// Returns error if registry file invalid or any referenced creature file fails to load
+pub fn load_from_registry(
+    registry_path: &Path,
+    campaign_root: &Path,
+) -> Result<Self, Box<dyn std::error::Error>> {
+    // 1. Load registry file as Vec<CreatureReference>
+    // 2. For each reference, resolve filepath relative to campaign_root
+    // 3. Load full CreatureDefinition from resolved path
+    // 4. Insert into database with id as key
+    // 5. Return populated database
+}
+```
+
+2. **Update campaign loader** to use registry loading:
+
+```rust
+// In load_campaign() function
+let creature_db = if let Some(creatures_file) = &metadata.creatures_file {
+    let registry_path = campaign_path.join(creatures_file);
+    CreatureDatabase::load_from_registry(&registry_path, campaign_path)?
+} else {
+    CreatureDatabase::new()
+};
+```
+
+**Rationale**:
+
+- Eager loading at startup ensures all creatures available immediately
+- Centralized error handling during load phase (fail-fast)
+- No runtime file I/O during gameplay
+- Simpler than lazy loading with on-demand file resolution
 
 #### 1.5 Update Campaign Metadata
 
@@ -260,22 +333,38 @@ pub struct MeshDefinition {
 
 #### 1.6 Testing Requirements
 
-**After 1.1 (Struct Update)**:
+**After 1.1 (CreatureReference Struct)**:
 
-- Verify MeshDefinition with `name` field compiles
-- Test parsing existing creature files with name field
-- Test backward compatibility (files without name parse correctly)
-- Ensure campaign builder displays mesh names
+- Verify `CreatureReference` compiles with all required traits
+- Test RON serialization/deserialization
+- Confirm `id` field properly uses `CreatureId` type alias
 
-**After 1.2-1.4 (File Updates)**:
+**After 1.2 (Individual File Verification)**:
 
-**Validation Tests for Files**:
-
-- Each individual creature file in `assets/creatures/` parses without errors
-- All 32 creatures in `data/creatures.ron` parse as valid RON array
+- Each of 32 files in `assets/creatures/` parses as valid `CreatureDefinition`
 - No duplicate IDs across all creatures
-- Each creature has mesh count == mesh_transforms count
-- `CreatureDatabase::load_from_file()` successfully loads `data/creatures.ron`
+- Each creature has matching `meshes.len() == mesh_transforms.len()`
+- All files include SPDX headers
+
+**After 1.3 (Registry File Creation)**:
+
+- `data/creatures.ron` parses as `Vec<CreatureReference>`
+- All 32 creatures referenced with unique IDs
+- All filepaths resolve correctly from campaign root
+- Registry file size < 5KB (compared to >1MB for embedded approach)
+
+**After 1.4 (Registry Loading)**:
+
+- `CreatureDatabase::load_from_registry()` successfully loads all 32 creatures
+- Each referenced file resolves and parses correctly
+- Loaded database contains all 32 creatures with correct IDs
+- Loading time acceptable (<1 second for all creatures)
+
+**After 1.5 (Campaign Integration)**:
+
+- Campaign loads successfully with `creatures_file: "data/creatures.ron"`
+- Creature database available in loaded campaign state
+- No errors during campaign startup
 
 **Commands**:
 
@@ -284,38 +373,40 @@ cargo fmt --all
 cargo check --all-targets --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo nextest run --all-features
-
-# Manual RON validation
-ron::from_str::<Vec<CreatureDefinition>>(file_contents)
 ```
 
 #### 1.7 Deliverables
 
-- [x] `src/domain/visual/mod.rs`: `name` field added to `MeshDefinition`
-- [x] Campaign builder updated to use mesh names in editor UI
-- [x] All 32 files in `campaigns/tutorial/assets/creatures/` corrected:
-  - [x] SPDX headers added
-  - [x] `id` field added per mapping table
-  - [x] `mesh_transforms` arrays added
-  - [x] Invalid fields removed (`health`, `speed`)
-  - [x] Mesh `name` fields kept (now valid) or converted to `Some("name")`
-- [x] All files in `data/creature_examples/` updated with same corrections
-- [ ] `campaigns/tutorial/data/creatures.ron` created with all 32 creatures
+- [ ] `src/domain/visual/mod.rs`: `CreatureReference` struct added with proper documentation
+- [ ] `src/domain/visual/creature_database.rs`: `load_from_registry()` method implemented
+- [ ] `src/sdk/campaign_loader.rs`: Updated to use registry loading
+- [ ] All 32 files in `campaigns/tutorial/assets/creatures/` verified:
+  - [x] Already have SPDX headers
+  - [x] Already have `id` field
+  - [x] Already have `mesh_transforms` arrays
+  - [x] Already have proper `CreatureDefinition` format
+- [ ] `campaigns/tutorial/data/creatures.ron` created as lightweight registry:
+  - [ ] Contains 32 `CreatureReference` entries
+  - [ ] Uses relative paths from campaign root
+  - [ ] File size < 5KB (vs >1MB for embedded approach)
 - [ ] `campaigns/tutorial/campaign.ron` updated with `creatures_file: "data/creatures.ron"`
-- [x] All files validate with `cargo check`
-- [x] RON parsing confirmed for all creature files
+- [ ] All files validate with `cargo check`
+- [ ] Registry loading tested with all 32 creatures
+- [ ] Documentation updated to reflect registry-based architecture
 
 #### 1.8 Success Criteria
 
-- `MeshDefinition` struct has optional `name` field
-- All individual creature files match proper `CreatureDefinition` struct format
-- All creature files include SPDX headers
-- Each creature has unique ID matching assignment table
-- `CreatureDatabase::load_from_file("campaigns/tutorial/data/creatures.ron")` succeeds
+- `CreatureReference` struct exists in domain layer with proper documentation
+- `CreatureDatabase::load_from_registry()` method implemented with eager loading
+- All 32 individual creature files validate as proper `CreatureDefinition` format
+- Lightweight registry file (`creatures.ron`) contains all 32 references with relative paths
+- Registry file size dramatically reduced (< 5KB vs >1MB for embedded approach)
+- Campaign loader successfully loads creature database from registry
+- All 32 creatures accessible by ID after campaign load
 - No compilation errors or warnings
-- Mesh names preserved (either in field or as comments) for editor/debugging utility
-- `data/creature_examples/` updated for consistency
-- Campaign builder displays mesh names in editor UI
+- Individual creature files remain single source of truth
+- Easy to edit individual creatures without touching registry file
+- Loading time acceptable (< 1 second for all creatures at startup)
 
 ### Phase 2: Monster Visual Mapping
 
@@ -667,7 +758,7 @@ cargo run --release --bin antares -- --campaign tutorial
 
 #### 5.3 Create Mapping Reference File
 
-**File**: `campaigns/tutorial/CREATURE_MAPPINGS.md`
+**File**: `campaigns/tutorial/creature_mappings.md`
 
 **Content**:
 
@@ -709,7 +800,7 @@ verified in-game.
 #### 5.5 Deliverables
 
 - [ ] `campaigns/tutorial/README.md` updated with creature documentation
-- [ ] `campaigns/tutorial/CREATURE_MAPPINGS.md` created
+- [ ] `campaigns/tutorial/creature_mappings.md` created
 - [ ] Unused creatures documented for future use
 - [ ] `docs/explanation/implementations.md` updated
 
@@ -719,6 +810,400 @@ verified in-game.
 - All mappings clearly documented
 - Future content creators have clear guidelines
 - Implementation properly recorded in project documentation
+
+### Phase 6: Campaign Builder Creatures Editor Integration
+
+**Objective**: Enable visual editing of creature mappings in `creatures.ron` from the Campaign Builder UI's Creatures Editor tab.
+
+#### 6.1 UI Components for Creatures Editor
+
+**Location**: Campaign Builder → Creatures Tab
+
+**Required UI Elements**:
+
+1. **Creature List Panel** (Left Side)
+
+   - Scrollable list of all creature references
+   - Group by category: Monsters (1-50), NPCs (51-100), Templates (101-150), Variants (151-200)
+   - Display: ID, Name, Status (✓ File Exists / ⚠ Missing)
+   - Search/filter capability
+   - Sort options (by ID, by Name, by Category)
+
+2. **Creature Details Editor** (Right Side)
+
+   - Creature ID field (numeric input, validated)
+   - Creature Name field (text input)
+   - Filepath field (text input with file browser button)
+   - "Browse" button to select .ron file from assets/creatures/
+   - Preview of selected creature mesh (if renderer available)
+   - Validation status indicators
+
+3. **Action Buttons**
+   - "Add New Creature" button
+   - "Delete Selected Creature" button
+   - "Save Changes" button (writes to creatures.ron)
+   - "Reload from File" button (discards unsaved changes)
+   - "Validate All" button (checks all file references)
+
+#### 6.2 Backend Implementation
+
+**File**: `src/ui/campaign_builder/creatures_editor.rs` (new)
+
+**Core Functionality**:
+
+```antares/docs/explanation/tutorial_procedural_mesh_integration_plan.md#L1-50
+/// Manages the creatures editor tab in the campaign builder
+pub struct CreaturesEditor {
+    /// Path to the campaign's creatures.ron file
+    creatures_file_path: PathBuf,
+
+    /// In-memory representation of creature registry
+    creatures: Vec<CreatureReference>,
+
+    /// Currently selected creature index
+    selected_index: Option<usize>,
+
+    /// Unsaved changes flag
+    is_dirty: bool,
+
+    /// Validation results cache
+    validation_results: HashMap<CreatureId, ValidationResult>,
+}
+
+impl CreaturesEditor {
+    /// Load creatures.ron into editor
+    pub fn load_from_file(path: PathBuf) -> Result<Self, EditorError>;
+
+    /// Save current state back to creatures.ron
+    pub fn save_to_file(&self) -> Result<(), EditorError>;
+
+    /// Add a new creature reference
+    pub fn add_creature(&mut self, creature: CreatureReference) -> Result<(), EditorError>;
+
+    /// Update existing creature reference
+    pub fn update_creature(&mut self, index: usize, creature: CreatureReference) -> Result<(), EditorError>;
+
+    /// Delete creature reference
+    pub fn delete_creature(&mut self, index: usize) -> Result<(), EditorError>;
+
+    /// Validate all creature file references exist
+    pub fn validate_all(&mut self) -> ValidationReport;
+
+    /// Check for duplicate IDs
+    pub fn check_duplicate_ids(&self) -> Vec<CreatureId>;
+
+    /// Suggest next available ID in range
+    pub fn suggest_next_id(&self, category: CreatureCategory) -> CreatureId;
+}
+```
+
+#### 6.3 Validation Logic
+
+**ID Range Validation**:
+
+- Monsters: 1-50
+- NPCs: 51-100
+- Templates: 101-150
+- Variants: 151-200
+- Custom: 201+ (campaign-specific)
+
+**File Reference Validation**:
+
+```antares/docs/explanation/tutorial_procedural_mesh_integration_plan.md#L51-70
+pub enum ValidationResult {
+    Valid,
+    FileNotFound(PathBuf),
+    InvalidPath(String),
+    DuplicateId(CreatureId),
+    IdOutOfRange { id: CreatureId, expected_range: std::ops::Range<u32> },
+    InvalidRonSyntax(String),
+}
+
+pub struct ValidationReport {
+    pub total_creatures: usize,
+    pub valid_count: usize,
+    pub warnings: Vec<(CreatureId, String)>,
+    pub errors: Vec<(CreatureId, ValidationResult)>,
+}
+```
+
+**Real-Time Validation**:
+
+- Check file exists on Browse button click
+- Validate ID uniqueness on change
+- Validate ID range based on creature category
+- Parse .ron file to verify syntax (optional, can be expensive)
+- Mark dirty flag on any edit
+
+#### 6.4 RON File Operations
+
+**Reading creatures.ron**:
+
+```antares/docs/explanation/tutorial_procedural_mesh_integration_plan.md#L71-85
+use serde::Deserialize;
+use std::fs;
+
+pub fn load_creatures_registry(path: &Path) -> Result<Vec<CreatureReference>, EditorError> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| EditorError::FileReadError(e.to_string()))?;
+
+    let creatures: Vec<CreatureReference> = ron::from_str(&content)
+        .map_err(|e| EditorError::RonParseError(e.to_string()))?;
+
+    Ok(creatures)
+}
+```
+
+**Writing creatures.ron**:
+
+```antares/docs/explanation/tutorial_procedural_mesh_integration_plan.md#L86-110
+use ron::ser::{PrettyConfig, to_string_pretty};
+
+pub fn save_creatures_registry(
+    path: &Path,
+    creatures: &[CreatureReference],
+    preserve_header: bool,
+) -> Result<(), EditorError> {
+    // Preserve header comments if requested
+    let header = if preserve_header {
+        CREATURES_RON_HEADER
+    } else {
+        ""
+    };
+
+    // Configure pretty printing
+    let pretty = PrettyConfig::new()
+        .depth_limit(2)
+        .separate_tuple_members(true)
+        .enumerate_arrays(true);
+
+    let ron_content = to_string_pretty(creatures, pretty)
+        .map_err(|e| EditorError::RonSerializeError(e.to_string()))?;
+
+    let final_content = format!("{}\n{}", header, ron_content);
+
+    fs::write(path, final_content)
+        .map_err(|e| EditorError::FileWriteError(e.to_string()))?;
+
+    Ok(())
+}
+```
+
+#### 6.5 User Workflow
+
+**Adding a New Creature**:
+
+1. Click "Add New Creature" button
+2. System suggests next available ID based on selected category
+3. User enters creature name
+4. User clicks "Browse" to select creature .ron file from assets/creatures/
+5. System validates file exists and is valid RON
+6. User clicks "Save Changes" to write to creatures.ron
+7. System revalidates entire registry
+
+**Editing Existing Creature**:
+
+1. Select creature from list
+2. Modify ID, name, or filepath in details panel
+3. System shows validation status in real-time
+4. User clicks "Save Changes" to persist
+5. System marks unsaved changes until save
+
+**Deleting a Creature**:
+
+1. Select creature from list
+2. Click "Delete Selected Creature"
+3. System prompts for confirmation
+4. System checks if creature is referenced by monsters/NPCs (optional warning)
+5. Remove from list on confirmation
+6. User clicks "Save Changes" to persist
+
+**Batch Validation**:
+
+1. Click "Validate All" button
+2. System checks all file references exist
+3. System checks for duplicate IDs
+4. System displays validation report with errors/warnings
+5. User can click on errors to navigate to problematic entries
+
+#### 6.6 Integration Points
+
+**Campaign Builder Main Window**:
+
+- Add "Creatures" tab to campaign builder tabs
+- Load creatures.ron when campaign is loaded
+- Show unsaved changes indicator in tab title
+- Prompt to save on tab close if dirty
+
+**Cross-References**:
+
+- Show usage count (how many monsters/NPCs reference each creature)
+- Optional: Click to view which monsters/NPCs use this creature
+- Warning when deleting a creature that's in use
+- Auto-suggest creatures when editing monsters/NPCs
+
+**File Watching** (Optional):
+
+- Detect external changes to creatures.ron
+- Prompt user to reload if file modified outside editor
+- Prevent data loss from concurrent edits
+
+#### 6.7 Testing Requirements
+
+**Unit Tests**:
+
+- Test loading valid creatures.ron
+- Test loading malformed RON (expect errors)
+- Test saving with header preservation
+- Test duplicate ID detection
+- Test ID range validation
+- Test file reference validation
+
+**Integration Tests**:
+
+- Load tutorial campaign creatures.ron
+- Add new creature and save
+- Delete creature and save
+- Modify creature and save
+- Validate round-trip (load → save → load) preserves data
+
+**UI Tests** (if applicable):
+
+- Test add creature workflow
+- Test edit creature workflow
+- Test delete creature workflow
+- Test validation display
+- Test unsaved changes warning
+
+**Example Test**:
+
+```antares/docs/explanation/tutorial_procedural_mesh_integration_plan.md#L111-135
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_tutorial_creatures_registry() {
+        let path = PathBuf::from("campaigns/tutorial/data/creatures.ron");
+        let result = load_creatures_registry(&path);
+
+        assert!(result.is_ok());
+        let creatures = result.unwrap();
+        assert!(creatures.len() > 0);
+
+        // Verify first creature
+        let goblin = &creatures[0];
+        assert_eq!(goblin.id, 1);
+        assert_eq!(goblin.name, "Goblin");
+        assert_eq!(goblin.filepath, "assets/creatures/goblin.ron");
+    }
+
+    #[test]
+    fn test_detect_duplicate_ids() {
+        let mut editor = CreaturesEditor::new();
+        editor.add_creature(CreatureReference { id: 1, name: "A".into(), filepath: "a.ron".into() }).unwrap();
+        editor.add_creature(CreatureReference { id: 1, name: "B".into(), filepath: "b.ron".into() }).unwrap();
+
+        let duplicates = editor.check_duplicate_ids();
+        assert_eq!(duplicates, vec![1]);
+    }
+}
+```
+
+#### 6.8 Error Handling
+
+**User-Facing Errors**:
+
+- Clear error messages in UI (not debug dumps)
+- Specific guidance on how to fix issues
+- Highlight problematic fields in red
+- Show tooltip with error details
+
+**Error Categories**:
+
+```antares/docs/explanation/tutorial_procedural_mesh_integration_plan.md#L136-150
+#[derive(Error, Debug)]
+pub enum EditorError {
+    #[error("Failed to read creatures file: {0}")]
+    FileReadError(String),
+
+    #[error("Failed to write creatures file: {0}")]
+    FileWriteError(String),
+
+    #[error("Invalid RON syntax: {0}")]
+    RonParseError(String),
+
+    #[error("Duplicate creature ID: {0}")]
+    DuplicateId(CreatureId),
+
+    #[error("Creature ID {0} out of valid range for category")]
+    IdOutOfRange(CreatureId),
+
+    #[error("Creature file not found: {0}")]
+    CreatureFileNotFound(PathBuf),
+}
+```
+
+#### 6.9 UI/UX Considerations
+
+**Visual Feedback**:
+
+- Green checkmark for valid creatures
+- Yellow warning for missing files
+- Red error for validation failures
+- Loading spinner during validation
+- Progress bar for batch operations
+
+**Keyboard Shortcuts**:
+
+- Ctrl+S: Save changes
+- Ctrl+N: Add new creature
+- Delete: Delete selected creature
+- Ctrl+F: Focus search box
+- Ctrl+R: Reload from file
+
+**Accessibility**:
+
+- Tab navigation support
+- Screen reader labels
+- High contrast mode support
+- Keyboard-only operation
+
+#### 6.10 Deliverables
+
+- [ ] `src/ui/campaign_builder/creatures_editor.rs` implemented
+- [ ] UI components for creature list and detail editing
+- [ ] RON loading/saving with header preservation
+- [ ] Validation logic for IDs and file references
+- [ ] Integration with main campaign builder window
+- [ ] Unit tests for editor logic
+- [ ] Integration tests with tutorial creatures.ron
+- [ ] User documentation for creatures editor
+
+#### 6.11 Success Criteria
+
+- User can load creatures.ron from any campaign
+- User can add/edit/delete creature references via UI
+- Changes persist correctly to creatures.ron file
+- All validation catches common errors before save
+- UI prevents data loss (unsaved changes warning)
+- Round-trip load/save preserves all data and formatting
+- Editor integrates seamlessly with campaign builder
+- Documentation explains workflow clearly
+
+#### 6.12 Future Enhancements
+
+**Possible Extensions** (not required for initial implementation):
+
+- Creature mesh preview in editor
+- Drag-and-drop creature file selection
+- Bulk import from directory
+- Export creature subset to new campaign
+- Creature duplication feature
+- Undo/redo support
+- Template creature generation wizard
+- Usage analytics (which creatures are most used)
+- Integration with monster/NPC editors (click to edit creature)
 
 ## Cross-Cutting Concerns
 
@@ -923,7 +1408,7 @@ Visual verification in-game
 
 ```
 campaigns/tutorial/data/creatures.ron          # Creature database (Phase 1)
-campaigns/tutorial/CREATURE_MAPPINGS.md        # Mapping reference (Phase 5)
+campaigns/tutorial/creature_mappings.md        # Mapping reference (Phase 5)
 docs/explanation/tutorial_procedural_mesh_integration_plan.md  # This plan
 ```
 
