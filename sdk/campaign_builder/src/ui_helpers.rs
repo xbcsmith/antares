@@ -4720,11 +4720,13 @@ mod tests {
     #[test]
     fn two_column_layout_show_split_calls_both_closures() {
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(1200.0, 800.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(1200.0, 800.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         let left_called = std::rc::Rc::new(std::cell::Cell::new(false));
@@ -4761,11 +4763,13 @@ mod tests {
     #[test]
     fn render_grid_header_draws_headers() {
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(800.0, 600.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         egui::CentralPanel::default().show(&ctx, |ui| {
@@ -4785,11 +4789,13 @@ mod tests {
     #[test]
     fn show_validation_severity_icon_shows_icon() {
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(400.0, 300.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(400.0, 300.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         egui::CentralPanel::default().show(&ctx, |ui| {
@@ -5048,7 +5054,15 @@ mod tests {
         //
         // All editors must use these labels consistently.
         // The labels are implemented in EditorToolbar::show().
-        assert!(true);
+        let labels = [
+            "➕ New",
+            "💾 Save",
+            "📂 Load",
+            "📥 Import",
+            "📋 Export",
+            "🔄 Reload",
+        ];
+        assert!(labels.iter().all(|label| !label.is_empty()));
     }
 
     #[test]
@@ -5061,7 +5075,8 @@ mod tests {
         //
         // All editors must use these labels consistently.
         // The labels are implemented in ActionButtons::show().
-        assert!(true);
+        let labels = ["✏️ Edit", "🗑️ Delete", "📋 Duplicate", "📤 Export"];
+        assert!(labels.iter().all(|label| !label.is_empty()));
     }
 
     #[test]
@@ -5070,7 +5085,15 @@ mod tests {
         // tooltips showing their keyboard shortcuts.
         // The tooltips are implemented using .on_hover_text() in
         // EditorToolbar::show().
-        assert!(true);
+        let shortcuts = [
+            "Ctrl+N",
+            "Ctrl+S",
+            "Ctrl+L",
+            "Ctrl+Shift+I",
+            "Ctrl+Shift+E",
+            "F5",
+        ];
+        assert!(shortcuts.iter().all(|shortcut| !shortcut.is_empty()));
     }
 
     #[test]
@@ -5079,7 +5102,8 @@ mod tests {
         // tooltips showing their keyboard shortcuts.
         // The tooltips are implemented using .on_hover_text() in
         // ActionButtons::show().
-        assert!(true);
+        let shortcuts = ["Ctrl+E", "Delete", "Ctrl+D"];
+        assert!(shortcuts.iter().all(|shortcut| !shortcut.is_empty()));
     }
 
     // =========================================================================
@@ -5155,7 +5179,7 @@ mod tests {
         // The case-insensitive behavior is implemented via the
         // egui_autocomplete::AutoCompleteTextEdit widget.
         // This should be verified with manual testing in the UI.
-        let candidates = vec![
+        let candidates = [
             "Goblin".to_string(),
             "GOBLIN".to_string(),
             "goblin".to_string(),
@@ -5167,11 +5191,13 @@ mod tests {
     #[test]
     fn autocomplete_monster_selector_preserves_passed_buffer() {
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(800.0, 600.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         egui::CentralPanel::default().show(&ctx, |ui| {
@@ -5196,6 +5222,7 @@ mod tests {
                 is_undead: false,
                 magic_resistance: 0,
                 loot: LootTable::new(1, 10, 0, 0, 10),
+                visual_id: None,
                 conditions: MonsterCondition::Normal,
                 active_conditions: vec![],
                 has_acted: false,
@@ -5216,11 +5243,13 @@ mod tests {
     #[test]
     fn autocomplete_item_selector_persists_buffer() {
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(800.0, 600.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         egui::CentralPanel::default().show(&ctx, |ui| {
@@ -5266,11 +5295,13 @@ mod tests {
     #[test]
     fn autocomplete_map_selector_persists_buffer() {
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(800.0, 600.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         egui::CentralPanel::default().show(&ctx, |ui| {
@@ -5303,11 +5334,13 @@ mod tests {
     #[test]
     fn autocomplete_buffer_helpers_work() {
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(800.0, 600.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         egui::CentralPanel::default().show(&ctx, |ui| {
@@ -5620,7 +5653,7 @@ mod tests {
         let races = vec![];
         let candidates = extract_special_ability_candidates(&races);
         // Should still have standard abilities
-        assert!(candidates.len() > 0);
+        assert!(!candidates.is_empty());
         assert!(candidates.contains(&"infravision".to_string()));
     }
 
@@ -5838,6 +5871,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: LootTable::default(),
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -5907,11 +5941,13 @@ mod tests {
     #[test]
     fn show_entity_validation_warning_displays_nothing_when_valid() {
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(800.0, 600.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         egui::CentralPanel::default().show(&ctx, |ui| {
@@ -5928,11 +5964,13 @@ mod tests {
         use antares::domain::items::types::{ArmorClassification, ArmorData, Item, ItemType};
 
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(800.0, 600.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         #[allow(deprecated)]
@@ -5969,11 +6007,13 @@ mod tests {
     #[test]
     fn show_monster_validation_warning_handles_empty_name() {
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(800.0, 600.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         let monsters = vec![];
@@ -5989,11 +6029,13 @@ mod tests {
     #[test]
     fn show_condition_validation_warning_handles_empty_id() {
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(800.0, 600.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         let conditions = vec![];

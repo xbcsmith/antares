@@ -10,7 +10,7 @@
 
 use super::advanced_trees::{TerrainVisualConfig, TreeType};
 use super::map::{MapEntity, TileCoord};
-use crate::domain::types;
+use crate::domain::types::{self, CreatureId};
 use crate::domain::world;
 use crate::domain::world::TileVisualMetadata;
 use bevy::color::LinearRgba;
@@ -97,6 +97,8 @@ pub struct ProceduralMeshCache {
     /// Cached mesh handle for railing bars
     #[allow(dead_code)]
     structure_railing_bar: Option<Handle<Mesh>>,
+    /// Cached mesh handles for creature visuals by (CreatureId, mesh_index)
+    creature_meshes: HashMap<(CreatureId, usize), Handle<Mesh>>,
 }
 
 impl ProceduralMeshCache {
@@ -125,6 +127,65 @@ impl ProceduralMeshCache {
             self.tree_meshes.insert(tree_type, handle.clone());
             handle
         }
+    }
+
+    /// Gets or creates a mesh handle for a specific creature mesh part
+    ///
+    /// # Arguments
+    ///
+    /// * `creature_id` - The ID of the creature definition
+    /// * `mesh_index` - Index of the mesh within the creature definition
+    /// * `mesh_def` - The mesh definition to convert if not cached
+    /// * `meshes` - Mesh asset storage
+    ///
+    /// # Returns
+    ///
+    /// Mesh handle for the creature mesh (either cached or newly created)
+    ///
+    /// # Examples
+    ///
+    /// ```text
+    /// use antares::game::systems::procedural_meshes::ProceduralMeshCache;
+    /// use antares::domain::visual::MeshDefinition;
+    ///
+    /// let mut cache = ProceduralMeshCache::default();
+    /// let handle = cache.get_or_create_creature_mesh(42, 0, &mesh_def, &mut meshes);
+    /// ```
+    pub fn get_or_create_creature_mesh(
+        &mut self,
+        creature_id: CreatureId,
+        mesh_index: usize,
+        mesh_def: &crate::domain::visual::MeshDefinition,
+        meshes: &mut ResMut<Assets<Mesh>>,
+    ) -> Handle<Mesh> {
+        let key = (creature_id, mesh_index);
+
+        if let Some(handle) = self.creature_meshes.get(&key) {
+            handle.clone()
+        } else {
+            // Convert mesh definition to Bevy mesh
+            let bevy_mesh = super::creature_meshes::mesh_definition_to_bevy(mesh_def);
+            let handle = meshes.add(bevy_mesh);
+            self.creature_meshes.insert(key, handle.clone());
+            handle
+        }
+    }
+
+    /// Clears all cached creature meshes
+    ///
+    /// This is useful for hot-reloading creature definitions or cleaning up
+    /// memory when creatures are no longer needed.
+    ///
+    /// # Examples
+    ///
+    /// ```text
+    /// use antares::game::systems::procedural_meshes::ProceduralMeshCache;
+    ///
+    /// let mut cache = ProceduralMeshCache::default();
+    /// cache.clear_creature_cache();
+    /// ```
+    pub fn clear_creature_cache(&mut self) {
+        self.creature_meshes.clear();
     }
 }
 
@@ -163,6 +224,7 @@ impl Default for ProceduralMeshCache {
             structure_door_frame: None,
             structure_railing_post: None,
             structure_railing_bar: None,
+            creature_meshes: HashMap::new(),
         }
     }
 }
@@ -287,6 +349,7 @@ impl ProceduralMeshCache {
         self.structure_door_frame = None;
         self.structure_railing_post = None;
         self.structure_railing_bar = None;
+        self.creature_meshes.clear();
     }
 
     /// Count the number of cached mesh handles

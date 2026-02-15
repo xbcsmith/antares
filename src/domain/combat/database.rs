@@ -13,7 +13,7 @@
 use crate::domain::character::Stats;
 use crate::domain::combat::monster::{LootTable, Monster, MonsterResistances};
 use crate::domain::combat::types::Attack;
-use crate::domain::types::MonsterId;
+use crate::domain::types::{CreatureId, MonsterId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -79,6 +79,7 @@ pub enum MonsterDatabaseError {
 ///     is_undead: false,
 ///     magic_resistance: 0,
 ///     loot: LootTable::new(1, 10, 0, 0, 10),
+///     visual_id: None,
 ///     conditions: Default::default(),
 ///     active_conditions: Vec::new(),
 ///     has_acted: false,
@@ -114,6 +115,9 @@ pub struct MonsterDefinition {
     pub magic_resistance: u8,
     /// Loot table
     pub loot: LootTable,
+    /// Optional visual creature ID for 3D representation
+    #[serde(default)]
+    pub visual_id: Option<CreatureId>,
     /// Current condition
     #[serde(default)]
     pub conditions: crate::domain::combat::monster::MonsterCondition,
@@ -151,6 +155,7 @@ impl MonsterDefinition {
     ///     is_undead: false,
     ///     magic_resistance: 0,
     ///     loot: LootTable::new(5, 15, 0, 0, 25),
+    ///     visual_id: None,
     ///     conditions: MonsterCondition::Normal,
     ///     active_conditions: vec![],
     ///     has_acted: false,
@@ -178,6 +183,7 @@ impl MonsterDefinition {
         monster.can_advance = self.can_advance;
         monster.is_undead = self.is_undead;
         monster.magic_resistance = self.magic_resistance;
+        monster.visual_id = self.visual_id;
         monster.conditions = self.conditions;
         monster.active_conditions = self.active_conditions.clone();
         monster.has_acted = self.has_acted;
@@ -343,6 +349,7 @@ impl MonsterDatabase {
     ///     is_undead: false,
     ///     magic_resistance: 0,
     ///     loot: LootTable::new(1, 10, 0, 0, 10),
+    ///     visual_id: None,
     ///     conditions: MonsterCondition::Normal,
     ///     active_conditions: vec![],
     ///     has_acted: false,
@@ -431,6 +438,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: LootTable::new(1, 10, 0, 0, 10),
+            visual_id: None,
             conditions: crate::domain::combat::monster::MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,

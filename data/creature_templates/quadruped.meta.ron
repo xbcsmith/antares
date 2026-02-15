@@ -1,0 +1,11 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+TemplateMetadata(
+    category: Quadruped,
+    tags: ["four-legged", "animal", "beast"],
+    difficulty: Intermediate,
+    author: "Antares Team",
+    description: "Four-legged creature template with body, head, legs, and tail. Great for creating animals, mounts, and beasts.",
+    thumbnail_path: None,
+)

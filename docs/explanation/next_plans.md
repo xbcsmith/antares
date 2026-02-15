@@ -29,6 +29,8 @@ Visual Properties and Terrain-Specific Settings should reset to defaults after t
 
 Visual Preset buttons do nothing. The Visual Preset button should immediately apply the selected visual preset to the selected tiles. Visual Presets needs a multi-select mode.
 
+✅ COMPLETED -
+
 ### Map Editor NPC
 
 Campaign Builder --> Map Editor --> Select Map --> Edit
@@ -112,6 +114,7 @@ Unable to create new nodes makes it impossible to create dialog trees.
 ### Clean up
 
 Analyze this codebase for refactoring opportunities:
+
 1. Find duplicate code patterns
 2. Identify unused exports and dead code
 3. Review error handling consistency
@@ -139,7 +142,7 @@ Write a plan with a phased approach to implementing advanced procedural meshes i
 
 The view point of the party is not centered. When the party approaches a door the door is not centereed on the screen it is off by half. This behavior applies to all objects in the game. It makes navigation very difficult. The party view point should be centered.
 
-[viewport centering fix implementation](./viewport_centering_fix_implementation.md)
+✅ COMPLETED - [viewport centering fix implementation](./viewport_centering_fix_implementation.md)
 
 ### Combat System
 
@@ -153,13 +156,13 @@ Core Components of a Bevy Combat System
     Events: Use Bevy's event system for actions, such as AttackEvent or DamageEvent, to handle interactions between entities.
     Plugin Architecture: Separate logic into plugins for modularity (e.g., CombatPlugin, WeaponPlugin).
 
-[combat system implementation plan.md](/Users/bsmith/go/src/github.com/xbcsmith/antares/docs/explanation/combat_system_implementation_plan.md)
+✅ COMPLETED - [combat system implementation plan.md](/Users/bsmith/go/src/github.com/xbcsmith/antares/docs/explanation/combat_system_implementation_plan.md)
 
 ### InnKeeper Party management
 
 InnKeeper Party management is broken. It triggers automatically before the player enters the inn. It should be triggered by a dialog node. There is no mouse support and no keyboard support so there is no way to navigate the party management window. ESC does not work to close the window. Basically the game is stuck at the InnKeeper Party management window. Characters that were recruited and in the party already still appear in the recruitable list. The recruit screen should only show characters that are not already in the party. Characters that are in the party should appear in the party list with an option to remove them from the party. Removing a character from the party should return them to the recruitable list. ESC should close the party management window and return to the game.
 
-[innkeeper party management fixes plan.md](/Users/bsmith/go/src/github.com/xbcsmith/antares/docs/explanation/innkeeper_party_management_fixes_plan.md)
+✅ COMPLETED - [innkeeper party management fixes plan.md](/Users/bsmith/go/src/github.com/xbcsmith/antares/docs/explanation/innkeeper_party_management_fixes_plan.md)
 
 ### Character Recruitment Events
 

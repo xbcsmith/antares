@@ -1396,6 +1396,7 @@ mod tests {
             is_undead: false,
             magic_resistance: 0,
             loot: crate::domain::combat::monster::LootTable::none(),
+            visual_id: None,
             conditions: crate::domain::combat::monster::MonsterCondition::Normal,
             active_conditions: Vec::new(),
             has_acted: false,

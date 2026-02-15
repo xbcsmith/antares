@@ -35,6 +35,7 @@
 use crate::domain::classes::ClassId;
 use crate::domain::races::RaceId;
 use crate::domain::types::{ItemId, MapId, MonsterId, SpellId};
+use crate::sdk::creature_validation::validate_creature_topology;
 use crate::sdk::database::ContentDatabase;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -94,7 +95,7 @@ impl fmt::Display for Severity {
 /// assert!(error.to_string().contains("invalid_class"));
 /// assert_eq!(error.severity(), Severity::Error);
 /// ```
-#[derive(Error, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Error, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ValidationError {
     /// Referenced class does not exist
     #[error("Missing class '{class_id}' referenced in {context}")]
@@ -155,6 +156,35 @@ pub enum ValidationError {
         /// The innkeeper ID missing a dialogue_id
         innkeeper_id: String,
     },
+
+    /// Creature name is empty
+    #[error("Creature ID {creature_id} has empty name")]
+    CreatureEmptyName { creature_id: u32 },
+
+    /// Creature has invalid scale
+    #[error("Creature '{name}' (ID {creature_id}) has invalid scale: {scale}")]
+    CreatureInvalidScale {
+        creature_id: u32,
+        name: String,
+        scale: f32,
+    },
+
+    /// Creature has no meshes
+    #[error("Creature '{name}' (ID {creature_id}) has no meshes")]
+    CreatureNoMeshes { creature_id: u32, name: String },
+
+    /// Creature mesh topology error
+    #[error("Creature '{name}' (ID {creature_id}) mesh {mesh_index}: {error}")]
+    CreatureMeshTopology {
+        creature_id: u32,
+        name: String,
+        mesh_index: usize,
+        error: String,
+    },
+
+    /// Creature has duplicate mesh names
+    #[error("Creature '{name}' (ID {creature_id}) has duplicate mesh names")]
+    CreatureDuplicateMeshNames { creature_id: u32, name: String },
 }
 
 impl ValidationError {
@@ -181,7 +211,12 @@ impl ValidationError {
             | ValidationError::MissingSpell { .. }
             | ValidationError::DuplicateId { .. }
             | ValidationError::InvalidStartingInnkeeper { .. }
-            | ValidationError::InnkeeperMissingDialogue { .. } => Severity::Error,
+            | ValidationError::InnkeeperMissingDialogue { .. }
+            | ValidationError::CreatureEmptyName { .. }
+            | ValidationError::CreatureInvalidScale { .. }
+            | ValidationError::CreatureNoMeshes { .. }
+            | ValidationError::CreatureMeshTopology { .. }
+            | ValidationError::CreatureDuplicateMeshNames { .. } => Severity::Error,
 
             ValidationError::DisconnectedMap { .. } => Severity::Warning,
 
@@ -307,6 +342,9 @@ impl<'a> Validator<'a> {
         // Validate innkeepers have dialogue configured
         errors.extend(self.validate_innkeepers());
 
+        // Validate creatures
+        errors.extend(self.validate_creatures());
+
         Ok(errors)
     }
 
@@ -409,6 +447,66 @@ impl<'a> Validator<'a> {
                         innkeeper_id: npc_id.clone(),
                     });
                 }
+            }
+        }
+
+        errors
+    }
+
+    /// Validates creature definitions
+    ///
+    /// Checks that:
+    /// - Creature name is not empty
+    /// - Creature scale is positive
+    /// - Creature has at least one mesh
+    /// - Mesh topology is valid (no degenerate triangles, consistent winding, etc.)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::database::ContentDatabase;
+    /// use antares::sdk::validation::Validator;
+    ///
+    /// let db = ContentDatabase::new();
+    /// let validator = Validator::new(&db);
+    /// let errors = validator.validate_all();
+    /// ```
+    fn validate_creatures(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+
+        for creature in self.db.creatures.all_creatures() {
+            // Check name not empty
+            if creature.name.trim().is_empty() {
+                errors.push(ValidationError::CreatureEmptyName {
+                    creature_id: creature.id,
+                });
+            }
+
+            // Check scale is positive
+            if creature.scale <= 0.0 {
+                errors.push(ValidationError::CreatureInvalidScale {
+                    creature_id: creature.id,
+                    name: creature.name.clone(),
+                    scale: creature.scale,
+                });
+            }
+
+            // Check has at least one mesh
+            if creature.meshes.is_empty() {
+                errors.push(ValidationError::CreatureNoMeshes {
+                    creature_id: creature.id,
+                    name: creature.name.clone(),
+                });
+            }
+
+            // Validate mesh topology
+            if let Err(topology_error) = validate_creature_topology(creature) {
+                errors.push(ValidationError::CreatureMeshTopology {
+                    creature_id: creature.id,
+                    name: creature.name.clone(),
+                    mesh_index: 0, // Error doesn't specify which mesh, use 0
+                    error: topology_error.to_string(),
+                });
             }
         }
 

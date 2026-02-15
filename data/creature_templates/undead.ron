@@ -1,0 +1,272 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+// Undead creature template
+// Skeletal structure with skull head, exposed ribcage, and bone limbs
+// Ghostly color tint option for spectral variants
+
+CreatureDefinition(
+    id: 1004,
+    name: "Undead Template",
+    meshes: [
+        // Ribcage torso (thin, exposed ribs)
+        MeshDefinition(
+            vertices: [
+                // Ribcage frame (front)
+                [-0.4, 0.0, 0.2], [0.4, 0.0, 0.2], [0.4, 1.4, 0.2], [-0.4, 1.4, 0.2],
+                // Ribcage frame (back)
+                [-0.4, 0.0, -0.2], [0.4, 0.0, -0.2], [0.4, 1.4, -0.2], [-0.4, 1.4, -0.2],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0, // Front
+                5, 4, 7, 7, 6, 5, // Back
+                4, 0, 3, 3, 7, 4, // Left
+                1, 5, 6, 6, 2, 1, // Right
+                3, 2, 6, 6, 7, 3, // Top
+                4, 5, 1, 1, 0, 4, // Bottom
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.9, 0.9, 0.85, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Skull head
+        MeshDefinition(
+            vertices: [
+                // Skull shape (slightly elongated cube)
+                [-0.35, 0.0, 0.35], [0.35, 0.0, 0.35], [0.35, 0.7, 0.35], [-0.35, 0.7, 0.35],
+                [-0.3, 0.0, -0.25], [0.3, 0.0, -0.25], [0.3, 0.7, -0.25], [-0.3, 0.7, -0.25],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 0.95, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Jaw
+        MeshDefinition(
+            vertices: [
+                [-0.25, 0.0, 0.25], [0.25, 0.0, 0.25], [0.25, 0.15, 0.25], [-0.25, 0.15, 0.25],
+                [-0.2, 0.0, -0.15], [0.2, 0.0, -0.15], [0.2, 0.15, -0.15], [-0.2, 0.15, -0.15],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.95, 0.95, 0.9, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Left upper arm (bone)
+        MeshDefinition(
+            vertices: [
+                [-0.12, 0.0, 0.12], [-0.08, 0.0, 0.12], [-0.08, 0.7, 0.12], [-0.12, 0.7, 0.12],
+                [-0.12, 0.0, 0.08], [-0.08, 0.0, 0.08], [-0.08, 0.7, 0.08], [-0.12, 0.7, 0.08],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.9, 0.9, 0.85, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Left forearm (bone)
+        MeshDefinition(
+            vertices: [
+                [-0.12, 0.0, 0.12], [-0.08, 0.0, 0.12], [-0.08, 0.6, 0.12], [-0.12, 0.6, 0.12],
+                [-0.12, 0.0, 0.08], [-0.08, 0.0, 0.08], [-0.08, 0.6, 0.08], [-0.12, 0.6, 0.08],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.9, 0.9, 0.85, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Right upper arm (bone)
+        MeshDefinition(
+            vertices: [
+                [0.08, 0.0, 0.12], [0.12, 0.0, 0.12], [0.12, 0.7, 0.12], [0.08, 0.7, 0.12],
+                [0.08, 0.0, 0.08], [0.12, 0.0, 0.08], [0.12, 0.7, 0.08], [0.08, 0.7, 0.08],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.9, 0.9, 0.85, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Right forearm (bone)
+        MeshDefinition(
+            vertices: [
+                [0.08, 0.0, 0.12], [0.12, 0.0, 0.12], [0.12, 0.6, 0.12], [0.08, 0.6, 0.12],
+                [0.08, 0.0, 0.08], [0.12, 0.0, 0.08], [0.12, 0.6, 0.08], [0.08, 0.6, 0.08],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.9, 0.9, 0.85, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Left leg (bone)
+        MeshDefinition(
+            vertices: [
+                [-0.15, 0.0, 0.15], [-0.1, 0.0, 0.15], [-0.1, 1.0, 0.15], [-0.15, 1.0, 0.15],
+                [-0.15, 0.0, 0.1], [-0.1, 0.0, 0.1], [-0.1, 1.0, 0.1], [-0.15, 1.0, 0.1],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.9, 0.9, 0.85, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Right leg (bone)
+        MeshDefinition(
+            vertices: [
+                [0.1, 0.0, 0.15], [0.15, 0.0, 0.15], [0.15, 1.0, 0.15], [0.1, 1.0, 0.15],
+                [0.1, 0.0, 0.1], [0.15, 0.0, 0.1], [0.15, 1.0, 0.1], [0.1, 1.0, 0.1],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.9, 0.9, 0.85, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+    ],
+    mesh_transforms: [
+        // Ribcage at origin
+        MeshTransform(
+            translation: [0.0, 1.0, 0.0],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Skull on top of ribcage
+        MeshTransform(
+            translation: [0.0, 2.4, 0.0],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Jaw below skull
+        MeshTransform(
+            translation: [0.0, 2.2, 0.05],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Left upper arm at shoulder
+        MeshTransform(
+            translation: [-0.5, 2.0, 0.0],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Left forearm
+        MeshTransform(
+            translation: [-0.5, 1.3, 0.0],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Right upper arm at shoulder
+        MeshTransform(
+            translation: [0.5, 2.0, 0.0],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Right forearm
+        MeshTransform(
+            translation: [0.5, 1.3, 0.0],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Left leg
+        MeshTransform(
+            translation: [-0.2, 0.0, 0.0],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Right leg
+        MeshTransform(
+            translation: [0.2, 0.0, 0.0],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+    ],
+    scale: 1.0,
+    color_tint: None,
+)

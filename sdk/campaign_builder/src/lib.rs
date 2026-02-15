@@ -22,29 +22,39 @@
 #![allow(clippy::useless_conversion)]
 
 pub mod advanced_validation;
+pub mod animation_editor;
 pub mod asset_manager;
 pub mod campaign_editor;
 pub mod characters_editor;
 pub mod classes_editor;
 pub mod conditions_editor;
 pub mod config_editor;
+pub mod creature_assets;
+pub mod creature_templates;
+pub mod creatures_editor;
 pub mod dialogue_editor;
 pub mod items_editor;
+pub mod lod_editor;
 pub mod logging;
 pub mod map_editor;
+pub mod material_editor;
 pub mod monsters_editor;
 pub mod npc_editor;
 pub mod packager;
+pub mod preview_renderer;
+pub mod primitive_generators;
 pub mod proficiencies_editor;
 pub mod quest_editor;
 pub mod races_editor;
 pub mod spells_editor;
+pub mod template_browser;
 pub mod templates;
 pub mod test_play;
 pub mod test_utils;
 pub mod ui_helpers;
 pub mod undo_redo;
 pub mod validation;
+pub mod variation_editor;
 
 use antares::sdk::tool_config::ToolConfig;
 use logging::{category, LogLevel, Logger};
@@ -168,6 +178,8 @@ pub struct CampaignMetadata {
     npcs_file: String,
     #[serde(default = "default_proficiencies_file")]
     proficiencies_file: String,
+    #[serde(default = "default_creatures_file")]
+    creatures_file: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -207,6 +219,10 @@ fn default_proficiencies_file() -> String {
     "data/proficiencies.ron".to_string()
 }
 
+fn default_creatures_file() -> String {
+    "data/creatures.ron".to_string()
+}
+
 impl Default for CampaignMetadata {
     fn default() -> Self {
         Self {
@@ -243,6 +259,7 @@ impl Default for CampaignMetadata {
             conditions_file: "data/conditions.ron".to_string(),
             npcs_file: "data/npcs.ron".to_string(),
             proficiencies_file: "data/proficiencies.ron".to_string(),
+            creatures_file: "data/creatures.ron".to_string(),
         }
     }
 }
@@ -256,6 +273,7 @@ enum EditorTab {
     Spells,
     Conditions,
     Monsters,
+    Creatures,
     Maps,
     Quests,
     Classes,
@@ -285,6 +303,7 @@ impl EditorTab {
             EditorTab::Spells => "Spells",
             EditorTab::Conditions => "Conditions",
             EditorTab::Monsters => "Monsters",
+            EditorTab::Creatures => "Creatures",
             EditorTab::Maps => "Maps",
             EditorTab::Quests => "Quests",
             EditorTab::Classes => "Classes",
@@ -425,6 +444,9 @@ struct CampaignBuilderApp {
     monsters: Vec<MonsterDefinition>,
     monsters_editor_state: MonstersEditorState,
 
+    creatures: Vec<antares::domain::visual::CreatureDefinition>,
+    creatures_editor_state: creatures_editor::CreaturesEditorState,
+
     conditions: Vec<ConditionDefinition>,
     conditions_editor_state: ConditionsEditorState,
 
@@ -541,6 +563,9 @@ impl Default for CampaignBuilderApp {
 
             monsters: Vec::new(),
             monsters_editor_state: MonstersEditorState::new(),
+
+            creatures: Vec::new(),
+            creatures_editor_state: creatures_editor::CreaturesEditorState::new(),
 
             conditions: Vec::new(),
             conditions_editor_state: ConditionsEditorState::new(),
@@ -699,6 +724,7 @@ impl CampaignBuilderApp {
                 items: Vec::new(),
                 experience: 0,
             },
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -987,7 +1013,7 @@ impl CampaignBuilderApp {
             if let Some(required_prof) = item.required_proficiency() {
                 referenced_proficiencies.insert(required_prof.clone());
 
-                let prof_exists = self.proficiencies.iter().any(|p| &p.id == &required_prof);
+                let prof_exists = self.proficiencies.iter().any(|p| p.id == required_prof);
                 if !prof_exists {
                     results.push(validation::ValidationResult::error(
                         validation::ValidationCategory::Proficiencies,
@@ -1930,6 +1956,83 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load creatures from RON file
+    fn load_creatures(&mut self) {
+        let creatures_file = self.campaign.creatures_file.clone();
+        if let Some(ref dir) = self.campaign_dir {
+            let creatures_path = dir.join(&creatures_file);
+            if creatures_path.exists() {
+                match fs::read_to_string(&creatures_path) {
+                    Ok(contents) => {
+                        match ron::from_str::<Vec<antares::domain::visual::CreatureDefinition>>(
+                            &contents,
+                        ) {
+                            Ok(creatures) => {
+                                let count = creatures.len();
+                                self.creatures = creatures;
+
+                                // Mark data file as loaded in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager.mark_data_file_loaded(&creatures_file, count);
+                                }
+
+                                self.status_message =
+                                    format!("Loaded {} creatures", self.creatures.len());
+                            }
+                            Err(e) => {
+                                // Mark data file as error in asset manager
+                                if let Some(ref mut manager) = self.asset_manager {
+                                    manager.mark_data_file_error(&creatures_file, &e.to_string());
+                                }
+                                self.status_message = format!("Failed to parse creatures: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Mark data file as error in asset manager
+                        if let Some(ref mut manager) = self.asset_manager {
+                            manager.mark_data_file_error(&creatures_file, &e.to_string());
+                        }
+                        self.status_message = format!("Failed to read creatures file: {}", e);
+                        eprintln!("Failed to read creatures file {:?}: {}", creatures_path, e);
+                    }
+                }
+            } else {
+                eprintln!("Creatures file does not exist: {:?}", creatures_path);
+            }
+        } else {
+            eprintln!("No campaign directory set when trying to load creatures");
+        }
+    }
+
+    /// Save creatures to RON file
+    fn save_creatures(&mut self) -> Result<(), String> {
+        if let Some(ref dir) = self.campaign_dir {
+            let creatures_path = dir.join(&self.campaign.creatures_file);
+
+            // Create creatures directory if it doesn't exist
+            if let Some(parent) = creatures_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create creatures directory: {}", e))?;
+            }
+
+            let ron_config = ron::ser::PrettyConfig::new()
+                .struct_names(false)
+                .enumerate_arrays(false);
+
+            let contents = ron::ser::to_string_pretty(&self.creatures, ron_config)
+                .map_err(|e| format!("Failed to serialize creatures: {}", e))?;
+
+            fs::write(&creatures_path, contents)
+                .map_err(|e| format!("Failed to write creatures file: {}", e))?;
+
+            self.unsaved_changes = true;
+            Ok(())
+        } else {
+            Err("No campaign directory set".to_string())
+        }
+    }
+
     /// Load maps from the maps directory
     fn load_maps(&mut self) {
         self.maps.clear();
@@ -1952,9 +2055,7 @@ impl CampaignBuilderApp {
 
                                             // Mark individual map file as loaded in asset manager
                                             if let Some(ref mut manager) = self.asset_manager {
-                                                if let Some(relative_path) =
-                                                    path.strip_prefix(dir).ok()
-                                                {
+                                                if let Ok(relative_path) = path.strip_prefix(dir) {
                                                     if let Some(path_str) = relative_path.to_str() {
                                                         manager.mark_data_file_loaded(path_str, 1);
                                                     }
@@ -1970,9 +2071,7 @@ impl CampaignBuilderApp {
 
                                             // Mark individual map file as error in asset manager
                                             if let Some(ref mut manager) = self.asset_manager {
-                                                if let Some(relative_path) =
-                                                    path.strip_prefix(dir).ok()
-                                                {
+                                                if let Ok(relative_path) = path.strip_prefix(dir) {
                                                     if let Some(path_str) = relative_path.to_str() {
                                                         manager.mark_data_file_error(
                                                             path_str,
@@ -1992,8 +2091,7 @@ impl CampaignBuilderApp {
 
                                         // Mark individual map file as error in asset manager
                                         if let Some(ref mut manager) = self.asset_manager {
-                                            if let Some(relative_path) = path.strip_prefix(dir).ok()
-                                            {
+                                            if let Ok(relative_path) = path.strip_prefix(dir) {
                                                 if let Some(path_str) = relative_path.to_str() {
                                                     manager.mark_data_file_error(
                                                         path_str,
@@ -2302,8 +2400,8 @@ impl CampaignBuilderApp {
                 starting_gold: self.campaign.starting_gold,
                 starting_food: self.campaign.starting_food,
                 starting_innkeeper: self.campaign.starting_innkeeper.clone(),
-                max_party_size: self.campaign.max_party_size as usize,
-                max_roster_size: self.campaign.max_roster_size as usize,
+                max_party_size: self.campaign.max_party_size,
+                max_roster_size: self.campaign.max_roster_size,
                 difficulty: antares::sdk::campaign_loader::Difficulty::Normal,
                 permadeath: self.campaign.permadeath,
                 allow_multiclassing: self.campaign.allow_multiclassing,
@@ -2428,6 +2526,9 @@ impl CampaignBuilderApp {
         self.monsters.clear();
         self.monsters_editor_state = MonstersEditorState::new();
 
+        self.creatures.clear();
+        self.creatures_editor_state = creatures_editor::CreaturesEditorState::new();
+
         self.conditions.clear();
         self.conditions_editor_state = ConditionsEditorState::new();
 
@@ -2501,6 +2602,10 @@ impl CampaignBuilderApp {
 
         if let Err(e) = self.save_monsters() {
             save_warnings.push(format!("Monsters: {}", e));
+        }
+
+        if let Err(e) = self.save_creatures() {
+            save_warnings.push(format!("Creatures: {}", e));
         }
 
         if let Err(e) = self.save_conditions() {
@@ -2644,6 +2749,7 @@ impl CampaignBuilderApp {
                     self.load_spells();
                     self.load_proficiencies();
                     self.load_monsters();
+                    self.load_creatures();
                     self.load_classes_from_campaign();
                     self.load_races_from_campaign();
                     self.load_characters_from_campaign();
@@ -3486,6 +3592,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Spells,
                     EditorTab::Conditions,
                     EditorTab::Monsters,
+                    EditorTab::Creatures,
                     EditorTab::Maps,
                     EditorTab::Quests,
                     EditorTab::Classes,
@@ -3591,6 +3698,17 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.status_message,
                 &mut self.file_load_merge_mode,
             ),
+            EditorTab::Creatures => {
+                if let Some(msg) = self.creatures_editor_state.show(
+                    ui,
+                    &mut self.creatures,
+                    &self.campaign_dir,
+                    &self.campaign.creatures_file,
+                    &mut self.unsaved_changes,
+                ) {
+                    self.status_message = msg;
+                }
+            }
             EditorTab::Maps => {
                 self.maps_editor_state.show(
                     ui,
@@ -5138,8 +5256,10 @@ mod tests {
         fs::write(&races_path, races_ron).expect("Failed to write races.ron");
 
         // Setup the CampaignBuilderApp, and point it at our temporary campaign
-        let mut app = CampaignBuilderApp::default();
-        app.campaign_dir = Some(tmpdir.clone());
+        let mut app = CampaignBuilderApp {
+            campaign_dir: Some(tmpdir.clone()),
+            ..Default::default()
+        };
         // Use the default "data/races.ron" path; set explicitly to be safe
         app.campaign.races_file = "data/races.ron".to_string();
 
@@ -5547,11 +5667,11 @@ mod tests {
     #[test]
     fn test_validation_reset_filters_clears_state() {
         use std::path::PathBuf;
-        let mut app = CampaignBuilderApp::default();
-
-        // Set a non-default state to simulate user changes
-        app.validation_filter = ValidationFilter::ErrorsOnly;
-        app.validation_focus_asset = Some(PathBuf::from("data/items.ron"));
+        let mut app = CampaignBuilderApp {
+            validation_filter: ValidationFilter::ErrorsOnly,
+            validation_focus_asset: Some(PathBuf::from("data/items.ron")),
+            ..Default::default()
+        };
 
         // Call the reset helper and verify all state is reverted
         app.reset_validation_filters();
@@ -6033,6 +6153,7 @@ mod tests {
             classes_file: "data/classes.ron".to_string(),
             races_file: "data/races.ron".to_string(),
             characters_file: "data/characters.ron".to_string(),
+            creatures_file: "data/creatures.ron".to_string(),
             maps_dir: "data/maps/".to_string(),
             quests_file: "data/quests.ron".to_string(),
             dialogue_file: "data/dialogue.ron".to_string(),
@@ -8299,6 +8420,7 @@ mod tests {
                 items: Vec::new(),
                 experience: 0,
             },
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -8326,30 +8448,31 @@ mod tests {
             attacks: vec![
                 Attack {
                     damage: DiceRoll::new(2, 8, 5),
-                    attack_type: AttackType::Fire,
-                    special_effect: Some(SpecialEffect::Poison),
-                },
-                Attack {
-                    damage: DiceRoll::new(1, 10, 3),
                     attack_type: AttackType::Physical,
                     special_effect: None,
                 },
+                Attack {
+                    damage: DiceRoll::new(1, 6, 2),
+                    attack_type: AttackType::Fire,
+                    special_effect: Some(SpecialEffect::Paralysis),
+                },
             ],
-            flee_threshold: 10,
-            special_attack_threshold: 25,
+            flee_threshold: 5,
+            special_attack_threshold: 30,
             resistances: MonsterResistances::new(),
             can_regenerate: true,
             can_advance: true,
-            is_undead: true,
-            magic_resistance: 50,
+            is_undead: false,
+            magic_resistance: 15,
             loot: LootTable {
-                gold_min: 50,
-                gold_max: 200,
-                gems_min: 1,
-                gems_max: 5,
+                gold_min: 0,
+                gold_max: 0,
+                gems_min: 0,
+                gems_max: 0,
                 items: Vec::new(),
                 experience: 0,
             },
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -8382,21 +8505,22 @@ mod tests {
                 attack_type: AttackType::Fire,
                 special_effect: Some(SpecialEffect::Paralysis),
             }],
-            flee_threshold: 5,
-            special_attack_threshold: 20,
+            flee_threshold: 10,
+            special_attack_threshold: 25,
             resistances: MonsterResistances::new(),
-            can_regenerate: true,
-            can_advance: false,
-            is_undead: true,
-            magic_resistance: 25,
+            can_regenerate: false,
+            can_advance: true,
+            is_undead: false,
+            magic_resistance: 10,
             loot: LootTable {
-                gold_min: 10,
-                gold_max: 50,
+                gold_min: 0,
+                gold_max: 0,
                 gems_min: 0,
-                gems_max: 2,
+                gems_max: 0,
                 items: Vec::new(),
-                experience: 200,
+                experience: 0,
             },
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -8434,21 +8558,22 @@ mod tests {
                 attack_type: AttackType::Physical,
                 special_effect: None,
             }],
-            flee_threshold: 5,
-            special_attack_threshold: 0,
+            flee_threshold: 2,
+            special_attack_threshold: 10,
             resistances: MonsterResistances::new(),
             can_regenerate: false,
             can_advance: true,
             is_undead: false,
             magic_resistance: 0,
             loot: LootTable {
-                gold_min: 1,
-                gold_max: 10,
+                gold_min: 0,
+                gold_max: 0,
                 gems_min: 0,
                 gems_max: 0,
                 items: Vec::new(),
                 experience: 25,
             },
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
