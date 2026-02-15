@@ -1865,7 +1865,7 @@ mod tests {
             id: "whisper".to_string(),
             name: "Whisper".to_string(),
             description: String::new(),
-            portrait_id: String::new(),
+            portrait_id: "character_055".to_string(),
             sprite: None,
             dialogue_id: None,
             quest_ids: Vec::new(),
@@ -1887,7 +1887,7 @@ mod tests {
         let portrait_buf = crate::ui_helpers::load_autocomplete_buffer(
             &ctx,
             egui::Id::new("autocomplete:portrait:npc_edit_portrait"),
-            || String::new(),
+            String::new,
         );
         assert_eq!(portrait_buf, "character_055");
     }

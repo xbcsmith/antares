@@ -34,6 +34,10 @@
 //!     normals: None,
 //!     uvs: None,
 //!     color: [1.0, 1.0, 1.0, 1.0],
+//!     lod_levels: None,
+//!     lod_distances: None,
+//!     material: None,
+//!     texture_path: None,
 //! };
 //!
 //! // Create a creature from the mesh
@@ -96,6 +100,10 @@ use crate::domain::types::CreatureId;
 ///     ]),
 ///     uvs: None,
 ///     color: [1.0, 0.0, 0.0, 1.0], // Red
+///     lod_levels: None,
+///     lod_distances: None,
+///     material: None,
+///     texture_path: None,
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -321,6 +329,10 @@ impl Default for MeshTransform {
 ///     normals: None,
 ///     uvs: None,
 ///     color: [0.5, 0.5, 0.5, 1.0],
+///     lod_levels: None,
+///     lod_distances: None,
+///     material: None,
+///     texture_path: None,
 /// };
 ///
 /// let head = MeshDefinition {
@@ -329,6 +341,10 @@ impl Default for MeshTransform {
 ///     normals: None,
 ///     uvs: None,
 ///     color: [0.7, 0.7, 0.7, 1.0],
+///     lod_levels: None,
+///     lod_distances: None,
+///     material: None,
+///     texture_path: None,
 /// };
 ///
 /// let creature = CreatureDefinition {
@@ -393,6 +409,10 @@ impl CreatureDefinition {
     ///     normals: None,
     ///     uvs: None,
     ///     color: [1.0, 1.0, 1.0, 1.0],
+    ///     lod_levels: None,
+    ///     lod_distances: None,
+    ///     material: None,
+    ///     texture_path: None,
     /// };
     ///
     /// let creature = CreatureDefinition {

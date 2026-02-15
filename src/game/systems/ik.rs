@@ -199,7 +199,7 @@ impl Vec3 {
 /// ```
 /// use antares::game::systems::ik::Quat;
 ///
-/// let identity = Quat::identity();
+/// let identity: Quat = [0.0, 0.0, 0.0, 1.0];
 /// assert_eq!(identity, [0.0, 0.0, 0.0, 1.0]);
 /// ```
 pub type Quat = [f32; 4];

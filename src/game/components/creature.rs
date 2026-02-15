@@ -37,7 +37,7 @@
 //!             material_override: None,
 //!         },
 //!         Transform::default(),
-//!     )).set_parent(parent);
+//!     )).set_parent_in_place(parent);
 //! }
 //! ```
 
@@ -189,11 +189,11 @@ impl CreatureVisual {
 ///
 ///     // Spawn first mesh (e.g., body)
 ///     commands.spawn(MeshPart::new(creature_id, 0))
-///         .set_parent(parent);
+///         .set_parent_in_place(parent);
 ///
 ///     // Spawn second mesh (e.g., head)
 ///     commands.spawn(MeshPart::new(creature_id, 1))
-///         .set_parent(parent);
+///         .set_parent_in_place(parent);
 /// }
 /// ```
 #[derive(Component, Debug, Clone)]
@@ -501,7 +501,7 @@ impl LodState {
 ///
 /// ```
 /// use antares::game::components::creature::CreatureAnimation;
-/// use antares::domain::visual::AnimationDefinition;
+/// use antares::domain::visual::animation::AnimationDefinition;
 ///
 /// fn example_animation() {
 ///     let anim_def = AnimationDefinition {
@@ -549,7 +549,7 @@ impl CreatureAnimation {
     ///
     /// ```
     /// use antares::game::components::creature::CreatureAnimation;
-    /// use antares::domain::visual::AnimationDefinition;
+    /// use antares::domain::visual::animation::AnimationDefinition;
     ///
     /// let def = AnimationDefinition {
     ///     name: "idle".to_string(),
@@ -587,16 +587,15 @@ impl CreatureAnimation {
     ///
     /// ```
     /// use antares::game::components::creature::CreatureAnimation;
-    /// use antares::domain::visual::AnimationDefinition;
+    /// use antares::domain::visual::animation::AnimationDefinition;
     ///
-    /// let def = AnimationDefinition {
-    ///     name: "attack".to_string(),
+    /// let mut anim = CreatureAnimation::new(AnimationDefinition {
+    ///     name: "idle".to_string(),
     ///     duration: 1.0,
     ///     keyframes: vec![],
     ///     looping: false,
-    /// };
+    /// });
     ///
-    /// let mut anim = CreatureAnimation::new(def);
     /// let finished = anim.advance(0.5);
     /// assert!(!finished);
     /// assert_eq!(anim.current_time, 0.5);
@@ -631,16 +630,15 @@ impl CreatureAnimation {
     ///
     /// ```
     /// use antares::game::components::creature::CreatureAnimation;
-    /// use antares::domain::visual::AnimationDefinition;
+    /// use antares::domain::visual::animation::AnimationDefinition;
     ///
-    /// let def = AnimationDefinition {
+    /// let mut anim = CreatureAnimation::new(AnimationDefinition {
     ///     name: "jump".to_string(),
     ///     duration: 0.5,
     ///     keyframes: vec![],
     ///     looping: false,
-    /// };
+    /// });
     ///
-    /// let mut anim = CreatureAnimation::new(def);
     /// anim.advance(0.3);
     /// anim.reset();
     /// assert_eq!(anim.current_time, 0.0);

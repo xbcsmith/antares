@@ -172,7 +172,7 @@ fn test_preset_all_includes_rotation_presets() {
 fn test_visual_editor_default_rotation() {
     let editor = VisualMetadataEditor::default();
 
-    assert_eq!(editor.enable_rotation_y, false);
+    assert!(!editor.enable_rotation_y);
     assert_eq!(editor.temp_rotation_y, 0.0);
 }
 
@@ -184,7 +184,7 @@ fn test_visual_editor_load_rotation_from_tile() {
     let mut editor = VisualMetadataEditor::default();
     editor.load_from_tile(&tile);
 
-    assert_eq!(editor.enable_rotation_y, true);
+    assert!(editor.enable_rotation_y);
     assert_eq!(editor.temp_rotation_y, 45.0);
 }
 
@@ -195,7 +195,7 @@ fn test_visual_editor_load_no_rotation_from_tile() {
     let mut editor = VisualMetadataEditor::default();
     editor.load_from_tile(&tile);
 
-    assert_eq!(editor.enable_rotation_y, false);
+    assert!(!editor.enable_rotation_y);
     assert_eq!(editor.temp_rotation_y, 0.0);
 }
 
@@ -332,9 +332,9 @@ fn test_rotation_roundtrip_through_editor() {
     let mut editor = VisualMetadataEditor::default();
     editor.load_from_tile(&original_tile);
 
-    assert_eq!(editor.enable_rotation_y, true);
+    assert!(editor.enable_rotation_y);
     assert_eq!(editor.temp_rotation_y, 135.0);
-    assert_eq!(editor.enable_height, true);
+    assert!(editor.enable_height);
     assert_eq!(editor.temp_height, 2.0);
 
     // Convert back

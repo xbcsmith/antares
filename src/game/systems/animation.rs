@@ -88,7 +88,7 @@ pub fn update_sprite_animations(time: Res<Time>, mut query: Query<&mut AnimatedS
 /// use bevy::prelude::*;
 /// use antares::game::systems::animation::animation_playback_system;
 /// use antares::game::components::creature::CreatureAnimation;
-/// use antares::domain::visual::AnimationDefinition;
+/// use antares::domain::visual::animation::AnimationDefinition;
 ///
 /// fn spawn_animated_creature(mut commands: Commands) {
 ///     let anim_def = AnimationDefinition {

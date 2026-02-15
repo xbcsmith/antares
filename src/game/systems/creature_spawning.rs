@@ -32,6 +32,7 @@
 //!         &mut materials,
 //!         Vec3::new(10.0, 0.0, 5.0),
 //!         None,
+//!         None,
 //!     );
 //! }
 //! ```
@@ -71,7 +72,7 @@ use bevy::prelude::*;
 ///
 /// ```
 /// use antares::game::systems::creature_spawning::spawn_creature;
-/// use antares::domain::visual::{CreatureDefinition, MeshDefinition};
+/// use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 /// use bevy::prelude::*;
 ///
 /// fn example(
@@ -80,6 +81,7 @@ use bevy::prelude::*;
 ///     mut materials: ResMut<Assets<StandardMaterial>>,
 /// ) {
 ///     let creature_def = CreatureDefinition {
+///         id: 1,
 ///         name: "Test Creature".to_string(),
 ///         meshes: vec![
 ///             MeshDefinition {
@@ -88,9 +90,15 @@ use bevy::prelude::*;
 ///                 normals: None,
 ///                 uvs: None,
 ///                 color: [1.0, 1.0, 1.0, 1.0],
+///                 lod_levels: None,
+///                 lod_distances: None,
+///                 material: None,
+///                 texture_path: None,
 ///             },
 ///         ],
+///         mesh_transforms: vec![MeshTransform::identity()],
 ///         scale: 1.0,
+///         color_tint: None,
 ///     };
 ///
 ///     let entity = spawn_creature(
@@ -99,6 +107,7 @@ use bevy::prelude::*;
 ///         &mut meshes,
 ///         &mut materials,
 ///         Vec3::ZERO,
+///         None,
 ///         None,
 ///     );
 /// }

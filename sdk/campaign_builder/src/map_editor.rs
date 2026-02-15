@@ -170,8 +170,8 @@ enum EditorAction {
     /// Tile was modified
     TileChanged {
         position: Position,
-        old_tile: Tile,
-        new_tile: Tile,
+        old_tile: Box<Tile>,
+        new_tile: Box<Tile>,
     },
     /// Event was added
     EventAdded {
@@ -1226,9 +1226,7 @@ impl TerrainEditorState {
     /// A new TerrainEditorState with values from the metadata or defaults
     pub fn from_metadata(metadata: &TileVisualMetadata) -> Self {
         let grass_blade_config_enabled = metadata.grass_blade_config.is_some();
-        let grass_blade_config = metadata
-            .grass_blade_config
-            .unwrap_or_else(GrassBladeConfig::default);
+        let grass_blade_config = metadata.grass_blade_config.unwrap_or_default();
 
         Self {
             grass_density: metadata.grass_density(),
@@ -1557,8 +1555,8 @@ impl MapEditorState {
 
                 self.undo_stack.push(EditorAction::TileChanged {
                     position: pos,
-                    old_tile,
-                    new_tile,
+                    old_tile: Box::new(old_tile),
+                    new_tile: Box::new(new_tile),
                 });
 
                 self.has_changes = true;
@@ -1751,7 +1749,7 @@ impl MapEditorState {
                 position, old_tile, ..
             } => {
                 if let Some(tile) = self.map.get_tile_mut(position) {
-                    *tile = old_tile;
+                    *tile = *old_tile;
                 }
             }
             EditorAction::EventAdded { position, .. } => {
@@ -1777,7 +1775,7 @@ impl MapEditorState {
                 position, new_tile, ..
             } => {
                 if let Some(tile) = self.map.get_tile_mut(position) {
-                    *tile = new_tile;
+                    *tile = *new_tile;
                 }
             }
             EditorAction::EventAdded {
@@ -5885,7 +5883,7 @@ mod tests {
         state.remove_npc_placement(5);
         assert_eq!(state.map.npc_placements.len(), 0);
         // has_changes should remain false
-        assert_eq!(state.has_changes, false);
+        assert!(!state.has_changes);
     }
 
     #[test]
@@ -6335,12 +6333,12 @@ mod tests {
         // Select a position
         let pos = Position::new(5, 5);
         state.selected_position = Some(pos);
+        state.selected_terrain = TerrainType::Grass;
+        state.paint_tile(pos);
 
         // Set terrain editor state
         state.terrain_editor_state.grass_density = GrassDensity::High;
-        state.terrain_editor_state.tree_type = TreeType::Pine;
         state.terrain_editor_state.foliage_density = 1.5;
-        state.terrain_editor_state.snow_coverage = 0.8;
         state.terrain_editor_state.grass_blade_config_enabled = true;
         state.terrain_editor_state.grass_blade_config = GrassBladeConfig {
             length: 1.4,
@@ -6362,9 +6360,9 @@ mod tests {
             .expect("Metadata should exist for position");
 
         assert_eq!(metadata.grass_density, Some(GrassDensity::High));
-        assert_eq!(metadata.tree_type, Some(TreeType::Pine));
+        assert_eq!(metadata.tree_type, None);
         assert_eq!(metadata.foliage_density, Some(1.5));
-        assert_eq!(metadata.snow_coverage, Some(0.8));
+        assert_eq!(metadata.snow_coverage, None);
         assert_eq!(
             metadata.grass_blade_config,
             Some(GrassBladeConfig {
@@ -6388,9 +6386,12 @@ mod tests {
         let pos2 = Position::new(4, 5);
         let pos3 = Position::new(6, 7);
         state.selected_tiles = vec![pos1, pos2, pos3];
+        state.selected_terrain = TerrainType::Forest;
+        state.paint_tile(pos1);
+        state.paint_tile(pos2);
+        state.paint_tile(pos3);
 
         // Set terrain editor state
-        state.terrain_editor_state.grass_density = GrassDensity::Low;
         state.terrain_editor_state.tree_type = TreeType::Oak;
 
         // Apply terrain state
@@ -6406,8 +6407,7 @@ mod tests {
         for pos in [pos1, pos2, pos3] {
             let metadata = metadata_map
                 .get(&pos)
-                .expect(&format!("Metadata should exist for position {:?}", pos));
-            assert_eq!(metadata.grass_density, Some(GrassDensity::Low));
+                .unwrap_or_else(|| panic!("Metadata should exist for position {:?}", pos));
             assert_eq!(metadata.tree_type, Some(TreeType::Oak));
         }
 
@@ -6479,7 +6479,7 @@ mod tests {
         state.terrain_editor_state = TerrainEditorState::default();
 
         // Verify state is reset
-        assert_eq!(state.visual_editor.enable_height, false);
+        assert!(!state.visual_editor.enable_height);
         assert_eq!(state.terrain_editor_state.tree_type, TreeType::Oak);
     }
 
@@ -6746,11 +6746,13 @@ mod tests {
         state.selected_position = Some(pos);
 
         let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(400.0, 300.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(400.0, 300.0),
+            )),
+            ..Default::default()
+        };
         ctx.begin_pass(raw_input);
 
         egui::CentralPanel::default().show(&ctx, |ui| {
@@ -6997,8 +6999,10 @@ mod tests {
 
     #[test]
     fn test_event_editor_state_teleport_map_buffer() {
-        let mut state = EventEditorState::default();
-        state.event_type = EventType::Teleport;
+        let mut state = EventEditorState {
+            event_type: EventType::Teleport,
+            ..Default::default()
+        };
 
         // Simulate setting teleport map via autocomplete
         state.teleport_map_input_buffer = "Town Square (ID: 1)".to_string();
@@ -7010,8 +7014,10 @@ mod tests {
 
     #[test]
     fn test_event_editor_state_npc_id_buffer() {
-        let mut state = EventEditorState::default();
-        state.event_type = EventType::NpcDialogue;
+        let mut state = EventEditorState {
+            event_type: EventType::NpcDialogue,
+            ..Default::default()
+        };
 
         // Simulate setting NPC ID via autocomplete (format: "map_id:npc_id")
         state.npc_id_input_buffer = "Merchant (Map: Town, NPC ID: 1)".to_string();
@@ -7023,12 +7029,12 @@ mod tests {
 
     #[test]
     fn test_event_editor_state_buffer_persistence() {
-        let mut state = EventEditorState::default();
-
-        // Set buffers
-        state.trap_effect_input_buffer = "Paralysis".to_string();
-        state.teleport_map_input_buffer = "Dark Forest (ID: 2)".to_string();
-        state.npc_id_input_buffer = "Guard (Map: Castle, NPC ID: 5)".to_string();
+        let state = EventEditorState {
+            trap_effect_input_buffer: "Paralysis".to_string(),
+            teleport_map_input_buffer: "Dark Forest (ID: 2)".to_string(),
+            npc_id_input_buffer: "Guard (Map: Castle, NPC ID: 5)".to_string(),
+            ..Default::default()
+        };
 
         // Verify all buffers are set
         assert_eq!(state.trap_effect_input_buffer, "Paralysis");
@@ -7936,6 +7942,8 @@ mod tests {
         let pos = Position::new(5, 5);
         state.selected_position = Some(pos);
         state.selected_tiles = vec![]; // Ensure multi-select is empty
+        state.selected_terrain = TerrainType::Grass;
+        state.paint_tile(pos);
 
         // Set terrain state
         state.terrain_editor_state.grass_density = GrassDensity::High;

@@ -221,10 +221,19 @@ impl LodEditorState {
                                     // Mesh statistics
                                     let lod_mesh = &lod_levels[lod_idx];
                                     ui.label("Mesh Statistics:");
-                                    ui.label(format!("  Vertices: {}", lod_mesh.vertex_count()));
-                                    ui.label(format!("  Triangles: {}", lod_mesh.triangle_count()));
-                                    ui.label(format!("  Normals: {}", lod_mesh.normal_count()));
-                                    ui.label(format!("  UVs: {}", lod_mesh.uv_count()));
+                                    ui.label(format!("  Vertices: {}", lod_mesh.vertices.len()));
+                                    ui.label(format!(
+                                        "  Triangles: {}",
+                                        lod_mesh.indices.len() / 3
+                                    ));
+                                    ui.label(format!(
+                                        "  Normals: {}",
+                                        lod_mesh.normals.as_ref().map(|n| n.len()).unwrap_or(0)
+                                    ));
+                                    ui.label(format!(
+                                        "  UVs: {}",
+                                        lod_mesh.uvs.as_ref().map(|u| u.len()).unwrap_or(0)
+                                    ));
 
                                     // Reduction percentage
                                     let base_vertices = mesh.vertices.len();

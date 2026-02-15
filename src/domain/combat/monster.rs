@@ -282,6 +282,7 @@ pub enum AiBehavior {
 ///     is_undead: false,
 ///     magic_resistance: 0,
 ///     ai_behavior: AiBehavior::Random,
+///     visual_id: None,
 ///     conditions: MonsterCondition::Normal,
 ///     active_conditions: Vec::new(),
 ///     has_acted: false,

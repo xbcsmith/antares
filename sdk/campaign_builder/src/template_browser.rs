@@ -240,7 +240,7 @@ impl TemplateBrowserState {
 
             // Category filter
             ui.label("Category:");
-            egui::ComboBox::from_id_source("category_filter")
+            egui::ComboBox::from_id_salt("category_filter")
                 .selected_text(self.category_filter.unwrap_or(TemplateCategory::All).name())
                 .show_ui(ui, |ui| {
                     for category in TemplateCategory::all() {
@@ -256,7 +256,7 @@ impl TemplateBrowserState {
 
             // Sort order
             ui.label("Sort:");
-            egui::ComboBox::from_id_source("sort_order")
+            egui::ComboBox::from_id_salt("sort_order")
                 .selected_text(self.sort_order.name())
                 .show_ui(ui, |ui| {
                     for order in SortOrder::all() {
@@ -306,7 +306,11 @@ impl TemplateBrowserState {
                     ui.separator();
 
                     if let Some(idx) = self.selected_template {
-                        if let Some(template) = filtered_templates.get(idx) {
+                        if let Some(template) = filtered_templates
+                            .iter()
+                            .find(|(i, _)| *i == idx)
+                            .map(|(_, t)| *t)
+                        {
                             self.show_template_preview(ui, template);
 
                             ui.separator();
@@ -555,14 +559,12 @@ impl TemplateBrowserState {
                 ));
             }
 
-            if let Some(lod_levels) = &template.creature.lod_levels {
-                ui.label(format!("  LOD Levels: {}", lod_levels.len()));
+            if !template.creature.mesh_transforms.is_empty() {
+                ui.label(format!(
+                    "  Mesh Transforms: {}",
+                    template.creature.mesh_transforms.len()
+                ));
             }
-
-            ui.label(format!(
-                "  Animations: {}",
-                template.creature.animations.len()
-            ));
         });
     }
 }
@@ -627,6 +629,30 @@ mod tests {
         assert_eq!(SortOrder::DateAdded.name(), "Date Added");
     }
 
+    /// Helper function to create a minimal creature for tests
+    fn create_test_creature() -> CreatureDefinition {
+        use antares::domain::visual::{MeshDefinition, MeshTransform};
+
+        CreatureDefinition {
+            id: 0,
+            name: String::new(),
+            meshes: vec![MeshDefinition {
+                vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+                indices: vec![0, 1, 2],
+                normals: None,
+                uvs: None,
+                color: [1.0, 1.0, 1.0, 1.0],
+                lod_levels: None,
+                lod_distances: None,
+                material: None,
+                texture_path: None,
+            }],
+            mesh_transforms: vec![MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+        }
+    }
+
     #[test]
     fn test_view_mode_variants() {
         assert_eq!(ViewMode::Grid, ViewMode::Grid);
@@ -643,7 +669,7 @@ mod tests {
             tags: vec!["test".to_string(), "example".to_string()],
             author: Some("Test Author".to_string()),
             thumbnail_path: None,
-            creature: CreatureDefinition::default(),
+            creature: create_test_creature(),
         };
 
         assert_eq!(metadata.name, "Test Template");
@@ -653,9 +679,6 @@ mod tests {
 
     #[test]
     fn test_filter_by_category() {
-        let mut state = TemplateBrowserState::new();
-        state.category_filter = Some(TemplateCategory::Dragon);
-
         let templates = vec![
             TemplateMetadata {
                 name: "Dragon1".to_string(),
@@ -664,7 +687,7 @@ mod tests {
                 tags: vec![],
                 author: None,
                 thumbnail_path: None,
-                creature: CreatureDefinition::default(),
+                creature: create_test_creature(),
             },
             TemplateMetadata {
                 name: "Humanoid1".to_string(),
@@ -673,21 +696,20 @@ mod tests {
                 tags: vec![],
                 author: None,
                 thumbnail_path: None,
-                creature: CreatureDefinition::default(),
+                creature: create_test_creature(),
             },
         ];
 
-        let filtered = state.filter_and_sort_templates(&templates);
+        let mut browser = TemplateBrowserState::new();
+        browser.category_filter = Some(TemplateCategory::Dragon);
+
+        let filtered = browser.filter_and_sort_templates(&templates);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].1.name, "Dragon1");
     }
 
     #[test]
     fn test_filter_by_search() {
-        let mut state = TemplateBrowserState::new();
-        state.search_query = "dragon".to_string();
-        state.category_filter = Some(TemplateCategory::All);
-
         let templates = vec![
             TemplateMetadata {
                 name: "Red Dragon".to_string(),
@@ -696,7 +718,7 @@ mod tests {
                 tags: vec![],
                 author: None,
                 thumbnail_path: None,
-                creature: CreatureDefinition::default(),
+                creature: create_test_creature(),
             },
             TemplateMetadata {
                 name: "Knight".to_string(),
@@ -705,21 +727,20 @@ mod tests {
                 tags: vec![],
                 author: None,
                 thumbnail_path: None,
-                creature: CreatureDefinition::default(),
+                creature: create_test_creature(),
             },
         ];
 
-        let filtered = state.filter_and_sort_templates(&templates);
+        let mut browser = TemplateBrowserState::new();
+        browser.search_query = "dragon".to_string();
+
+        let filtered = browser.filter_and_sort_templates(&templates);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].1.name, "Red Dragon");
     }
 
     #[test]
     fn test_sort_by_name_ascending() {
-        let mut state = TemplateBrowserState::new();
-        state.sort_order = SortOrder::NameAscending;
-        state.category_filter = Some(TemplateCategory::All);
-
         let templates = vec![
             TemplateMetadata {
                 name: "Zombie".to_string(),
@@ -728,7 +749,7 @@ mod tests {
                 tags: vec![],
                 author: None,
                 thumbnail_path: None,
-                creature: CreatureDefinition::default(),
+                creature: create_test_creature(),
             },
             TemplateMetadata {
                 name: "Archer".to_string(),
@@ -737,18 +758,21 @@ mod tests {
                 tags: vec![],
                 author: None,
                 thumbnail_path: None,
-                creature: CreatureDefinition::default(),
+                creature: create_test_creature(),
             },
         ];
 
-        let filtered = state.filter_and_sort_templates(&templates);
+        let mut browser = TemplateBrowserState::new();
+        browser.sort_order = SortOrder::NameAscending;
+
+        let filtered = browser.filter_and_sort_templates(&templates);
         assert_eq!(filtered[0].1.name, "Archer");
         assert_eq!(filtered[1].1.name, "Zombie");
     }
 
     #[test]
     fn test_template_browser_action_variants() {
-        let creature = CreatureDefinition::default();
+        let creature = create_test_creature();
 
         let action = TemplateBrowserAction::UseTemplate(creature.clone());
         assert!(matches!(action, TemplateBrowserAction::UseTemplate(_)));

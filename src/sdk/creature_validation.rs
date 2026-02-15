@@ -23,6 +23,10 @@
 //!     normals: None,
 //!     uvs: None,
 //!     color: [1.0, 1.0, 1.0, 1.0],
+//!     lod_levels: None,
+//!     lod_distances: None,
+//!     material: None,
+//!     texture_path: None,
 //! };
 //!
 //! let result = validate_mesh_topology(&mesh);
@@ -141,6 +145,10 @@ impl TopologyValidation {
 ///     normals: None,
 ///     uvs: None,
 ///     color: [1.0, 1.0, 1.0, 1.0],
+///     lod_levels: None,
+///     lod_distances: None,
+///     material: None,
+///     texture_path: None,
 /// };
 ///
 /// let validation = validate_mesh_topology(&mesh).unwrap();
@@ -248,6 +256,10 @@ pub fn validate_mesh_topology(mesh: &MeshDefinition) -> Result<TopologyValidatio
 ///     normals: None,
 ///     uvs: None,
 ///     color: [1.0, 1.0, 1.0, 1.0],
+///     lod_levels: None,
+///     lod_distances: None,
+///     material: None,
+///     texture_path: None,
 /// };
 ///
 /// let creature = CreatureDefinition {

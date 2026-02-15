@@ -70,7 +70,7 @@ mod visual_presets {
         let tall = VisualPreset::TallTree.to_metadata();
         let dead = VisualPreset::DeadTree.to_metadata();
 
-        let heights = vec![
+        let heights = [
             short.height.unwrap(),
             medium.height.unwrap(),
             tall.height.unwrap(),
@@ -338,8 +338,10 @@ mod visual_presets {
     fn test_terrain_preset_all_variants_present() {
         let presets = VisualPreset::all();
 
-        // Count new presets
-        let expected_preset_names = vec![
+        let required_preset_names = vec![
+            "Default (None)",
+            "Short Wall",
+            "Tall Wall",
             "Short Tree",
             "Medium Tree",
             "Tall Tree",
@@ -361,16 +363,17 @@ mod visual_presets {
             "Volcanic Vent",
         ];
 
-        for preset in presets {
-            let name = preset.name();
-            // All presets should have a valid name
+        let preset_names: Vec<&str> = presets.iter().map(VisualPreset::name).collect();
+        for name in &preset_names {
             assert!(!name.is_empty(), "Preset should have a non-empty name");
+        }
 
-            // All presets should be present
-            if expected_preset_names.contains(&name) {
-                // Verify it's in the list
-                assert!(true);
-            }
+        for required in required_preset_names {
+            assert!(
+                preset_names.contains(&required),
+                "Missing required preset: {}",
+                required
+            );
         }
     }
 
@@ -406,7 +409,7 @@ mod visual_presets {
             // All metadata should have reasonable values
             if let Some(height) = metadata.height {
                 assert!(
-                    height >= 0.1 && height <= 10.0,
+                    (0.1..=10.0).contains(&height),
                     "Height for {} should be 0.1-10.0, got {}",
                     preset.name(),
                     height
@@ -415,7 +418,7 @@ mod visual_presets {
 
             if let Some(scale) = metadata.scale {
                 assert!(
-                    scale >= 0.1 && scale <= 3.0,
+                    (0.1..=3.0).contains(&scale),
                     "Scale for {} should be 0.1-3.0, got {}",
                     preset.name(),
                     scale
@@ -424,7 +427,7 @@ mod visual_presets {
 
             if let Some(rotation) = metadata.rotation_y {
                 assert!(
-                    rotation >= 0.0 && rotation <= 360.0,
+                    (0.0..=360.0).contains(&rotation),
                     "Rotation for {} should be 0-360, got {}",
                     preset.name(),
                     rotation
@@ -433,19 +436,19 @@ mod visual_presets {
 
             if let Some((r, g, b)) = metadata.color_tint {
                 assert!(
-                    r >= 0.0 && r <= 1.0,
+                    (0.0..=1.0).contains(&r),
                     "Red component for {} should be 0.0-1.0, got {}",
                     preset.name(),
                     r
                 );
                 assert!(
-                    g >= 0.0 && g <= 1.0,
+                    (0.0..=1.0).contains(&g),
                     "Green component for {} should be 0.0-1.0, got {}",
                     preset.name(),
                     g
                 );
                 assert!(
-                    b >= 0.0 && b <= 1.0,
+                    (0.0..=1.0).contains(&b),
                     "Blue component for {} should be 0.0-1.0, got {}",
                     preset.name(),
                     b
@@ -513,7 +516,7 @@ mod visual_presets {
 
         for preset in lava_presets {
             let metadata = preset.to_metadata();
-            let (r, g, b) = metadata.color_tint.unwrap_or((0.0, 0.0, 0.0));
+            let (r, _g, _b) = metadata.color_tint.unwrap_or((0.0, 0.0, 0.0));
 
             // Lava should have high red component (hot colors)
             assert!(

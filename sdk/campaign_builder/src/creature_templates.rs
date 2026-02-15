@@ -11,6 +11,8 @@ use crate::primitive_generators::{
 };
 use antares::domain::visual::{CreatureDefinition, MeshTransform};
 
+type TemplateGenerator = fn(&str, u32) -> CreatureDefinition;
+
 /// Generates a simple humanoid creature using primitives
 ///
 /// Creates a basic biped creature with:
@@ -104,7 +106,11 @@ pub fn generate_quadruped_template(name: &str, id: u32) -> CreatureDefinition {
 
     // Body (elongated cube)
     meshes.push(generate_cube(1.0, [0.6, 0.5, 0.4, 1.0]));
-    transforms.push(MeshTransform::scale(1.5, 0.8, 0.6).with_translation(0.0, 0.8, 0.0));
+    transforms.push(MeshTransform {
+        translation: [0.0, 0.8, 0.0],
+        rotation: [0.0, 0.0, 0.0],
+        scale: [1.5, 0.8, 0.6],
+    });
 
     // Head (sphere)
     meshes.push(generate_sphere(0.3, 12, 12, [0.7, 0.6, 0.5, 1.0]));
@@ -161,18 +167,27 @@ pub fn generate_flying_template(name: &str, id: u32) -> CreatureDefinition {
 
     // Beak (cone)
     meshes.push(generate_cone(0.1, 0.3, 8, [1.0, 0.7, 0.0, 1.0]));
-    transforms.push(
-        MeshTransform::rotation(0.0, 0.0, std::f32::consts::PI / 2.0)
-            .with_translation(0.4, 0.5, 0.0),
-    );
+    transforms.push(MeshTransform {
+        translation: [0.4, 0.5, 0.0],
+        rotation: [0.0, 0.0, std::f32::consts::PI / 2.0],
+        scale: [1.0, 1.0, 1.0],
+    });
 
     // Left wing (flat cube)
     meshes.push(generate_cube(0.6, [0.7, 0.7, 0.8, 1.0]));
-    transforms.push(MeshTransform::scale(0.1, 0.6, 1.2).with_translation(-0.5, 0.5, 0.0));
+    transforms.push(MeshTransform {
+        translation: [-0.5, 0.5, 0.0],
+        rotation: [0.0, 0.0, 0.0],
+        scale: [0.1, 0.6, 1.2],
+    });
 
     // Right wing (flat cube)
     meshes.push(generate_cube(0.6, [0.7, 0.7, 0.8, 1.0]));
-    transforms.push(MeshTransform::scale(0.1, 0.6, 1.2).with_translation(0.5, 0.5, 0.0));
+    transforms.push(MeshTransform {
+        translation: [0.5, 0.5, 0.0],
+        rotation: [0.0, 0.0, 0.0],
+        scale: [0.1, 0.6, 1.2],
+    });
 
     CreatureDefinition {
         id,
@@ -202,7 +217,11 @@ pub fn generate_slime_template(name: &str, id: u32) -> CreatureDefinition {
 
     // Body (squashed sphere)
     meshes.push(generate_sphere(0.6, 16, 12, [0.2, 0.8, 0.3, 0.8]));
-    transforms.push(MeshTransform::scale(1.0, 0.6, 1.0).with_translation(0.0, 0.3, 0.0));
+    transforms.push(MeshTransform {
+        translation: [0.0, 0.3, 0.0],
+        rotation: [0.0, 0.0, 0.0],
+        scale: [1.0, 0.6, 1.0],
+    });
 
     // Eyes (small spheres)
     meshes.push(generate_sphere(0.08, 6, 6, [0.0, 0.0, 0.0, 1.0]));
@@ -244,7 +263,11 @@ pub fn generate_dragon_template(name: &str, id: u32) -> CreatureDefinition {
 
     // Body (elongated sphere)
     meshes.push(generate_sphere(0.6, 16, 16, [0.8, 0.2, 0.2, 1.0]));
-    transforms.push(MeshTransform::scale(2.0, 1.0, 1.0).with_translation(0.0, 1.2, 0.0));
+    transforms.push(MeshTransform {
+        translation: [0.0, 1.2, 0.0],
+        rotation: [0.0, 0.0, 0.0],
+        scale: [2.0, 1.0, 1.0],
+    });
 
     // Head (sphere)
     meshes.push(generate_sphere(0.4, 12, 12, [0.9, 0.3, 0.3, 1.0]));
@@ -260,18 +283,27 @@ pub fn generate_dragon_template(name: &str, id: u32) -> CreatureDefinition {
 
     // Left wing
     meshes.push(generate_cube(1.0, [0.6, 0.1, 0.1, 1.0]));
-    transforms.push(MeshTransform::scale(0.1, 0.8, 2.0).with_translation(-0.7, 1.5, 0.0));
+    transforms.push(MeshTransform {
+        translation: [-0.7, 1.5, 0.0],
+        rotation: [0.0, 0.0, 0.0],
+        scale: [0.1, 0.8, 2.0],
+    });
 
     // Right wing
     meshes.push(generate_cube(1.0, [0.6, 0.1, 0.1, 1.0]));
-    transforms.push(MeshTransform::scale(0.1, 0.8, 2.0).with_translation(0.7, 1.5, 0.0));
+    transforms.push(MeshTransform {
+        translation: [0.7, 1.5, 0.0],
+        rotation: [0.0, 0.0, 0.0],
+        scale: [0.1, 0.8, 2.0],
+    });
 
     // Tail (cylinder)
     meshes.push(generate_cylinder(0.2, 1.5, 8, [0.7, 0.2, 0.2, 1.0]));
-    transforms.push(
-        MeshTransform::rotation(0.0, 0.0, std::f32::consts::PI / 4.0)
-            .with_translation(-1.5, 0.8, 0.0),
-    );
+    transforms.push(MeshTransform {
+        translation: [-1.5, 0.8, 0.0],
+        rotation: [0.0, 0.0, std::f32::consts::PI / 4.0],
+        scale: [1.0, 1.0, 1.0],
+    });
 
     // Legs (simplified)
     for i in 0..4 {
@@ -297,7 +329,7 @@ pub fn generate_dragon_template(name: &str, id: u32) -> CreatureDefinition {
 /// # Returns
 ///
 /// A vector of tuples containing (template_name, generator_function)
-pub fn available_templates() -> Vec<(&'static str, fn(&str, u32) -> CreatureDefinition)> {
+pub fn available_templates() -> Vec<(&'static str, TemplateGenerator)> {
     vec![
         (
             "Humanoid",

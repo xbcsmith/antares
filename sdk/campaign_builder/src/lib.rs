@@ -724,6 +724,7 @@ impl CampaignBuilderApp {
                 items: Vec::new(),
                 experience: 0,
             },
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -1012,7 +1013,7 @@ impl CampaignBuilderApp {
             if let Some(required_prof) = item.required_proficiency() {
                 referenced_proficiencies.insert(required_prof.clone());
 
-                let prof_exists = self.proficiencies.iter().any(|p| &p.id == &required_prof);
+                let prof_exists = self.proficiencies.iter().any(|p| p.id == required_prof);
                 if !prof_exists {
                     results.push(validation::ValidationResult::error(
                         validation::ValidationCategory::Proficiencies,
@@ -2054,9 +2055,7 @@ impl CampaignBuilderApp {
 
                                             // Mark individual map file as loaded in asset manager
                                             if let Some(ref mut manager) = self.asset_manager {
-                                                if let Some(relative_path) =
-                                                    path.strip_prefix(dir).ok()
-                                                {
+                                                if let Ok(relative_path) = path.strip_prefix(dir) {
                                                     if let Some(path_str) = relative_path.to_str() {
                                                         manager.mark_data_file_loaded(path_str, 1);
                                                     }
@@ -2072,9 +2071,7 @@ impl CampaignBuilderApp {
 
                                             // Mark individual map file as error in asset manager
                                             if let Some(ref mut manager) = self.asset_manager {
-                                                if let Some(relative_path) =
-                                                    path.strip_prefix(dir).ok()
-                                                {
+                                                if let Ok(relative_path) = path.strip_prefix(dir) {
                                                     if let Some(path_str) = relative_path.to_str() {
                                                         manager.mark_data_file_error(
                                                             path_str,
@@ -2094,8 +2091,7 @@ impl CampaignBuilderApp {
 
                                         // Mark individual map file as error in asset manager
                                         if let Some(ref mut manager) = self.asset_manager {
-                                            if let Some(relative_path) = path.strip_prefix(dir).ok()
-                                            {
+                                            if let Ok(relative_path) = path.strip_prefix(dir) {
                                                 if let Some(path_str) = relative_path.to_str() {
                                                     manager.mark_data_file_error(
                                                         path_str,
@@ -2404,8 +2400,8 @@ impl CampaignBuilderApp {
                 starting_gold: self.campaign.starting_gold,
                 starting_food: self.campaign.starting_food,
                 starting_innkeeper: self.campaign.starting_innkeeper.clone(),
-                max_party_size: self.campaign.max_party_size as usize,
-                max_roster_size: self.campaign.max_roster_size as usize,
+                max_party_size: self.campaign.max_party_size,
+                max_roster_size: self.campaign.max_roster_size,
                 difficulty: antares::sdk::campaign_loader::Difficulty::Normal,
                 permadeath: self.campaign.permadeath,
                 allow_multiclassing: self.campaign.allow_multiclassing,
@@ -5260,8 +5256,10 @@ mod tests {
         fs::write(&races_path, races_ron).expect("Failed to write races.ron");
 
         // Setup the CampaignBuilderApp, and point it at our temporary campaign
-        let mut app = CampaignBuilderApp::default();
-        app.campaign_dir = Some(tmpdir.clone());
+        let mut app = CampaignBuilderApp {
+            campaign_dir: Some(tmpdir.clone()),
+            ..Default::default()
+        };
         // Use the default "data/races.ron" path; set explicitly to be safe
         app.campaign.races_file = "data/races.ron".to_string();
 
@@ -5669,11 +5667,11 @@ mod tests {
     #[test]
     fn test_validation_reset_filters_clears_state() {
         use std::path::PathBuf;
-        let mut app = CampaignBuilderApp::default();
-
-        // Set a non-default state to simulate user changes
-        app.validation_filter = ValidationFilter::ErrorsOnly;
-        app.validation_focus_asset = Some(PathBuf::from("data/items.ron"));
+        let mut app = CampaignBuilderApp {
+            validation_filter: ValidationFilter::ErrorsOnly,
+            validation_focus_asset: Some(PathBuf::from("data/items.ron")),
+            ..Default::default()
+        };
 
         // Call the reset helper and verify all state is reverted
         app.reset_validation_filters();
@@ -6155,6 +6153,7 @@ mod tests {
             classes_file: "data/classes.ron".to_string(),
             races_file: "data/races.ron".to_string(),
             characters_file: "data/characters.ron".to_string(),
+            creatures_file: "data/creatures.ron".to_string(),
             maps_dir: "data/maps/".to_string(),
             quests_file: "data/quests.ron".to_string(),
             dialogue_file: "data/dialogue.ron".to_string(),
@@ -8421,6 +8420,7 @@ mod tests {
                 items: Vec::new(),
                 experience: 0,
             },
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -8448,30 +8448,31 @@ mod tests {
             attacks: vec![
                 Attack {
                     damage: DiceRoll::new(2, 8, 5),
-                    attack_type: AttackType::Fire,
-                    special_effect: Some(SpecialEffect::Poison),
-                },
-                Attack {
-                    damage: DiceRoll::new(1, 10, 3),
                     attack_type: AttackType::Physical,
                     special_effect: None,
                 },
+                Attack {
+                    damage: DiceRoll::new(1, 6, 2),
+                    attack_type: AttackType::Fire,
+                    special_effect: Some(SpecialEffect::Paralysis),
+                },
             ],
-            flee_threshold: 10,
-            special_attack_threshold: 25,
+            flee_threshold: 5,
+            special_attack_threshold: 30,
             resistances: MonsterResistances::new(),
             can_regenerate: true,
             can_advance: true,
-            is_undead: true,
-            magic_resistance: 50,
+            is_undead: false,
+            magic_resistance: 15,
             loot: LootTable {
-                gold_min: 50,
-                gold_max: 200,
-                gems_min: 1,
-                gems_max: 5,
+                gold_min: 0,
+                gold_max: 0,
+                gems_min: 0,
+                gems_max: 0,
                 items: Vec::new(),
                 experience: 0,
             },
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -8504,21 +8505,22 @@ mod tests {
                 attack_type: AttackType::Fire,
                 special_effect: Some(SpecialEffect::Paralysis),
             }],
-            flee_threshold: 5,
-            special_attack_threshold: 20,
+            flee_threshold: 10,
+            special_attack_threshold: 25,
             resistances: MonsterResistances::new(),
-            can_regenerate: true,
-            can_advance: false,
-            is_undead: true,
-            magic_resistance: 25,
+            can_regenerate: false,
+            can_advance: true,
+            is_undead: false,
+            magic_resistance: 10,
             loot: LootTable {
-                gold_min: 10,
-                gold_max: 50,
+                gold_min: 0,
+                gold_max: 0,
                 gems_min: 0,
-                gems_max: 2,
+                gems_max: 0,
                 items: Vec::new(),
-                experience: 200,
+                experience: 0,
             },
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
@@ -8556,21 +8558,22 @@ mod tests {
                 attack_type: AttackType::Physical,
                 special_effect: None,
             }],
-            flee_threshold: 5,
-            special_attack_threshold: 0,
+            flee_threshold: 2,
+            special_attack_threshold: 10,
             resistances: MonsterResistances::new(),
             can_regenerate: false,
             can_advance: true,
             is_undead: false,
             magic_resistance: 0,
             loot: LootTable {
-                gold_min: 1,
-                gold_max: 10,
+                gold_min: 0,
+                gold_max: 0,
                 gems_min: 0,
                 gems_max: 0,
                 items: Vec::new(),
                 experience: 25,
             },
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,

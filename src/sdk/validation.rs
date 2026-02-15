@@ -469,7 +469,7 @@ impl<'a> Validator<'a> {
     ///
     /// let db = ContentDatabase::new();
     /// let validator = Validator::new(&db);
-    /// let errors = validator.validate_creatures();
+    /// let errors = validator.validate_all();
     /// ```
     fn validate_creatures(&self) -> Vec<ValidationError> {
         let mut errors = Vec::new();

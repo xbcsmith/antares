@@ -552,10 +552,10 @@ fn skeletal_animation_system(
     for (mut creature, children) in query.iter_mut() {
         // Update state machine
         creature.state_machine.update();
-        
+
         // Get current animation from active state
         let current_time = time.elapsed_secs();
-        
+
         // Sample animation for each bone
         for bone_id in 0..creature.skeleton.bones.len() {
             if let Some(keyframe) = creature.current_animation.sample_bone(bone_id, current_time) {
@@ -584,14 +584,14 @@ fn ik_solver_system(
         if !ik_target.enabled {
             continue;
         }
-        
+
         let chain = &ik_target.chain;
-        
+
         // Get bone positions
         let root_pos = get_bone_world_position(&creature.skeleton, chain.bones[0]);
         let mid_pos = get_bone_world_position(&creature.skeleton, chain.bones[1]);
         let end_pos = calculate_end_effector_position(...);
-        
+
         // Solve IK
         let rotations = solve_two_bone_ik(
             root_pos,
@@ -600,7 +600,7 @@ fn ik_solver_system(
             chain.target,
             chain.pole_target,
         );
-        
+
         // Apply rotations to bones
         apply_bone_rotation(chain.bones[0], rotations[0], ...);
         apply_bone_rotation(chain.bones[1], rotations[1], ...);

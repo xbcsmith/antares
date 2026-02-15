@@ -21,7 +21,7 @@ use std::collections::HashMap;
 /// use antares::game::resources::performance::PerformanceMetrics;
 ///
 /// fn update_metrics(mut metrics: ResMut<PerformanceMetrics>, time: Res<Time>) {
-///     metrics.update_frame_time(time.delta_seconds());
+///     metrics.update_frame_time(time.delta_secs());
 ///
 ///     println!("Current FPS: {:.1}", metrics.current_fps());
 /// }

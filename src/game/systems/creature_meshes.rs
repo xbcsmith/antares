@@ -69,6 +69,10 @@ use bevy::prelude::*;
 ///     normals: None,
 ///     uvs: None,
 ///     color: [1.0, 1.0, 1.0, 1.0],
+///     lod_levels: None,
+///     lod_distances: None,
+///     material: None,
+///     texture_path: None,
 /// };
 ///
 /// let bevy_mesh = mesh_definition_to_bevy(&mesh_def);

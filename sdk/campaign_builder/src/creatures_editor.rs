@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
-use antares::domain::visual::{CreatureDefinition, CreatureId, MeshDefinition, MeshTransform};
+use antares::domain::types::CreatureId;
+use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -94,70 +95,59 @@ impl CreaturesEditorState {
         creatures_file: &str,
         unsaved_changes: &mut bool,
     ) -> Option<String> {
-        let mut result_message = None;
-
         match self.mode {
             CreaturesEditorMode::List => {
-                result_message = self.show_list_mode(ui, creatures, unsaved_changes);
+                self.show_list_mode(ui, creatures.as_mut_slice(), unsaved_changes)
             }
             CreaturesEditorMode::Add | CreaturesEditorMode::Edit => {
-                result_message = self.show_edit_mode(ui, creatures, unsaved_changes);
+                self.show_edit_mode(ui, creatures, unsaved_changes)
             }
         }
-
-        result_message
     }
 
     fn show_list_mode(
         &mut self,
         ui: &mut egui::Ui,
-        creatures: &mut Vec<CreatureDefinition>,
+        creatures: &mut [CreatureDefinition],
         unsaved_changes: &mut bool,
     ) -> Option<String> {
-        let mut result_message = None;
+        let result_message: Option<String> = None;
 
         // Toolbar
         let toolbar_action = EditorToolbar::new("creatures_toolbar")
-            .search(&mut self.search_query)
+            .with_search(&mut self.search_query)
             .show(ui);
 
-        if let Some(action) = toolbar_action {
-            match action {
-                ToolbarAction::Add => {
-                    self.mode = CreaturesEditorMode::Add;
-                    self.edit_buffer = Self::default_creature();
-                    self.edit_buffer.id = self.next_available_id(creatures);
-                    self.selected_mesh_index = None;
-                    self.mesh_edit_buffer = None;
-                    self.mesh_transform_buffer = None;
-                }
-                ToolbarAction::Delete => {
-                    if let Some(idx) = self.selected_creature {
-                        if idx < creatures.len() {
-                            let name = creatures[idx].name.clone();
-                            creatures.remove(idx);
-                            self.selected_creature = None;
-                            *unsaved_changes = true;
-                            result_message = Some(format!("Deleted creature: {}", name));
-                        }
-                    }
-                }
-                ToolbarAction::Duplicate => {
-                    if let Some(idx) = self.selected_creature {
-                        if idx < creatures.len() {
-                            let mut new_creature = creatures[idx].clone();
-                            new_creature.id = self.next_available_id(creatures);
-                            new_creature.name = format!("{} (Copy)", new_creature.name);
-                            creatures.push(new_creature.clone());
-                            *unsaved_changes = true;
-                            result_message =
-                                Some(format!("Duplicated creature: {}", new_creature.name));
-                        }
-                    }
-                }
-                _ => {}
+        match toolbar_action {
+            ToolbarAction::New => {
+                self.mode = CreaturesEditorMode::Add;
+                self.edit_buffer = Self::default_creature();
+                self.edit_buffer.id = self.next_available_id(creatures);
+                self.selected_mesh_index = None;
+                self.mesh_edit_buffer = None;
+                self.mesh_transform_buffer = None;
+            }
+            ToolbarAction::Save => {
+                // Save creatures to campaign
+            }
+            ToolbarAction::Load => {
+                // Load creatures from file
+            }
+            ToolbarAction::Import => {
+                // Import creatures from RON text
+            }
+            ToolbarAction::Export => {
+                // Export creatures to file
+            }
+            ToolbarAction::Reload => {
+                // Reload creatures from campaign
+            }
+            ToolbarAction::None => {
+                // No action triggered
             }
         }
+
+        // Action buttons for selected creature (separate from toolbar)
 
         ui.separator();
 
@@ -217,65 +207,100 @@ impl CreaturesEditorState {
         creatures: &mut Vec<CreatureDefinition>,
         unsaved_changes: &mut bool,
     ) -> Option<String> {
-        let mut result_message = None;
+        let mut result_message: Option<String> = None;
 
         // Action buttons
-        let action = ActionButtons::new("creatures_edit_actions")
-            .with_save()
-            .with_cancel()
-            .show(ui);
+        let action = ActionButtons::new().show(ui);
 
         match action {
-            ItemAction::Save => {
-                // Validate creature
-                if let Err(e) = self.edit_buffer.validate() {
-                    result_message = Some(format!("Validation error: {}", e));
-                } else {
-                    match self.mode {
-                        CreaturesEditorMode::Add => {
-                            creatures.push(self.edit_buffer.clone());
-                            result_message =
-                                Some(format!("Created creature: {}", self.edit_buffer.name));
-                        }
-                        CreaturesEditorMode::Edit => {
-                            if let Some(idx) = self.selected_creature {
-                                if idx < creatures.len() {
-                                    creatures[idx] = self.edit_buffer.clone();
-                                    result_message = Some(format!(
-                                        "Updated creature: {}",
-                                        self.edit_buffer.name
-                                    ));
-                                }
-                            }
-                        }
-                        _ => {}
+            ItemAction::Edit => {
+                // Edit mode is already set
+            }
+            ItemAction::Delete => {
+                if let Some(idx) = self.selected_creature {
+                    if idx < creatures.len() {
+                        let name = creatures[idx].name.clone();
+                        creatures.remove(idx);
+                        self.selected_creature = None;
+                        self.mode = CreaturesEditorMode::List;
+                        *unsaved_changes = true;
+                        result_message = Some(format!("Deleted creature: {}", name));
                     }
-                    *unsaved_changes = true;
-                    self.mode = CreaturesEditorMode::List;
-                    self.preview_dirty = false;
                 }
             }
-            ItemAction::Cancel => {
-                self.mode = CreaturesEditorMode::List;
-                self.selected_mesh_index = None;
-                self.mesh_edit_buffer = None;
-                self.mesh_transform_buffer = None;
-                self.preview_dirty = false;
+            ItemAction::Duplicate => {
+                if let Some(idx) = self.selected_creature {
+                    if idx < creatures.len() {
+                        let mut new_creature = creatures[idx].clone();
+                        new_creature.id = self.next_available_id(creatures);
+                        new_creature.name = format!("{} (Copy)", new_creature.name);
+                        creatures.push(new_creature.clone());
+                        *unsaved_changes = true;
+                        result_message =
+                            Some(format!("Duplicated creature: {}", new_creature.name));
+                    }
+                }
             }
-            _ => {}
+            ItemAction::Export => {
+                // Export implementation
+            }
+            ItemAction::None => {
+                // No action triggered
+            }
+        }
+
+        // Save/Cancel buttons for edit mode
+        if self.mode == CreaturesEditorMode::Edit || self.mode == CreaturesEditorMode::Add {
+            ui.horizontal(|ui| {
+                if ui.button("✓ Save").clicked() {
+                    // Validate creature
+                    if let Err(e) = self.edit_buffer.validate() {
+                        result_message = Some(format!("Validation error: {}", e));
+                    } else {
+                        match self.mode {
+                            CreaturesEditorMode::Add => {
+                                creatures.push(self.edit_buffer.clone());
+                                *unsaved_changes = true;
+                                result_message =
+                                    Some(format!("Added creature: {}", self.edit_buffer.name));
+                            }
+                            CreaturesEditorMode::Edit => {
+                                if let Some(idx) = self.selected_creature {
+                                    if idx < creatures.len() {
+                                        creatures[idx] = self.edit_buffer.clone();
+                                        *unsaved_changes = true;
+                                        result_message = Some(format!(
+                                            "Updated creature: {}",
+                                            self.edit_buffer.name
+                                        ));
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+
+                        self.mode = CreaturesEditorMode::List;
+                        self.preview_dirty = false;
+                    }
+                }
+
+                if ui.button("✕ Cancel").clicked() {
+                    self.mode = CreaturesEditorMode::List;
+                    self.selected_mesh_index = None;
+                    self.mesh_edit_buffer = None;
+                    self.mesh_transform_buffer = None;
+                    self.preview_dirty = false;
+                }
+            });
         }
 
         ui.separator();
 
         // Two-column layout: properties on left, preview on right
-        TwoColumnLayout::new("creatures_editor_layout")
-            .left_panel(|ui| {
-                self.show_creature_properties(ui);
-            })
-            .right_panel(|ui| {
-                self.show_mesh_list_and_editor(ui);
-            })
-            .show(ui);
+        ui.columns(2, |columns| {
+            self.show_creature_properties(&mut columns[0]);
+            self.show_mesh_list_and_editor(&mut columns[1]);
+        });
 
         result_message
     }
@@ -303,7 +328,7 @@ impl CreaturesEditorState {
                     .add(
                         egui::DragValue::new(&mut self.edit_buffer.scale)
                             .speed(0.01)
-                            .clamp_range(0.01..=100.0),
+                            .range(0.01..=100.0),
                     )
                     .changed()
                 {
@@ -393,7 +418,7 @@ impl CreaturesEditorState {
                             self.selected_mesh_index = Some(idx);
                             self.mesh_edit_buffer = Some(mesh.clone());
                             self.mesh_transform_buffer =
-                                Some(self.edit_buffer.mesh_transforms[idx].clone());
+                                Some(self.edit_buffer.mesh_transforms[idx]);
                         }
                     }
                 }
@@ -418,37 +443,34 @@ impl CreaturesEditorState {
                                     ui.label("X:");
                                     if ui
                                         .add(
-                                            egui::DragValue::new(&mut transform.position[0])
+                                            egui::DragValue::new(&mut transform.translation[2])
                                                 .speed(0.01),
                                         )
                                         .changed()
                                     {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] =
-                                            transform.clone();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         self.preview_dirty = true;
                                     }
                                     ui.label("Y:");
                                     if ui
                                         .add(
-                                            egui::DragValue::new(&mut transform.position[1])
+                                            egui::DragValue::new(&mut transform.translation[1])
                                                 .speed(0.01),
                                         )
                                         .changed()
                                     {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] =
-                                            transform.clone();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         self.preview_dirty = true;
                                     }
                                     ui.label("Z:");
                                     if ui
                                         .add(
-                                            egui::DragValue::new(&mut transform.position[2])
+                                            egui::DragValue::new(&mut transform.translation[2])
                                                 .speed(0.01),
                                         )
                                         .changed()
                                     {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] =
-                                            transform.clone();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         self.preview_dirty = true;
                                     }
                                 });
@@ -459,37 +481,37 @@ impl CreaturesEditorState {
                                     ui.label("X:");
                                     if ui
                                         .add(
-                                            egui::DragValue::new(&mut transform.rotation[0])
-                                                .speed(0.01),
+                                            egui::DragValue::new(&mut transform.scale[0])
+                                                .speed(0.01)
+                                                .range(0.01..=100.0),
                                         )
                                         .changed()
                                     {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] =
-                                            transform.clone();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         self.preview_dirty = true;
                                     }
                                     ui.label("Y:");
                                     if ui
                                         .add(
-                                            egui::DragValue::new(&mut transform.rotation[1])
-                                                .speed(0.01),
+                                            egui::DragValue::new(&mut transform.scale[1])
+                                                .speed(0.01)
+                                                .range(0.01..=100.0),
                                         )
                                         .changed()
                                     {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] =
-                                            transform.clone();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         self.preview_dirty = true;
                                     }
                                     ui.label("Z:");
                                     if ui
                                         .add(
-                                            egui::DragValue::new(&mut transform.rotation[2])
-                                                .speed(0.01),
+                                            egui::DragValue::new(&mut transform.scale[2])
+                                                .speed(0.01)
+                                                .range(0.01..=100.0),
                                         )
                                         .changed()
                                     {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] =
-                                            transform.clone();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         self.preview_dirty = true;
                                     }
                                 });
@@ -502,12 +524,11 @@ impl CreaturesEditorState {
                                         .add(
                                             egui::DragValue::new(&mut transform.scale[0])
                                                 .speed(0.01)
-                                                .clamp_range(0.01..=100.0),
+                                                .range(0.01..=100.0),
                                         )
                                         .changed()
                                     {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] =
-                                            transform.clone();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         self.preview_dirty = true;
                                     }
                                     ui.label("Y:");
@@ -515,12 +536,11 @@ impl CreaturesEditorState {
                                         .add(
                                             egui::DragValue::new(&mut transform.scale[1])
                                                 .speed(0.01)
-                                                .clamp_range(0.01..=100.0),
+                                                .range(0.01..=100.0),
                                         )
                                         .changed()
                                     {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] =
-                                            transform.clone();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         self.preview_dirty = true;
                                     }
                                     ui.label("Z:");
@@ -528,12 +548,11 @@ impl CreaturesEditorState {
                                         .add(
                                             egui::DragValue::new(&mut transform.scale[2])
                                                 .speed(0.01)
-                                                .clamp_range(0.01..=100.0),
+                                                .range(0.01..=100.0),
                                         )
                                         .changed()
                                     {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] =
-                                            transform.clone();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         self.preview_dirty = true;
                                     }
                                 });

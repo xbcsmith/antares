@@ -20,6 +20,10 @@
 //!     normals: None,
 //!     uvs: None,
 //!     color: [1.0, 1.0, 1.0, 1.0],
+//!     lod_levels: None,
+//!     lod_distances: None,
+//!     material: None,
+//!     texture_path: None,
 //! };
 //!
 //! let creature = CreatureDefinition {
@@ -124,6 +128,10 @@ impl CreatureDatabase {
     ///     normals: None,
     ///     uvs: None,
     ///     color: [1.0, 1.0, 1.0, 1.0],
+    ///     lod_levels: None,
+    ///     lod_distances: None,
+    ///     material: None,
+    ///     texture_path: None,
     /// };
     ///
     /// let creature = CreatureDefinition {
@@ -209,6 +217,10 @@ impl CreatureDatabase {
     ///     normals: None,
     ///     uvs: None,
     ///     color: [1.0, 1.0, 1.0, 1.0],
+    ///     lod_levels: None,
+    ///     lod_distances: None,
+    ///     material: None,
+    ///     texture_path: None,
     /// };
     ///
     /// let creature = CreatureDefinition {
@@ -269,19 +281,19 @@ impl CreatureDatabase {
     ///         name: "Test Creature",
     ///         meshes: [
     ///             (
-    ///                 vertices: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+    ///                 vertices: [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.0)],
     ///                 indices: [0, 1, 2],
-    ///                 color: [1.0, 1.0, 1.0, 1.0],
     ///             ),
     ///         ],
     ///         mesh_transforms: [
     ///             (
-    ///                 translation: [0.0, 0.0, 0.0],
-    ///                 rotation: [0.0, 0.0, 0.0],
-    ///                 scale: [1.0, 1.0, 1.0],
+    ///                 translation: (0.0, 0.0, 0.0),
+    ///                 rotation: (0.0, 0.0, 0.0),
+    ///                 scale: (1.0, 1.0, 1.0),
     ///             ),
     ///         ],
     ///         scale: 1.0,
+    ///         color_tint: None,
     ///     ),
     /// ]
     /// "#;

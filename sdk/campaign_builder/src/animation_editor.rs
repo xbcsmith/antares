@@ -141,7 +141,7 @@ impl AnimationEditorState {
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
-        animations: &mut Vec<AnimationDefinition>,
+        animations: &mut [AnimationDefinition],
     ) -> Option<AnimationAction> {
         let mut action = None;
 
@@ -424,7 +424,7 @@ impl AnimationEditorState {
                     ui.add(
                         egui::DragValue::new(&mut self.create_buffer.duration)
                             .speed(0.1)
-                            .clamp_range(0.1..=60.0)
+                            .range(0.1..=60.0)
                             .suffix(" seconds"),
                     );
                 });
@@ -455,6 +455,7 @@ impl AnimationEditorState {
     }
 
     /// Shows the keyframe editor dialog
+    /// Shows the keyframe editor dialog
     fn show_keyframe_editor(&mut self, ctx: &egui::Context) -> Option<KeyframeAction> {
         let mut result = None;
         let mut close_dialog = false;
@@ -479,7 +480,7 @@ impl AnimationEditorState {
                     ui.add(
                         egui::DragValue::new(&mut self.keyframe_buffer.mesh_index)
                             .speed(1)
-                            .clamp_range(0..=100),
+                            .range(0..=100),
                     );
                 });
 
@@ -523,11 +524,6 @@ impl AnimationEditorState {
                     ui.label("Z:");
                     ui.add(
                         egui::DragValue::new(&mut self.keyframe_buffer.transform.rotation[2])
-                            .speed(0.01),
-                    );
-                    ui.label("W:");
-                    ui.add(
-                        egui::DragValue::new(&mut self.keyframe_buffer.transform.rotation[3])
                             .speed(0.01),
                     );
                 });
@@ -643,7 +639,7 @@ impl KeyframeBuffer {
         Self {
             time: keyframe.time,
             mesh_index: keyframe.mesh_index,
-            transform: keyframe.transform.clone(),
+            transform: keyframe.transform,
         }
     }
 
@@ -652,7 +648,7 @@ impl KeyframeBuffer {
         Keyframe {
             time: self.time,
             mesh_index: self.mesh_index,
-            transform: self.transform.clone(),
+            transform: self.transform,
         }
     }
 }

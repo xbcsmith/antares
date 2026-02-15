@@ -20,21 +20,30 @@
 //!
 //! ```
 //! use antares::game::systems::monster_rendering::spawn_monster_with_visual;
-//! use antares::domain::combat::Monster;
-//! use antares::domain::visual::CreatureDatabase;
+//! use antares::domain::combat::{Monster, LootTable};
+//! use antares::domain::character::Stats;
+//! use antares::domain::visual::creature_database::CreatureDatabase;
 //! use bevy::prelude::*;
 //!
 //! fn spawn_example(
 //!     mut commands: Commands,
-//!     monster: &Monster,
-//!     creature_db: &CreatureDatabase,
 //!     mut meshes: ResMut<Assets<Mesh>>,
 //!     mut materials: ResMut<Assets<StandardMaterial>>,
 //! ) {
+//!     let creature_db = CreatureDatabase::new();
+//!     let monster = Monster::new(
+//!         1,
+//!         "Goblin".to_string(),
+//!         Stats::new(8, 6, 6, 8, 10, 8, 5),
+//!         10,
+//!         5,
+//!         vec![],
+//!         LootTable::new(5, 15, 0, 1, 25),
+//!     );
 //!     let entity = spawn_monster_with_visual(
 //!         &mut commands,
-//!         monster,
-//!         creature_db,
+//!         &monster,
+//!         &creature_db,
 //!         &mut meshes,
 //!         &mut materials,
 //!         Vec3::new(5.0, 0.0, 10.0),
@@ -99,8 +108,9 @@ pub struct MonsterMarker {
 ///
 /// ```
 /// use antares::game::systems::monster_rendering::spawn_monster_with_visual;
-/// use antares::domain::combat::Monster;
-/// use antares::domain::visual::CreatureDatabase;
+/// use antares::domain::combat::{Monster, LootTable};
+/// use antares::domain::character::Stats;
+/// use antares::domain::visual::creature_database::CreatureDatabase;
 /// use bevy::prelude::*;
 ///
 /// fn example(
@@ -110,12 +120,13 @@ pub struct MonsterMarker {
 ///     mut materials: ResMut<Assets<StandardMaterial>>,
 /// ) {
 ///     let monster = Monster::new(
-///         "Goblin".to_string(),
 ///         1,
+///         "Goblin".to_string(),
+///         Stats::new(8, 6, 6, 8, 10, 8, 5),
 ///         10,
 ///         5,
-///         5,
-///         5,
+///         vec![],
+///         LootTable::new(5, 15, 0, 1, 25),
 ///     );
 ///
 ///     let visual_entity = spawn_monster_with_visual(

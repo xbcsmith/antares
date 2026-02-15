@@ -26,6 +26,10 @@
 //!     normals: None,
 //!     uvs: None,
 //!     color: [1.0, 1.0, 1.0, 1.0],
+//!     lod_levels: None,
+//!     lod_distances: None,
+//!     material: None,
+//!     texture_path: None,
 //! };
 //!
 //! assert!(mesh_validation::validate_mesh_definition(&valid_mesh).is_ok());
@@ -52,6 +56,10 @@ use super::MeshDefinition;
 ///     normals: None,
 ///     uvs: None,
 ///     color: [1.0, 1.0, 1.0, 1.0],
+///     lod_levels: None,
+///     lod_distances: None,
+///     material: None,
+///     texture_path: None,
 /// };
 ///
 /// assert!(mesh_validation::validate_mesh_definition(&mesh).is_ok());

@@ -384,8 +384,8 @@ pub fn generate_cone(radius: f32, height: f32, segments: u32, color: [f32; 4]) -
     // Side triangle fan
     for i in 0..segments {
         indices.push(apex_idx);
-        indices.push((i + 1) as u32);
-        indices.push((i + 2) as u32);
+        indices.push(i + 1);
+        indices.push(i + 2);
     }
 
     // Base cap
@@ -449,8 +449,8 @@ mod tests {
     #[test]
     fn test_generate_sphere_minimum_subdivisions() {
         let sphere = generate_sphere(1.0, 3, 2, [1.0, 0.0, 0.0, 1.0]);
-        assert!(sphere.vertices.len() > 0);
-        assert!(sphere.indices.len() > 0);
+        assert!(!sphere.vertices.is_empty());
+        assert!(!sphere.indices.is_empty());
         assert!(sphere.normals.is_some());
         assert!(sphere.uvs.is_some());
     }
@@ -460,14 +460,14 @@ mod tests {
         let sphere = generate_sphere(1.0, 16, 16, [0.0, 1.0, 0.0, 1.0]);
         // (rings + 1) * (segments + 1) vertices
         assert_eq!(sphere.vertices.len(), 17 * 17);
-        assert!(sphere.indices.len() > 0);
+        assert!(!sphere.indices.is_empty());
     }
 
     #[test]
     fn test_generate_cylinder_has_caps() {
         let cylinder = generate_cylinder(0.5, 2.0, 8, [0.0, 0.0, 1.0, 1.0]);
-        assert!(cylinder.vertices.len() > 0);
-        assert!(cylinder.indices.len() > 0);
+        assert!(!cylinder.vertices.is_empty());
+        assert!(!cylinder.indices.is_empty());
         assert!(cylinder.normals.is_some());
         assert!(cylinder.uvs.is_some());
     }
@@ -475,8 +475,8 @@ mod tests {
     #[test]
     fn test_generate_cone_has_base() {
         let cone = generate_cone(0.5, 1.5, 8, [1.0, 1.0, 0.0, 1.0]);
-        assert!(cone.vertices.len() > 0);
-        assert!(cone.indices.len() > 0);
+        assert!(!cone.vertices.is_empty());
+        assert!(!cone.indices.is_empty());
         assert!(cone.normals.is_some());
         assert!(cone.uvs.is_some());
     }

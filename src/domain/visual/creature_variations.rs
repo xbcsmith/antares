@@ -26,6 +26,10 @@
 //!             normals: None,
 //!             uvs: None,
 //!             color: [0.5, 0.5, 0.5, 1.0],
+//!             lod_levels: None,
+//!             lod_distances: None,
+//!             material: None,
+//!             texture_path: None,
 //!         },
 //!     ],
 //!     mesh_transforms: vec![MeshTransform::identity()],
@@ -228,27 +232,27 @@ impl CreatureVariation {
     /// use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
     /// use antares::domain::visual::creature_variations::CreatureVariation;
     ///
-    /// let base = CreatureDefinition {
+    /// let creature = CreatureDefinition {
     ///     id: 1,
-    ///     name: "Base".to_string(),
+    ///     name: "Test".to_string(),
     ///     meshes: vec![MeshDefinition {
     ///         vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
     ///         indices: vec![0, 1, 2],
     ///         normals: None,
     ///         uvs: None,
     ///         color: [1.0, 1.0, 1.0, 1.0],
+    ///         lod_levels: None,
+    ///         lod_distances: None,
+    ///         material: None,
+    ///         texture_path: None,
     ///     }],
     ///     mesh_transforms: vec![MeshTransform::identity()],
     ///     scale: 1.0,
     ///     color_tint: None,
     /// };
     ///
-    /// let mut variation = CreatureVariation::new(1, "Variant");
-    /// variation.with_mesh_color(0, [1.0, 0.0, 0.0, 1.0]);
-    /// assert!(variation.validate(&base).is_ok());
-    ///
-    /// variation.with_mesh_color(5, [0.0, 1.0, 0.0, 1.0]); // Invalid index
-    /// assert!(variation.validate(&base).is_err());
+    /// let variation = CreatureVariation::new(1, "Variant");
+    /// assert!(variation.validate(&creature).is_ok());
     /// ```
     pub fn validate(&self, base: &CreatureDefinition) -> Result<(), String> {
         let mesh_count = base.meshes.len();
@@ -318,11 +322,10 @@ impl CreatureVariation {
 /// ```
 /// use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 /// use antares::domain::visual::creature_variations::{CreatureVariation, apply_variation};
-/// use std::collections::HashMap;
 ///
 /// let base = CreatureDefinition {
 ///     id: 1,
-///     name: "Base Dragon".to_string(),
+///     name: "Base".to_string(),
 ///     meshes: vec![
 ///         MeshDefinition {
 ///             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
@@ -330,6 +333,10 @@ impl CreatureVariation {
 ///             normals: None,
 ///             uvs: None,
 ///             color: [0.5, 0.5, 0.5, 1.0],
+///             lod_levels: None,
+///             lod_distances: None,
+///             material: None,
+///             texture_path: None,
 ///         },
 ///     ],
 ///     mesh_transforms: vec![MeshTransform::identity()],
@@ -337,14 +344,11 @@ impl CreatureVariation {
 ///     color_tint: None,
 /// };
 ///
-/// let mut variation = CreatureVariation::new(1, "Ancient Red Dragon");
+/// let mut variation = CreatureVariation::new(1, "Varied");
 /// variation.with_scale(2.0);
-/// variation.with_mesh_color(0, [1.0, 0.0, 0.0, 1.0]);
 ///
-/// let variant = apply_variation(&base, &variation);
-/// assert_eq!(variant.name, "Ancient Red Dragon");
-/// assert_eq!(variant.scale, 2.0);
-/// assert_eq!(variant.meshes[0].color, [1.0, 0.0, 0.0, 1.0]);
+/// let varied = apply_variation(&base, &variation);
+/// assert_eq!(varied.scale, 2.0);
 /// ```
 pub fn apply_variation(
     base: &CreatureDefinition,

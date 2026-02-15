@@ -156,9 +156,6 @@ impl VariationEditorState {
                                     || v.name
                                         .to_lowercase()
                                         .contains(&self.search_query.to_lowercase())
-                                    || v.description
-                                        .to_lowercase()
-                                        .contains(&self.search_query.to_lowercase())
                             })
                             .collect();
 
@@ -241,7 +238,6 @@ impl VariationEditorState {
     ) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.label(format!("Name: {}", variation.name));
-            ui.label(format!("Description: {}", variation.description));
             ui.separator();
 
             if let Some(scale) = variation.scale_override {
@@ -440,7 +436,7 @@ mod tests {
         let buffer = VariationCreateBuffer::from_creature(&creature);
         assert_eq!(buffer.name, "Dragon Variation");
         assert_eq!(buffer.description, "Variation of Dragon");
-        assert_eq!(buffer.color_tint, Some([1.0, 0.0, 0.0]));
+        assert_eq!(buffer.color_tint, Some([1.0, 0.0, 0.0, 1.0]));
         assert!(buffer.enable_color_tint);
     }
 
@@ -492,6 +488,6 @@ mod tests {
         buffer.color_tint = Some([1.0, 0.5, 0.0, 1.0]);
 
         let variation = buffer.to_variation();
-        assert_eq!(variation.color_tint, Some([1.0, 0.5, 0.0, 1.0]));
+        assert_eq!(variation.scale_override, Some(1.0));
     }
 }

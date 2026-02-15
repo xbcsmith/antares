@@ -336,7 +336,8 @@ impl PreviewRenderer {
         self.render_preview(&painter, response.rect);
 
         // Show preview info overlay
-        ui.allocate_ui_at_rect(response.rect, |ui| {
+        let builder = egui::UiBuilder::new().max_rect(response.rect);
+        ui.scope_builder(builder, |ui| {
             ui.with_layout(
                 egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(false),
                 |ui| {
@@ -511,6 +512,7 @@ impl PreviewRenderer {
     }
 
     /// Draw mesh as wireframe (simplified 3D projection)
+    /// Draw mesh as wireframe (simplified 3D projection)
     fn draw_mesh_wireframe(
         &self,
         painter: &egui::Painter,
@@ -526,14 +528,14 @@ impl PreviewRenderer {
         let scale = 50.0 * global_scale;
 
         // Project vertices to 2D screen space
-        let mut projected: Vec<egui::Pos2> = mesh
+        let projected: Vec<egui::Pos2> = mesh
             .vertices
             .iter()
             .map(|v| {
                 // Apply mesh transform (simplified)
-                let x = v[0] * transform.transform[0] + transform.transform[12];
-                let y = v[1] * transform.transform[5] + transform.transform[13];
-                let z = v[2] * transform.transform[10] + transform.transform[14];
+                let x = v[0] * transform.scale[0] + transform.translation[0];
+                let y = v[1] * transform.scale[1] + transform.translation[1];
+                let z = v[2] * transform.scale[2] + transform.translation[2];
 
                 // Simple isometric projection
                 let screen_x = center.x + (x - z * 0.5) * scale;

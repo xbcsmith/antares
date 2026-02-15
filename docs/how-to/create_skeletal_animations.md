@@ -35,7 +35,7 @@ Skeleton(
                 [0.0, 0.0, 0.0, 1.0],
             ],
         ),
-        
+
         // Bone 1: Pelvis
         Bone(
             id: 1,
@@ -53,7 +53,7 @@ Skeleton(
                 [0.0, 0.0, 0.0, 1.0],
             ],
         ),
-        
+
         // Bone 2: Spine
         Bone(
             id: 2,
@@ -71,7 +71,7 @@ Skeleton(
                 [0.0, 0.0, 0.0, 1.0],
             ],
         ),
-        
+
         // Bone 3: Head
         Bone(
             id: 3,
@@ -89,7 +89,7 @@ Skeleton(
                 [0.0, 0.0, 0.0, 1.0],
             ],
         ),
-        
+
         // Bone 4: Left Upper Arm
         Bone(
             id: 4,
@@ -107,7 +107,7 @@ Skeleton(
                 [0.0, 0.0, 0.0, 1.0],
             ],
         ),
-        
+
         // Bone 5: Left Forearm
         Bone(
             id: 5,
