@@ -145,6 +145,6 @@ All 11 tutorial monsters mapped and validated. Ready for Phase 3: NPC Procedural
 
 ---
 
-**Last Verified**: All tests passing  
-**Test Count**: 4/4 passing  
+**Last Verified**: All tests passing
+**Test Count**: 4/4 passing
 **Version**: 1.0
