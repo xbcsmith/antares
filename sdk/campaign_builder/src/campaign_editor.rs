@@ -466,6 +466,7 @@ impl CampaignMetadataEditorState {
     /// This function contains the full UI logic previously hosted in `show()`.
     /// It accepts an `npcs` slice to allow the starting-innkeeper control to
     /// render a filtered ComboBox when NPCs are available.
+    #[allow(clippy::too_many_arguments)]
     fn render_ui(
         &mut self,
         ui: &mut egui::Ui,

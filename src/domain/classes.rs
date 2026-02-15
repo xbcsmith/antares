@@ -486,6 +486,20 @@ impl ClassDatabase {
         self.classes.values()
     }
 
+    /// Returns the number of classes in the database
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::classes::ClassDatabase;
+    ///
+    /// let db = ClassDatabase::new();
+    /// assert_eq!(db.count(), 0);
+    /// ```
+    pub fn count(&self) -> usize {
+        self.classes.len()
+    }
+
     /// Validates the class database
     ///
     /// Checks for:

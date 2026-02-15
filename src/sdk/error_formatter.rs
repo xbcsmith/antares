@@ -324,6 +324,70 @@ impl ErrorFormatter {
                     "Players can recruit them from the inn during gameplay".to_string(),
                 ]
             }
+
+            ValidationError::CreatureEmptyName { creature_id } => {
+                vec![
+                    format!("Creature ID {} has an empty name", creature_id),
+                    "Edit data/creatures.ron and add a name for this creature".to_string(),
+                    "Names should be descriptive (e.g., 'Goblin', 'Dragon')".to_string(),
+                ]
+            }
+
+            ValidationError::CreatureInvalidScale {
+                creature_id,
+                name,
+                scale,
+            } => {
+                vec![
+                    format!(
+                        "Creature '{}' (ID {}) has invalid scale: {}",
+                        name, creature_id, scale
+                    ),
+                    "Scale must be greater than 0.0".to_string(),
+                    "Typical values: 1.0 (normal), 0.5 (half size), 2.0 (double size)".to_string(),
+                    "Edit data/creatures.ron to fix the scale value".to_string(),
+                ]
+            }
+
+            ValidationError::CreatureNoMeshes { creature_id, name } => {
+                vec![
+                    format!("Creature '{}' (ID {}) has no meshes", name, creature_id),
+                    "Every creature must have at least one mesh definition".to_string(),
+                    "Use the Campaign Builder's Creatures tab to add meshes".to_string(),
+                    "Or use primitive generators (cube, sphere, etc.) to create basic shapes"
+                        .to_string(),
+                ]
+            }
+
+            ValidationError::CreatureMeshTopology {
+                creature_id,
+                name,
+                mesh_index,
+                error,
+            } => {
+                vec![
+                    format!(
+                        "Creature '{}' (ID {}) mesh {}: {}",
+                        name, creature_id, mesh_index, error
+                    ),
+                    "Mesh has topology errors that will prevent rendering".to_string(),
+                    "Common issues: degenerate triangles, inconsistent winding, invalid indices"
+                        .to_string(),
+                    "Re-export the mesh or use the primitive generators for valid topology"
+                        .to_string(),
+                ]
+            }
+
+            ValidationError::CreatureDuplicateMeshNames { creature_id, name } => {
+                vec![
+                    format!(
+                        "Creature '{}' (ID {}) has duplicate mesh names",
+                        name, creature_id
+                    ),
+                    "Each mesh in a creature should have a unique name or identifier".to_string(),
+                    "Edit data/creatures.ron to ensure mesh names are unique".to_string(),
+                ]
+            }
         }
     }
 

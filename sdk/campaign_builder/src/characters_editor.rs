@@ -3149,21 +3149,21 @@ mod tests {
         let race_buf = crate::ui_helpers::load_autocomplete_buffer(
             &ctx,
             egui::Id::new("autocomplete:race:race_select"),
-            || String::new(),
+            String::new,
         );
         assert_eq!(race_buf, "Elf");
 
         let class_buf = crate::ui_helpers::load_autocomplete_buffer(
             &ctx,
             egui::Id::new("autocomplete:class:class_select"),
-            || String::new(),
+            String::new,
         );
         assert_eq!(class_buf, "Robber");
 
         let portrait_buf = crate::ui_helpers::load_autocomplete_buffer(
             &ctx,
             egui::Id::new("autocomplete:portrait:character_portrait"),
-            || String::new(),
+            String::new,
         );
         assert_eq!(portrait_buf, "character_055");
     }

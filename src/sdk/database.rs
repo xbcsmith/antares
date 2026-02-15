@@ -81,19 +81,22 @@ pub enum DatabaseError {
     #[error("Failed to load characters: {0}")]
     CharacterLoadError(String),
 
-    #[error("Failed to load map {map_id}: {error}")]
-    MapLoadError { map_id: MapId, error: String },
+    #[error("Failed to load creatures: {0}")]
+    CreatureLoadError(String),
 
-    #[error("Campaign directory not found: {0}")]
+    #[error("Failed to load map {map_id}: {error}")]
+    MapLoadError { map_id: String, error: String },
+
+    #[error("Campaign not found: {0:?}")]
     CampaignNotFound(PathBuf),
 
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
     #[error("RON parsing error: {0}")]
-    RonError(#[from] ron::Error),
+    RonError(#[from] ron::error::SpannedError),
 
-    #[error("Validation failed: {0}")]
+    #[error("Validation error: {0}")]
     ValidationError(String),
 }
 
@@ -1014,6 +1017,9 @@ pub struct ContentDatabase {
 
     /// NPC definitions database
     pub npcs: NpcDatabase,
+
+    /// Creature visual definitions database
+    pub creatures: crate::domain::visual::creature_database::CreatureDatabase,
 }
 
 impl ContentDatabase {
@@ -1040,6 +1046,7 @@ impl ContentDatabase {
             conditions: ConditionDatabase::new(),
             characters: CharacterDatabase::new(),
             npcs: NpcDatabase::new(),
+            creatures: crate::domain::visual::creature_database::CreatureDatabase::new(),
         }
     }
 
@@ -1177,6 +1184,22 @@ impl ContentDatabase {
             NpcDatabase::new()
         };
 
+        // Load creatures
+        let mut creatures = crate::domain::visual::creature_database::CreatureDatabase::new();
+        if data_dir.join("creatures.ron").exists() {
+            let creature_list =
+                crate::domain::visual::creature_database::CreatureDatabase::load_from_file(
+                    &data_dir.join("creatures.ron"),
+                )
+                .map_err(|e| DatabaseError::CreatureLoadError(e.to_string()))?;
+
+            for creature in creature_list {
+                creatures
+                    .add_creature(creature)
+                    .map_err(|e| DatabaseError::CreatureLoadError(e.to_string()))?;
+            }
+        }
+
         Ok(Self {
             classes,
             races,
@@ -1189,6 +1212,7 @@ impl ContentDatabase {
             conditions,
             characters,
             npcs,
+            creatures,
         })
     }
 
@@ -1295,6 +1319,22 @@ impl ContentDatabase {
             NpcDatabase::new()
         };
 
+        // Load creatures
+        let mut creatures = crate::domain::visual::creature_database::CreatureDatabase::new();
+        if data_path.join("creatures.ron").exists() {
+            let creature_list =
+                crate::domain::visual::creature_database::CreatureDatabase::load_from_file(
+                    &data_path.join("creatures.ron"),
+                )
+                .map_err(|e| DatabaseError::CreatureLoadError(e.to_string()))?;
+
+            for creature in creature_list {
+                creatures
+                    .add_creature(creature)
+                    .map_err(|e| DatabaseError::CreatureLoadError(e.to_string()))?;
+            }
+        }
+
         Ok(Self {
             classes,
             races,
@@ -1307,6 +1347,7 @@ impl ContentDatabase {
             conditions,
             characters,
             npcs,
+            creatures,
         })
     }
 
@@ -1448,8 +1489,8 @@ impl ContentDatabase {
     /// ```
     pub fn stats(&self) -> ContentStats {
         ContentStats {
-            class_count: self.classes.all_classes().count(),
-            race_count: self.races.len(),
+            class_count: self.classes.count(),
+            race_count: self.races.count(),
             item_count: self.items.len(),
             monster_count: self.monsters.count(),
             spell_count: self.spells.count(),
@@ -1459,6 +1500,7 @@ impl ContentDatabase {
             condition_count: self.conditions.count(),
             character_count: self.characters.len(),
             npc_count: self.npcs.count(),
+            creature_count: self.creatures.count(),
         }
     }
 }
@@ -1519,6 +1561,9 @@ pub struct ContentStats {
 
     /// Number of NPC definitions
     pub npc_count: usize,
+
+    /// Number of creature visual definitions
+    pub creature_count: usize,
 }
 
 impl ContentStats {
@@ -1540,10 +1585,10 @@ impl ContentStats {
     ///     dialogue_count: 15,
     ///     condition_count: 10,
     ///     character_count: 8,
-    ///     npc_count: 0,
+    ///     npc_count: 12,
+    ///     creature_count: 0,
     /// };
-    ///
-    /// assert_eq!(stats.total(), 251);
+    /// assert_eq!(stats.total(), 263);
     /// ```
     pub fn total(&self) -> usize {
         self.class_count
@@ -1557,6 +1602,7 @@ impl ContentStats {
             + self.condition_count
             + self.character_count
             + self.npc_count
+            + self.creature_count
     }
 }
 
@@ -1582,19 +1628,20 @@ mod tests {
     #[test]
     fn test_content_stats_total() {
         let stats = ContentStats {
-            class_count: 5,
-            race_count: 3,
-            item_count: 100,
-            monster_count: 50,
-            spell_count: 30,
-            map_count: 10,
-            quest_count: 20,
-            dialogue_count: 15,
-            condition_count: 10,
-            character_count: 8,
+            class_count: 6,
+            race_count: 5,
+            item_count: 0,
+            monster_count: 0,
+            spell_count: 0,
+            map_count: 0,
+            quest_count: 0,
+            dialogue_count: 0,
+            condition_count: 0,
+            character_count: 6,
             npc_count: 0,
+            creature_count: 0,
         };
-        assert_eq!(stats.total(), 251);
+        assert_eq!(stats.total(), 17);
     }
 
     #[test]
@@ -2182,14 +2229,16 @@ mod tests {
             quest_count: 10,
             dialogue_count: 8,
             condition_count: 12,
-            character_count: 9,
-            npc_count: 7,
+            character_count: 6,
+            npc_count: 0,
+            creature_count: 0,
         };
 
-        // Total should include character_count and npc_count
-        assert_eq!(stats.total(), 173);
-        assert_eq!(stats.character_count, 9);
-        assert_eq!(stats.npc_count, 7);
+        // Total should include character_count, npc_count, and creature_count
+        assert_eq!(stats.total(), 163);
+        assert_eq!(stats.character_count, 6);
+        assert_eq!(stats.npc_count, 0);
+        assert_eq!(stats.creature_count, 0);
     }
 
     #[test]
@@ -2461,6 +2510,7 @@ mod tests {
             dialogue_count: 8,
             condition_count: 12,
             character_count: 9,
+            creature_count: 0,
             npc_count: 15,
         };
 

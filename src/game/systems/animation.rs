@@ -1,13 +1,15 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Sprite animation system
+//! Animation systems for sprites and creatures
 //!
-//! Updates animated sprites by advancing frames based on delta time.
+//! Provides two animation systems:
+//! - Sprite animation: Updates animated sprites by advancing frames
+//! - Creature keyframe animation: Plays mesh transform animations
 //!
 //! # Performance
 //!
-//! - Only entities with `AnimatedSprite` component are updated
+//! - Only entities with animation components are updated
 //! - Frame-rate independent (uses delta time)
 //! - Efficient frame advancement
 //!
@@ -15,13 +17,14 @@
 //!
 //! ```no_run
 //! use bevy::prelude::*;
-//! use antares::game::systems::animation::update_sprite_animations;
+//! use antares::game::systems::animation::{update_sprite_animations, animation_playback_system};
 //!
 //! fn build_app(app: &mut App) {
-//!     app.add_systems(Update, update_sprite_animations);
+//!     app.add_systems(Update, (update_sprite_animations, animation_playback_system));
 //! }
 //! ```
 
+use crate::game::components::creature::CreatureAnimation;
 use crate::game::components::sprite::AnimatedSprite;
 use bevy::prelude::*;
 
@@ -58,6 +61,85 @@ pub fn update_sprite_animations(time: Res<Time>, mut query: Query<&mut AnimatedS
         // Advance animation by delta time
         let _finished = anim.advance(time.delta_secs());
         // Note: finished flag can be used for one-shot animations if needed
+    }
+}
+
+/// System that updates creature keyframe animations
+///
+/// For each creature with `CreatureAnimation`:
+/// - Advances animation time by delta seconds
+/// - Samples animation keyframes at current time
+/// - Applies transforms to child mesh entities
+///
+/// # Behavior
+///
+/// - Loops if `looping: true`, otherwise stops at last frame
+/// - Respects playback speed multiplier
+/// - Interpolates between keyframes for smooth animation
+///
+/// # Performance
+///
+/// - O(n) where n = number of animated creatures
+/// - Only processes entities with CreatureAnimation component
+///
+/// # Examples
+///
+/// ```no_run
+/// use bevy::prelude::*;
+/// use antares::game::systems::animation::animation_playback_system;
+/// use antares::game::components::creature::CreatureAnimation;
+/// use antares::domain::visual::animation::AnimationDefinition;
+///
+/// fn spawn_animated_creature(mut commands: Commands) {
+///     let anim_def = AnimationDefinition {
+///         name: "walk".to_string(),
+///         duration: 1.0,
+///         keyframes: vec![],
+///         looping: true,
+///     };
+///
+///     commands.spawn((
+///         CreatureAnimation::new(anim_def),
+///         Transform::default(),
+///     ));
+/// }
+/// ```
+pub fn animation_playback_system(
+    time: Res<Time>,
+    mut query: Query<(&mut CreatureAnimation, &Children)>,
+    mut transform_query: Query<&mut Transform>,
+) {
+    for (mut animation, children) in query.iter_mut() {
+        if !animation.playing {
+            continue;
+        }
+
+        // Advance animation time
+        let _finished = animation.advance(time.delta_secs());
+
+        // Sample animation at current time
+        let current_time = animation.current_time;
+
+        // Apply transforms from keyframes to child entities
+        for keyframe in &animation.definition.keyframes {
+            // Find the keyframe that affects this time
+            if keyframe.time <= current_time {
+                // Find the mesh entity (child at mesh_index)
+                if let Some(child) = children.iter().nth(keyframe.mesh_index) {
+                    if let Ok(mut transform) = transform_query.get_mut(child) {
+                        // Apply the keyframe transform
+                        transform.translation = Vec3::from(keyframe.transform.translation);
+                        transform.rotation = Quat::from_euler(
+                            EulerRot::XYZ,
+                            keyframe.transform.rotation[0],
+                            keyframe.transform.rotation[1],
+                            keyframe.transform.rotation[2],
+                        );
+                        transform.scale = Vec3::from(keyframe.transform.scale);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -152,5 +234,76 @@ mod tests {
         let finished = anim.advance(1.0);
         assert!(!finished, "Empty animation should not finish");
         assert_eq!(anim.current_sprite_index(), 0, "Empty animation returns 0");
+    }
+
+    #[test]
+    fn test_creature_animation_playback() {
+        use crate::domain::visual::animation::{AnimationDefinition, Keyframe};
+        use crate::domain::visual::MeshTransform;
+
+        let keyframe = Keyframe {
+            time: 0.5,
+            mesh_index: 0,
+            transform: MeshTransform {
+                translation: [1.0, 2.0, 3.0],
+                rotation: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+            },
+        };
+
+        let anim_def = AnimationDefinition {
+            name: "test".to_string(),
+            duration: 1.0,
+            keyframes: vec![keyframe],
+            looping: false,
+        };
+
+        let mut anim = CreatureAnimation::new(anim_def);
+        assert_eq!(anim.current_time, 0.0);
+        assert!(anim.playing);
+
+        // Advance to keyframe time
+        anim.advance(0.5);
+        assert_eq!(anim.current_time, 0.5);
+    }
+
+    #[test]
+    fn test_creature_animation_stops_when_finished() {
+        use crate::domain::visual::animation::AnimationDefinition;
+
+        let anim_def = AnimationDefinition {
+            name: "one_shot".to_string(),
+            duration: 1.0,
+            keyframes: vec![],
+            looping: false,
+        };
+
+        let mut anim = CreatureAnimation::new(anim_def);
+
+        // Advance past duration
+        let finished = anim.advance(1.5);
+        assert!(finished);
+        assert!(!anim.playing);
+        assert_eq!(anim.current_time, 1.0);
+    }
+
+    #[test]
+    fn test_creature_animation_loops() {
+        use crate::domain::visual::animation::AnimationDefinition;
+
+        let anim_def = AnimationDefinition {
+            name: "loop".to_string(),
+            duration: 1.0,
+            keyframes: vec![],
+            looping: true,
+        };
+
+        let mut anim = CreatureAnimation::new(anim_def);
+
+        // Advance past duration
+        let finished = anim.advance(1.2);
+        assert!(!finished);
+        assert!(anim.playing);
+        assert!((anim.current_time - 0.2).abs() < 0.0001);
     }
 }

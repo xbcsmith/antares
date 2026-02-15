@@ -1,0 +1,11 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+TemplateMetadata(
+    category: Beast,
+    tags: ["predator", "claws", "fangs", "muscular", "feral"],
+    difficulty: Advanced,
+    author: "Antares Team",
+    description: "Muscular quadruped beast template with large jaw, claws, and optional horns. Perfect for creating predatory creatures and feral monsters.",
+    thumbnail_path: None,
+)

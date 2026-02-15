@@ -1,0 +1,11 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+TemplateMetadata(
+    category: Humanoid,
+    tags: ["biped", "basic", "starter"],
+    difficulty: Beginner,
+    author: "Antares Team",
+    description: "Basic humanoid template with torso, head, and arms. Perfect starting point for creating human-like creatures.",
+    thumbnail_path: None,
+)

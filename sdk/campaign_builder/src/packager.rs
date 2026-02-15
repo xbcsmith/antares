@@ -308,6 +308,7 @@ impl CampaignBuilderApp {
         files.push(PathBuf::from(&self.campaign.races_file));
         files.push(PathBuf::from(&self.campaign.quests_file));
         files.push(PathBuf::from(&self.campaign.dialogue_file));
+        files.push(PathBuf::from(&self.campaign.creatures_file));
 
         // Maps directory (all .ron files)
         if let Some(ref campaign_dir) = self.campaign_dir {

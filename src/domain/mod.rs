@@ -14,6 +14,7 @@
 //! - `combat`: Combat system (monsters, attacks, combat state)
 //! - `magic`: Magic system (spells, spell books, effects)
 //! - `items`: Item system (weapons, armor, consumables)
+//! - `visual`: Visual system (creature meshes, procedural geometry)
 
 pub mod character;
 pub mod character_definition;
@@ -30,6 +31,7 @@ pub mod quest;
 pub mod races;
 pub mod resources;
 pub mod types;
+pub mod visual;
 pub mod world;
 
 // Re-export commonly used types from submodules
@@ -39,7 +41,10 @@ pub use character_definition::{
 };
 pub use dialogue::{DialogueId, NodeId};
 pub use quest::QuestId;
-pub use types::{CharacterId, EventId, InnkeeperId, ItemId, MapId, MonsterId, RaceId, SpellId};
+pub use types::{
+    CharacterId, CreatureId, EventId, InnkeeperId, ItemId, MapId, MeshId, MonsterId, RaceId,
+    SpellId,
+};
 pub use types::{DiceRoll, Direction, GameTime, Position};
 
 // Re-export proficiency types
@@ -50,3 +55,7 @@ pub use proficiency::{
 
 // Re-export party management types
 pub use party_manager::{PartyManagementError, PartyManager};
+
+// Re-export visual types
+pub use visual::creature_database::{CreatureDatabase, CreatureDatabaseError};
+pub use visual::{CreatureDefinition, MeshDefinition, MeshTransform};

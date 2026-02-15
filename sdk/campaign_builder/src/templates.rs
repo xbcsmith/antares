@@ -429,6 +429,7 @@ impl TemplateManager {
                 conditions: MonsterCondition::Normal,
                 active_conditions: vec![],
                 has_acted: false,
+                visual_id: None,
             }),
             "skeleton" => Some(MonsterDefinition {
                 id,
@@ -456,6 +457,7 @@ impl TemplateManager {
                 conditions: MonsterCondition::Normal,
                 active_conditions: vec![],
                 has_acted: false,
+                visual_id: None,
             }),
             "orc" => Some(MonsterDefinition {
                 id,
@@ -483,6 +485,7 @@ impl TemplateManager {
                 conditions: MonsterCondition::Normal,
                 active_conditions: vec![],
                 has_acted: false,
+                visual_id: None,
             }),
             "dragon" => Some(MonsterDefinition {
                 id,
@@ -508,11 +511,12 @@ impl TemplateManager {
                 can_regenerate: true,
                 can_advance: true,
                 is_undead: false,
-                magic_resistance: 50,
-                loot: LootTable::new(1000, 5000, 0, 0, 5000),
+                magic_resistance: 20,
+                loot: LootTable::new(100, 300, 10, 2, 200),
                 conditions: MonsterCondition::Normal,
                 active_conditions: vec![],
                 has_acted: false,
+                visual_id: None,
             }),
             _ => None,
         }

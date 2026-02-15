@@ -2717,7 +2717,7 @@ mod tests {
         quests.push(quest);
 
         // Edit the stage
-        assert!(state.edit_stage(&mut quests, 0, 0).is_ok());
+        assert!(state.edit_stage(&quests, 0, 0).is_ok());
         assert_eq!(state.stage_buffer.number, "1");
         assert_eq!(state.stage_buffer.name, "Stage 1");
         assert_eq!(state.stage_buffer.description, "Test stage description");
@@ -2857,7 +2857,7 @@ mod tests {
     fn test_quest_giver_auto_population() {
         let mut editor = QuestEditorState::default();
         let map_id: MapId = 1;
-        let mut maps = vec![Map::new(
+        let mut maps = [Map::new(
             map_id,
             "Test Map".to_string(),
             "Desc".to_string(),

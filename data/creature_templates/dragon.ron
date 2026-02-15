@@ -1,0 +1,299 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+// Dragon creature template
+// Majestic winged dragon with elongated body, neck, wings, and tail
+// Customizable wing size, tail length, and scale colors
+
+CreatureDefinition(
+    id: 1002,
+    name: "Dragon Template",
+    meshes: [
+        // Body (elongated torso)
+        MeshDefinition(
+            vertices: [
+                // Front face
+                [-0.6, 0.0, 0.5], [0.6, 0.0, 0.5], [0.6, 1.2, 0.5], [-0.6, 1.2, 0.5],
+                // Back face
+                [-0.6, 0.0, -0.5], [0.6, 0.0, -0.5], [0.6, 1.2, -0.5], [-0.6, 1.2, -0.5],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0, // Front
+                5, 4, 7, 7, 6, 5, // Back
+                4, 0, 3, 3, 7, 4, // Left
+                1, 5, 6, 6, 2, 1, // Right
+                3, 2, 6, 6, 7, 3, // Top
+                4, 5, 1, 1, 0, 4, // Bottom
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.8, 0.2, 0.2, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Neck
+        MeshDefinition(
+            vertices: [
+                [-0.3, 0.0, 0.3], [0.3, 0.0, 0.3], [0.25, 1.0, 0.25], [-0.25, 1.0, 0.25],
+                [-0.3, 0.0, -0.3], [0.3, 0.0, -0.3], [0.25, 1.0, -0.25], [-0.25, 1.0, -0.25],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.8, 0.2, 0.2, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Head with snout
+        MeshDefinition(
+            vertices: [
+                // Dragon head with elongated snout
+                [-0.4, 0.0, 0.6], [0.4, 0.0, 0.6], [0.3, 0.6, 0.5], [-0.3, 0.6, 0.5],
+                [-0.3, 0.0, -0.3], [0.3, 0.0, -0.3], [0.25, 0.6, -0.25], [-0.25, 0.6, -0.25],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.9, 0.3, 0.3, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Left wing
+        MeshDefinition(
+            vertices: [
+                // Triangular wing shape
+                [0.0, 0.0, 0.0], [0.0, 0.5, 0.2], [-2.0, 0.3, 0.1],
+                [0.0, 0.0, 0.0], [-2.0, 0.3, 0.1], [-1.8, 0.0, -0.1],
+                [0.0, 0.0, 0.0], [-1.8, 0.0, -0.1], [0.0, 0.5, 0.2],
+            ],
+            indices: [
+                0, 1, 2,
+                3, 4, 5,
+                6, 7, 8,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.7, 0.1, 0.1, 0.9],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Right wing
+        MeshDefinition(
+            vertices: [
+                // Triangular wing shape (mirrored)
+                [0.0, 0.0, 0.0], [0.0, 0.5, 0.2], [2.0, 0.3, 0.1],
+                [0.0, 0.0, 0.0], [2.0, 0.3, 0.1], [1.8, 0.0, -0.1],
+                [0.0, 0.0, 0.0], [1.8, 0.0, -0.1], [0.0, 0.5, 0.2],
+            ],
+            indices: [
+                0, 2, 1,
+                3, 5, 4,
+                6, 8, 7,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.7, 0.1, 0.1, 0.9],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Front-left leg
+        MeshDefinition(
+            vertices: [
+                [-0.2, 0.0, 0.2], [-0.1, 0.0, 0.2], [-0.1, 0.8, 0.2], [-0.2, 0.8, 0.2],
+                [-0.2, 0.0, 0.1], [-0.1, 0.0, 0.1], [-0.1, 0.8, 0.1], [-0.2, 0.8, 0.1],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.7, 0.2, 0.2, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Front-right leg
+        MeshDefinition(
+            vertices: [
+                [0.1, 0.0, 0.2], [0.2, 0.0, 0.2], [0.2, 0.8, 0.2], [0.1, 0.8, 0.2],
+                [0.1, 0.0, 0.1], [0.2, 0.0, 0.1], [0.2, 0.8, 0.1], [0.1, 0.8, 0.1],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.7, 0.2, 0.2, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Back-left leg
+        MeshDefinition(
+            vertices: [
+                [-0.2, 0.0, 0.2], [-0.1, 0.0, 0.2], [-0.1, 0.8, 0.2], [-0.2, 0.8, 0.2],
+                [-0.2, 0.0, 0.1], [-0.1, 0.0, 0.1], [-0.1, 0.8, 0.1], [-0.2, 0.8, 0.1],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.7, 0.2, 0.2, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Back-right leg
+        MeshDefinition(
+            vertices: [
+                [0.1, 0.0, 0.2], [0.2, 0.0, 0.2], [0.2, 0.8, 0.2], [0.1, 0.8, 0.2],
+                [0.1, 0.0, 0.1], [0.2, 0.0, 0.1], [0.2, 0.8, 0.1], [0.1, 0.8, 0.1],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.7, 0.2, 0.2, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        // Tail (long, segmented)
+        MeshDefinition(
+            vertices: [
+                // Long tapered tail
+                [-0.15, 0.0, 0.15], [0.15, 0.0, 0.15], [0.1, 2.0, 0.1], [-0.1, 2.0, 0.1],
+                [-0.15, 0.0, -0.15], [0.15, 0.0, -0.15], [0.1, 2.0, -0.1], [-0.1, 2.0, -0.1],
+            ],
+            indices: [
+                0, 1, 2, 2, 3, 0,
+                5, 4, 7, 7, 6, 5,
+                4, 0, 3, 3, 7, 4,
+                1, 5, 6, 6, 2, 1,
+                3, 2, 6, 6, 7, 3,
+                4, 5, 1, 1, 0, 4,
+            ],
+            normals: None,
+            uvs: None,
+            color: [0.7, 0.2, 0.2, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+    ],
+    mesh_transforms: [
+        // Body at origin
+        MeshTransform(
+            translation: [0.0, 1.0, 0.0],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Neck extending upward
+        MeshTransform(
+            translation: [0.0, 2.2, 0.3],
+            rotation: [-0.2, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Head at top of neck
+        MeshTransform(
+            translation: [0.0, 3.0, 0.5],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Left wing at shoulder
+        MeshTransform(
+            translation: [-0.6, 1.8, 0.0],
+            rotation: [0.0, 0.0, 0.3],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Right wing at shoulder
+        MeshTransform(
+            translation: [0.6, 1.8, 0.0],
+            rotation: [0.0, 0.0, -0.3],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Front-left leg
+        MeshTransform(
+            translation: [-0.4, 0.0, 0.3],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Front-right leg
+        MeshTransform(
+            translation: [0.4, 0.0, 0.3],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Back-left leg
+        MeshTransform(
+            translation: [-0.4, 0.0, -0.3],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Back-right leg
+        MeshTransform(
+            translation: [0.4, 0.0, -0.3],
+            rotation: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+        // Tail extending backward
+        MeshTransform(
+            translation: [0.0, 1.0, -0.8],
+            rotation: [0.3, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+        ),
+    ],
+    scale: 1.0,
+    color_tint: None,
+)

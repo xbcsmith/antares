@@ -2213,10 +2213,12 @@ mod tests {
 
     #[test]
     fn test_validate_effect_edit_buffer_attribute_modifier() {
-        let mut buffer = EffectEditBuffer::default();
-        buffer.effect_type = Some("AttributeModifier".to_string());
-        buffer.attribute = "might".to_string();
-        buffer.attribute_value = 5;
+        let buffer = EffectEditBuffer {
+            effect_type: Some("AttributeModifier".to_string()),
+            attribute: "might".to_string(),
+            attribute_value: 5,
+            ..Default::default()
+        };
 
         let result = validate_effect_edit_buffer(&buffer);
         assert!(result.is_ok());
@@ -2224,10 +2226,12 @@ mod tests {
 
     #[test]
     fn test_validate_effect_edit_buffer_empty_attribute() {
-        let mut buffer = EffectEditBuffer::default();
-        buffer.effect_type = Some("AttributeModifier".to_string());
-        buffer.attribute = "".to_string();
-        buffer.attribute_value = 5;
+        let buffer = EffectEditBuffer {
+            effect_type: Some("AttributeModifier".to_string()),
+            attribute: String::new(),
+            attribute_value: 5,
+            ..Default::default()
+        };
 
         let result = validate_effect_edit_buffer(&buffer);
         assert!(result.is_err());
@@ -2235,9 +2239,11 @@ mod tests {
 
     #[test]
     fn test_validate_effect_edit_buffer_status_effect() {
-        let mut buffer = EffectEditBuffer::default();
-        buffer.effect_type = Some("StatusEffect".to_string());
-        buffer.status_tag = "poisoned".to_string();
+        let buffer = EffectEditBuffer {
+            effect_type: Some("StatusEffect".to_string()),
+            status_tag: "poisoned".to_string(),
+            ..Default::default()
+        };
 
         let result = validate_effect_edit_buffer(&buffer);
         assert!(result.is_ok());
@@ -2245,9 +2251,11 @@ mod tests {
 
     #[test]
     fn test_validate_effect_edit_buffer_empty_status() {
-        let mut buffer = EffectEditBuffer::default();
-        buffer.effect_type = Some("StatusEffect".to_string());
-        buffer.status_tag = "".to_string();
+        let buffer = EffectEditBuffer {
+            effect_type: Some("StatusEffect".to_string()),
+            status_tag: String::new(),
+            ..Default::default()
+        };
 
         let result = validate_effect_edit_buffer(&buffer);
         assert!(result.is_err());

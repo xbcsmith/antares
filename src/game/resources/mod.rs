@@ -9,10 +9,12 @@ use crate::application::GameState;
 use bevy::prelude::*;
 
 pub mod grass_quality_settings;
+pub mod performance;
 pub mod sprite_assets;
 
 // Re-export commonly used types
 pub use grass_quality_settings::{GrassPerformanceLevel, GrassQualitySettings};
+pub use performance::{LodAutoTuning, MeshCache, PerformanceMetrics};
 
 /// Global game state resource wrapper
 #[derive(Resource)]

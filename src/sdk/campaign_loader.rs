@@ -255,6 +255,10 @@ pub struct CampaignData {
     /// Characters data file (premade characters and NPC templates)
     #[serde(default = "default_characters_path")]
     pub characters: String,
+
+    /// Creatures data file (visual definitions)
+    #[serde(default = "default_creatures_path")]
+    pub creatures: String,
 }
 
 fn default_items_path() -> String {
@@ -291,6 +295,10 @@ fn default_dialogues_path() -> String {
 
 fn default_characters_path() -> String {
     "data/characters.ron".to_string()
+}
+
+fn default_creatures_path() -> String {
+    "data/creatures.ron".to_string()
 }
 
 /// Asset paths within campaign
@@ -453,6 +461,8 @@ pub struct CampaignMetadata {
     pub dialogue_file: String,
     #[serde(default = "default_characters_path")]
     pub characters_file: String,
+    #[serde(default = "default_creatures_path")]
+    pub creatures_file: String,
 }
 
 impl TryFrom<CampaignMetadata> for Campaign {
@@ -515,6 +525,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 quests: metadata.quests_file,
                 dialogues: metadata.dialogue_file,
                 characters: metadata.characters_file,
+                creatures: metadata.creatures_file,
             },
             assets: CampaignAssets {
                 tilesets: "assets/tilesets".to_string(),
@@ -790,6 +801,7 @@ mod tests {
             quests: default_quests_path(),
             dialogues: default_dialogues_path(),
             characters: default_characters_path(),
+            creatures: default_creatures_path(),
         };
 
         assert_eq!(data.items, "data/items.ron");

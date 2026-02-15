@@ -43,6 +43,12 @@ pub type EventId = u16;
 /// Race identifier (e.g., "human", "elf", "dwarf")
 pub type RaceId = String;
 
+/// Creature identifier (for visual/mesh definitions)
+pub type CreatureId = u32;
+
+/// Mesh identifier (for individual meshes within a creature)
+pub type MeshId = u32;
+
 // ===== Position =====
 
 /// 2D position on a map

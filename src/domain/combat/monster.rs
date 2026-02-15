@@ -1,18 +1,18 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Monster definitions and conditions
+//! Monster types and combat AI
 //!
-//! This module defines monster data structures, resistances, and condition tracking
-//! for combat encounters.
+//! This module defines the Monster struct and related types for combat encounters.
+//! Monsters have stats, attacks, resistances, and AI behaviors.
 //!
 //! # Architecture Reference
 //!
-//! See `docs/reference/architecture.md` Section 4.4 for complete specifications.
+//! See `docs/reference/architecture.md` Section 4.4 for complete monster specifications.
 
 use crate::domain::character::{AttributePair, AttributePair16, Stats};
 use crate::domain::combat::types::Attack;
-use crate::domain::types::MonsterId;
+use crate::domain::types::{CreatureId, MonsterId};
 use serde::{Deserialize, Serialize};
 
 // ===== MonsterResistances =====
@@ -282,6 +282,7 @@ pub enum AiBehavior {
 ///     is_undead: false,
 ///     magic_resistance: 0,
 ///     ai_behavior: AiBehavior::Random,
+///     visual_id: None,
 ///     conditions: MonsterCondition::Normal,
 ///     active_conditions: Vec::new(),
 ///     has_acted: false,
@@ -327,6 +328,9 @@ pub struct Monster {
     /// AI behavior preference for the monster (affects target selection/decision making)
     #[serde(default)]
     pub ai_behavior: AiBehavior,
+    /// Optional visual creature ID for 3D representation
+    #[serde(default)]
+    pub visual_id: Option<CreatureId>,
     /// Current condition (paralyzed, asleep, etc.) - runtime state, defaults to Normal
     #[serde(default)]
     pub conditions: MonsterCondition,
@@ -366,10 +370,37 @@ impl Monster {
             is_undead: false,
             magic_resistance: 0,
             ai_behavior: AiBehavior::default(),
+            visual_id: None,
             conditions: MonsterCondition::Normal,
             active_conditions: Vec::new(),
             has_acted: false,
         }
+    }
+
+    /// Sets the visual creature ID for this monster
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::monster::{Monster, LootTable};
+    /// use antares::domain::character::{Stats, AttributePair, AttributePair16};
+    /// use antares::domain::combat::types::Attack;
+    ///
+    /// let mut monster = Monster::new(
+    ///     1,
+    ///     "Test Monster".to_string(),
+    ///     Stats::new(10, 8, 6, 10, 12, 10, 8),
+    ///     50,
+    ///     10,
+    ///     vec![],
+    ///     LootTable::none(),
+    /// );
+    ///
+    /// monster.set_visual(42);
+    /// assert_eq!(monster.visual_id, Some(42));
+    /// ```
+    pub fn set_visual(&mut self, visual_id: CreatureId) {
+        self.visual_id = Some(visual_id);
     }
 
     /// Returns true if the monster is alive

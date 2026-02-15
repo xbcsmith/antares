@@ -97,9 +97,11 @@ mod furniture_properties_tests {
     /// Test FurnitureFlags can be individually set
     #[test]
     fn test_furniture_flags_individual_settings() {
-        let mut flags = FurnitureFlags::default();
+        let mut flags = FurnitureFlags {
+            lit: true,
+            ..Default::default()
+        };
 
-        flags.lit = true;
         assert!(flags.lit);
         assert!(!flags.locked);
         assert!(!flags.blocking);
@@ -239,8 +241,10 @@ mod furniture_properties_tests {
     /// Test scale range (0.5-2.0)
     #[test]
     fn test_furniture_scale_range() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Furniture;
+        let mut editor = EventEditorState {
+            event_type: EventType::Furniture,
+            ..Default::default()
+        };
 
         // Minimum scale
         editor.furniture_scale = 0.5;
@@ -286,10 +290,12 @@ mod furniture_properties_tests {
     /// Test lit flag for torches
     #[test]
     fn test_torch_lit_flag() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Furniture;
-        editor.furniture_type = FurnitureType::Torch;
-        editor.name = "Test Torch".to_string();
+        let mut editor = EventEditorState {
+            event_type: EventType::Furniture,
+            furniture_type: FurnitureType::Torch,
+            name: "Test Torch".to_string(),
+            ..Default::default()
+        };
 
         // Default: not lit
         assert!(!editor.furniture_lit);
@@ -339,9 +345,11 @@ mod furniture_properties_tests {
     /// Test locked flag for chests
     #[test]
     fn test_chest_locked_flag() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Furniture;
-        editor.furniture_type = FurnitureType::Chest;
+        let mut editor = EventEditorState {
+            event_type: EventType::Furniture,
+            furniture_type: FurnitureType::Chest,
+            ..Default::default()
+        };
 
         // Default: not locked
         assert!(!editor.furniture_locked);
@@ -391,9 +399,11 @@ mod furniture_properties_tests {
     #[test]
     fn test_furniture_blocking_flag() {
         for furniture_type in FurnitureType::all() {
-            let mut editor = EventEditorState::default();
-            editor.event_type = EventType::Furniture;
-            editor.furniture_type = *furniture_type;
+            let mut editor = EventEditorState {
+                event_type: EventType::Furniture,
+                furniture_type: *furniture_type,
+                ..Default::default()
+            };
 
             // Default: not blocking
             assert!(!editor.furniture_blocking);
@@ -506,14 +516,16 @@ mod furniture_properties_tests {
         ];
 
         for (furniture_type, material, scale, lit, locked, blocking) in configurations {
-            let mut editor = EventEditorState::default();
-            editor.event_type = EventType::Furniture;
-            editor.furniture_type = furniture_type;
-            editor.furniture_material = material;
-            editor.furniture_scale = scale;
-            editor.furniture_lit = lit;
-            editor.furniture_locked = locked;
-            editor.furniture_blocking = blocking;
+            let editor = EventEditorState {
+                event_type: EventType::Furniture,
+                furniture_type,
+                furniture_material: material,
+                furniture_scale: scale,
+                furniture_lit: lit,
+                furniture_locked: locked,
+                furniture_blocking: blocking,
+                ..Default::default()
+            };
 
             let event = editor.to_map_event().unwrap();
 

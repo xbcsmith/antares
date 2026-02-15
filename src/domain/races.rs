@@ -599,6 +599,20 @@ impl RaceDatabase {
         self.races.keys().collect()
     }
 
+    /// Returns the number of races in the database
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::races::RaceDatabase;
+    ///
+    /// let db = RaceDatabase::new();
+    /// assert_eq!(db.count(), 0);
+    /// ```
+    pub fn count(&self) -> usize {
+        self.races.len()
+    }
+
     /// Validates the race database
     ///
     /// Checks for:

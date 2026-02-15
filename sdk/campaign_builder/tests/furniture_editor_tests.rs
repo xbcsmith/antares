@@ -84,12 +84,14 @@ mod furniture_editor_tests {
     /// Test furniture event serialization (to_map_event)
     #[test]
     fn test_furniture_event_serialization() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Furniture;
-        editor.name = "Ornate Throne".to_string();
-        editor.description = "A golden throne".to_string();
-        editor.furniture_type = FurnitureType::Throne;
-        editor.furniture_rotation_y = "45".to_string();
+        let editor = EventEditorState {
+            event_type: EventType::Furniture,
+            name: "Ornate Throne".to_string(),
+            description: "A golden throne".to_string(),
+            furniture_type: FurnitureType::Throne,
+            furniture_rotation_y: "45".to_string(),
+            ..Default::default()
+        };
 
         let result = editor.to_map_event();
 
@@ -156,9 +158,11 @@ mod furniture_editor_tests {
     #[test]
     fn test_furniture_rotation_range() {
         // Test minimum rotation (0 degrees)
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Furniture;
-        editor.furniture_rotation_y = "0".to_string();
+        let mut editor = EventEditorState {
+            event_type: EventType::Furniture,
+            furniture_rotation_y: "0".to_string(),
+            ..Default::default()
+        };
 
         let result = editor.to_map_event();
         assert!(result.is_ok());
@@ -177,9 +181,11 @@ mod furniture_editor_tests {
     /// Test invalid rotation handling
     #[test]
     fn test_furniture_invalid_rotation() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Furniture;
-        editor.furniture_rotation_y = "invalid".to_string();
+        let editor = EventEditorState {
+            event_type: EventType::Furniture,
+            furniture_rotation_y: "invalid".to_string(),
+            ..Default::default()
+        };
 
         let result = editor.to_map_event();
 
@@ -211,8 +217,10 @@ mod furniture_editor_tests {
             assert_eq!(furniture_type.name(), expected_name);
 
             // Test roundtrip
-            let mut editor = EventEditorState::default();
-            editor.furniture_type = furniture_type;
+            let editor = EventEditorState {
+                furniture_type,
+                ..Default::default()
+            };
             assert_eq!(editor.furniture_type, furniture_type);
         }
     }
@@ -292,10 +300,12 @@ mod furniture_editor_tests {
     /// Test empty name handling for furniture events
     #[test]
     fn test_furniture_event_empty_name() {
-        let mut editor = EventEditorState::default();
-        editor.event_type = EventType::Furniture;
-        editor.name = "".to_string();
-        editor.furniture_type = FurnitureType::Torch;
+        let editor = EventEditorState {
+            event_type: EventType::Furniture,
+            name: String::new(),
+            furniture_type: FurnitureType::Torch,
+            ..Default::default()
+        };
 
         // Empty name should still be allowed (defaults behavior)
         let result = editor.to_map_event();
@@ -333,11 +343,13 @@ mod furniture_editor_tests {
         ];
 
         for (ftype, rotation) in configs {
-            let mut editor = EventEditorState::default();
-            editor.event_type = EventType::Furniture;
-            editor.furniture_type = ftype;
-            editor.furniture_rotation_y = rotation.to_string();
-            editor.name = format!("Test {}", ftype.name());
+            let editor = EventEditorState {
+                event_type: EventType::Furniture,
+                furniture_type: ftype,
+                furniture_rotation_y: rotation.to_string(),
+                name: format!("Test {}", ftype.name()),
+                ..Default::default()
+            };
 
             let event = editor.to_map_event().unwrap();
 

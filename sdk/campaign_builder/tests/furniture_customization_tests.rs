@@ -23,28 +23,28 @@ fn test_material_base_color_wood() {
     let color = FurnitureMaterial::Wood.base_color();
     assert_eq!(color, [0.6, 0.4, 0.2]); // Brown
                                         // Verify values are in valid range
-    assert!(color.iter().all(|&c| c >= 0.0 && c <= 1.0));
+    assert!(color.iter().all(|&c| (0.0..=1.0).contains(&c)));
 }
 
 #[test]
 fn test_material_base_color_stone() {
     let color = FurnitureMaterial::Stone.base_color();
     assert_eq!(color, [0.5, 0.5, 0.5]); // Gray
-    assert!(color.iter().all(|&c| c >= 0.0 && c <= 1.0));
+    assert!(color.iter().all(|&c| (0.0..=1.0).contains(&c)));
 }
 
 #[test]
 fn test_material_base_color_metal() {
     let color = FurnitureMaterial::Metal.base_color();
     assert_eq!(color, [0.7, 0.7, 0.8]); // Silver
-    assert!(color.iter().all(|&c| c >= 0.0 && c <= 1.0));
+    assert!(color.iter().all(|&c| (0.0..=1.0).contains(&c)));
 }
 
 #[test]
 fn test_material_base_color_gold() {
     let color = FurnitureMaterial::Gold.base_color();
     assert_eq!(color, [1.0, 0.84, 0.0]); // Gold
-    assert!(color.iter().all(|&c| c >= 0.0 && c <= 1.0));
+    assert!(color.iter().all(|&c| (0.0..=1.0).contains(&c)));
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn test_material_base_color_all_variants() {
         let color = material.base_color();
         // All colors should be in valid RGB range
         assert!(
-            color.iter().all(|&c| c >= 0.0 && c <= 1.0),
+            color.iter().all(|&c| (0.0..=1.0).contains(&c)),
             "Material {:?} has out-of-range color values",
             material
         );
@@ -79,7 +79,7 @@ fn test_material_metallic_range_validity() {
     for material in FurnitureMaterial::all() {
         let metallic = material.metallic();
         assert!(
-            metallic >= 0.0 && metallic <= 1.0,
+            (0.0..=1.0).contains(&metallic),
             "Material {:?} has metallic value outside 0.0-1.0 range",
             material
         );
@@ -103,7 +103,7 @@ fn test_material_roughness_range_validity() {
     for material in FurnitureMaterial::all() {
         let roughness = material.roughness();
         assert!(
-            roughness >= 0.0 && roughness <= 1.0,
+            (0.0..=1.0).contains(&roughness),
             "Material {:?} has roughness value outside 0.0-1.0 range",
             material
         );
@@ -239,7 +239,7 @@ fn test_color_tint_range_validation() {
                 assert_eq!(color_tint, Some(tint));
                 // Verify each component is in valid range
                 for &component in &tint {
-                    assert!(component >= 0.0 && component <= 1.0);
+                    assert!((0.0..=1.0).contains(&component));
                 }
             }
             _ => panic!("Expected Furniture event"),
@@ -355,7 +355,7 @@ fn test_appearance_presets_other_types_default() {
     for furniture_type in other_types {
         let presets = furniture_type.default_presets();
         assert!(
-            presets.len() >= 1,
+            !presets.is_empty(),
             "{:?} should have at least 1 preset",
             furniture_type
         );
@@ -452,9 +452,9 @@ fn test_furniture_properties_roundtrip_basic() {
             assert_eq!(rotation_y, Some(45.0));
             assert_eq!(scale, 1.2);
             assert_eq!(material, FurnitureMaterial::Gold);
-            assert_eq!(flags.lit, false);
-            assert_eq!(flags.locked, false);
-            assert_eq!(flags.blocking, true);
+            assert!(!flags.lit);
+            assert!(!flags.locked);
+            assert!(flags.blocking);
             assert_eq!(color_tint, None);
         }
         _ => panic!("Expected Furniture event"),
@@ -495,9 +495,9 @@ fn test_furniture_properties_roundtrip_with_color_tint() {
             assert_eq!(rotation_y, Some(90.0));
             assert_eq!(scale, 0.9);
             assert_eq!(material, FurnitureMaterial::Metal);
-            assert_eq!(flags.lit, true);
-            assert_eq!(flags.locked, false);
-            assert_eq!(flags.blocking, false);
+            assert!(flags.lit);
+            assert!(!flags.locked);
+            assert!(!flags.blocking);
             assert_eq!(color_tint, Some([0.8, 0.4, 0.1]));
         }
         _ => panic!("Expected Furniture event"),
@@ -527,9 +527,9 @@ fn test_furniture_properties_roundtrip_all_flags() {
         MapEvent::Furniture {
             flags, color_tint, ..
         } => {
-            assert_eq!(flags.lit, true);
-            assert_eq!(flags.locked, true);
-            assert_eq!(flags.blocking, true);
+            assert!(flags.lit);
+            assert!(flags.locked);
+            assert!(flags.blocking);
             assert_eq!(color_tint, Some([0.5, 0.5, 0.5]));
         }
         _ => panic!("Expected Furniture event"),
@@ -660,7 +660,7 @@ fn test_furniture_event_with_all_phase9_features() {
             assert_eq!(rotation_y, Some(45.0));
             assert_eq!(scale, 1.5);
             assert_eq!(material, FurnitureMaterial::Gold);
-            assert_eq!(flags.blocking, true);
+            assert!(flags.blocking);
             assert_eq!(color_tint, Some([1.0, 0.9, 0.5]));
 
             // Verify material properties are accessible

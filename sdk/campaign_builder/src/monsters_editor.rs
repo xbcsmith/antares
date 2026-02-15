@@ -86,6 +86,7 @@ impl MonstersEditorState {
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
+            visual_id: None,
         }
     }
 

@@ -16,7 +16,7 @@ use campaign_builder::map_editor::{MapEditorState, VisualPreset};
 fn test_all_presets_defined() {
     // Verify all presets are accessible
     let presets = VisualPreset::all();
-    assert_eq!(presets.len(), 13, "Expected 13 presets");
+    assert_eq!(presets.len(), 32, "Expected 32 presets");
 
     // Verify each has a name
     for preset in presets {
@@ -498,9 +498,9 @@ fn test_all_presets_produce_valid_metadata() {
             assert!(scale > 0.0, "Scale must be positive");
         }
         if let Some((r, g, b)) = metadata.color_tint {
-            assert!(r >= 0.0 && r <= 1.0, "R must be in 0.0-1.0 range");
-            assert!(g >= 0.0 && g <= 1.0, "G must be in 0.0-1.0 range");
-            assert!(b >= 0.0 && b <= 1.0, "B must be in 0.0-1.0 range");
+            assert!((0.0..=1.0).contains(&r), "R must be in 0.0-1.0 range");
+            assert!((0.0..=1.0).contains(&g), "G must be in 0.0-1.0 range");
+            assert!((0.0..=1.0).contains(&b), "B must be in 0.0-1.0 range");
         }
     }
 }
