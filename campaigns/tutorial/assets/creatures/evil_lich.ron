@@ -3,7 +3,7 @@
 
 // Evil Lich - Powerful undead sorcerer boss
 CreatureDefinition(
-    id: 13,
+    id: 153,
     name: "EvilLich",
     scale: 1.2,    meshes: [
         // Floating robes (wider base)

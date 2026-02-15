@@ -3,7 +3,7 @@
 
 // Example creature: A dragon-like creature made of pyramids
 CreatureDefinition(
-    id: 32,
+    id: 33,
     name: "PyramidDragon",
     scale: 1.5,    meshes: [
         // Body pyramid

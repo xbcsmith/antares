@@ -3,7 +3,7 @@
 
 // Red Dragon - Fearsome flying boss creature
 CreatureDefinition(
-    id: 31,
+    id: 32,
     name: "RedDragon",
     scale: 2.5,    meshes: [
         // Body - main torso

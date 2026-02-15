@@ -4,7 +4,7 @@
 // Kobold
 // id:2 | Speed 10, HP 5 | Reptilian, scaly, tail, orange eyes
 CreatureDefinition(
-    id: 3,
+    id: 2,
     name: "Kobold",
     scale: 0.70,    meshes: [
         MeshDefinition(

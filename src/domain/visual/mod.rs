@@ -469,6 +469,40 @@ impl CreatureDefinition {
     }
 }
 
+/// Lightweight creature registry entry
+///
+/// Used in campaign creature registries to reference external creature mesh files
+/// instead of embedding full MeshDefinition data inline.
+///
+/// This struct is designed for registry files (e.g., `creatures.ron`) that map
+/// creature IDs to their corresponding definition files. The actual creature
+/// definitions are loaded from individual files at campaign startup.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::visual::CreatureReference;
+///
+/// let reference = CreatureReference {
+///     id: 1,
+///     name: "Goblin".to_string(),
+///     filepath: "assets/creatures/goblin.ron".to_string(),
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatureReference {
+    /// Unique creature identifier matching the referenced creature file
+    pub id: CreatureId,
+
+    /// Display name for editor/debugging
+    pub name: String,
+
+    /// Relative path to creature definition file from campaign root
+    ///
+    /// Example: "assets/creatures/goblin.ron"
+    pub filepath: String,
+}
+
 // ===== Default value functions for serde =====
 
 fn default_color() -> [f32; 4] {

@@ -4,7 +4,7 @@
 // Orc
 // id:10 | Might 12, HP 25 | Tusked warrior, warpaint, crude club
 CreatureDefinition(
-    id: 7,
+    id: 10,
     name: "Orc",
     scale: 1.10,    meshes: [
         MeshDefinition(

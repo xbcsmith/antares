@@ -4,7 +4,7 @@
 // Wolf
 // id:12 | Speed 14, HP 18 | Fast quadruped, grey fur, amber eyes, pack hunter
 CreatureDefinition(
-    id: 2,
+    id: 12,
     name: "Wolf",
     scale: 0.90,    meshes: [
         MeshDefinition(

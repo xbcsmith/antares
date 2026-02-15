@@ -4,7 +4,7 @@
 // OldGareth
 // Male Dwarf Knight | Endurance 16 Speed 8 | grizzled veteran, salt-pepper beard, warhammer
 CreatureDefinition(
-    id: 64,
+    id: 58,
     name: "OldGareth",
     scale: 0.87,    meshes: [
         MeshDefinition(

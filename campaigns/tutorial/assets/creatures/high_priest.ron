@@ -3,7 +3,7 @@
 
 // High Priest - Male spiritual leader of the temple
 CreatureDefinition(
-    id: 55,
+    id: 54,
     name: "HighPriest",
     scale: 1.0,    meshes: [
         // Robe base

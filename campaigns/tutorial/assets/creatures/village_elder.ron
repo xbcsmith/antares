@@ -3,7 +3,7 @@
 
 // Village Elder - Wise old leader of the village
 CreatureDefinition(
-    id: 54,
+    id: 51,
     name: "VillageElder",
     scale: 0.95,    meshes: [
         // Legs with robes

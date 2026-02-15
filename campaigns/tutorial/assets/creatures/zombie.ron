@@ -4,7 +4,7 @@
 // Zombie
 // id:21 | Undead, HP 35, Disease, Speed 4 | Shambling, rot spots, disease aura
 CreatureDefinition(
-    id: 6,
+    id: 21,
     name: "Zombie",
     scale: 1.00,    meshes: [
         MeshDefinition(

@@ -24,18 +24,18 @@ fn test_tutorial_npc_creature_mapping_complete() {
 
     // Expected NPC-to-Creature mappings based on Phase 3 implementation
     let expected_mappings: Vec<(&str, CreatureId)> = vec![
-        ("tutorial_elder_village", 54),           // VillageElder
+        ("tutorial_elder_village", 51),           // VillageElder
         ("tutorial_innkeeper_town", 52),          // Innkeeper
         ("tutorial_merchant_town", 53),           // Merchant
-        ("tutorial_priestess_town", 56),          // HighPriestess
-        ("tutorial_wizard_arcturus", 58),         // WizardArcturus
-        ("tutorial_wizard_arcturus_brother", 64), // OldGareth
+        ("tutorial_priestess_town", 55),          // HighPriestess
+        ("tutorial_wizard_arcturus", 56),         // WizardArcturus
+        ("tutorial_wizard_arcturus_brother", 58), // OldGareth
         ("tutorial_ranger_lost", 57),             // Ranger
-        ("tutorial_elder_village2", 54),          // VillageElder (reused)
+        ("tutorial_elder_village2", 51),          // VillageElder (reused)
         ("tutorial_innkeeper_town2", 52),         // Innkeeper (reused)
         ("tutorial_merchant_town2", 53),          // Merchant (reused)
-        ("tutorial_priest_town2", 55),            // HighPriest
-        ("tutorial_goblin_dying", 12),            // DyingGoblin
+        ("tutorial_priest_town2", 54),            // HighPriest
+        ("tutorial_goblin_dying", 151),           // DyingGoblin
     ];
 
     // Verify each NPC has the correct creature_id
@@ -148,15 +148,15 @@ fn test_creature_database_has_expected_npc_creatures() {
 
     // NPC-specific creatures that should exist
     let expected_npc_creatures: Vec<(CreatureId, &str)> = vec![
+        (51, "VillageElder"),
         (52, "Innkeeper"),
         (53, "Merchant"),
-        (54, "VillageElder"),
-        (55, "HighPriest"),
-        (56, "HighPriestess"),
+        (54, "HighPriest"),
+        (55, "HighPriestess"),
+        (56, "WizardArcturus"),
         (57, "Ranger"),
-        (58, "WizardArcturus"),
-        (64, "OldGareth"),
-        (12, "DyingGoblin"), // Special NPC (goblin)
+        (58, "OldGareth"),
+        (151, "DyingGoblin"), // Special NPC (goblin variant)
     ];
 
     for (creature_id, expected_name) in expected_npc_creatures {
@@ -190,7 +190,7 @@ fn test_npc_definition_parses_with_creature_id() {
     description: "Wise elder",
     portrait_id: "elder.png",
     dialogue_id: Some(1),
-    creature_id: Some(54),
+    creature_id: Some(51),
     sprite: None,
     quest_ids: [1, 2],
     faction: Some("Village"),
@@ -202,7 +202,7 @@ fn test_npc_definition_parses_with_creature_id() {
     let npc: NpcDefinition = ron::from_str(ron_str).expect("Failed to parse NPC with creature_id");
 
     assert_eq!(npc.id, "test_elder");
-    assert_eq!(npc.creature_id, Some(54));
+    assert_eq!(npc.creature_id, Some(51));
     assert_eq!(npc.name, "Village Elder");
 
     println!("✓ NPC definition parses correctly with creature_id");
@@ -324,7 +324,7 @@ fn test_npc_hybrid_sprite_and_creature_support() {
     description: "Has both sprite and creature",
     portrait_id: "hybrid.png",
     dialogue_id: None,
-    creature_id: Some(54),
+    creature_id: Some(51),
     sprite: Some((
         sheet_path: "npcs.png",
         sprite_index: 5,
@@ -340,7 +340,7 @@ fn test_npc_hybrid_sprite_and_creature_support() {
 
     let npc: NpcDefinition = ron::from_str(ron_str).expect("Failed to parse hybrid NPC");
 
-    assert_eq!(npc.creature_id, Some(54));
+    assert_eq!(npc.creature_id, Some(51));
     assert!(npc.sprite.is_some());
     assert_eq!(npc.sprite.as_ref().unwrap().sprite_index, 5);
 

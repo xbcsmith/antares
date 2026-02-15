@@ -4,7 +4,7 @@
 // FireElemental
 // id:22 | Fire+Physical immune, HP 70, magic_res 50 | Pure flame creature
 CreatureDefinition(
-    id: 9,
+    id: 22,
     name: "FireElemental",
     scale: 1.10,    meshes: [
         MeshDefinition(

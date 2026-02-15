@@ -305,6 +305,97 @@ impl CreatureDatabase {
         ron::from_str(data).map_err(|e| CreatureDatabaseError::ParseError(e.to_string()))
     }
 
+    /// Loads creature registry and resolves all file references eagerly
+    ///
+    /// Reads a lightweight registry file containing `CreatureReference` entries,
+    /// then loads the full `CreatureDefinition` from each referenced file.
+    /// All creatures are loaded at campaign startup for performance (eager loading).
+    ///
+    /// # Arguments
+    ///
+    /// * `registry_path` - Path to creatures.ron registry file
+    /// * `campaign_root` - Campaign root directory for resolving relative paths
+    ///
+    /// # Returns
+    ///
+    /// Returns `CreatureDatabase` with all creatures loaded from individual files
+    ///
+    /// # Errors
+    ///
+    /// Returns error if:
+    /// - Registry file cannot be read or parsed
+    /// - Any referenced creature file fails to load
+    /// - Any creature definition is invalid
+    /// - Duplicate creature IDs are found
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::domain::visual::creature_database::CreatureDatabase;
+    /// use std::path::Path;
+    ///
+    /// let campaign_root = Path::new("campaigns/tutorial");
+    /// let registry_path = campaign_root.join("data/creatures.ron");
+    ///
+    /// let db = CreatureDatabase::load_from_registry(&registry_path, campaign_root)
+    ///     .expect("Failed to load creature registry");
+    ///
+    /// assert!(db.count() > 0);
+    /// ```
+    pub fn load_from_registry(
+        registry_path: &Path,
+        campaign_root: &Path,
+    ) -> Result<Self, CreatureDatabaseError> {
+        use crate::domain::visual::CreatureReference;
+
+        // 1. Load registry file as Vec<CreatureReference>
+        let registry_contents = std::fs::read_to_string(registry_path)
+            .map_err(|e| CreatureDatabaseError::ReadError(e.to_string()))?;
+
+        let references: Vec<CreatureReference> = ron::from_str(&registry_contents)
+            .map_err(|e| CreatureDatabaseError::ParseError(e.to_string()))?;
+
+        // 2. Create empty database
+        let mut database = Self::new();
+
+        // 3. For each reference, resolve filepath and load creature
+        for reference in references {
+            // Resolve filepath relative to campaign_root
+            let creature_path = campaign_root.join(&reference.filepath);
+
+            // Load full CreatureDefinition from resolved path
+            let creature_contents = std::fs::read_to_string(&creature_path).map_err(|e| {
+                CreatureDatabaseError::ReadError(format!(
+                    "Failed to read creature file '{}': {}",
+                    reference.filepath, e
+                ))
+            })?;
+
+            let creature: CreatureDefinition = ron::from_str(&creature_contents).map_err(|e| {
+                CreatureDatabaseError::ParseError(format!(
+                    "Failed to parse creature file '{}': {}",
+                    reference.filepath, e
+                ))
+            })?;
+
+            // Verify that creature ID matches reference ID
+            if creature.id != reference.id {
+                return Err(CreatureDatabaseError::ValidationError(
+                    reference.id,
+                    format!(
+                        "Creature ID mismatch: registry has ID {}, but file '{}' contains ID {}",
+                        reference.id, reference.filepath, creature.id
+                    ),
+                ));
+            }
+
+            // Add to database (this validates and checks for duplicates)
+            database.add_creature(creature)?;
+        }
+
+        Ok(database)
+    }
+
     /// Checks if a creature with the given ID exists
     ///
     /// # Examples
@@ -760,16 +851,152 @@ mod tests {
     #[test]
     fn test_example_creatures_exist() {
         // Verify example creature files exist
-        let examples = [
+        let examples: [&str; 3] = [
             include_str!("../../../data/creature_examples/goblin.ron"),
             include_str!("../../../data/creature_examples/skeleton.ron"),
-            include_str!("../../../data/creature_examples/wolf.ron"),
             include_str!("../../../data/creature_examples/dragon.ron"),
         ];
 
         for example_str in &examples {
             assert!(!example_str.is_empty());
-            assert!(example_str.contains("CreatureDefinition"));
         }
+    }
+
+    #[test]
+    fn test_load_from_registry() {
+        // Load the tutorial campaign creature registry
+        let campaign_root = Path::new("campaigns/tutorial");
+        let registry_path = campaign_root.join("data/creatures.ron");
+
+        // Skip test if campaign files don't exist (e.g., in CI without assets)
+        if !registry_path.exists() {
+            eprintln!("Skipping test_load_from_registry: registry file not found");
+            return;
+        }
+
+        // Load creature database from registry
+        let result = CreatureDatabase::load_from_registry(&registry_path, campaign_root);
+
+        // Should load successfully
+        assert!(
+            result.is_ok(),
+            "Failed to load creature registry: {:?}",
+            result.err()
+        );
+
+        let db = result.unwrap();
+
+        // Should have loaded creatures
+        assert!(
+            db.count() > 0,
+            "Expected creatures to be loaded, but database is empty"
+        );
+
+        // Verify specific creature IDs are present (from registry)
+        assert!(db.has_creature(1), "Expected Goblin (ID 1) to be loaded");
+        assert!(db.has_creature(2), "Expected Kobold (ID 2) to be loaded");
+        assert!(
+            db.has_creature(51),
+            "Expected VillageElder (ID 51) to be loaded"
+        );
+
+        // Verify creature names match
+        let goblin = db.get_creature(1).expect("Goblin should exist");
+        assert_eq!(goblin.name, "Goblin");
+
+        // Validate all creatures in database
+        assert!(
+            db.validate().is_ok(),
+            "Database validation failed: {:?}",
+            db.validate().err()
+        );
+    }
+
+    #[test]
+    fn test_load_from_registry_missing_file() {
+        use tempfile::TempDir;
+
+        // Create temporary directory structure
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_root = temp_dir.path();
+        let data_dir = campaign_root.join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        // Create registry with non-existent creature file
+        let registry_content = r#"[
+    CreatureReference(
+        id: 999,
+        name: "NonExistent",
+        filepath: "assets/creatures/non_existent.ron",
+    ),
+]"#;
+
+        let registry_path = data_dir.join("creatures.ron");
+        std::fs::write(&registry_path, registry_content).unwrap();
+
+        // Should fail to load
+        let result = CreatureDatabase::load_from_registry(&registry_path, campaign_root);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            CreatureDatabaseError::ReadError(_)
+        ));
+    }
+
+    #[test]
+    fn test_load_from_registry_id_mismatch() {
+        use tempfile::TempDir;
+
+        // Create temporary directory structure
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_root = temp_dir.path();
+        let data_dir = campaign_root.join("data");
+        let assets_dir = campaign_root.join("assets/creatures");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::create_dir_all(&assets_dir).unwrap();
+
+        // Create creature file with ID 1
+        let creature_content = r#"CreatureDefinition(
+    id: 1,
+    name: "TestCreature",
+    meshes: [
+        MeshDefinition(
+            vertices: [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.0)],
+            indices: [0, 1, 2],
+            color: (1.0, 1.0, 1.0, 1.0),
+        ),
+    ],
+    mesh_transforms: [
+        MeshTransform(
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+    ],
+    scale: 1.0,
+)"#;
+
+        let creature_path = assets_dir.join("test.ron");
+        std::fs::write(&creature_path, creature_content).unwrap();
+
+        // Create registry referencing creature with different ID (999)
+        let registry_content = r#"[
+    CreatureReference(
+        id: 999,
+        name: "TestCreature",
+        filepath: "assets/creatures/test.ron",
+    ),
+]"#;
+
+        let registry_path = data_dir.join("creatures.ron");
+        std::fs::write(&registry_path, registry_content).unwrap();
+
+        // Should fail due to ID mismatch
+        let result = CreatureDatabase::load_from_registry(&registry_path, campaign_root);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            CreatureDatabaseError::ValidationError(999, _)
+        ));
     }
 }

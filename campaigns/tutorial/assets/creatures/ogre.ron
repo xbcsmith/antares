@@ -4,7 +4,7 @@
 // Ogre
 // id:20 | Might 18, HP 60, regenerates | Massive brute, pot belly, tusks, huge club
 CreatureDefinition(
-    id: 8,
+    id: 20,
     name: "Ogre",
     scale: 1.36,    meshes: [
         MeshDefinition(

@@ -4,7 +4,7 @@
 // Lich
 // id:31 | Intellect 22, HP 150, undead, fire/cold/elec immune, Drain | Necromancer lich
 CreatureDefinition(
-    id: 10,
+    id: 31,
     name: "Lich",
     scale: 1.05,    meshes: [
         MeshDefinition(

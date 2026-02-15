@@ -4,7 +4,7 @@
 // Skeleton
 // id:11 | Undead, HP 20, cold/fear immune | Bone body, glowing eyes, rusty sword
 CreatureDefinition(
-    id: 5,
+    id: 11,
     name: "Skeleton",
     scale: 1.00,    meshes: [
         MeshDefinition(

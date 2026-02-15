@@ -3,7 +3,7 @@
 
 // Wizard Arcturus - Old powerful wizard
 CreatureDefinition(
-    id: 58,
+    id: 56,
     name: "WizardArcturus",
     scale: 1.0,    meshes: [
         // Long wizard robes

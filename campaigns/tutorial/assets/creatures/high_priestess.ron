@@ -3,7 +3,7 @@
 
 // High Priestess - Spiritual leader of the temple
 CreatureDefinition(
-    id: 56,
+    id: 55,
     name: "HighPriestess",
     scale: 0.98,    meshes: [
         // Long flowing robe base

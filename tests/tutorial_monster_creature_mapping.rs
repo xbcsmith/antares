@@ -16,6 +16,7 @@ use std::path::Path;
 fn test_tutorial_monster_creature_mapping_complete() {
     let monsters_path = "campaigns/tutorial/data/monsters.ron";
     let creatures_path = "campaigns/tutorial/data/creatures.ron";
+    let campaign_root = Path::new("campaigns/tutorial");
 
     // Skip if files don't exist (running tests outside project root)
     if !std::path::Path::new(monsters_path).exists()
@@ -29,29 +30,24 @@ fn test_tutorial_monster_creature_mapping_complete() {
     let monster_db =
         MonsterDatabase::load_from_file(monsters_path).expect("Failed to load monsters");
 
-    // Load creatures and build database
-    let creatures = CreatureDatabase::load_from_file(Path::new(creatures_path))
-        .expect("Failed to load creatures");
-    let mut creature_db = CreatureDatabase::new();
-    for creature in creatures {
-        creature_db
-            .add_creature(creature)
-            .expect("Failed to add creature");
-    }
+    // Load creatures from registry
+    let creature_db =
+        CreatureDatabase::load_from_registry(Path::new(creatures_path), campaign_root)
+            .expect("Failed to load creatures");
 
     // Expected monster-to-creature mappings from Phase 2
     let expected_mappings = [
         (1, 1, "Goblin", "Goblin"),
-        (2, 3, "Kobold", "Kobold"),
-        (3, 4, "Giant Rat", "GiantRat"),
-        (10, 7, "Orc", "Orc"),
-        (11, 5, "Skeleton", "Skeleton"),
-        (12, 2, "Wolf", "Wolf"),
-        (20, 8, "Ogre", "Ogre"),
-        (21, 6, "Zombie", "Zombie"),
-        (22, 9, "Fire Elemental", "FireElemental"),
+        (2, 2, "Kobold", "Kobold"),
+        (3, 3, "Giant Rat", "GiantRat"),
+        (10, 10, "Orc", "Orc"),
+        (11, 11, "Skeleton", "Skeleton"),
+        (12, 12, "Wolf", "Wolf"),
+        (20, 20, "Ogre", "Ogre"),
+        (21, 21, "Zombie", "Zombie"),
+        (22, 22, "Fire Elemental", "FireElemental"),
         (30, 30, "Dragon", "Dragon"),
-        (31, 10, "Lich", "Lich"),
+        (31, 31, "Lich", "Lich"),
     ];
 
     println!("Validating monster-to-creature mappings...");
@@ -160,6 +156,7 @@ fn test_all_tutorial_monsters_have_visuals() {
 fn test_no_broken_creature_references() {
     let monsters_path = "campaigns/tutorial/data/monsters.ron";
     let creatures_path = "campaigns/tutorial/data/creatures.ron";
+    let campaign_root = Path::new("campaigns/tutorial");
 
     if !std::path::Path::new(monsters_path).exists()
         || !std::path::Path::new(creatures_path).exists()
@@ -171,15 +168,10 @@ fn test_no_broken_creature_references() {
     let monster_db =
         MonsterDatabase::load_from_file(monsters_path).expect("Failed to load monsters");
 
-    // Load creatures and build database
-    let creatures = CreatureDatabase::load_from_file(Path::new(creatures_path))
-        .expect("Failed to load creatures");
-    let mut creature_db = CreatureDatabase::new();
-    for creature in creatures {
-        creature_db
-            .add_creature(creature)
-            .expect("Failed to add creature");
-    }
+    // Load creatures from registry
+    let creature_db =
+        CreatureDatabase::load_from_registry(Path::new(creatures_path), campaign_root)
+            .expect("Failed to load creatures");
 
     let mut broken_references = Vec::new();
 
@@ -203,24 +195,20 @@ fn test_no_broken_creature_references() {
 #[test]
 fn test_creature_database_has_expected_creatures() {
     let creatures_path = "campaigns/tutorial/data/creatures.ron";
+    let campaign_root = Path::new("campaigns/tutorial");
 
     if !std::path::Path::new(creatures_path).exists() {
         println!("Skipping test - creatures.ron not found");
         return;
     }
 
-    // Load creatures and build database
-    let creatures = CreatureDatabase::load_from_file(Path::new(creatures_path))
-        .expect("Failed to load creatures");
-    let mut creature_db = CreatureDatabase::new();
-    for creature in creatures {
-        creature_db
-            .add_creature(creature)
-            .expect("Failed to add creature");
-    }
+    // Load creatures from registry
+    let creature_db =
+        CreatureDatabase::load_from_registry(Path::new(creatures_path), campaign_root)
+            .expect("Failed to load creatures");
 
     // All creature IDs that should exist based on monster mappings
-    let required_creature_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 30];
+    let required_creature_ids = [1, 2, 3, 10, 11, 12, 20, 21, 22, 30, 31];
 
     for creature_id in required_creature_ids {
         assert!(

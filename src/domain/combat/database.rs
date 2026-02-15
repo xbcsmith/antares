@@ -556,18 +556,19 @@ mod tests {
             .expect("Failed to load tutorial monsters");
 
         // Expected monster-to-creature mappings from Phase 2 plan
+        // Monster IDs match Creature IDs for direct visual mapping
         let expected_mappings = [
             (1, Some(1)),   // Goblin -> Goblin
-            (2, Some(3)),   // Kobold -> Kobold
-            (3, Some(4)),   // Giant Rat -> GiantRat
-            (10, Some(7)),  // Orc -> Orc
-            (11, Some(5)),  // Skeleton -> Skeleton
-            (12, Some(2)),  // Wolf -> Wolf
-            (20, Some(8)),  // Ogre -> Ogre
-            (21, Some(6)),  // Zombie -> Zombie
-            (22, Some(9)),  // Fire Elemental -> FireElemental
+            (2, Some(2)),   // Kobold -> Kobold
+            (3, Some(3)),   // Giant Rat -> GiantRat
+            (10, Some(10)), // Orc -> Orc
+            (11, Some(11)), // Skeleton -> Skeleton
+            (12, Some(12)), // Wolf -> Wolf
+            (20, Some(20)), // Ogre -> Ogre
+            (21, Some(21)), // Zombie -> Zombie
+            (22, Some(22)), // Fire Elemental -> FireElemental
             (30, Some(30)), // Dragon -> Dragon
-            (31, Some(10)), // Lich -> Lich
+            (31, Some(31)), // Lich -> Lich
         ];
 
         for (monster_id, expected_visual_id) in expected_mappings {

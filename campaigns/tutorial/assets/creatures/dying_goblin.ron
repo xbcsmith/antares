@@ -3,7 +3,7 @@
 
 // Dying Goblin - Small injured goblin NPC
 CreatureDefinition(
-    id: 12,
+    id: 151,
     name: "DyingGoblin",
     scale: 0.75,    meshes: [
         // Legs (shorter, hunched)

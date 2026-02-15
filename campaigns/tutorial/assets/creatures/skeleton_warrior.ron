@@ -3,7 +3,7 @@
 
 // Skeleton Warrior - Undead melee fighter
 CreatureDefinition(
-    id: 11,
+    id: 152,
     name: "SkeletonWarrior",
     scale: 1.05,    meshes: [
         // Leg bones
