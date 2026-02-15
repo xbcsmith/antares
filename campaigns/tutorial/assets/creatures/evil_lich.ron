@@ -1,18 +1,19 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 // Evil Lich - Powerful undead sorcerer boss
 CreatureDefinition(
+    id: 13,
     name: "EvilLich",
-    scale: 1.2,
-    health: 250.0,
-    speed: 3.5,
-    meshes: [
+    scale: 1.2,    meshes: [
         // Floating robes (wider base)
         MeshDefinition(
-            name: "robe_base",
+            name: Some("robe_base"),
             vertices: [
                 // Wide bottom
-                [-0.4, -0.8, 0.3], [0.4, -0.8, 0.3], [0.4, -0.8, -0.3], [-0.4, -0.8, -0.3],
+                (-0.4, -0.8, 0.3), (0.4, -0.8, 0.3), (0.4, -0.8, -0.3), (-0.4, -0.8, -0.3),
                 // Narrower middle
-                [-0.3, 0.0, 0.2], [0.3, 0.0, 0.2], [0.3, 0.0, -0.2], [-0.3, 0.0, -0.2],
+                (-0.3, 0.0, 0.2), (0.3, 0.0, 0.2), (0.3, 0.0, -0.2), (-0.3, 0.0, -0.2),
             ],
             normals: None,
             uvs: None,
@@ -30,15 +31,15 @@ CreatureDefinition(
                 // Top
                 4, 5, 6, 4, 6, 7,
             ],
-            color: Some([0.1, 0.05, 0.15, 1.0]), // Deep purple-black
+            color: (0.1, 0.05, 0.15, 1.0), // Deep purple-black
         ),
 
         // Upper robe/torso
         MeshDefinition(
-            name: "robe_upper",
+            name: Some("robe_upper"),
             vertices: [
-                [-0.3, 0.0, 0.2], [0.3, 0.0, 0.2], [0.3, 0.8, 0.15], [-0.3, 0.8, 0.15],
-                [-0.3, 0.0, -0.2], [0.3, 0.0, -0.2], [0.3, 0.8, -0.2], [-0.3, 0.8, -0.2],
+                (-0.3, 0.0, 0.2), (0.3, 0.0, 0.2), (0.3, 0.8, 0.15), (-0.3, 0.8, 0.15),
+                (-0.3, 0.0, -0.2), (0.3, 0.0, -0.2), (0.3, 0.8, -0.2), (-0.3, 0.8, -0.2),
             ],
             normals: None,
             uvs: None,
@@ -50,15 +51,15 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.15, 0.08, 0.2, 1.0]), // Dark purple
+            color: (0.15, 0.08, 0.2, 1.0), // Dark purple
         ),
 
         // Ornate shoulder pads
         MeshDefinition(
-            name: "left_shoulder",
+            name: Some("left_shoulder"),
             vertices: [
-                [-0.3, 0.7, 0.1], [-0.5, 0.7, 0.1], [-0.5, 0.9, 0.1], [-0.3, 0.9, 0.1],
-                [-0.3, 0.7, -0.15], [-0.5, 0.7, -0.15], [-0.5, 0.9, -0.15], [-0.3, 0.9, -0.15],
+                (-0.3, 0.7, 0.1), (-0.5, 0.7, 0.1), (-0.5, 0.9, 0.1), (-0.3, 0.9, 0.1),
+                (-0.3, 0.7, -0.15), (-0.5, 0.7, -0.15), (-0.5, 0.9, -0.15), (-0.3, 0.9, -0.15),
             ],
             normals: None,
             uvs: None,
@@ -70,13 +71,13 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.7, 0.6, 0.2, 1.0]), // Tarnished gold
+            color: (0.7, 0.6, 0.2, 1.0), // Tarnished gold
         ),
         MeshDefinition(
-            name: "right_shoulder",
+            name: Some("right_shoulder"),
             vertices: [
-                [0.3, 0.7, 0.1], [0.5, 0.7, 0.1], [0.5, 0.9, 0.1], [0.3, 0.9, 0.1],
-                [0.3, 0.7, -0.15], [0.5, 0.7, -0.15], [0.5, 0.9, -0.15], [0.3, 0.9, -0.15],
+                (0.3, 0.7, 0.1), (0.5, 0.7, 0.1), (0.5, 0.9, 0.1), (0.3, 0.9, 0.1),
+                (0.3, 0.7, -0.15), (0.5, 0.7, -0.15), (0.5, 0.9, -0.15), (0.3, 0.9, -0.15),
             ],
             normals: None,
             uvs: None,
@@ -88,15 +89,15 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.7, 0.6, 0.2, 1.0]), // Tarnished gold
+            color: (0.7, 0.6, 0.2, 1.0), // Tarnished gold
         ),
 
         // Skeletal arms extending from robe
         MeshDefinition(
-            name: "left_arm",
+            name: Some("left_arm"),
             vertices: [
-                [-0.5, 0.8, -0.05], [-0.7, 0.8, -0.05], [-0.7, 0.3, -0.05], [-0.5, 0.3, -0.05],
-                [-0.5, 0.8, -0.1], [-0.7, 0.8, -0.1], [-0.7, 0.3, -0.1], [-0.5, 0.3, -0.1],
+                (-0.5, 0.8, -0.05), (-0.7, 0.8, -0.05), (-0.7, 0.3, -0.05), (-0.5, 0.3, -0.05),
+                (-0.5, 0.8, -0.1), (-0.7, 0.8, -0.1), (-0.7, 0.3, -0.1), (-0.5, 0.3, -0.1),
             ],
             normals: None,
             uvs: None,
@@ -108,13 +109,13 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.8, 0.8, 0.75, 1.0]), // Bone white
+            color: (0.8, 0.8, 0.75, 1.0), // Bone white
         ),
         MeshDefinition(
-            name: "right_arm",
+            name: Some("right_arm"),
             vertices: [
-                [0.5, 0.8, -0.05], [0.7, 0.8, -0.05], [0.7, 0.3, -0.05], [0.5, 0.3, -0.05],
-                [0.5, 0.8, -0.1], [0.7, 0.8, -0.1], [0.7, 0.3, -0.1], [0.5, 0.3, -0.1],
+                (0.5, 0.8, -0.05), (0.7, 0.8, -0.05), (0.7, 0.3, -0.05), (0.5, 0.3, -0.05),
+                (0.5, 0.8, -0.1), (0.7, 0.8, -0.1), (0.7, 0.3, -0.1), (0.5, 0.3, -0.1),
             ],
             normals: None,
             uvs: None,
@@ -126,15 +127,15 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.8, 0.8, 0.75, 1.0]), // Bone white
+            color: (0.8, 0.8, 0.75, 1.0), // Bone white
         ),
 
         // Skull head
         MeshDefinition(
-            name: "skull",
+            name: Some("skull"),
             vertices: [
-                [-0.18, 0.8, 0.05], [0.18, 0.8, 0.05], [0.18, 1.15, 0.05], [-0.18, 1.15, 0.05],
-                [-0.18, 0.8, -0.25], [0.18, 0.8, -0.25], [0.18, 1.15, -0.25], [-0.18, 1.15, -0.25],
+                (-0.18, 0.8, 0.05), (0.18, 0.8, 0.05), (0.18, 1.15, 0.05), (-0.18, 1.15, 0.05),
+                (-0.18, 0.8, -0.25), (0.18, 0.8, -0.25), (0.18, 1.15, -0.25), (-0.18, 1.15, -0.25),
             ],
             normals: None,
             uvs: None,
@@ -146,15 +147,15 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.85, 0.85, 0.8, 1.0]), // Ancient bone
+            color: (0.85, 0.85, 0.8, 1.0), // Ancient bone
         ),
 
         // Crown
         MeshDefinition(
-            name: "crown_base",
+            name: Some("crown_base"),
             vertices: [
-                [-0.2, 1.15, 0.0], [0.2, 1.15, 0.0], [0.2, 1.15, -0.2], [-0.2, 1.15, -0.2],
-                [-0.18, 1.25, -0.02], [0.18, 1.25, -0.02], [0.18, 1.25, -0.18], [-0.18, 1.25, -0.18],
+                (-0.2, 1.15, 0.0), (0.2, 1.15, 0.0), (0.2, 1.15, -0.2), (-0.2, 1.15, -0.2),
+                (-0.18, 1.25, -0.02), (0.18, 1.25, -0.02), (0.18, 1.25, -0.18), (-0.18, 1.25, -0.18),
             ],
             normals: None,
             uvs: None,
@@ -166,47 +167,47 @@ CreatureDefinition(
                 3, 0, 4, 3, 4, 7,
                 4, 5, 6, 4, 6, 7,
             ],
-            color: Some([0.8, 0.7, 0.3, 1.0]), // Tarnished gold
+            color: (0.8, 0.7, 0.3, 1.0), // Tarnished gold
         ),
 
         // Crown spikes
         MeshDefinition(
-            name: "crown_spike_1",
+            name: Some("crown_spike_1"),
             vertices: [
-                [-0.15, 1.25, -0.1], [-0.1, 1.25, -0.1], [-0.125, 1.45, -0.1],
+                (-0.15, 1.25, -0.1), (-0.1, 1.25, -0.1), (-0.125, 1.45, -0.1),
             ],
-            normals: Some([[0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0]]),
+            normals: Some([(0.0, 0.0, -1.0), (0.0, 0.0, -1.0), (0.0, 0.0, -1.0)]),
             uvs: None,
             indices: [0, 1, 2],
-            color: Some([0.9, 0.8, 0.4, 1.0]), // Bright gold
+            color: (0.9, 0.8, 0.4, 1.0), // Bright gold
         ),
         MeshDefinition(
-            name: "crown_spike_2",
+            name: Some("crown_spike_2"),
             vertices: [
-                [-0.025, 1.25, -0.1], [0.025, 1.25, -0.1], [0.0, 1.5, -0.1],
+                (-0.025, 1.25, -0.1), (0.025, 1.25, -0.1), (0.0, 1.5, -0.1),
             ],
-            normals: Some([[0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0]]),
+            normals: Some([(0.0, 0.0, -1.0), (0.0, 0.0, -1.0), (0.0, 0.0, -1.0)]),
             uvs: None,
             indices: [0, 1, 2],
-            color: Some([0.9, 0.8, 0.4, 1.0]), // Bright gold
+            color: (0.9, 0.8, 0.4, 1.0), // Bright gold
         ),
         MeshDefinition(
-            name: "crown_spike_3",
+            name: Some("crown_spike_3"),
             vertices: [
-                [0.1, 1.25, -0.1], [0.15, 1.25, -0.1], [0.125, 1.45, -0.1],
+                (0.1, 1.25, -0.1), (0.15, 1.25, -0.1), (0.125, 1.45, -0.1),
             ],
-            normals: Some([[0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0]]),
+            normals: Some([(0.0, 0.0, -1.0), (0.0, 0.0, -1.0), (0.0, 0.0, -1.0)]),
             uvs: None,
             indices: [0, 1, 2],
-            color: Some([0.9, 0.8, 0.4, 1.0]), // Bright gold
+            color: (0.9, 0.8, 0.4, 1.0), // Bright gold
         ),
 
         // Glowing eyes (intense)
         MeshDefinition(
-            name: "left_eye",
+            name: Some("left_eye"),
             vertices: [
-                [-0.12, 0.95, -0.01], [-0.06, 0.95, -0.01], [-0.06, 1.02, -0.01], [-0.12, 1.02, -0.01],
-                [-0.12, 0.95, -0.06], [-0.06, 0.95, -0.06], [-0.06, 1.02, -0.06], [-0.12, 1.02, -0.06],
+                (-0.12, 0.95, -0.01), (-0.06, 0.95, -0.01), (-0.06, 1.02, -0.01), (-0.12, 1.02, -0.01),
+                (-0.12, 0.95, -0.06), (-0.06, 0.95, -0.06), (-0.06, 1.02, -0.06), (-0.12, 1.02, -0.06),
             ],
             normals: None,
             uvs: None,
@@ -218,13 +219,13 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([1.0, 0.1, 0.1, 1.0]), // Intense red glow
+            color: (1.0, 0.1, 0.1, 1.0), // Intense red glow
         ),
         MeshDefinition(
-            name: "right_eye",
+            name: Some("right_eye"),
             vertices: [
-                [0.06, 0.95, -0.01], [0.12, 0.95, -0.01], [0.12, 1.02, -0.01], [0.06, 1.02, -0.01],
-                [0.06, 0.95, -0.06], [0.12, 0.95, -0.06], [0.12, 1.02, -0.06], [0.06, 1.02, -0.06],
+                (0.06, 0.95, -0.01), (0.12, 0.95, -0.01), (0.12, 1.02, -0.01), (0.06, 1.02, -0.01),
+                (0.06, 0.95, -0.06), (0.12, 0.95, -0.06), (0.12, 1.02, -0.06), (0.06, 1.02, -0.06),
             ],
             normals: None,
             uvs: None,
@@ -236,15 +237,15 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([1.0, 0.1, 0.1, 1.0]), // Intense red glow
+            color: (1.0, 0.1, 0.1, 1.0), // Intense red glow
         ),
 
         // Staff of power (in right hand)
         MeshDefinition(
-            name: "staff_shaft",
+            name: Some("staff_shaft"),
             vertices: [
-                [0.7, 0.3, -0.075], [0.75, 0.3, -0.075], [0.75, 1.8, -0.075], [0.7, 1.8, -0.075],
-                [0.7, 0.3, -0.1], [0.75, 0.3, -0.1], [0.75, 1.8, -0.1], [0.7, 1.8, -0.1],
+                (0.7, 0.3, -0.075), (0.75, 0.3, -0.075), (0.75, 1.8, -0.075), (0.7, 1.8, -0.075),
+                (0.7, 0.3, -0.1), (0.75, 0.3, -0.1), (0.75, 1.8, -0.1), (0.7, 1.8, -0.1),
             ],
             normals: None,
             uvs: None,
@@ -256,20 +257,20 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.15, 0.1, 0.05, 1.0]), // Dark wood
+            color: (0.15, 0.1, 0.05, 1.0), // Dark wood
         ),
 
         // Staff orb (glowing)
         MeshDefinition(
-            name: "staff_orb",
+            name: Some("staff_orb"),
             vertices: [
                 // Simplified sphere as octahedron
-                [0.725, 1.8, -0.0875],   // front
-                [0.625, 1.9, -0.0875],   // left
-                [0.825, 1.9, -0.0875],   // right
-                [0.725, 2.0, -0.0875],   // top
-                [0.725, 1.8, -0.1875],   // back
-                [0.725, 1.9, -0.0875],   // center
+                (0.725, 1.8, -0.0875),   // front
+                (0.625, 1.9, -0.0875),   // left
+                (0.825, 1.9, -0.0875),   // right
+                (0.725, 2.0, -0.0875),   // top
+                (0.725, 1.8, -0.1875),   // back
+                (0.725, 1.9, -0.0875),   // center
             ],
             normals: None,
             uvs: None,
@@ -281,39 +282,60 @@ CreatureDefinition(
                 4, 1, 5,
                 4, 2, 5,
             ],
-            color: Some([0.5, 0.1, 0.8, 1.0]), // Purple magical glow
+            color: (0.5, 0.1, 0.8, 1.0), // Purple magical glow
         ),
 
         // Mystical aura particles (floating triangles)
         MeshDefinition(
-            name: "aura_particle_1",
+            name: Some("aura_particle_1"),
             vertices: [
-                [-0.4, 0.5, 0.3], [-0.3, 0.5, 0.3], [-0.35, 0.6, 0.3],
+                (-0.4, 0.5, 0.3), (-0.3, 0.5, 0.3), (-0.35, 0.6, 0.3),
             ],
-            normals: Some([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]),
+            normals: Some([(0.0, 0.0, 1.0), (0.0, 0.0, 1.0), (0.0, 0.0, 1.0)]),
             uvs: None,
             indices: [0, 1, 2],
-            color: Some([0.6, 0.2, 0.8, 0.6]), // Semi-transparent purple
+            color: (0.6, 0.2, 0.8, 0.6), // Semi-transparent purple
         ),
         MeshDefinition(
-            name: "aura_particle_2",
+            name: Some("aura_particle_2"),
             vertices: [
-                [0.3, 0.7, 0.25], [0.4, 0.7, 0.25], [0.35, 0.8, 0.25],
+                (0.3, 0.7, 0.25), (0.4, 0.7, 0.25), (0.35, 0.8, 0.25),
             ],
-            normals: Some([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]),
+            normals: Some([(0.0, 0.0, 1.0), (0.0, 0.0, 1.0), (0.0, 0.0, 1.0)]),
             uvs: None,
             indices: [0, 1, 2],
-            color: Some([0.6, 0.2, 0.8, 0.6]), // Semi-transparent purple
+            color: (0.6, 0.2, 0.8, 0.6), // Semi-transparent purple
         ),
         MeshDefinition(
-            name: "aura_particle_3",
+            name: Some("aura_particle_3"),
             vertices: [
-                [-0.2, 1.0, 0.2], [-0.1, 1.0, 0.2], [-0.15, 1.1, 0.2],
+                (-0.2, 1.0, 0.2), (-0.1, 1.0, 0.2), (-0.15, 1.1, 0.2),
             ],
-            normals: Some([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]),
+            normals: Some([(0.0, 0.0, 1.0), (0.0, 0.0, 1.0), (0.0, 0.0, 1.0)]),
             uvs: None,
             indices: [0, 1, 2],
-            color: Some([0.6, 0.2, 0.8, 0.6]), // Semi-transparent purple
+            color: (0.6, 0.2, 0.8, 0.6), // Semi-transparent purple
         ),
     ],
+    mesh_transforms: [
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0))
+    ],
+    color_tint: None,
 )

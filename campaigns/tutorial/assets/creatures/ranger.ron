@@ -1,17 +1,18 @@
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 // Ranger - A skilled archer and tracker
 CreatureDefinition(
+    id: 57,
     name: "Ranger",
-    scale: 1.0,
-    health: 80.0,
-    speed: 6.5,
-    meshes: [
+    scale: 1.0,    meshes: [
         // Legs
         MeshDefinition(
-            name: "left_leg",
+            name: Some("left_leg"),
             vertices: [
                 // Left leg (tall thin box)
-                [-0.15, -1.0, 0.0], [-0.05, -1.0, 0.0], [-0.05, 0.0, 0.0], [-0.15, 0.0, 0.0],
-                [-0.15, -1.0, -0.1], [-0.05, -1.0, -0.1], [-0.05, 0.0, -0.1], [-0.15, 0.0, -0.1],
+                (-0.15, -1.0, 0.0), (-0.05, -1.0, 0.0), (-0.05, 0.0, 0.0), (-0.15, 0.0, 0.0),
+                (-0.15, -1.0, -0.1), (-0.05, -1.0, -0.1), (-0.05, 0.0, -0.1), (-0.15, 0.0, -0.1),
             ],
             normals: None,
             uvs: None,
@@ -23,13 +24,13 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.3, 0.5, 0.2, 1.0]), // Forest green
+            color: (0.3, 0.5, 0.2, 1.0), // Forest green
         ),
         MeshDefinition(
-            name: "right_leg",
+            name: Some("right_leg"),
             vertices: [
-                [0.05, -1.0, 0.0], [0.15, -1.0, 0.0], [0.15, 0.0, 0.0], [0.05, 0.0, 0.0],
-                [0.05, -1.0, -0.1], [0.15, -1.0, -0.1], [0.15, 0.0, -0.1], [0.05, 0.0, -0.1],
+                (0.05, -1.0, 0.0), (0.15, -1.0, 0.0), (0.15, 0.0, 0.0), (0.05, 0.0, 0.0),
+                (0.05, -1.0, -0.1), (0.15, -1.0, -0.1), (0.15, 0.0, -0.1), (0.05, 0.0, -0.1),
             ],
             normals: None,
             uvs: None,
@@ -41,15 +42,15 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.3, 0.5, 0.2, 1.0]), // Forest green
+            color: (0.3, 0.5, 0.2, 1.0), // Forest green
         ),
 
         // Torso
         MeshDefinition(
-            name: "torso",
+            name: Some("torso"),
             vertices: [
-                [-0.25, 0.0, 0.1], [0.25, 0.0, 0.1], [0.25, 0.8, 0.1], [-0.25, 0.8, 0.1],
-                [-0.25, 0.0, -0.15], [0.25, 0.0, -0.15], [0.25, 0.8, -0.15], [-0.25, 0.8, -0.15],
+                (-0.25, 0.0, 0.1), (0.25, 0.0, 0.1), (0.25, 0.8, 0.1), (-0.25, 0.8, 0.1),
+                (-0.25, 0.0, -0.15), (0.25, 0.0, -0.15), (0.25, 0.8, -0.15), (-0.25, 0.8, -0.15),
             ],
             normals: None,
             uvs: None,
@@ -61,15 +62,15 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.4, 0.6, 0.3, 1.0]), // Lighter green (leather armor)
+            color: (0.4, 0.6, 0.3, 1.0), // Lighter green (leather armor)
         ),
 
         // Arms
         MeshDefinition(
-            name: "left_arm",
+            name: Some("left_arm"),
             vertices: [
-                [-0.25, 0.6, 0.0], [-0.5, 0.6, 0.0], [-0.5, 0.1, 0.0], [-0.25, 0.1, 0.0],
-                [-0.25, 0.6, -0.1], [-0.5, 0.6, -0.1], [-0.5, 0.1, -0.1], [-0.25, 0.1, -0.1],
+                (-0.25, 0.6, 0.0), (-0.5, 0.6, 0.0), (-0.5, 0.1, 0.0), (-0.25, 0.1, 0.0),
+                (-0.25, 0.6, -0.1), (-0.5, 0.6, -0.1), (-0.5, 0.1, -0.1), (-0.25, 0.1, -0.1),
             ],
             normals: None,
             uvs: None,
@@ -81,13 +82,13 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.55, 0.45, 0.35, 1.0]), // Tan skin
+            color: (0.55, 0.45, 0.35, 1.0), // Tan skin
         ),
         MeshDefinition(
-            name: "right_arm",
+            name: Some("right_arm"),
             vertices: [
-                [0.25, 0.6, 0.0], [0.5, 0.6, 0.0], [0.5, 0.1, 0.0], [0.25, 0.1, 0.0],
-                [0.25, 0.6, -0.1], [0.5, 0.6, -0.1], [0.5, 0.1, -0.1], [0.25, 0.1, -0.1],
+                (0.25, 0.6, 0.0), (0.5, 0.6, 0.0), (0.5, 0.1, 0.0), (0.25, 0.1, 0.0),
+                (0.25, 0.6, -0.1), (0.5, 0.6, -0.1), (0.5, 0.1, -0.1), (0.25, 0.1, -0.1),
             ],
             normals: None,
             uvs: None,
@@ -99,15 +100,15 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.55, 0.45, 0.35, 1.0]), // Tan skin
+            color: (0.55, 0.45, 0.35, 1.0), // Tan skin
         ),
 
         // Head
         MeshDefinition(
-            name: "head",
+            name: Some("head"),
             vertices: [
-                [-0.15, 0.8, 0.05], [0.15, 0.8, 0.05], [0.15, 1.1, 0.05], [-0.15, 1.1, 0.05],
-                [-0.15, 0.8, -0.15], [0.15, 0.8, -0.15], [0.15, 1.1, -0.15], [-0.15, 1.1, -0.15],
+                (-0.15, 0.8, 0.05), (0.15, 0.8, 0.05), (0.15, 1.1, 0.05), (-0.15, 1.1, 0.05),
+                (-0.15, 0.8, -0.15), (0.15, 0.8, -0.15), (0.15, 1.1, -0.15), (-0.15, 1.1, -0.15),
             ],
             normals: None,
             uvs: None,
@@ -119,15 +120,15 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.6, 0.5, 0.4, 1.0]), // Lighter skin tone
+            color: (0.6, 0.5, 0.4, 1.0), // Lighter skin tone
         ),
 
         // Hood
         MeshDefinition(
-            name: "hood",
+            name: Some("hood"),
             vertices: [
-                [-0.2, 1.1, 0.1], [0.2, 1.1, 0.1], [0.2, 1.1, -0.2], [-0.2, 1.1, -0.2],
-                [0.0, 1.35, -0.05],
+                (-0.2, 1.1, 0.1), (0.2, 1.1, 0.1), (0.2, 1.1, -0.2), (-0.2, 1.1, -0.2),
+                (0.0, 1.35, -0.05),
             ],
             normals: None,
             uvs: None,
@@ -138,17 +139,17 @@ CreatureDefinition(
                 2, 3, 4,
                 3, 0, 4,
             ],
-            color: Some([0.25, 0.4, 0.15, 1.0]), // Dark green hood
+            color: (0.25, 0.4, 0.15, 1.0), // Dark green hood
         ),
 
         // Bow (held in hand)
         MeshDefinition(
-            name: "bow",
+            name: Some("bow"),
             vertices: [
-                [0.5, 0.1, -0.05], [0.55, 0.1, -0.05],
-                [0.5, 0.9, -0.05], [0.55, 0.9, -0.05],
-                [0.5, 0.1, -0.1], [0.55, 0.1, -0.1],
-                [0.5, 0.9, -0.1], [0.55, 0.9, -0.1],
+                (0.5, 0.1, -0.05), (0.55, 0.1, -0.05),
+                (0.5, 0.9, -0.05), (0.55, 0.9, -0.05),
+                (0.5, 0.1, -0.1), (0.55, 0.1, -0.1),
+                (0.5, 0.9, -0.1), (0.55, 0.9, -0.1),
             ],
             normals: None,
             uvs: None,
@@ -160,15 +161,15 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.4, 0.25, 0.1, 1.0]), // Brown wood
+            color: (0.4, 0.25, 0.1, 1.0), // Brown wood
         ),
 
         // Quiver on back
         MeshDefinition(
-            name: "quiver",
+            name: Some("quiver"),
             vertices: [
-                [-0.15, 0.3, -0.15], [-0.05, 0.3, -0.15], [-0.05, 0.7, -0.15], [-0.15, 0.7, -0.15],
-                [-0.15, 0.3, -0.25], [-0.05, 0.3, -0.25], [-0.05, 0.7, -0.25], [-0.15, 0.7, -0.25],
+                (-0.15, 0.3, -0.15), (-0.05, 0.3, -0.15), (-0.05, 0.7, -0.15), (-0.15, 0.7, -0.15),
+                (-0.15, 0.3, -0.25), (-0.05, 0.3, -0.25), (-0.05, 0.7, -0.25), (-0.15, 0.7, -0.25),
             ],
             normals: None,
             uvs: None,
@@ -180,7 +181,19 @@ CreatureDefinition(
                 4, 5, 1, 1, 0, 4,
                 3, 2, 6, 6, 7, 3,
             ],
-            color: Some([0.5, 0.3, 0.15, 1.0]), // Leather brown
+            color: (0.5, 0.3, 0.15, 1.0), // Leather brown
         ),
     ],
+    mesh_transforms: [
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0)),
+        MeshTransform(translation: (0.0, 0.0, 0.0), rotation: (0.0, 0.0, 0.0), scale: (1.0, 1.0, 1.0))
+    ],
+    color_tint: None,
 )

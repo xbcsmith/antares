@@ -238,6 +238,7 @@ fn create_billboard_mesh(mesh: &MeshDefinition) -> MeshDefinition {
 
     // Create a quad facing the camera
     MeshDefinition {
+        name: None,
         vertices: vec![
             [center_x - width, center_y - height, center_z],
             [center_x + width, center_y - height, center_z],
@@ -369,6 +370,7 @@ fn build_simplified_mesh(mesh: &MeshDefinition, triangle_indices: &[usize]) -> M
     }
 
     MeshDefinition {
+        name: None,
         vertices: new_vertices,
         indices: new_indices,
         normals: new_normals,
@@ -387,6 +389,7 @@ mod tests {
 
     fn create_test_mesh() -> MeshDefinition {
         MeshDefinition {
+            name: None,
             vertices: vec![
                 [0.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
@@ -446,6 +449,7 @@ mod tests {
     #[test]
     fn test_simplify_mesh_already_simple() {
         let mesh = MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
@@ -465,7 +469,8 @@ mod tests {
     #[test]
     fn test_calculate_mesh_size() {
         let mesh = MeshDefinition {
-            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
             uvs: None,
@@ -484,6 +489,7 @@ mod tests {
     #[test]
     fn test_calculate_mesh_size_empty() {
         let mesh = MeshDefinition {
+            name: None,
             vertices: vec![],
             indices: vec![],
             normals: None,
@@ -513,7 +519,8 @@ mod tests {
     #[test]
     fn test_calculate_triangle_area() {
         let mesh = MeshDefinition {
-            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
             uvs: None,

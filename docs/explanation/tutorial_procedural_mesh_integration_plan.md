@@ -7,6 +7,7 @@ This plan outlines the integration of procedural mesh-based creature visuals int
 **Scope**: Update tutorial campaign (`campaigns/tutorial/`) to use procedural mesh creatures from `assets/creatures/` directory.
 
 **Key Changes**:
+
 - Create centralized creature database with ID-based lookup
 - Map 11 monster types to 32 available creature meshes
 - Update NPCs to use procedural meshes instead of sprites
@@ -17,25 +18,30 @@ This plan outlines the integration of procedural mesh-based creature visuals int
 ### Existing Infrastructure
 
 **Creature Assets (32 files in `campaigns/tutorial/assets/creatures/`)**:
+
 - Monster creatures: goblin, dragon, skeleton, skeleton_warrior, zombie, kobold, orc, ogre, giant_rat, wolf, lich, evil_lich, fire_elemental, red_dragon, pyramid_dragon, dying_goblin
 - NPC creatures: innkeeper, merchant, village_elder, wizard_arcturus, high_priest, high_priestess, ranger, apprentice_zara, kira, mira, sirius, whisper, old_gareth
 - Template creatures: template_dwarf_cleric, template_elf_mage, template_human_fighter
 
 **Monster Definitions (`campaigns/tutorial/data/monsters.ron`)**:
+
 - 11 monster types defined: Goblin (id:1), Kobold (id:2), Giant Rat (id:3), Orc (id:10), Skeleton (id:11), Wolf (id:12), Ogre (id:20), Zombie (id:21), Fire Elemental (id:22), Dragon (id:30), Lich (id:31)
 - All have `visual_id: Option<CreatureId>` field currently unpopulated
 - `MonsterDefinition` struct in `src/domain/combat/database.rs` supports visual linking
 
 **NPC Definitions (`campaigns/tutorial/data/npcs.ron`)**:
+
 - 12 NPCs defined with `sprite: Option<SpriteReference>` field (all `None`)
 - `NpcDefinition` struct in `src/domain/world/npc.rs` has sprite field
 - NPCs include: tutorial_elder_village, tutorial_innkeeper_town, tutorial_merchant_town, tutorial_priestess_town, tutorial_wizard_arcturus, tutorial_wizard_arcturus_brother, tutorial_ranger_lost, tutorial_elder_village2, tutorial_innkeeper_town2, tutorial_merchant_town2, tutorial_priest_town2, tutorial_goblin_dying
 
 **Campaign Configuration (`campaigns/tutorial/campaign.ron`)**:
+
 - References data files: items, spells, monsters, classes, races, characters, maps, quests, dialogues, conditions, npcs, proficiencies
 - No creatures_file reference currently present
 
 **Domain Layer Support**:
+
 - `CreatureDatabase` exists in `src/domain/visual/creature_database.rs`
 - `CreatureDefinition` type in `src/domain/visual/mod.rs`
 - `CreatureId` type alias defined in `src/domain/types.rs`
@@ -52,114 +58,264 @@ This plan outlines the integration of procedural mesh-based creature visuals int
 
 ## Implementation Phases
 
-### Phase 1: Creature Database Creation
+### Phase 1: Domain Struct Updates and Creature File Correction
 
-**Objective**: Create centralized creature database with ID assignments for all 32 creature meshes.
+**Objective**: Add missing `name` field to `MeshDefinition` struct, then fix all creature files to add required fields while preserving existing data.
 
-#### 1.1 Create Creature Database File
+#### 1.1 Add `name` Field to MeshDefinition Struct
 
-**File**: `campaigns/tutorial/data/creatures.ron`
+**Files**:
 
-**Structure**:
+- `src/domain/visual/mod.rs`
+- `sdk/campaign_builder/src/` (any files using MeshDefinition)
+
+**Current Issue**: `MeshDefinition` struct is missing the `name` field that exists in the procedural_mesh_implementation_plan.md examples and all existing creature files.
+
+**Required Change**:
+
+Add optional `name` field to `MeshDefinition` struct:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshDefinition {
+    /// Optional name for the mesh (e.g., "left_leg", "head", "torso")
+    ///
+    /// Used for debugging, editor display, and mesh identification.
+    #[serde(default)]
+    pub name: Option<String>,
+
+    /// Vertex positions as [x, y, z] coordinates
+    pub vertices: Vec<[f32; 3]>,
+
+    // ... rest of fields
+}
 ```
-[
-    CreatureDefinition(
-        id: 1,
-        name: "Goblin",
-        scale: 0.72,
-        health: 40.0,
-        speed: 6.5,
-        meshes: [ ... ]
-    ),
-    // ... more creatures
-]
-```
+
+**Rationale**:
+
+- All existing creature files have `name` field in MeshDefinition
+- Matches the design from procedural_mesh_implementation_plan.md Appendix
+- Optional field with `#[serde(default)]` maintains backward compatibility
+- Essential for debugging and visual editor mesh identification
+
+**Testing**:
+
+- Verify existing creature files parse correctly after adding field
+- Test that meshes without name field still parse (backward compatibility)
+- Ensure name field displays in campaign builder editor
+
+#### 1.2 Fix Individual Creature Files
+
+**Files**: All 32 files in `campaigns/tutorial/assets/creatures/*.ron`
+
+**Current Issues After 1.1**:
+
+- Missing `id` field (required by `CreatureDefinition`)
+- Missing `mesh_transforms` array (required - one per mesh)
+- Invalid `health` field (not in struct - belongs in game stats)
+- Invalid `speed` field (not in struct - belongs in game stats)
+- `name` field in `MeshDefinition` is now VALID (added in 1.1)
+
+**Required Changes Per File**:
+
+1. **Add SPDX header** (following `data/creature_templates/dragon.ron` pattern):
+
+   ```ron
+   // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+   // SPDX-License-Identifier: Apache-2.0
+   ```
+
+2. **Keep mesh names** (now valid after 1.1):
+
+   - `MeshDefinition(name: "left_leg", ...)` is now correct
+   - Name field is optional, used for editor/debugging
+
+3. **Add `id` field** to `CreatureDefinition` per assignment table below
+
+4. **Remove invalid fields**:
+
+   - Delete `health: 40.0` (move to monster stats if needed)
+   - Delete `speed: 6.5` (move to monster stats if needed)
+
+5. **Convert mesh name to comment-style** (optional, for consistency with templates):
+
+   - Change `MeshDefinition(name: "left_leg", ...)`
+   - To `MeshDefinition(name: Some("left_leg"), ...)`
+   - Or use comment format: `// Left leg\nMeshDefinition(name: None, ...)`
+
+**Note**: Since `name` is optional, both approaches are valid. Recommend keeping `name: Some("...")` for editor utility.
+
+6. **Add `mesh_transforms` array** with identity transforms for each mesh:
+   ```ron
+   mesh_transforms: [
+       MeshTransform(
+           translation: [0.0, 0.0, 0.0],
+           rotation: [0.0, 0.0, 0.0],
+           scale: [1.0, 1.0, 1.0],
+       ),
+       // ... one per mesh
+   ],
+   ```
 
 **ID Assignment Strategy**:
+
 - Monster base creatures: 1-50
 - NPC creatures: 51-100
 - Template creatures: 101-150
 - Variant creatures: 151-200
 
-**Specific Assignments**:
+**Specific ID Assignments**:
 
-| Creature File | Assigned ID | Category | Notes |
-|---------------|-------------|----------|-------|
-| goblin.ron | 1 | Monster | Base goblin |
-| kobold.ron | 2 | Monster | Base kobold |
-| giant_rat.ron | 3 | Monster | Base rat |
-| orc.ron | 10 | Monster | Base orc |
-| skeleton.ron | 11 | Monster | Base skeleton |
-| wolf.ron | 12 | Monster | Base wolf |
-| ogre.ron | 20 | Monster | Base ogre |
-| zombie.ron | 21 | Monster | Base zombie |
-| fire_elemental.ron | 22 | Monster | Base elemental |
-| dragon.ron | 30 | Monster | Generic dragon |
-| lich.ron | 31 | Monster | Base lich |
-| red_dragon.ron | 32 | Monster | Red dragon variant |
-| pyramid_dragon.ron | 33 | Monster | Pyramid dragon variant |
-| dying_goblin.ron | 151 | Variant | Wounded goblin NPC |
-| skeleton_warrior.ron | 152 | Variant | Elite skeleton |
-| evil_lich.ron | 153 | Variant | Powerful lich |
-| village_elder.ron | 51 | NPC | Elder character |
-| innkeeper.ron | 52 | NPC | Innkeeper character |
-| merchant.ron | 53 | NPC | Merchant character |
-| high_priest.ron | 54 | NPC | Male priest |
-| high_priestess.ron | 55 | NPC | Female priest |
-| wizard_arcturus.ron | 56 | NPC | Wizard character |
-| ranger.ron | 57 | NPC | Ranger character |
-| old_gareth.ron | 58 | NPC | Old character variant |
-| apprentice_zara.ron | 59 | NPC | Apprentice character |
-| kira.ron | 60 | NPC | Kira character |
-| mira.ron | 61 | NPC | Mira character |
-| sirius.ron | 62 | NPC | Sirius character |
-| whisper.ron | 63 | NPC | Whisper character |
-| template_human_fighter.ron | 101 | Template | Human fighter base |
-| template_elf_mage.ron | 102 | Template | Elf mage base |
-| template_dwarf_cleric.ron | 103 | Template | Dwarf cleric base |
+| Creature File              | Assigned ID | Category | Notes                  |
+| -------------------------- | ----------- | -------- | ---------------------- |
+| goblin.ron                 | 1           | Monster  | Base goblin            |
+| kobold.ron                 | 2           | Monster  | Base kobold            |
+| giant_rat.ron              | 3           | Monster  | Base rat               |
+| orc.ron                    | 10          | Monster  | Base orc               |
+| skeleton.ron               | 11          | Monster  | Base skeleton          |
+| wolf.ron                   | 12          | Monster  | Base wolf              |
+| ogre.ron                   | 20          | Monster  | Base ogre              |
+| zombie.ron                 | 21          | Monster  | Base zombie            |
+| fire_elemental.ron         | 22          | Monster  | Base elemental         |
+| dragon.ron                 | 30          | Monster  | Generic dragon         |
+| lich.ron                   | 31          | Monster  | Base lich              |
+| red_dragon.ron             | 32          | Monster  | Red dragon variant     |
+| pyramid_dragon.ron         | 33          | Monster  | Pyramid dragon variant |
+| dying_goblin.ron           | 151         | Variant  | Wounded goblin NPC     |
+| skeleton_warrior.ron       | 152         | Variant  | Elite skeleton         |
+| evil_lich.ron              | 153         | Variant  | Powerful lich          |
+| village_elder.ron          | 51          | NPC      | Elder character        |
+| innkeeper.ron              | 52          | NPC      | Innkeeper character    |
+| merchant.ron               | 53          | NPC      | Merchant character     |
+| high_priest.ron            | 54          | NPC      | Male priest            |
+| high_priestess.ron         | 55          | NPC      | Female priest          |
+| wizard_arcturus.ron        | 56          | NPC      | Wizard character       |
+| ranger.ron                 | 57          | NPC      | Ranger character       |
+| old_gareth.ron             | 58          | NPC      | Old character variant  |
+| apprentice_zara.ron        | 59          | NPC      | Apprentice character   |
+| kira.ron                   | 60          | NPC      | Kira character         |
+| mira.ron                   | 61          | NPC      | Mira character         |
+| sirius.ron                 | 62          | NPC      | Sirius character       |
+| whisper.ron                | 63          | NPC      | Whisper character      |
+| template_human_fighter.ron | 101         | Template | Human fighter base     |
+| template_elf_mage.ron      | 102         | Template | Elf mage base          |
+| template_dwarf_cleric.ron  | 103         | Template | Dwarf cleric base      |
+
+#### 1.3 Update Creature Examples
+
+**Files**: All files in `data/creature_examples/*.ron`
+
+**Objective**: Apply same format corrections to example creatures for consistency.
 
 **Action Items**:
-- Read each creature RON file from `assets/creatures/`
-- Assign ID to each `CreatureDefinition` following table above
-- Combine into single RON array in `data/creatures.ron`
-- Validate RON syntax with `cargo check`
 
-#### 1.2 Update Campaign Metadata
+- Apply same corrections as 1.2 to all creature_examples files
+- Ensure SPDX headers present
+- Convert mesh names to comments
+- Add `mesh_transforms` arrays
+- Validate all examples parse correctly
+
+**Note**: These are reference examples, not campaign content, but should follow same format.
+
+#### 1.4 Create Creatures Database File
+
+**File**: `campaigns/tutorial/data/creatures.ron`
+
+**Structure**: Array format for batch loading by `CreatureDatabase`
+
+```ron
+// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+// Tutorial campaign creature database
+// Loads all creature visual definitions for monsters and NPCs
+
+[
+    // Include references or inline definitions
+    // Option A: Inline all 32 creatures here
+    // Option B: Use include mechanism if RON supports it
+]
+```
+
+**Decision Point**:
+
+- **Option A**: Copy all 32 corrected creatures inline (easier loading, single file)
+- **Option B**: Keep individual files, use loader to scan directory (easier editing)
+
+**Recommendation**: Option A for Phase 1 (matches existing data pattern like `monsters.ron`)
+
+#### 1.5 Update Campaign Metadata
 
 **File**: `campaigns/tutorial/campaign.ron`
 
 **Changes**:
+
 - Add field: `creatures_file: "data/creatures.ron"`
 - Position after `monsters_file` line for logical grouping
 
-**Validation**: Ensure `CampaignMetadata` struct in `src/domain/campaign/metadata.rs` supports `creatures_file` field or add if missing.
+**Validation**:
 
-#### 1.3 Testing Requirements
+- Verify `CampaignMetadata` struct in `src/sdk/campaign_loader.rs` already has `creatures_file` field (it does, with default)
+- Confirm field is properly deserialized
 
-**Unit Tests**:
-- Verify `data/creatures.ron` parses without errors
-- Confirm all 32 creatures load successfully
-- Validate no duplicate IDs in creature database
+#### 1.6 Testing Requirements
+
+**After 1.1 (Struct Update)**:
+
+- Verify MeshDefinition with `name` field compiles
+- Test parsing existing creature files with name field
+- Test backward compatibility (files without name parse correctly)
+- Ensure campaign builder displays mesh names
+
+**After 1.2-1.4 (File Updates)**:
+
+**Validation Tests for Files**:
+
+- Each individual creature file in `assets/creatures/` parses without errors
+- All 32 creatures in `data/creatures.ron` parse as valid RON array
+- No duplicate IDs across all creatures
+- Each creature has mesh count == mesh_transforms count
+- `CreatureDatabase::load_from_file()` successfully loads `data/creatures.ron`
 
 **Commands**:
+
 ```bash
+cargo fmt --all
 cargo check --all-targets --all-features
-ron::from_str validation on creatures.ron content
+cargo clippy --all-targets --all-features -- -D warnings
+cargo nextest run --all-features
+
+# Manual RON validation
+ron::from_str::<Vec<CreatureDefinition>>(file_contents)
 ```
 
-#### 1.4 Deliverables
+#### 1.7 Deliverables
 
-- [ ] `campaigns/tutorial/data/creatures.ron` created with 32 creature definitions
-- [ ] All creature IDs assigned per mapping table
-- [ ] `campaigns/tutorial/campaign.ron` updated with `creatures_file` reference
-- [ ] RON syntax validated with `cargo check`
+- [x] `src/domain/visual/mod.rs`: `name` field added to `MeshDefinition`
+- [x] Campaign builder updated to use mesh names in editor UI
+- [x] All 32 files in `campaigns/tutorial/assets/creatures/` corrected:
+  - [x] SPDX headers added
+  - [x] `id` field added per mapping table
+  - [x] `mesh_transforms` arrays added
+  - [x] Invalid fields removed (`health`, `speed`)
+  - [x] Mesh `name` fields kept (now valid) or converted to `Some("name")`
+- [x] All files in `data/creature_examples/` updated with same corrections
+- [ ] `campaigns/tutorial/data/creatures.ron` created with all 32 creatures
+- [ ] `campaigns/tutorial/campaign.ron` updated with `creatures_file: "data/creatures.ron"`
+- [x] All files validate with `cargo check`
+- [x] RON parsing confirmed for all creature files
 
-#### 1.5 Success Criteria
+#### 1.8 Success Criteria
 
-- All 32 creature files successfully consolidated into `data/creatures.ron`
-- No RON parsing errors when loading creature database
+- `MeshDefinition` struct has optional `name` field
+- All individual creature files match proper `CreatureDefinition` struct format
+- All creature files include SPDX headers
 - Each creature has unique ID matching assignment table
-- Campaign metadata references creatures file correctly
+- `CreatureDatabase::load_from_file("campaigns/tutorial/data/creatures.ron")` succeeds
+- No compilation errors or warnings
+- Mesh names preserved (either in field or as comments) for editor/debugging utility
+- `data/creature_examples/` updated for consistency
+- Campaign builder displays mesh names in editor UI
 
 ### Phase 2: Monster Visual Mapping
 
@@ -171,25 +327,27 @@ ron::from_str validation on creatures.ron content
 
 **Monster Mapping Table**:
 
-| Monster ID | Monster Name | Creature ID | Creature File | Notes |
-|------------|--------------|-------------|---------------|-------|
-| 1 | Goblin | 1 | goblin.ron | Exact match |
-| 2 | Kobold | 2 | kobold.ron | Exact match |
-| 3 | Giant Rat | 3 | giant_rat.ron | Exact match |
-| 10 | Orc | 10 | orc.ron | Exact match |
-| 11 | Skeleton | 11 | skeleton.ron | Exact match |
-| 12 | Wolf | 12 | wolf.ron | Exact match |
-| 20 | Ogre | 20 | ogre.ron | Exact match |
-| 21 | Zombie | 21 | zombie.ron | Exact match |
-| 22 | Fire Elemental | 22 | fire_elemental.ron | Exact match |
-| 30 | Dragon | 30 | dragon.ron | Generic dragon visual |
-| 31 | Lich | 31 | lich.ron | Base lich visual |
+| Monster ID | Monster Name   | Creature ID | Creature File      | Notes                 |
+| ---------- | -------------- | ----------- | ------------------ | --------------------- |
+| 1          | Goblin         | 1           | goblin.ron         | Exact match           |
+| 2          | Kobold         | 2           | kobold.ron         | Exact match           |
+| 3          | Giant Rat      | 3           | giant_rat.ron      | Exact match           |
+| 10         | Orc            | 10          | orc.ron            | Exact match           |
+| 11         | Skeleton       | 11          | skeleton.ron       | Exact match           |
+| 12         | Wolf           | 12          | wolf.ron           | Exact match           |
+| 20         | Ogre           | 20          | ogre.ron           | Exact match           |
+| 21         | Zombie         | 21          | zombie.ron         | Exact match           |
+| 22         | Fire Elemental | 22          | fire_elemental.ron | Exact match           |
+| 30         | Dragon         | 30          | dragon.ron         | Generic dragon visual |
+| 31         | Lich           | 31          | lich.ron           | Base lich visual      |
 
 **Changes Required**:
+
 - Update each monster entry to include `visual_id: Some({creature_id})`
 - Example: Goblin (id:1) gets `visual_id: Some(1)`
 
 **Before**:
+
 ```ron
 (
     id: 1,
@@ -201,6 +359,7 @@ ron::from_str validation on creatures.ron content
 ```
 
 **After**:
+
 ```ron
 (
     id: 1,
@@ -214,6 +373,7 @@ ron::from_str validation on creatures.ron content
 #### 2.2 Variant Creature Strategy
 
 **Elite/Variant Monsters** (future expansion):
+
 - Skeleton Warrior visual (id:152) - use for elite skeleton encounters
 - Evil Lich visual (id:153) - use for lich boss encounters
 - Red Dragon visual (id:32) - use for fire dragon encounters
@@ -224,17 +384,20 @@ ron::from_str validation on creatures.ron content
 #### 2.3 Missing Creature Visuals
 
 **Monsters Needing New Creatures** (none currently):
+
 - All 11 tutorial monsters have matching creature visuals
 - Future monster additions will require new creature mesh files
 
 #### 2.4 Testing Requirements
 
 **Validation**:
+
 - All `visual_id` values reference existing creature IDs from Phase 1
 - No broken references (visual_id pointing to non-existent creature)
 - Monster loading succeeds with visual_id populated
 
 **Test Approach**:
+
 - Load monsters.ron and creatures.ron
 - For each monster with visual_id, verify creature exists in database
 - Log warnings for any missing creature references
@@ -264,14 +427,17 @@ ron::from_str validation on creatures.ron content
 **Options**:
 
 **Option A**: Add `creature_id: Option<CreatureId>` field alongside sprite
+
 - Pros: Backward compatible, supports both systems
 - Cons: Two visual systems in parallel, more complex
 
 **Option B**: Repurpose sprite field to support creature references
+
 - Pros: Minimal schema change, single visual field
 - Cons: Less explicit, requires enum or variant handling
 
 **Option C**: Replace sprite with `visual: NpcVisual` enum
+
 - Pros: Explicit, type-safe, future-proof
 - Cons: Breaking change, requires migration
 
@@ -285,20 +451,20 @@ ron::from_str validation on creatures.ron content
 
 **NPC-to-Creature Mapping**:
 
-| NPC ID | NPC Name | Creature ID | Creature File | Rationale |
-|--------|----------|-------------|---------------|-----------|
-| tutorial_elder_village | Village Elder Town Square | 51 | village_elder.ron | Exact match |
-| tutorial_elder_village2 | Village Elder Mountain Pass | 51 | village_elder.ron | Same visual, different location |
-| tutorial_innkeeper_town | InnKeeper Town Square | 52 | innkeeper.ron | Exact match |
-| tutorial_innkeeper_town2 | Innkeeper Mountain Pass | 52 | innkeeper.ron | Same visual, different location |
-| tutorial_merchant_town | Merchant Town Square | 53 | merchant.ron | Exact match |
-| tutorial_merchant_town2 | Merchant Mountain Pass | 53 | merchant.ron | Same visual, different location |
-| tutorial_priestess_town | High Priestess Town Square | 55 | high_priestess.ron | Exact match |
-| tutorial_priest_town2 | High Priest Mountain Pass | 54 | high_priest.ron | Gender swap |
-| tutorial_wizard_arcturus | Arcturus | 56 | wizard_arcturus.ron | Exact match |
-| tutorial_wizard_arcturus_brother | Arcturus Brother | 58 | old_gareth.ron | Different character, similar style |
-| tutorial_ranger_lost | Lost Ranger | 57 | ranger.ron | Exact match |
-| tutorial_goblin_dying | Dying Goblin | 151 | dying_goblin.ron | Special variant |
+| NPC ID                           | NPC Name                    | Creature ID | Creature File       | Rationale                          |
+| -------------------------------- | --------------------------- | ----------- | ------------------- | ---------------------------------- |
+| tutorial_elder_village           | Village Elder Town Square   | 51          | village_elder.ron   | Exact match                        |
+| tutorial_elder_village2          | Village Elder Mountain Pass | 51          | village_elder.ron   | Same visual, different location    |
+| tutorial_innkeeper_town          | InnKeeper Town Square       | 52          | innkeeper.ron       | Exact match                        |
+| tutorial_innkeeper_town2         | Innkeeper Mountain Pass     | 52          | innkeeper.ron       | Same visual, different location    |
+| tutorial_merchant_town           | Merchant Town Square        | 53          | merchant.ron        | Exact match                        |
+| tutorial_merchant_town2          | Merchant Mountain Pass      | 53          | merchant.ron        | Same visual, different location    |
+| tutorial_priestess_town          | High Priestess Town Square  | 55          | high_priestess.ron  | Exact match                        |
+| tutorial_priest_town2            | High Priest Mountain Pass   | 54          | high_priest.ron     | Gender swap                        |
+| tutorial_wizard_arcturus         | Arcturus                    | 56          | wizard_arcturus.ron | Exact match                        |
+| tutorial_wizard_arcturus_brother | Arcturus Brother            | 58          | old_gareth.ron      | Different character, similar style |
+| tutorial_ranger_lost             | Lost Ranger                 | 57          | ranger.ron          | Exact match                        |
+| tutorial_goblin_dying            | Dying Goblin                | 151         | dying_goblin.ron    | Special variant                    |
 
 **Implementation Note**: If `NpcDefinition` doesn't support `creature_id` field, add to domain struct first before updating data file.
 
@@ -307,11 +473,12 @@ ron::from_str validation on creatures.ron content
 **File**: `src/domain/world/npc.rs`
 
 **Potential Change** (verify if needed):
+
 ```rust
 pub struct NpcDefinition {
     // ... existing fields
     pub sprite: Option<SpriteReference>,
-    
+
     // Add new field
     #[serde(default)]
     pub creature_id: Option<CreatureId>,
@@ -323,12 +490,14 @@ pub struct NpcDefinition {
 #### 3.4 Testing Requirements
 
 **Validation**:
+
 - NPCs load successfully with creature_id field
 - All creature_id values reference valid creatures from database
 - Sprite fallback still works when creature_id is None
 - No rendering errors when NPCs spawn
 
 **Test Cases**:
+
 - Load npcs.ron with new creature_id fields
 - Verify each NPC creature reference is valid
 - Test NPC spawning in game (visual verification)
@@ -356,17 +525,20 @@ pub struct NpcDefinition {
 #### 4.1 Campaign Loading Verification
 
 **Files to Review**:
+
 - `src/domain/campaign/loader.rs` - campaign loading logic
 - `src/domain/campaign/metadata.rs` - CampaignMetadata struct
 - `src/infrastructure/campaign/` - infrastructure campaign loading
 
 **Required Changes**:
+
 1. Add `creatures_file` field to `CampaignMetadata` struct if missing
 2. Load creature database during campaign initialization
 3. Make `CreatureDatabase` accessible to rendering systems
 4. Validate creature references during campaign loading
 
 **Validation Points**:
+
 - Campaign loads `data/creatures.ron` successfully
 - Creature database is accessible to monster spawning
 - Creature database is accessible to NPC spawning
@@ -377,12 +549,14 @@ pub struct NpcDefinition {
 **System**: Combat encounter spawning
 
 **Verification**:
+
 - Monsters spawn with correct creature visual based on `visual_id`
 - Missing `visual_id` falls back to default/placeholder
 - Creature meshes render correctly in combat mode
 - Creature scale/health/speed properties are respected
 
 **Files to Check**:
+
 - Monster spawning systems in game engine layer
 - Combat encounter initialization
 - Creature mesh generation from `CreatureDefinition`
@@ -392,12 +566,14 @@ pub struct NpcDefinition {
 **System**: World NPC placement
 
 **Verification**:
+
 - NPCs spawn with correct creature visual based on `creature_id`
 - NPCs without `creature_id` fall back to sprite system
 - Creature meshes render correctly in exploration mode
 - NPC positioning and facing work with procedural meshes
 
 **Files to Check**:
+
 - NPC spawning systems in game engine layer
 - Map loading and NPC placement
 - Creature mesh generation for NPCs
@@ -405,6 +581,7 @@ pub struct NpcDefinition {
 #### 4.4 Testing Requirements
 
 **Integration Tests**:
+
 - Load tutorial campaign with new creature database
 - Spawn test monster encounter with creature visuals
 - Place test NPC with creature visual
@@ -412,12 +589,14 @@ pub struct NpcDefinition {
 - Test both Exploration and Combat game modes
 
 **Performance Tests**:
+
 - Measure creature loading time
 - Verify mesh generation caching works
 - Check memory usage with all creatures loaded
 - Profile rendering performance with multiple creatures
 
 **Commands**:
+
 ```bash
 cargo nextest run --all-features
 cargo run --release --bin antares -- --campaign tutorial
@@ -450,6 +629,7 @@ cargo run --release --bin antares -- --campaign tutorial
 **File**: `campaigns/tutorial/README.md`
 
 **Sections to Add/Update**:
+
 1. **Visual Assets**: Overview of procedural mesh system
 2. **Creature Database**: How to add new creatures
 3. **Monster Visuals**: Mapping table documentation
@@ -457,6 +637,7 @@ cargo run --release --bin antares -- --campaign tutorial
 5. **Troubleshooting**: Common issues with creature loading
 
 **Content**:
+
 - Creature ID assignment strategy
 - How to create new creature mesh files
 - How to link monsters/NPCs to creatures
@@ -467,6 +648,7 @@ cargo run --release --bin antares -- --campaign tutorial
 **Current Status**: All 11 tutorial monsters have creature visuals
 
 **Unused Creatures** (available but not referenced):
+
 - skeleton_warrior.ron (id:152) - Elite skeleton variant
 - evil_lich.ron (id:153) - Boss lich variant
 - red_dragon.ron (id:32) - Fire dragon variant
@@ -478,6 +660,7 @@ cargo run --release --bin antares -- --campaign tutorial
 - whisper.ron (id:63) - Whisper NPC
 
 **Recommendations**:
+
 - Document unused creatures for future quest expansion
 - Consider adding elite encounters using variant creatures
 - Use character creatures for future NPC additions
@@ -487,6 +670,7 @@ cargo run --release --bin antares -- --campaign tutorial
 **File**: `campaigns/tutorial/CREATURE_MAPPINGS.md`
 
 **Content**:
+
 - Complete monster-to-creature mapping table
 - Complete NPC-to-creature mapping table
 - Creature ID assignment ranges
@@ -500,23 +684,25 @@ cargo run --release --bin antares -- --campaign tutorial
 **File**: `docs/explanation/implementations.md`
 
 **Entry to Add**:
+
 ```markdown
 ## Tutorial Campaign Procedural Mesh Integration
 
 **Date**: {completion_date}
 **Phase**: Content Integration
-**Files Modified**: 
+**Files Modified**:
+
 - campaigns/tutorial/data/creatures.ron (created)
 - campaigns/tutorial/data/monsters.ron (visual_id added)
 - campaigns/tutorial/data/npcs.ron (creature_id added)
 - campaigns/tutorial/campaign.ron (creatures_file added)
 - src/domain/world/npc.rs (creature_id field added, if needed)
 
-**Summary**: Integrated 32 procedural mesh creatures into tutorial campaign, 
-replacing sprite placeholders. All 11 monsters and 12 NPCs now use 3D procedural 
+**Summary**: Integrated 32 procedural mesh creatures into tutorial campaign,
+replacing sprite placeholders. All 11 monsters and 12 NPCs now use 3D procedural
 meshes for visual representation.
 
-**Testing**: Integration tests pass, campaign loads successfully, visual rendering 
+**Testing**: Integration tests pass, campaign loads successfully, visual rendering
 verified in-game.
 ```
 
@@ -539,12 +725,14 @@ verified in-game.
 ### Backward Compatibility
 
 **Sprite Fallback System**:
+
 - Keep `assets/sprites/placeholders/` directory
 - Maintain sprite loading code for NPCs
 - Gracefully handle missing creature_id fields
 - Use placeholder sprite when creature not found
 
 **RON File Compatibility**:
+
 - Use `#[serde(default)]` for new optional fields
 - Support old campaign files without creatures_file
 - Maintain existing monster definitions without visual_id
@@ -552,12 +740,14 @@ verified in-game.
 ### Error Handling
 
 **Creature Loading Errors**:
+
 - Clear error messages for missing creature files
 - Validation of creature ID references during loading
 - Graceful degradation to placeholders on error
 - Logging of creature loading issues
 
 **Runtime Errors**:
+
 - Handle missing creature visuals without crashing
 - Warn when visual_id references non-existent creature
 - Fall back to default mesh/sprite on render failure
@@ -565,11 +755,13 @@ verified in-game.
 ### Performance Considerations
 
 **Creature Loading**:
+
 - Load creature database once during campaign init
 - Cache parsed CreatureDefinition objects
 - Lazy-load individual creature meshes on demand
 
 **Mesh Generation**:
+
 - Use existing mesh caching system from Phase 2 implementation
 - Generate meshes once, reuse for multiple instances
 - Consider instancing for repeated creatures
@@ -577,11 +769,13 @@ verified in-game.
 ### Validation Strategy
 
 **Pre-Runtime Validation**:
+
 - RON syntax validation via `cargo check`
 - Creature ID reference validation during loading
 - Schema validation for all data files
 
 **Runtime Validation**:
+
 - Verify creature exists before spawning
 - Validate mesh data integrity
 - Check for circular references
@@ -599,6 +793,7 @@ verified in-game.
 ### Rollback Strategy
 
 **If Issues Arise**:
+
 - Creature database optional - campaign works without it
 - Monsters work without visual_id (field is Option)
 - NPCs fall back to sprites when creature_id missing
@@ -607,24 +802,28 @@ verified in-game.
 ### Testing Between Phases
 
 **After Phase 1**:
+
 ```bash
 cargo check
 ron::from_str validation on creatures.ron
 ```
 
 **After Phase 2**:
+
 ```bash
 cargo nextest run
 Validate monster loading with visual_id
 ```
 
 **After Phase 3**:
+
 ```bash
 cargo nextest run
 Validate NPC loading with creature_id
 ```
 
 **After Phase 4**:
+
 ```bash
 cargo run --release -- --campaign tutorial
 Visual verification in-game
@@ -635,10 +834,12 @@ Visual verification in-game
 ### High Risk Items
 
 1. **Domain Struct Changes**: Adding `creature_id` to `NpcDefinition` requires code changes
+
    - Mitigation: Use `#[serde(default)]` for backward compatibility
    - Mitigation: Comprehensive unit tests for NPC loading
 
 2. **Campaign Loading Integration**: Creature database must load correctly
+
    - Mitigation: Add error handling and fallback
    - Mitigation: Test with and without creatures_file
 
@@ -649,10 +850,12 @@ Visual verification in-game
 ### Medium Risk Items
 
 1. **RON File Syntax**: Large creatures.ron file prone to syntax errors
+
    - Mitigation: Use automated RON validation
    - Mitigation: Build incrementally, test often
 
 2. **ID Collisions**: Risk of duplicate creature IDs
+
    - Mitigation: Follow strict ID assignment table
    - Mitigation: Validation script to check for duplicates
 
@@ -663,6 +866,7 @@ Visual verification in-game
 ### Low Risk Items
 
 1. **Performance Impact**: Creature loading adds initialization time
+
    - Mitigation: Already tested in procedural mesh implementation
    - Mitigation: Caching system in place
 
@@ -679,6 +883,7 @@ Visual verification in-game
 5. **Phase 5** (Documentation): Document implementation and inventory
 
 **Estimated Effort**:
+
 - Phase 1: 2-3 hours (file consolidation and ID assignment)
 - Phase 2: 1 hour (update visual_id fields)
 - Phase 3: 2-4 hours (domain changes + data updates)

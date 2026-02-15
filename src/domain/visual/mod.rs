@@ -108,6 +108,12 @@ use crate::domain::types::CreatureId;
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshDefinition {
+    /// Optional name for the mesh (e.g., "left_leg", "head", "torso")
+    ///
+    /// Used for debugging, editor display, and mesh identification.
+    #[serde(default)]
+    pub name: Option<String>,
+
     /// Vertex positions as [x, y, z] coordinates
     pub vertices: Vec<[f32; 3]>,
 
@@ -487,6 +493,7 @@ mod tests {
 
     fn create_test_triangle_mesh() -> MeshDefinition {
         MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
