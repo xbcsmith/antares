@@ -48,11 +48,15 @@
 //! ```
 
 pub mod animation;
+pub mod animation_state_machine;
+pub mod blend_tree;
 pub mod creature_database;
 pub mod creature_variations;
 pub mod lod;
 pub mod mesh_validation;
 pub mod performance;
+pub mod skeletal_animation;
+pub mod skeleton;
 pub mod template_metadata;
 pub mod texture_atlas;
 

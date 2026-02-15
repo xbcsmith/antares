@@ -19,6 +19,7 @@ pub mod dialogue_visuals;
 pub mod events;
 pub mod furniture_rendering;
 pub mod hud;
+pub mod ik;
 pub mod inn_ui;
 pub mod input;
 pub mod lod;
