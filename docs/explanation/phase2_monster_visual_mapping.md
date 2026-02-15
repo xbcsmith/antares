@@ -24,27 +24,27 @@ Phase 2 implements the monster-to-creature visual mapping system for the tutoria
 
 All 11 tutorial campaign monsters have been mapped to existing creature visual definitions:
 
-| Monster ID | Monster Name     | Creature ID | Creature Name   | Notes                    |
-|------------|------------------|-------------|-----------------|--------------------------|
-| 1          | Goblin           | 1           | Goblin          | Direct match             |
-| 2          | Kobold           | 3           | Kobold          | Different IDs            |
-| 3          | Giant Rat        | 4           | GiantRat        | Different IDs            |
-| 10         | Orc              | 7           | Orc             | Different IDs            |
-| 11         | Skeleton         | 5           | Skeleton        | Different IDs            |
-| 12         | Wolf             | 2           | Wolf            | Different IDs            |
-| 20         | Ogre             | 8           | Ogre            | Different IDs            |
-| 21         | Zombie           | 6           | Zombie          | Different IDs            |
-| 22         | Fire Elemental   | 9           | FireElemental   | Different IDs            |
-| 30         | Dragon           | 30          | Dragon          | Direct match             |
-| 31         | Lich             | 10          | Lich            | Different IDs            |
+| Monster ID | Monster Name   | Creature ID | Creature Name | Notes       |
+| ---------- | -------------- | ----------- | ------------- | ----------- |
+| 1          | Goblin         | 1           | Goblin        | Exact match |
+| 2          | Kobold         | 2           | Kobold        | Exact match |
+| 3          | Giant Rat      | 3           | GiantRat      | Exact match |
+| 10         | Orc            | 10          | Orc           | Exact match |
+| 11         | Skeleton       | 11          | Skeleton      | Exact match |
+| 12         | Wolf           | 12          | Wolf          | Exact match |
+| 20         | Ogre           | 20          | Ogre          | Exact match |
+| 21         | Zombie         | 21          | Zombie        | Exact match |
+| 22         | Fire Elemental | 22          | FireElemental | Exact match |
+| 30         | Dragon         | 30          | Dragon        | Exact match |
+| 31         | Lich           | 31          | Lich          | Exact match |
 
 ### Key Findings
 
-1. **ID Mismatch Pattern**: Only 2 monsters (Goblin and Dragon) have matching IDs with their creature definitions. This is expected and does not indicate an error.
+1. **Perfect 1:1 Mapping**: All 11 monsters have exact ID matches with their corresponding creatures (monster ID = creature ID). This 1:1 mapping strategy provides maximum clarity and maintainability.
 
 2. **Complete Coverage**: All 11 tutorial monsters now have valid `visual_id` references pointing to existing creatures in the creature database.
 
-3. **No Missing Visuals**: Unlike the initial plan assumption, no new creature mesh files were needed - all required creatures already existed in the database.
+3. **No Missing Visuals**: All required creatures already existed in the database from Phase 1, enabling immediate implementation without requiring new creature mesh creation.
 
 ### Changes Made
 
@@ -111,6 +111,7 @@ cargo nextest run --test tutorial_monster_creature_mapping
 **Results**: 4/4 tests passed
 
 All tests validate:
+
 - Monster definitions load successfully
 - All monsters have visual_id set
 - All visual_id references point to existing creatures
@@ -121,14 +122,15 @@ All tests validate:
 
 The tutorial campaign creature database includes additional variant creatures for future expansion:
 
-| Creature ID | Creature Name      | Potential Use Case              |
-|-------------|--------------------|---------------------------------|
-| 11          | SkeletonWarrior    | Elite skeleton encounters       |
-| 12          | DyingGoblin        | Wounded/fleeing goblin state    |
-| 31          | RedDragon          | Fire dragon variant             |
-| 32          | (if exists)        | Additional dragon variant       |
+| Creature ID | Creature Name   | Potential Use Case           |
+| ----------- | --------------- | ---------------------------- |
+| 32          | RedDragon       | Fire dragon variant          |
+| 33          | PyramidDragon   | Ancient dragon variant       |
+| 151         | DyingGoblin     | Wounded/fleeing goblin state |
+| 152         | SkeletonWarrior | Elite skeleton encounters    |
+| 153         | EvilLich        | Lich boss encounters         |
 
-**Recommendation**: These variants are available for future monster definitions but are not currently mapped to any tutorial monsters.
+**Recommendation**: These variants are available for future monster definitions but are not currently mapped to any tutorial monsters. When implementing elite or boss variants, create new monster definitions with enhanced stats and assign their `visual_id` to the appropriate variant creature ID.
 
 ## Architecture Compliance
 

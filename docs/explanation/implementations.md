@@ -292,19 +292,21 @@ Phase 2 implements the monster-to-creature visual mapping system for the tutoria
 
 ### Monster-to-Creature Mapping Table
 
-| Monster ID | Monster Name   | Creature ID | Creature Name |
-| ---------- | -------------- | ----------- | ------------- |
-| 1          | Goblin         | 1           | Goblin        |
-| 2          | Kobold         | 3           | Kobold        |
-| 3          | Giant Rat      | 4           | GiantRat      |
-| 10         | Orc            | 7           | Orc           |
-| 11         | Skeleton       | 5           | Skeleton      |
-| 12         | Wolf           | 2           | Wolf          |
-| 20         | Ogre           | 8           | Ogre          |
-| 21         | Zombie         | 6           | Zombie        |
-| 22         | Fire Elemental | 9           | FireElemental |
-| 30         | Dragon         | 30          | Dragon        |
-| 31         | Lich           | 10          | Lich          |
+All tutorial monsters use 1:1 exact ID matching with their creature visuals:
+
+| Monster ID | Monster Name   | Creature ID | Creature Name | Strategy    |
+| ---------- | -------------- | ----------- | ------------- | ----------- |
+| 1          | Goblin         | 1           | Goblin        | Exact match |
+| 2          | Kobold         | 2           | Kobold        | Exact match |
+| 3          | Giant Rat      | 3           | GiantRat      | Exact match |
+| 10         | Orc            | 10          | Orc           | Exact match |
+| 11         | Skeleton       | 11          | Skeleton      | Exact match |
+| 12         | Wolf           | 12          | Wolf          | Exact match |
+| 20         | Ogre           | 20          | Ogre          | Exact match |
+| 21         | Zombie         | 21          | Zombie        | Exact match |
+| 22         | Fire Elemental | 22          | FireElemental | Exact match |
+| 30         | Dragon         | 30          | Dragon        | Exact match |
+| 31         | Lich           | 31          | Lich          | Exact match |
 
 ### Components
 
@@ -373,10 +375,11 @@ cargo nextest run --test tutorial_monster_creature_mapping
 
 ### Files Modified
 
-- `campaigns/tutorial/data/monsters.ron` - Added visual_id to all monsters
-- `src/domain/combat/database.rs` - Added 2 unit tests
-- `tests/tutorial_monster_creature_mapping.rs` - Created 4 integration tests (NEW)
-- `docs/explanation/phase2_monster_visual_mapping.md` - Phase documentation (NEW)
+- `campaigns/tutorial/data/monsters.ron` - Added visual_id to all monsters (1:1 mapping)
+- `src/domain/combat/database.rs` - Unit test for visual_id validation
+- `tests/tutorial_monster_creature_mapping.rs` - 4 integration tests (NEW)
+- `docs/explanation/phase2_monster_visual_mapping.md` - Phase documentation (UPDATED)
+- `docs/reference/monster_creature_mapping_reference.md` - Mapping reference (NEW)
 
 ### Success Criteria - All Met ✅
 
