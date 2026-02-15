@@ -281,6 +281,113 @@
 
 ---
 
+## Tutorial Campaign Procedural Mesh Integration - Phase 2: Monster Visual Mapping
+
+**Status**: ✅ Complete
+**Date**: 2025-01-XX
+
+### Overview
+
+Phase 2 implements the monster-to-creature visual mapping system for the tutorial campaign. All 11 tutorial monsters now have `visual_id` fields linking them to their 3D procedural mesh representations.
+
+### Monster-to-Creature Mapping Table
+
+| Monster ID | Monster Name   | Creature ID | Creature Name |
+| ---------- | -------------- | ----------- | ------------- |
+| 1          | Goblin         | 1           | Goblin        |
+| 2          | Kobold         | 3           | Kobold        |
+| 3          | Giant Rat      | 4           | GiantRat      |
+| 10         | Orc            | 7           | Orc           |
+| 11         | Skeleton       | 5           | Skeleton      |
+| 12         | Wolf           | 2           | Wolf          |
+| 20         | Ogre           | 8           | Ogre          |
+| 21         | Zombie         | 6           | Zombie        |
+| 22         | Fire Elemental | 9           | FireElemental |
+| 30         | Dragon         | 30          | Dragon        |
+| 31         | Lich           | 10          | Lich          |
+
+### Components
+
+#### 1. Monster Definitions Updated (`campaigns/tutorial/data/monsters.ron`)
+
+Added `visual_id` field to all 11 monsters:
+
+```ron
+(
+    id: 1,
+    name: "Goblin",
+    // ... other fields ...
+    visual_id: Some(1),  // Links to Goblin creature
+    conditions: Normal,
+    active_conditions: [],
+    has_acted: false,
+)
+```
+
+#### 2. Unit Tests (`src/domain/combat/database.rs`)
+
+- `test_monster_visual_id_parsing`: Validates visual_id field parsing
+- `test_load_tutorial_monsters_visual_ids`: Validates all 11 monster mappings
+
+#### 3. Integration Tests (`tests/tutorial_monster_creature_mapping.rs`)
+
+- `test_tutorial_monster_creature_mapping_complete`: Validates all mappings end-to-end
+- `test_all_tutorial_monsters_have_visuals`: Ensures no missing visual_id fields
+- `test_no_broken_creature_references`: Detects broken references
+- `test_creature_database_has_expected_creatures`: Validates creature existence
+
+### Testing
+
+```bash
+# Unit tests
+cargo nextest run test_monster_visual_id_parsing
+cargo nextest run test_load_tutorial_monsters_visual_ids
+
+# Integration tests
+cargo nextest run --test tutorial_monster_creature_mapping
+```
+
+**Results**: 6/6 tests passed (2 unit + 4 integration)
+
+### Quality Checks
+
+- ✅ `cargo fmt --all` - All code formatted
+- ✅ `cargo check --all-targets --all-features` - Zero errors
+- ✅ `cargo clippy --all-targets --all-features -- -D warnings` - Zero warnings
+- ✅ `cargo nextest run --all-features` - 2325/2325 tests passed
+
+### Architecture Compliance
+
+- ✅ Used `CreatureId` type alias (not raw `u32`)
+- ✅ Used `Option<CreatureId>` for optional visual reference
+- ✅ RON format for data files per architecture.md Section 7.1-7.2
+- ✅ Monster struct matches architecture.md Section 4.4
+
+### Deliverables
+
+- [x] All 11 monsters have `visual_id` populated
+- [x] Monster-to-creature mapping table documented
+- [x] Comprehensive test suite (6 tests)
+- [x] Zero broken creature references
+- [x] Phase 2 documentation created
+
+### Files Modified
+
+- `campaigns/tutorial/data/monsters.ron` - Added visual_id to all monsters
+- `src/domain/combat/database.rs` - Added 2 unit tests
+- `tests/tutorial_monster_creature_mapping.rs` - Created 4 integration tests (NEW)
+- `docs/explanation/phase2_monster_visual_mapping.md` - Phase documentation (NEW)
+
+### Success Criteria - All Met ✅
+
+- [x] Every monster has valid `visual_id` value
+- [x] All creature IDs exist in creature database
+- [x] Monster loading completes without errors
+- [x] Visual mappings documented and verifiable
+- [x] Tests validate end-to-end integration
+
+---
+
 ## SDK Campaign Builder Clippy Remediation
 
 ### Overview
