@@ -42,7 +42,7 @@ Enhanced `CreaturesEditorState` with Phase 2 fields:
 ```rust
 pub struct CreaturesEditorState {
     // ... Phase 1 fields ...
-    
+
     // Phase 2: Asset Editor UI
     pub show_primitive_dialog: bool,
     pub primitive_type: PrimitiveType,
@@ -175,7 +175,7 @@ pub camera_distance: f32,    // Zoom level (1.0 - 10.0)
 - ✅ Keep mesh name checkbox
 - ✅ Generate and Cancel buttons
 
-**Implementation**: 
+**Implementation**:
 - `show_primitive_replacement_dialog()` - UI dialog
 - `apply_primitive_replacement()` - Mesh generation and replacement logic
 
@@ -596,7 +596,7 @@ The preview framework is ready for Bevy integration in future iterations. Valida
 
 ---
 
-**Implementation Date**: January 2025  
-**Engineer**: AI Agent (following AGENTS.md rules)  
-**Review Status**: Pending human review  
+**Implementation Date**: January 2025
+**Engineer**: AI Agent (following AGENTS.md rules)
+**Review Status**: Pending human review
 **Next Phase**: Phase 3 - Template System Integration

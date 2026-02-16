@@ -50,6 +50,7 @@ pub mod quest_editor;
 pub mod races_editor;
 pub mod spells_editor;
 pub mod template_browser;
+pub mod template_metadata;
 pub mod templates;
 pub mod test_play;
 pub mod test_utils;

@@ -9,9 +9,10 @@
 use crate::primitive_generators::{
     generate_cone, generate_cube, generate_cylinder, generate_sphere,
 };
+use crate::template_metadata::{
+    Complexity, TemplateCategory, TemplateGenerator, TemplateMetadata, TemplateRegistry,
+};
 use antares::domain::visual::{CreatureDefinition, MeshTransform};
-
-type TemplateGenerator = fn(&str, u32) -> CreatureDefinition;
 
 /// Generates a simple humanoid creature using primitives
 ///
@@ -324,34 +325,142 @@ pub fn generate_dragon_template(name: &str, id: u32) -> CreatureDefinition {
     }
 }
 
-/// Returns a list of all available creature templates
+/// Returns a list of all available creature templates (legacy)
 ///
 /// # Returns
 ///
 /// A vector of tuples containing (template_name, generator_function)
+///
+/// # Note
+///
+/// This function is deprecated. Use `initialize_template_registry()` instead
+/// to get a registry with full metadata support.
 pub fn available_templates() -> Vec<(&'static str, TemplateGenerator)> {
     vec![
-        (
-            "Humanoid",
-            generate_humanoid_template as fn(&str, u32) -> CreatureDefinition,
-        ),
+        ("Humanoid", generate_humanoid_template as TemplateGenerator),
         (
             "Quadruped",
-            generate_quadruped_template as fn(&str, u32) -> CreatureDefinition,
+            generate_quadruped_template as TemplateGenerator,
         ),
         (
             "Flying Creature",
-            generate_flying_template as fn(&str, u32) -> CreatureDefinition,
+            generate_flying_template as TemplateGenerator,
         ),
-        (
-            "Slime/Blob",
-            generate_slime_template as fn(&str, u32) -> CreatureDefinition,
-        ),
-        (
-            "Dragon",
-            generate_dragon_template as fn(&str, u32) -> CreatureDefinition,
-        ),
+        ("Slime/Blob", generate_slime_template as TemplateGenerator),
+        ("Dragon", generate_dragon_template as TemplateGenerator),
     ]
+}
+
+/// Initializes a template registry with all available creature templates
+///
+/// This function populates a `TemplateRegistry` with all built-in creature
+/// templates, including rich metadata for browsing, filtering, and searching.
+///
+/// # Returns
+///
+/// A fully populated `TemplateRegistry` ready for use in the template browser UI
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::creature_templates::initialize_template_registry;
+///
+/// let registry = initialize_template_registry();
+/// assert!(registry.len() > 0);
+///
+/// // Search for templates
+/// let humanoids = registry.search("humanoid");
+/// assert!(!humanoids.is_empty());
+/// ```
+pub fn initialize_template_registry() -> TemplateRegistry {
+    let mut registry = TemplateRegistry::new();
+
+    // Humanoid template
+    let humanoid_metadata = TemplateMetadata {
+        id: "humanoid_basic".to_string(),
+        name: "Humanoid".to_string(),
+        category: TemplateCategory::Humanoid,
+        complexity: Complexity::Beginner,
+        mesh_count: 6,
+        description: "Basic bipedal humanoid with body, head, arms, and legs. Perfect starting point for knights, mages, and NPCs.".to_string(),
+        tags: vec!["humanoid".to_string(), "biped".to_string(), "basic".to_string()],
+    };
+    let humanoid_example = generate_humanoid_template("Example Humanoid", 0);
+    registry.register(
+        humanoid_metadata,
+        humanoid_example,
+        generate_humanoid_template as TemplateGenerator,
+    );
+
+    // Quadruped template
+    let quadruped_metadata = TemplateMetadata {
+        id: "quadruped_basic".to_string(),
+        name: "Quadruped".to_string(),
+        category: TemplateCategory::Creature,
+        complexity: Complexity::Beginner,
+        mesh_count: 6,
+        description: "Four-legged creature with elongated body. Great for wolves, bears, dogs, and other animals.".to_string(),
+        tags: vec!["quadruped".to_string(), "animal".to_string(), "four-legged".to_string()],
+    };
+    let quadruped_example = generate_quadruped_template("Example Quadruped", 0);
+    registry.register(
+        quadruped_metadata,
+        quadruped_example,
+        generate_quadruped_template as TemplateGenerator,
+    );
+
+    // Flying creature template
+    let flying_metadata = TemplateMetadata {
+        id: "flying_basic".to_string(),
+        name: "Flying Creature".to_string(),
+        category: TemplateCategory::Creature,
+        complexity: Complexity::Intermediate,
+        mesh_count: 4,
+        description: "Winged creature with body, beak, and wings. Ideal for birds, bats, and flying monsters.".to_string(),
+        tags: vec!["flying".to_string(), "winged".to_string(), "bird".to_string()],
+    };
+    let flying_example = generate_flying_template("Example Bird", 0);
+    registry.register(
+        flying_metadata,
+        flying_example,
+        generate_flying_template as TemplateGenerator,
+    );
+
+    // Slime template
+    let slime_metadata = TemplateMetadata {
+        id: "slime_basic".to_string(),
+        name: "Slime/Blob".to_string(),
+        category: TemplateCategory::Creature,
+        complexity: Complexity::Beginner,
+        mesh_count: 3,
+        description: "Simple blob creature with squashed sphere body and eyes. Perfect for slimes, oozes, and amorphous monsters.".to_string(),
+        tags: vec!["slime".to_string(), "blob".to_string(), "ooze".to_string(), "simple".to_string()],
+    };
+    let slime_example = generate_slime_template("Example Slime", 0);
+    registry.register(
+        slime_metadata,
+        slime_example,
+        generate_slime_template as TemplateGenerator,
+    );
+
+    // Dragon template
+    let dragon_metadata = TemplateMetadata {
+        id: "dragon_basic".to_string(),
+        name: "Dragon".to_string(),
+        category: TemplateCategory::Creature,
+        complexity: Complexity::Advanced,
+        mesh_count: 11,
+        description: "Complex dragon creature with body, head, horns, wings, tail, and legs. Advanced template for large boss monsters.".to_string(),
+        tags: vec!["dragon".to_string(), "boss".to_string(), "winged".to_string(), "complex".to_string()],
+    };
+    let dragon_example = generate_dragon_template("Example Dragon", 0);
+    registry.register(
+        dragon_metadata,
+        dragon_example,
+        generate_dragon_template as TemplateGenerator,
+    );
+
+    registry
 }
 
 #[cfg(test)]
@@ -428,5 +537,92 @@ mod tests {
                 "Mesh and transform counts must match"
             );
         }
+    }
+
+    #[test]
+    fn test_initialize_template_registry() {
+        let registry = initialize_template_registry();
+        assert_eq!(registry.len(), 5);
+        assert!(!registry.is_empty());
+    }
+
+    #[test]
+    fn test_registry_contains_all_templates() {
+        let registry = initialize_template_registry();
+
+        assert!(registry.get("humanoid_basic").is_some());
+        assert!(registry.get("quadruped_basic").is_some());
+        assert!(registry.get("flying_basic").is_some());
+        assert!(registry.get("slime_basic").is_some());
+        assert!(registry.get("dragon_basic").is_some());
+    }
+
+    #[test]
+    fn test_registry_templates_by_category() {
+        let registry = initialize_template_registry();
+
+        let humanoids = registry.by_category(TemplateCategory::Humanoid);
+        assert_eq!(humanoids.len(), 1);
+
+        let creatures = registry.by_category(TemplateCategory::Creature);
+        assert_eq!(creatures.len(), 4);
+    }
+
+    #[test]
+    fn test_registry_templates_by_complexity() {
+        let registry = initialize_template_registry();
+
+        let beginner = registry.by_complexity(Complexity::Beginner);
+        assert_eq!(beginner.len(), 3); // humanoid, quadruped, slime
+
+        let intermediate = registry.by_complexity(Complexity::Intermediate);
+        assert_eq!(intermediate.len(), 1); // flying
+
+        let advanced = registry.by_complexity(Complexity::Advanced);
+        assert_eq!(advanced.len(), 1); // dragon
+    }
+
+    #[test]
+    fn test_registry_search() {
+        let registry = initialize_template_registry();
+
+        let results = registry.search("humanoid");
+        assert_eq!(results.len(), 1);
+
+        let results = registry.search("dragon");
+        assert_eq!(results.len(), 1);
+
+        let results = registry.search("winged");
+        assert_eq!(results.len(), 2); // flying and dragon
+    }
+
+    #[test]
+    fn test_registry_generate_creature() {
+        let registry = initialize_template_registry();
+
+        let result = registry.generate("humanoid_basic", "Test Knight", 42);
+        assert!(result.is_ok());
+
+        let creature = result.unwrap();
+        assert_eq!(creature.name, "Test Knight");
+        assert_eq!(creature.id, 42);
+        assert_eq!(creature.meshes.len(), 6);
+    }
+
+    #[test]
+    fn test_registry_metadata_accuracy() {
+        let registry = initialize_template_registry();
+
+        let humanoid = registry.get("humanoid_basic").unwrap();
+        assert_eq!(
+            humanoid.metadata.mesh_count,
+            humanoid.example_creature.meshes.len()
+        );
+
+        let dragon = registry.get("dragon_basic").unwrap();
+        assert_eq!(
+            dragon.metadata.mesh_count,
+            dragon.example_creature.meshes.len()
+        );
     }
 }
