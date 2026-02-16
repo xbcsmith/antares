@@ -48,6 +48,35 @@ pub struct CreaturesEditorState {
     pub selected_registry_entry: Option<usize>,
     pub registry_sort_by: RegistrySortBy,
     pub show_validation_panel: bool,
+
+    // Phase 2: Asset Editor UI
+    pub show_primitive_dialog: bool,
+    pub primitive_type: PrimitiveType,
+    pub primitive_size: f32,
+    pub primitive_segments: u32,
+    pub primitive_rings: u32,
+    pub primitive_use_current_color: bool,
+    pub primitive_custom_color: [f32; 4],
+    pub primitive_preserve_transform: bool,
+    pub primitive_keep_name: bool,
+    pub mesh_visibility: Vec<bool>,
+    pub show_grid: bool,
+    pub show_wireframe: bool,
+    pub show_normals: bool,
+    pub show_axes: bool,
+    pub background_color: [f32; 4],
+    pub camera_distance: f32,
+    pub uniform_scale: bool,
+}
+
+/// Primitive type for mesh generation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimitiveType {
+    Cube,
+    Sphere,
+    Cylinder,
+    Pyramid,
+    Cone,
 }
 
 /// Sort order for registry list
@@ -80,6 +109,23 @@ impl Default for CreaturesEditorState {
             selected_registry_entry: None,
             registry_sort_by: RegistrySortBy::Id,
             show_validation_panel: false,
+            show_primitive_dialog: false,
+            primitive_type: PrimitiveType::Cube,
+            primitive_size: 1.0,
+            primitive_segments: 16,
+            primitive_rings: 16,
+            primitive_use_current_color: true,
+            primitive_custom_color: [0.5, 0.5, 0.5, 1.0],
+            primitive_preserve_transform: true,
+            primitive_keep_name: true,
+            mesh_visibility: Vec::new(),
+            show_grid: true,
+            show_wireframe: false,
+            show_normals: false,
+            show_axes: true,
+            background_color: [0.2, 0.2, 0.25, 1.0],
+            camera_distance: 5.0,
+            uniform_scale: true,
         }
     }
 }
@@ -626,22 +672,518 @@ impl CreaturesEditorState {
 
         ui.separator();
 
-        // Two-column layout: properties on left, preview on right
-        ui.columns(2, |columns| {
-            self.show_creature_properties(&mut columns[0]);
-            self.show_mesh_list_and_editor(&mut columns[1]);
+        // Phase 2: Three-panel layout: Mesh List | 3D Preview | Mesh Properties
+        egui::SidePanel::left("mesh_list_panel")
+            .resizable(true)
+            .default_width(250.0)
+            .min_width(200.0)
+            .max_width(400.0)
+            .show_inside(ui, |ui| {
+                self.show_mesh_list_panel(ui, unsaved_changes);
+            });
+
+        egui::SidePanel::right("mesh_properties_panel")
+            .resizable(true)
+            .default_width(350.0)
+            .min_width(300.0)
+            .max_width(500.0)
+            .show_inside(ui, |ui| {
+                self.show_mesh_properties_panel(ui, unsaved_changes);
+            });
+
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            self.show_preview_panel(ui);
         });
+
+        // Show primitive replacement dialog if active
+        if self.show_primitive_dialog {
+            self.show_primitive_replacement_dialog(ui.ctx(), unsaved_changes);
+        }
+
+        // Bottom panel for creature-level properties
+        egui::TopBottomPanel::bottom("creature_properties_bottom")
+            .resizable(false)
+            .min_height(100.0)
+            .show_inside(ui, |ui| {
+                self.show_creature_level_properties(ui, unsaved_changes);
+            });
 
         result_message
     }
 
-    fn show_creature_properties(&mut self, ui: &mut egui::Ui) {
+    /// Show mesh list panel (left, 250px) - Phase 2.1
+    fn show_mesh_list_panel(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
+        ui.heading("Meshes");
+
+        // Mesh list toolbar
+        ui.horizontal(|ui| {
+            if ui.button("➕ Add Primitive").clicked() {
+                self.show_primitive_dialog = true;
+                self.primitive_type = PrimitiveType::Cube;
+                self.primitive_size = 1.0;
+                self.primitive_use_current_color = true;
+                self.primitive_preserve_transform = false;
+                self.primitive_keep_name = false;
+            }
+
+            if let Some(mesh_idx) = self.selected_mesh_index {
+                if ui.button("📋 Duplicate").clicked() {
+                    if mesh_idx < self.edit_buffer.meshes.len() {
+                        let mesh = self.edit_buffer.meshes[mesh_idx].clone();
+                        let transform = self.edit_buffer.mesh_transforms[mesh_idx];
+                        self.edit_buffer.meshes.push(mesh);
+                        self.edit_buffer.mesh_transforms.push(transform);
+                        self.mesh_visibility.push(true);
+                        *unsaved_changes = true;
+                        self.preview_dirty = true;
+                    }
+                }
+
+                if ui.button("🗑 Delete").clicked() {
+                    if mesh_idx < self.edit_buffer.meshes.len() {
+                        self.edit_buffer.meshes.remove(mesh_idx);
+                        self.edit_buffer.mesh_transforms.remove(mesh_idx);
+                        if mesh_idx < self.mesh_visibility.len() {
+                            self.mesh_visibility.remove(mesh_idx);
+                        }
+                        self.selected_mesh_index = None;
+                        self.mesh_edit_buffer = None;
+                        self.mesh_transform_buffer = None;
+                        *unsaved_changes = true;
+                        self.preview_dirty = true;
+                    }
+                }
+            }
+        });
+
+        ui.separator();
+
+        // Ensure mesh_visibility matches mesh count
+        while self.mesh_visibility.len() < self.edit_buffer.meshes.len() {
+            self.mesh_visibility.push(true);
+        }
+        self.mesh_visibility.truncate(self.edit_buffer.meshes.len());
+
+        // Mesh list
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            if self.edit_buffer.meshes.is_empty() {
+                ui.label("No meshes. Click 'Add Primitive' to get started.");
+            } else {
+                for (idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        // Visibility checkbox
+                        let mut visible = self.mesh_visibility.get(idx).copied().unwrap_or(true);
+                        if ui.checkbox(&mut visible, "").changed() {
+                            if idx < self.mesh_visibility.len() {
+                                self.mesh_visibility[idx] = visible;
+                            }
+                            self.preview_dirty = true;
+                        }
+
+                        // Color indicator dot
+                        let color = egui::Color32::from_rgba_premultiplied(
+                            (mesh.color[0] * 255.0) as u8,
+                            (mesh.color[1] * 255.0) as u8,
+                            (mesh.color[2] * 255.0) as u8,
+                            (mesh.color[3] * 255.0) as u8,
+                        );
+                        ui.colored_label(color, "●");
+
+                        // Mesh name and info
+                        let is_selected = self.selected_mesh_index == Some(idx);
+                        let default_name = format!("unnamed_mesh_{}", idx);
+                        let name = mesh.name.as_deref().unwrap_or(&default_name);
+                        let label = format!("{} ({} verts)", name, mesh.vertices.len());
+
+                        if ui.selectable_label(is_selected, label).clicked() {
+                            self.selected_mesh_index = Some(idx);
+                            self.mesh_edit_buffer = Some(mesh.clone());
+                            self.mesh_transform_buffer =
+                                Some(self.edit_buffer.mesh_transforms[idx]);
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    /// Show 3D preview panel (center, flex) - Phase 2.2
+    fn show_preview_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Preview");
+
+        // Preview controls overlay
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.show_grid, "Grid");
+            ui.checkbox(&mut self.show_wireframe, "Wireframe");
+            ui.checkbox(&mut self.show_normals, "Normals");
+            ui.checkbox(&mut self.show_axes, "Axes");
+
+            if ui.button("🔄 Reset Camera").clicked() {
+                self.camera_distance = 5.0;
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Camera Distance:");
+            ui.add(
+                egui::Slider::new(&mut self.camera_distance, 1.0..=10.0)
+                    .text("units")
+                    .show_value(true),
+            );
+
+            ui.label("Background:");
+            ui.color_edit_button_rgba_unmultiplied(&mut self.background_color);
+        });
+
+        ui.separator();
+
+        // Preview area placeholder
+        let (rect, _response) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), ui.available_height() - 20.0),
+            egui::Sense::click_and_drag(),
+        );
+
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            egui::Color32::from_rgba_premultiplied(
+                (self.background_color[0] * 255.0) as u8,
+                (self.background_color[1] * 255.0) as u8,
+                (self.background_color[2] * 255.0) as u8,
+                (self.background_color[3] * 255.0) as u8,
+            ),
+        );
+
+        // Draw simple placeholder text
+        let center = rect.center();
+        ui.painter().text(
+            center,
+            egui::Align2::CENTER_CENTER,
+            "3D Preview (Bevy integration pending)",
+            egui::FontId::proportional(16.0),
+            egui::Color32::GRAY,
+        );
+
+        // TODO: Integrate actual preview_renderer.rs here
+        // - Left-drag: Rotate camera
+        // - Right-drag: Pan camera
+        // - Scroll: Zoom
+        // - Double-click: Focus on selected mesh
+        // - Highlight selected mesh
+        // - Show mesh coordinate axes when selected
+        // - Display bounding box
+    }
+
+    /// Show mesh properties panel (right, 350px) - Phase 2.3
+    fn show_mesh_properties_panel(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
+        if let Some(mesh_idx) = self.selected_mesh_index {
+            if mesh_idx >= self.edit_buffer.meshes.len() {
+                ui.label("Invalid mesh selection");
+                return;
+            }
+
+            ui.heading(format!("Mesh {} Properties", mesh_idx));
+            ui.separator();
+
+            // Mesh Info Section
+            ui.collapsing("Mesh Info", |ui| {
+                egui::Grid::new("mesh_info_grid")
+                    .num_columns(2)
+                    .spacing([10.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label("Name:");
+                        let mut name = self.edit_buffer.meshes[mesh_idx]
+                            .name
+                            .clone()
+                            .unwrap_or_default();
+                        if ui.text_edit_singleline(&mut name).changed() {
+                            self.edit_buffer.meshes[mesh_idx].name =
+                                if name.is_empty() { None } else { Some(name) };
+                            if let Some(buffer) = &mut self.mesh_edit_buffer {
+                                buffer.name = self.edit_buffer.meshes[mesh_idx].name.clone();
+                            }
+                            *unsaved_changes = true;
+                        }
+                        ui.end_row();
+
+                        ui.label("Color:");
+                        if ui
+                            .color_edit_button_rgba_unmultiplied(
+                                &mut self.edit_buffer.meshes[mesh_idx].color,
+                            )
+                            .changed()
+                        {
+                            if let Some(buffer) = &mut self.mesh_edit_buffer {
+                                buffer.color = self.edit_buffer.meshes[mesh_idx].color;
+                            }
+                            *unsaved_changes = true;
+                            self.preview_dirty = true;
+                        }
+                        ui.end_row();
+
+                        ui.label("Vertices:");
+                        ui.label(format!(
+                            "{}",
+                            self.edit_buffer.meshes[mesh_idx].vertices.len()
+                        ));
+                        ui.end_row();
+
+                        ui.label("Triangles:");
+                        ui.label(format!(
+                            "{}",
+                            self.edit_buffer.meshes[mesh_idx].indices.len() / 3
+                        ));
+                        ui.end_row();
+                    });
+            });
+
+            // Transform Section
+            if let Some(transform) = self.mesh_transform_buffer.as_mut() {
+                ui.collapsing("Transform", |ui| {
+                    egui::Grid::new("mesh_transform_grid")
+                        .num_columns(2)
+                        .spacing([10.0, 8.0])
+                        .show(ui, |ui| {
+                            ui.label("Translation:");
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label("X:");
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut transform.translation[0])
+                                                .speed(0.01)
+                                                .range(-5.0..=5.0),
+                                        )
+                                        .changed()
+                                    {
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
+                                        *unsaved_changes = true;
+                                        self.preview_dirty = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Y:");
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut transform.translation[1])
+                                                .speed(0.01)
+                                                .range(-5.0..=5.0),
+                                        )
+                                        .changed()
+                                    {
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
+                                        *unsaved_changes = true;
+                                        self.preview_dirty = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Z:");
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut transform.translation[2])
+                                                .speed(0.01)
+                                                .range(-5.0..=5.0),
+                                        )
+                                        .changed()
+                                    {
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
+                                        *unsaved_changes = true;
+                                        self.preview_dirty = true;
+                                    }
+                                });
+                            });
+                            ui.end_row();
+
+                            ui.label("Rotation (deg):");
+                            ui.vertical(|ui| {
+                                let mut pitch_deg = transform.rotation[0].to_degrees();
+                                let mut yaw_deg = transform.rotation[1].to_degrees();
+                                let mut roll_deg = transform.rotation[2].to_degrees();
+
+                                ui.horizontal(|ui| {
+                                    ui.label("Pitch:");
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut pitch_deg)
+                                                .speed(1.0)
+                                                .range(0.0..=360.0),
+                                        )
+                                        .changed()
+                                    {
+                                        transform.rotation[0] = pitch_deg.to_radians();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
+                                        *unsaved_changes = true;
+                                        self.preview_dirty = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Yaw:");
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut yaw_deg)
+                                                .speed(1.0)
+                                                .range(0.0..=360.0),
+                                        )
+                                        .changed()
+                                    {
+                                        transform.rotation[1] = yaw_deg.to_radians();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
+                                        *unsaved_changes = true;
+                                        self.preview_dirty = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Roll:");
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut roll_deg)
+                                                .speed(1.0)
+                                                .range(0.0..=360.0),
+                                        )
+                                        .changed()
+                                    {
+                                        transform.rotation[2] = roll_deg.to_radians();
+                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
+                                        *unsaved_changes = true;
+                                        self.preview_dirty = true;
+                                    }
+                                });
+                            });
+                            ui.end_row();
+
+                            ui.label("Scale:");
+                            ui.vertical(|ui| {
+                                ui.checkbox(&mut self.uniform_scale, "Uniform scaling");
+
+                                if self.uniform_scale {
+                                    let mut uniform = transform.scale[0];
+                                    ui.horizontal(|ui| {
+                                        ui.label("XYZ:");
+                                        if ui
+                                            .add(
+                                                egui::DragValue::new(&mut uniform)
+                                                    .speed(0.01)
+                                                    .range(0.01..=10.0),
+                                            )
+                                            .changed()
+                                        {
+                                            transform.scale = [uniform, uniform, uniform];
+                                            self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
+                                            *unsaved_changes = true;
+                                            self.preview_dirty = true;
+                                        }
+                                    });
+                                } else {
+                                    ui.horizontal(|ui| {
+                                        ui.label("X:");
+                                        if ui
+                                            .add(
+                                                egui::DragValue::new(&mut transform.scale[0])
+                                                    .speed(0.01)
+                                                    .range(0.01..=10.0),
+                                            )
+                                            .changed()
+                                        {
+                                            self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
+                                            *unsaved_changes = true;
+                                            self.preview_dirty = true;
+                                        }
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Y:");
+                                        if ui
+                                            .add(
+                                                egui::DragValue::new(&mut transform.scale[1])
+                                                    .speed(0.01)
+                                                    .range(0.01..=10.0),
+                                            )
+                                            .changed()
+                                        {
+                                            self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
+                                            *unsaved_changes = true;
+                                            self.preview_dirty = true;
+                                        }
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Z:");
+                                        if ui
+                                            .add(
+                                                egui::DragValue::new(&mut transform.scale[2])
+                                                    .speed(0.01)
+                                                    .range(0.01..=10.0),
+                                            )
+                                            .changed()
+                                        {
+                                            self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
+                                            *unsaved_changes = true;
+                                            self.preview_dirty = true;
+                                        }
+                                    });
+                                }
+                            });
+                            ui.end_row();
+                        });
+                });
+            }
+
+            // Geometry Section
+            ui.collapsing("Geometry", |ui| {
+                let mesh = &self.edit_buffer.meshes[mesh_idx];
+                ui.label(format!("Vertices: {}", mesh.vertices.len()));
+                ui.label(format!("Triangles: {}", mesh.indices.len() / 3));
+                ui.label(format!(
+                    "Normals: {}",
+                    if mesh.normals.is_some() { "Yes" } else { "No" }
+                ));
+                ui.label(format!(
+                    "UVs: {}",
+                    if mesh.uvs.is_some() { "Yes" } else { "No" }
+                ));
+
+                // TODO: Add View/Edit Table buttons for vertices/indices/normals
+            });
+
+            // Action Buttons
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button("🔄 Replace with Primitive").clicked() {
+                    self.show_primitive_dialog = true;
+                    self.primitive_use_current_color = true;
+                    self.primitive_preserve_transform = true;
+                    self.primitive_keep_name = true;
+                }
+
+                if ui.button("🔍 Validate Mesh").clicked() {
+                    // TODO: Implement mesh validation
+                }
+
+                if ui.button("↺ Reset Transform").clicked() {
+                    self.edit_buffer.mesh_transforms[mesh_idx] = MeshTransform::identity();
+                    self.mesh_transform_buffer = Some(MeshTransform::identity());
+                    *unsaved_changes = true;
+                    self.preview_dirty = true;
+                }
+            });
+        } else {
+            ui.label("Select a mesh to edit its properties");
+        }
+    }
+
+    /// Show creature-level properties (bottom panel) - Phase 2.5
+    fn show_creature_level_properties(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
+        ui.heading("Creature Properties");
+
         egui::Grid::new("creature_properties_grid")
             .num_columns(2)
             .spacing([10.0, 8.0])
             .show(ui, |ui| {
                 ui.label("ID:");
-                ui.add_enabled(false, egui::DragValue::new(&mut self.edit_buffer.id));
+                let category = CreatureCategory::from_id(self.edit_buffer.id);
+                let category_label = format!("{:?}", category);
+                ui.horizontal(|ui| {
+                    ui.add_enabled(false, egui::DragValue::new(&mut self.edit_buffer.id));
+                    ui.label(format!("({})", category_label));
+                });
                 ui.end_row();
 
                 ui.label("Name:");
@@ -649,6 +1191,7 @@ impl CreaturesEditorState {
                     .text_edit_singleline(&mut self.edit_buffer.name)
                     .changed()
                 {
+                    *unsaved_changes = true;
                     self.preview_dirty = true;
                 }
                 ui.end_row();
@@ -656,12 +1199,13 @@ impl CreaturesEditorState {
                 ui.label("Scale:");
                 if ui
                     .add(
-                        egui::DragValue::new(&mut self.edit_buffer.scale)
-                            .speed(0.01)
-                            .range(0.01..=100.0),
+                        egui::Slider::new(&mut self.edit_buffer.scale, 0.1..=5.0)
+                            .text("units")
+                            .logarithmic(true),
                     )
                     .changed()
                 {
+                    *unsaved_changes = true;
                     self.preview_dirty = true;
                 }
                 ui.end_row();
@@ -677,20 +1221,250 @@ impl CreaturesEditorState {
                         } else {
                             self.edit_buffer.color_tint = None;
                         }
+                        *unsaved_changes = true;
                         self.preview_dirty = true;
                     }
 
                     if let Some(tint) = &mut self.edit_buffer.color_tint {
                         if ui.color_edit_button_rgba_unmultiplied(tint).changed() {
+                            *unsaved_changes = true;
                             self.preview_dirty = true;
                         }
                     }
                 });
                 ui.end_row();
             });
+
+        // Validation and file operations
+        ui.separator();
+        ui.horizontal(|ui| {
+            let error_count = 0; // TODO: Implement validation
+            let warning_count = 0;
+            ui.label(format!(
+                "{} errors, {} warnings",
+                error_count, warning_count
+            ));
+
+            if ui.button("Show Issues").clicked() {
+                // TODO: Expand validation panel
+            }
+        });
+
+        ui.horizontal(|ui| {
+            if ui.button("💾 Save Asset").clicked() {
+                // Handled by parent Save button
+            }
+
+            if ui.button("💾 Save As...").clicked() {
+                // TODO: Implement save as dialog
+            }
+
+            if ui.button("📋 Export RON").clicked() {
+                // TODO: Implement RON export to clipboard
+            }
+
+            if ui.button("↺ Revert Changes").clicked() {
+                // TODO: Implement revert from file
+            }
+        });
     }
 
-    fn show_mesh_list_and_editor(&mut self, ui: &mut egui::Ui) {
+    /// Show primitive replacement dialog - Phase 2.4
+    fn show_primitive_replacement_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        unsaved_changes: &mut bool,
+    ) {
+        egui::Window::new("Replace with Primitive")
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.heading("Select Primitive Type");
+
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.primitive_type, PrimitiveType::Cube, "Cube");
+                    ui.selectable_value(&mut self.primitive_type, PrimitiveType::Sphere, "Sphere");
+                    ui.selectable_value(
+                        &mut self.primitive_type,
+                        PrimitiveType::Cylinder,
+                        "Cylinder",
+                    );
+                    ui.selectable_value(
+                        &mut self.primitive_type,
+                        PrimitiveType::Pyramid,
+                        "Pyramid",
+                    );
+                    ui.selectable_value(&mut self.primitive_type, PrimitiveType::Cone, "Cone");
+                });
+
+                ui.separator();
+
+                // Primitive-specific settings
+                match self.primitive_type {
+                    PrimitiveType::Cube => {
+                        ui.label("Cube Settings:");
+                        ui.add(
+                            egui::Slider::new(&mut self.primitive_size, 0.1..=5.0)
+                                .text("Size")
+                                .logarithmic(true),
+                        );
+                    }
+                    PrimitiveType::Sphere => {
+                        ui.label("Sphere Settings:");
+                        ui.add(
+                            egui::Slider::new(&mut self.primitive_size, 0.1..=5.0)
+                                .text("Radius")
+                                .logarithmic(true),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut self.primitive_segments, 3..=64)
+                                .text("Segments"),
+                        );
+                        ui.add(egui::Slider::new(&mut self.primitive_rings, 2..=64).text("Rings"));
+                    }
+                    PrimitiveType::Cylinder => {
+                        ui.label("Cylinder Settings:");
+                        ui.add(
+                            egui::Slider::new(&mut self.primitive_size, 0.1..=5.0)
+                                .text("Radius")
+                                .logarithmic(true),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut self.primitive_segments, 3..=64)
+                                .text("Segments"),
+                        );
+                    }
+                    PrimitiveType::Pyramid => {
+                        ui.label("Pyramid Settings:");
+                        ui.add(
+                            egui::Slider::new(&mut self.primitive_size, 0.1..=5.0)
+                                .text("Base Size")
+                                .logarithmic(true),
+                        );
+                    }
+                    PrimitiveType::Cone => {
+                        ui.label("Cone Settings:");
+                        ui.add(
+                            egui::Slider::new(&mut self.primitive_size, 0.1..=5.0)
+                                .text("Base Radius")
+                                .logarithmic(true),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut self.primitive_segments, 3..=64)
+                                .text("Segments"),
+                        );
+                    }
+                }
+
+                ui.separator();
+
+                ui.label("Color:");
+                ui.checkbox(
+                    &mut self.primitive_use_current_color,
+                    "Use current mesh color",
+                );
+                if !self.primitive_use_current_color {
+                    ui.horizontal(|ui| {
+                        ui.label("Custom:");
+                        ui.color_edit_button_rgba_unmultiplied(&mut self.primitive_custom_color);
+                    });
+                }
+
+                ui.separator();
+
+                ui.label("Options:");
+                ui.checkbox(&mut self.primitive_preserve_transform, "Preserve transform");
+                ui.checkbox(&mut self.primitive_keep_name, "Keep mesh name");
+
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("✓ Generate").clicked() {
+                        self.apply_primitive_replacement(unsaved_changes);
+                        self.show_primitive_dialog = false;
+                    }
+
+                    if ui.button("✕ Cancel").clicked() {
+                        self.show_primitive_dialog = false;
+                    }
+                });
+            });
+    }
+
+    /// Apply primitive replacement to selected mesh or create new mesh
+    fn apply_primitive_replacement(&mut self, unsaved_changes: &mut bool) {
+        use crate::primitive_generators::*;
+
+        // Determine color
+        let color = if self.primitive_use_current_color {
+            if let Some(mesh_idx) = self.selected_mesh_index {
+                if mesh_idx < self.edit_buffer.meshes.len() {
+                    self.edit_buffer.meshes[mesh_idx].color
+                } else {
+                    self.primitive_custom_color
+                }
+            } else {
+                self.primitive_custom_color
+            }
+        } else {
+            self.primitive_custom_color
+        };
+
+        // Generate primitive mesh
+        let mut new_mesh = match self.primitive_type {
+            PrimitiveType::Cube => generate_cube(self.primitive_size, color),
+            PrimitiveType::Sphere => generate_sphere(
+                self.primitive_size,
+                self.primitive_segments,
+                self.primitive_rings,
+                color,
+            ),
+            PrimitiveType::Cylinder => generate_cylinder(
+                self.primitive_size,
+                self.primitive_size * 2.0,
+                self.primitive_segments,
+                color,
+            ),
+            PrimitiveType::Pyramid => generate_pyramid(self.primitive_size, color),
+            PrimitiveType::Cone => generate_cone(
+                self.primitive_size,
+                self.primitive_size * 2.0,
+                self.primitive_segments,
+                color,
+            ),
+        };
+
+        // Handle name preservation
+        if let Some(mesh_idx) = self.selected_mesh_index {
+            if mesh_idx < self.edit_buffer.meshes.len() {
+                if self.primitive_keep_name {
+                    new_mesh.name = self.edit_buffer.meshes[mesh_idx].name.clone();
+                }
+
+                // Replace existing mesh
+                self.edit_buffer.meshes[mesh_idx] = new_mesh.clone();
+
+                if !self.primitive_preserve_transform {
+                    self.edit_buffer.mesh_transforms[mesh_idx] = MeshTransform::identity();
+                    self.mesh_transform_buffer = Some(MeshTransform::identity());
+                }
+
+                self.mesh_edit_buffer = Some(new_mesh);
+            }
+        } else {
+            // Add as new mesh
+            self.edit_buffer.meshes.push(new_mesh);
+            self.edit_buffer
+                .mesh_transforms
+                .push(MeshTransform::identity());
+            self.mesh_visibility.push(true);
+        }
+
+        *unsaved_changes = true;
+        self.preview_dirty = true;
+    }
+
+    fn _legacy_show_mesh_list_and_editor(&mut self, ui: &mut egui::Ui) {
         ui.heading("Meshes");
 
         ui.horizontal(|ui| {
