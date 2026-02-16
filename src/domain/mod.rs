@@ -15,7 +15,11 @@
 //! - `magic`: Magic system (spells, spell books, effects)
 //! - `items`: Item system (weapons, armor, consumables)
 //! - `visual`: Visual system (creature meshes, procedural geometry)
+//! - `campaign`: Campaign system (campaign definitions, metadata)
+//! - `campaign_loader`: Campaign loading system (game data loading)
 
+pub mod campaign;
+pub mod campaign_loader;
 pub mod character;
 pub mod character_definition;
 pub mod classes;
@@ -59,3 +63,7 @@ pub use party_manager::{PartyManagementError, PartyManager};
 // Re-export visual types
 pub use visual::creature_database::{CreatureDatabase, CreatureDatabaseError};
 pub use visual::{CreatureDefinition, MeshDefinition, MeshTransform};
+
+// Re-export campaign types
+pub use campaign::{Campaign, CampaignConfig};
+pub use campaign_loader::{CampaignError, CampaignLoader, GameData};

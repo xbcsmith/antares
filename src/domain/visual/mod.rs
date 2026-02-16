@@ -108,6 +108,12 @@ use crate::domain::types::CreatureId;
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshDefinition {
+    /// Optional name for the mesh (e.g., "left_leg", "head", "torso")
+    ///
+    /// Used for debugging, editor display, and mesh identification.
+    #[serde(default)]
+    pub name: Option<String>,
+
     /// Vertex positions as [x, y, z] coordinates
     pub vertices: Vec<[f32; 3]>,
 
@@ -463,6 +469,40 @@ impl CreatureDefinition {
     }
 }
 
+/// Lightweight creature registry entry
+///
+/// Used in campaign creature registries to reference external creature mesh files
+/// instead of embedding full MeshDefinition data inline.
+///
+/// This struct is designed for registry files (e.g., `creatures.ron`) that map
+/// creature IDs to their corresponding definition files. The actual creature
+/// definitions are loaded from individual files at campaign startup.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::visual::CreatureReference;
+///
+/// let reference = CreatureReference {
+///     id: 1,
+///     name: "Goblin".to_string(),
+///     filepath: "assets/creatures/goblin.ron".to_string(),
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatureReference {
+    /// Unique creature identifier matching the referenced creature file
+    pub id: CreatureId,
+
+    /// Display name for editor/debugging
+    pub name: String,
+
+    /// Relative path to creature definition file from campaign root
+    ///
+    /// Example: "assets/creatures/goblin.ron"
+    pub filepath: String,
+}
+
 // ===== Default value functions for serde =====
 
 fn default_color() -> [f32; 4] {
@@ -487,6 +527,7 @@ mod tests {
 
     fn create_test_triangle_mesh() -> MeshDefinition {
         MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,

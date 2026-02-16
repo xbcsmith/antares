@@ -393,6 +393,7 @@ mod tests {
             name: "Base Dragon".to_string(),
             meshes: vec![
                 MeshDefinition {
+                    name: None,
                     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
                     indices: vec![0, 1, 2],
                     normals: None,
@@ -404,11 +405,12 @@ mod tests {
                     texture_path: None,
                 },
                 MeshDefinition {
+                    name: None,
                     vertices: vec![[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.25, 0.5, 0.0]],
                     indices: vec![0, 1, 2],
                     normals: None,
                     uvs: None,
-                    color: [0.6, 0.6, 0.6, 1.0],
+                    color: [0.5, 0.5, 0.5, 1.0],
                     lod_levels: None,
                     lod_distances: None,
                     material: None,
@@ -468,7 +470,7 @@ mod tests {
 
         assert_eq!(result.name, "Red Dragon");
         assert_eq!(result.meshes[0].color, [1.0, 0.0, 0.0, 1.0]);
-        assert_eq!(result.meshes[1].color, [0.6, 0.6, 0.6, 1.0]); // Unchanged
+        assert_eq!(result.meshes[1].color, [0.5, 0.5, 0.5, 1.0]); // Unchanged
     }
 
     #[test]

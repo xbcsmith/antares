@@ -8016,6 +8016,16 @@
             text: "The Cave of Arcturus!",
         ),
         (
+            x: 16,
+            y: 15,
+        ): Treasure(
+            name: "Foo",
+            description: "The Foo",
+            loot: [
+                102,
+            ],
+        ),
+        (
             x: 1,
             y: 1,
         ): Treasure(
@@ -8048,16 +8058,6 @@
                 y: 10,
             ),
             map_id: 4,
-        ),
-        (
-            x: 16,
-            y: 15,
-        ): Treasure(
-            name: "Foo",
-            description: "The Foo",
-            loot: [
-                102,
-            ],
         ),
     },
     allow_random_encounters: true,

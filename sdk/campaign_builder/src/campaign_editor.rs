@@ -112,6 +112,7 @@ pub struct CampaignMetadataEditBuffer {
     pub npcs_file: String,
     pub conditions_file: String,
     pub proficiencies_file: String,
+    pub creatures_file: String,
 }
 
 impl CampaignMetadataEditBuffer {
@@ -149,6 +150,7 @@ impl CampaignMetadataEditBuffer {
             npcs_file: m.npcs_file.clone(),
             conditions_file: m.conditions_file.clone(),
             proficiencies_file: m.proficiencies_file.clone(),
+            creatures_file: m.creatures_file.clone(),
         }
     }
 
@@ -185,6 +187,7 @@ impl CampaignMetadataEditBuffer {
         dest.npcs_file = self.npcs_file.clone();
         dest.conditions_file = self.conditions_file.clone();
         dest.proficiencies_file = self.proficiencies_file.clone();
+        dest.creatures_file = self.creatures_file.clone();
     }
 }
 
@@ -929,6 +932,30 @@ impl CampaignMetadataEditorState {
                                                 .pick_file()
                                             {
                                                 self.buffer.proficiencies_file =
+                                                    p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    // Creatures File
+                                    ui.label("Creatures File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.creatures_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.creatures_file =
                                                     p.display().to_string();
                                                 self.has_unsaved_changes = true;
                                                 *unsaved_changes = true;

@@ -10,7 +10,7 @@
 //! # Architecture
 //!
 //! When a monster has a `visual_id`, the system:
-//! 1. Looks up the `CreatureDefinition` from the content database
+//! 1. Looks up the `CreatureDefinition` from the game data resource
 //! 2. Spawns the creature visual hierarchy
 //! 3. Attaches a `MonsterMarker` to link the visual to the combat entity
 //!
@@ -20,17 +20,18 @@
 //!
 //! ```
 //! use antares::game::systems::monster_rendering::spawn_monster_with_visual;
+//! use antares::game::resources::GameDataResource;
 //! use antares::domain::combat::{Monster, LootTable};
 //! use antares::domain::character::Stats;
-//! use antares::domain::visual::creature_database::CreatureDatabase;
+//! use antares::domain::campaign_loader::GameData;
 //! use bevy::prelude::*;
 //!
 //! fn spawn_example(
 //!     mut commands: Commands,
+//!     game_data: Res<GameDataResource>,
 //!     mut meshes: ResMut<Assets<Mesh>>,
 //!     mut materials: ResMut<Assets<StandardMaterial>>,
 //! ) {
-//!     let creature_db = CreatureDatabase::new();
 //!     let monster = Monster::new(
 //!         1,
 //!         "Goblin".to_string(),
@@ -43,7 +44,7 @@
 //!     let entity = spawn_monster_with_visual(
 //!         &mut commands,
 //!         &monster,
-//!         &creature_db,
+//!         &game_data,
 //!         &mut meshes,
 //!         &mut materials,
 //!         Vec3::new(5.0, 0.0, 10.0),
@@ -52,8 +53,8 @@
 //! ```
 
 use crate::domain::combat::Monster;
-use crate::domain::CreatureDatabase;
 use crate::game::components::creature::CreatureVisual;
+use crate::game::resources::GameDataResource;
 use crate::game::systems::creature_spawning::spawn_creature;
 use bevy::prelude::*;
 
@@ -95,7 +96,7 @@ pub struct MonsterMarker {
 ///
 /// * `commands` - Bevy commands for entity creation
 /// * `monster` - The monster to spawn a visual for
-/// * `creature_db` - Database of creature definitions
+/// * `game_data` - Game data resource containing creature database
 /// * `meshes` - Mesh asset storage
 /// * `materials` - Material asset storage
 /// * `position` - World position to spawn at
@@ -108,14 +109,15 @@ pub struct MonsterMarker {
 ///
 /// ```
 /// use antares::game::systems::monster_rendering::spawn_monster_with_visual;
+/// use antares::game::resources::GameDataResource;
 /// use antares::domain::combat::{Monster, LootTable};
 /// use antares::domain::character::Stats;
-/// use antares::domain::visual::creature_database::CreatureDatabase;
+/// use antares::domain::campaign_loader::GameData;
 /// use bevy::prelude::*;
 ///
 /// fn example(
 ///     mut commands: Commands,
-///     creature_db: CreatureDatabase,
+///     game_data: Res<GameDataResource>,
 ///     mut meshes: ResMut<Assets<Mesh>>,
 ///     mut materials: ResMut<Assets<StandardMaterial>>,
 /// ) {
@@ -132,7 +134,7 @@ pub struct MonsterMarker {
 ///     let visual_entity = spawn_monster_with_visual(
 ///         &mut commands,
 ///         &monster,
-///         &creature_db,
+///         &game_data,
 ///         &mut meshes,
 ///         &mut materials,
 ///         Vec3::new(10.0, 0.0, 5.0),
@@ -142,14 +144,14 @@ pub struct MonsterMarker {
 pub fn spawn_monster_with_visual(
     commands: &mut Commands,
     monster: &Monster,
-    creature_db: &CreatureDatabase,
+    game_data: &GameDataResource,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     position: Vec3,
 ) -> Entity {
     if let Some(visual_id) = monster.visual_id {
         // Look up creature definition
-        if let Some(creature_def) = creature_db.get_creature(visual_id) {
+        if let Some(creature_def) = game_data.get_creature(visual_id) {
             // Spawn creature visual
             let visual_entity = spawn_creature(
                 commands,

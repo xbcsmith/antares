@@ -449,6 +449,7 @@ mod tests {
 
     fn create_valid_triangle_mesh() -> MeshDefinition {
         MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
@@ -475,6 +476,7 @@ mod tests {
     #[test]
     fn test_validate_mesh_topology_degenerate_triangle() {
         let mesh = MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
@@ -497,6 +499,7 @@ mod tests {
     #[test]
     fn test_validate_mesh_topology_invalid_index_count() {
         let mesh = MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
             indices: vec![0, 1], // Only 2 indices
             normals: None,
@@ -519,6 +522,7 @@ mod tests {
     #[test]
     fn test_validate_mesh_topology_out_of_bounds_index() {
         let mesh = MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 5], // Index 5 out of bounds
             normals: None,
@@ -541,6 +545,7 @@ mod tests {
     #[test]
     fn test_validate_mesh_topology_isolated_vertices() {
         let mesh = MeshDefinition {
+            name: None,
             vertices: vec![
                 [0.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
@@ -570,6 +575,7 @@ mod tests {
     #[test]
     fn test_validate_mesh_topology_inconsistent_winding() {
         let mesh = MeshDefinition {
+            name: None,
             vertices: vec![
                 [0.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
@@ -599,8 +605,9 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_mesh_topology_uv_out_of_range() {
+    fn test_validate_mesh_topology_uv_count_mismatch() {
         let mesh = MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
@@ -641,6 +648,7 @@ mod tests {
     #[test]
     fn test_validate_creature_topology_invalid_mesh() {
         let bad_mesh = MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0]],
             indices: vec![0, 1, 2], // Indices out of bounds
             normals: None,
@@ -704,6 +712,7 @@ mod tests {
     #[test]
     fn test_count_isolated_vertices_some() {
         let mesh = MeshDefinition {
+            name: None,
             vertices: vec![
                 [0.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
@@ -773,6 +782,7 @@ mod tests {
     fn test_count_non_manifold_edges_cube() {
         // Simple cube - all edges should be manifold (shared by exactly 2 triangles)
         let mesh = MeshDefinition {
+            name: None,
             vertices: vec![
                 [-1.0, -1.0, -1.0],
                 [1.0, -1.0, -1.0],

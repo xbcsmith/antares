@@ -1185,20 +1185,15 @@ impl ContentDatabase {
         };
 
         // Load creatures
-        let mut creatures = crate::domain::visual::creature_database::CreatureDatabase::new();
-        if data_dir.join("creatures.ron").exists() {
-            let creature_list =
-                crate::domain::visual::creature_database::CreatureDatabase::load_from_file(
-                    &data_dir.join("creatures.ron"),
-                )
-                .map_err(|e| DatabaseError::CreatureLoadError(e.to_string()))?;
-
-            for creature in creature_list {
-                creatures
-                    .add_creature(creature)
-                    .map_err(|e| DatabaseError::CreatureLoadError(e.to_string()))?;
-            }
-        }
+        let creatures = if data_dir.join("creatures.ron").exists() {
+            crate::domain::visual::creature_database::CreatureDatabase::load_from_registry(
+                &data_dir.join("creatures.ron"),
+                campaign_path,
+            )
+            .map_err(|e| DatabaseError::CreatureLoadError(e.to_string()))?
+        } else {
+            crate::domain::visual::creature_database::CreatureDatabase::new()
+        };
 
         Ok(Self {
             classes,
@@ -1320,20 +1315,16 @@ impl ContentDatabase {
         };
 
         // Load creatures
-        let mut creatures = crate::domain::visual::creature_database::CreatureDatabase::new();
-        if data_path.join("creatures.ron").exists() {
-            let creature_list =
-                crate::domain::visual::creature_database::CreatureDatabase::load_from_file(
-                    &data_path.join("creatures.ron"),
-                )
-                .map_err(|e| DatabaseError::CreatureLoadError(e.to_string()))?;
-
-            for creature in creature_list {
-                creatures
-                    .add_creature(creature)
-                    .map_err(|e| DatabaseError::CreatureLoadError(e.to_string()))?;
-            }
-        }
+        let creatures = if data_path.join("creatures.ron").exists() {
+            let root_path = data_path.parent().unwrap_or(data_path);
+            crate::domain::visual::creature_database::CreatureDatabase::load_from_registry(
+                &data_path.join("creatures.ron"),
+                root_path,
+            )
+            .map_err(|e| DatabaseError::CreatureLoadError(e.to_string()))?
+        } else {
+            crate::domain::visual::creature_database::CreatureDatabase::new()
+        };
 
         Ok(Self {
             classes,
@@ -2268,6 +2259,7 @@ mod tests {
             description: "The wise village elder".to_string(),
             portrait_id: "elder.png".to_string(),
             dialogue_id: Some(1),
+            creature_id: None,
             sprite: None,
             quest_ids: vec![1, 2],
             faction: Some("Village".to_string()),

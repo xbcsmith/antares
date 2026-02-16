@@ -5128,16 +5128,23 @@
     ],
     events: {
         (
-            x: 14,
-            y: 14,
+            x: 3,
+            y: 2,
         ): Encounter(
-            name: "Boss Lair",
-            description: "A concentrated group of powerful monsters guarding a key location.",
+            name: "Monster Patrol",
+            description: "A small patrol of monsters crossing this area.",
             monster_group: [
-                3,
-                3,
-                3,
+                1,
+                2,
             ],
+        ),
+        (
+            x: 1,
+            y: 8,
+        ): Sign(
+            name: "Exit Sign",
+            description: "A sign marking the path back to town.",
+            text: "Exit to Town",
         ),
         (
             x: 13,
@@ -5148,28 +5155,6 @@
             loot: [
                 11,
                 21,
-            ],
-        ),
-        (
-            x: 3,
-            y: 5,
-        ): Encounter(
-            name: "Monster Ambush",
-            description: "A group of monsters lying in wait to ambush unsuspecting travelers.",
-            monster_group: [
-                2,
-                1,
-            ],
-        ),
-        (
-            x: 3,
-            y: 2,
-        ): Encounter(
-            name: "Monster Patrol",
-            description: "A small patrol of monsters crossing this area.",
-            monster_group: [
-                1,
-                2,
             ],
         ),
         (
@@ -5185,13 +5170,16 @@
             ],
         ),
         (
-            x: 10,
-            y: 6,
-        ): Trap(
-            name: "Spike Trap",
-            description: "A hidden spike trap that deals 5 points of damage when triggered.",
-            damage: 5,
-            effect: None,
+            x: 14,
+            y: 14,
+        ): Encounter(
+            name: "Boss Lair",
+            description: "A concentrated group of powerful monsters guarding a key location.",
+            monster_group: [
+                3,
+                3,
+                3,
+            ],
         ),
         (
             x: 5,
@@ -5217,12 +5205,15 @@
             ],
         ),
         (
-            x: 1,
-            y: 8,
-        ): Sign(
-            name: "Exit Sign",
-            description: "A sign marking the path back to town.",
-            text: "Exit to Town",
+            x: 3,
+            y: 5,
+        ): Encounter(
+            name: "Monster Ambush",
+            description: "A group of monsters lying in wait to ambush unsuspecting travelers.",
+            monster_group: [
+                2,
+                1,
+            ],
         ),
         (
             x: 0,
@@ -5235,6 +5226,15 @@
                 y: 0,
             ),
             map_id: 4,
+        ),
+        (
+            x: 10,
+            y: 6,
+        ): Trap(
+            name: "Spike Trap",
+            description: "A hidden spike trap that deals 5 points of damage when triggered.",
+            damage: 5,
+            effect: None,
         ),
     },
     allow_random_encounters: true,
