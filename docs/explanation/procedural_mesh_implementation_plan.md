@@ -1075,7 +1075,7 @@ pub visual_id: Option<CreatureId>, // NPCs also reference creature visuals
 
 ---
 
-## Appendix: Example Creature RON Files
+
 
 **Simple Cube Robot (Phase 1 deliverable):**
 

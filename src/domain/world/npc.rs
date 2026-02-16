@@ -22,8 +22,9 @@
 //!     name: "Elder Theron".to_string(),
 //!     description: "The wise village elder".to_string(),
 //!     portrait_id: "elder".to_string(),
-//!     sprite: None,
 //!     dialogue_id: Some(1),
+//!     creature_id: None,
+//!     sprite: None,
 //!     quest_ids: vec![1, 2],
 //!     faction: Some("Village Council".to_string()),
 //!     is_merchant: false,
@@ -42,7 +43,7 @@
 
 use crate::domain::dialogue::DialogueId;
 use crate::domain::quest::QuestId;
-use crate::domain::types::{Direction, Position};
+use crate::domain::types::{CreatureId, Direction, Position};
 use crate::domain::world::SpriteReference;
 use serde::{Deserialize, Serialize};
 
@@ -98,6 +99,37 @@ pub struct NpcDefinition {
     #[serde(default)]
     pub dialogue_id: Option<DialogueId>,
 
+    /// Optional creature visual reference for procedural mesh rendering.
+    ///
+    /// When `Some`, the NPC will use the specified creature's procedural mesh definition
+    /// for 3D rendering. This integrates NPCs with the same visual system used for monsters.
+    /// When `None`, falls back to sprite-based rendering (if sprite is set) or default visuals.
+    ///
+    /// Backward compatibility: Old RON files without this field will deserialize
+    /// with `creature_id = None` via `#[serde(default)]`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::npc::NpcDefinition;
+    ///
+    /// let npc = NpcDefinition {
+    ///     id: "village_elder".to_string(),
+    ///     name: "Elder Theron".to_string(),
+    ///     description: "The wise village elder".to_string(),
+    ///     portrait_id: "elder.png".to_string(),
+    ///     dialogue_id: None,
+    ///     creature_id: Some(54), // VillageElder creature
+    ///     sprite: None,
+    ///     quest_ids: vec![],
+    ///     faction: None,
+    ///     is_merchant: false,
+    ///     is_innkeeper: false,
+    /// };
+    /// ```
+    #[serde(default)]
+    pub creature_id: Option<CreatureId>,
+
     /// Optional sprite reference for this NPC's visual representation.
     ///
     /// When `Some`, the NPC will use the specified sprite sheet and index.
@@ -118,11 +150,12 @@ pub struct NpcDefinition {
     ///     description: "A vigilant guard".to_string(),
     ///     portrait_id: "guard.png".to_string(),
     ///     dialogue_id: None,
+    ///     creature_id: None,
+    ///     sprite: None,
     ///     quest_ids: vec![],
     ///     faction: None,
     ///     is_merchant: false,
     ///     is_innkeeper: false,
-    ///     sprite: None,
     /// };
     /// ```
     #[serde(default)]
@@ -179,8 +212,9 @@ impl NpcDefinition {
             name: name.into(),
             description: String::new(),
             portrait_id: portrait_id.into(),
-            sprite: None,
             dialogue_id: None,
+            creature_id: None,
+            sprite: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
@@ -214,8 +248,9 @@ impl NpcDefinition {
             name: name.into(),
             description: String::new(),
             portrait_id: portrait_id.into(),
-            sprite: None,
             dialogue_id: None,
+            creature_id: None,
+            sprite: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: true,
@@ -249,8 +284,9 @@ impl NpcDefinition {
             name: name.into(),
             description: String::new(),
             portrait_id: portrait_id.into(),
-            sprite: None,
             dialogue_id: None,
+            creature_id: None,
+            sprite: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
@@ -320,6 +356,30 @@ impl NpcDefinition {
     /// ```
     pub fn with_sprite(mut self, sprite: SpriteReference) -> Self {
         self.sprite = Some(sprite);
+        self
+    }
+
+    /// Sets the creature visual reference for this NPC (builder pattern).
+    ///
+    /// # Arguments
+    ///
+    /// * `creature_id` - The creature ID to use for procedural mesh rendering
+    ///
+    /// # Returns
+    ///
+    /// Self with creature_id field set
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::npc::NpcDefinition;
+    ///
+    /// let elder = NpcDefinition::new("elder", "Village Elder", "elder.png")
+    ///     .with_creature_id(54); // VillageElder creature mesh
+    /// assert_eq!(elder.creature_id, Some(54));
+    /// ```
+    pub fn with_creature_id(mut self, creature_id: CreatureId) -> Self {
+        self.creature_id = Some(creature_id);
         self
     }
 }
@@ -502,8 +562,9 @@ mod tests {
             name: "Village Elder".to_string(),
             description: "Wise elder".to_string(),
             portrait_id: "elder.png".to_string(),
-            sprite: None,
             dialogue_id: Some(1),
+            creature_id: None,
+            sprite: None,
             quest_ids: vec![1, 2, 3],
             faction: Some("Village".to_string()),
             is_merchant: false,
@@ -638,8 +699,9 @@ NpcDefinition(
             name: "Complete NPC".to_string(),
             description: "An NPC with all fields set".to_string(),
             portrait_id: "complete.png".to_string(),
-            sprite: None,
             dialogue_id: Some(10),
+            creature_id: None,
+            sprite: None,
             quest_ids: vec![1, 2, 3, 4],
             faction: Some("Test Faction".to_string()),
             is_merchant: true,
@@ -665,5 +727,82 @@ NpcDefinition(
 
         assert_eq!(placement1.npc_id, placement2.npc_id);
         assert_ne!(placement1.position, placement2.position);
+    }
+
+    #[test]
+    fn test_npc_definition_with_creature_id() {
+        let npc = NpcDefinition::new("elder", "Village Elder", "elder.png").with_creature_id(54);
+
+        assert_eq!(npc.creature_id, Some(54));
+        assert_eq!(npc.id, "elder");
+        assert_eq!(npc.name, "Village Elder");
+    }
+
+    #[test]
+    fn test_npc_definition_creature_id_serialization() {
+        let npc = NpcDefinition {
+            id: "wizard".to_string(),
+            name: "Wizard Arcturus".to_string(),
+            description: "A powerful wizard".to_string(),
+            portrait_id: "wizard.png".to_string(),
+            dialogue_id: Some(1),
+            creature_id: Some(58), // WizardArcturus creature
+            sprite: None,
+            quest_ids: vec![],
+            faction: Some("Wizards".to_string()),
+            is_merchant: false,
+            is_innkeeper: false,
+        };
+
+        let serialized = ron::to_string(&npc).expect("Failed to serialize");
+        let deserialized: NpcDefinition =
+            ron::from_str(&serialized).expect("Failed to deserialize");
+
+        assert_eq!(npc, deserialized);
+        assert_eq!(deserialized.creature_id, Some(58));
+    }
+
+    #[test]
+    fn test_npc_definition_deserializes_without_creature_id_defaults_none() {
+        let ron_str = r#"
+NpcDefinition(
+    id: "old_npc",
+    name: "Old NPC",
+    portrait_id: "portrait.png",
+)
+"#;
+        let npc: NpcDefinition = ron::from_str(ron_str).expect("Failed to deserialize old format");
+        assert!(npc.creature_id.is_none());
+        assert_eq!(npc.name, "Old NPC");
+    }
+
+    #[test]
+    fn test_npc_definition_with_both_creature_and_sprite() {
+        let sprite = crate::domain::world::SpriteReference {
+            sheet_path: "sprites/npcs.png".to_string(),
+            sprite_index: 5,
+            animation: None,
+            material_properties: None,
+        };
+
+        let npc = NpcDefinition::new("merchant", "Merchant", "merchant.png")
+            .with_creature_id(53) // Merchant creature
+            .with_sprite(sprite);
+
+        assert_eq!(npc.creature_id, Some(53));
+        assert!(npc.sprite.is_some());
+        assert_eq!(npc.sprite.as_ref().unwrap().sprite_index, 5);
+    }
+
+    #[test]
+    fn test_npc_definition_defaults_have_no_creature_id() {
+        let npc = NpcDefinition::new("test", "Test NPC", "test.png");
+        assert!(npc.creature_id.is_none());
+
+        let merchant = NpcDefinition::merchant("m1", "Merchant", "m.png");
+        assert!(merchant.creature_id.is_none());
+
+        let innkeeper = NpcDefinition::innkeeper("i1", "Innkeeper", "i.png");
+        assert!(innkeeper.creature_id.is_none());
     }
 }

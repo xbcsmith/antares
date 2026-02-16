@@ -33,6 +33,7 @@ fn create_test_mesh(num_vertices: usize) -> MeshDefinition {
         .collect();
 
     MeshDefinition {
+        name: None,
         vertices,
         indices,
         normals: None,
@@ -272,6 +273,7 @@ fn test_memory_usage_calculation_comprehensive() {
     let uvs = vec![[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]];
 
     let mesh = MeshDefinition {
+        name: None,
         vertices: vertices.clone(),
         indices: vec![0, 1, 2],
         normals: Some(normals.clone()),

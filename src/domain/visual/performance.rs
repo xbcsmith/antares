@@ -477,6 +477,7 @@ mod tests {
             .collect();
 
         MeshDefinition {
+            name: None,
             vertices,
             indices,
             normals: None,
@@ -510,6 +511,7 @@ mod tests {
     #[test]
     fn test_calculate_mesh_bounding_size() {
         let mesh = MeshDefinition {
+            name: None,
             vertices: vec![
                 [0.0, 0.0, 0.0],
                 [10.0, 0.0, 0.0],

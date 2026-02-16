@@ -10,6 +10,17 @@ Document the campaign data structure, including all the RON files that make up a
 
 ## SDK
 
+### Creatures Editor
+
+Campaign Builder --> Creatures Editor
+
+Creatures Editor is not loading the creatures.ron file in the tutorial campaign.
+
+We should be able to control the creature mapping from creatures.ron file to assets/creatures/foo.ron
+
+Campaign Builder --> Metadata Editor --> Files has no place to add the creatures file
+
+
 ### Map Editor Multiselection
 
 Campaign Builder --> Map Editor --> Select Map --> Edit

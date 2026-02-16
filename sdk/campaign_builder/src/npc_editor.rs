@@ -35,6 +35,7 @@ use crate::ui_helpers::{
 use antares::domain::dialogue::{DialogueId, DialogueTree};
 use antares::domain::quest::{Quest, QuestId};
 use antares::domain::world::{NpcDefinition, NpcId, SpriteReference};
+use antares::domain::CreatureId;
 use antares::sdk::tool_config::DisplayConfig;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
@@ -146,6 +147,8 @@ pub struct NpcEditBuffer {
     pub faction: String,
     pub is_merchant: bool,
     pub is_innkeeper: bool,
+    /// Optional creature ID for procedural mesh rendering
+    pub creature_id: String,
     /// Optional sprite sheet path (relative to campaign root, e.g. 'assets/sprites/actors/wizard.png')
     pub sprite_sheet: String,
     /// Optional sprite index (0-based)
@@ -164,6 +167,7 @@ impl Default for NpcEditBuffer {
             faction: String::new(),
             is_merchant: false,
             is_innkeeper: false,
+            creature_id: String::new(),
             sprite_sheet: String::new(),
             sprite_index: String::new(),
         }
@@ -1206,6 +1210,10 @@ impl NpcEditorState {
                     .dialogue_id
                     .as_ref()
                     .map_or(String::new(), |id| id.to_string()),
+                creature_id: npc
+                    .creature_id
+                    .as_ref()
+                    .map_or(String::new(), |id| id.to_string()),
                 quest_ids: npc.quest_ids.iter().map(|id| id.to_string()).collect(),
                 faction: npc.faction.as_ref().unwrap_or(&String::new()).clone(),
                 is_merchant: npc.is_merchant,
@@ -1326,11 +1334,21 @@ impl NpcEditorState {
             return false;
         }
 
-        let npc = NpcDefinition {
+        let npc_def = NpcDefinition {
             id: self.edit_buffer.id.clone(),
             name: self.edit_buffer.name.clone(),
             description: self.edit_buffer.description.clone(),
             portrait_id: self.edit_buffer.portrait_id.clone(),
+            dialogue_id: if self.edit_buffer.dialogue_id.is_empty() {
+                None
+            } else {
+                self.edit_buffer.dialogue_id.parse::<DialogueId>().ok()
+            },
+            creature_id: if self.edit_buffer.creature_id.is_empty() {
+                None
+            } else {
+                self.edit_buffer.creature_id.parse::<CreatureId>().ok()
+            },
             sprite: if self.edit_buffer.sprite_sheet.trim().is_empty() {
                 None
             } else {
@@ -1343,11 +1361,6 @@ impl NpcEditorState {
                     }),
                     Err(_) => None,
                 }
-            },
-            dialogue_id: if self.edit_buffer.dialogue_id.is_empty() {
-                None
-            } else {
-                self.edit_buffer.dialogue_id.parse::<DialogueId>().ok()
             },
             quest_ids: self
                 .edit_buffer
@@ -1367,13 +1380,13 @@ impl NpcEditorState {
         // Perform the in-memory save and remember the result
         let saved = match self.mode {
             NpcEditorMode::Add => {
-                self.npcs.push(npc);
+                self.npcs.push(npc_def);
                 true
             }
             NpcEditorMode::Edit => {
                 if let Some(index) = self.selected_npc {
                     if index < self.npcs.len() {
-                        self.npcs[index] = npc;
+                        self.npcs[index] = npc_def;
                         true
                     } else {
                         false
@@ -1632,6 +1645,7 @@ mod tests {
             portrait_id: String::new(),
             sprite: Some(sprite.clone()),
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
@@ -1667,6 +1681,7 @@ mod tests {
             portrait_id: String::new(),
             sprite: Some(sprite.clone()),
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
@@ -1707,6 +1722,7 @@ mod tests {
             portrait_id: String::new(),
             sprite: None,
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
@@ -1735,6 +1751,7 @@ mod tests {
             portrait_id: String::new(),
             sprite: None,
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
@@ -1755,6 +1772,7 @@ mod tests {
             portrait_id: String::new(),
             sprite: None,
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: true,
@@ -1769,6 +1787,7 @@ mod tests {
             portrait_id: String::new(),
             sprite: None,
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
@@ -1789,6 +1808,7 @@ mod tests {
             portrait_id: String::new(),
             sprite: None,
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: true,
@@ -1803,6 +1823,7 @@ mod tests {
             portrait_id: String::new(),
             sprite: None,
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
@@ -1825,6 +1846,7 @@ mod tests {
             portrait_id: String::new(),
             sprite: None,
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
@@ -1868,6 +1890,7 @@ mod tests {
             portrait_id: "character_055".to_string(),
             sprite: None,
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
@@ -1928,6 +1951,7 @@ mod tests {
             portrait_id: String::new(),
             sprite: None,
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,
@@ -2076,6 +2100,7 @@ mod tests {
             portrait_id: "10".to_string(),
             sprite: None,
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,

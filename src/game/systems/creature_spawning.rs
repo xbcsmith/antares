@@ -309,11 +309,12 @@ mod tests {
     fn test_spawn_creature_with_lod() {
         // Create a simple creature definition with LOD levels
         let lod1 = MeshDefinition {
-            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.25, 0.5, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
             uvs: None,
-            color: [1.0, 0.0, 0.0, 1.0],
+            color: [1.0, 1.0, 1.0, 1.0],
             lod_levels: None,
             lod_distances: None,
             material: None,
@@ -321,6 +322,7 @@ mod tests {
         };
 
         let mesh_with_lod = MeshDefinition {
+            name: None,
             vertices: vec![
                 [0.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
@@ -365,6 +367,7 @@ mod tests {
         };
 
         let mesh_with_material = MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,

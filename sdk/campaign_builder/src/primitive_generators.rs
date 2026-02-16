@@ -97,10 +97,11 @@ pub fn generate_cube(size: f32, color: [f32; 4]) -> MeshDefinition {
     ];
 
     MeshDefinition {
+        name: None,
         vertices,
         indices,
         normals: Some(normals),
-        uvs: Some(uvs),
+        uvs: None,
         color,
         lod_levels: None,
         lod_distances: None,
@@ -178,6 +179,7 @@ pub fn generate_sphere(radius: f32, segments: u32, rings: u32, color: [f32; 4]) 
     }
 
     MeshDefinition {
+        name: None,
         vertices,
         indices,
         normals: Some(normals),
@@ -314,6 +316,7 @@ pub fn generate_cylinder(
     }
 
     MeshDefinition {
+        name: None,
         vertices,
         indices,
         normals: Some(normals),
@@ -414,6 +417,7 @@ pub fn generate_cone(radius: f32, height: f32, segments: u32, color: [f32; 4]) -
     }
 
     MeshDefinition {
+        name: None,
         vertices,
         indices,
         normals: Some(normals),

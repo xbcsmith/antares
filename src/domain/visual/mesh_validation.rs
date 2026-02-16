@@ -334,6 +334,7 @@ mod tests {
 
     fn create_valid_triangle() -> MeshDefinition {
         MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
@@ -541,21 +542,20 @@ mod tests {
     #[test]
     fn test_validate_mesh_cube() {
         let cube = MeshDefinition {
+            name: None,
             vertices: vec![
-                // Front face
-                [-1.0, -1.0, 1.0],
-                [1.0, -1.0, 1.0],
-                [1.0, 1.0, 1.0],
-                [-1.0, 1.0, 1.0],
-                // Back face
                 [-1.0, -1.0, -1.0],
                 [1.0, -1.0, -1.0],
                 [1.0, 1.0, -1.0],
                 [-1.0, 1.0, -1.0],
+                [-1.0, -1.0, 1.0],
+                [1.0, -1.0, 1.0],
+                [1.0, 1.0, 1.0],
+                [-1.0, 1.0, 1.0],
             ],
             indices: vec![
-                0, 1, 2, 2, 3, 0, // Front
-                4, 5, 6, 6, 7, 4, // Back
+                0, 1, 2, 2, 3, 0, 1, 5, 6, 6, 2, 1, 7, 6, 5, 5, 4, 7, 4, 0, 3, 3, 7, 4, 4, 5, 1, 1,
+                0, 4, 3, 2, 6, 6, 7, 3,
             ],
             normals: None,
             uvs: None,

@@ -366,6 +366,7 @@ impl CreaturesEditorState {
         ui.horizontal(|ui| {
             if ui.button("➕ Add Mesh").clicked() {
                 self.edit_buffer.meshes.push(MeshDefinition {
+                    name: None,
                     vertices: vec![],
                     indices: vec![],
                     normals: None,

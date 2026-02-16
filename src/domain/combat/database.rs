@@ -527,4 +527,72 @@ mod tests {
         let all = db.all_monsters();
         assert_eq!(all.len(), 3);
     }
+
+    #[test]
+    fn test_monster_visual_id_parsing() {
+        let mut monster = create_test_monster(1, "Goblin", 8);
+        monster.visual_id = Some(42);
+
+        assert_eq!(monster.visual_id, Some(42));
+
+        // Test that None is valid
+        let mut monster2 = create_test_monster(2, "Ghost", 10);
+        monster2.visual_id = None;
+        assert_eq!(monster2.visual_id, None);
+    }
+
+    #[test]
+    fn test_load_tutorial_monsters_visual_ids() {
+        // This test validates that the tutorial campaign monsters.ron file
+        // has valid visual_id mappings
+        let monsters_path = "campaigns/tutorial/data/monsters.ron";
+
+        // Skip if file doesn't exist (running tests outside project root)
+        if !std::path::Path::new(monsters_path).exists() {
+            return;
+        }
+
+        let db = MonsterDatabase::load_from_file(monsters_path)
+            .expect("Failed to load tutorial monsters");
+
+        // Expected monster-to-creature mappings from Phase 2 plan
+        // Monster IDs match Creature IDs for direct visual mapping
+        let expected_mappings = [
+            (1, Some(1)),   // Goblin -> Goblin
+            (2, Some(2)),   // Kobold -> Kobold
+            (3, Some(3)),   // Giant Rat -> GiantRat
+            (10, Some(10)), // Orc -> Orc
+            (11, Some(11)), // Skeleton -> Skeleton
+            (12, Some(12)), // Wolf -> Wolf
+            (20, Some(20)), // Ogre -> Ogre
+            (21, Some(21)), // Zombie -> Zombie
+            (22, Some(22)), // Fire Elemental -> FireElemental
+            (30, Some(30)), // Dragon -> Dragon
+            (31, Some(31)), // Lich -> Lich
+        ];
+
+        for (monster_id, expected_visual_id) in expected_mappings {
+            let monster = db
+                .get_monster(monster_id)
+                .unwrap_or_else(|| panic!("Monster {} not found", monster_id));
+
+            assert_eq!(
+                monster.visual_id, expected_visual_id,
+                "Monster {} ({}) has incorrect visual_id: expected {:?}, got {:?}",
+                monster_id, monster.name, expected_visual_id, monster.visual_id
+            );
+        }
+
+        // Verify all 11 monsters have visual_id set
+        assert_eq!(db.len(), 11, "Expected 11 monsters in tutorial campaign");
+
+        for monster in db.all_monsters() {
+            assert!(
+                monster.visual_id.is_some(),
+                "Monster {} ({}) is missing visual_id",
+                monster.id,
+                monster.name
+            );
+        }
+    }
 }

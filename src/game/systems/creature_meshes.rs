@@ -503,6 +503,7 @@ mod tests {
     #[test]
     fn test_mesh_definition_to_bevy_vertices() {
         let mesh_def = MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
@@ -526,7 +527,8 @@ mod tests {
     #[test]
     fn test_mesh_definition_to_bevy_normals_auto() {
         let mesh_def = MeshDefinition {
-            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None, // Should auto-generate
             uvs: None,
@@ -544,7 +546,8 @@ mod tests {
     #[test]
     fn test_mesh_definition_to_bevy_normals_provided() {
         let mesh_def = MeshDefinition {
-            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: Some(vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]),
             uvs: None,
@@ -562,7 +565,8 @@ mod tests {
     #[test]
     fn test_mesh_definition_to_bevy_uvs() {
         let mesh_def = MeshDefinition {
-            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            name: None,
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
             uvs: Some(vec![[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]),
@@ -580,6 +584,7 @@ mod tests {
     #[test]
     fn test_mesh_definition_to_bevy_color() {
         let mesh_def = MeshDefinition {
+            name: None,
             vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
             indices: vec![0, 1, 2],
             normals: None,
