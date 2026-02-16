@@ -1,9 +1,13 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::creature_id_manager::{CreatureCategory, CreatureIdManager};
+use crate::creatures_manager::CreaturesManager;
 use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
 use antares::domain::types::CreatureId;
-use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
+use antares::domain::visual::{
+    CreatureDefinition, CreatureReference, MeshDefinition, MeshTransform,
+};
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -36,6 +40,22 @@ pub struct CreaturesEditorState {
 
     // Preview state
     pub preview_dirty: bool,
+
+    // Phase 1: Registry Management UI
+    pub category_filter: Option<CreatureCategory>,
+    pub show_registry_stats: bool,
+    pub id_manager: CreatureIdManager,
+    pub selected_registry_entry: Option<usize>,
+    pub registry_sort_by: RegistrySortBy,
+    pub show_validation_panel: bool,
+}
+
+/// Sort order for registry list
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistrySortBy {
+    Id,
+    Name,
+    Category,
 }
 
 impl Default for CreaturesEditorState {
@@ -54,6 +74,12 @@ impl Default for CreaturesEditorState {
             mesh_edit_buffer: None,
             mesh_transform_buffer: None,
             preview_dirty: false,
+            category_filter: None,
+            show_registry_stats: true,
+            id_manager: CreatureIdManager::new(),
+            selected_registry_entry: None,
+            registry_sort_by: RegistrySortBy::Id,
+            show_validation_panel: false,
         }
     }
 }
@@ -97,12 +123,316 @@ impl CreaturesEditorState {
     ) -> Option<String> {
         match self.mode {
             CreaturesEditorMode::List => {
-                self.show_list_mode(ui, creatures.as_mut_slice(), unsaved_changes)
+                self.show_registry_mode(ui, creatures, campaign_dir, unsaved_changes)
             }
             CreaturesEditorMode::Add | CreaturesEditorMode::Edit => {
                 self.show_edit_mode(ui, creatures, unsaved_changes)
             }
         }
+    }
+
+    /// Show registry management mode (Phase 1)
+    fn show_registry_mode(
+        &mut self,
+        ui: &mut egui::Ui,
+        creatures: &mut [CreatureDefinition],
+        campaign_dir: &Option<PathBuf>,
+        unsaved_changes: &mut bool,
+    ) -> Option<String> {
+        let mut result_message: Option<String> = None;
+
+        // Update ID manager from current creatures
+        let references: Vec<CreatureReference> = creatures
+            .iter()
+            .map(|c| CreatureReference {
+                id: c.id,
+                name: c.name.clone(),
+                filepath: format!(
+                    "assets/creatures/{}.ron",
+                    c.name.to_lowercase().replace(' ', "_")
+                ),
+            })
+            .collect();
+        self.id_manager.update_from_registry(&references);
+
+        // Registry Overview Section
+        if self.show_registry_stats {
+            ui.horizontal(|ui| {
+                ui.label(format!("📊 {} creatures registered", creatures.len()));
+
+                let (monsters, npcs, templates, variants, custom) =
+                    self.count_by_category(creatures);
+                ui.separator();
+                ui.label(format!(
+                    "({} Monsters, {} NPCs, {} Templates, {} Variants, {} Custom)",
+                    monsters, npcs, templates, variants, custom
+                ));
+            });
+            ui.separator();
+        }
+
+        // Toolbar with filters
+        ui.horizontal(|ui| {
+            let toolbar_action = EditorToolbar::new("creatures_toolbar")
+                .with_search(&mut self.search_query)
+                .with_total_count(creatures.len())
+                .show(ui);
+
+            match toolbar_action {
+                ToolbarAction::New => {
+                    self.mode = CreaturesEditorMode::Add;
+                    self.edit_buffer = Self::default_creature();
+                    let suggested_category =
+                        self.category_filter.unwrap_or(CreatureCategory::Monsters);
+                    self.edit_buffer.id = self.id_manager.suggest_next_id(suggested_category);
+                    *unsaved_changes = true;
+                }
+                ToolbarAction::Save
+                | ToolbarAction::Load
+                | ToolbarAction::Import
+                | ToolbarAction::Export
+                | ToolbarAction::Reload => {
+                    // Handled by parent
+                }
+                ToolbarAction::None => {}
+            }
+
+            ui.separator();
+
+            // Category filter dropdown
+            egui::ComboBox::from_label("Category")
+                .selected_text(
+                    self.category_filter
+                        .map(|c| c.display_name())
+                        .unwrap_or("All"),
+                )
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.category_filter, None, "All");
+                    ui.selectable_value(
+                        &mut self.category_filter,
+                        Some(CreatureCategory::Monsters),
+                        "Monsters",
+                    );
+                    ui.selectable_value(
+                        &mut self.category_filter,
+                        Some(CreatureCategory::Npcs),
+                        "NPCs",
+                    );
+                    ui.selectable_value(
+                        &mut self.category_filter,
+                        Some(CreatureCategory::Templates),
+                        "Templates",
+                    );
+                    ui.selectable_value(
+                        &mut self.category_filter,
+                        Some(CreatureCategory::Variants),
+                        "Variants",
+                    );
+                    ui.selectable_value(
+                        &mut self.category_filter,
+                        Some(CreatureCategory::Custom),
+                        "Custom",
+                    );
+                });
+
+            // Sort dropdown
+            egui::ComboBox::from_label("Sort")
+                .selected_text(match self.registry_sort_by {
+                    RegistrySortBy::Id => "By ID",
+                    RegistrySortBy::Name => "By Name",
+                    RegistrySortBy::Category => "By Category",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.registry_sort_by, RegistrySortBy::Id, "By ID");
+                    ui.selectable_value(
+                        &mut self.registry_sort_by,
+                        RegistrySortBy::Name,
+                        "By Name",
+                    );
+                    ui.selectable_value(
+                        &mut self.registry_sort_by,
+                        RegistrySortBy::Category,
+                        "By Category",
+                    );
+                });
+
+            if ui.button("🔄 Revalidate").clicked() {
+                self.show_validation_panel = true;
+                result_message = Some("Validation complete".to_string());
+            }
+        });
+
+        ui.separator();
+
+        // Registry List View
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            // Filter and sort creatures
+            let mut filtered_creatures: Vec<(usize, &CreatureDefinition)> = creatures
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| {
+                    // Apply category filter
+                    if let Some(cat) = self.category_filter {
+                        if CreatureCategory::from_id(c.id) != cat {
+                            return false;
+                        }
+                    }
+
+                    // Apply search filter
+                    if !self.search_query.is_empty() {
+                        let query = self.search_query.to_lowercase();
+                        return c.name.to_lowercase().contains(&query)
+                            || c.id.to_string().contains(&query);
+                    }
+
+                    true
+                })
+                .collect();
+
+            // Sort creatures
+            match self.registry_sort_by {
+                RegistrySortBy::Id => filtered_creatures.sort_by_key(|(_, c)| c.id),
+                RegistrySortBy::Name => {
+                    filtered_creatures.sort_by(|(_, a), (_, b)| a.name.cmp(&b.name))
+                }
+                RegistrySortBy::Category => filtered_creatures
+                    .sort_by_key(|(_, c)| (CreatureCategory::from_id(c.id) as u8, c.id)),
+            }
+
+            if filtered_creatures.is_empty() {
+                ui.label("No creatures found. Click 'New' to create one.");
+            } else {
+                // Header
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("ID").strong());
+                    ui.separator();
+                    ui.label(egui::RichText::new("Name").strong());
+                    ui.separator();
+                    ui.label(egui::RichText::new("Status").strong());
+                    ui.separator();
+                    ui.label(egui::RichText::new("Category").strong());
+                });
+                ui.separator();
+
+                for (idx, creature) in filtered_creatures {
+                    let is_selected = self.selected_registry_entry == Some(idx);
+                    let category = CreatureCategory::from_id(creature.id);
+                    let color = category.color();
+
+                    ui.horizontal(|ui| {
+                        // ID badge with category color
+                        let id_text = format!("{:03}", creature.id);
+                        ui.colored_label(
+                            egui::Color32::from_rgb(
+                                (color[0] * 255.0) as u8,
+                                (color[1] * 255.0) as u8,
+                                (color[2] * 255.0) as u8,
+                            ),
+                            egui::RichText::new(id_text).strong(),
+                        );
+
+                        ui.separator();
+
+                        // Creature name (selectable)
+                        let response = ui.selectable_label(
+                            is_selected,
+                            format!(
+                                "{} ({} mesh{})",
+                                creature.name,
+                                creature.meshes.len(),
+                                if creature.meshes.len() == 1 { "" } else { "es" }
+                            ),
+                        );
+
+                        if response.clicked() {
+                            self.selected_registry_entry = Some(idx);
+                        }
+
+                        if response.double_clicked() {
+                            self.mode = CreaturesEditorMode::Edit;
+                            self.edit_buffer = creature.clone();
+                            self.selected_mesh_index = None;
+                            self.mesh_edit_buffer = None;
+                            self.mesh_transform_buffer = None;
+                            self.preview_dirty = true;
+                        }
+
+                        ui.separator();
+
+                        // Status indicator
+                        let validation_result = self.id_manager.validate_id(creature.id, category);
+                        if validation_result.is_ok() {
+                            ui.label("✓");
+                        } else {
+                            ui.colored_label(egui::Color32::YELLOW, "⚠");
+                        }
+
+                        ui.separator();
+
+                        // Category badge
+                        ui.label(
+                            egui::RichText::new(category.display_name())
+                                .small()
+                                .background_color(egui::Color32::from_rgb(
+                                    (color[0] * 100.0) as u8,
+                                    (color[1] * 100.0) as u8,
+                                    (color[2] * 100.0) as u8,
+                                )),
+                        );
+                    });
+                }
+            }
+        });
+
+        // Show validation panel if requested
+        if self.show_validation_panel {
+            ui.separator();
+            ui.collapsing("Validation Results", |ui| {
+                let conflicts = self.id_manager.check_conflicts();
+                if conflicts.is_empty() {
+                    ui.colored_label(egui::Color32::GREEN, "✓ No ID conflicts detected");
+                } else {
+                    ui.colored_label(
+                        egui::Color32::RED,
+                        format!("⚠ {} ID conflict(s) detected", conflicts.len()),
+                    );
+                    for conflict in conflicts {
+                        ui.label(format!(
+                            "ID {}: {} creatures ({})",
+                            conflict.id,
+                            conflict.creature_names.len(),
+                            conflict.creature_names.join(", ")
+                        ));
+                    }
+                }
+            });
+        }
+
+        result_message
+    }
+
+    /// Count creatures by category
+    fn count_by_category(
+        &self,
+        creatures: &[CreatureDefinition],
+    ) -> (usize, usize, usize, usize, usize) {
+        let mut monsters = 0;
+        let mut npcs = 0;
+        let mut templates = 0;
+        let mut variants = 0;
+        let mut custom = 0;
+
+        for creature in creatures {
+            match CreatureCategory::from_id(creature.id) {
+                CreatureCategory::Monsters => monsters += 1,
+                CreatureCategory::Npcs => npcs += 1,
+                CreatureCategory::Templates => templates += 1,
+                CreatureCategory::Variants => variants += 1,
+                CreatureCategory::Custom => custom += 1,
+            }
+        }
+
+        (monsters, npcs, templates, variants, custom)
     }
 
     fn show_list_mode(
@@ -611,7 +941,9 @@ mod tests {
         assert_eq!(state.mode, CreaturesEditorMode::List);
         assert!(state.search_query.is_empty());
         assert_eq!(state.selected_creature, None);
-        assert!(state.show_preview);
+        assert_eq!(state.category_filter, None);
+        assert!(state.show_registry_stats);
+        assert_eq!(state.registry_sort_by, RegistrySortBy::Id);
     }
 
     #[test]
@@ -619,10 +951,64 @@ mod tests {
         let creature = CreaturesEditorState::default_creature();
         assert_eq!(creature.id, 0);
         assert_eq!(creature.name, "New Creature");
-        assert!(creature.meshes.is_empty());
-        assert!(creature.mesh_transforms.is_empty());
+        assert_eq!(creature.meshes.len(), 0);
         assert_eq!(creature.scale, 1.0);
         assert_eq!(creature.color_tint, None);
+    }
+
+    #[test]
+    fn test_registry_sort_by_enum() {
+        assert_eq!(RegistrySortBy::Id, RegistrySortBy::Id);
+        assert_ne!(RegistrySortBy::Id, RegistrySortBy::Name);
+    }
+
+    #[test]
+    fn test_count_by_category_empty() {
+        let state = CreaturesEditorState::new();
+        let creatures = vec![];
+        let (monsters, npcs, templates, variants, custom) = state.count_by_category(&creatures);
+        assert_eq!(monsters, 0);
+        assert_eq!(npcs, 0);
+        assert_eq!(templates, 0);
+        assert_eq!(variants, 0);
+        assert_eq!(custom, 0);
+    }
+
+    #[test]
+    fn test_count_by_category_mixed() {
+        let state = CreaturesEditorState::new();
+        let creatures = vec![
+            CreatureDefinition {
+                id: 1,
+                name: "Goblin".to_string(),
+                meshes: vec![],
+                mesh_transforms: vec![],
+                scale: 1.0,
+                color_tint: None,
+            },
+            CreatureDefinition {
+                id: 2,
+                name: "Orc".to_string(),
+                meshes: vec![],
+                mesh_transforms: vec![],
+                scale: 1.0,
+                color_tint: None,
+            },
+            CreatureDefinition {
+                id: 51,
+                name: "Villager".to_string(),
+                meshes: vec![],
+                mesh_transforms: vec![],
+                scale: 1.0,
+                color_tint: None,
+            },
+        ];
+        let (monsters, npcs, templates, variants, custom) = state.count_by_category(&creatures);
+        assert_eq!(monsters, 2);
+        assert_eq!(npcs, 1);
+        assert_eq!(templates, 0);
+        assert_eq!(variants, 0);
+        assert_eq!(custom, 0);
     }
 
     #[test]

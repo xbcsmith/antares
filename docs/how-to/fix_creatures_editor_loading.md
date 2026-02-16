@@ -32,10 +32,10 @@ fn load_creatures(&mut self) {
                             // Step 2: Load full definitions for each reference
                             let mut creatures = Vec::new();
                             let mut load_errors = Vec::new();
-                            
+
                             for reference in references {
                                 let creature_path = dir.join(&reference.filepath);
-                                
+
                                 match fs::read_to_string(&creature_path) {
                                     Ok(creature_contents) => {
                                         match ron::from_str::<
@@ -76,15 +76,15 @@ fn load_creatures(&mut self) {
                                     }
                                 }
                             }
-                            
+
                             if load_errors.is_empty() {
                                 let count = creatures.len();
                                 self.creatures = creatures;
-                                
+
                                 if let Some(ref mut manager) = self.asset_manager {
                                     manager.mark_data_file_loaded(&creatures_file, count);
                                 }
-                                
+
                                 self.status_message =
                                     format!("Loaded {} creatures", count);
                             } else {
@@ -94,7 +94,7 @@ fn load_creatures(&mut self) {
                                         &format!("{} errors loading creatures", load_errors.len()),
                                     );
                                 }
-                                
+
                                 self.status_message = format!(
                                     "Loaded {} creatures with {} errors:\n{}",
                                     creatures.len(),
@@ -108,7 +108,7 @@ fn load_creatures(&mut self) {
                             if let Some(ref mut manager) = self.asset_manager {
                                 manager.mark_data_file_error(&creatures_file, &e.to_string());
                             }
-                            self.status_message = 
+                            self.status_message =
                                 format!("Failed to parse creatures registry: {}", e);
                             eprintln!(
                                 "Failed to parse creatures registry {:?}: {}",
@@ -154,7 +154,7 @@ fn save_creatures(&mut self) -> Result<(), String> {
                     .replace(" ", "_")
                     .replace("'", "")
                     .replace("-", "_");
-                    
+
                 antares::domain::visual::CreatureReference {
                     id: creature.id,
                     name: creature.name.clone(),
@@ -194,7 +194,7 @@ fn save_creatures(&mut self) -> Result<(), String> {
 
         for (reference, creature) in references.iter().zip(self.creatures.iter()) {
             let creature_path = dir.join(&reference.filepath);
-            
+
             let creature_contents = ron::ser::to_string_pretty(creature, creature_ron_config.clone())
                 .map_err(|e| {
                     format!("Failed to serialize creature {}: {}", reference.name, e)

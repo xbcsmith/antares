@@ -30,6 +30,7 @@ pub mod classes_editor;
 pub mod conditions_editor;
 pub mod config_editor;
 pub mod creature_assets;
+pub mod creature_id_manager;
 pub mod creature_templates;
 pub mod creatures_editor;
 pub mod creatures_manager;
