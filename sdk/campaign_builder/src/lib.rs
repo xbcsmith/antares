@@ -32,6 +32,7 @@ pub mod config_editor;
 pub mod creature_assets;
 pub mod creature_templates;
 pub mod creatures_editor;
+pub mod creatures_manager;
 pub mod dialogue_editor;
 pub mod items_editor;
 pub mod lod_editor;
