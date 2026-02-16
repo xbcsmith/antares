@@ -8008,26 +8008,12 @@
     ],
     events: {
         (
-            x: 14,
-            y: 4,
-        ): Encounter(
-            name: "Hungry Wolves",
-            description: "A pack of wolves that hunts together in this region.",
-            monster_group: [
-                5,
-                4,
-            ],
-        ),
-        (
-            x: 17,
-            y: 16,
-        ): Encounter(
-            name: "Bandit Patrol",
-            description: "A patrol of bandits looking for easy victims.",
-            monster_group: [
-                6,
-                6,
-            ],
+            x: 11,
+            y: 0,
+        ): Sign(
+            name: "Ruins Direction Sign",
+            description: "A sign pointing the way to the Ancient Ruins.",
+            text: "To Ancient Ruins",
         ),
         (
             x: 8,
@@ -8036,23 +8022,6 @@
             name: "Mountain Pass Sign",
             description: "A wooden sign indicating the way to the mountain pass.",
             text: "To the Mountain Pass",
-        ),
-        (
-            x: 0,
-            y: 7,
-        ): Sign(
-            name: "Town Exit Sign",
-            description: "A sign directing travelers to the town exit.",
-            text: "Exit to town.",
-        ),
-        (
-            x: 7,
-            y: 17,
-        ): Trap(
-            name: "Hidden Pit Trap",
-            description: "A concealed pit trap that deals heavy damage when sprung.",
-            damage: 8,
-            effect: None,
         ),
         (
             x: 5,
@@ -8067,28 +8036,34 @@
         ),
         (
             x: 19,
-            y: 10,
-        ): Teleport(
-            name: "Arcturus Cave Portal",
-            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (18,17).",
-            destination: (
-                x: 18,
-                y: 17,
-            ),
-            map_id: 4,
+            y: 11,
+        ): Sign(
+            name: "Wizard\'s Cave Sign",
+            description: "A sign pointing the way to the Wizard\'s Cave.",
+            text: "To the Wizard\'s Cave",
         ),
         (
-            x: 10,
-            y: 13,
-        ): Treasure(
-            name: "Large Treasure Chest",
-            description: "A large and ornate chest containing valuable loot.",
-            loot: [
-                15,
-                25,
-                33,
-                40,
+            x: 17,
+            y: 16,
+        ): Encounter(
+            name: "Bandit Patrol",
+            description: "A patrol of bandits looking for easy victims.",
+            monster_group: [
+                6,
+                6,
             ],
+        ),
+        (
+            x: 12,
+            y: 0,
+        ): Teleport(
+            name: "Ancient Portal",
+            description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (1,7).",
+            destination: (
+                x: 1,
+                y: 7,
+            ),
+            map_id: 3,
         ),
         (
             x: 0,
@@ -8115,6 +8090,14 @@
             ],
         ),
         (
+            x: 0,
+            y: 7,
+        ): Sign(
+            name: "Town Exit Sign",
+            description: "A sign directing travelers to the town exit.",
+            text: "Exit to town.",
+        ),
+        (
             x: 3,
             y: 11,
         ): Encounter(
@@ -8124,18 +8107,6 @@
                 6,
                 5,
             ],
-        ),
-        (
-            x: 12,
-            y: 0,
-        ): Teleport(
-            name: "Ancient Portal",
-            description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (1,7).",
-            destination: (
-                x: 1,
-                y: 7,
-            ),
-            map_id: 3,
         ),
         (
             x: 7,
@@ -8150,20 +8121,38 @@
             map_id: 5,
         ),
         (
-            x: 11,
-            y: 0,
-        ): Sign(
-            name: "Ruins Direction Sign",
-            description: "A sign pointing the way to the Ancient Ruins.",
-            text: "To Ancient Ruins",
+            x: 19,
+            y: 10,
+        ): Teleport(
+            name: "Arcturus Cave Portal",
+            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (18,17).",
+            destination: (
+                x: 18,
+                y: 17,
+            ),
+            map_id: 4,
         ),
         (
-            x: 19,
-            y: 11,
-        ): Sign(
-            name: "Wizard\'s Cave Sign",
-            description: "A sign pointing the way to the Wizard\'s Cave.",
-            text: "To the Wizard\'s Cave",
+            x: 7,
+            y: 17,
+        ): Trap(
+            name: "Hidden Pit Trap",
+            description: "A concealed pit trap that deals heavy damage when sprung.",
+            damage: 8,
+            effect: None,
+        ),
+        (
+            x: 10,
+            y: 13,
+        ): Treasure(
+            name: "Large Treasure Chest",
+            description: "A large and ornate chest containing valuable loot.",
+            loot: [
+                15,
+                25,
+                33,
+                40,
+            ],
         ),
         (
             x: 16,
@@ -8174,6 +8163,17 @@
             loot: [
                 14,
                 24,
+            ],
+        ),
+        (
+            x: 14,
+            y: 4,
+        ): Encounter(
+            name: "Hungry Wolves",
+            description: "A pack of wolves that hunts together in this region.",
+            monster_group: [
+                5,
+                4,
             ],
         ),
     },

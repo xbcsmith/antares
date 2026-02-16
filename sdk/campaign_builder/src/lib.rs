@@ -76,6 +76,7 @@ use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarge
 use antares::domain::proficiency::ProficiencyDefinition;
 use antares::domain::quest::{Quest, QuestId};
 use antares::domain::types::{DiceRoll, ItemId, MapId, MonsterId, SpellId};
+use antares::domain::visual::CreatureReference;
 use antares::domain::world::Map;
 use conditions_editor::ConditionsEditorState;
 use dialogue_editor::DialogueEditorState;
@@ -1965,37 +1966,109 @@ impl CampaignBuilderApp {
             if creatures_path.exists() {
                 match fs::read_to_string(&creatures_path) {
                     Ok(contents) => {
-                        match ron::from_str::<Vec<antares::domain::visual::CreatureDefinition>>(
-                            &contents,
-                        ) {
-                            Ok(creatures) => {
-                                let count = creatures.len();
-                                self.creatures = creatures;
+                        // Step 1: Parse registry file as Vec<CreatureReference>
+                        match ron::from_str::<Vec<CreatureReference>>(&contents) {
+                            Ok(references) => {
+                                // Step 2: Load full definitions for each reference
+                                let mut creatures = Vec::new();
+                                let mut load_errors = Vec::new();
 
-                                // Mark data file as loaded in asset manager
-                                if let Some(ref mut manager) = self.asset_manager {
-                                    manager.mark_data_file_loaded(&creatures_file, count);
+                                for reference in references {
+                                    let creature_path = dir.join(&reference.filepath);
+
+                                    match fs::read_to_string(&creature_path) {
+                                        Ok(creature_contents) => {
+                                            match ron::from_str::<
+                                                antares::domain::visual::CreatureDefinition,
+                                            >(
+                                                &creature_contents
+                                            ) {
+                                                Ok(creature) => {
+                                                    // Validate ID match
+                                                    if creature.id != reference.id {
+                                                        load_errors.push(
+                                                            format!(
+                                                                "ID mismatch for {}: registry={}, file={}",
+                                                                reference.filepath,
+                                                                reference.id,
+                                                                creature.id
+                                                            )
+                                                        );
+                                                    } else {
+                                                        creatures.push(creature);
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    load_errors.push(format!(
+                                                        "Failed to parse {}: {}",
+                                                        reference.filepath, e
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            load_errors.push(format!(
+                                                "Failed to read {}: {}",
+                                                reference.filepath, e
+                                            ));
+                                        }
+                                    }
                                 }
 
-                                self.status_message =
-                                    format!("Loaded {} creatures", self.creatures.len());
+                                if load_errors.is_empty() {
+                                    let count = creatures.len();
+                                    self.creatures = creatures;
+
+                                    if let Some(ref mut manager) = self.asset_manager {
+                                        manager.mark_data_file_loaded(&creatures_file, count);
+                                    }
+
+                                    self.status_message = format!("Loaded {} creatures", count);
+                                } else {
+                                    if let Some(ref mut manager) = self.asset_manager {
+                                        manager.mark_data_file_error(
+                                            &creatures_file,
+                                            &format!(
+                                                "{} errors loading creatures",
+                                                load_errors.len()
+                                            ),
+                                        );
+                                    }
+
+                                    self.status_message = format!(
+                                        "Loaded {} creatures with {} errors:\n{}",
+                                        creatures.len(),
+                                        load_errors.len(),
+                                        load_errors.join("\n")
+                                    );
+                                    eprintln!(
+                                        "Creature loading errors: {}",
+                                        load_errors.join("\n")
+                                    );
+                                }
                             }
                             Err(e) => {
-                                // Mark data file as error in asset manager
                                 if let Some(ref mut manager) = self.asset_manager {
                                     manager.mark_data_file_error(&creatures_file, &e.to_string());
                                 }
-                                self.status_message = format!("Failed to parse creatures: {}", e);
+                                self.status_message =
+                                    format!("Failed to parse creatures registry: {}", e);
+                                eprintln!(
+                                    "Failed to parse creatures registry {:?}: {}",
+                                    creatures_path, e
+                                );
                             }
                         }
                     }
                     Err(e) => {
-                        // Mark data file as error in asset manager
                         if let Some(ref mut manager) = self.asset_manager {
                             manager.mark_data_file_error(&creatures_file, &e.to_string());
                         }
-                        self.status_message = format!("Failed to read creatures file: {}", e);
-                        eprintln!("Failed to read creatures file {:?}: {}", creatures_path, e);
+                        self.status_message = format!("Failed to read creatures registry: {}", e);
+                        eprintln!(
+                            "Failed to read creatures registry {:?}: {}",
+                            creatures_path, e
+                        );
                     }
                 }
             } else {
@@ -2009,24 +2082,76 @@ impl CampaignBuilderApp {
     /// Save creatures to RON file
     fn save_creatures(&mut self) -> Result<(), String> {
         if let Some(ref dir) = self.campaign_dir {
-            let creatures_path = dir.join(&self.campaign.creatures_file);
+            // Step 1: Create registry entries from creatures
+            let references: Vec<CreatureReference> = self
+                .creatures
+                .iter()
+                .map(|creature| {
+                    let filename = creature
+                        .name
+                        .to_lowercase()
+                        .replace(" ", "_")
+                        .replace("'", "")
+                        .replace("-", "_");
 
-            // Create creatures directory if it doesn't exist
+                    CreatureReference {
+                        id: creature.id,
+                        name: creature.name.clone(),
+                        filepath: format!("assets/creatures/{}.ron", filename),
+                    }
+                })
+                .collect();
+
+            // Step 2: Save registry file (creatures.ron)
+            let creatures_path = dir.join(&self.campaign.creatures_file);
             if let Some(parent) = creatures_path.parent() {
                 fs::create_dir_all(parent)
                     .map_err(|e| format!("Failed to create creatures directory: {}", e))?;
             }
 
-            let ron_config = ron::ser::PrettyConfig::new()
+            let registry_ron_config = ron::ser::PrettyConfig::new()
                 .struct_names(false)
-                .enumerate_arrays(false);
+                .enumerate_arrays(true)
+                .separate_tuple_members(true)
+                .depth_limit(2);
 
-            let contents = ron::ser::to_string_pretty(&self.creatures, ron_config)
-                .map_err(|e| format!("Failed to serialize creatures: {}", e))?;
+            let registry_contents = ron::ser::to_string_pretty(&references, registry_ron_config)
+                .map_err(|e| format!("Failed to serialize creatures registry: {}", e))?;
 
-            fs::write(&creatures_path, contents)
-                .map_err(|e| format!("Failed to write creatures file: {}", e))?;
+            fs::write(&creatures_path, registry_contents)
+                .map_err(|e| format!("Failed to write creatures registry: {}", e))?;
 
+            // Step 3: Save individual creature files (assets/creatures/*.ron)
+            let creatures_dir = dir.join("assets/creatures");
+            fs::create_dir_all(&creatures_dir)
+                .map_err(|e| format!("Failed to create creatures assets directory: {}", e))?;
+
+            let creature_ron_config = ron::ser::PrettyConfig::new()
+                .struct_names(false)
+                .enumerate_arrays(false)
+                .depth_limit(3);
+
+            for (reference, creature) in references.iter().zip(self.creatures.iter()) {
+                let creature_path = dir.join(&reference.filepath);
+
+                let creature_contents =
+                    ron::ser::to_string_pretty(creature, creature_ron_config.clone()).map_err(
+                        |e| format!("Failed to serialize creature {}: {}", reference.name, e),
+                    )?;
+
+                fs::write(&creature_path, creature_contents).map_err(|e| {
+                    format!(
+                        "Failed to write creature file {}: {}",
+                        reference.filepath, e
+                    )
+                })?;
+            }
+
+            self.status_message = format!(
+                "Saved {} creatures (registry + {} individual files)",
+                self.creatures.len(),
+                self.creatures.len()
+            );
             self.unsaved_changes = true;
             Ok(())
         } else {
@@ -5033,6 +5158,7 @@ mod tests {
             portrait_id: String::new(),
             sprite: None,
             dialogue_id: None,
+            creature_id: None,
             quest_ids: Vec::new(),
             faction: None,
             is_merchant: false,

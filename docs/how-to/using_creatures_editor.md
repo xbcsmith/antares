@@ -410,5 +410,5 @@ If you encounter issues not covered in this guide:
 
 ---
 
-**Last Updated**: 2025-02-16  
+**Last Updated**: 2025-02-16
 **Version**: 1.0
