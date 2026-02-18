@@ -3591,6 +3591,10 @@ impl eframe::App for CampaignBuilderApp {
                         self.show_template_browser = true;
                         ui.close();
                     }
+                    if ui.button("🐉 Creature Editor").clicked() {
+                        self.active_tab = EditorTab::Creatures;
+                        ui.close();
+                    }
                     ui.separator();
                     if ui.button("✅ Validate Campaign").clicked() {
                         self.validate_campaign();
@@ -6391,6 +6395,7 @@ mod tests {
         assert_eq!(EditorTab::Items.name(), "Items");
         assert_eq!(EditorTab::Spells.name(), "Spells");
         assert_eq!(EditorTab::Monsters.name(), "Monsters");
+        assert_eq!(EditorTab::Creatures.name(), "Creatures");
         assert_eq!(EditorTab::Maps.name(), "Maps");
         assert_eq!(EditorTab::Quests.name(), "Quests");
         assert_eq!(EditorTab::Dialogues.name(), "Dialogues");

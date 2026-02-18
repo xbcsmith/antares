@@ -24,6 +24,8 @@ Campaign Builder --> Creatures Editor
 
 [@create_creatures.md](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/docs/how-to/create_creatures.md) Tools does not have a link to the Creature Editor. The only way to spawn a creature editor is to select New from The Campaign Builder --> Creatures tab. The Creatures tab has a list of creatures but no preview is rendered when selected. I would expect a Preview in the right column to appear with a Edit button that opens the Creatures Assets .ron file in the Creature Editor window. I would also expect to have a place where I can register an creature asset .ron in the creatures.ron registry. I thought we covered this in the [@creature_editor_enhanced_implementation_plan.md](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/docs/explanation/creature_editor_enhanced_implementation_plan.md) [@creature_templates.md](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/docs/reference/creature_templates.md) are not displayed in the template browser window. and I can't figure out how to get to them.
 
+[creature editor ui fix](./creature_editor_ux_fixes_implementation_plan.md)
+
 ### Map Editor Multiselection
 
 Campaign Builder --> Map Editor --> Select Map --> Edit

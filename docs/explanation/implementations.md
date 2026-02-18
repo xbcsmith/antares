@@ -19,9 +19,105 @@
 | **Creature Editor Enhancement Phase 3** | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)** |
 | **Creature Editor Enhancement Phase 4** | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                |
 | **Creature Editor Enhancement Phase 5** | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**              |
+| **Creature Editor UX Fixes Phase 1**    | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry** |
 
 **Total Lines Implemented**: 8,000+ lines of production code + 5,000+ lines of documentation
 **Total Tests**: 285+ new tests (all passing), 1,759 campaign_builder tests passing
+
+---
+
+## Creature Editor UX Fixes - Phase 1: Fix Documentation and Add Tools Menu Entry
+
+### Overview
+
+Phase 1 of the Creature Editor UX Fixes addresses a documentation mismatch
+(Issue 1 from the UX analysis) and the missing `Tools -> Creature Editor` menu
+entry. The documentation described a navigation path that did not exist at
+runtime, and the panel layout description was incorrect.
+
+### Problem Statement
+
+`docs/how-to/create_creatures.md` instructed users to navigate to
+`Tools -> Creature Editor`, but that menu entry did not exist. The Tools menu
+contained only: Template Browser, Validate Campaign, Advanced Validation Report,
+Balance Statistics, Refresh File Tree, Test Play, Export Campaign, and
+Preferences. No Creature Editor entry was present.
+
+Additionally, the Getting Started section described a three-panel layout
+(Template Browser / Preview Pane / Properties Panel) that does not correspond
+to the actual UI. The real entry mode is a flat registry list with a toolbar,
+and the three-panel layout (Mesh List / 3D Preview / Mesh Properties) only
+appears after opening an individual creature for editing.
+
+### Components Implemented
+
+#### 1.1 Tools Menu Entry (`sdk/campaign_builder/src/lib.rs`)
+
+Added a `Tools -> Creature Editor` button immediately after the existing
+`Template Browser...` entry and before the first separator in the Tools menu
+block inside `impl eframe::App for CampaignBuilderApp::update()`:
+
+```rust
+if ui.button("🐉 Creature Editor").clicked() {
+    self.active_tab = EditorTab::Creatures;
+    ui.close();
+}
+```
+
+This sets `self.active_tab = EditorTab::Creatures`, which causes the left
+sidebar to switch to the Creatures panel, matching the behavior the
+documentation already described.
+
+#### 1.2 Documentation Fix (`docs/how-to/create_creatures.md`)
+
+Replaced the inaccurate "Opening the Campaign Builder" subsection with
+"Opening the Creature Editor" containing two accurate navigation paths:
+
+- **Path A (via Tools menu):** `Tools -> Creature Editor` switches the active
+  panel to the Creatures editor inside an already-open campaign.
+- **Path B (direct tab):** Click the `Creatures` tab in the left sidebar.
+
+Replaced the incorrect three-panel description with a correct description of
+the registry list mode (flat list with toolbar at top) and a note that the
+three-panel layout only appears after opening an individual creature for
+editing.
+
+#### 1.3 Regression-Guard Test (`sdk/campaign_builder/src/lib.rs`)
+
+Added `assert_eq!(EditorTab::Creatures.name(), "Creatures");` to the existing
+`test_editor_tab_names` test function. This guards against future refactors
+accidentally breaking the tab name string used for display and navigation.
+
+### Files Modified
+
+- `sdk/campaign_builder/src/lib.rs` -- new "Creature Editor" button in Tools
+  menu; `EditorTab::Creatures` assertion added to `test_editor_tab_names`
+- `docs/how-to/create_creatures.md` -- corrected "Getting Started" section
+
+### Testing
+
+- `test_editor_tab_names` now asserts `EditorTab::Creatures.name() == "Creatures"`.
+- All 2401 tests pass; zero failures, zero clippy warnings.
+- Manual smoke test: open app, click `Tools -> Creature Editor`, the Creatures
+  tab activates.
+
+### Quality Gates
+
+```text
+cargo fmt --all             -- no output (clean)
+cargo check --all-targets   -- Finished 0 errors
+cargo clippy -- -D warnings -- Finished 0 warnings
+cargo nextest run           -- 2401 passed, 0 failed
+```
+
+### Success Criteria Met
+
+- `Tools` menu contains a "Creature Editor" entry that navigates to
+  `EditorTab::Creatures`.
+- Documentation accurately describes both navigation paths (Tools menu and
+  direct tab) and the actual panel layout (registry list in default mode,
+  three-panel only after opening a creature).
+- All quality gates pass with no new failures.
 
 ---
 
