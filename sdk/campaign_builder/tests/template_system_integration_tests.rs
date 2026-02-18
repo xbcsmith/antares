@@ -19,14 +19,43 @@ fn test_template_registry_initialization() {
     let registry = initialize_template_registry();
 
     // Verify all expected templates are registered
-    assert_eq!(registry.len(), 5, "Expected 5 built-in templates");
+    assert_eq!(registry.len(), 24, "Expected 24 built-in templates");
 
-    // Verify specific templates exist
+    // Verify original templates still exist
     assert!(registry.get("humanoid_basic").is_some());
     assert!(registry.get("quadruped_basic").is_some());
     assert!(registry.get("flying_basic").is_some());
     assert!(registry.get("slime_basic").is_some());
     assert!(registry.get("dragon_basic").is_some());
+
+    // Verify new humanoid variants
+    assert!(registry.get("humanoid_fighter").is_some());
+    assert!(registry.get("humanoid_mage").is_some());
+    assert!(registry.get("humanoid_cleric").is_some());
+    assert!(registry.get("humanoid_rogue").is_some());
+    assert!(registry.get("humanoid_archer").is_some());
+
+    // Verify new creature variants
+    assert!(registry.get("quadruped_wolf").is_some());
+    assert!(registry.get("spider_basic").is_some());
+    assert!(registry.get("snake_basic").is_some());
+
+    // Verify undead templates
+    assert!(registry.get("skeleton_basic").is_some());
+    assert!(registry.get("zombie_basic").is_some());
+    assert!(registry.get("ghost_basic").is_some());
+
+    // Verify robot templates
+    assert!(registry.get("robot_basic").is_some());
+    assert!(registry.get("robot_advanced").is_some());
+    assert!(registry.get("robot_flying").is_some());
+
+    // Verify primitive templates
+    assert!(registry.get("primitive_cube").is_some());
+    assert!(registry.get("primitive_sphere").is_some());
+    assert!(registry.get("primitive_cylinder").is_some());
+    assert!(registry.get("primitive_cone").is_some());
+    assert!(registry.get("primitive_pyramid").is_some());
 }
 
 #[test]
@@ -70,16 +99,26 @@ fn test_template_category_filtering() {
 
     // Filter by Humanoid category
     let humanoids = registry.by_category(TemplateCategory::Humanoid);
-    assert_eq!(humanoids.len(), 1);
-    assert_eq!(humanoids[0].metadata.name, "Humanoid");
+    assert_eq!(humanoids.len(), 6); // basic + fighter + mage + cleric + rogue + archer
+    for entry in &humanoids {
+        assert_eq!(entry.metadata.category, TemplateCategory::Humanoid);
+    }
 
     // Filter by Creature category
     let creatures = registry.by_category(TemplateCategory::Creature);
-    assert_eq!(creatures.len(), 4); // quadruped, flying, slime, dragon
+    assert_eq!(creatures.len(), 7); // quadruped, flying, slime, dragon, wolf, spider, snake
 
-    // Verify no templates in other categories
+    // Verify undead category
+    let undead = registry.by_category(TemplateCategory::Undead);
+    assert_eq!(undead.len(), 3); // skeleton, zombie, ghost
+
+    // Verify robot category
     let robots = registry.by_category(TemplateCategory::Robot);
-    assert_eq!(robots.len(), 0);
+    assert_eq!(robots.len(), 3); // basic, advanced, flying
+
+    // Verify primitive category
+    let primitives = registry.by_category(TemplateCategory::Primitive);
+    assert_eq!(primitives.len(), 5); // cube, sphere, cylinder, cone, pyramid
 }
 
 #[test]
@@ -88,11 +127,18 @@ fn test_template_complexity_filtering() {
 
     // Filter by Beginner complexity
     let beginner = registry.by_complexity(Complexity::Beginner);
-    assert_eq!(beginner.len(), 3); // humanoid, quadruped, slime
+    // humanoid_basic, fighter, mage, cleric, rogue, archer = 6 humanoids
+    // quadruped_basic, slime_basic, wolf, snake = 4 creatures
+    // skeleton, zombie, ghost = 3 undead
+    // robot_basic = 1 robot
+    // cube, sphere, cylinder, cone, pyramid = 5 primitives
+    // Total = 19
+    assert_eq!(beginner.len(), 19);
 
     // Filter by Intermediate complexity
     let intermediate = registry.by_complexity(Complexity::Intermediate);
-    assert_eq!(intermediate.len(), 1); // flying
+    // flying_basic, spider_basic, robot_advanced, robot_flying = 4
+    assert_eq!(intermediate.len(), 4);
 
     // Filter by Advanced complexity
     let advanced = registry.by_complexity(Complexity::Advanced);
@@ -107,9 +153,10 @@ fn test_template_complexity_filtering() {
 fn test_template_search_by_name() {
     let registry = initialize_template_registry();
 
+    // "humanoid" appears in tags/descriptions for multiple humanoid templates
     let results = registry.search("humanoid");
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].metadata.name, "Humanoid");
+    assert!(!results.is_empty(), "humanoid search should return results");
+    assert!(results.iter().any(|e| e.metadata.name == "Humanoid"));
 
     let results = registry.search("dragon");
     assert_eq!(results.len(), 1);
@@ -120,14 +167,18 @@ fn test_template_search_by_name() {
 fn test_template_search_by_tags() {
     let registry = initialize_template_registry();
 
-    // Search for "winged" should find flying creature and dragon
+    // Search for "winged" should find flying creature and dragon only
     let results = registry.search("winged");
     assert_eq!(results.len(), 2);
+    assert!(results.iter().any(|e| e.metadata.name == "Flying Creature"));
+    assert!(results.iter().any(|e| e.metadata.name == "Dragon"));
 
-    // Search for "biped" should find humanoid
+    // Search for "biped" should find all humanoid templates (all tagged "biped")
     let results = registry.search("biped");
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].metadata.name, "Humanoid");
+    assert_eq!(results.len(), 6);
+    for entry in &results {
+        assert_eq!(entry.metadata.category, TemplateCategory::Humanoid);
+    }
 }
 
 #[test]
@@ -477,5 +528,5 @@ fn test_view_mode_switching() {
 fn test_registry_is_not_empty() {
     let registry = initialize_template_registry();
     assert!(!registry.is_empty());
-    assert!(registry.len() == 5);
+    assert_eq!(registry.len(), 24);
 }

@@ -689,8 +689,10 @@ mod tests {
         browser.category_filter = Some(TemplateCategory::Humanoid);
 
         let filtered = browser.filter_and_sort_templates(&templates);
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].1.metadata.category, TemplateCategory::Humanoid);
+        assert_eq!(filtered.len(), 6);
+        for (_, entry) in &filtered {
+            assert_eq!(entry.metadata.category, TemplateCategory::Humanoid);
+        }
     }
 
     #[test]

@@ -2,26 +2,122 @@
 
 ## Implementation Status Overview
 
-| Phase                                   | Status      | Date       | Description                                   |
-| --------------------------------------- | ----------- | ---------- | --------------------------------------------- |
-| Phase 1                                 | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                       |
-| Phase 2                                 | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                         |
-| Phase 3                                 | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                |
-| Phase 4                                 | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                  |
-| Phase 5                                 | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                    |
-| Phase 6                                 | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration |
-| Phase 7                                 | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                       |
-| Phase 8                                 | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                  |
-| Phase 9                                 | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                    |
-| Phase 10                                | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                    |
-| **Creature Editor Enhancement Phase 1** | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**           |
-| **Creature Editor Enhancement Phase 2** | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                  |
-| **Creature Editor Enhancement Phase 3** | ✅ COMPLETE | 2025-02-15 | **Template System Integration**               |
-| **Creature Editor Enhancement Phase 4** | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**               |
-| **Creature Editor Enhancement Phase 5** | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**             |
+| Phase                                   | Status      | Date       | Description                                    |
+| --------------------------------------- | ----------- | ---------- | ---------------------------------------------- |
+| Phase 1                                 | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                        |
+| Phase 2                                 | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                          |
+| Phase 3                                 | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                 |
+| Phase 4                                 | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                   |
+| Phase 5                                 | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                     |
+| Phase 6                                 | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration  |
+| Phase 7                                 | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                        |
+| Phase 8                                 | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                   |
+| Phase 9                                 | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                     |
+| Phase 10                                | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                     |
+| **Creature Editor Enhancement Phase 1** | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**            |
+| **Creature Editor Enhancement Phase 2** | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                   |
+| **Creature Editor Enhancement Phase 3** | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)** |
+| **Creature Editor Enhancement Phase 4** | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                |
+| **Creature Editor Enhancement Phase 5** | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**              |
 
 **Total Lines Implemented**: 8,000+ lines of production code + 5,000+ lines of documentation
-**Total Tests**: 235+ new tests (all passing), 1,335+ lib tests passing
+**Total Tests**: 285+ new tests (all passing), 1,759 campaign_builder tests passing
+
+---
+
+## Creature Template Expansion - 24 Production-Ready Templates
+
+### Overview
+
+Expanded `sdk/campaign_builder/src/creature_templates.rs` from 5 basic templates to
+24 production-ready templates spanning all five `TemplateCategory` variants. This
+fulfills the Phase 3 deliverable requiring 15+ templates that was previously incomplete.
+
+### Templates Added (19 new)
+
+#### Humanoid Variants (5 new, `TemplateCategory::Humanoid`)
+
+| Template ID        | Name    | Meshes | Equipment Detail                                  |
+| ------------------ | ------- | ------ | ------------------------------------------------- |
+| `humanoid_fighter` | Fighter | 8      | Plate armor, flat-cube shield, elongated sword    |
+| `humanoid_mage`    | Mage    | 8      | Purple robes, tall staff, cone pointed hat        |
+| `humanoid_cleric`  | Cleric  | 9      | Cream robes, golden holy symbol disc, sphere mace |
+| `humanoid_rogue`   | Rogue   | 9      | Dark leather, hood cylinder, twin daggers         |
+| `humanoid_archer`  | Archer  | 8      | Forest green armor, tall bow, back quiver         |
+
+#### Creature Variants (3 new, `TemplateCategory::Creature`)
+
+| Template ID      | Name   | Meshes | Detail                                         |
+| ---------------- | ------ | ------ | ---------------------------------------------- |
+| `quadruped_wolf` | Wolf   | 8      | Lean body, elongated snout, angled upward tail |
+| `spider_basic`   | Spider | 10     | Two body segments + eight radiating legs       |
+| `snake_basic`    | Snake  | 7      | Six sinusoidal body segments + cone tail       |
+
+#### Undead Templates (3 new, `TemplateCategory::Undead`)
+
+| Template ID      | Name     | Meshes | Detail                                              |
+| ---------------- | -------- | ------ | --------------------------------------------------- |
+| `skeleton_basic` | Skeleton | 6      | Narrow ivory bone shapes, very thin limbs           |
+| `zombie_basic`   | Zombie   | 6      | Gray-green flesh, asymmetric zombie reach pose      |
+| `ghost_basic`    | Ghost    | 6      | Translucent blue-white wispy form, alpha color tint |
+
+#### Robot Templates (3 new, `TemplateCategory::Robot`)
+
+| Template ID      | Name             | Meshes | Detail                                           |
+| ---------------- | ---------------- | ------ | ------------------------------------------------ |
+| `robot_basic`    | Robot (Basic)    | 6      | Boxy cube body/head, thick cylinder limbs        |
+| `robot_advanced` | Robot (Advanced) | 12     | Sphere shoulder joints, chest panel, sensor eye  |
+| `robot_flying`   | Robot (Flying)   | 8      | Wide wing panels, landing struts, thruster cones |
+
+#### Primitive Templates (5 new, `TemplateCategory::Primitive`)
+
+| Template ID          | Name     | Meshes | Detail                         |
+| -------------------- | -------- | ------ | ------------------------------ |
+| `primitive_cube`     | Cube     | 1      | Single unit cube               |
+| `primitive_sphere`   | Sphere   | 1      | Single sphere (r=0.5)          |
+| `primitive_cylinder` | Cylinder | 1      | Single cylinder (r=0.5, h=1.0) |
+| `primitive_cone`     | Cone     | 1      | Single cone (r=0.5, h=1.0)     |
+| `primitive_pyramid`  | Pyramid  | 1      | Single four-sided pyramid      |
+
+### Registry Totals After Expansion
+
+| Category  | Count  | Complexity Distribution                     |
+| --------- | ------ | ------------------------------------------- |
+| Humanoid  | 6      | 6 Beginner                                  |
+| Creature  | 7      | 4 Beginner, 2 Intermediate, 1 Advanced      |
+| Undead    | 3      | 3 Beginner                                  |
+| Robot     | 3      | 1 Beginner, 2 Intermediate                  |
+| Primitive | 5      | 5 Beginner                                  |
+| **Total** | **24** | **19 Beginner, 4 Intermediate, 1 Advanced** |
+
+### Files Modified
+
+- `sdk/campaign_builder/src/creature_templates.rs` - Added 19 generator functions,
+  updated `available_templates()` and `initialize_template_registry()`, updated and
+  expanded test module (53 new tests)
+- `sdk/campaign_builder/src/template_browser.rs` - Updated `test_filter_by_category`
+  expected count from 1 to 6 humanoids
+- `sdk/campaign_builder/tests/template_system_integration_tests.rs` - Updated 6
+  hardcoded count assertions to match expanded registry
+
+### Testing
+
+53 new unit tests added inside `creature_templates.rs`:
+
+- Individual structure tests for all 19 new generators (mesh count + transform consistency)
+- Batch validation tests by category (`test_all_humanoid_variants_validate`, etc.)
+- Semantic tests (`test_ghost_is_translucent`, `test_spider_has_eight_legs`,
+  `test_robot_advanced_has_more_parts_than_basic`, etc.)
+- Updated registry count and category/complexity filter tests
+
+All 1,759 `campaign_builder` tests pass.
+
+### Quality Gates
+
+- `cargo fmt --all` - clean
+- `cargo check --all-targets --all-features` - 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` - 0 warnings
+- `cargo nextest run --all-features -p campaign_builder` - 1759 passed, 0 failed
 
 ---
 
