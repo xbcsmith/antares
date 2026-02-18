@@ -464,8 +464,8 @@ pub fn import_mesh_from_obj_with_options(
 
                 // Parse face indices (OBJ uses 1-based indexing)
                 let mut face_indices = Vec::new();
-                for i in 1..parts.len() {
-                    let index = parse_face_vertex(parts[i])?;
+                for part in parts.iter().skip(1) {
+                    let index = parse_face_vertex(part)?;
                     if index.0 == 0 || index.0 > vertices.len() {
                         return Err(ObjError::InvalidIndex(format!(
                             "Vertex index {} out of range (1-{})",

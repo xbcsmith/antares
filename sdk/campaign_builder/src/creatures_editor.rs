@@ -1,8 +1,13 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::context_menu::ContextMenuManager;
 use crate::creature_id_manager::{CreatureCategory, CreatureIdManager};
+use crate::creature_undo_redo::CreatureUndoRedoManager;
 use crate::creatures_manager::CreaturesManager;
+use crate::creatures_workflow::{CreatureWorkflowState, WorkflowMode};
+use crate::keyboard_shortcuts::ShortcutManager;
+use crate::preview_features::PreviewState;
 use crate::ui_helpers::{ActionButtons, EditorToolbar, ItemAction, ToolbarAction, TwoColumnLayout};
 use antares::domain::types::CreatureId;
 use antares::domain::visual::{
@@ -67,6 +72,18 @@ pub struct CreaturesEditorState {
     pub background_color: [f32; 4],
     pub camera_distance: f32,
     pub uniform_scale: bool,
+
+    // Phase 5: Workflow Integration & Polish
+    /// Unified workflow state (undo/redo, shortcuts, context menus, auto-save, preview).
+    pub workflow: CreatureWorkflowState,
+    /// Dedicated undo/redo manager for creature editing operations.
+    pub undo_redo: CreatureUndoRedoManager,
+    /// Keyboard shortcut registry for the creature editor.
+    pub shortcut_manager: ShortcutManager,
+    /// Context menu registry for mesh list and preview panels.
+    pub context_menu_manager: ContextMenuManager,
+    /// Enhanced preview state (camera, lighting, grid, statistics).
+    pub preview_state: PreviewState,
 }
 
 /// Primitive type for mesh generation
@@ -126,6 +143,13 @@ impl Default for CreaturesEditorState {
             background_color: [0.2, 0.2, 0.25, 1.0],
             camera_distance: 5.0,
             uniform_scale: true,
+
+            // Phase 5: Workflow Integration & Polish
+            workflow: CreatureWorkflowState::new(),
+            undo_redo: CreatureUndoRedoManager::new(),
+            shortcut_manager: ShortcutManager::new(),
+            context_menu_manager: ContextMenuManager::new(),
+            preview_state: PreviewState::new(),
         }
     }
 }
@@ -1702,6 +1726,186 @@ impl CreaturesEditorState {
             .max()
             .unwrap_or(0)
             .saturating_add(1)
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 5: Workflow Integration helpers
+    // -----------------------------------------------------------------------
+
+    /// Enter asset-editor mode for the given creature.
+    ///
+    /// Transitions the editor into `Edit` mode, records the creature index,
+    /// updates the unified `workflow` state (breadcrumbs, undo history, etc.),
+    /// and marks the session as clean.
+    ///
+    /// # Arguments
+    ///
+    /// * `creatures` - The full creature list.
+    /// * `index` - The index of the creature to edit.
+    /// * `file_name` - The asset file name (e.g. `"goblin.ron"`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::creatures_editor::CreaturesEditorState;
+    /// use antares::domain::visual::CreatureDefinition;
+    ///
+    /// let mut state = CreaturesEditorState::new();
+    /// let creature = CreatureDefinition {
+    ///     id: 1,
+    ///     name: "Goblin".to_string(),
+    ///     meshes: vec![],
+    ///     mesh_transforms: vec![],
+    ///     scale: 1.0,
+    ///     color_tint: None,
+    /// };
+    /// let creatures = vec![creature];
+    /// state.open_for_editing(&creatures, 0, "goblin.ron");
+    ///
+    /// use campaign_builder::creatures_editor::CreaturesEditorMode;
+    /// assert_eq!(state.mode, CreaturesEditorMode::Edit);
+    /// ```
+    pub fn open_for_editing(
+        &mut self,
+        creatures: &[CreatureDefinition],
+        index: usize,
+        file_name: &str,
+    ) {
+        if let Some(creature) = creatures.get(index) {
+            self.mode = CreaturesEditorMode::Edit;
+            self.selected_creature = Some(index);
+            self.edit_buffer = creature.clone();
+            self.preview_dirty = true;
+            self.workflow.enter_asset_editor(file_name, &creature.name);
+        }
+    }
+
+    /// Return to registry (list) mode, resetting all transient edit state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::creatures_editor::{CreaturesEditorState, CreaturesEditorMode};
+    /// use campaign_builder::creatures_workflow::WorkflowMode;
+    ///
+    /// let mut state = CreaturesEditorState::new();
+    /// state.mode = CreaturesEditorMode::Edit;
+    /// state.back_to_registry();
+    ///
+    /// assert_eq!(state.mode, CreaturesEditorMode::List);
+    /// assert_eq!(state.workflow.mode, WorkflowMode::Registry);
+    /// ```
+    pub fn back_to_registry(&mut self) {
+        self.mode = CreaturesEditorMode::List;
+        self.selected_creature = None;
+        self.selected_mesh_index = None;
+        self.mesh_edit_buffer = None;
+        self.mesh_transform_buffer = None;
+        self.preview_dirty = false;
+        self.workflow.return_to_registry();
+    }
+
+    /// Returns the mode indicator string for the top bar (Phase 5.1).
+    ///
+    /// Examples: `"Registry Mode"` or `"Asset Editor: goblin.ron"`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::creatures_editor::CreaturesEditorState;
+    ///
+    /// let state = CreaturesEditorState::new();
+    /// assert_eq!(state.mode_indicator(), "Registry Mode");
+    /// ```
+    pub fn mode_indicator(&self) -> String {
+        self.workflow.mode_indicator()
+    }
+
+    /// Returns the breadcrumb navigation string (Phase 5.1).
+    ///
+    /// Example: `"Creatures > Goblin > left_leg"`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::creatures_editor::CreaturesEditorState;
+    ///
+    /// let state = CreaturesEditorState::new();
+    /// assert_eq!(state.breadcrumb_string(), "Creatures");
+    /// ```
+    pub fn breadcrumb_string(&self) -> String {
+        self.workflow.breadcrumb_string()
+    }
+
+    /// Returns `true` if there are unsaved changes in the current session.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::creatures_editor::CreaturesEditorState;
+    ///
+    /// let state = CreaturesEditorState::new();
+    /// assert!(!state.has_unsaved_changes());
+    /// ```
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.workflow.has_unsaved_changes()
+    }
+
+    /// Returns `true` if there is at least one action available to undo.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::creatures_editor::CreaturesEditorState;
+    ///
+    /// let state = CreaturesEditorState::new();
+    /// assert!(!state.can_undo());
+    /// ```
+    pub fn can_undo(&self) -> bool {
+        self.undo_redo.can_undo()
+    }
+
+    /// Returns `true` if there is at least one action available to redo.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::creatures_editor::CreaturesEditorState;
+    ///
+    /// let state = CreaturesEditorState::new();
+    /// assert!(!state.can_redo());
+    /// ```
+    pub fn can_redo(&self) -> bool {
+        self.undo_redo.can_redo()
+    }
+
+    /// Returns the keyboard shortcut string for an action (Phase 5.3).
+    ///
+    /// # Arguments
+    ///
+    /// * `action` - The shortcut action to look up.
+    ///
+    /// # Returns
+    ///
+    /// A human-readable shortcut string, or `None` if no binding exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::creatures_editor::CreaturesEditorState;
+    /// use campaign_builder::keyboard_shortcuts::ShortcutAction;
+    ///
+    /// let state = CreaturesEditorState::new();
+    /// let shortcut = state.shortcut_for(ShortcutAction::Save);
+    /// assert!(shortcut.is_some());
+    /// ```
+    pub fn shortcut_for(
+        &self,
+        action: crate::keyboard_shortcuts::ShortcutAction,
+    ) -> Option<String> {
+        self.shortcut_manager
+            .get_shortcut(action)
+            .map(|s| s.to_string())
     }
 }
 

@@ -101,7 +101,7 @@ pub fn generate_cube(size: f32, color: [f32; 4]) -> MeshDefinition {
         vertices,
         indices,
         normals: Some(normals),
-        uvs: None,
+        uvs: Some(uvs),
         color,
         lod_levels: None,
         lod_distances: None,

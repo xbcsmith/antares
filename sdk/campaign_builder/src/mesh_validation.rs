@@ -303,7 +303,7 @@ pub fn validate_mesh(mesh: &MeshDefinition) -> MeshValidationReport {
     }
 
     // Check indices are multiples of 3
-    if mesh.indices.len() % 3 != 0 {
+    if !mesh.indices.len().is_multiple_of(3) {
         report.errors.push(MeshError::IndicesNotTriangles {
             count: mesh.indices.len(),
         });

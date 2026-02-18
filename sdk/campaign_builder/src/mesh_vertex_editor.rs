@@ -392,17 +392,45 @@ impl MeshVertexEditor {
         self.add_to_history(operation);
     }
 
-    /// Scales selected vertices from their center by the given factor
+    /// Scales selected vertices from the world origin by the given factor
+    ///
+    /// Each selected vertex has its coordinates multiplied by the scale factor,
+    /// effectively scaling from the world origin (0, 0, 0).
     ///
     /// # Arguments
     ///
     /// * `scale` - The scale factor [x, y, z]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::visual::MeshDefinition;
+    /// use campaign_builder::mesh_vertex_editor::MeshVertexEditor;
+    ///
+    /// let mesh = MeshDefinition {
+    ///     name: Some("test".to_string()),
+    ///     vertices: vec![[1.0, 2.0, 3.0]],
+    ///     indices: vec![],
+    ///     normals: None,
+    ///     uvs: None,
+    ///     color: [1.0, 1.0, 1.0, 1.0],
+    ///     lod_levels: None,
+    ///     lod_distances: None,
+    ///     material: None,
+    ///     texture_path: None,
+    /// };
+    ///
+    /// let mut editor = MeshVertexEditor::new(mesh);
+    /// editor.select_vertex(0);
+    /// editor.scale_selected([2.0, 2.0, 2.0]);
+    ///
+    /// let vertex = editor.mesh().vertices[0];
+    /// assert_eq!(vertex, [2.0, 4.0, 6.0]);
+    /// ```
     pub fn scale_selected(&mut self, scale: [f32; 3]) {
         if self.selected_vertices.is_empty() {
             return;
         }
-
-        let center = self.calculate_selection_center();
 
         let mut operation = VertexOperation {
             description: "Scale vertices".to_string(),
@@ -414,16 +442,10 @@ impl MeshVertexEditor {
         for &index in &self.selected_vertices {
             operation.old_positions.push(self.mesh.vertices[index]);
 
-            let offset = [
-                self.mesh.vertices[index][0] - center[0],
-                self.mesh.vertices[index][1] - center[1],
-                self.mesh.vertices[index][2] - center[2],
-            ];
-
             let mut new_pos = [
-                center[0] + offset[0] * scale[0],
-                center[1] + offset[1] * scale[1],
-                center[2] + offset[2] * scale[2],
+                self.mesh.vertices[index][0] * scale[0],
+                self.mesh.vertices[index][1] * scale[1],
+                self.mesh.vertices[index][2] * scale[2],
             ];
 
             if self.snap_to_grid {
@@ -543,11 +565,11 @@ impl MeshVertexEditor {
         // Create index mapping (old -> new)
         let mut index_map: Vec<Option<usize>> = vec![Some(0); self.mesh.vertices.len()];
         let mut new_index = 0;
-        for i in 0..self.mesh.vertices.len() {
+        for (i, slot) in index_map.iter_mut().enumerate() {
             if self.selected_vertices.contains(&i) {
-                index_map[i] = None;
+                *slot = None;
             } else {
-                index_map[i] = Some(new_index);
+                *slot = Some(new_index);
                 new_index += 1;
             }
         }
@@ -884,10 +906,14 @@ mod tests {
         let mesh = create_test_mesh();
         let mut editor = MeshVertexEditor::new(mesh);
 
+        // Select vertex 0, then switch to Add mode to also select vertex 1
         editor.select_vertex(0);
+        editor.set_selection_mode(SelectionMode::Add);
         editor.select_vertex(1);
         editor.invert_selection();
 
+        // After invert: 0 and 1 were selected, so they become unselected
+        // 2 and 3 were not selected, so they become selected
         assert!(!editor.is_vertex_selected(0));
         assert!(!editor.is_vertex_selected(1));
         assert!(editor.is_vertex_selected(2));
