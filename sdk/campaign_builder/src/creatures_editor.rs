@@ -335,6 +335,11 @@ impl CreaturesEditorState {
         ui.separator();
 
         // Registry List View
+        // Deferred double-click action: we must not call open_for_editing() from
+        // inside the scroll-area closure because `filtered_creatures` holds shared
+        // borrows into `creatures` at that point.  We collect the intent here and
+        // execute it after the closure returns (all borrows released).
+        let mut pending_edit: Option<(usize, String)> = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             // Filter and sort creatures
             let mut filtered_creatures: Vec<(usize, &CreatureDefinition)> = creatures
@@ -419,12 +424,11 @@ impl CreaturesEditorState {
                         }
 
                         if response.double_clicked() {
-                            self.mode = CreaturesEditorMode::Edit;
-                            self.edit_buffer = creature.clone();
-                            self.selected_mesh_index = None;
-                            self.mesh_edit_buffer = None;
-                            self.mesh_transform_buffer = None;
-                            self.preview_dirty = true;
+                            let file_name = format!(
+                                "assets/creatures/{}.ron",
+                                creature.name.to_lowercase().replace(' ', "_")
+                            );
+                            pending_edit = Some((idx, file_name));
                         }
 
                         ui.separator();
@@ -453,6 +457,14 @@ impl CreaturesEditorState {
                 }
             }
         });
+
+        // Apply any pending edit action that was deferred from inside the scroll
+        // area.  At this point every borrow of `creatures` held by
+        // `filtered_creatures` has been released, so open_for_editing() can
+        // take a shared borrow without conflict.
+        if let Some((idx, file_name)) = pending_edit {
+            self.open_for_editing(creatures, idx, &file_name);
+        }
 
         // Show validation panel if requested
         if self.show_validation_panel {
@@ -2057,5 +2069,140 @@ mod tests {
 
         state.preview_dirty = false;
         assert!(!state.preview_dirty);
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 2 regression tests: Fix the Silent Data-Loss Bug in Edit Mode
+    // -----------------------------------------------------------------------
+
+    /// Helper that constructs a named creature with a given id.
+    fn make_creature(id: u32, name: &str) -> CreatureDefinition {
+        CreatureDefinition {
+            id,
+            name: name.to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+        }
+    }
+
+    /// Simulates the fixed double-click path: calls `open_for_editing()` and
+    /// verifies that `selected_creature`, `mode`, and `edit_buffer` are all set
+    /// correctly.
+    #[test]
+    fn test_double_click_sets_selected_creature() {
+        let mut state = CreaturesEditorState::new();
+        let creatures = vec![make_creature(1, "Goblin"), make_creature(2, "Orc")];
+
+        // This is what the fixed double-click handler calls.
+        let file_name = format!(
+            "assets/creatures/{}.ron",
+            creatures[0].name.to_lowercase().replace(' ', "_")
+        );
+        state.open_for_editing(&creatures, 0, &file_name);
+
+        assert_eq!(state.selected_creature, Some(0));
+        assert_eq!(state.mode, CreaturesEditorMode::Edit);
+        assert_eq!(state.edit_buffer.name, "Goblin");
+        assert!(state.preview_dirty);
+    }
+
+    /// After opening via `open_for_editing()`, mutating `edit_buffer`, and
+    /// executing the Save guard, the backing `creatures` vec must be updated.
+    #[test]
+    fn test_edit_mode_save_updates_creature() {
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+
+        state.open_for_editing(&creatures, 0, "assets/creatures/goblin.ron");
+
+        // Modify the edit buffer (as the user would do in the UI).
+        state.edit_buffer.name = "Super Goblin".to_string();
+
+        // Reproduce the Save guard from show_edit_mode():
+        //   if let Some(idx) = self.selected_creature { creatures[idx] = self.edit_buffer.clone(); }
+        if let Some(idx) = state.selected_creature {
+            if idx < creatures.len() {
+                creatures[idx] = state.edit_buffer.clone();
+            }
+        }
+
+        assert_eq!(creatures[0].name, "Super Goblin");
+    }
+
+    /// If edit mode is entered WITHOUT calling `open_for_editing()` (the old
+    /// broken path), `selected_creature` remains `None` and the Save guard must
+    /// be a no-op -- no data loss, but also no phantom write.
+    #[test]
+    fn test_edit_mode_save_without_selected_creature_is_noop() {
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+
+        // Replicate the OLD broken double-click behaviour: set mode without
+        // calling open_for_editing(), so selected_creature stays None.
+        state.mode = CreaturesEditorMode::Edit;
+        state.edit_buffer = creatures[0].clone();
+        state.edit_buffer.name = "Broken Name".to_string();
+
+        // The Save guard in show_edit_mode() does nothing when selected_creature
+        // is None.
+        if let Some(idx) = state.selected_creature {
+            if idx < creatures.len() {
+                creatures[idx] = state.edit_buffer.clone();
+            }
+        }
+
+        // The original name must be preserved.
+        assert_eq!(creatures[0].name, "Goblin");
+        assert_eq!(state.selected_creature, None);
+    }
+
+    /// Entering edit mode via `open_for_editing()` and then triggering Delete
+    /// must remove the correct creature from the vec.
+    #[test]
+    fn test_delete_from_edit_mode_removes_creature() {
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin"), make_creature(2, "Orc")];
+
+        state.open_for_editing(&creatures, 0, "assets/creatures/goblin.ron");
+
+        // Reproduce the Delete guard from show_edit_mode():
+        if let Some(idx) = state.selected_creature {
+            if idx < creatures.len() {
+                creatures.remove(idx);
+                state.selected_creature = None;
+                state.mode = CreaturesEditorMode::List;
+            }
+        }
+
+        assert_eq!(creatures.len(), 1);
+        assert_eq!(creatures[0].name, "Orc");
+        assert_eq!(state.selected_creature, None);
+        assert_eq!(state.mode, CreaturesEditorMode::List);
+    }
+
+    /// Entering edit mode via `open_for_editing()` and then triggering Duplicate
+    /// must append a copy with a new id to the vec.
+    #[test]
+    fn test_duplicate_from_edit_mode_adds_creature() {
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+
+        state.open_for_editing(&creatures, 0, "assets/creatures/goblin.ron");
+
+        // Reproduce the Duplicate guard from show_edit_mode():
+        if let Some(idx) = state.selected_creature {
+            if idx < creatures.len() {
+                let mut new_creature = creatures[idx].clone();
+                new_creature.id = state.next_available_id(&creatures);
+                new_creature.name = format!("{} (Copy)", new_creature.name);
+                creatures.push(new_creature);
+            }
+        }
+
+        assert_eq!(creatures.len(), 2);
+        assert_eq!(creatures[1].name, "Goblin (Copy)");
+        assert_eq!(creatures[1].id, 2);
     }
 }

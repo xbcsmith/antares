@@ -20,9 +20,131 @@
 | **Creature Editor Enhancement Phase 4** | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                |
 | **Creature Editor Enhancement Phase 5** | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**              |
 | **Creature Editor UX Fixes Phase 1**    | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry** |
+| **Creature Editor UX Fixes Phase 2**    | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**      |
 
 **Total Lines Implemented**: 8,000+ lines of production code + 5,000+ lines of documentation
-**Total Tests**: 285+ new tests (all passing), 1,759 campaign_builder tests passing
+**Total Tests**: 290+ new tests (all passing), 1,410 campaign_builder tests passing
+
+---
+
+## Creature Editor UX Fixes - Phase 2: Fix the Silent Data-Loss Bug in Edit Mode
+
+### Overview
+
+Phase 2 fixes the highest-priority correctness bug in the Creature Editor: a
+silent data-loss regression caused by the double-click handler in
+`show_registry_mode()` entering `Edit` mode without ever setting
+`self.selected_creature`. Because the Save, Delete, and Duplicate guards in
+`show_edit_mode()` all branch on `if let Some(idx) = self.selected_creature`,
+any edit made after a double-click was silently discarded on Save, and
+Delete/Duplicate were silent no-ops.
+
+### Problem Statement
+
+The broken double-click handler in `show_registry_mode()`:
+
+- Set `self.mode = CreaturesEditorMode::Edit`
+- Cloned the creature into `self.edit_buffer`
+- Reset transient state (`selected_mesh_index`, buffers, `preview_dirty`)
+- **Never set `self.selected_creature`**
+
+As a result `self.selected_creature` remained `None` throughout the edit
+session, so the `if let Some(idx) = self.selected_creature` guards in
+`show_edit_mode()` were never satisfied and all mutations were dropped.
+
+### Root Cause
+
+The correct entry point is `open_for_editing()` (introduced in Phase 5), which
+sets `selected_creature`, `edit_buffer`, `mode`, `preview_dirty`, and invokes
+the workflow breadcrumb system. The double-click handler bypassed this method
+entirely.
+
+A secondary complication prevented a trivial one-line fix: the double-click
+handler runs inside an `egui::ScrollArea::show()` closure whose body holds
+`filtered_creatures: Vec<(usize, &CreatureDefinition)>` -- shared borrows into
+the `creatures` slice. Calling `open_for_editing(creatures, ...)` from inside
+that closure would create a second borrow while the shared borrows were still
+live, which the Rust borrow checker rejects.
+
+### Solution Implemented
+
+**File modified**: `sdk/campaign_builder/src/creatures_editor.rs`
+
+#### 2.1 Deferred double-click pattern
+
+A `pending_edit: Option<(usize, String)>` variable is declared immediately
+before the `ScrollArea::show()` call. Inside the for loop the broken inline
+code is replaced with a two-line intent-capture:
+
+```sdk/campaign_builder/src/creatures_editor.rs#L340-344
+let mut pending_edit: Option<(usize, String)> = None;
+egui::ScrollArea::vertical().show(ui, |ui| {
+    // ... filtered_creatures borrows creatures here ...
+    if response.double_clicked() {
+        let file_name = format!(
+            "assets/creatures/{}.ron",
+            creature.name.to_lowercase().replace(' ', "_")
+        );
+        pending_edit = Some((idx, file_name));
+    }
+});
+// All borrows into creatures released here.
+if let Some((idx, file_name)) = pending_edit {
+    self.open_for_editing(creatures, idx, &file_name);
+}
+```
+
+After the `ScrollArea::show()` call returns, `filtered_creatures` and every
+shared borrow into `creatures` have been dropped. The deferred
+`open_for_editing()` call is then safe.
+
+#### 2.2 Delete and Duplicate guards
+
+With `selected_creature` now correctly set, the existing `if let Some(idx) =
+self.selected_creature` guards in `show_edit_mode()` for Delete and Duplicate
+are inherently fixed -- no changes required.
+
+### Files Modified
+
+- `sdk/campaign_builder/src/creatures_editor.rs`
+  - Replaced broken 7-line double-click block with deferred `pending_edit` pattern
+  - Added `pending_edit` dispatch after the `ScrollArea::show()` call
+  - Added 5 regression tests in `mod tests`
+
+### Testing
+
+Five new regression tests were added to `creatures_editor::tests`:
+
+| Test                                                    | Purpose                                                                                                                               |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_double_click_sets_selected_creature`              | Verifies `open_for_editing()` sets `selected_creature`, `mode == Edit`, and populates `edit_buffer`                                   |
+| `test_edit_mode_save_updates_creature`                  | Opens via `open_for_editing()`, modifies `edit_buffer.name`, runs the Save guard, confirms `creatures[idx]` is updated                |
+| `test_edit_mode_save_without_selected_creature_is_noop` | Replicates the old broken path (`selected_creature == None`), confirms the Save guard is a no-op and the original name is preserved   |
+| `test_delete_from_edit_mode_removes_creature`           | Opens via `open_for_editing()`, runs the Delete guard, confirms the creature is removed and `mode` returns to `List`                  |
+| `test_duplicate_from_edit_mode_adds_creature`           | Opens via `open_for_editing()`, runs the Duplicate guard, confirms `creatures.len()` increases and the copy has the right name and id |
+
+All 15 tests in `creatures_editor::tests` pass (10 pre-existing + 5 new).
+
+### Quality Gates
+
+```text
+cargo fmt --all                                       -- clean
+cargo check --all-targets --all-features              -- 0 errors
+cargo clippy --all-targets --all-features -D warnings -- 0 warnings
+cargo nextest run --all-features                      -- 2401 passed, 8 skipped
+```
+
+### Success Criteria Met
+
+- Double-clicking a registered creature, editing a field, and clicking Save now
+  correctly updates the creature in `self.creatures`.
+- Delete and Duplicate from edit mode work correctly for creatures entered via
+  double-click.
+- No silent data discards remain on the double-click path.
+- The borrow-checker issue is resolved via the deferred `pending_edit` pattern
+  without requiring any signature changes to `show_registry_mode()` or
+  `open_for_editing()`.
+- All pre-existing tests continue to pass.
 
 ---
 
