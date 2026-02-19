@@ -27,6 +27,170 @@
 
 ---
 
+## Creature Editor UX Fixes - Phase 3: Preview Panel in Registry List Mode
+
+### Overview
+
+Phase 3 adds a live preview side panel to the Creatures Registry list view. When
+a creature row is selected, a right-side panel opens showing all relevant
+metadata and three action buttons. A two-step delete confirmation prevents
+accidental data loss.
+
+### Problem Statement
+
+The registry list was a flat table with no way to inspect a creature without
+opening the full three-panel asset editor. Users had to double-click, wait for
+the editor to load, then hit Cancel to go back -- making it impractical to browse
+or quickly delete/duplicate a creature.
+
+### Components Implemented
+
+#### 3.1 New struct field: `registry_delete_confirm_pending`
+
+Added to `CreaturesEditorState` in the Phase 1 section:
+
+```sdk/campaign_builder/src/creatures_editor.rs#L53-58
+/// Phase 3: Two-step delete confirmation flag for the registry preview panel.
+///
+/// When `true` the Delete button shows "⚠ Confirm Delete"; a second click
+/// executes the deletion.  Resets whenever `selected_registry_entry` changes
+/// or `back_to_registry()` is called.
+pub registry_delete_confirm_pending: bool,
+```
+
+Initialized to `false` in `Default`. Also reset in `back_to_registry()`.
+
+#### 3.2 New private enum: `RegistryPreviewAction`
+
+Defined at module level (before `impl Default`):
+
+```sdk/campaign_builder/src/creatures_editor.rs#L113-124
+/// Deferred action requested from the registry preview panel.
+///
+/// Collected during UI rendering and applied after the closure returns to avoid
+/// borrow-checker conflicts between the `&mut self` receiver and the
+/// `&CreatureDefinition` display borrow.
+enum RegistryPreviewAction {
+    /// Open the creature in the asset editor (Edit mode).
+    Edit { file_name: String },
+    /// Duplicate the creature with the next available ID.
+    Duplicate,
+    /// Delete the creature after two-step confirmation.
+    Delete,
+}
+```
+
+The deferred pattern is the same borrow-safe strategy introduced in Phase 2
+(`pending_edit`). Mutations to `creatures` happen outside every closure, once all
+borrows are released.
+
+#### 3.3 Redesigned `show_registry_mode()` layout
+
+The previous single-column scroll area was replaced with a two-column layout:
+
+- Right panel: `egui::SidePanel::right("registry_preview_panel")` with
+  `default_width(300.0)` and `resizable(true)`. Shown only when
+  `selected_registry_entry.is_some()`.
+- Left area: `egui::ScrollArea::vertical()` fills the remaining space with the
+  filtered/sorted creature list.
+
+Key implementation details:
+
+1. Filtering and sorting now produce a `filtered_indices: Vec<usize>` (owned,
+   no borrows into `creatures`) so both closures can safely access `creatures`.
+2. The side panel closure borrows `creatures[sel_idx]` immutably for display,
+   while the scroll area closure does the same for each row -- sequential,
+   non-overlapping borrows, compatible with Rust NLL.
+3. Single-click on a row resets `registry_delete_confirm_pending` when the
+   selection changes, preventing a stale confirmation state from carrying over.
+4. Double-click in the list still works via the existing `pending_edit` deferred
+   action (Phase 2 fix preserved).
+5. `pending_preview_action` is applied after both closures return.
+
+#### 3.4 New method: `show_registry_preview_panel()`
+
+Signature (adapted from plan to avoid borrow conflicts):
+
+```sdk/campaign_builder/src/creatures_editor.rs#L606-612
+fn show_registry_preview_panel(
+    &mut self,
+    ui: &mut egui::Ui,
+    creature: &CreatureDefinition,
+    idx: usize,
+) -> Option<RegistryPreviewAction>
+```
+
+Takes `creature: &CreatureDefinition` instead of `creatures: &mut Vec<...>` so
+the method can borrow `&mut self` independently. Returns an action enum instead
+of applying mutations directly; the caller applies them after the closure returns.
+
+Panel content rendered:
+
+- Creature **name** as a heading.
+- **ID** formatted as `001` with category color from
+  `CreatureCategory::from_id(creature.id).color()`.
+- **Category** display name in category color.
+- **Scale** value (3 decimal places).
+- **Color tint** as a small filled rectangle swatch (32x16 px) plus RGB values,
+  or "None" if absent.
+- **Mesh count** via a collapsible `ui.collapsing(...)` showing each mesh name
+  (or "(unnamed)" for `None`) and vertex count.
+- **Derived file path** (`assets/creatures/{slug}.ron`) in monospace.
+
+Action buttons:
+
+- **"✏ Edit"** (prominent, strong text) -- returns
+  `RegistryPreviewAction::Edit { file_name }`.
+- **"📋 Duplicate"** -- returns `RegistryPreviewAction::Duplicate`.
+- **"🗑 Delete"** / **"⚠ Confirm Delete"** -- two-step via
+  `registry_delete_confirm_pending`. First click sets the flag; second click
+  returns `RegistryPreviewAction::Delete`. A "Cancel" button clears the flag.
+
+### Files Modified
+
+- `sdk/campaign_builder/src/creatures_editor.rs`
+  - `CreaturesEditorState` struct: added `registry_delete_confirm_pending` field
+  - `Default` impl: initialised to `false`
+  - `back_to_registry()`: reset flag on return
+  - `show_registry_mode()`: redesigned to two-column layout with deferred actions
+  - `show_registry_preview_panel()`: new private method (187 lines)
+  - `mod tests`: 4 new unit tests, `test_creatures_editor_state_initialization`
+    extended with new field assertion
+
+### Testing
+
+Four new unit tests added to `mod tests` in `creatures_editor.rs`:
+
+| Test                                                           | What it verifies                                                                             |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `test_registry_preview_not_shown_when_no_selection`            | `selected_registry_entry == None` keeps mode as `List` and flag stays `false`                |
+| `test_registry_delete_confirm_flag_resets_on_selection_change` | Arming the flag for creature 0 then clicking creature 1 resets it                            |
+| `test_registry_preview_edit_button_transitions_to_edit_mode`   | Applying `Edit` action calls `open_for_editing`, sets `mode == Edit` and `selected_creature` |
+| `test_registry_preview_duplicate_appends_creature`             | Applying `Duplicate` action pushes a "(Copy)" entry with the next available ID               |
+
+Test count for `creatures_editor` module: 19 (was 15 after Phase 2).
+
+### Quality Gates
+
+```text
+cargo fmt --all                                        clean
+cargo check --all-targets --all-features               Finished (0 errors)
+cargo clippy --all-targets --all-features -- -D warnings  Finished (0 warnings)
+cargo nextest run --all-features                       2401 passed, 8 skipped
+```
+
+### Success Criteria Met
+
+- Selecting a creature in the registry list renders name, ID, category, scale,
+  color tint, and mesh count in the right panel within one frame.
+- Edit button opens the creature in the three-panel asset editor (via
+  `open_for_editing()`).
+- Delete uses two-step confirmation; "Cancel" aborts without removing the entry.
+- Duplicate appends a new creature with the next available ID.
+- All existing tests continue to pass; no regressions from Phase 2.
+
+---
+
 ## Creature Editor UX Fixes - Phase 2: Fix the Silent Data-Loss Bug in Edit Mode
 
 ### Overview

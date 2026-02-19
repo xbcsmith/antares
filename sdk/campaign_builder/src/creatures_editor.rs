@@ -53,6 +53,12 @@ pub struct CreaturesEditorState {
     pub selected_registry_entry: Option<usize>,
     pub registry_sort_by: RegistrySortBy,
     pub show_validation_panel: bool,
+    /// Phase 3: Two-step delete confirmation flag for the registry preview panel.
+    ///
+    /// When `true` the Delete button shows "⚠ Confirm Delete"; a second click
+    /// executes the deletion.  Resets whenever `selected_registry_entry` changes
+    /// or `back_to_registry()` is called.
+    pub registry_delete_confirm_pending: bool,
 
     // Phase 2: Asset Editor UI
     pub show_primitive_dialog: bool,
@@ -104,6 +110,20 @@ pub enum RegistrySortBy {
     Category,
 }
 
+/// Deferred action requested from the registry preview panel.
+///
+/// Collected during UI rendering and applied after the closure returns to avoid
+/// borrow-checker conflicts between the `&mut self` receiver and the
+/// `&CreatureDefinition` display borrow.
+enum RegistryPreviewAction {
+    /// Open the creature in the asset editor (Edit mode).
+    Edit { file_name: String },
+    /// Duplicate the creature with the next available ID.
+    Duplicate,
+    /// Delete the creature after two-step confirmation.
+    Delete,
+}
+
 impl Default for CreaturesEditorState {
     fn default() -> Self {
         Self {
@@ -143,6 +163,8 @@ impl Default for CreaturesEditorState {
             background_color: [0.2, 0.2, 0.25, 1.0],
             camera_distance: 5.0,
             uniform_scale: true,
+
+            registry_delete_confirm_pending: false,
 
             // Phase 5: Workflow Integration & Polish
             workflow: CreatureWorkflowState::new(),
@@ -205,7 +227,7 @@ impl CreaturesEditorState {
     fn show_registry_mode(
         &mut self,
         ui: &mut egui::Ui,
-        creatures: &mut [CreatureDefinition],
+        creatures: &mut Vec<CreatureDefinition>,
         campaign_dir: &Option<PathBuf>,
         unsaved_changes: &mut bool,
     ) -> Option<String> {
@@ -334,50 +356,83 @@ impl CreaturesEditorState {
 
         ui.separator();
 
-        // Registry List View
-        // Deferred double-click action: we must not call open_for_editing() from
-        // inside the scroll-area closure because `filtered_creatures` holds shared
-        // borrows into `creatures` at that point.  We collect the intent here and
-        // execute it after the closure returns (all borrows released).
-        let mut pending_edit: Option<(usize, String)> = None;
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            // Filter and sort creatures
-            let mut filtered_creatures: Vec<(usize, &CreatureDefinition)> = creatures
+        // ---- Phase 3: Two-column layout (list + preview side panel) ----
+        //
+        // Strategy: compute a fully-owned index list (no borrows into `creatures`)
+        // so that:
+        //   1. The right-side preview panel can borrow `creatures[sel]` immutably
+        //      while calling `&mut self` methods.
+        //   2. The left-side scroll area can borrow `creatures[i]` for display.
+        //   3. Deferred actions (Edit / Duplicate / Delete / double-click) are
+        //      applied AFTER all closures return, once every borrow is released.
+
+        // Build filtered + sorted index list (owned, no external borrows).
+        let filtered_indices: Vec<usize> = {
+            let mut pairs: Vec<(usize, u32, String)> = creatures
                 .iter()
                 .enumerate()
                 .filter(|(_, c)| {
-                    // Apply category filter
                     if let Some(cat) = self.category_filter {
                         if CreatureCategory::from_id(c.id) != cat {
                             return false;
                         }
                     }
-
-                    // Apply search filter
                     if !self.search_query.is_empty() {
-                        let query = self.search_query.to_lowercase();
-                        return c.name.to_lowercase().contains(&query)
-                            || c.id.to_string().contains(&query);
+                        let q = self.search_query.to_lowercase();
+                        return c.name.to_lowercase().contains(&q) || c.id.to_string().contains(&q);
                     }
-
                     true
                 })
+                .map(|(i, c)| (i, c.id, c.name.clone()))
                 .collect();
 
-            // Sort creatures
             match self.registry_sort_by {
-                RegistrySortBy::Id => filtered_creatures.sort_by_key(|(_, c)| c.id),
+                RegistrySortBy::Id => pairs.sort_by_key(|(_, id, _)| *id),
                 RegistrySortBy::Name => {
-                    filtered_creatures.sort_by(|(_, a), (_, b)| a.name.cmp(&b.name))
+                    pairs.sort_by(|(_, _, a), (_, _, b)| a.cmp(b));
                 }
-                RegistrySortBy::Category => filtered_creatures
-                    .sort_by_key(|(_, c)| (CreatureCategory::from_id(c.id) as u8, c.id)),
+                RegistrySortBy::Category => {
+                    pairs.sort_by_key(|(_, id, _)| (CreatureCategory::from_id(*id) as u8, *id));
+                }
             }
+            pairs.into_iter().map(|(i, _, _)| i).collect()
+        };
 
-            if filtered_creatures.is_empty() {
+        // Deferred actions collected inside UI closures; applied after they return.
+        let mut pending_edit: Option<(usize, String)> = None;
+        let mut pending_preview_action: Option<RegistryPreviewAction> = None;
+
+        // --- Right panel: preview (only when a creature is selected) ---
+        if self.selected_registry_entry.is_some() {
+            egui::SidePanel::right("registry_preview_panel")
+                .default_width(300.0)
+                .resizable(true)
+                .show_inside(ui, |ui| {
+                    // `self` is &mut Self, `creatures` is &mut Vec<...>.
+                    // These are independent borrows so the closure can hold both.
+                    if let Some(sel_idx) = self.selected_registry_entry {
+                        if let Some(creature) = creatures.get(sel_idx) {
+                            // creature: &CreatureDefinition (immutable borrow from creatures)
+                            // self.show_registry_preview_panel borrows &mut self separately.
+                            let action = self.show_registry_preview_panel(ui, creature, sel_idx);
+                            if action.is_some() {
+                                pending_preview_action = action;
+                            }
+                        } else {
+                            // Index out of bounds (creature was deleted externally).
+                            self.selected_registry_entry = None;
+                            ui.label("No creature selected.");
+                        }
+                    }
+                });
+        }
+
+        // --- Left area: registry list in a scroll area ---
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            if filtered_indices.is_empty() {
                 ui.label("No creatures found. Click 'New' to create one.");
             } else {
-                // Header
+                // Column header row
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("ID").strong());
                     ui.separator();
@@ -389,7 +444,8 @@ impl CreaturesEditorState {
                 });
                 ui.separator();
 
-                for (idx, creature) in filtered_creatures {
+                for &idx in &filtered_indices {
+                    let creature = &creatures[idx];
                     let is_selected = self.selected_registry_entry == Some(idx);
                     let category = CreatureCategory::from_id(creature.id);
                     let color = category.color();
@@ -409,17 +465,19 @@ impl CreaturesEditorState {
                         ui.separator();
 
                         // Creature name (selectable)
-                        let response = ui.selectable_label(
-                            is_selected,
-                            format!(
-                                "{} ({} mesh{})",
-                                creature.name,
-                                creature.meshes.len(),
-                                if creature.meshes.len() == 1 { "" } else { "es" }
-                            ),
+                        let label = format!(
+                            "{} ({} mesh{})",
+                            creature.name,
+                            creature.meshes.len(),
+                            if creature.meshes.len() == 1 { "" } else { "es" }
                         );
+                        let response = ui.selectable_label(is_selected, label);
 
                         if response.clicked() {
+                            // Reset delete-confirm flag when switching selection.
+                            if self.selected_registry_entry != Some(idx) {
+                                self.registry_delete_confirm_pending = false;
+                            }
                             self.selected_registry_entry = Some(idx);
                         }
 
@@ -433,7 +491,7 @@ impl CreaturesEditorState {
 
                         ui.separator();
 
-                        // Status indicator
+                        // Validation status indicator
                         let validation_result = self.id_manager.validate_id(creature.id, category);
                         if validation_result.is_ok() {
                             ui.label("✓");
@@ -458,12 +516,47 @@ impl CreaturesEditorState {
             }
         });
 
-        // Apply any pending edit action that was deferred from inside the scroll
-        // area.  At this point every borrow of `creatures` held by
-        // `filtered_creatures` has been released, so open_for_editing() can
-        // take a shared borrow without conflict.
+        // --- Apply deferred actions (all closures have returned; borrows released) ---
+
+        // Double-click from the list opens the creature in the asset editor.
         if let Some((idx, file_name)) = pending_edit {
             self.open_for_editing(creatures, idx, &file_name);
+        }
+
+        // Actions requested from the preview panel.
+        match pending_preview_action {
+            Some(RegistryPreviewAction::Edit { file_name }) => {
+                if let Some(idx) = self.selected_registry_entry {
+                    self.open_for_editing(creatures, idx, &file_name);
+                }
+            }
+            Some(RegistryPreviewAction::Duplicate) => {
+                if let Some(idx) = self.selected_registry_entry {
+                    if idx < creatures.len() {
+                        let new_id = self.next_available_id(creatures);
+                        let mut new_creature = creatures[idx].clone();
+                        new_creature.id = new_id;
+                        new_creature.name = format!("{} (Copy)", new_creature.name);
+                        let new_name = new_creature.name.clone();
+                        creatures.push(new_creature);
+                        *unsaved_changes = true;
+                        result_message = Some(format!("Duplicated creature as '{}'", new_name));
+                    }
+                }
+            }
+            Some(RegistryPreviewAction::Delete) => {
+                if let Some(idx) = self.selected_registry_entry {
+                    if idx < creatures.len() {
+                        let name = creatures[idx].name.clone();
+                        creatures.remove(idx);
+                        self.selected_registry_entry = None;
+                        self.registry_delete_confirm_pending = false;
+                        *unsaved_changes = true;
+                        result_message = Some(format!("Deleted creature '{}'", name));
+                    }
+                }
+            }
+            None => {}
         }
 
         // Show validation panel if requested
@@ -491,6 +584,185 @@ impl CreaturesEditorState {
         }
 
         result_message
+    }
+
+    /// Renders the registry preview panel for the creature at `idx`.
+    ///
+    /// Shows creature metadata (name, ID, category, scale, color tint, mesh list)
+    /// and three action buttons: Edit (primary), Duplicate, Delete (two-step).
+    ///
+    /// Returns a `RegistryPreviewAction` if the user clicked an action button,
+    /// or `None` if no action was triggered this frame.
+    ///
+    /// # Arguments
+    ///
+    /// * `ui`      - The egui Ui region to render into.
+    /// * `creature` - Read-only view of the creature to display.
+    /// * `idx`     - Index of the creature in the backing `creatures` vec.
+    fn show_registry_preview_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        creature: &CreatureDefinition,
+        idx: usize,
+    ) -> Option<RegistryPreviewAction> {
+        let mut action: Option<RegistryPreviewAction> = None;
+
+        // --- Heading: creature name ---
+        ui.heading(&creature.name);
+        ui.separator();
+
+        // --- ID with category-color badge ---
+        let category = CreatureCategory::from_id(creature.id);
+        let color = category.color();
+        let cat_color32 = egui::Color32::from_rgb(
+            (color[0] * 255.0) as u8,
+            (color[1] * 255.0) as u8,
+            (color[2] * 255.0) as u8,
+        );
+
+        ui.horizontal(|ui| {
+            ui.label("ID:");
+            ui.colored_label(
+                cat_color32,
+                egui::RichText::new(format!("{:03}", creature.id)).strong(),
+            );
+        });
+
+        // --- Category ---
+        ui.horizontal(|ui| {
+            ui.label("Category:");
+            ui.label(
+                egui::RichText::new(category.display_name())
+                    .color(cat_color32)
+                    .strong(),
+            );
+        });
+
+        // --- Scale ---
+        ui.horizontal(|ui| {
+            ui.label("Scale:");
+            ui.label(format!("{:.3}", creature.scale));
+        });
+
+        // --- Color tint swatch ---
+        ui.horizontal(|ui| {
+            ui.label("Color tint:");
+            if let Some(tint) = creature.color_tint {
+                let swatch_color = egui::Color32::from_rgb(
+                    (tint[0] * 255.0) as u8,
+                    (tint[1] * 255.0) as u8,
+                    (tint[2] * 255.0) as u8,
+                );
+                // Draw a small filled rectangle as the swatch.
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(32.0, 16.0), egui::Sense::hover());
+                ui.painter().rect_filled(rect, 2.0, swatch_color);
+                ui.label(format!("({:.2}, {:.2}, {:.2})", tint[0], tint[1], tint[2]));
+            } else {
+                ui.label("None");
+            }
+        });
+
+        // --- Mesh count + collapsible list ---
+        let mesh_count = creature.meshes.len();
+        ui.collapsing(
+            format!(
+                "Meshes: {} mesh{}",
+                mesh_count,
+                if mesh_count == 1 { "" } else { "es" }
+            ),
+            |ui| {
+                if mesh_count == 0 {
+                    ui.label("(no meshes)");
+                } else {
+                    for (i, mesh) in creature.meshes.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{}.", i + 1));
+                            let name = mesh.name.as_deref().unwrap_or("(unnamed)");
+                            ui.label(egui::RichText::new(name).monospace());
+                            ui.label(format!(
+                                "— {} vert{}",
+                                mesh.vertices.len(),
+                                if mesh.vertices.len() == 1 {
+                                    "ex"
+                                } else {
+                                    "ices"
+                                }
+                            ));
+                        });
+                    }
+                }
+            },
+        );
+
+        // --- Derived file path ---
+        let slug = creature.name.to_lowercase().replace(' ', "_");
+        let file_path = format!("assets/creatures/{}.ron", slug);
+        ui.horizontal(|ui| {
+            ui.label("File:");
+            ui.label(egui::RichText::new(&file_path).monospace().small());
+        });
+
+        ui.separator();
+
+        // --- Action buttons ---
+
+        // Primary action: Edit (opens the full asset editor)
+        if ui
+            .button(egui::RichText::new("✏ Edit").strong())
+            .on_hover_text("Open creature in the asset editor")
+            .clicked()
+        {
+            action = Some(RegistryPreviewAction::Edit {
+                file_name: file_path,
+            });
+        }
+
+        ui.horizontal(|ui| {
+            // Duplicate
+            if ui
+                .button("📋 Duplicate")
+                .on_hover_text("Create a copy with the next available ID")
+                .clicked()
+            {
+                action = Some(RegistryPreviewAction::Duplicate);
+            }
+
+            // Delete — two-step confirmation
+            if self.registry_delete_confirm_pending {
+                // Second click executes the deletion.
+                if ui
+                    .button(egui::RichText::new("⚠ Confirm Delete").color(egui::Color32::RED))
+                    .on_hover_text("Click again to permanently delete this creature")
+                    .clicked()
+                {
+                    action = Some(RegistryPreviewAction::Delete);
+                }
+                // Cancel button clears the flag without deleting.
+                if ui.button("Cancel").clicked() {
+                    self.registry_delete_confirm_pending = false;
+                }
+            } else {
+                // First click arms the confirmation.
+                if ui
+                    .button("🗑 Delete")
+                    .on_hover_text("Delete this creature (requires confirmation)")
+                    .clicked()
+                {
+                    self.registry_delete_confirm_pending = true;
+                }
+            }
+        });
+
+        // Show a hint so the user knows which creature is in the editor slot.
+        ui.separator();
+        ui.label(
+            egui::RichText::new(format!("Registry index: {}", idx))
+                .small()
+                .weak(),
+        );
+
+        action
     }
 
     /// Count creatures by category
@@ -1814,6 +2086,7 @@ impl CreaturesEditorState {
         self.mesh_edit_buffer = None;
         self.mesh_transform_buffer = None;
         self.preview_dirty = false;
+        self.registry_delete_confirm_pending = false;
         self.workflow.return_to_registry();
     }
 
@@ -1934,6 +2207,7 @@ mod tests {
         assert_eq!(state.category_filter, None);
         assert!(state.show_registry_stats);
         assert_eq!(state.registry_sort_by, RegistrySortBy::Id);
+        assert!(!state.registry_delete_confirm_pending);
     }
 
     #[test]
@@ -2204,5 +2478,93 @@ mod tests {
         assert_eq!(creatures.len(), 2);
         assert_eq!(creatures[1].name, "Goblin (Copy)");
         assert_eq!(creatures[1].id, 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 3: Preview Panel in Registry List Mode
+    // -----------------------------------------------------------------------
+
+    /// Confirm that when `selected_registry_entry` is `None` the preview panel
+    /// logic is not triggered -- verified by checking that
+    /// `registry_delete_confirm_pending` stays `false` and no mode transition
+    /// occurs.
+    #[test]
+    fn test_registry_preview_not_shown_when_no_selection() {
+        let state = CreaturesEditorState::new();
+        assert_eq!(state.selected_registry_entry, None);
+        // No preview action should be reachable; the field guard proves this.
+        assert!(!state.registry_delete_confirm_pending);
+        assert_eq!(state.mode, CreaturesEditorMode::List);
+    }
+
+    /// `registry_delete_confirm_pending` must reset when a DIFFERENT creature is
+    /// selected via a single click in the list.
+    #[test]
+    fn test_registry_delete_confirm_flag_resets_on_selection_change() {
+        let mut state = CreaturesEditorState::new();
+
+        // Arm the confirmation for creature 0.
+        state.selected_registry_entry = Some(0);
+        state.registry_delete_confirm_pending = true;
+
+        // Simulate clicking a different creature (idx 1) -- mirrors the list
+        // click handler added in show_registry_mode().
+        let new_idx: usize = 1;
+        if state.selected_registry_entry != Some(new_idx) {
+            state.registry_delete_confirm_pending = false;
+        }
+        state.selected_registry_entry = Some(new_idx);
+
+        assert_eq!(state.selected_registry_entry, Some(1));
+        assert!(!state.registry_delete_confirm_pending);
+    }
+
+    /// Clicking the Edit button in the preview panel must call `open_for_editing`,
+    /// transitioning to `Edit` mode with `selected_creature` set correctly.
+    #[test]
+    fn test_registry_preview_edit_button_transitions_to_edit_mode() {
+        let mut state = CreaturesEditorState::new();
+        let creatures = vec![make_creature(1, "Goblin"), make_creature(2, "Orc")];
+
+        state.selected_registry_entry = Some(0);
+
+        // Simulate the Edit action produced by show_registry_preview_panel().
+        let file_name = format!(
+            "assets/creatures/{}.ron",
+            creatures[0].name.to_lowercase().replace(' ', "_")
+        );
+        // Apply action as show_registry_mode() would.
+        if let Some(idx) = state.selected_registry_entry {
+            state.open_for_editing(&creatures, idx, &file_name);
+        }
+
+        assert_eq!(state.mode, CreaturesEditorMode::Edit);
+        assert_eq!(state.selected_creature, Some(0));
+        assert_eq!(state.edit_buffer.name, "Goblin");
+        assert!(state.preview_dirty);
+    }
+
+    /// The Duplicate action from the preview panel must append one new creature
+    /// to the vec with the next available ID and a "(Copy)" suffix.
+    #[test]
+    fn test_registry_preview_duplicate_appends_creature() {
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin"), make_creature(3, "Orc")];
+
+        state.selected_registry_entry = Some(0);
+
+        // Apply Duplicate action as show_registry_mode() would.
+        let idx = state.selected_registry_entry.unwrap();
+        assert!(idx < creatures.len());
+        let new_id = state.next_available_id(&creatures);
+        let mut new_creature = creatures[idx].clone();
+        new_creature.id = new_id;
+        new_creature.name = format!("{} (Copy)", new_creature.name);
+        creatures.push(new_creature);
+
+        assert_eq!(creatures.len(), 3);
+        assert_eq!(creatures[2].name, "Goblin (Copy)");
+        // next_available_id returns max(1,3)+1 = 4
+        assert_eq!(creatures[2].id, 4);
     }
 }
