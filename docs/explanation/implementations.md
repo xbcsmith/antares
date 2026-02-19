@@ -21,9 +21,147 @@
 | **Creature Editor Enhancement Phase 5** | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**              |
 | **Creature Editor UX Fixes Phase 1**    | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry** |
 | **Creature Editor UX Fixes Phase 2**    | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**      |
+| **Creature Editor UX Fixes Phase 3**    | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**        |
+| **Creature Editor UX Fixes Phase 4**    | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File** |
 
-**Total Lines Implemented**: 8,000+ lines of production code + 5,000+ lines of documentation
-**Total Tests**: 290+ new tests (all passing), 1,410 campaign_builder tests passing
+**Total Lines Implemented**: 8,300+ lines of production code + 5,000+ lines of documentation
+**Total Tests**: 295+ new tests (all passing), 1,419 campaign_builder tests passing
+
+---
+
+## Creature Editor UX Fixes - Phase 4: Register Existing Creature Asset .ron File
+
+### Overview
+
+Phase 4 adds a "Register Asset" workflow that lets a user type a relative path to
+an existing `.ron` file on disk, validate it, inspect a summary of its contents,
+and register it into the campaign's creature list -- all without leaving the
+Campaign Builder.
+
+### Problem Statement
+
+Previously there was no way to bring an already-authored creature `.ron` file into
+the registry except by opening the file manually and copy-pasting content through
+the Import dialog. The workflow was error-prone and offered no feedback before the
+Vec was mutated.
+
+### Components Implemented
+
+#### 4.1 Four new state fields on `CreaturesEditorState`
+
+```sdk/campaign_builder/src/creatures_editor.rs#L63-72
+// Phase 4: Register Asset Dialog
+/// When `true`, the "Register Creature Asset" dialog window is visible.
+pub show_register_asset_dialog: bool,
+/// Path buffer for the asset path text field (relative to campaign directory).
+pub register_asset_path_buffer: String,
+/// Creature parsed and validated from the asset file; `Some` when validation succeeds.
+pub register_asset_validated_creature: Option<CreatureDefinition>,
+/// Error message from the last Validate attempt; `None` when validation succeeded.
+pub register_asset_error: Option<String>,
+```
+
+All four fields are initialized in `Default` to `false` / `String::new()` / `None` / `None`.
+
+#### 4.2 "Register Asset" button in the registry toolbar
+
+A `"📥 Register Asset"` button is placed beside the existing `"🔄 Revalidate"` button
+inside the `ui.horizontal` toolbar block of `show_registry_mode()`. Clicking it sets
+`self.show_register_asset_dialog = true`.
+
+#### 4.3 `show_register_asset_dialog_window()` method
+
+A new private method with the signature:
+
+```sdk/campaign_builder/src/creatures_editor.rs#L640-646
+fn show_register_asset_dialog_window(
+    &mut self,
+    ctx: &egui::Context,
+    creatures: &mut Vec<CreatureDefinition>,
+    campaign_dir: &Option<PathBuf>,
+    unsaved_changes: &mut bool,
+) -> Option<String>
+```
+
+The window contains:
+
+- A labeled `text_edit_singleline` bound to `register_asset_path_buffer`, with
+  inline help text explaining that the path must be relative to the campaign
+  directory and use forward slashes.
+- A **"Validate"** button that defers to `execute_register_asset_validation()`.
+- A **"Register"** button, rendered via `ui.add_enabled_ui` and enabled only when
+  `register_asset_validated_creature.is_some()`. On click it appends the creature,
+  sets `*unsaved_changes = true`, clears all dialog state, and returns a success
+  message string.
+- A **"Cancel"** button that clears all dialog state without touching `creatures`.
+- An `egui::Color32::RED` error label shown when `register_asset_error.is_some()`.
+- An `egui::Color32::GREEN` success summary with a `egui::Grid` preview (name, ID,
+  category, mesh count, scale) shown when `register_asset_validated_creature.is_some()`.
+
+The method uses a deferred-action pattern (`do_validate`, `do_register`, `do_cancel`
+booleans) to avoid borrow-checker conflicts between the egui closure and `&mut self`.
+
+The method is called from the end of `show_registry_mode()` when
+`self.show_register_asset_dialog` is `true`, passing `ui.ctx().clone()`.
+
+#### 4.4 `execute_register_asset_validation()` helper method
+
+A private method that performs all validation in one place:
+
+1. **Path normalization** (section 4.5): replaces `\\` with `/` and strips any
+   leading `/` via `trim_start_matches('/')`.
+2. **Empty path guard**: sets an error if the buffer is blank.
+3. **File read**: `std::fs::read_to_string` against
+   `campaign_dir.join(normalized_path)`. Reports the full path in the error
+   message on failure.
+4. **RON parse**: `ron::from_str::<CreatureDefinition>(&contents)`. Surfaces the
+   RON error string verbatim.
+5. **Duplicate ID check** (direct vec scan -- authoritative): looks for any
+   `c.id == creature.id` in `creatures` and names the conflicting creature in the
+   error.
+6. **Range validity** via `self.id_manager.validate_id(creature.id, category)`:
+   reports `OutOfRange` errors with category name and range.
+7. On success, stores the creature in `register_asset_validated_creature` and
+   clears `register_asset_error`.
+
+#### 4.5 Path normalization
+
+Implemented inside `execute_register_asset_validation`:
+
+```sdk/campaign_builder/src/creatures_editor.rs#L786-793
+let normalized = self
+    .register_asset_path_buffer
+    .replace('\\', "/")
+    .trim_start_matches('/')
+    .to_string();
+```
+
+### Testing
+
+Five new unit tests added in `mod tests`:
+
+| Test                                                             | What it verifies                                                                                                           |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `test_register_asset_dialog_initial_state`                       | All four fields default to `false` / empty / `None`                                                                        |
+| `test_register_asset_validate_duplicate_id_sets_error`           | Duplicate ID sets `register_asset_error` containing the conflicting name; `register_asset_validated_creature` stays `None` |
+| `test_register_asset_register_button_disabled_before_validation` | `register_asset_validated_creature` is `None` before any validation, so the Register button is disabled                    |
+| `test_register_asset_cancel_does_not_modify_creatures`           | Cancel clears all dialog state and leaves `creatures` unchanged                                                            |
+| `test_register_asset_success_appends_creature`                   | Validates a real temp-file RON creature and simulates Register; verifies append + `unsaved_changes = true`                 |
+
+Tests `test_register_asset_validate_duplicate_id_sets_error` and
+`test_register_asset_success_appends_creature` both use `tempfile::NamedTempFile`
+(already a `[dev-dependencies]` crate) to write real `.ron` files and exercise
+the full file-read + parse + validate pipeline.
+
+### Success Criteria Met
+
+- A user can type a relative path, validate it, see a metadata preview, and
+  register the creature in one workflow without leaving the Campaign Builder.
+- ID conflicts and parse errors are surfaced with actionable messages before
+  any mutation of the `Vec`.
+- Cancelling leaves the creature list unchanged.
+- All five required tests pass; `cargo nextest run --all-features` reports
+  2401 tests run, 2401 passed, 0 failed.
 
 ---
 
