@@ -16,6 +16,23 @@ use antares::domain::visual::{
 use eframe::egui;
 use std::path::PathBuf;
 
+/// Sentinel string returned by the creatures editor `show()` method to signal
+/// that the Campaign Builder should open the Creature Template Browser dialog.
+///
+/// This pattern is consistent with the `requested_open_npc` mechanism used in
+/// the Maps editor -- the editor cannot directly open a sibling dialog, so it
+/// communicates the request through its `Option<String>` return value.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::creatures_editor::OPEN_CREATURE_TEMPLATES_SENTINEL;
+///
+/// assert!(!OPEN_CREATURE_TEMPLATES_SENTINEL.is_empty());
+/// assert!(OPEN_CREATURE_TEMPLATES_SENTINEL.starts_with("__campaign_builder"));
+/// ```
+pub const OPEN_CREATURE_TEMPLATES_SENTINEL: &str = "__campaign_builder::open_creature_templates__";
+
 /// Editor mode for creatures
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreaturesEditorMode {
@@ -371,6 +388,10 @@ impl CreaturesEditorState {
 
             if ui.button("📥 Register Asset").clicked() {
                 self.show_register_asset_dialog = true;
+            }
+
+            if ui.button("📋 Browse Templates").clicked() {
+                result_message = Some(OPEN_CREATURE_TEMPLATES_SENTINEL.to_string());
             }
         });
 
@@ -1269,6 +1290,10 @@ impl CreaturesEditorState {
                     self.mesh_edit_buffer = None;
                     self.mesh_transform_buffer = None;
                     self.preview_dirty = false;
+                }
+
+                if ui.button("📋 Browse Templates").clicked() {
+                    result_message = Some(OPEN_CREATURE_TEMPLATES_SENTINEL.to_string());
                 }
             });
         }

@@ -2,30 +2,204 @@
 
 ## Implementation Status Overview
 
-| Phase                                   | Status      | Date       | Description                                    |
-| --------------------------------------- | ----------- | ---------- | ---------------------------------------------- |
-| Phase 1                                 | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                        |
-| Phase 2                                 | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                          |
-| Phase 3                                 | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                 |
-| Phase 4                                 | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                   |
-| Phase 5                                 | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                     |
-| Phase 6                                 | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration  |
-| Phase 7                                 | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                        |
-| Phase 8                                 | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                   |
-| Phase 9                                 | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                     |
-| Phase 10                                | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                     |
-| **Creature Editor Enhancement Phase 1** | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**            |
-| **Creature Editor Enhancement Phase 2** | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                   |
-| **Creature Editor Enhancement Phase 3** | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)** |
-| **Creature Editor Enhancement Phase 4** | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                |
-| **Creature Editor Enhancement Phase 5** | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**              |
-| **Creature Editor UX Fixes Phase 1**    | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry** |
-| **Creature Editor UX Fixes Phase 2**    | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**      |
-| **Creature Editor UX Fixes Phase 3**    | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**        |
-| **Creature Editor UX Fixes Phase 4**    | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File** |
+| Phase                                   | Status      | Date       | Description                                              |
+| --------------------------------------- | ----------- | ---------- | -------------------------------------------------------- |
+| Phase 1                                 | ✅ COMPLETE | 2025-02-14 | Core Domain Integration                                  |
+| Phase 2                                 | ✅ COMPLETE | 2025-02-14 | Game Engine Rendering                                    |
+| Phase 3                                 | ✅ COMPLETE | 2025-02-14 | Campaign Builder Visual Editor                           |
+| Phase 4                                 | ✅ COMPLETE | 2025-02-14 | Content Pipeline Integration                             |
+| Phase 5                                 | ✅ COMPLETE | 2025-02-14 | Advanced Features & Polish                               |
+| Phase 6                                 | ✅ COMPLETE | 2025-02-15 | Campaign Builder Creatures Editor Integration            |
+| Phase 7                                 | ✅ COMPLETE | 2025-02-14 | Game Engine Integration                                  |
+| Phase 8                                 | ✅ COMPLETE | 2025-02-14 | Content Creation & Templates                             |
+| Phase 9                                 | ✅ COMPLETE | 2025-02-14 | Performance & Optimization                               |
+| Phase 10                                | ✅ COMPLETE | 2025-02-14 | Advanced Animation Systems                               |
+| **Creature Editor Enhancement Phase 1** | ✅ COMPLETE | 2025-02-15 | **Creature Registry Management UI**                      |
+| **Creature Editor Enhancement Phase 2** | ✅ COMPLETE | 2025-02-15 | **Creature Asset Editor UI**                             |
+| **Creature Editor Enhancement Phase 3** | ✅ COMPLETE | 2025-02-15 | **Template System Integration (24 templates)**           |
+| **Creature Editor Enhancement Phase 4** | ✅ COMPLETE | 2025-02-15 | **Advanced Mesh Editing Tools**                          |
+| **Creature Editor Enhancement Phase 5** | ✅ COMPLETE | 2025-02-15 | **Workflow Integration & Polish**                        |
+| **Creature Editor UX Fixes Phase 1**    | ✅ COMPLETE | 2025-02-16 | **Fix Documentation and Add Tools Menu Entry**           |
+| **Creature Editor UX Fixes Phase 2**    | ✅ COMPLETE | 2025-02-16 | **Fix Silent Data-Loss Bug in Edit Mode**                |
+| **Creature Editor UX Fixes Phase 3**    | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**                  |
+| **Creature Editor UX Fixes Phase 4**    | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**           |
+| **Creature Editor UX Fixes Phase 5**    | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder** |
 
-**Total Lines Implemented**: 8,300+ lines of production code + 5,000+ lines of documentation
-**Total Tests**: 295+ new tests (all passing), 1,419 campaign_builder tests passing
+**Total Lines Implemented**: 8,500+ lines of production code + 5,100+ lines of documentation
+**Total Tests**: 298+ new tests (all passing), 1,776 campaign_builder tests passing
+
+---
+
+## Creature Editor UX Fixes - Phase 5: Wire Creature Template Browser into the Campaign Builder
+
+### Overview
+
+Phase 5 wires the fully built but disconnected creature template system
+(`creature_templates.rs`, `template_metadata.rs`, `template_browser.rs`) into
+`CampaignBuilderApp` in `lib.rs`. After this phase:
+
+- The Tools menu exposes a dedicated "Creature Templates..." entry.
+- Clicking it (or clicking "Browse Templates" from inside the Creatures editor)
+  opens the full-featured `TemplateBrowserState` grid/list window.
+- "Create New" on a template creates a new `CreatureDefinition`, registers it in
+  `self.creatures`, switches to the Creatures tab, and opens the three-panel
+  editor ready to customize.
+- "Apply to Current" while a creature is open in Edit mode replaces its mesh
+  data without discarding the creature's ID or name.
+- A sentinel constant (`OPEN_CREATURE_TEMPLATES_SENTINEL`) lets the creatures
+  editor signal the Campaign Builder to open the template browser without
+  coupling the two layers directly.
+
+### Problem Statement
+
+All 24 creature templates were registered in `initialize_template_registry()`
+and the `TemplateBrowserState` UI was fully implemented, but `CampaignBuilderApp`
+had no fields pointing at the registry or browser state, no menu entry to
+surface them, and no code path to act on the `TemplateBrowserAction` values
+the browser returns. The template system was unreachable at runtime.
+
+### Components Implemented
+
+#### 5.1 Three new fields on `CampaignBuilderApp` (`sdk/campaign_builder/src/lib.rs`)
+
+```rust
+// Phase 5: Creature Template Browser
+creature_template_registry: template_metadata::TemplateRegistry,
+creature_template_browser_state: template_browser::TemplateBrowserState,
+show_creature_template_browser: bool,
+```
+
+Initialized in `Default::default()`:
+
+```rust
+creature_template_registry: creature_templates::initialize_template_registry(),
+creature_template_browser_state: template_browser::TemplateBrowserState::new(),
+show_creature_template_browser: false,
+```
+
+#### 5.2 "Creature Templates..." entry in the Tools menu
+
+Added immediately after the existing "Creature Editor" button:
+
+```rust
+if ui.button("🐉 Creature Templates...").clicked() {
+    self.show_creature_template_browser = true;
+    ui.close();
+}
+```
+
+#### 5.3 `show_creature_template_browser_dialog()` private method
+
+The method uses Rust's field-splitting borrow rules to avoid borrow conflicts
+between `self.creature_template_registry` (immutable borrow for entries) and
+`self.creature_template_browser_state` (mutable borrow for rendering). Both
+borrows are confined to an inner block and are fully released before the action
+is handled.
+
+Actions handled:
+
+- `TemplateBrowserAction::CreateNew(template_id)`:
+
+  1. Resolve template name from the registry (owned clone).
+  2. Call `id_manager.suggest_next_id(CreatureCategory::Monsters)` for the next
+     available ID in range 1-50.
+  3. Generate the creature via `creature_template_registry.generate(...)`.
+  4. Push onto `self.creatures`, open in the editor with `open_for_editing`,
+     switch to `EditorTab::Creatures`, set `unsaved_changes = true`, and
+     set a descriptive `status_message`.
+
+- `TemplateBrowserAction::ApplyToCurrent(template_id)`:
+  - If not in `CreaturesEditorMode::Edit`, set an informative status message
+    and return.
+  - Otherwise generate a creature from the template (preserving the existing
+    creature's ID and name), then copy `meshes`, `mesh_transforms`, `scale`,
+    and `color_tint` into `edit_buffer` and set `preview_dirty = true`.
+
+#### 5.4 Dialog call guarded in `update()`
+
+```rust
+// Phase 5: Creature Template Browser dialog
+if self.show_creature_template_browser {
+    self.show_creature_template_browser_dialog(ctx);
+}
+```
+
+#### 5.5 Sentinel constant in `creatures_editor.rs`
+
+```rust
+pub const OPEN_CREATURE_TEMPLATES_SENTINEL: &str =
+    "__campaign_builder::open_creature_templates__";
+```
+
+#### 5.6 "Browse Templates" buttons added to the creatures editor
+
+- **Registry toolbar** (`show_registry_mode()`): button added after
+  "Register Asset"; sets `result_message` to the sentinel string.
+- **Edit mode action row** (`show_edit_mode()`): button added alongside
+  Save/Cancel; sets `result_message` to the sentinel string.
+
+#### 5.7 Sentinel detection in `EditorTab::Creatures` match arm
+
+```rust
+EditorTab::Creatures => {
+    if let Some(msg) = self.creatures_editor_state.show(...) {
+        if msg == creatures_editor::OPEN_CREATURE_TEMPLATES_SENTINEL {
+            self.show_creature_template_browser = true;
+        } else {
+            self.status_message = msg;
+        }
+    }
+}
+```
+
+### Files Modified
+
+| File                                           | Change                                                                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/lib.rs`              | Three new struct fields, Default init, Tools menu entry, dialog method, update guard, sentinel detection            |
+| `sdk/campaign_builder/src/creatures_editor.rs` | `OPEN_CREATURE_TEMPLATES_SENTINEL` constant, "Browse Templates" button in registry toolbar and edit mode action row |
+| `docs/explanation/implementations.md`          | This summary                                                                                                        |
+
+### Testing
+
+Three new unit tests added to `mod tests` in `lib.rs`:
+
+| Test                                                   | What it verifies                                                                                            |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `test_creature_template_browser_defaults_to_hidden`    | `show_creature_template_browser` is `false` after `Default::default()`                                      |
+| `test_creature_template_registry_non_empty_on_default` | `creature_template_registry` has >= 24 templates after initialization                                       |
+| `test_creature_template_sentinel_sets_show_flag`       | Simulates sentinel detection: `show_creature_template_browser` becomes `true`; `status_message` stays empty |
+
+All three tests pass. The full test suite remains green:
+
+```
+Summary [5.614s] 1776 tests run: 1776 passed, 2 skipped
+```
+
+### Architecture Compliance
+
+- No core data structures (`CreatureDefinition`, `MeshDefinition`, etc.) were
+  modified.
+- Field-splitting borrow pattern used instead of cloning or unsafe code.
+- `creature_id_manager::CreatureCategory` type alias used throughout (no raw
+  integers).
+- Sentinel pattern is consistent with the existing `requested_open_npc`
+  mechanism in the Maps editor.
+- All new code formatted with `cargo fmt --all`; zero clippy warnings.
+
+### Success Criteria Met
+
+- Tools -> "Creature Templates..." opens the full-featured grid/list browser
+  with all 24 registered creature templates, category filter, complexity
+  filter, and preview panel.
+- "Create New" creates a creature, registers it in `self.creatures`, switches
+  to the Creatures tab, and opens the three-panel editor.
+- "Apply to Current" while a creature is open in Edit mode replaces its mesh
+  data without discarding the creature's ID or name.
+- "Browse Templates" button inside the Creatures tab toolbar (registry and edit
+  modes) opens the same dialog via the sentinel mechanism.
+- The existing "Template Browser" (Items / Monsters / Quests / Dialogues /
+  Maps) is unaffected.
 
 ---
 

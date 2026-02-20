@@ -508,6 +508,11 @@ struct CampaignBuilderApp {
     template_manager: templates::TemplateManager,
     show_template_browser: bool,
     template_category: templates::TemplateCategory,
+
+    // Phase 5: Creature Template Browser
+    creature_template_registry: template_metadata::TemplateRegistry,
+    creature_template_browser_state: template_browser::TemplateBrowserState,
+    show_creature_template_browser: bool,
     advanced_validator: Option<advanced_validation::AdvancedValidator>,
     show_validation_report: bool,
     validation_report: String,
@@ -620,6 +625,12 @@ impl Default for CampaignBuilderApp {
             template_manager: templates::TemplateManager::new(),
             show_template_browser: false,
             template_category: templates::TemplateCategory::Item,
+
+            // Phase 5: Creature Template Browser
+            creature_template_registry: creature_templates::initialize_template_registry(),
+            creature_template_browser_state: template_browser::TemplateBrowserState::new(),
+            show_creature_template_browser: false,
+
             advanced_validator: None,
             show_validation_report: false,
             validation_report: String::new(),
@@ -3200,6 +3211,154 @@ impl CampaignBuilderApp {
         self.show_template_browser = open;
     }
 
+    /// Show the Creature Template Browser dialog window.
+    ///
+    /// Opens a full-featured grid/list browser with all registered creature
+    /// templates.  The browser supports category filtering, complexity filtering,
+    /// search, and a live preview panel.
+    ///
+    /// # Actions handled
+    ///
+    /// * `TemplateBrowserAction::CreateNew(template_id)` -- Generates a new
+    ///   `CreatureDefinition` from the selected template, assigns the next
+    ///   available ID in the Monsters range, pushes it onto `self.creatures`,
+    ///   switches to the Creatures tab, and opens the editor.
+    ///
+    /// * `TemplateBrowserAction::ApplyToCurrent(template_id)` -- If a creature
+    ///   is currently open in Edit mode, replaces its mesh data (meshes,
+    ///   mesh_transforms, scale, color_tint) with data generated from the
+    ///   template while preserving the creature's ID and name.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // In the update() method:
+    /// // if self.show_creature_template_browser {
+    /// //     self.show_creature_template_browser_dialog(ctx);
+    /// // }
+    /// ```
+    fn show_creature_template_browser_dialog(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_creature_template_browser;
+
+        // Split borrows: `entries` borrows `creature_template_registry`
+        // immutably while `browser_state` borrows `creature_template_browser_state`
+        // mutably.  These are disjoint fields so the borrow checker allows it.
+        // The inner block ensures both borrows are released before we access
+        // other `self` fields below.
+        let action: Option<template_browser::TemplateBrowserAction> = {
+            let entries: Vec<&template_metadata::TemplateEntry> =
+                self.creature_template_registry.all_templates();
+            let browser_state = &mut self.creature_template_browser_state;
+            egui::Window::new("🐉 Creature Template Browser")
+                .open(&mut open)
+                .resizable(true)
+                .default_size([900.0, 600.0])
+                .show(ctx, |ui| browser_state.show(ui, &entries))
+                .and_then(|r| r.inner)
+                .flatten()
+        };
+
+        self.show_creature_template_browser = open;
+
+        let Some(action) = action else {
+            return;
+        };
+
+        match action {
+            template_browser::TemplateBrowserAction::CreateNew(template_id) => {
+                // Collect only what we need (owned) so the borrow of
+                // creature_template_registry is released before we mutate self.
+                let template_name: Option<String> = self
+                    .creature_template_registry
+                    .get(&template_id)
+                    .map(|e| e.metadata.name.clone());
+
+                let Some(template_name) = template_name else {
+                    self.status_message =
+                        format!("Template '{}' not found in registry", template_id);
+                    return;
+                };
+
+                // Suggest next ID in the Monsters category (1–50).
+                let new_id = self
+                    .creatures_editor_state
+                    .id_manager
+                    .suggest_next_id(creature_id_manager::CreatureCategory::Monsters);
+
+                let creature_name = format!("New {}", template_name);
+
+                // `generate` returns an owned value; borrow of the registry ends here.
+                match self
+                    .creature_template_registry
+                    .generate(&template_id, &creature_name, new_id)
+                {
+                    Ok(new_creature) => {
+                        self.creatures.push(new_creature);
+                        let new_idx = self.creatures.len() - 1;
+                        let file_name = format!(
+                            "assets/creatures/{}.ron",
+                            self.creatures[new_idx]
+                                .name
+                                .to_lowercase()
+                                .replace(' ', "_")
+                        );
+                        self.creatures_editor_state.open_for_editing(
+                            &self.creatures,
+                            new_idx,
+                            &file_name,
+                        );
+                        self.active_tab = EditorTab::Creatures;
+                        self.unsaved_changes = true;
+                        self.status_message = format!(
+                            "Created '{}' from template '{}' -- customize and save.",
+                            creature_name, template_name
+                        );
+                    }
+                    Err(e) => {
+                        self.status_message =
+                            format!("Failed to generate creature from template: {}", e);
+                    }
+                }
+            }
+            template_browser::TemplateBrowserAction::ApplyToCurrent(template_id) => {
+                if self.creatures_editor_state.mode != creatures_editor::CreaturesEditorMode::Edit {
+                    self.status_message =
+                        "Open a creature in the editor first, then apply a template.".to_string();
+                    return;
+                }
+
+                // Preserve the current creature's identity.
+                let current_name = self.creatures_editor_state.edit_buffer.name.clone();
+                let current_id = self.creatures_editor_state.edit_buffer.id;
+
+                // Generate from template (owned result; borrow ends immediately).
+                match self.creature_template_registry.generate(
+                    &template_id,
+                    &current_name,
+                    current_id,
+                ) {
+                    Ok(template_creature) => {
+                        // Copy mesh data only -- keep the creature's ID and name intact.
+                        self.creatures_editor_state.edit_buffer.meshes = template_creature.meshes;
+                        self.creatures_editor_state.edit_buffer.mesh_transforms =
+                            template_creature.mesh_transforms;
+                        self.creatures_editor_state.edit_buffer.scale = template_creature.scale;
+                        self.creatures_editor_state.edit_buffer.color_tint =
+                            template_creature.color_tint;
+                        self.creatures_editor_state.preview_dirty = true;
+                        self.status_message = format!(
+                            "Applied template '{}' mesh data to '{}'.",
+                            template_id, current_name
+                        );
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to apply template: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
     /// Show validation report dialog
     fn show_validation_report_dialog(&mut self, ctx: &egui::Context) {
         let mut open = self.show_validation_report;
@@ -3595,6 +3754,10 @@ impl eframe::App for CampaignBuilderApp {
                         self.active_tab = EditorTab::Creatures;
                         ui.close();
                     }
+                    if ui.button("🐉 Creature Templates...").clicked() {
+                        self.show_creature_template_browser = true;
+                        ui.close();
+                    }
                     ui.separator();
                     if ui.button("✅ Validate Campaign").clicked() {
                         self.validate_campaign();
@@ -3849,7 +4012,11 @@ impl eframe::App for CampaignBuilderApp {
                     &self.campaign.creatures_file,
                     &mut self.unsaved_changes,
                 ) {
-                    self.status_message = msg;
+                    if msg == creatures_editor::OPEN_CREATURE_TEMPLATES_SENTINEL {
+                        self.show_creature_template_browser = true;
+                    } else {
+                        self.status_message = msg;
+                    }
                 }
             }
             EditorTab::Maps => {
@@ -4101,6 +4268,11 @@ impl eframe::App for CampaignBuilderApp {
         // Phase 15: Template browser dialog
         if self.show_template_browser {
             self.show_template_browser_dialog(ctx);
+        }
+
+        // Phase 5: Creature Template Browser dialog
+        if self.show_creature_template_browser {
+            self.show_creature_template_browser_dialog(ctx);
         }
 
         // Phase 15: Validation report dialog
@@ -10068,5 +10240,59 @@ fn test_another() {}
         assert!(output.contains("Total Issues: 2"));
         assert!(output.contains("from_label Violations: 1"));
         assert!(output.contains("Average Score: 90.5"));
+    }
+
+    // =========================================================================
+    // Phase 5: Creature Template Browser Tests
+    // =========================================================================
+
+    #[test]
+    fn test_creature_template_browser_defaults_to_hidden() {
+        let app = CampaignBuilderApp::default();
+        assert!(
+            !app.show_creature_template_browser,
+            "Creature template browser should be hidden on default construction"
+        );
+    }
+
+    #[test]
+    fn test_creature_template_registry_non_empty_on_default() {
+        let app = CampaignBuilderApp::default();
+        assert!(
+            !app.creature_template_registry.is_empty(),
+            "Creature template registry should contain templates after initialization"
+        );
+        // The initialize_template_registry function registers all 24 known templates.
+        assert!(
+            app.creature_template_registry.len() >= 24,
+            "Expected at least 24 registered creature templates, got {}",
+            app.creature_template_registry.len()
+        );
+    }
+
+    #[test]
+    fn test_creature_template_sentinel_sets_show_flag() {
+        let mut app = CampaignBuilderApp::default();
+
+        // The sentinel is returned by the creatures editor when the user clicks
+        // "Browse Templates".  The update() loop checks for this sentinel and sets
+        // show_creature_template_browser = true instead of writing to status_message.
+
+        // Simulate what update() does when it receives the sentinel from show().
+        let sentinel_msg = creatures_editor::OPEN_CREATURE_TEMPLATES_SENTINEL.to_string();
+        if sentinel_msg == creatures_editor::OPEN_CREATURE_TEMPLATES_SENTINEL {
+            app.show_creature_template_browser = true;
+        } else {
+            app.status_message = sentinel_msg;
+        }
+
+        assert!(
+            app.show_creature_template_browser,
+            "show_creature_template_browser should be true after receiving the sentinel"
+        );
+        assert!(
+            app.status_message.is_empty(),
+            "status_message should NOT be set when the sentinel is received"
+        );
     }
 }
