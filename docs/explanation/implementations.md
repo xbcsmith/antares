@@ -28,6 +28,7 @@
 | **Findings Remediation Phase 2**         | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)** |
 | **Findings Remediation Phase 3**         | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard** |
 | **Findings Remediation Phase 4**         | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI** |
+| **Findings Remediation Phase 5**         | ✅ COMPLETE | 2026-02-21 | **Creature Editor Documentation Parity and Status Reconciliation** |
 
 **Total Lines Implemented**: 8,500+ lines of production code + 5,100+ lines of documentation
 **Total Tests**: 298+ new tests (all passing), 1,776 campaign_builder tests passing
@@ -93,6 +94,57 @@ UI for renderer-unavailable scenarios.
 Creature preview now renders through the integrated preview subsystem, reflects
 mesh edits and selection updates without mode switching, and degrades safely to
 diagnostic fallback UI if renderer initialization is unavailable.
+
+---
+
+## Findings Remediation - Phase 5: Documentation Parity and Status Reconciliation
+
+### Overview
+
+Phase 5 aligns creature-editor user documentation with currently shipped UI
+behavior and adds an automated parity check script to ensure key documented
+navigation/actions remain wired in code.
+
+### Components Updated
+
+- `docs/how-to/create_creatures.md`
+- `docs/explanation/implementations.md`
+- `scripts/validate_creature_editor_doc_parity.sh`
+
+### Key Changes
+
+- Rewrote `docs/how-to/create_creatures.md` to match active campaign-builder
+  creature workflows only.
+- Removed stale instructions that implied currently unavailable in-flow
+  operations and replaced them with explicit "planned/not yet wired" scope
+  notes for:
+  - Variations
+  - LOD authoring
+  - Animation authoring
+  - Material editing
+- Standardized navigation text to documented entry points that exist in code:
+  - `Tools -> Creature Editor`
+  - `Tools -> Creature Templates...`
+  - Sidebar `Creatures` tab
+- Added `scripts/validate_creature_editor_doc_parity.sh` to validate parity
+  between docs and UI code for critical actions and entry points.
+
+### Parity Script Coverage
+
+`scripts/validate_creature_editor_doc_parity.sh` verifies:
+
+- Documented navigation paths are present in `docs/how-to/create_creatures.md`.
+- Referenced menu actions exist in `sdk/campaign_builder/src/lib.rs`.
+- Referenced creature-editor actions exist in
+  `sdk/campaign_builder/src/creatures_editor.rs`.
+- Critical sentinels and dispatch paths (`OPEN_CREATURE_TEMPLATES_SENTINEL`)
+  remain in place.
+
+### Outcome
+
+Creature-editor documentation now reflects real shipped behavior and no longer
+overstates unsupported workflows. A dedicated script enforces ongoing parity
+between documented actions and actual UI code paths.
 
 ---
 
