@@ -25,9 +25,50 @@
 | **Creature Editor UX Fixes Phase 4**    | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**           |
 | **Creature Editor UX Fixes Phase 5**    | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder** |
 | **Findings Remediation Phase 1**         | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**  |
+| **Findings Remediation Phase 2**         | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)** |
 
 **Total Lines Implemented**: 8,500+ lines of production code + 5,100+ lines of documentation
 **Total Tests**: 298+ new tests (all passing), 1,776 campaign_builder tests passing
+
+---
+
+## Findings Remediation - Phase 2: Creature Editor Action Wiring
+
+### Overview
+
+Phase 2 replaces no-op creature editor actions with functional behavior in
+`creatures_editor.rs`. The editor now wires mesh validation, issue display,
+save-as flow, RON export, and revert behavior to real code paths while keeping
+state synchronization deterministic.
+
+### Components Updated
+
+- `sdk/campaign_builder/src/creatures_editor.rs`
+
+### Key Changes
+
+- Added validation state tracking fields (`validation_errors`, `validation_warnings`, `validation_info`, `last_validated_mesh_index`) and save-as dialog state (`show_save_as_dialog`, `save_as_path_buffer`).
+- Added refresh and mesh-level validation helpers using `mesh_validation::validate_mesh`.
+- Implemented `Validate Mesh` button behavior with issue-panel population and status feedback.
+- Implemented `Show Issues` toggle with inline issue rendering in the bottom properties panel.
+- Implemented `Export RON` path via `ron::ser::to_string_pretty` and `ui.ctx().copy_text(...)`.
+- Implemented `Revert Changes` behavior that restores `edit_buffer` from the selected registry entry (Edit mode) or resets defaults (Add mode).
+- Implemented Save-As workflow with normalized relative asset path handling, deterministic new-ID assignment, and editor state transition to the newly created creature variant.
+- Added a dedicated Save-As dialog window and helper methods for path normalization/default generation.
+
+### Tests Added
+
+- `test_validate_selected_mesh_reports_invalid_mesh_errors`
+- `test_export_current_creature_to_ron_contains_name`
+- `test_revert_edit_buffer_from_registry_restores_original`
+- `test_perform_save_as_with_path_appends_new_creature`
+- `test_normalize_relative_creature_asset_path_rewrites_backslashes`
+
+### Outcome
+
+The previously stubbed Phase 2 creature-editor controls now perform concrete
+operations with explicit status outcomes, reducing silent no-op behavior in the
+asset editing workflow.
 
 ---
 
