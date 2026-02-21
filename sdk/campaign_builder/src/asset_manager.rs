@@ -2122,7 +2122,7 @@ mod tests {
             name: "Test NPC".to_string(),
             description: "A test NPC".to_string(),
             portrait_id: "test_1".to_string(),
-            sprite: None,
+            sprite: Some(sprite),
             dialogue_id: None,
             creature_id: None,
             quest_ids: vec![],

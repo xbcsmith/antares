@@ -46,26 +46,26 @@ pub fn load_from_registry(
     // Step 1: Load registry
     let registry_contents = fs::read_to_string(registry_path)?;
     let references: Vec<CreatureReference> = ron::from_str(&registry_contents)?;
-    
+
     // Step 2: Load full definitions
     let mut database = Self::new();
     for reference in references {
         // Resolve relative path
         let creature_path = campaign_root.join(&reference.filepath);
-        
+
         // Read creature file
         let creature_contents = fs::read_to_string(&creature_path)?;
         let creature: CreatureDefinition = ron::from_str(&creature_contents)?;
-        
+
         // Validate ID match
         if creature.id != reference.id {
             return Err(CreatureDatabaseError::ValidationError(...));
         }
-        
+
         // Add to database
         database.add_creature(creature)?;
     }
-    
+
     Ok(database)
 }
 ```
@@ -328,7 +328,7 @@ match ron::from_str::<Vec<CreatureDefinition>>(&contents) {
 match ron::from_str::<Vec<CreatureReference>>(&contents) {
     Ok(references) => {
         let mut creatures = Vec::new();
-        
+
         // Step 2: Load each creature file
         for reference in references {
             let creature_path = dir.join(&reference.filepath);
@@ -349,7 +349,7 @@ match ron::from_str::<Vec<CreatureReference>>(&contents) {
                 Err(e) => eprintln!("Failed to read creature file: {}", e),
             }
         }
-        
+
         self.creatures = creatures;
     }
     Err(e) => {

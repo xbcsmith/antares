@@ -16,14 +16,30 @@ A comprehensive guide to creating custom creatures using the procedural mesh sys
 
 ## Getting Started
 
-### Opening the Campaign Builder
+### Opening the Creature Editor
 
-1. Launch the Antares Campaign Builder application
-2. Navigate to **Tools** → **Creature Editor**
-3. The creature editor interface will open with three main panels:
-   - **Template Browser** (left): Browse available templates
-   - **Preview Pane** (center): 3D preview of your creature
-   - **Properties Panel** (right): Edit creature properties
+The Creature Editor is part of the Campaign Builder application. There are two
+ways to navigate to it inside an open campaign:
+
+- **Path A (via Tools menu):** Click **Tools** → **Creature Editor**. This
+  switches the active panel to the Creatures editor without leaving the current
+  campaign session.
+- **Path B (direct tab):** Click the **Creatures** tab in the left sidebar.
+
+Both paths open the same editor. You must have a campaign open before either
+path is available.
+
+### Creature Editor Layout
+
+When you first enter the Creatures editor it shows the **Registry List** mode:
+a flat list of all registered creature assets in the campaign, with a toolbar
+at the top (New, Edit, Delete, Duplicate). Single-clicking a creature in the
+list selects it.
+
+The three-panel layout (Mesh List / 3D Preview placeholder / Mesh Properties)
+only appears after you open an individual creature for editing, either by
+clicking **New** to create one from scratch or by selecting a creature and
+clicking **Edit** (or double-clicking the row).
 
 ### Understanding Templates
 
@@ -58,6 +74,7 @@ Each creature has a base color that can be modified:
 5. Click **Apply**
 
 **Example color values:**
+
 - Red: `[1.0, 0.0, 0.0, 1.0]`
 - Green: `[0.0, 1.0, 0.0, 1.0]`
 - Blue: `[0.0, 0.0, 1.0, 1.0]`
@@ -87,6 +104,7 @@ Each mesh part has its own transform (position, rotation, scale):
    - **Scale**: Resize the mesh independently
 
 **Example**: To move the head forward:
+
 - Set Translation Z to `0.5`
 
 ---
@@ -132,6 +150,7 @@ To create young and ancient dragon variants:
 ### Understanding Mesh Structure
 
 Each creature is made of multiple meshes (body parts). A humanoid template has:
+
 - Torso
 - Head
 - Left arm
@@ -171,6 +190,7 @@ For each mesh, you can edit:
 Use primitive generators to quickly create common shapes:
 
 **Cube Generator:**
+
 ```
 Width: 1.0
 Height: 1.0
@@ -179,6 +199,7 @@ Center: [0.0, 0.0, 0.0]
 ```
 
 **Sphere Generator:**
+
 ```
 Radius: 0.5
 Subdivisions: 16
@@ -186,6 +207,7 @@ Center: [0.0, 0.0, 0.0]
 ```
 
 **Cylinder Generator:**
+
 ```
 Radius: 0.3
 Height: 1.0
@@ -219,6 +241,7 @@ LOD (Level of Detail) improves performance by using simpler meshes at a distance
 4. Click **Generate**
 
 The system will create:
+
 - LOD 0: Full detail (close range)
 - LOD 1: Medium detail (medium range)
 - LOD 2: Low detail (far range)
@@ -237,6 +260,7 @@ Materials define how light interacts with your creature:
    - **Alpha Mode**: Opaque, Blend, or Mask
 
 **Example material (Shiny Metal):**
+
 ```
 Base Color: [0.7, 0.7, 0.8, 1.0]
 Metallic: 1.0
@@ -266,6 +290,7 @@ Create keyframe animations for basic movement:
 5. Click **Preview Animation** to test
 
 **Example: Bobbing head animation**
+
 ```
 Keyframe 0.0s: Head Y = 1.5
 Keyframe 1.0s: Head Y = 1.6
@@ -281,12 +306,14 @@ Keyframe 2.0s: Head Y = 1.5
 Degenerate triangles (zero area) cause rendering issues:
 
 **Bad:**
+
 ```
 Triangle with vertices at same position:
 [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]
 ```
 
 **Good:**
+
 ```
 Triangle with distinct vertices:
 [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]
@@ -323,11 +350,13 @@ Keep your creatures performant:
 Use clear, descriptive names:
 
 **Good:**
+
 - `red_dragon_adult.ron`
 - `skeleton_warrior.ron`
 - `goblin_shaman.ron`
 
 **Bad:**
+
 - `creature1.ron`
 - `test.ron`
 - `untitled.ron`
@@ -339,11 +368,13 @@ Use clear, descriptive names:
 ### Preview is Black or Invisible
 
 **Possible causes:**
+
 - Color values outside 0.0-1.0 range
 - All meshes hidden
 - Camera positioned incorrectly
 
 **Solutions:**
+
 1. Reset color tint to `[1.0, 1.0, 1.0, 1.0]`
 2. Check mesh visibility in Mesh List
 3. Click **View** → **Reset Camera**
@@ -353,6 +384,7 @@ Use clear, descriptive names:
 **Cause:** Inverted normals or incorrect winding order
 
 **Solution:**
+
 1. Select the mesh
 2. Click **Mesh** → **Flip Normals**
 3. Or click **Mesh** → **Recalculate Normals**
@@ -362,6 +394,7 @@ Use clear, descriptive names:
 **Cause:** Missing triangles or incorrect indices
 
 **Solution:**
+
 1. Click **Tools** → **Validate Mesh**
 2. Review the error report
 3. Manually fix missing indices or use **Auto-Repair**
@@ -371,6 +404,7 @@ Use clear, descriptive names:
 **Cause:** File permissions or invalid data
 
 **Solution:**
+
 1. Check that you have write permissions to the data directory
 2. Validate your creature before saving
 3. Ensure creature ID is unique
@@ -380,6 +414,7 @@ Use clear, descriptive names:
 **Cause:** Too many vertices or complex meshes
 
 **Solution:**
+
 1. Generate LOD levels
 2. Reduce mesh complexity
 3. Combine multiple small meshes into one
@@ -387,11 +422,13 @@ Use clear, descriptive names:
 ### Texture Doesn't Appear
 
 **Possible causes:**
+
 - Texture path is incorrect
 - UVs are not defined
 - Texture file format not supported
 
 **Solutions:**
+
 1. Verify texture path is relative to project root
 2. Generate UVs if missing: **Mesh** → **Generate UVs**
 3. Use PNG or JPEG format
