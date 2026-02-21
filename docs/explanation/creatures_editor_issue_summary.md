@@ -10,7 +10,7 @@ The creatures editor can't load creatures because the campaign builder tries to 
 
 **File**: `campaigns/tutorial/data/creatures.ron`
 
-**What it contains**: 
+**What it contains**:
 ```ron
 [
     CreatureReference(

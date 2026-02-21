@@ -101,7 +101,7 @@ pub fn generate_cube(size: f32, color: [f32; 4]) -> MeshDefinition {
         vertices,
         indices,
         normals: Some(normals),
-        uvs: None,
+        uvs: Some(uvs),
         color,
         lod_levels: None,
         lod_distances: None,
@@ -430,6 +430,103 @@ pub fn generate_cone(radius: f32, height: f32, segments: u32, color: [f32; 4]) -
     }
 }
 
+/// Generates a square pyramid mesh with specified base size and color
+///
+/// # Arguments
+///
+/// * `base_size` - The side length of the square base
+/// * `color` - RGBA color values [r, g, b, a] in range [0.0, 1.0]
+///
+/// # Returns
+///
+/// A `MeshDefinition` representing a pyramid
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::primitive_generators::generate_pyramid;
+///
+/// let pyramid = generate_pyramid(1.0, [1.0, 1.0, 0.0, 1.0]);
+/// assert_eq!(pyramid.vertices.len(), 5); // 4 base + 1 apex
+/// ```
+pub fn generate_pyramid(base_size: f32, color: [f32; 4]) -> MeshDefinition {
+    let half = base_size / 2.0;
+    let height = base_size; // Height equals base size for proportional pyramid
+
+    // 5 vertices: 4 base corners + 1 apex
+    #[rustfmt::skip]
+    let vertices = vec![
+        // Base (bottom face, Y = 0)
+        [-half, 0.0, -half],  // 0: back-left
+        [ half, 0.0, -half],  // 1: back-right
+        [ half, 0.0,  half],  // 2: front-right
+        [-half, 0.0,  half],  // 3: front-left
+        // Apex
+        [0.0, height, 0.0],   // 4: top
+    ];
+
+    // Calculate face normals for each triangular face
+    let base_normal = [0.0, -1.0, 0.0];
+
+    // For sloped faces, calculate normals pointing outward
+    let front_normal = [0.0, 0.5, 1.0]; // Approximate, will normalize
+    let back_normal = [0.0, 0.5, -1.0];
+    let left_normal = [-1.0, 0.5, 0.0];
+    let right_normal = [1.0, 0.5, 0.0];
+
+    // Normalize the sloped normals
+    let normalize = |v: [f32; 3]| -> [f32; 3] {
+        let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        [v[0] / len, v[1] / len, v[2] / len]
+    };
+
+    let front_normal = normalize(front_normal);
+    let back_normal = normalize(back_normal);
+    let left_normal = normalize(left_normal);
+    let right_normal = normalize(right_normal);
+
+    #[rustfmt::skip]
+    let normals = vec![
+        base_normal, base_normal, base_normal, base_normal,  // Base vertices
+        [0.0, 1.0, 0.0],  // Apex (average of all face normals pointing up)
+    ];
+
+    #[rustfmt::skip]
+    let uvs = vec![
+        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0],  // Base
+        [0.5, 0.5],  // Apex
+    ];
+
+    // Indices for 5 faces: 1 base (2 triangles) + 4 sides (1 triangle each)
+    #[rustfmt::skip]
+    let indices = vec![
+        // Base (looking up from below, clockwise)
+        0, 2, 1,
+        0, 3, 2,
+        // Front face
+        3, 4, 2,
+        // Right face
+        2, 4, 1,
+        // Back face
+        1, 4, 0,
+        // Left face
+        0, 4, 3,
+    ];
+
+    MeshDefinition {
+        name: None,
+        vertices,
+        indices,
+        normals: Some(normals),
+        uvs: Some(uvs),
+        color,
+        lod_levels: None,
+        lod_distances: None,
+        material: None,
+        texture_path: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -548,5 +645,34 @@ mod tests {
         let cone = generate_cone(1.0, 2.0, 8, [1.0, 1.0, 1.0, 1.0]);
         // First vertex should be apex at (0, height, 0)
         assert_eq!(cone.vertices[0], [0.0, 2.0, 0.0]);
+    }
+
+    #[test]
+    fn test_generate_pyramid_has_five_vertices() {
+        let pyramid = generate_pyramid(1.0, [1.0, 1.0, 0.0, 1.0]);
+        assert_eq!(pyramid.vertices.len(), 5); // 4 base + 1 apex
+        assert!(!pyramid.indices.is_empty());
+        assert!(pyramid.normals.is_some());
+        assert!(pyramid.uvs.is_some());
+    }
+
+    #[test]
+    fn test_pyramid_apex_position() {
+        let pyramid = generate_pyramid(2.0, [1.0, 1.0, 1.0, 1.0]);
+        // Apex should be at (0, height, 0) where height = base_size
+        assert_eq!(pyramid.vertices[4], [0.0, 2.0, 0.0]);
+    }
+
+    #[test]
+    fn test_pyramid_base_size() {
+        let base_size = 3.0;
+        let pyramid = generate_pyramid(base_size, [1.0, 1.0, 1.0, 1.0]);
+        let half = base_size / 2.0;
+
+        // Check base corners are at expected positions
+        assert_eq!(pyramid.vertices[0], [-half, 0.0, -half]);
+        assert_eq!(pyramid.vertices[1], [half, 0.0, -half]);
+        assert_eq!(pyramid.vertices[2], [half, 0.0, half]);
+        assert_eq!(pyramid.vertices[3], [-half, 0.0, half]);
     }
 }

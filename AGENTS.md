@@ -851,6 +851,25 @@ character.stats.might.reset();    // ✓ Resets current to base
 
 ---
 
+### ❌ Anti-Pattern 7: egui Widget ID Clashes (SDK / Campaign Builder)
+
+Widgets inside loops, multiple `ScrollArea`s in the same scope, and
+`ComboBox::from_label` all produce silent ID collisions in egui. Symptoms are
+subtle: wrong combo box selection, shared scroll state, clicks firing on the
+wrong row. The compiler and clippy cannot catch these.
+
+**Full rules, wrong/right examples, and an audit checklist are in
+`sdk/AGENTS.md`.**
+
+Quick summary of what is required for every campaign builder UI function:
+
+- Wrap every `for` loop body that renders widgets in `ui.push_id(unique_key, ...)`
+- Give every `ScrollArea` a distinct `.id_salt("unique_string")`
+- Use `ComboBox::from_id_salt("unique_string")` — never `from_label`
+- Give every `Grid`, `Plot`, and `CollapsingHeader` inside a loop a unique ID
+
+---
+
 ## Emergency Procedures
 
 ### When Quality Checks Fail
@@ -960,6 +979,11 @@ cargo clippy --all-targets --all-features -- -D warnings
 - [ ] No `unwrap()` or `expect()` without justification
 - [ ] All public items have doc comments with examples
 - [ ] All functions have at least 3 tests (success, failure, edge case)
+- [ ] (SDK only) egui ID audit passed — see `sdk/AGENTS.md` for the full
+      checklist: every loop uses `push_id`, every `ScrollArea` has `id_salt`,
+      every `ComboBox` uses `from_id_salt`, no `SidePanel`/`TopBottomPanel`/
+      `CentralPanel` is conditionally skipped by a same-frame boolean guard,
+      every layout-driving state mutation calls `request_repaint()`
 
 ### Testing
 
@@ -1112,15 +1136,21 @@ All four cargo commands MUST pass before claiming done:
 **FOLLOW THIS SEQUENCE FOR EVERY TASK:**
 
 ```text
-1. Read architecture.md sections relevant to your task
-2. Verify data structures, types, and constants match architecture
-3. Create branch: pr-<feat>-<issue>
-4. Implement code with /// doc comments
-5. Use type aliases (ItemId, SpellId, etc.) not raw types
-6. Add tests (>80% coverage) with game-specific test cases
-7. Run: cargo fmt --all
-8. Run: cargo check --all-targets --all-features
-9. Run: cargo clippy --all-targets --all-features -- -D warnings
+1.  Read architecture.md sections relevant to your task
+2.  Verify data structures, types, and constants match architecture
+3.  Create branch: pr-<feat>-<issue>
+4.  Implement code with /// doc comments
+5.  Use type aliases (ItemId, SpellId, etc.) not raw types
+6.  Add tests (>80% coverage) with game-specific test cases
+6a. (SDK / Campaign Builder UI only) Run the egui ID audit in sdk/AGENTS.md:
+      every loop uses push_id, every ScrollArea has id_salt,
+      every ComboBox uses from_id_salt,
+      no SidePanel/TopBottomPanel/CentralPanel skipped by a same-frame guard
+      (show a placeholder instead), every layout-driving state mutation calls
+      request_repaint()
+7.  Run: cargo fmt --all
+8.  Run: cargo check --all-targets --all-features
+9.  Run: cargo clippy --all-targets --all-features -- -D warnings
 10. Run: cargo nextest run --all-features
 11. Update: docs/explanation/implementations.md
 12. Verify: No architectural deviations from architecture.md
@@ -1134,9 +1164,17 @@ All four cargo commands MUST pass before claiming done:
 
 ---
 
+## SDK-Specific Rules
+
+Rules that apply only to code under `sdk/` are kept in `sdk/AGENTS.md` to
+avoid bloating this file. Read that file in full before touching anything in
+`sdk/campaign_builder`.
+
+---
+
 ## Living Document
 
-This file is continuously updated as new patterns emerge. Last updated: 2024
+This file is continuously updated as new patterns emerge. Last updated: 2025
 
 **For AI Agents**: You are a master Rust developer. Follow these rules
 precisely. Update the implementation summaries in `docs/explanation/implementations`.

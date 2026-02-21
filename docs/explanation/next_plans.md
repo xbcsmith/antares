@@ -10,6 +10,9 @@ Document the campaign data structure, including all the RON files that make up a
 
 ## SDK
 
+### Campaign Builder command line
+
+Specify the campaign file to open from command line.
 ### Creatures Editor
 
 Campaign Builder --> Creatures Editor
@@ -20,6 +23,19 @@ We should be able to control the creature mapping from creatures.ron file to ass
 
 Campaign Builder --> Metadata Editor --> Files has no place to add the creatures file
 
+Campaign Builder --> Creatures Editor
+
+[@create_creatures.md](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/docs/how-to/create_creatures.md) Tools does not have a link to the Creature Editor. The only way to spawn a creature editor is to select New from The Campaign Builder --> Creatures tab. The Creatures tab has a list of creatures but no preview is rendered when selected. I would expect a Preview in the right column to appear with a Edit button that opens the Creatures Assets .ron file in the Creature Editor window. I would also expect to have a place where I can register an creature asset .ron in the creatures.ron registry. I thought we covered this in the [@creature_editor_enhanced_implementation_plan.md](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/docs/explanation/creature_editor_enhanced_implementation_plan.md) [@creature_templates.md](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/docs/reference/creature_templates.md) are not displayed in the template browser window. and I can't figure out how to get to them.
+
+[creature editor ui fix](./creature_editor_ux_fixes_implementation_plan.md)
+
+Clashing ID in the Creature Template browser.
+
+Creature Template browser has clashing ID. ID Clashes when things like Windows or CollapsingHeaders share names or when things like Plot and Grid:s aren't given unique id_salt:s. Sometimes the solution is to use ui.push_id
+
+Tools --> Creature Editor does not open the Creature Editor.
+
+Campaign Builder --> Creature Editor --> Click Creature does not show anything in the right panel.
 
 ### Map Editor Multiselection
 

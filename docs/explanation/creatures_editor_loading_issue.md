@@ -192,12 +192,12 @@ pub fn load_full_definitions(
         let filepath = campaign_root.join(&reference.filepath);
         let content = fs::read_to_string(&filepath)?;
         let creature = ron::from_str::<CreatureDefinition>(&content)?;
-        
+
         // Validate ID match
         if creature.id != reference.id {
             return Err(CreatureLoadError::IdMismatch { ... });
         }
-        
+
         creatures.push(creature);
     }
     Ok(creatures)
@@ -222,23 +222,23 @@ fn load_creatures(&mut self) {
                                 Ok(creatures) => {
                                     let count = creatures.len();
                                     self.creatures = creatures;
-                                    self.status_message = 
+                                    self.status_message =
                                         format!("Loaded {} creatures", count);
                                 }
                                 Err(e) => {
-                                    self.status_message = 
+                                    self.status_message =
                                         format!("Failed to load creature files: {}", e);
                                 }
                             }
                         }
                         Err(e) => {
-                            self.status_message = 
+                            self.status_message =
                                 format!("Failed to parse creatures registry: {}", e);
                         }
                     }
                 }
                 Err(e) => {
-                    self.status_message = 
+                    self.status_message =
                         format!("Failed to read creatures file: {}", e);
                 }
             }
@@ -258,7 +258,7 @@ fn save_creatures(&mut self) -> Result<(), String> {
             .map(|creature| CreatureReference {
                 id: creature.id,
                 name: creature.name.clone(),
-                filepath: format!("assets/creatures/{}.ron", 
+                filepath: format!("assets/creatures/{}.ron",
                     creature.name.to_lowercase().replace(" ", "_")),
             })
             .collect();
@@ -268,22 +268,22 @@ fn save_creatures(&mut self) -> Result<(), String> {
         if let Some(parent) = registry_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
-        let registry_ron = ron::ser::to_string_pretty(&references, 
+
+        let registry_ron = ron::ser::to_string_pretty(&references,
             ron::ser::PrettyConfig::new().struct_names(false))?;
         fs::write(&registry_path, registry_ron)?;
 
         // Save individual creature files
         let creatures_dir = dir.join("assets/creatures");
         fs::create_dir_all(&creatures_dir)?;
-        
+
         let creature_ron_config = ron::ser::PrettyConfig::new()
             .struct_names(false)
             .enumerate_arrays(false);
-            
+
         for (reference, creature) in references.iter().zip(self.creatures.iter()) {
             let creature_path = dir.join(&reference.filepath);
-            let creature_content = ron::ser::to_string_pretty(creature, 
+            let creature_content = ron::ser::to_string_pretty(creature,
                 creature_ron_config.clone())?;
             fs::write(&creature_path, creature_content)?;
         }
