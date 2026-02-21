@@ -27,9 +27,72 @@
 | **Findings Remediation Phase 1**         | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**  |
 | **Findings Remediation Phase 2**         | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)** |
 | **Findings Remediation Phase 3**         | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard** |
+| **Findings Remediation Phase 4**         | ✅ COMPLETE | 2026-02-21 | **Creature Editor Preview Renderer Integration + Fallback UI** |
 
 **Total Lines Implemented**: 8,500+ lines of production code + 5,100+ lines of documentation
 **Total Tests**: 298+ new tests (all passing), 1,776 campaign_builder tests passing
+
+---
+
+## Findings Remediation - Phase 4: Creature Preview Renderer Integration
+
+### Overview
+
+Phase 4 replaces the creature editor's placeholder preview panel with the
+integrated preview renderer path, wires deterministic state synchronization
+between edit operations and preview rendering, and adds a fallback diagnostic
+UI for renderer-unavailable scenarios.
+
+### Components Updated
+
+- `sdk/campaign_builder/src/creatures_editor.rs`
+- `sdk/campaign_builder/src/preview_renderer.rs`
+- `sdk/campaign_builder/tests/creature_preview_integration_test.rs`
+
+### Key Changes
+
+- Replaced `show_preview_panel` placeholder drawing code with active
+  `PreviewRenderer` rendering and interaction path.
+- Added renderer lifecycle fields to `CreaturesEditorState`:
+  - `preview_renderer: Option<PreviewRenderer>`
+  - `preview_error: Option<String>`
+- Added deterministic preview synchronization helper that applies current
+  mesh data, transform data, visibility masks, selected mesh index, camera
+  distance, and visual toggles into the renderer.
+- Added preview statistics refresh (`mesh_count`, `vertex_count`,
+  `triangle_count`, `selected_meshes`) during sync to keep preview state
+  coherent with edit buffer state.
+- Added fallback diagnostics panel for unavailable preview subsystem and
+  surfaced fallback status messages directly in the preview panel.
+- Added selected-mesh highlight support in `PreviewRenderer` and per-mesh
+  visibility masking so preview behavior matches mesh list selection and
+  visibility toggles.
+- Added `request_repaint()` on preview-driving state changes and set
+  `preview_dirty = true` on mesh selection changes to ensure deterministic
+  refresh semantics.
+- Added `ui.push_id(...)` around mesh-list row widgets to satisfy egui ID
+  isolation requirements for loop-rendered controls.
+- Cleared renderer state and preview statistics during `back_to_registry()`
+  so mode transitions leave no stale preview selection/model state.
+
+### Tests Added
+
+- `creatures_editor.rs`:
+  - `test_preview_sync_clears_dirty_and_updates_statistics`
+  - `test_preview_sync_reflects_transform_changes`
+  - `test_preview_sync_reflects_color_changes_and_visibility`
+- `preview_renderer.rs`:
+  - `test_preview_renderer_selected_mesh_round_trip`
+  - `test_preview_renderer_mesh_visibility_round_trip`
+- `sdk/campaign_builder/tests/creature_preview_integration_test.rs`:
+  - `test_preview_updates_after_transform_edit_in_ui_frame`
+  - `test_preview_updates_after_color_edit_in_ui_frame`
+
+### Outcome
+
+Creature preview now renders through the integrated preview subsystem, reflects
+mesh edits and selection updates without mode switching, and degrades safely to
+diagnostic fallback UI if renderer initialization is unavailable.
 
 ---
 
