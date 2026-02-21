@@ -26,9 +26,76 @@
 | **Creature Editor UX Fixes Phase 5**    | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder** |
 | **Findings Remediation Phase 1**         | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**  |
 | **Findings Remediation Phase 2**         | IN PROGRESS | 2026-02-21 | **Creature Editor Action Wiring (Validate/SaveAs/Export/Revert)** |
+| **Findings Remediation Phase 3**         | ✅ COMPLETE | 2026-02-21 | **Reference-Backed Creature Persistence Alignment + Legacy Guard** |
 
 **Total Lines Implemented**: 8,500+ lines of production code + 5,100+ lines of documentation
 **Total Tests**: 298+ new tests (all passing), 1,776 campaign_builder tests passing
+
+---
+
+## Findings Remediation - Phase 3: Core Persistence Alignment and Dead-Path Cleanup
+
+### Overview
+
+Phase 3 aligns campaign-builder creature persistence helpers with the active
+runtime architecture: `data/creatures.ron` as a `Vec<CreatureReference>`
+registry plus per-creature files under `assets/creatures/*.ron`. It also
+removes the old inline-list assumptions and hardens against accidental re-entry
+to the retired list-mode UI path.
+
+### Components Updated
+
+- `sdk/campaign_builder/src/creature_assets.rs`
+- `sdk/campaign_builder/src/creatures_editor.rs`
+- `sdk/campaign_builder/tests/creature_asset_editor_tests.rs`
+
+### Key Changes
+
+- Refactored `CreatureAssetManager` to read/write a reference registry
+  (`Vec<CreatureReference>`) instead of inline `Vec<CreatureDefinition>`.
+- Save path now writes/updates the creature asset file first, then updates
+  registry metadata (`id`, `name`, `filepath`) deterministically.
+- Load path now resolves each registry entry into its asset file and validates
+  ID consistency between registry and asset contents.
+- Added explicit legacy compatibility guard:
+  - Detects inline `Vec<CreatureDefinition>` in `data/creatures.ron`.
+  - Returns `LegacyInlineRegistryDetected { count }` for normal operations.
+- Added migration helper `migrate_legacy_inline_registry()` to convert legacy
+  inline registries into the active reference-backed model.
+- Replaced the dead `show_list_mode` implementation with a deprecated trap so
+  any accidental runtime dispatch fails loudly during development.
+
+### Tests Added/Updated
+
+- `creature_assets.rs` tests:
+  - reference-backed save/load round trip with registry + asset file checks
+  - multi-creature round trip and registry integrity
+  - delete and duplicate behavior in reference-backed format
+  - legacy inline registry detection guard
+  - migration from inline legacy format into reference-backed model
+  - next-id and presence checks using registry entries
+- `creatures_editor.rs` test:
+  - `test_show_list_mode_dispatch_uses_registry_mode_only` verifies `show()` in
+    `List` mode does not reach deprecated list-mode function and refreshes the
+    ID manager through registry mode.
+- `sdk/campaign_builder/tests/creature_asset_editor_tests.rs` update:
+  - save test now validates both `data/creatures.ron` registry contents and the
+    referenced asset file existence.
+
+### Legacy Compatibility Behavior
+
+If `data/creatures.ron` contains legacy inline creature definitions, regular
+asset-manager operations intentionally stop with a targeted compatibility error
+until migration is performed. Running
+`CreatureAssetManager::migrate_legacy_inline_registry()` performs the
+conversion to registry+asset-file format in-place.
+
+### Outcome
+
+No active creature persistence helper assumes
+`data/creatures.ron = Vec<CreatureDefinition>` in the supported code path.
+Registry handling is now consistent with the campaign builder runtime model,
+and the retired list-mode code path is explicitly fenced off.
 
 ---
 

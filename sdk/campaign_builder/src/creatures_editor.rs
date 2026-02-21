@@ -1142,102 +1142,15 @@ impl CreaturesEditorState {
         (monsters, npcs, templates, variants, custom)
     }
 
+    #[allow(dead_code)]
+    #[deprecated(note = "Legacy list-mode path is retired; use show_registry_mode instead")]
     fn show_list_mode(
         &mut self,
-        ui: &mut egui::Ui,
-        creatures: &mut [CreatureDefinition],
-        unsaved_changes: &mut bool,
+        _ui: &mut egui::Ui,
+        _creatures: &mut [CreatureDefinition],
+        _unsaved_changes: &mut bool,
     ) -> Option<String> {
-        let result_message: Option<String> = None;
-
-        // Toolbar
-        let toolbar_action = EditorToolbar::new("creatures_toolbar")
-            .with_search(&mut self.search_query)
-            .show(ui);
-
-        match toolbar_action {
-            ToolbarAction::New => {
-                self.mode = CreaturesEditorMode::Add;
-                self.edit_buffer = Self::default_creature();
-                self.edit_buffer.id = self.next_available_id(creatures);
-                self.selected_mesh_index = None;
-                self.mesh_edit_buffer = None;
-                self.mesh_transform_buffer = None;
-            }
-            ToolbarAction::Save => {
-                // Save creatures to campaign
-            }
-            ToolbarAction::Load => {
-                // Load creatures from file
-            }
-            ToolbarAction::Import => {
-                // Import creatures from RON text
-            }
-            ToolbarAction::Export => {
-                // Export creatures to file
-            }
-            ToolbarAction::Reload => {
-                // Reload creatures from campaign
-            }
-            ToolbarAction::None => {
-                // No action triggered
-            }
-        }
-
-        // Action buttons for selected creature (separate from toolbar)
-
-        ui.separator();
-
-        // Creature list
-        egui::ScrollArea::vertical()
-            .id_salt("creatures_list_mode_scroll")
-            .show(ui, |ui| {
-                let filtered_creatures: Vec<(usize, &CreatureDefinition)> = creatures
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| {
-                        self.search_query.is_empty()
-                            || c.name
-                                .to_lowercase()
-                                .contains(&self.search_query.to_lowercase())
-                            || c.id.to_string().contains(&self.search_query)
-                    })
-                    .collect();
-
-                if filtered_creatures.is_empty() {
-                    ui.label("No creatures found. Click 'Add' to create one.");
-                } else {
-                    for (idx, creature) in filtered_creatures {
-                        let is_selected = self.selected_creature == Some(idx);
-
-                        let response = ui.selectable_label(
-                            is_selected,
-                            format!(
-                                "{} (ID: {}, {} mesh{})",
-                                creature.name,
-                                creature.id,
-                                creature.meshes.len(),
-                                if creature.meshes.len() == 1 { "" } else { "es" }
-                            ),
-                        );
-
-                        if response.clicked() {
-                            self.selected_creature = Some(idx);
-                        }
-
-                        if response.double_clicked() {
-                            self.mode = CreaturesEditorMode::Edit;
-                            self.edit_buffer = creature.clone();
-                            self.selected_mesh_index = None;
-                            self.mesh_edit_buffer = None;
-                            self.mesh_transform_buffer = None;
-                            self.preview_dirty = true;
-                        }
-                    }
-                }
-            });
-
-        result_message
+        panic!("Deprecated show_list_mode() path should never be called")
     }
 
     fn show_edit_mode(
@@ -3704,5 +3617,38 @@ mod tests {
         assert_eq!(creatures[2].name, "Goblin (Copy)");
         // next_available_id returns max(1,3)+1 = 4
         assert_eq!(creatures[2].id, 4);
+    }
+
+    #[test]
+    fn test_show_list_mode_dispatch_uses_registry_mode_only() {
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+        let mut unsaved_changes = false;
+        let mut result_message = None;
+
+        let ctx = egui::Context::default();
+        let execution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    result_message = state.show(
+                        ui,
+                        &mut creatures,
+                        &None,
+                        "data/creatures.ron",
+                        &mut unsaved_changes,
+                    );
+                });
+            });
+        }));
+
+        assert!(
+            execution.is_ok(),
+            "List-mode dispatch should not hit deprecated show_list_mode()"
+        );
+        assert!(result_message.is_none());
+        assert!(
+            state.id_manager.is_id_used(1),
+            "show_registry_mode should refresh id manager from runtime registry"
+        );
     }
 }
