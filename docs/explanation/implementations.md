@@ -24,9 +24,47 @@
 | **Creature Editor UX Fixes Phase 3**    | ✅ COMPLETE | 2025-02-16 | **Preview Panel in Registry List Mode**                  |
 | **Creature Editor UX Fixes Phase 4**    | ✅ COMPLETE | 2025-02-16 | **Register Existing Creature Asset .ron File**           |
 | **Creature Editor UX Fixes Phase 5**    | ✅ COMPLETE | 2025-02-16 | **Wire Creature Template Browser into Campaign Builder** |
+| **Findings Remediation Phase 1**         | IN PROGRESS | 2026-02-21 | **Template ID Synchronization and Duplicate-ID Guards**  |
 
 **Total Lines Implemented**: 8,500+ lines of production code + 5,100+ lines of documentation
 **Total Tests**: 298+ new tests (all passing), 1,776 campaign_builder tests passing
+
+---
+
+## Findings Remediation - Phase 1: Template ID Synchronization and Duplicate-ID Guards
+
+### Overview
+
+Phase 1 addresses a correctness issue in template-based creature creation where
+ID suggestions could be produced from stale `CreatureIdManager` state when users
+opened creature templates directly from the Tools menu. The remediation ensures
+ID selection always synchronizes from the authoritative in-memory registry
+(`self.creatures`) before suggestion and adds a defensive duplicate-ID guard
+before insertion.
+
+### Components Updated
+
+- `sdk/campaign_builder/src/lib.rs`
+
+### Key Changes
+
+- Added a shared registry-reference builder (`creature_references_from_current_registry`) to derive `CreatureReference` values from `self.creatures`.
+- Added `sync_creature_id_manager_from_creatures` to refresh `creatures_editor_state.id_manager` from current creature data.
+- Added `next_available_creature_id_for_category` to provide deterministic, bounded ID assignment in a category after synchronization.
+- Updated template `CreateNew` action in `show_creature_template_browser_dialog` to use synchronized ID selection before generation.
+- Added explicit duplicate-ID guard before pushing generated creatures, with actionable status messaging.
+
+### Tests Added
+
+- `test_sync_creature_id_manager_from_creatures_tracks_current_registry`
+- `test_next_available_creature_id_refreshes_stale_id_manager_state`
+- `test_next_available_creature_id_returns_error_when_monster_range_is_full`
+
+### Outcome
+
+Template-based creature creation no longer depends on prior navigation to the
+Creatures tab for correct ID assignment behavior, and duplicate-ID insertion is
+explicitly blocked with clear user feedback.
 
 ---
 

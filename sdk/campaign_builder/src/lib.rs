@@ -88,7 +88,7 @@ use antares::domain::items::types::{
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
 use antares::domain::proficiency::ProficiencyDefinition;
 use antares::domain::quest::{Quest, QuestId};
-use antares::domain::types::{DiceRoll, ItemId, MapId, MonsterId, SpellId};
+use antares::domain::types::{CreatureId, DiceRoll, ItemId, MapId, MonsterId, SpellId};
 use antares::domain::visual::CreatureReference;
 use antares::domain::world::Map;
 use conditions_editor::ConditionsEditorState;
@@ -3211,6 +3211,65 @@ impl CampaignBuilderApp {
         self.show_template_browser = open;
     }
 
+    /// Build registry references from the currently loaded creature definitions.
+    fn creature_references_from_current_registry(&self) -> Vec<CreatureReference> {
+        self.creatures
+            .iter()
+            .map(|creature| CreatureReference {
+                id: creature.id,
+                name: creature.name.clone(),
+                filepath: format!(
+                    "assets/creatures/{}.ron",
+                    creature.name.to_lowercase().replace(' ', "_")
+                ),
+            })
+            .collect()
+    }
+
+    /// Synchronize the creature ID manager from the current in-memory registry.
+    fn sync_creature_id_manager_from_creatures(&mut self) {
+        let references = self.creature_references_from_current_registry();
+        self.creatures_editor_state
+            .id_manager
+            .update_from_registry(&references);
+    }
+
+    /// Determine the next available creature ID in the specified category.
+    ///
+    /// This method always refreshes the ID manager from `self.creatures` first so
+    /// menu-entry order does not affect ID assignment correctness.
+    fn next_available_creature_id_for_category(
+        &mut self,
+        category: creature_id_manager::CreatureCategory,
+    ) -> Result<CreatureId, String> {
+        self.sync_creature_id_manager_from_creatures();
+
+        let suggested = self
+            .creatures_editor_state
+            .id_manager
+            .suggest_next_id(category);
+        if !self.creatures_editor_state.id_manager.is_id_used(suggested) {
+            return Ok(suggested);
+        }
+
+        let range = category.id_range();
+        let range_start = range.start;
+        let range_end = range.end - 1;
+
+        for candidate in range {
+            if !self.creatures_editor_state.id_manager.is_id_used(candidate) {
+                return Ok(candidate);
+            }
+        }
+
+        Err(format!(
+            "No available IDs in {} range ({}-{}).",
+            category.display_name(),
+            range_start,
+            range_end
+        ))
+    }
+
     /// Show the Creature Template Browser dialog window.
     ///
     /// Opens a full-featured grid/list browser with all registered creature
@@ -3279,11 +3338,18 @@ impl CampaignBuilderApp {
                     return;
                 };
 
-                // Suggest next ID in the Monsters category (1–50).
-                let new_id = self
-                    .creatures_editor_state
-                    .id_manager
-                    .suggest_next_id(creature_id_manager::CreatureCategory::Monsters);
+                // Suggest next ID in the Monsters category (1–50) using a
+                // freshly synchronized ID manager so this path is correct even
+                // when users open templates directly from Tools.
+                let new_id = match self.next_available_creature_id_for_category(
+                    creature_id_manager::CreatureCategory::Monsters,
+                ) {
+                    Ok(id) => id,
+                    Err(error) => {
+                        self.status_message = error;
+                        return;
+                    }
+                };
 
                 let creature_name = format!("New {}", template_name);
 
@@ -3293,6 +3359,18 @@ impl CampaignBuilderApp {
                     .generate(&template_id, &creature_name, new_id)
                 {
                     Ok(new_creature) => {
+                        if let Some(existing) = self
+                            .creatures
+                            .iter()
+                            .find(|creature| creature.id == new_creature.id)
+                        {
+                            self.status_message = format!(
+                                "Cannot create creature from template '{}': ID {} is already registered to '{}'.",
+                                template_id, new_creature.id, existing.name
+                            );
+                            return;
+                        }
+
                         self.creatures.push(new_creature);
                         let new_idx = self.creatures.len() - 1;
                         let file_name = format!(
@@ -10294,6 +10372,108 @@ fn test_another() {}
         assert!(
             app.status_message.is_empty(),
             "status_message should NOT be set when the sentinel is received"
+        );
+    }
+
+    #[test]
+    fn test_sync_creature_id_manager_from_creatures_tracks_current_registry() {
+        let mut app = CampaignBuilderApp::default();
+        let template_id = app
+            .creature_template_registry
+            .all_templates()
+            .first()
+            .expect("template registry should not be empty")
+            .metadata
+            .id
+            .clone();
+
+        let creature_one = app
+            .creature_template_registry
+            .generate(&template_id, "Phase1 Sync One", 1)
+            .expect("template generation should succeed");
+        let creature_two = app
+            .creature_template_registry
+            .generate(&template_id, "Phase1 Sync Two", 2)
+            .expect("template generation should succeed");
+
+        app.creatures = vec![creature_one, creature_two];
+        app.creatures_editor_state
+            .id_manager
+            .update_from_registry(&[]);
+
+        app.sync_creature_id_manager_from_creatures();
+
+        assert!(app.creatures_editor_state.id_manager.is_id_used(1));
+        assert!(app.creatures_editor_state.id_manager.is_id_used(2));
+    }
+
+    #[test]
+    fn test_next_available_creature_id_refreshes_stale_id_manager_state() {
+        let mut app = CampaignBuilderApp::default();
+        let template_id = app
+            .creature_template_registry
+            .all_templates()
+            .first()
+            .expect("template registry should not be empty")
+            .metadata
+            .id
+            .clone();
+
+        let existing = app
+            .creature_template_registry
+            .generate(&template_id, "Existing Monster", 1)
+            .expect("template generation should succeed");
+        app.creatures = vec![existing];
+
+        // Simulate stale manager state: this mirrors opening templates directly
+        // from Tools before visiting the Creatures tab.
+        app.creatures_editor_state
+            .id_manager
+            .update_from_registry(&[]);
+
+        let next_id = app
+            .next_available_creature_id_for_category(
+                creature_id_manager::CreatureCategory::Monsters,
+            )
+            .expect("ID suggestion should succeed");
+
+        assert_eq!(
+            next_id, 2,
+            "next available monster ID should skip used ID 1"
+        );
+    }
+
+    #[test]
+    fn test_next_available_creature_id_returns_error_when_monster_range_is_full() {
+        let mut app = CampaignBuilderApp::default();
+        let template_id = app
+            .creature_template_registry
+            .all_templates()
+            .first()
+            .expect("template registry should not be empty")
+            .metadata
+            .id
+            .clone();
+
+        let mut full_registry = Vec::new();
+        for id in 1..=50 {
+            full_registry.push(
+                app.creature_template_registry
+                    .generate(&template_id, &format!("Monster {id}"), id)
+                    .expect("template generation should succeed"),
+            );
+        }
+        app.creatures = full_registry;
+
+        let error = app
+            .next_available_creature_id_for_category(
+                creature_id_manager::CreatureCategory::Monsters,
+            )
+            .expect_err("ID suggestion should fail when monster range is fully allocated");
+
+        assert!(
+            error.contains("No available IDs in Monsters range (1-50)"),
+            "unexpected error message: {error}"
         );
     }
 }
