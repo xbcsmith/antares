@@ -3750,8 +3750,9 @@ impl eframe::App for CampaignBuilderApp {
                         self.show_template_browser = true;
                         ui.close();
                     }
-                    if ui.button("🐉 Creature Editor").clicked() {
+                    if ui.button("🦎 Creature Editor").clicked() {
                         self.active_tab = EditorTab::Creatures;
+                        ui.ctx().request_repaint();
                         ui.close();
                     }
                     if ui.button("🐉 Creature Templates...").clicked() {

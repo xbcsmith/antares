@@ -259,6 +259,7 @@ impl TemplateBrowserState {
                 ui.separator();
 
                 egui::ScrollArea::vertical()
+                    .id_salt("template_gallery_scroll")
                     .max_height(600.0)
                     .show(ui, |ui| {
                         if filtered_templates.is_empty() {
@@ -409,69 +410,75 @@ impl TemplateBrowserState {
         let available_width = ui.available_width();
         let items_per_row = (available_width / (item_size + 10.0)).max(1.0) as usize;
 
-        for row in templates.chunks(items_per_row) {
-            ui.horizontal(|ui| {
-                for (template_id, entry) in row {
-                    let metadata = &entry.metadata;
-                    let is_selected = self.selected_template.as_ref() == Some(template_id);
+        for (row_idx, row) in templates.chunks(items_per_row).enumerate() {
+            ui.push_id(row_idx, |ui| {
+                ui.horizontal(|ui| {
+                    for (template_id, entry) in row {
+                        let metadata = &entry.metadata;
+                        let is_selected = self.selected_template.as_ref() == Some(template_id);
 
-                    let response = ui
-                        .vertical(|ui| {
-                            // Thumbnail placeholder
-                            let (rect, response) = ui.allocate_exact_size(
-                                egui::vec2(item_size, item_size),
-                                egui::Sense::click(),
-                            );
+                        let response = ui
+                            .push_id(template_id, |ui| {
+                                ui.vertical(|ui| {
+                                    // Thumbnail placeholder
+                                    let (rect, response) = ui.allocate_exact_size(
+                                        egui::vec2(item_size, item_size),
+                                        egui::Sense::click(),
+                                    );
 
-                            // Draw thumbnail background
-                            let bg_color = if is_selected {
-                                egui::Color32::from_rgb(70, 100, 150)
-                            } else {
-                                egui::Color32::from_gray(60)
-                            };
-                            ui.painter().rect_filled(rect, 4.0, bg_color);
+                                    // Draw thumbnail background
+                                    let bg_color = if is_selected {
+                                        egui::Color32::from_rgb(70, 100, 150)
+                                    } else {
+                                        egui::Color32::from_gray(60)
+                                    };
+                                    ui.painter().rect_filled(rect, 4.0, bg_color);
 
-                            // Draw placeholder icon or thumbnail
-                            let icon = match metadata.category {
-                                TemplateCategory::Humanoid => "🧍",
-                                TemplateCategory::Creature => "🐺",
-                                TemplateCategory::Undead => "💀",
-                                TemplateCategory::Robot => "🤖",
-                                TemplateCategory::Primitive => "📦",
-                            };
+                                    // Draw placeholder icon or thumbnail
+                                    let icon = match metadata.category {
+                                        TemplateCategory::Humanoid => "🧍",
+                                        TemplateCategory::Creature => "🐺",
+                                        TemplateCategory::Undead => "💀",
+                                        TemplateCategory::Robot => "🤖",
+                                        TemplateCategory::Primitive => "📦",
+                                    };
 
-                            ui.painter().text(
-                                rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                icon,
-                                egui::FontId::proportional(32.0),
-                                egui::Color32::WHITE,
-                            );
+                                    ui.painter().text(
+                                        rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        icon,
+                                        egui::FontId::proportional(32.0),
+                                        egui::Color32::WHITE,
+                                    );
 
-                            // Template name
-                            ui.label(&metadata.name);
+                                    // Template name
+                                    ui.label(&metadata.name);
 
-                            // Complexity indicator
-                            let complexity_color = match metadata.complexity {
-                                Complexity::Beginner => egui::Color32::GREEN,
-                                Complexity::Intermediate => egui::Color32::YELLOW,
-                                Complexity::Advanced => egui::Color32::LIGHT_RED,
-                                Complexity::Expert => egui::Color32::RED,
-                            };
-                            ui.colored_label(complexity_color, metadata.complexity.name());
+                                    // Complexity indicator
+                                    let complexity_color = match metadata.complexity {
+                                        Complexity::Beginner => egui::Color32::GREEN,
+                                        Complexity::Intermediate => egui::Color32::YELLOW,
+                                        Complexity::Advanced => egui::Color32::LIGHT_RED,
+                                        Complexity::Expert => egui::Color32::RED,
+                                    };
+                                    ui.colored_label(complexity_color, metadata.complexity.name());
 
-                            response
-                        })
-                        .inner;
+                                    response
+                                })
+                                .inner
+                            })
+                            .inner;
 
-                    if response.clicked() {
-                        self.selected_template = Some(template_id.clone());
+                        if response.clicked() {
+                            self.selected_template = Some(template_id.clone());
+                        }
+
+                        if response.double_clicked() {
+                            action =
+                                Some(TemplateBrowserAction::ApplyToCurrent(template_id.clone()));
+                        }
                     }
-
-                    if response.double_clicked() {
-                        action = Some(TemplateBrowserAction::ApplyToCurrent(template_id.clone()));
-                    }
-                }
+                });
             });
         }
 
@@ -490,32 +497,34 @@ impl TemplateBrowserState {
             let metadata = &entry.metadata;
             let is_selected = self.selected_template.as_ref() == Some(template_id);
 
-            ui.horizontal(|ui| {
-                let response = ui.selectable_label(is_selected, &metadata.name);
+            ui.push_id(template_id, |ui| {
+                ui.horizontal(|ui| {
+                    let response = ui.selectable_label(is_selected, &metadata.name);
 
-                ui.label(format!("[{}]", metadata.category.name()));
+                    ui.label(format!("[{}]", metadata.category.name()));
 
-                let complexity_color = match metadata.complexity {
-                    Complexity::Beginner => egui::Color32::GREEN,
-                    Complexity::Intermediate => egui::Color32::YELLOW,
-                    Complexity::Advanced => egui::Color32::LIGHT_RED,
-                    Complexity::Expert => egui::Color32::RED,
-                };
-                ui.colored_label(complexity_color, metadata.complexity.name());
+                    let complexity_color = match metadata.complexity {
+                        Complexity::Beginner => egui::Color32::GREEN,
+                        Complexity::Intermediate => egui::Color32::YELLOW,
+                        Complexity::Advanced => egui::Color32::LIGHT_RED,
+                        Complexity::Expert => egui::Color32::RED,
+                    };
+                    ui.colored_label(complexity_color, metadata.complexity.name());
 
-                ui.label(format!("{} meshes", metadata.mesh_count));
+                    ui.label(format!("{} meshes", metadata.mesh_count));
 
-                if !metadata.tags.is_empty() {
-                    ui.label(format!("Tags: {}", metadata.tags.join(", ")));
-                }
+                    if !metadata.tags.is_empty() {
+                        ui.label(format!("Tags: {}", metadata.tags.join(", ")));
+                    }
 
-                if response.clicked() {
-                    self.selected_template = Some(template_id.clone());
-                }
+                    if response.clicked() {
+                        self.selected_template = Some(template_id.clone());
+                    }
 
-                if response.double_clicked() {
-                    action = Some(TemplateBrowserAction::ApplyToCurrent(template_id.clone()));
-                }
+                    if response.double_clicked() {
+                        action = Some(TemplateBrowserAction::ApplyToCurrent(template_id.clone()));
+                    }
+                });
             });
 
             ui.separator();
@@ -529,59 +538,63 @@ impl TemplateBrowserState {
         let metadata = &entry.metadata;
         let creature = &entry.example_creature;
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.heading(&metadata.name);
-            ui.separator();
-
-            ui.label(format!("Category: {}", metadata.category.name()));
-
-            let complexity_color = match metadata.complexity {
-                Complexity::Beginner => egui::Color32::GREEN,
-                Complexity::Intermediate => egui::Color32::YELLOW,
-                Complexity::Advanced => egui::Color32::LIGHT_RED,
-                Complexity::Expert => egui::Color32::RED,
-            };
-            ui.horizontal(|ui| {
-                ui.label("Complexity:");
-                ui.colored_label(complexity_color, metadata.complexity.name());
-            });
-
-            ui.separator();
-
-            ui.label("Description:");
-            ui.label(&metadata.description);
-
-            ui.separator();
-
-            if !metadata.tags.is_empty() {
-                ui.label("Tags:");
-                ui.horizontal_wrapped(|ui| {
-                    for tag in &metadata.tags {
-                        ui.label(format!("#{}", tag));
-                    }
-                });
+        egui::ScrollArea::vertical()
+            .id_salt(format!("template_preview_scroll_{}", metadata.id))
+            .show(ui, |ui| {
+                ui.heading(&metadata.name);
                 ui.separator();
-            }
 
-            // Creature statistics
-            ui.label("Creature Details:");
-            ui.label(format!("  Meshes: {}", metadata.mesh_count));
-            ui.label(format!("  Scale: {:.2}", creature.scale));
+                ui.label(format!("Category: {}", metadata.category.name()));
 
-            if let Some(color) = creature.color_tint {
-                ui.label(format!(
-                    "  Color Tint: RGB({:.2}, {:.2}, {:.2})",
-                    color[0], color[1], color[2]
-                ));
-            }
+                let complexity_color = match metadata.complexity {
+                    Complexity::Beginner => egui::Color32::GREEN,
+                    Complexity::Intermediate => egui::Color32::YELLOW,
+                    Complexity::Advanced => egui::Color32::LIGHT_RED,
+                    Complexity::Expert => egui::Color32::RED,
+                };
+                ui.push_id("complexity_row", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Complexity:");
+                        ui.colored_label(complexity_color, metadata.complexity.name());
+                    });
+                });
 
-            if !creature.mesh_transforms.is_empty() {
-                ui.label(format!(
-                    "  Mesh Transforms: {}",
-                    creature.mesh_transforms.len()
-                ));
-            }
-        });
+                ui.separator();
+
+                ui.label("Description:");
+                ui.label(&metadata.description);
+
+                ui.separator();
+
+                if !metadata.tags.is_empty() {
+                    ui.label("Tags:");
+                    ui.horizontal_wrapped(|ui| {
+                        for tag in &metadata.tags {
+                            ui.label(format!("#{}", tag));
+                        }
+                    });
+                    ui.separator();
+                }
+
+                // Creature statistics
+                ui.label("Creature Details:");
+                ui.label(format!("  Meshes: {}", metadata.mesh_count));
+                ui.label(format!("  Scale: {:.2}", creature.scale));
+
+                if let Some(color) = creature.color_tint {
+                    ui.label(format!(
+                        "  Color Tint: RGB({:.2}, {:.2}, {:.2})",
+                        color[0], color[1], color[2]
+                    ));
+                }
+
+                if !creature.mesh_transforms.is_empty() {
+                    ui.label(format!(
+                        "  Mesh Transforms: {}",
+                        creature.mesh_transforms.len()
+                    ));
+                }
+            });
     }
 }
 

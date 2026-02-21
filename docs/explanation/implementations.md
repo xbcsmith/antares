@@ -7028,3 +7028,99 @@ This fix enables:
 - `docs/explanation/CREATURES_EDITOR_ISSUE_SUMMARY.md` - Executive summary
 
 ---
+
+## Creature Editor UX Fix: Right Panel Not Showing on Creature Click - COMPLETED
+
+### Summary
+
+Clicking a creature row in the Creature Editor's registry list did not show
+anything in the right panel. The panel appeared to be completely absent on the
+first click and would only materialize (if at all) after a second interaction.
+
+### Root Cause
+
+Two compounding problems in `show_registry_mode()` inside
+`sdk/campaign_builder/src/creatures_editor.rs`:
+
+1. **Conditional panel registration (primary bug)**
+   The `egui::SidePanel::right("registry_preview_panel")` call was wrapped in
+   `if self.selected_registry_entry.is_some()`. In egui, `show_inside` panels
+   must be registered on every frame so that egui reserves their space before
+   laying out the central content. Because the panel block was skipped on every
+   frame where nothing was selected, the very frame on which the user clicked a
+   row was still a "nothing selected" frame — the click set
+   `selected_registry_entry` inside the left-side scroll closure, which runs
+   after the (already-skipped) panel section. The panel only appeared on the
+   next frame, and only if something else triggered a repaint.
+
+2. **Missing `request_repaint()` (secondary bug)**
+   Even when `selected_registry_entry` was eventually set, no repaint was
+   requested. egui may not schedule another frame until the user moves the
+   mouse, so the panel could sit invisible indefinitely.
+
+### Solution Implemented
+
+#### Fix 1: Unconditional panel registration with placeholder content
+
+Removed the `if self.selected_registry_entry.is_some()` guard. The
+`SidePanel::right` is now rendered every frame. When no creature is selected
+the panel displays a centered, italicized hint:
+
+> "Select a creature to preview it here."
+
+This also eliminates the jarring layout jump that occurred when the panel
+first appeared and the left scroll area suddenly shrank to accommodate it.
+
+#### Fix 2: `request_repaint()` on click
+
+Added `ui.ctx().request_repaint()` immediately after
+`self.selected_registry_entry = Some(idx)` in the click handler so the
+right panel updates in the same visual frame as the selection highlight.
+
+#### Fix 3: `id_salt` on the registry list `ScrollArea`
+
+The left-side scroll area was `egui::ScrollArea::vertical()` with no salt,
+which can collide with other vertical scroll areas on the same UI level.
+Changed to:
+
+```sdk/campaign_builder/src/creatures_editor.rs#L488-489
+egui::ScrollArea::vertical()
+    .id_salt("creatures_registry_list")
+```
+
+Also added salts to the `show_list_mode` and `show_mesh_list_panel` scroll
+areas (`"creatures_list_mode_scroll"` and
+`"creatures_mesh_list_panel_scroll"` respectively).
+
+#### Fix 4: `from_id_salt` on toolbar `ComboBox` widgets
+
+The Category filter and Sort dropdowns were using `ComboBox::from_label(...)`,
+which derives the widget ID from the label string. If any other combo box
+elsewhere in the same UI uses the same label text the selections silently
+bleed into each other. Replaced both with `from_id_salt(...)` and added
+explicit `ui.label(...)` calls for the visible label text:
+
+```sdk/campaign_builder/src/creatures_editor.rs#L328-328
+egui::ComboBox::from_id_salt("creatures_registry_category_filter")
+```
+
+```sdk/campaign_builder/src/creatures_editor.rs#L364-364
+egui::ComboBox::from_id_salt("creatures_registry_sort_by")
+```
+
+### Files Modified
+
+- `sdk/campaign_builder/src/creatures_editor.rs`
+  - `show_registry_mode()`: unconditional panel, repaint on click,
+    `id_salt` on scroll area, `from_id_salt` on both combo boxes
+  - `show_list_mode()`: `id_salt` on scroll area
+  - `show_mesh_list_panel()`: `id_salt` on scroll area
+
+### Quality Gates
+
+- `cargo fmt --all` — passed
+- `cargo check --all-targets --all-features` — passed (0 errors)
+- `cargo clippy --all-targets --all-features -- -D warnings` — passed (0 warnings)
+- `cargo nextest run --all-features` — 2401 passed, 8 skipped
+
+---

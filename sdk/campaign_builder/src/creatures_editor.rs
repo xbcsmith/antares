@@ -325,7 +325,7 @@ impl CreaturesEditorState {
             ui.separator();
 
             // Category filter dropdown
-            egui::ComboBox::from_label("Category")
+            egui::ComboBox::from_id_salt("creatures_registry_category_filter")
                 .selected_text(
                     self.category_filter
                         .map(|c| c.display_name())
@@ -359,9 +359,10 @@ impl CreaturesEditorState {
                         "Custom",
                     );
                 });
+            ui.label("Category");
 
             // Sort dropdown
-            egui::ComboBox::from_label("Sort")
+            egui::ComboBox::from_id_salt("creatures_registry_sort_by")
                 .selected_text(match self.registry_sort_by {
                     RegistrySortBy::Id => "By ID",
                     RegistrySortBy::Name => "By Name",
@@ -380,6 +381,7 @@ impl CreaturesEditorState {
                         "By Category",
                     );
                 });
+            ui.label("Sort");
 
             if ui.button("🔄 Revalidate").clicked() {
                 self.show_validation_panel = true;
@@ -443,18 +445,34 @@ impl CreaturesEditorState {
         let mut pending_edit: Option<(usize, String)> = None;
         let mut pending_preview_action: Option<RegistryPreviewAction> = None;
 
-        // --- Right panel: preview (only when a creature is selected) ---
-        if self.selected_registry_entry.is_some() {
-            egui::SidePanel::right("registry_preview_panel")
-                .default_width(300.0)
-                .resizable(true)
-                .show_inside(ui, |ui| {
-                    // `self` is &mut Self, `creatures` is &mut Vec<...>.
-                    // These are independent borrows so the closure can hold both.
-                    if let Some(sel_idx) = self.selected_registry_entry {
+        // --- Right panel: preview (always present; shows placeholder when nothing selected) ---
+        //
+        // IMPORTANT: egui `SidePanel` must be registered unconditionally every frame so that
+        // egui reserves its space before laying out the central content.  If the panel is
+        // wrapped in `if selected.is_some()` it only appears on the *second* frame after a
+        // click (because the click fires inside the left-side scroll closure, which runs after
+        // the panel section has already been skipped for this frame).  Keeping the panel alive
+        // at all times also avoids the jarring layout jump when the panel first appears.
+        egui::SidePanel::right("registry_preview_panel")
+            .default_width(300.0)
+            .resizable(true)
+            .show_inside(ui, |ui| {
+                match self.selected_registry_entry {
+                    None => {
+                        // Placeholder — no creature selected yet.
+                        ui.centered_and_justified(|ui| {
+                            ui.label(
+                                egui::RichText::new("Select a creature to preview it here.")
+                                    .weak()
+                                    .italics(),
+                            );
+                        });
+                    }
+                    Some(sel_idx) => {
                         if let Some(creature) = creatures.get(sel_idx) {
                             // creature: &CreatureDefinition (immutable borrow from creatures)
-                            // self.show_registry_preview_panel borrows &mut self separately.
+                            // show_registry_preview_panel takes &mut self — both borrows are
+                            // independent so the borrow checker is happy.
                             let action = self.show_registry_preview_panel(ui, creature, sel_idx);
                             if action.is_some() {
                                 pending_preview_action = action;
@@ -465,97 +483,103 @@ impl CreaturesEditorState {
                             ui.label("No creature selected.");
                         }
                     }
-                });
-        }
+                }
+            });
 
         // --- Left area: registry list in a scroll area ---
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            if filtered_indices.is_empty() {
-                ui.label("No creatures found. Click 'New' to create one.");
-            } else {
-                // Column header row
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("ID").strong());
-                    ui.separator();
-                    ui.label(egui::RichText::new("Name").strong());
-                    ui.separator();
-                    ui.label(egui::RichText::new("Status").strong());
-                    ui.separator();
-                    ui.label(egui::RichText::new("Category").strong());
-                });
-                ui.separator();
-
-                for &idx in &filtered_indices {
-                    let creature = &creatures[idx];
-                    let is_selected = self.selected_registry_entry == Some(idx);
-                    let category = CreatureCategory::from_id(creature.id);
-                    let color = category.color();
-
+        egui::ScrollArea::vertical()
+            .id_salt("creatures_registry_list")
+            .show(ui, |ui| {
+                if filtered_indices.is_empty() {
+                    ui.label("No creatures found. Click 'New' to create one.");
+                } else {
+                    // Column header row
                     ui.horizontal(|ui| {
-                        // ID badge with category color
-                        let id_text = format!("{:03}", creature.id);
-                        ui.colored_label(
-                            egui::Color32::from_rgb(
-                                (color[0] * 255.0) as u8,
-                                (color[1] * 255.0) as u8,
-                                (color[2] * 255.0) as u8,
-                            ),
-                            egui::RichText::new(id_text).strong(),
-                        );
-
+                        ui.label(egui::RichText::new("ID").strong());
                         ui.separator();
-
-                        // Creature name (selectable)
-                        let label = format!(
-                            "{} ({} mesh{})",
-                            creature.name,
-                            creature.meshes.len(),
-                            if creature.meshes.len() == 1 { "" } else { "es" }
-                        );
-                        let response = ui.selectable_label(is_selected, label);
-
-                        if response.clicked() {
-                            // Reset delete-confirm flag when switching selection.
-                            if self.selected_registry_entry != Some(idx) {
-                                self.registry_delete_confirm_pending = false;
-                            }
-                            self.selected_registry_entry = Some(idx);
-                        }
-
-                        if response.double_clicked() {
-                            let file_name = format!(
-                                "assets/creatures/{}.ron",
-                                creature.name.to_lowercase().replace(' ', "_")
-                            );
-                            pending_edit = Some((idx, file_name));
-                        }
-
+                        ui.label(egui::RichText::new("Name").strong());
                         ui.separator();
-
-                        // Validation status indicator
-                        let validation_result = self.id_manager.validate_id(creature.id, category);
-                        if validation_result.is_ok() {
-                            ui.label("✓");
-                        } else {
-                            ui.colored_label(egui::Color32::YELLOW, "⚠");
-                        }
-
+                        ui.label(egui::RichText::new("Status").strong());
                         ui.separator();
-
-                        // Category badge
-                        ui.label(
-                            egui::RichText::new(category.display_name())
-                                .small()
-                                .background_color(egui::Color32::from_rgb(
-                                    (color[0] * 100.0) as u8,
-                                    (color[1] * 100.0) as u8,
-                                    (color[2] * 100.0) as u8,
-                                )),
-                        );
+                        ui.label(egui::RichText::new("Category").strong());
                     });
+                    ui.separator();
+
+                    for &idx in &filtered_indices {
+                        let creature = &creatures[idx];
+                        let is_selected = self.selected_registry_entry == Some(idx);
+                        let category = CreatureCategory::from_id(creature.id);
+                        let color = category.color();
+
+                        ui.horizontal(|ui| {
+                            // ID badge with category color
+                            let id_text = format!("{:03}", creature.id);
+                            ui.colored_label(
+                                egui::Color32::from_rgb(
+                                    (color[0] * 255.0) as u8,
+                                    (color[1] * 255.0) as u8,
+                                    (color[2] * 255.0) as u8,
+                                ),
+                                egui::RichText::new(id_text).strong(),
+                            );
+
+                            ui.separator();
+
+                            // Creature name (selectable)
+                            let label = format!(
+                                "{} ({} mesh{})",
+                                creature.name,
+                                creature.meshes.len(),
+                                if creature.meshes.len() == 1 { "" } else { "es" }
+                            );
+                            let response = ui.selectable_label(is_selected, label);
+
+                            if response.clicked() {
+                                // Reset delete-confirm flag when switching selection.
+                                if self.selected_registry_entry != Some(idx) {
+                                    self.registry_delete_confirm_pending = false;
+                                }
+                                self.selected_registry_entry = Some(idx);
+                                // Request an immediate repaint so the right-panel preview
+                                // updates in the same visual frame as the click highlight.
+                                ui.ctx().request_repaint();
+                            }
+
+                            if response.double_clicked() {
+                                let file_name = format!(
+                                    "assets/creatures/{}.ron",
+                                    creature.name.to_lowercase().replace(' ', "_")
+                                );
+                                pending_edit = Some((idx, file_name));
+                            }
+
+                            ui.separator();
+
+                            // Validation status indicator
+                            let validation_result =
+                                self.id_manager.validate_id(creature.id, category);
+                            if validation_result.is_ok() {
+                                ui.label("✓");
+                            } else {
+                                ui.colored_label(egui::Color32::YELLOW, "⚠");
+                            }
+
+                            ui.separator();
+
+                            // Category badge
+                            ui.label(
+                                egui::RichText::new(category.display_name())
+                                    .small()
+                                    .background_color(egui::Color32::from_rgb(
+                                        (color[0] * 100.0) as u8,
+                                        (color[1] * 100.0) as u8,
+                                        (color[2] * 100.0) as u8,
+                                    )),
+                            );
+                        });
+                    }
                 }
-            }
-        });
+            });
 
         // --- Apply deferred actions (all closures have returned; borrows released) ---
 
@@ -1152,51 +1176,53 @@ impl CreaturesEditorState {
         ui.separator();
 
         // Creature list
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            let filtered_creatures: Vec<(usize, &CreatureDefinition)> = creatures
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| {
-                    self.search_query.is_empty()
-                        || c.name
-                            .to_lowercase()
-                            .contains(&self.search_query.to_lowercase())
-                        || c.id.to_string().contains(&self.search_query)
-                })
-                .collect();
+        egui::ScrollArea::vertical()
+            .id_salt("creatures_list_mode_scroll")
+            .show(ui, |ui| {
+                let filtered_creatures: Vec<(usize, &CreatureDefinition)> = creatures
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| {
+                        self.search_query.is_empty()
+                            || c.name
+                                .to_lowercase()
+                                .contains(&self.search_query.to_lowercase())
+                            || c.id.to_string().contains(&self.search_query)
+                    })
+                    .collect();
 
-            if filtered_creatures.is_empty() {
-                ui.label("No creatures found. Click 'Add' to create one.");
-            } else {
-                for (idx, creature) in filtered_creatures {
-                    let is_selected = self.selected_creature == Some(idx);
+                if filtered_creatures.is_empty() {
+                    ui.label("No creatures found. Click 'Add' to create one.");
+                } else {
+                    for (idx, creature) in filtered_creatures {
+                        let is_selected = self.selected_creature == Some(idx);
 
-                    let response = ui.selectable_label(
-                        is_selected,
-                        format!(
-                            "{} (ID: {}, {} mesh{})",
-                            creature.name,
-                            creature.id,
-                            creature.meshes.len(),
-                            if creature.meshes.len() == 1 { "" } else { "es" }
-                        ),
-                    );
+                        let response = ui.selectable_label(
+                            is_selected,
+                            format!(
+                                "{} (ID: {}, {} mesh{})",
+                                creature.name,
+                                creature.id,
+                                creature.meshes.len(),
+                                if creature.meshes.len() == 1 { "" } else { "es" }
+                            ),
+                        );
 
-                    if response.clicked() {
-                        self.selected_creature = Some(idx);
-                    }
+                        if response.clicked() {
+                            self.selected_creature = Some(idx);
+                        }
 
-                    if response.double_clicked() {
-                        self.mode = CreaturesEditorMode::Edit;
-                        self.edit_buffer = creature.clone();
-                        self.selected_mesh_index = None;
-                        self.mesh_edit_buffer = None;
-                        self.mesh_transform_buffer = None;
-                        self.preview_dirty = true;
+                        if response.double_clicked() {
+                            self.mode = CreaturesEditorMode::Edit;
+                            self.edit_buffer = creature.clone();
+                            self.selected_mesh_index = None;
+                            self.mesh_edit_buffer = None;
+                            self.mesh_transform_buffer = None;
+                            self.preview_dirty = true;
+                        }
                     }
                 }
-            }
-        });
+            });
 
         result_message
     }
@@ -1393,46 +1419,49 @@ impl CreaturesEditorState {
         self.mesh_visibility.truncate(self.edit_buffer.meshes.len());
 
         // Mesh list
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            if self.edit_buffer.meshes.is_empty() {
-                ui.label("No meshes. Click 'Add Primitive' to get started.");
-            } else {
-                for (idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        // Visibility checkbox
-                        let mut visible = self.mesh_visibility.get(idx).copied().unwrap_or(true);
-                        if ui.checkbox(&mut visible, "").changed() {
-                            if idx < self.mesh_visibility.len() {
-                                self.mesh_visibility[idx] = visible;
+        egui::ScrollArea::vertical()
+            .id_salt("creatures_mesh_list_panel_scroll")
+            .show(ui, |ui| {
+                if self.edit_buffer.meshes.is_empty() {
+                    ui.label("No meshes. Click 'Add Primitive' to get started.");
+                } else {
+                    for (idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            // Visibility checkbox
+                            let mut visible =
+                                self.mesh_visibility.get(idx).copied().unwrap_or(true);
+                            if ui.checkbox(&mut visible, "").changed() {
+                                if idx < self.mesh_visibility.len() {
+                                    self.mesh_visibility[idx] = visible;
+                                }
+                                self.preview_dirty = true;
                             }
-                            self.preview_dirty = true;
-                        }
 
-                        // Color indicator dot
-                        let color = egui::Color32::from_rgba_premultiplied(
-                            (mesh.color[0] * 255.0) as u8,
-                            (mesh.color[1] * 255.0) as u8,
-                            (mesh.color[2] * 255.0) as u8,
-                            (mesh.color[3] * 255.0) as u8,
-                        );
-                        ui.colored_label(color, "●");
+                            // Color indicator dot
+                            let color = egui::Color32::from_rgba_premultiplied(
+                                (mesh.color[0] * 255.0) as u8,
+                                (mesh.color[1] * 255.0) as u8,
+                                (mesh.color[2] * 255.0) as u8,
+                                (mesh.color[3] * 255.0) as u8,
+                            );
+                            ui.colored_label(color, "●");
 
-                        // Mesh name and info
-                        let is_selected = self.selected_mesh_index == Some(idx);
-                        let default_name = format!("unnamed_mesh_{}", idx);
-                        let name = mesh.name.as_deref().unwrap_or(&default_name);
-                        let label = format!("{} ({} verts)", name, mesh.vertices.len());
+                            // Mesh name and info
+                            let is_selected = self.selected_mesh_index == Some(idx);
+                            let default_name = format!("unnamed_mesh_{}", idx);
+                            let name = mesh.name.as_deref().unwrap_or(&default_name);
+                            let label = format!("{} ({} verts)", name, mesh.vertices.len());
 
-                        if ui.selectable_label(is_selected, label).clicked() {
-                            self.selected_mesh_index = Some(idx);
-                            self.mesh_edit_buffer = Some(mesh.clone());
-                            self.mesh_transform_buffer =
-                                Some(self.edit_buffer.mesh_transforms[idx]);
-                        }
-                    });
+                            if ui.selectable_label(is_selected, label).clicked() {
+                                self.selected_mesh_index = Some(idx);
+                                self.mesh_edit_buffer = Some(mesh.clone());
+                                self.mesh_transform_buffer =
+                                    Some(self.edit_buffer.mesh_transforms[idx]);
+                            }
+                        });
+                    }
                 }
-            }
-        });
+            });
     }
 
     /// Show 3D preview panel (center, flex) - Phase 2.2
@@ -2899,7 +2928,7 @@ mod tests {
     #[test]
     fn test_edit_mode_save_without_selected_creature_is_noop() {
         let mut state = CreaturesEditorState::new();
-        let mut creatures = vec![make_creature(1, "Goblin")];
+        let mut creatures = [make_creature(1, "Goblin")];
 
         // Replicate the OLD broken double-click behaviour: set mode without
         // calling open_for_editing(), so selected_creature stays None.
