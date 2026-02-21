@@ -55,6 +55,8 @@ state synchronization deterministic.
 - Implemented `Revert Changes` behavior that restores `edit_buffer` from the selected registry entry (Edit mode) or resets defaults (Add mode).
 - Implemented Save-As workflow with normalized relative asset path handling, deterministic new-ID assignment, and editor state transition to the newly created creature variant.
 - Added a dedicated Save-As dialog window and helper methods for path normalization/default generation.
+- Updated Save-As flow to perform real asset-file writes to the selected relative `.ron` path (campaign-root relative), including directory creation and serialization/write error reporting.
+- Constrained Save-As paths to `assets/creatures/*.ron` so editor-created assets remain aligned with registry save/load conventions and avoid orphaned off-model files.
 
 ### Tests Added
 
@@ -62,6 +64,11 @@ state synchronization deterministic.
 - `test_export_current_creature_to_ron_contains_name`
 - `test_revert_edit_buffer_from_registry_restores_original`
 - `test_perform_save_as_with_path_appends_new_creature`
+- `test_perform_save_as_with_path_requires_campaign_directory`
+- `test_perform_save_as_with_path_rejects_non_creature_asset_paths`
+- `test_perform_save_as_with_path_reports_directory_creation_failure`
+- `test_revert_edit_buffer_from_registry_errors_in_list_mode`
+- `test_revert_edit_buffer_from_registry_errors_when_selection_missing`
 - `test_normalize_relative_creature_asset_path_rewrites_backslashes`
 
 ### Outcome

@@ -1388,7 +1388,8 @@ impl CreaturesEditorState {
             });
 
         if self.show_save_as_dialog {
-            if let Some(msg) = self.show_save_as_dialog_window(ui.ctx(), creatures, unsaved_changes)
+            if let Some(msg) =
+                self.show_save_as_dialog_window(ui.ctx(), creatures, campaign_dir, unsaved_changes)
             {
                 result_message = Some(msg);
             }
@@ -2167,6 +2168,7 @@ impl CreaturesEditorState {
         &mut self,
         creatures: &mut Vec<CreatureDefinition>,
         relative_path: &str,
+        campaign_dir: &Option<PathBuf>,
         unsaved_changes: &mut bool,
     ) -> Result<String, String> {
         let mut normalized = Self::normalize_relative_creature_asset_path(relative_path);
@@ -2175,6 +2177,11 @@ impl CreaturesEditorState {
         }
         if !normalized.ends_with(".ron") {
             normalized.push_str(".ron");
+        }
+        if !normalized.starts_with("assets/creatures/") {
+            return Err(
+                "Save As path must be under assets/creatures/ and use a .ron filename".to_string(),
+            );
         }
 
         let file_name = normalized
@@ -2191,6 +2198,8 @@ impl CreaturesEditorState {
         let mut new_creature = self.edit_buffer.clone();
         new_creature.id = self.next_available_id(creatures);
         new_creature.name = stem.replace('_', " ");
+
+        self.write_creature_asset_file(campaign_dir, &normalized, &new_creature)?;
 
         creatures.push(new_creature.clone());
         let new_idx = creatures.len() - 1;
@@ -2212,10 +2221,48 @@ impl CreaturesEditorState {
         ))
     }
 
+    fn write_creature_asset_file(
+        &self,
+        campaign_dir: &Option<PathBuf>,
+        relative_path: &str,
+        creature: &CreatureDefinition,
+    ) -> Result<(), String> {
+        let base_dir = campaign_dir
+            .as_ref()
+            .ok_or_else(|| "Save As requires an open campaign directory".to_string())?;
+        let absolute_path = base_dir.join(relative_path);
+
+        if let Some(parent) = absolute_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "Failed to create Save As directory '{}': {}",
+                    parent.display(),
+                    error
+                )
+            })?;
+        }
+
+        let ron_config = ron::ser::PrettyConfig::new()
+            .struct_names(false)
+            .enumerate_arrays(false)
+            .depth_limit(3);
+        let contents = ron::ser::to_string_pretty(creature, ron_config)
+            .map_err(|error| format!("Failed to serialize creature for Save As: {}", error))?;
+
+        std::fs::write(&absolute_path, contents).map_err(|error| {
+            format!(
+                "Failed to write Save As asset '{}': {}",
+                absolute_path.display(),
+                error
+            )
+        })
+    }
+
     fn show_save_as_dialog_window(
         &mut self,
         ctx: &egui::Context,
         creatures: &mut Vec<CreatureDefinition>,
+        campaign_dir: &Option<PathBuf>,
         unsaved_changes: &mut bool,
     ) -> Option<String> {
         let mut result_message = None;
@@ -2234,6 +2281,7 @@ impl CreaturesEditorState {
                         match self.perform_save_as_with_path(
                             creatures,
                             &self.save_as_path_buffer,
+                            campaign_dir,
                             unsaved_changes,
                         ) {
                             Ok(msg) => {
@@ -3289,9 +3337,13 @@ mod tests {
 
     #[test]
     fn test_perform_save_as_with_path_appends_new_creature() {
+        use tempfile::tempdir;
+
         let mut state = CreaturesEditorState::new();
         let mut creatures = vec![make_creature(1, "Goblin")];
         let mut unsaved_changes = false;
+        let campaign_root = tempdir().expect("tempdir");
+        let campaign_dir = Some(campaign_root.path().to_path_buf());
 
         state.edit_buffer = creatures[0].clone();
         state.selected_creature = Some(0);
@@ -3301,6 +3353,7 @@ mod tests {
             .perform_save_as_with_path(
                 &mut creatures,
                 "assets/creatures/goblin_elite.ron",
+                &campaign_dir,
                 &mut unsaved_changes,
             )
             .expect("save as should succeed");
@@ -3311,6 +3364,131 @@ mod tests {
         assert_eq!(creatures[1].id, 2);
         assert_eq!(state.selected_creature, Some(1));
         assert!(unsaved_changes);
+
+        let saved_file = campaign_root
+            .path()
+            .join("assets/creatures/goblin_elite.ron");
+        assert!(saved_file.exists(), "save as should write a creature file");
+        let saved_text = std::fs::read_to_string(saved_file).expect("read saved creature");
+        assert!(saved_text.contains("goblin elite"));
+        assert!(saved_text.contains("id: 2"));
+    }
+
+    #[test]
+    fn test_perform_save_as_with_path_requires_campaign_directory() {
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+        let mut unsaved_changes = false;
+
+        state.edit_buffer = creatures[0].clone();
+        state.selected_creature = Some(0);
+        state.mode = CreaturesEditorMode::Edit;
+
+        let result = state.perform_save_as_with_path(
+            &mut creatures,
+            "assets/creatures/goblin_clone.ron",
+            &None,
+            &mut unsaved_changes,
+        );
+
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        assert!(error.contains("requires an open campaign directory"));
+        assert_eq!(
+            creatures.len(),
+            1,
+            "failed save-as must not mutate registry"
+        );
+        assert!(!unsaved_changes, "failed save-as must not set unsaved flag");
+    }
+
+    #[test]
+    fn test_perform_save_as_with_path_rejects_non_creature_asset_paths() {
+        use tempfile::tempdir;
+
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+        let mut unsaved_changes = false;
+        let campaign_root = tempdir().expect("tempdir");
+        let campaign_dir = Some(campaign_root.path().to_path_buf());
+
+        state.edit_buffer = creatures[0].clone();
+        state.selected_creature = Some(0);
+        state.mode = CreaturesEditorMode::Edit;
+
+        let result = state.perform_save_as_with_path(
+            &mut creatures,
+            "data/creatures/invalid_location.ron",
+            &campaign_dir,
+            &mut unsaved_changes,
+        );
+
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        assert!(error.contains("must be under assets/creatures/"));
+        assert_eq!(creatures.len(), 1, "invalid path must not mutate registry");
+        assert!(!unsaved_changes, "invalid path must not set unsaved flag");
+    }
+
+    #[test]
+    fn test_perform_save_as_with_path_reports_directory_creation_failure() {
+        use tempfile::tempdir;
+
+        let mut state = CreaturesEditorState::new();
+        let mut creatures = vec![make_creature(1, "Goblin")];
+        let mut unsaved_changes = false;
+        let campaign_root = tempdir().expect("tempdir");
+        let campaign_dir = Some(campaign_root.path().to_path_buf());
+
+        state.edit_buffer = creatures[0].clone();
+        state.selected_creature = Some(0);
+        state.mode = CreaturesEditorMode::Edit;
+
+        // Force create_dir_all(parent) to fail by creating a file where a directory is needed.
+        std::fs::write(campaign_root.path().join("assets"), "not a directory")
+            .expect("create blocking file");
+
+        let result = state.perform_save_as_with_path(
+            &mut creatures,
+            "assets/creatures/goblin_elite.ron",
+            &campaign_dir,
+            &mut unsaved_changes,
+        );
+
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        assert!(error.contains("Failed to create Save As directory"));
+        assert_eq!(creatures.len(), 1, "failed write must not mutate registry");
+        assert!(!unsaved_changes, "failed write must not set unsaved flag");
+    }
+
+    #[test]
+    fn test_revert_edit_buffer_from_registry_errors_in_list_mode() {
+        let mut state = CreaturesEditorState::new();
+        let creatures = vec![make_creature(1, "Goblin")];
+
+        let result = state.revert_edit_buffer_from_registry(&creatures);
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Cannot revert while in registry mode".to_string()
+        );
+    }
+
+    #[test]
+    fn test_revert_edit_buffer_from_registry_errors_when_selection_missing() {
+        let mut state = CreaturesEditorState::new();
+        let creatures = vec![make_creature(1, "Goblin")];
+
+        state.mode = CreaturesEditorMode::Edit;
+        state.selected_creature = Some(3);
+
+        let result = state.revert_edit_buffer_from_registry(&creatures);
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Cannot revert: selected creature is no longer available".to_string()
+        );
     }
 
     #[test]
