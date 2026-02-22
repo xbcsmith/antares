@@ -183,7 +183,18 @@ pub fn spawn_creature(
             },
             Mesh3d(mesh_handle),
             MeshMaterial3d(material_handle),
-            Transform::default(),
+            if let Some(mesh_transform) = creature_def.mesh_transforms.get(mesh_index) {
+                Transform::from_translation(Vec3::from(mesh_transform.translation))
+                    .with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        mesh_transform.rotation[0],
+                        mesh_transform.rotation[1],
+                        mesh_transform.rotation[2],
+                    ))
+                    .with_scale(Vec3::from(mesh_transform.scale))
+            } else {
+                Transform::default()
+            },
             GlobalTransform::default(),
             Visibility::default(),
             InheritedVisibility::default(),

@@ -363,6 +363,303 @@ if self.show_creature_template_browser {
 
 ---
 
+### Rule 9: Always Use `TwoColumnLayout` for List/Detail Splits
+
+The project provides `TwoColumnLayout` in `ui_helpers.rs` precisely to avoid
+the egui panel-ordering problems described in Rule 6. **Never replace it with a
+raw `SidePanel::right().show_inside()`** for a list/detail or
+list/preview layout inside an editor panel.
+
+`TwoColumnLayout` uses `ui.horizontal + ui.vertical`, which are ordinary widget
+calls evaluated in document order. Both columns see the same frame state.
+`SidePanel` is a layout reservation evaluated before all widget closures — any
+state set by a click in the left column is invisible to the right panel until
+the next frame.
+
+**WRONG:**
+
+```antares/sdk/examples/wrong_two_column_raw_panel.rs#L1-12
+// Raw SidePanel evaluated before the list's ScrollArea fires clicks.
+// Right panel sees stale `selected_entry` on the click frame.
+egui::SidePanel::right("preview_panel")
+    .default_width(300.0)
+    .show_inside(ui, |ui| {
+        if let Some(idx) = self.selected_entry {
+            self.show_preview(ui, &items[idx]);
+        }
+    });
+egui::ScrollArea::vertical()
+    .id_salt("items_list_scroll")
+    .show(ui, |ui| { /* list with click handlers */ });
+```
+
+**RIGHT:**
+
+```antares/sdk/examples/right_two_column_helper.rs#L1-18
+// TwoColumnLayout evaluates both columns in order; right column always
+// sees the selection state set by the left column on the same frame.
+TwoColumnLayout::new("items_editor")
+    .with_inspector_min_width(300.0)
+    .show_split(
+        ui,
+        |left_ui| {
+            // list with click handlers
+            // set pending_selection here; apply after show_split
+        },
+        |right_ui| {
+            match preview_snapshot {
+                None => { right_ui.label("Select an item to preview."); }
+                Some((idx, ref item)) => { self.show_preview(right_ui, item, idx); }
+            }
+        },
+    );
+```
+
+**Decision rule:** If you are tempted to reach for `SidePanel::right` inside an
+editor panel, stop and use `TwoColumnLayout` instead. The only acceptable use of
+`SidePanel` in this codebase is in the top-level `update()` function in
+`lib.rs` (the global sidebar and the central panel itself).
+
+---
+
+### Rule 10: Pre-Compute Shared State Before Multi-Closure Calls
+
+`TwoColumnLayout::show_split` — and any function that accepts two or more
+closures simultaneously — requires that **both closures are constructed at the
+same time**. The Rust borrow checker therefore sees both captures simultaneously
+and will reject code where one closure captures `self` by shared reference and
+the other captures `self` by mutable reference, even if the borrows are of
+disjoint fields (E0500).
+
+The fix is always the same: **extract everything the immutable closure needs
+into owned local variables before the call**. This also makes the data flow
+explicit and easier to reason about.
+
+**WRONG:**
+
+```antares/sdk/examples/wrong_two_closure_borrow.rs#L1-14
+// E0500: left closure borrows self.id_manager (shared),
+// right closure borrows all of self (mutable).
+TwoColumnLayout::new("creatures_registry").show_split(
+    ui,
+    |left_ui| {
+        for &idx in &filtered_indices {
+            let ok = self.id_manager.validate_id(id, cat).is_ok(); // ❌ shared borrow
+            // ...
+        }
+    },
+    |right_ui| {
+        self.show_preview(right_ui, creature, idx); // ❌ mutable borrow
+    },
+);
+```
+
+**RIGHT:**
+
+```antares/sdk/examples/right_two_closure_precompute.rs#L1-22
+// Pre-compute everything the left closure needs from self before show_split.
+let row_valid: Vec<bool> = filtered_indices
+    .iter()
+    .map(|&idx| {
+        let cat = CreatureCategory::from_id(creatures[idx].id);
+        self.id_manager.validate_id(creatures[idx].id, cat).is_ok() // ✓ computed before
+    })
+    .collect();
+let preview_snapshot: Option<(usize, CreatureDefinition)> =
+    self.selected_registry_entry
+        .and_then(|idx| creatures.get(idx).map(|c| (idx, c.clone()))); // ✓ owned clone
+
+TwoColumnLayout::new("creatures_registry").show_split(
+    ui,
+    |left_ui| {
+        // uses row_valid (Vec<bool>) — no self borrow
+    },
+    |right_ui| {
+        self.show_preview(right_ui, &preview_snapshot, idx); // ✓ only mutable borrow
+    },
+);
+```
+
+**General pattern for any multi-closure call:**
+
+1. Identify every piece of `self` each closure needs to read.
+2. For closures that only read data: extract to an owned `let` binding before
+   the call (clone if necessary).
+3. For the one closure that needs `&mut self`: keep the method call inside that
+   closure only.
+4. Collect mutations from all closures as deferred local variables (`pending_*`)
+   and apply them after the multi-closure call returns.
+
+**The deferred mutation pattern:**
+
+```antares/sdk/examples/right_deferred_mutation.rs#L1-15
+let mut pending_selection: Option<usize> = None;
+let mut pending_selection_reset_confirm = false;
+
+TwoColumnLayout::new("my_editor").show_split(
+    ui,
+    |left_ui| {
+        if response.clicked() {
+            pending_selection = Some(idx);           // ✓ deferred
+            pending_selection_reset_confirm = true;  // ✓ deferred
+            left_ui.ctx().request_repaint();
+        }
+    },
+    |right_ui| { /* ... */ },
+);
+
+// Apply mutations after show_split — no active closure borrows.
+if let Some(new_idx) = pending_selection {
+    if pending_selection_reset_confirm {
+        self.delete_confirm_pending = false;
+    }
+    self.selected_entry = Some(new_idx);
+}
+```
+
+---
+
+### Rule 11: Test Contracts, Not Implementation Constants
+
+Tests that hardcode the numeric value of a constant — rather than asserting
+the contract the constant enforces — become stale silently when the constant
+changes. There is no compiler error and no clippy warning. The test simply
+fails with a confusing number mismatch on the next person who changes the
+range.
+
+This caused three test failures in `creatures_manager` when ID ranges were
+widened from 50-wide bands to 1000-wide bands: the production code was correct
+but the tests still asserted the old boundary numbers.
+
+**WRONG:**
+
+```antares/sdk/examples/wrong_test_constant.rs#L1-8
+#[test]
+fn test_monster_id_range() {
+    let range = CreatureCategory::Monsters.id_range();
+    assert_eq!(range.start, 1);
+    assert_eq!(range.end, 51);  // ❌ hardcodes the end value
+                                //    silently wrong after any range change
+}
+```
+
+**RIGHT:**
+
+```antares/sdk/examples/right_test_constant.rs#L1-15
+#[test]
+fn test_monster_id_range() {
+    let range = CreatureCategory::Monsters.id_range();
+
+    // Assert the contract: Monsters start at 1 and do not overlap NPCs.
+    assert_eq!(range.start, 1);
+    let npc_range = CreatureCategory::Npcs.id_range();
+    assert_eq!(range.end, npc_range.start, "Monster range must end where NPC range begins");
+
+    // Assert boundary membership — these are the semantically meaningful checks.
+    assert!(range.contains(&1),    "ID 1 must be a Monster");
+    assert!(range.contains(&(range.end - 1)), "last Monster ID must be in range");
+    assert!(!range.contains(&range.end),      "first NPC ID must not be a Monster");
+}
+```
+
+**Rules that follow from this:**
+
+- Assert **boundary membership** (`range.contains(&x)`) rather than the
+  raw numeric endpoints.
+- Assert **cross-category non-overlap** (`range.end == next_category.start`)
+  rather than a hardcoded integer.
+- When a constant represents a capacity limit (e.g. `MAX_ITEMS`), import and
+  reference the constant in the test — do not repeat its numeric value:
+
+```antares/sdk/examples/right_test_capacity_constant.rs#L1-7
+#[test]
+fn test_inventory_full_at_max() {
+    // ✓ References the constant — survives any capacity change.
+    for i in 0..Inventory::MAX_ITEMS {
+        inventory.add(i).unwrap();
+    }
+    assert!(inventory.add(99).is_err());
+}
+```
+
+---
+
+### Rule 12: Never Put a Growing Button Row in `ui.horizontal`; Use `ui.horizontal_wrapped`
+
+`ui.horizontal` allocates exactly as much width as is available and clips
+anything that overflows. A toolbar that looks fine at 1400 px becomes unusable
+at 1000 px because the rightmost buttons are simply invisible — no scrollbar,
+no overflow indicator, no error. The compiler and clippy cannot detect this.
+
+This caused the Creature Editor toolbar's "Register Asset" and "Browse
+Templates" buttons to be invisible at standard window widths (fixed 2025).
+
+**WRONG:**
+
+```antares/sdk/examples/wrong_toolbar_overflow.rs#L1-10
+// All buttons in one horizontal row — clips silently on narrow windows.
+ui.horizontal(|ui| {
+    let toolbar_action = EditorToolbar::new("creatures_toolbar").show(ui);
+    egui::ComboBox::from_id_salt("category_filter").show_ui(ui, |ui| { /* … */ });
+    ui.label("Category");
+    egui::ComboBox::from_id_salt("sort_order").show_ui(ui, |ui| { /* … */ });
+    ui.label("Sort");
+    if ui.button("🔄 Revalidate").clicked() { /* … */ }
+    if ui.button("📥 Register Asset").clicked() { /* … */ }  // ❌ invisible at 1000 px
+    if ui.button("📋 Browse Templates").clicked() { /* … */ } // ❌ invisible at 1000 px
+});
+```
+
+**RIGHT:**
+
+```antares/sdk/examples/right_toolbar_wrapped.rs#L1-17
+// Row 1: EditorToolbar on its own line — it is already compact and always fits.
+let toolbar_action = EditorToolbar::new("creatures_toolbar")
+    .with_search(&mut self.search_query)
+    .with_total_count(creatures.len())
+    .show(ui);
+
+// Row 2: filters and registry actions on a wrapped row so they reflow rather
+// than clip when the window is narrow.
+ui.horizontal_wrapped(|ui| {
+    egui::ComboBox::from_id_salt("category_filter").show_ui(ui, |ui| { /* … */ });
+    ui.label("Category");
+    ui.separator();
+    egui::ComboBox::from_id_salt("sort_order").show_ui(ui, |ui| { /* … */ });
+    ui.label("Sort");
+    ui.separator();
+    if ui.button("🔄 Revalidate").clicked() { /* … */ }
+    if ui.button("📥 Register Asset").clicked() { /* … */ }
+    if ui.button("📋 Browse Templates").clicked() { /* … */ }
+});
+```
+
+**Rules that follow from this:**
+
+- Use `ui.horizontal` **only** for a fixed, small number of widgets whose total
+  width is guaranteed to fit (e.g. a pair of labels, or a single icon + text).
+- Use `ui.horizontal_wrapped` for every toolbar row that contains more than
+  two or three buttons, or that contains a `ComboBox` plus buttons.
+- Split long toolbars across two rows when they contain logically distinct
+  groups: put the primary `EditorToolbar` on row 1 (it manages its own width),
+  and put filters, secondary actions, and contextual buttons on row 2 with
+  `horizontal_wrapped`.
+- Apply the same rule to the Save/Cancel/action row in every edit-mode panel.
+
+**Where "Register Asset" (and other contextual actions) must appear:**
+
+A feature that can be triggered from a toolbar must also be reachable from
+every context where it is relevant — specifically:
+
+- The registry-list toolbar (row 2).
+- The registry-list **preview panel** (right column), next to Edit.
+- The **edit-mode** Save/Cancel row, so the user can register while editing.
+
+If a button exists in only one of these places, users who don't know the full
+layout will be unable to find it.
+
+---
+
 ## egui ID Audit Checklist
 
 Run this checklist on every function you touch before marking any campaign
@@ -410,6 +707,17 @@ class this section was written to prevent.
 - [ ] No two `egui::Window::new(...)` calls share a title string in the same
       `update()` frame
 
+**Toolbar layout:**
+
+- [ ] Every toolbar row that contains more than two buttons uses
+      `ui.horizontal_wrapped`, not `ui.horizontal`
+- [ ] The `EditorToolbar` widget stands alone on its own row; filters and
+      secondary action buttons go on a second `horizontal_wrapped` row
+- [ ] The Save/Cancel row in every edit-mode panel uses `ui.horizontal_wrapped`
+- [ ] Every contextual action (Register Asset, Browse Templates, etc.) that
+      appears in the toolbar also appears in the preview panel and the edit-mode
+      action row so it is reachable from every workflow entry point
+
 ---
 
 ## SDK-Specific Workflow Steps
@@ -429,6 +737,12 @@ under `sdk/campaign_builder/src/`:
       - Every ComboBox uses from_id_salt with a globally unique string
       - Every Grid / Plot / CollapsingHeader in a loop has a unique ID
       - No two Windows share a title string in the same frame
+      - List/detail or list/preview splits use TwoColumnLayout, not raw SidePanel
+      - Any multi-closure call (show_split, etc.) pre-computes shared state into
+        owned locals before the call; mutations are deferred and applied after
+      - Toolbar rows with more than two buttons use horizontal_wrapped, not horizontal
+      - Every contextual action present in the toolbar is also present in the
+        preview panel and the edit-mode action row
 ```
 
 Do not skip this step even for "small" changes. ID collisions are invisible to
@@ -450,6 +764,20 @@ campaign builder UI code:
       `ui.ctx().request_repaint()`
 - [ ] Every tab-switch in `update()` calls `ctx.request_repaint()`
 
+### Layout and Architecture
+
+- [ ] List/detail and list/preview layouts use `TwoColumnLayout`, not raw
+      `SidePanel::right().show_inside()`
+- [ ] Any function that accepts two or more closures simultaneously has all
+      shared `self` reads extracted to owned `let` bindings before the call
+- [ ] All state mutations inside closures use the deferred `pending_*` pattern
+      and are applied after the multi-closure call returns
+- [ ] Tests assert contracts and boundary membership, not hardcoded numeric
+      constant values
+- [ ] Toolbar rows with more than two buttons use `ui.horizontal_wrapped`
+- [ ] Every contextual action in the toolbar is also in the preview panel and
+      the edit-mode action row
+
 ### egui ID Uniqueness
 
 - [ ] All `push_id` calls verified for every widget loop
@@ -464,15 +792,17 @@ campaign builder UI code:
 
 ## Living Document
 
-This file is updated whenever a new egui ID-class bug is found and fixed in the
-campaign builder. When you fix a new category of ID clash, add a rule and an
+This file is updated whenever a new bug class is found and fixed in the
+campaign builder. When you fix a new category of bug, add a rule and an
 example here before closing the task.
 
 Last updated: 2025
 
 ### Bugs recorded in this file
 
-| Date | File                  | Pattern                                                                                                                                       | Rule             |
-| ---- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| 2025 | `template_browser.rs` | widgets in loops without `push_id`; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                     | Rules 1, 2, 3    |
-| 2025 | `creatures_editor.rs` | `SidePanel::right` wrapped in `if selected.is_some()`; no `request_repaint()` on click; bare `ScrollArea::vertical()`; `ComboBox::from_label` | Rules 2, 3, 6, 7 |
+| Date | File                  | Pattern                                                                                                                                                                                                                                                           | Rule             |
+| ---- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| 2025 | `template_browser.rs` | widgets in loops without `push_id`; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                                                                         | Rules 1, 2, 3    |
+| 2025 | `creatures_editor.rs` | `SidePanel::right` wrapped in `if selected.is_some()`; no `request_repaint()` on click; bare `ScrollArea::vertical()`; `ComboBox::from_label`                                                                                                                     | Rules 2, 3, 6, 7 |
+| 2025 | `creatures_editor.rs` | `SidePanel::right.show_inside` used instead of `TwoColumnLayout`; registry list loop rows missing `push_id`; `self.id_manager` borrowed inside left closure conflicting with `&mut self` capture in right closure — fixed by pre-computing `row_valid: Vec<bool>` | Rules 1, 6       |
+| 2025 | `creatures_editor.rs` | All toolbar controls in one `ui.horizontal` — "Register Asset" and "Browse Templates" clipped invisible at standard window widths; button not present in preview panel or edit-mode row                                                                           | Rule 12          |

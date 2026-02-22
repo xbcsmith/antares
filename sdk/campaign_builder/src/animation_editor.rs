@@ -19,7 +19,8 @@
 //!
 //! ```no_run
 //! use campaign_builder::animation_editor::AnimationEditorState;
-//! use antares::domain::visual::{AnimationDefinition, CreatureDefinition};
+//! use antares::domain::visual::animation::AnimationDefinition;
+//! use antares::domain::visual::CreatureDefinition;
 //!
 //! let mut state = AnimationEditorState::new();
 //! let mut creature = CreatureDefinition::default();

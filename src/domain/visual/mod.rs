@@ -163,6 +163,23 @@ pub struct MeshDefinition {
     pub texture_path: Option<String>,
 }
 
+impl Default for MeshDefinition {
+    fn default() -> Self {
+        Self {
+            name: None,
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            normals: None,
+            uvs: None,
+            color: default_color(),
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        }
+    }
+}
+
 /// Material definition for physically-based rendering
 ///
 /// Defines the visual properties of a mesh surface using PBR parameters.
@@ -212,6 +229,18 @@ pub struct MaterialDefinition {
     /// Alpha blending mode
     #[serde(default)]
     pub alpha_mode: AlphaMode,
+}
+
+impl Default for MaterialDefinition {
+    fn default() -> Self {
+        Self {
+            base_color: default_color(),
+            metallic: 0.0,
+            roughness: default_roughness(),
+            emissive: None,
+            alpha_mode: AlphaMode::Opaque,
+        }
+    }
 }
 
 /// Alpha blending mode for materials
@@ -389,6 +418,19 @@ pub struct CreatureDefinition {
     /// If None, meshes use their own colors.
     #[serde(default)]
     pub color_tint: Option<[f32; 4]>,
+}
+
+impl Default for CreatureDefinition {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            name: "New Creature".to_string(),
+            meshes: Vec::new(),
+            mesh_transforms: Vec::new(),
+            scale: 1.0,
+            color_tint: None,
+        }
+    }
 }
 
 impl CreatureDefinition {
